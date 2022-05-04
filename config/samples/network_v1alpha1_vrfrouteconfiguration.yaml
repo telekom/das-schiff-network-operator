@@ -1,0 +1,6 @@
+apiVersion: network.schiff.telekom.de/v1alpha1
+kind: VRFRouteConfiguration
+metadata:
+  name: vrfrouteconfiguration-sample
+spec:
+  # TODO(user): Add fields here

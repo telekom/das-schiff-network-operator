@@ -1,0 +1,24 @@
+# permissions for end users to edit vrfrouteconfigurations.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: vrfrouteconfiguration-editor-role
+rules:
+- apiGroups:
+  - network.schiff.telekom.de
+  resources:
+  - vrfrouteconfigurations
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - network.schiff.telekom.de
+  resources:
+  - vrfrouteconfigurations/status
+  verbs:
+  - get

@@ -1,0 +1,19 @@
+domain: schiff.telekom.de
+layout:
+- go.kubebuilder.io/v3
+projectName: network-operator
+repo: github.com/telekom/das-schiff-network-operator
+resources:
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: schiff.telekom.de
+  group: network
+  kind: VRFRouteConfiguration
+  path: github.com/telekom/das-schiff-network-operator/api/v1alpha1
+  version: v1alpha1
+  webhooks:
+    validation: true
+    webhookVersion: v1
+version: "3"

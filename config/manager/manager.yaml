@@ -1,0 +1,69 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: worker
+  namespace: system
+  labels:
+    control-plane: controller-manager
+    app: network-operator-worker
+spec:
+  selector:
+    matchLabels:
+      control-plane: controller-manager
+      app: network-operator-worker
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/default-container: manager
+      labels:
+        control-plane: controller-manager
+        app: network-operator-worker
+    spec:
+      hostNetwork: true
+      hostPID: true
+      containers:
+      - command:
+        - /manager
+        args: []
+        image: controller:latest
+        name: manager
+        securityContext:
+          privileged: true
+          runAsUser: 0
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8081
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8081
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        # TODO(user): Configure the resources accordingly based on the project requirements.
+        # More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+        resources:
+          limits:
+            cpu: 500m
+            memory: 128Mi
+          requests:
+            cpu: 10m
+            memory: 64Mi
+        volumeMounts:
+        - mountPath: /etc/frr
+          name: frr-config
+        - mountPath: /var/run/dbus/system_bus_socket
+          name: dbus-socket
+      serviceAccountName: controller-manager
+      terminationGracePeriodSeconds: 10
+      volumes:
+      - name: frr-config
+        hostPath:
+          path: /etc/frr
+          type: Directory
+      - name: dbus-socket
+        hostPath:
+          path: /var/run/dbus/system_bus_socket
+          type: Socket
