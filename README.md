@@ -1,16 +1,12 @@
 # network-operator
 
-This operator / controller can configure netlink interfaces (VRFs, Bridges, VXLANs), attach some simple **eBPF** tc filters and template FRR configuration.
+This operator configures netlink interfaces (VRFs, Bridges, VXLANs), attach some simple **eBPF** tc filters and template FRR configuration.
 
-It is provided as a reference and not as a project that can be deployed as-is.
+**NOTE:** This project is **not production ready**! Please use with caution.
 
 ## Overview
 
 ![Peerings](docs/vrfs.png)
-
-## License
-
-The project is licensed as Apache License Version 2.0 **except** `bpf/` which is licensed as GPLv2. (see LICENSE file at `bpf/LICENSE`).
 
 ## Configuration
 
@@ -23,7 +19,8 @@ The reconcile process is runs at start time and everytime a change on the cluste
 This tool is configured from multiple places:
 
 ### Configfile
-The configfile shall be located at `/opt/network-operator/config.yaml` and contains the mapping from VRF name to **VNI**, interfaces the operator should attach its **BPF** code to and VRFs for which it should only configure **route-maps** and **prefix-lists**.
+
+The configfile is located at `/opt/network-operator/config.yaml` and contains the mapping from VRFs names to **VNIs**, interfaces the operator should attach its **BPF** code to and VRFs for which it should only configure **route-maps** and **prefix-lists**.
 
 ```yaml
 vnimap: # VRF name to VNI mapping for the site
@@ -39,11 +36,13 @@ bpfInterfaces: # Attach eBPF program to the interfaces from the provisioning pro
 ```
 
 ### CustomResource VRFRouteConfiguration
+
 The peerings and route leaking are configured from this custom resource. It contains a VRF to peer to and the routes that should be imported & exported.
 
 There can be multiple CustomResources per VRF but it needs to be ensured that sequence numbers of them are not conflicting. In general each CustomResource is templated as one route-map entry for each direction and one prefix-list for each direction.
 
 ### FRR Template
+
 For the network-operator to work some config hints need to be placed in the FRR configuration the node boots with. These hints should be comments and mark the place where we template our configuration. The following hints need to be placed:
 
 | **Hint**                      | **Position**                                                    |
@@ -88,3 +87,14 @@ An internal loop is tracking these interfaces and reapplies the eBPF code when n
 
 ![eBPF Flow](docs/ebpf-flow.png)
 
+## License
+
+This project is licensed under Apache License Version 2.0, with the **exception of the code in [`./bpf/](./bpf/)** which falls under the [GPLv2 license](./bpf/LICENSE).
+
+Copyright (c) 2022 Deutsche Telekom AG.
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the License.
+
+You may obtain a copy of the License at https://www.apache.org/licenses/LICENSE-2.0.
+
+Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the LICENSE for the specific language governing permissions and limitations under the License.
