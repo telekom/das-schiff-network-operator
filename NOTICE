@@ -6,7 +6,7 @@ except in compliance with the repective License.
 
 (Some background info: the software licensed under Apache-2.0 is running in the user space. 
 ./bpf (eBPF) is a kernel module loaded by the kernel and running in the kernel space. That's
-the reason, why it has to be released / used under the terms of the GPL-2.0.
+the reason, why it has to be released / used under the terms of the GPL-2.0.)
 
 Contributors:
 -------------
