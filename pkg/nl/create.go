@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/vishvananda/netlink"
 	"github.com/telekom/das-schiff-network-operator/pkg/bpf"
+	"github.com/vishvananda/netlink"
 )
 
 func (n *NetlinkManager) createVRF(info *VRFInformation) error {
