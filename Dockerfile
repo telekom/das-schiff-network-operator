@@ -1,5 +1,5 @@
 # Build the manager binary
-FROM docker.io/library/golang:1.16-alpine as builder
+FROM docker.io/library/golang:1.17-alpine as builder
 
 
 WORKDIR /workspace
@@ -11,7 +11,7 @@ COPY go.sum go.sum
 RUN go mod download
 
 # Build router
-RUN apk add llvm clang linux-headers libbpf-dev
+RUN apk add llvm clang linux-headers libbpf-dev musl-dev
 
 # Copy the go source
 COPY main.go main.go

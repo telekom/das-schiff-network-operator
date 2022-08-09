@@ -141,7 +141,7 @@ func (r *VRFRouteConfigurationReconciler) ReconcileDebounced(ctx context.Context
 		return vrfConfigs[i].VNI < vrfConfigs[j].VNI
 	})
 
-	err = r.reconcileNetlink(vrfConfigs)
+	created, err := r.reconcileNetlink(vrfConfigs)
 	if err != nil {
 		r.Logger.Error(err, "error reconciling Netlink")
 		return err
@@ -166,13 +166,19 @@ func (r *VRFRouteConfigurationReconciler) ReconcileDebounced(ctx context.Context
 		}
 		r.dirtyConfig = false
 	}
+
+	// Make sure that all created netlink VRFs are up after FRR reload
+	time.Sleep(2 * time.Second)
+	for _, info := range created {
+		r.NLManager.UpL3(info)
+	}
 	return nil
 }
 
-func (r *VRFRouteConfigurationReconciler) reconcileNetlink(vrfConfigs []frr.VRFConfiguration) error {
-	existing, err := r.NLManager.List()
+func (r *VRFRouteConfigurationReconciler) reconcileNetlink(vrfConfigs []frr.VRFConfiguration) ([]nl.VRFInformation, error) {
+	existing, err := r.NLManager.ListL3()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Check for VRFs that are configured on the host but no longer in Kubernetes
@@ -185,7 +191,7 @@ func (r *VRFRouteConfigurationReconciler) reconcileNetlink(vrfConfigs []frr.VRFC
 			}
 		}
 		if !stillExists {
-			delete = append(delete, *cfg)
+			delete = append(delete, cfg)
 		}
 	}
 
@@ -213,7 +219,7 @@ func (r *VRFRouteConfigurationReconciler) reconcileNetlink(vrfConfigs []frr.VRFC
 	// Delete / Cleanup VRFs
 	for _, info := range delete {
 		r.Logger.Info("Deleting VRF because it is no longer configured in Kubernetes", "vrf", info.Name, "vni", info.VNI)
-		errs := r.NLManager.Cleanup(info.Name)
+		errs := r.NLManager.CleanupL3(info.Name)
 		for _, err := range errs {
 			r.Logger.Error(err, "Error deleting VRF", "vrf", info.Name, "vni", strconv.Itoa(info.VNI))
 		}
@@ -221,13 +227,13 @@ func (r *VRFRouteConfigurationReconciler) reconcileNetlink(vrfConfigs []frr.VRFC
 	// Create VRFs
 	for _, info := range create {
 		r.Logger.Info("Creating VRF to match Kubernetes", "vrf", info.Name, "vni", info.VNI)
-		err := r.NLManager.Create(&info)
+		err := r.NLManager.CreateL3(info)
 		if err != nil {
-			return fmt.Errorf("error creating VRF %s, VNI %d: %w", info.Name, info.VNI, err)
+			return nil, fmt.Errorf("error creating VRF %s, VNI %d: %w", info.Name, info.VNI, err)
 		}
 	}
 
-	return nil
+	return create, nil
 }
 
 func handlePrefixItemList(input []networkv1alpha1.VrfRouteConfigurationPrefixItem, seq int) frr.PrefixList {

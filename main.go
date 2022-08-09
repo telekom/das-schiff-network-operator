@@ -33,9 +33,9 @@ import (
 
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/controllers"
+	"github.com/telekom/das-schiff-network-operator/pkg/anycast"
 	"github.com/telekom/das-schiff-network-operator/pkg/bpf"
 	"github.com/telekom/das-schiff-network-operator/pkg/config"
-	"github.com/telekom/das-schiff-network-operator/pkg/macvlan"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -92,6 +92,8 @@ func main() {
 		os.Exit(1)
 	}
 
+	anycastTracker := &anycast.AnycastTracker{}
+
 	// Start VRFRouteConfigurationReconciler when we are not running in only BPF mode.
 	if !onlyBPFMode {
 		if err = (&controllers.VRFRouteConfigurationReconciler{
@@ -106,6 +108,16 @@ func main() {
 	if err = (&networkv1alpha1.VRFRouteConfiguration{}).SetupWebhookWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create webhook", "webhook", "VRFRouteConfiguration")
 		os.Exit(1)
+	}
+	if !onlyBPFMode {
+		if err = (&controllers.Layer2NetworkConfigurationReconciler{
+			Client:         mgr.GetClient(),
+			Scheme:         mgr.GetScheme(),
+			AnycastTracker: anycastTracker,
+		}).SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create controller", "controller", "Layer2NetworkConfiguration")
+			os.Exit(1)
+		}
 	}
 	//+kubebuilder:scaffold:builder
 
@@ -128,8 +140,8 @@ func main() {
 	setupLog.Info("start bpf interface check")
 	bpf.RunInterfaceCheck()
 
-	setupLog.Info("start macvlan sync")
-	macvlan.RunMACSync(interfacePrefix)
+	setupLog.Info("start anycast sync")
+	anycastTracker.RunAnycastSync()
 
 	setupLog.Info("starting manager")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
