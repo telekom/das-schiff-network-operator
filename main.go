@@ -36,6 +36,7 @@ import (
 	"github.com/telekom/das-schiff-network-operator/pkg/anycast"
 	"github.com/telekom/das-schiff-network-operator/pkg/bpf"
 	"github.com/telekom/das-schiff-network-operator/pkg/config"
+	"github.com/telekom/das-schiff-network-operator/pkg/macvlan"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -61,7 +62,7 @@ func main() {
 			"Command-line flags override configuration from this file.")
 	flag.BoolVar(&onlyBPFMode, "only-attach-bpf", false,
 		"Only attach BPF to specified interfaces in config. This will not start any reconciliation. Perfect for masters.")
-	flag.StringVar(&interfacePrefix, "macvlan-interface-prefix", "vlan.",
+	flag.StringVar(&interfacePrefix, "macvlan-interface-prefix", "",
 		"Interface prefix for bridge devices for MACVlan sync")
 	opts := zap.Options{
 		Development: true,
@@ -142,6 +143,11 @@ func main() {
 
 	setupLog.Info("start anycast sync")
 	anycastTracker.RunAnycastSync()
+
+	if len(interfacePrefix) > 0 {
+		setupLog.Info("start macvlan sync")
+		macvlan.RunMACSync(interfacePrefix)
+	}
 
 	setupLog.Info("starting manager")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
