@@ -6,6 +6,7 @@ router bgp {{$.ASN}} vrf vr.{{$vrf.Name}}
  neighbor vd.{{$vrf.Name}} interface remote-as internal
  !
  address-family ipv4 unicast
+  neighbor vd.{{$vrf.Name}} soft-reconfiguration inbound
   neighbor vd.{{$vrf.Name}} route-map rm_{{$vrf.Name}}_export in
   neighbor vd.{{$vrf.Name}} route-map rm_{{$vrf.Name}}_import out
  exit-address-family
