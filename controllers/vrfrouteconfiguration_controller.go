@@ -255,6 +255,7 @@ func copyPrefixItemToFRRItem(i int, item networkv1alpha1.VrfRouteConfigurationPr
 	}
 	return frr.PrefixedRouteItem{
 		CIDR:   *network,
+		IPv6:   network.IP.To4() == nil,
 		Seq:    seq,
 		Action: item.Action,
 		GE:     item.GE,

@@ -16,6 +16,7 @@ type FRRTemplateConfig struct {
 	VRFs        string
 	Neighbors   string
 	NeighborsV4 string
+	NeighborsV6 string
 	BGP         string
 	PrefixLists string
 	RouteMaps   string
@@ -78,6 +79,10 @@ func (f *FRRManager) renderSubtemplates(in []VRFConfiguration) (*FRRTemplateConf
 	if err != nil {
 		return nil, err
 	}
+	neighborsV6, err := render(NEIGHBOR_V6_TPL, in)
+	if err != nil {
+		return nil, err
+	}
 	prefixlists, err := render(PREFIX_LIST_TPL, in)
 	if err != nil {
 		return nil, err
@@ -100,6 +105,7 @@ func (f *FRRManager) renderSubtemplates(in []VRFConfiguration) (*FRRTemplateConf
 		VRFs:             string(vrfs),
 		Neighbors:        string(neighbors),
 		NeighborsV4:      string(neighborsV4),
+		NeighborsV6:      string(neighborsV6),
 		BGP:              string(bgp),
 		PrefixLists:      string(prefixlists),
 		RouteMaps:        string(routemaps),

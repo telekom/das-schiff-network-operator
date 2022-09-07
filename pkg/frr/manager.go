@@ -31,6 +31,7 @@ type PrefixList struct {
 
 type PrefixedRouteItem struct {
 	CIDR   net.IPNet
+	IPv6   bool
 	Seq    int
 	Action string
 	GE     *int
