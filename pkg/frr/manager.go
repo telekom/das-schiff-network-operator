@@ -41,6 +41,7 @@ type PrefixedRouteItem struct {
 type VRFConfiguration struct {
 	Name   string
 	VNI    int
+	RT     *int
 	Import []PrefixList
 	Export []PrefixList
 }

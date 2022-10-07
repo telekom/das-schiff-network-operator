@@ -102,9 +102,13 @@ func (r *VRFRouteConfigurationReconciler) ReconcileDebounced(ctx context.Context
 		spec := vrf.Spec
 
 		var vni int
+		var rt *int = nil
 
 		if val, ok := r.Config.VRFToVNI[spec.VRF]; ok {
 			vni = val
+		} else if val, ok := r.Config.VRFConfig[spec.VRF]; ok {
+			vni = val.VNI
+			rt = &val.RT
 		} else if r.Config.ShouldSkipVRFConfig(spec.VRF) {
 			vni = config.SKIP_VRF_TEMPLATE_VNI
 		} else {
@@ -117,6 +121,7 @@ func (r *VRFRouteConfigurationReconciler) ReconcileDebounced(ctx context.Context
 			vrfConfigMap[spec.VRF] = frr.VRFConfiguration{
 				Name: spec.VRF,
 				VNI:  vni,
+				RT:   rt,
 			}
 		}
 

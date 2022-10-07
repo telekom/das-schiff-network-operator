@@ -20,6 +20,10 @@ router bgp {{$.ASN}} vrf vr.{{$vrf.Name}}
  address-family l2vpn evpn
   advertise ipv4 unicast route-map rm4_{{$vrf.Name}}_export
   advertise ipv6 unicast route-map rm6_{{$vrf.Name}}_export
+{{if $vrf.RT}}
+  rt vpn import $vrf.RT
+  rt vpn export $vrf.RT
+{{end}}
  exit-address-family
 exit
 !
