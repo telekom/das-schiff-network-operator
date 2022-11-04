@@ -11,7 +11,8 @@ import (
 )
 
 var (
-	ANYCAST_ROUTES_PROT = netlink.RouteProtocol(125)
+	ANYCAST_ROUTES_PROT       = netlink.RouteProtocol(125)
+	DEFAULT_VRF_ANYCAST_TABLE = 130
 )
 
 type AnycastTracker struct {
@@ -110,7 +111,7 @@ func syncInterfaceByFamily(intf *netlink.Bridge, family int, routingTable uint32
 }
 
 func syncInterface(intf *netlink.Bridge) {
-	routingTable := uint32(unix.RT_TABLE_MAIN)
+	routingTable := uint32(DEFAULT_VRF_ANYCAST_TABLE)
 	if intf.Attrs().MasterIndex > 0 {
 		nl, err := netlink.LinkByIndex(intf.Attrs().MasterIndex)
 		if err != nil {
