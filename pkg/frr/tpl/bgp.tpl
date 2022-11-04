@@ -9,6 +9,8 @@ router bgp {{$.ASN}} vrf vr.{{$vrf.Name}}
   neighbor vd.{{$vrf.Name}} soft-reconfiguration inbound
   neighbor vd.{{$vrf.Name}} route-map rm_{{$vrf.Name}}_export in
   neighbor vd.{{$vrf.Name}} route-map rm_{{$vrf.Name}}_import out
+  redistribute connected route-map rm_{{$vrf.Name}}_export
+  redistribute kernel route-map rm_{{$vrf.Name}}_export
  exit-address-family
  !
  address-family l2vpn evpn
