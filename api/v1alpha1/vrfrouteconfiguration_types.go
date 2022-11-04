@@ -68,6 +68,9 @@ type VRFRouteConfigurationSpec struct {
 
 	// Sequence of the generated route-map, maximum of 65534 because we sometimes have to set an explicit default-deny
 	Seq int `json:"seq"`
+
+	// Community for export, if omitted no community will be set
+	Community *int `json:"community,omitempty"`
 }
 
 // VRFRouteConfigurationStatus defines the observed state of VRFRouteConfiguration

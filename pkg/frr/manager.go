@@ -25,8 +25,9 @@ type FRRManager struct {
 }
 
 type PrefixList struct {
-	Items []PrefixedRouteItem
-	Seq   int
+	Items     []PrefixedRouteItem
+	Seq       int
+	Community *int
 }
 
 type PrefixedRouteItem struct {
