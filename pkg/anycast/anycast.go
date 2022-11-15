@@ -75,12 +75,23 @@ func buildRoute(family int, intf *netlink.Bridge, dst *net.IPNet, table uint32) 
 	}
 }
 
+func filterNeighbors(neighIn []netlink.Neigh) (neighOut []netlink.Neigh) {
+	for _, neigh := range neighIn {
+		if neigh.Flags&netlink.NTF_EXT_LEARNED == netlink.NTF_EXT_LEARNED {
+			break
+		}
+		neighOut = append(neighOut, neigh)
+	}
+	return neighOut
+}
+
 func syncInterfaceByFamily(intf *netlink.Bridge, family int, routingTable uint32) {
 	bridgeNeighbors, err := netlink.NeighList(intf.Attrs().Index, family)
 	if err != nil {
 		fmt.Printf("Error getting v4 neighbors of interface %s: %v\n", intf.Attrs().Name, err)
 		return
 	}
+	bridgeNeighbors = filterNeighbors(bridgeNeighbors)
 
 	routeFilterV4 := &netlink.Route{
 		LinkIndex: intf.Attrs().Index,
