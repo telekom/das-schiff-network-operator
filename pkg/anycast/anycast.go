@@ -78,7 +78,7 @@ func buildRoute(family int, intf *netlink.Bridge, dst *net.IPNet, table uint32) 
 func filterNeighbors(neighIn []netlink.Neigh) (neighOut []netlink.Neigh) {
 	for _, neigh := range neighIn {
 		if neigh.Flags&netlink.NTF_EXT_LEARNED == netlink.NTF_EXT_LEARNED {
-			break
+			continue
 		}
 		neighOut = append(neighOut, neigh)
 	}
