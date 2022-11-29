@@ -20,8 +20,8 @@ type Config struct {
 }
 
 type VRFConfig struct {
-	VNI int `yaml:"vni"`
-	RT  int `yaml:"rt"`
+	VNI int    `yaml:"vni"`
+	RT  string `yaml:"rt"`
 }
 
 func LoadConfig() (*Config, error) {

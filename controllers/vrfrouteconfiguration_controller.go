@@ -102,7 +102,7 @@ func (r *VRFRouteConfigurationReconciler) ReconcileDebounced(ctx context.Context
 		spec := vrf.Spec
 
 		var vni int
-		var rt *int = nil
+		var rt *string = nil
 
 		if val, ok := r.Config.VRFToVNI[spec.VRF]; ok {
 			vni = val

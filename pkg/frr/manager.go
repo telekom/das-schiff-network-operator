@@ -42,7 +42,7 @@ type PrefixedRouteItem struct {
 type VRFConfiguration struct {
 	Name   string
 	VNI    int
-	RT     *int
+	RT     *string
 	Import []PrefixList
 	Export []PrefixList
 }
