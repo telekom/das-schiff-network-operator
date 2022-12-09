@@ -155,7 +155,10 @@ func (r *VRFRouteConfigurationReconciler) ReconcileDebounced(ctx context.Context
 	// We wait here for two seconds to let FRR settle after updating netlink devices
 	time.Sleep(2 * time.Second)
 
-	changed, err := r.FRRManager.Configure(vrfConfigs)
+	changed, err := r.FRRManager.Configure(frr.FRRConfiguration{
+		VRFs: vrfConfigs,
+		ASN:  r.Config.ServerASN,
+	})
 	if err != nil {
 		r.Logger.Error(err, "error updating FRR configuration")
 		return err

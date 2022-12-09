@@ -17,6 +17,7 @@ type Config struct {
 	VRFConfig     map[string]VRFConfig `yaml:"vrfConfig"`
 	BPFInterfaces []string             `yaml:"bpfInterfaces"`
 	SkipVRFConfig []string             `yaml:"skipVRFConfig"`
+	ServerASN     int                  `yaml:"serverASN"`
 }
 
 type VRFConfig struct {

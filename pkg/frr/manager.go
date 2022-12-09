@@ -47,6 +47,11 @@ type VRFConfiguration struct {
 	Export []PrefixList
 }
 
+type FRRConfiguration struct {
+	ASN  int
+	VRFs []VRFConfiguration
+}
+
 func NewFRRManager() *FRRManager {
 	return &FRRManager{
 		ConfigPath:   "/etc/frr/frr.conf",

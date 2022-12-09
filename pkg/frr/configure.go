@@ -26,7 +26,7 @@ type FRRTemplateConfig struct {
 	HostRouterID     string
 }
 
-func (m *FRRManager) Configure(in []VRFConfiguration) (bool, error) {
+func (m *FRRManager) Configure(in FRRConfiguration) (bool, error) {
 	config, err := m.renderSubtemplates(in)
 	if err != nil {
 		return false, err
@@ -53,7 +53,7 @@ func (m *FRRManager) Configure(in []VRFConfiguration) (bool, error) {
 	return false, nil
 }
 
-func (f *FRRManager) renderSubtemplates(in []VRFConfiguration) (*FRRTemplateConfig, error) {
+func (f *FRRManager) renderSubtemplates(in FRRConfiguration) (*FRRTemplateConfig, error) {
 	vrfRouterId, err := (&nl.NetlinkManager{}).GetRouterIDForVRFs()
 	if err != nil {
 		return nil, err
@@ -67,35 +67,39 @@ func (f *FRRManager) renderSubtemplates(in []VRFConfiguration) (*FRRTemplateConf
 		return nil, err
 	}
 
-	vrfs, err := render(VRF_TPL, in)
+	vrfs, err := render(VRF_TPL, in.VRFs)
 	if err != nil {
 		return nil, err
 	}
-	neighbors, err := render(NEIGHBOR_TPL, in)
+	neighbors, err := render(NEIGHBOR_TPL, in.VRFs)
 	if err != nil {
 		return nil, err
 	}
-	neighborsV4, err := render(NEIGHBOR_V4_TPL, in)
+	neighborsV4, err := render(NEIGHBOR_V4_TPL, in.VRFs)
 	if err != nil {
 		return nil, err
 	}
-	neighborsV6, err := render(NEIGHBOR_V6_TPL, in)
+	neighborsV6, err := render(NEIGHBOR_V6_TPL, in.VRFs)
 	if err != nil {
 		return nil, err
 	}
-	prefixlists, err := render(PREFIX_LIST_TPL, in)
+	prefixlists, err := render(PREFIX_LIST_TPL, in.VRFs)
 	if err != nil {
 		return nil, err
 	}
-	routemaps, err := render(ROUTE_MAP_TPL, in)
+	routemaps, err := render(ROUTE_MAP_TPL, in.VRFs)
 	if err != nil {
 		return nil, err
+	}
+	asn := in.ASN
+	if asn == 0 {
+		asn = VRF_ASN_CONFIG
 	}
 	// Special handling for BGP instance rendering (we need ASN and Router ID)
 	bgp, err := render(BGP_INSTANCE_TPL, bgpInstanceConfig{
-		VRFs:     in,
+		VRFs:     in.VRFs,
 		RouterID: vrfRouterId.String(),
-		ASN:      VRF_ASN_CONFIG,
+		ASN:      asn,
 	})
 	if err != nil {
 		return nil, err
