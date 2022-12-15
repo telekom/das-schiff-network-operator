@@ -102,13 +102,15 @@ func (r *VRFRouteConfigurationReconciler) ReconcileDebounced(ctx context.Context
 		spec := vrf.Spec
 
 		var vni int
-		var rt *string = nil
+		var rt string
 
 		if val, ok := r.Config.VRFToVNI[spec.VRF]; ok {
 			vni = val
+			r.Logger.Info("Configuring VRF from old VRFToVNI", "vrf", spec.VRF, "vni", val)
 		} else if val, ok := r.Config.VRFConfig[spec.VRF]; ok {
 			vni = val.VNI
-			rt = &val.RT
+			rt = val.RT
+			r.Logger.Info("Configuring VRF from new VRFConfig", "vrf", spec.VRF, "vni", val.VNI, "rt", rt)
 		} else if r.Config.ShouldSkipVRFConfig(spec.VRF) {
 			vni = config.SKIP_VRF_TEMPLATE_VNI
 		} else {
@@ -246,7 +248,7 @@ func (r *VRFRouteConfigurationReconciler) reconcileNetlink(vrfConfigs []frr.VRFC
 
 func handlePrefixItemList(input []networkv1alpha1.VrfRouteConfigurationPrefixItem, seq int) frr.PrefixList {
 	prefixList := frr.PrefixList{
-		Seq: seq,
+		Seq: seq + 1,
 	}
 	for i, item := range input {
 		prefixList.Items = append(prefixList.Items, copyPrefixItemToFRRItem(i, item))

@@ -42,7 +42,7 @@ type PrefixedRouteItem struct {
 type VRFConfiguration struct {
 	Name   string
 	VNI    int
-	RT     *string
+	RT     string
 	Import []PrefixList
 	Export []PrefixList
 }
@@ -92,4 +92,8 @@ func (m *FRRManager) ReloadFRR() error {
 
 func (v VRFConfiguration) ShouldTemplateVRF() bool {
 	return v.VNI != config.SKIP_VRF_TEMPLATE_VNI
+}
+
+func (v VRFConfiguration) ShouldDefineRT() bool {
+	return v.RT != ""
 }

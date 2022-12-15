@@ -6,14 +6,16 @@ router bgp {{$.ASN}} vrf vr.{{$vrf.Name}}
  neighbor vd.{{$vrf.Name}} interface remote-as internal
  !
  address-family ipv4 unicast
+  neighbor vd.{{$vrf.Name}} activate
   neighbor vd.{{$vrf.Name}} soft-reconfiguration inbound
-  neighbor vd.{{$vrf.Name}} route-map rm4_{{$vrf.Name}}_export in
-  neighbor vd.{{$vrf.Name}} route-map rm4_{{$vrf.Name}}_import out
+  neighbor vd.{{$vrf.Name}} route-map rm_{{$vrf.Name}}_export in
+  neighbor vd.{{$vrf.Name}} route-map rm_{{$vrf.Name}}_import out
   redistribute connected route-map rm_{{$vrf.Name}}_export
   redistribute kernel route-map rm_{{$vrf.Name}}_export
  exit-address-family
  !
  address-family ipv6 unicast
+  neighbor vd.{{$vrf.Name}} activate
   neighbor vd.{{$vrf.Name}} soft-reconfiguration inbound
   neighbor vd.{{$vrf.Name}} route-map rm6_{{$vrf.Name}}_export in
   neighbor vd.{{$vrf.Name}} route-map rm6_{{$vrf.Name}}_import out
@@ -24,11 +26,11 @@ router bgp {{$.ASN}} vrf vr.{{$vrf.Name}}
  exit-address-family
  !
  address-family l2vpn evpn
-  advertise ipv4 unicast route-map rm4_{{$vrf.Name}}_export
+  advertise ipv4 unicast route-map rm_{{$vrf.Name}}_export
   advertise ipv6 unicast route-map rm6_{{$vrf.Name}}_export
-{{if $vrf.RT}}
-  route-target import $vrf.RT
-  route-target export $vrf.RT
+{{if $vrf.ShouldDefineRT}}
+  route-target import {{$vrf.RT}}
+  route-target export {{$vrf.RT}}
 {{end}}
  exit-address-family
 exit
