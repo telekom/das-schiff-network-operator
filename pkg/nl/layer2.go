@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"net"
+	"os"
 
 	"github.com/vishvananda/netlink"
 )
@@ -197,6 +198,11 @@ func (n *NetlinkManager) ReconcileL2(current Layer2Information, desired Layer2In
 		if err != nil {
 			return fmt.Errorf("error creating MACVLAN interface: %v", err)
 		}
+	}
+
+	// Ensure bridge can receive gratitious ARP
+	if err := os.WriteFile(fmt.Sprintf("/proc/sys/net/ipv4/conf/%s%d/arp_accept", LAYER2_PREFIX, current.VlanID), []byte("1"), 0o644); err != nil {
+		return fmt.Errorf("error setting arp_accept = 1 for interface: %v", err)
 	}
 
 	// Add/Remove anycast gateways
