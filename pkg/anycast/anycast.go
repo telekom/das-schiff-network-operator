@@ -80,6 +80,13 @@ func filterNeighbors(neighIn []netlink.Neigh) (neighOut []netlink.Neigh) {
 		if neigh.Flags&netlink.NTF_EXT_LEARNED == netlink.NTF_EXT_LEARNED {
 			continue
 		}
+		if neigh.State != netlink.NUD_NONE &&
+			neigh.State&netlink.NUD_PERMANENT != netlink.NUD_PERMANENT &&
+			neigh.State&netlink.NUD_STALE != netlink.NUD_STALE &&
+			neigh.State&netlink.NUD_REACHABLE != netlink.NUD_REACHABLE &&
+			neigh.State&netlink.NUD_DELAY != netlink.NUD_DELAY {
+			continue
+		}
 		neighOut = append(neighOut, neigh)
 	}
 	return neighOut
