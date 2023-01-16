@@ -28,9 +28,9 @@ func loadRouter() (*ebpf.CollectionSpec, error) {
 //
 // The following types are suitable as obj argument:
 //
-//     *routerObjects
-//     *routerPrograms
-//     *routerMaps
+//	*routerObjects
+//	*routerPrograms
+//	*routerMaps
 //
 // See ebpf.CollectionSpec.LoadAndAssign documentation for details.
 func loadRouterObjects(obj interface{}, opts *ebpf.CollectionOptions) error {
@@ -121,5 +121,6 @@ func _RouterClose(closers ...io.Closer) error {
 }
 
 // Do not access this directly.
+//
 //go:embed router_bpfel_x86.o
 var _RouterBytes []byte
