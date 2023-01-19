@@ -8,6 +8,40 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+func (n *NetlinkManager) listRoutes() ([]netlink.Route, error) {
+	routes, err := netlink.RouteListFiltered(netlink.FAMILY_ALL, &netlink.Route{
+		Table: 0,
+	}, netlink.RT_FILTER_TABLE)
+	if err != nil {
+		return nil, err
+	}
+	return routes, nil
+}
+
+func (n *NetlinkManager) listVRFInterfaces() ([]VRFInformation, error) {
+	infos := []VRFInformation{}
+
+	links, err := netlink.LinkList()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, link := range links {
+		if link.Type() == "vrf" {
+			vrf := link.(*netlink.Vrf)
+
+			info := VRFInformation{}
+			info.table = int(vrf.Table)
+			info.Name = link.Attrs().Name
+			// info.Name = strings.TrimPrefix(strings.TrimPrefix(link.Attrs().Name, VRF_PREFIX), "Vrf_")
+			info.vrfId = vrf.Attrs().Index
+			infos = append(infos, info)
+		}
+	}
+
+	return infos, nil
+}
+
 func (n *NetlinkManager) listL3() ([]VRFInformation, error) {
 	infos := []VRFInformation{}
 

@@ -102,6 +102,10 @@ func (n *NetlinkManager) ListL3() ([]VRFInformation, error) {
 	return n.listL3()
 }
 
+func (n *NetlinkManager) ListVRFInterfaces() ([]VRFInformation, error) {
+	return n.listVRFInterfaces()
+}
+
 func (n *NetlinkManager) findFreeTableID() (int, error) {
 	configuredVRFs, err := n.ListL3()
 	if err != nil {

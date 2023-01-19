@@ -18,7 +18,10 @@ package main
 
 import (
 	"flag"
+	"fmt"
+	"net/http"
 	"os"
+	"sort"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -31,12 +34,15 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/controllers"
 	"github.com/telekom/das-schiff-network-operator/pkg/anycast"
 	"github.com/telekom/das-schiff-network-operator/pkg/bpf"
 	"github.com/telekom/das-schiff-network-operator/pkg/config"
 	"github.com/telekom/das-schiff-network-operator/pkg/macvlan"
+	"github.com/telekom/das-schiff-network-operator/pkg/monitoring"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -56,6 +62,7 @@ func main() {
 	var onlyBPFMode bool
 	var configFile string
 	var interfacePrefix string
+	var metricsPort int
 	flag.StringVar(&configFile, "config", "",
 		"The controller will load its initial configuration from this file. "+
 			"Omit this flag to use the default configuration values. "+
@@ -64,15 +71,34 @@ func main() {
 		"Only attach BPF to specified interfaces in config. This will not start any reconciliation. Perfect for masters.")
 	flag.StringVar(&interfacePrefix, "macvlan-interface-prefix", "",
 		"Interface prefix for bridge devices for MACVlan sync")
+	flag.IntVar(&metricsPort, "metrics-port", 9090, "Port on which the metrics service listens on")
 	opts := zap.Options{
 		Development: true,
 	}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
+	var err error
+	collector, err := monitoring.NewDasSchiffNetworkOperatorCollector()
+	if err != nil {
+		setupLog.Error(fmt.Errorf("couldn't create collector: %s", err), "metrics export not setup")
+	}
+	setupLog.Info("msg", "Enabled collectors")
+	collectors := []string{}
+	for n := range collector.Collectors {
+		collectors = append(collectors, n)
+	}
+	sort.Strings(collectors)
+	for _, c := range collectors {
+		setupLog.Info("collector", c)
+	}
+	if err := prometheus.Register(collector); err != nil {
+		setupLog.Error(fmt.Errorf("couldn't register das_schiff_network_operator_collector: %s", err), "registration error")
+	}
 
+	http.Handle("/metrics", promhttp.Handler())
+	http.ListenAndServe(fmt.Sprintf(":%d", metricsPort), nil)
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
-	var err error
 	options := ctrl.Options{Scheme: scheme}
 	if configFile != "" {
 		options, err = options.AndFrom(ctrl.ConfigFile().AtPath(configFile))
