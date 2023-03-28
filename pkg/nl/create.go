@@ -141,6 +141,19 @@ func (n *NetlinkManager) setUp(intfName string) error {
 	return netlink.LinkSetUp(link)
 }
 
+func generateUnderlayMAC() (net.HardwareAddr, error) {
+	_, vxlanIP, err := getInterfaceAndIP(UNDERLAY_LOOPBACK)
+	if err != nil {
+		return nil, err
+	}
+
+	generatedMac, err := generateMAC(vxlanIP)
+	if err != nil {
+		return nil, err
+	}
+	return generatedMac, nil
+}
+
 func getInterfaceAndIP(name string) (int, net.IP, error) {
 	dummy := netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: name}}
 
