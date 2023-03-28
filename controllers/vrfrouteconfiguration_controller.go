@@ -135,6 +135,14 @@ func (r *VRFRouteConfigurationReconciler) ReconcileDebounced(ctx context.Context
 		if len(spec.Import) > 0 {
 			config.Import = append(config.Import, handlePrefixItemList(spec.Import, spec.Seq))
 		}
+		for _, aggregate := range spec.Aggregate {
+			_, network, _ := net.ParseCIDR(aggregate)
+			if network.IP.To4() == nil {
+				config.AggregateIPv6 = append(config.AggregateIPv6, aggregate)
+			} else {
+				config.AggregateIPv4 = append(config.AggregateIPv4, aggregate)
+			}
+		}
 
 		vrfConfigMap[spec.VRF] = config
 	}

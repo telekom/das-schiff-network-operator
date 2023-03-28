@@ -12,6 +12,9 @@ router bgp {{$.ASN}} vrf vr.{{$vrf.Name}}
   neighbor vd.{{$vrf.Name}} route-map rm_{{$vrf.Name}}_import out
   redistribute connected route-map rm_{{$vrf.Name}}_export
   redistribute kernel route-map rm_{{$vrf.Name}}_export
+{{range $item := $vrf.AggregateIPv4}}
+  aggregate-address {{$item}}
+{{- end }}
  exit-address-family
  !
  address-family ipv6 unicast
@@ -23,6 +26,9 @@ router bgp {{$.ASN}} vrf vr.{{$vrf.Name}}
   neighbor vd.{{$vrf.Name}} route-map rm_{{$vrf.Name}}_import out
   redistribute connected route-map rm6_{{$vrf.Name}}_export
   redistribute kernel route-map rm6_{{$vrf.Name}}_export
+{{range $item := $vrf.AggregateIPv6}}
+  aggregate-address {{$item}}
+{{- end }}
  exit-address-family
  !
  address-family l2vpn evpn

@@ -39,6 +39,11 @@ spec:
           spec:
             description: VRFRouteConfigurationSpec defines the desired state of VRFRouteConfiguration
             properties:
+              aggregate:
+                description: Aggregate Routes that should be announced
+                items:
+                  type: string
+                type: array
               community:
                 description: Community for export, if omitted no community will be
                   set

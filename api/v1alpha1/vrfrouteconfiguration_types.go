@@ -25,14 +25,14 @@ import (
 
 // VRFRouteConfigurationPrefixItem defines a prefix item
 type VrfRouteConfigurationPrefixItem struct {
-	// +kubebuilder:validation:Required
 
+	// +kubebuilder:validation:Required
 	// CIDR of the leaked network
 	CIDR string `json:"cidr,omitempty"`
+
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=4294967295
 	// +kubebuilder:validation:ExclusiveMaximum=false
-
 	// Sequence in the generated prefix-list, if omitted will be list index
 	Seq int `json:"seq,omitempty"`
 
@@ -50,22 +50,24 @@ type VrfRouteConfigurationPrefixItem struct {
 type VRFRouteConfigurationSpec struct {
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MaxLength=12
-
 	// VRF this configuration refers to
 	VRF string `json:"vrf,omitempty"`
-	// +kubebuilder:validation:MaxItems=4294967295
 
+	// +kubebuilder:validation:MaxItems=4294967295
 	// Routes imported from this VRF into the cluster VRF
 	Import []VrfRouteConfigurationPrefixItem `json:"import"`
-	// +kubebuilder:validation:MaxItems=4294967295
 
+	// +kubebuilder:validation:MaxItems=4294967295
 	// Routes exported from the cluster VRF into the specified VRF
 	Export []VrfRouteConfigurationPrefixItem `json:"export"`
+
+	// Aggregate Routes that should be announced
+	Aggregate []string `json:"aggregate,omitempty"`
+
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=65534
 	// +kubebuilder:validation:ExclusiveMaximum=false
-
 	// Sequence of the generated route-map, maximum of 65534 because we sometimes have to set an explicit default-deny
 	Seq int `json:"seq"`
 

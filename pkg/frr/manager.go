@@ -40,11 +40,13 @@ type PrefixedRouteItem struct {
 }
 
 type VRFConfiguration struct {
-	Name   string
-	VNI    int
-	RT     string
-	Import []PrefixList
-	Export []PrefixList
+	Name          string
+	VNI           int
+	RT            string
+	AggregateIPv4 []string
+	AggregateIPv6 []string
+	Import        []PrefixList
+	Export        []PrefixList
 }
 
 type FRRConfiguration struct {
