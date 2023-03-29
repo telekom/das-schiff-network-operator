@@ -18,6 +18,14 @@ func (n *NetlinkManager) listRoutes() ([]netlink.Route, error) {
 	return routes, nil
 }
 
+func (n *NetlinkManager) listNeighbors() ([]netlink.Neigh, error) {
+	neighbors, err := netlink.NeighList(0, netlink.FAMILY_ALL)
+	if err != nil {
+		return nil, err
+	}
+	return neighbors, nil
+}
+
 func (n *NetlinkManager) listVRFInterfaces() ([]VRFInformation, error) {
 	infos := []VRFInformation{}
 

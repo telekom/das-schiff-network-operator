@@ -2,9 +2,11 @@ package nl
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"net"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/vishvananda/netlink"
@@ -26,6 +28,41 @@ type Layer2Information struct {
 	vxlan         *netlink.Vxlan
 	macvlanBridge *netlink.Veth
 	macvlanHost   *netlink.Veth
+}
+
+type NeighborInformation struct {
+	Interface string
+
+	State string
+
+	Family string
+	IP     string
+	MAC    string
+}
+
+func getNeighborState(state int) (string, error) {
+	switch state {
+	case netlink.NUD_DELAY:
+		return "delay", nil
+	case netlink.NUD_FAILED:
+		return "failed", nil
+	case netlink.NUD_INCOMPLETE:
+		return "incomplete", nil
+	case netlink.NUD_NOARP:
+		return "no_arp", nil
+	case netlink.NUD_NONE:
+		return "none", nil
+	case netlink.NUD_PERMANENT:
+		return "permanent", nil
+	case netlink.NUD_PROBE:
+		return "probe", nil
+	case netlink.NUD_REACHABLE:
+		return "reachable", nil
+	case netlink.NUD_STALE:
+		return "stale", nil
+	default:
+		return "", errors.New(fmt.Sprintf("[%x] is not a valid neighbor state", state))
+	}
 }
 
 func (n *NetlinkManager) ParseIPAddresses(addresses []string) ([]*netlink.Addr, error) {
@@ -274,6 +311,48 @@ func (n *NetlinkManager) ReconcileL2(current Layer2Information, desired Layer2In
 
 func (n *NetlinkManager) ListL2() ([]Layer2Information, error) {
 	return n.listL2()
+}
+
+func (n *NetlinkManager) ListNeighbors() ([]NeighborInformation, error) {
+	netlinkNeighbors, err := n.listNeighbors()
+	if err != nil {
+		return nil, err
+	}
+	neighbors := []NeighborInformation{}
+	for _, netlinkNeighbor := range netlinkNeighbors {
+		family, err := getFamily(netlinkNeighbor.Family)
+		if err != nil {
+			return nil, err
+		}
+		state, err := getNeighborState(netlinkNeighbor.State)
+		if err != nil {
+			return nil, err
+		}
+
+		linkInfo, err := netlink.LinkByIndex(netlinkNeighbor.LinkIndex)
+		if err != nil {
+			return nil, err
+		}
+		interfaceName := linkInfo.Attrs().Name
+		hardwareAddr := netlinkNeighbor.HardwareAddr.String()
+		// This ensures that only neighbors of secondary interfaces are imported
+		// or hardware interfaces which support VFs
+		if strings.HasPrefix(interfaceName, VETH_L2_PREFIX) ||
+			strings.HasPrefix(interfaceName, MACVLAN_PREFIX) ||
+			strings.HasPrefix(interfaceName, LAYER2_PREFIX) ||
+			linkInfo.Attrs().Vfs != nil ||
+			netlinkNeighbor.State != netlink.NUD_NOARP {
+			neighbor := NeighborInformation{
+				Family:    family,
+				State:     state,
+				MAC:       hardwareAddr,
+				IP:        netlinkNeighbor.IP.String(),
+				Interface: interfaceName,
+			}
+			neighbors = append(neighbors, neighbor)
+		}
+	}
+	return neighbors, nil
 }
 
 func (n *NetlinkManager) GetBridgeId(info Layer2Information) (int, error) {

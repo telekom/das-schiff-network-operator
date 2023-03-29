@@ -8,9 +8,9 @@ import (
 )
 
 type frrCollector struct {
-	routesDesc typedFactoryDesc
-	frr        *frr.FRRCLI
-	logger     logr.Logger
+	// routesDesc typedFactoryDesc
+	frr    *frr.FRRCLI
+	logger logr.Logger
 }
 
 func init() {
@@ -24,15 +24,15 @@ func NewFRRCollector() (Collector, error) {
 		return nil, err
 	}
 	collector := frrCollector{
-		routesDesc: typedFactoryDesc{
-			desc: prometheus.NewDesc(
-				prometheus.BuildFQName(namespace, "frr", "routes"),
-				"The number of routes currently in the Linux Dataplane.",
-				[]string{"table", "protocol", "address_family"},
-				nil,
-			),
-			valueType: prometheus.GaugeValue,
-		},
+		// routesDesc: typedFactoryDesc{
+		// 	desc: prometheus.NewDesc(
+		// 		prometheus.BuildFQName(namespace, "frr", "routes"),
+		// 		"The number of routes currently in the Linux Dataplane.",
+		// 		[]string{"table", "protocol", "address_family"},
+		// 		nil,
+		// 	),
+		// 	valueType: prometheus.GaugeValue,
+		// },
 		frr:    frrCli,
 		logger: ctrl.Log.WithName("frr.collector"),
 	}
