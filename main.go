@@ -43,6 +43,7 @@ import (
 	"github.com/telekom/das-schiff-network-operator/pkg/config"
 	"github.com/telekom/das-schiff-network-operator/pkg/macvlan"
 	"github.com/telekom/das-schiff-network-operator/pkg/monitoring"
+	"github.com/telekom/das-schiff-network-operator/pkg/notrack"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -169,6 +170,9 @@ func main() {
 
 	setupLog.Info("start anycast sync")
 	anycastTracker.RunAnycastSync()
+
+	setupLog.Info("start notrack sync")
+	notrack.RunIPTablesSync()
 
 	if len(interfacePrefix) > 0 {
 		setupLog.Info("start macvlan sync")

@@ -4,6 +4,7 @@ go 1.16
 
 require (
 	github.com/cilium/ebpf v0.9.1
+	github.com/coreos/go-iptables v0.6.0
 	github.com/coreos/go-systemd/v22 v22.3.2
 	github.com/go-logr/logr v0.4.0
 	github.com/google/go-cmp v0.5.6
@@ -16,5 +17,6 @@ require (
 	k8s.io/api v0.22.1
 	k8s.io/apimachinery v0.22.1
 	k8s.io/client-go v0.22.1
+	k8s.io/utils v0.0.0-20210802155522-efc7438f0176 // indirect
 	sigs.k8s.io/controller-runtime v0.10.0
 )

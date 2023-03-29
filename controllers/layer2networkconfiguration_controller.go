@@ -116,6 +116,7 @@ func (r *Layer2NetworkConfigurationReconciler) ReconcileDebounced(ctx context.Co
 	err = r.Client.Get(ctx, types.NamespacedName{Name: nodeName}, node)
 	if err != nil {
 		logger.Error(err, "error getting local node name")
+		return err
 	}
 
 	layer2Info := []nl.Layer2Information{}
@@ -127,11 +128,11 @@ func (r *Layer2NetworkConfigurationReconciler) ReconcileDebounced(ctx context.Co
 			selector, err := metav1.LabelSelectorAsSelector(spec.NodeSelector)
 			if err != nil {
 				logger.Error(err, "error converting nodeSelector of layer2 to selector", "layer2", layer2.ObjectMeta.Name)
-				continue
+				return err
 			}
 			if !selector.Matches(labels.Set(node.ObjectMeta.Labels)) {
 				logger.Info("local node does not match nodeSelector of layer2", "layer2", layer2.ObjectMeta.Name, "node", nodeName)
-				continue
+				return err
 			}
 		}
 
@@ -143,7 +144,7 @@ func (r *Layer2NetworkConfigurationReconciler) ReconcileDebounced(ctx context.Co
 		anycastGateways, err := r.NLManager.ParseIPAddresses(spec.AnycastGateways)
 		if err != nil {
 			logger.Error(err, "error parsing anycast gateways", "layer", layer2.ObjectMeta.Name, "gw", spec.AnycastGateways)
-			continue
+			return err
 		}
 
 		layer2Info = append(layer2Info, nl.Layer2Information{
@@ -160,6 +161,7 @@ func (r *Layer2NetworkConfigurationReconciler) ReconcileDebounced(ctx context.Co
 
 	if err := r.reconcileLayer2(ctx, layer2Info); err != nil {
 		logger.Error(err, "error reconciling Layer2s")
+		return err
 	}
 
 	return nil
