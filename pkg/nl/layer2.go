@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"time"
 
 	"github.com/vishvananda/netlink"
 )
@@ -181,8 +182,16 @@ func (n *NetlinkManager) ReconcileL2(current Layer2Information, desired Layer2In
 	}
 
 	if desired.AnycastMAC != nil && !bytes.Equal(current.bridge.HardwareAddr, *desired.AnycastMAC) {
+		if err := netlink.LinkSetDown(current.vxlan); err != nil {
+			return fmt.Errorf("error downing vxlan before changing MAC: %v", err)
+		}
+		time.Sleep(500 * time.Millisecond) // Wait for FRR to pickup interface down
 		if err := netlink.LinkSetHardwareAddr(current.bridge, *desired.AnycastMAC); err != nil {
 			return fmt.Errorf("error setting vxlan mac address: %v", err)
+		}
+		time.Sleep(500 * time.Millisecond)
+		if err := netlink.LinkSetUp(current.vxlan); err != nil {
+			return fmt.Errorf("error upping vxlan after changing MAC: %v", err)
 		}
 	}
 	if !bytes.Equal(current.vxlan.HardwareAddr, vxlanMAC) {
