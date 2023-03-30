@@ -180,6 +180,17 @@ func (n *NetlinkManager) ReconcileL2(current Layer2Information, desired Layer2In
 		return fmt.Errorf("error generating MAC for vxlan device: %v", err)
 	}
 
+	if desired.AnycastMAC != nil && !bytes.Equal(current.bridge.HardwareAddr, *desired.AnycastMAC) {
+		if err := netlink.LinkSetHardwareAddr(current.bridge, *desired.AnycastMAC); err != nil {
+			return fmt.Errorf("error setting vxlan mac address: %v", err)
+		}
+	}
+	if !bytes.Equal(current.vxlan.HardwareAddr, vxlanMAC) {
+		if err := netlink.LinkSetHardwareAddr(current.vxlan, vxlanMAC); err != nil {
+			return fmt.Errorf("error setting vxlan mac address: %v", err)
+		}
+	}
+
 	reattachL2VNI := false
 	// Reconcile VRF
 	if current.VRF != desired.VRF {
@@ -199,13 +210,6 @@ func (n *NetlinkManager) ReconcileL2(current Layer2Information, desired Layer2In
 		}
 	}
 
-	if desired.AnycastMAC != nil && !bytes.Equal(current.bridge.HardwareAddr, *desired.AnycastMAC) {
-		reattachL2VNI = true
-	}
-	if !bytes.Equal(current.vxlan.HardwareAddr, vxlanMAC) {
-		reattachL2VNI = true
-	}
-
 	protinfo, err := netlink.LinkGetProtinfo(current.vxlan)
 	if err != nil {
 		return fmt.Errorf("error getting bridge port info: %v", err)
@@ -221,14 +225,6 @@ func (n *NetlinkManager) ReconcileL2(current Layer2Information, desired Layer2In
 		}
 		if err := netlink.LinkSetNoMaster(current.vxlan); err != nil {
 			return fmt.Errorf("error removing vxlan from bridge before changing MAC: %v", err)
-		}
-
-		// Update VXLAN and Bridge MAC addresses
-		if err := netlink.LinkSetHardwareAddr(current.vxlan, vxlanMAC); err != nil {
-			return fmt.Errorf("error setting vxlan mac address: %v", err)
-		}
-		if err := netlink.LinkSetHardwareAddr(current.bridge, *desired.AnycastMAC); err != nil {
-			return fmt.Errorf("error setting vxlan mac address: %v", err)
 		}
 
 		// Reattach VXLAN to L2VNI bridge
