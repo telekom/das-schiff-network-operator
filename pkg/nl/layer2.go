@@ -263,6 +263,16 @@ func (n *NetlinkManager) ReconcileL2(current Layer2Information, desired Layer2In
 		}
 	}
 
+	protinfo, err := netlink.LinkGetProtinfo(current.vxlan)
+	if err != nil {
+		return fmt.Errorf("error getting bridge port info: %v", err)
+	}
+	if protinfo.Learning {
+		if err := netlink.LinkSetLearning(current.vxlan, false); err != nil {
+			return fmt.Errorf("error setting vxlan learning to false: %v", err)
+		}
+	}
+
 	// Ensure bridge can receive gratitious ARP
 	if err := os.WriteFile(fmt.Sprintf("/proc/sys/net/ipv4/conf/%s%d/arp_accept", LAYER2_PREFIX, current.VlanID), []byte("1"), 0o644); err != nil {
 		return fmt.Errorf("error setting arp_accept = 1 for interface: %v", err)
