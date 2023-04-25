@@ -218,6 +218,25 @@ func (n *NetlinkManager) ReconcileL2(current Layer2Information, desired Layer2In
 		return fmt.Errorf("error generating MAC for vxlan device: %v", err)
 	}
 
+	if desired.AnycastMAC != nil && !bytes.Equal(current.bridge.HardwareAddr, *desired.AnycastMAC) {
+		if err := netlink.LinkSetDown(current.vxlan); err != nil {
+			return fmt.Errorf("error downing vxlan before changing MAC: %v", err)
+		}
+		time.Sleep(500 * time.Millisecond) // Wait for FRR to pickup interface down
+		if err := netlink.LinkSetHardwareAddr(current.bridge, *desired.AnycastMAC); err != nil {
+			return fmt.Errorf("error setting vxlan mac address: %v", err)
+		}
+		time.Sleep(500 * time.Millisecond)
+		if err := netlink.LinkSetUp(current.vxlan); err != nil {
+			return fmt.Errorf("error upping vxlan after changing MAC: %v", err)
+		}
+	}
+	if !bytes.Equal(current.vxlan.HardwareAddr, vxlanMAC) {
+		if err := netlink.LinkSetHardwareAddr(current.vxlan, vxlanMAC); err != nil {
+			return fmt.Errorf("error setting vxlan mac address: %v", err)
+		}
+	}
+
 	reattachL2VNI := false
 	// Reconcile VRF
 	if current.VRF != desired.VRF {
@@ -237,48 +256,36 @@ func (n *NetlinkManager) ReconcileL2(current Layer2Information, desired Layer2In
 		}
 	}
 
-	if desired.AnycastMAC != nil && !bytes.Equal(current.bridge.HardwareAddr, *desired.AnycastMAC) {
-		reattachL2VNI = true
+	protinfo, err := netlink.LinkGetProtinfo(current.vxlan)
+	if err != nil {
+		return fmt.Errorf("error getting bridge port info: %v", err)
 	}
-	if !bytes.Equal(current.vxlan.HardwareAddr, vxlanMAC) {
+	if protinfo.Learning {
 		reattachL2VNI = true
 	}
 
 	if reattachL2VNI {
-		if err := netlink.LinkSetNoMaster(current.vxlan); err != nil {
-			return fmt.Errorf("error removing vxlan from bridge before changing MAC: %v", err)
-		}
+		// First set VXLAN down and detach from L2VNI bridge
 		if err := netlink.LinkSetDown(current.vxlan); err != nil {
 			return fmt.Errorf("error downing vxlan before changing MAC: %v", err)
 		}
-		if err := netlink.LinkSetDown(current.bridge); err != nil {
-			return fmt.Errorf("error downing bridge before changing MAC: %v", err)
+		if err := netlink.LinkSetNoMaster(current.vxlan); err != nil {
+			return fmt.Errorf("error removing vxlan from bridge before changing MAC: %v", err)
 		}
-		time.Sleep(1 * time.Second)
-	}
 
-	// Set MAC address
-	if desired.AnycastMAC != nil && !bytes.Equal(current.bridge.HardwareAddr, *desired.AnycastMAC) {
-		if err := netlink.LinkSetHardwareAddr(current.bridge, *desired.AnycastMAC); err != nil {
-			return fmt.Errorf("error setting bridge mac address: %v", err)
-		}
-	}
-	if !bytes.Equal(current.vxlan.HardwareAddr, vxlanMAC) {
-		if err := netlink.LinkSetHardwareAddr(current.vxlan, vxlanMAC); err != nil {
-			return fmt.Errorf("error setting vxlan mac address: %v", err)
-		}
-	}
-
-	if reattachL2VNI {
-		time.Sleep(1 * time.Second)
-		if err := netlink.LinkSetUp(current.vxlan); err != nil {
-			return fmt.Errorf("error uping vxlan after changing MAC: %v", err)
-		}
-		if err := netlink.LinkSetUp(current.bridge); err != nil {
-			return fmt.Errorf("error uping bridge after changing MAC: %v", err)
-		}
+		// Reattach VXLAN to L2VNI bridge
 		if err := netlink.LinkSetMaster(current.vxlan, current.bridge); err != nil {
 			return fmt.Errorf("error adding vxlan to bridge after changing MAC: %v", err)
+		}
+
+		// Disable learning on bridgeport
+		if err := netlink.LinkSetLearning(current.vxlan, false); err != nil {
+			return fmt.Errorf("error setting vxlan learning to false: %v", err)
+		}
+
+		// Up VXLAN interface again
+		if err := netlink.LinkSetUp(current.vxlan); err != nil {
+			return fmt.Errorf("error uping vxlan after changing MAC: %v", err)
 		}
 	}
 
