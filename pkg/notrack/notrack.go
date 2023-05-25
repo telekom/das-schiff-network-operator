@@ -22,7 +22,7 @@ var (
 	notrackLog = ctrl.Log.WithName("notrack")
 
 	rulesRegex          = regexp.MustCompile(`--comment "?nwop:notrack"?`)
-	inputInterfaceRegex = regexp.MustCompile(`-i "?([a-zA-Z._]*)"?`)
+	inputInterfaceRegex = regexp.MustCompile(`-i "?([a-zA-Z0-9._]*)"?`)
 	notrackLinkPrefixes = []string{"vr."}
 )
 

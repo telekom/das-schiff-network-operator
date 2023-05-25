@@ -54,7 +54,7 @@ func (n *NetlinkManager) CreateL2(info Layer2Information) error {
 		return fmt.Errorf("anycastGateways require anycastMAC to be set")
 	}
 
-	bridge, err := n.createBridge(fmt.Sprintf("%s%d", LAYER2_PREFIX, info.VlanID), masterIdx, info.MTU)
+	bridge, err := n.createBridge(fmt.Sprintf("%s%d", LAYER2_PREFIX, info.VlanID), info.AnycastMAC, masterIdx, info.MTU)
 	if err != nil {
 		return err
 	}
@@ -62,6 +62,9 @@ func (n *NetlinkManager) CreateL2(info Layer2Information) error {
 		return err
 	}
 	info.bridge = bridge
+	if err := n.configureBridge(bridge.Name); err != nil {
+		return err
+	}
 
 	for _, addr := range info.AnycastGateways {
 		err = netlink.AddrAdd(bridge, addr)
@@ -73,7 +76,6 @@ func (n *NetlinkManager) CreateL2(info Layer2Information) error {
 	vxlan, err := n.createVXLAN(
 		fmt.Sprintf("%s%d", VXLAN_PREFIX, info.VNI),
 		bridge.Attrs().Index,
-		nil,
 		info.VNI,
 		info.MTU,
 		false,
@@ -270,13 +272,37 @@ func (n *NetlinkManager) ReconcileL2(current Layer2Information, desired Layer2In
 		}
 	}
 
-	// Ensure bridge can receive gratitious ARP
-	if err := os.WriteFile(fmt.Sprintf("/proc/sys/net/ipv4/conf/%s%d/arp_accept", LAYER2_PREFIX, current.VlanID), []byte("1"), 0o644); err != nil {
-		return fmt.Errorf("error setting arp_accept = 1 for interface: %v", err)
+	if err := n.configureBridge(fmt.Sprintf("%s%d", LAYER2_PREFIX, current.VlanID)); err != nil {
+		return err
+	}
+	if err := setNeighSuppression(current.vxlan, os.Getenv("NWOP_NEIGH_SUPPRESSION") == "true"); err != nil {
+		return err
 	}
 
 	// Add/Remove anycast gateways
 	return n.reconcileIPAddresses(current.bridge, current.AnycastGateways, desired.AnycastGateways)
+}
+
+func (n *NetlinkManager) configureBridge(intfName string) error {
+	// Ensure bridge can receive gratitious ARP
+	if err := os.WriteFile(fmt.Sprintf("/proc/sys/net/ipv4/conf/%s/arp_accept", intfName), []byte("1"), 0o644); err != nil {
+		return fmt.Errorf("error setting arp_accept = 1 for interface: %v", err)
+	}
+
+	baseTimer := os.Getenv("NWOP_NEIGH_BASE_REACHABLE_TIME")
+	if baseTimer == "" {
+		baseTimer = "30000"
+	}
+
+	// Ensure Ipv4 Neighbor expiry is set to 30min
+	if err := os.WriteFile(fmt.Sprintf("/proc/sys/net/ipv4/neigh/%s/base_reachable_time_ms", intfName), []byte(baseTimer), 0o644); err != nil {
+		return fmt.Errorf("error setting ipv4 base_reachable_time_ms = %s for interface: %v", baseTimer, err)
+	}
+	// Ensure IPv6 Neighbor expiry is set to 30min
+	if err := os.WriteFile(fmt.Sprintf("/proc/sys/net/ipv6/neigh/%s/base_reachable_time_ms", intfName), []byte(baseTimer), 0o644); err != nil {
+		return fmt.Errorf("error setting ipv6 base_reachable_time_ms = %s for interface: %v", baseTimer, err)
+	}
+	return nil
 }
 
 func (n *NetlinkManager) ListL2() ([]Layer2Information, error) {
