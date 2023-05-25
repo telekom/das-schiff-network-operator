@@ -143,6 +143,14 @@ func (r *VRFRouteConfigurationReconciler) ReconcileDebounced(ctx context.Context
 				config.AggregateIPv4 = append(config.AggregateIPv4, aggregate)
 			}
 		}
+		for _, sbrRoute := range spec.SBRFor {
+			_, network, err := net.ParseCIDR(sbrRoute)
+			if err != nil {
+				r.Logger.Error(err, "error reconciling sbr routes")
+				return err
+			}
+			config.SBRRoute = append(config.SBRRoute, *network)
+		}
 
 		vrfConfigMap[spec.VRF] = config
 	}
@@ -204,7 +212,7 @@ func (r *VRFRouteConfigurationReconciler) reconcileNetlink(vrfConfigs []frr.VRFC
 	for _, cfg := range existing {
 		stillExists := false
 		for _, vrf := range vrfConfigs {
-			if vrf.Name == cfg.Name {
+			if vrf.Name == cfg.Name && vrf.VNI == cfg.VNI {
 				stillExists = true
 			}
 		}
@@ -222,14 +230,15 @@ func (r *VRFRouteConfigurationReconciler) reconcileNetlink(vrfConfigs []frr.VRFC
 		}
 		alreadyExists := false
 		for _, cfg := range existing {
-			if vrf.Name == cfg.Name {
+			if vrf.Name == cfg.Name && vrf.VNI == cfg.VNI {
 				alreadyExists = true
 			}
 		}
 		if !alreadyExists {
 			create = append(create, nl.VRFInformation{
-				Name: vrf.Name,
-				VNI:  vrf.VNI,
+				Name:        vrf.Name,
+				VNI:         vrf.VNI,
+				SBRPrefixes: vrf.SBRRoute,
 			})
 		}
 	}
