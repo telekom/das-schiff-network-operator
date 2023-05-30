@@ -10,30 +10,37 @@ import (
 )
 
 // Template for VRF config
+//
 //go:embed tpl/vrf.tpl
 var VRF_RAW_TPL string
 
 // Template for route-maps
+//
 //go:embed tpl/route-map.tpl
 var ROUTE_MAP_RAW_TPL string
 
 // Template for ip prefix-list
+//
 //go:embed tpl/prefix-list.tpl
 var PREFIX_LIST_RAW_TPL string
 
 // Template for bgp neighbor
+//
 //go:embed tpl/bgp-neighbor.tpl
 var NEIGHBOR_RAW_TPL string
 
 // Template for bgp v4 neighbor
+//
 //go:embed tpl/bgp-neighbor-v4.tpl
 var NEIGHBOR_V4_RAW_TPL string
 
 // Template for bgp v4 neighbor
+//
 //go:embed tpl/bgp-neighbor-v6.tpl
 var NEIGHBOR_V6_RAW_TPL string
 
 // Template for VRF BGP instance
+//
 //go:embed tpl/bgp.tpl
 var BGP_INSTANCE_RAW_TPL string
 
@@ -48,9 +55,10 @@ var (
 )
 
 type bgpInstanceConfig struct {
-	VRFs     []VRFConfiguration
-	RouterID string
-	ASN      int
+	VRFs             []VRFConfiguration
+	RouterID         string
+	ASN              int
+	ECMPMaximumPaths int
 }
 
 func mustParse(name string, rawtpl string) *template.Template {
