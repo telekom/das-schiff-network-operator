@@ -93,15 +93,13 @@ func (f *FRRManager) renderSubtemplates(in FRRConfiguration) (*FRRTemplateConfig
 	if err != nil {
 		return nil, err
 	}
-	envECMPMaximumPaths, isSet := os.LookupEnv("NWOP_ECMP_MAXIMUM_PATHS")
 	ecmpMaximumPaths := 8 // Default to BCMs preferred target of maximum 8 paths per route.
-	if isSet {
+	if envECMPMaximumPaths, ok := os.LookupEnv("NWOP_ECMP_MAXIMUM_PATHS"); ok {
 		parsedECMPMaximumPaths, err := strconv.Atoi(envECMPMaximumPaths)
 		if err != nil {
-			ecmpMaximumPaths = parsedECMPMaximumPaths
-		} else {
-			return nil, err
+			return nil, fmt.Errorf("failed to parse NWOP_ECMP_MAXIMUM_PATHS: %w", err)
 		}
+		ecmpMaximumPaths = parsedECMPMaximumPaths
 	}
 	asn := in.ASN
 	if asn == 0 {
