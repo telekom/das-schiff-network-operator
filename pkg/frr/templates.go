@@ -2,9 +2,9 @@ package frr
 
 import (
 	_ "embed"
+	"os"
 
 	"bytes"
-	"io/ioutil"
 	"regexp"
 	"text/template"
 )
@@ -78,7 +78,7 @@ func render(tpl *template.Template, vrfs interface{}) ([]byte, error) {
 }
 
 func generateTemplateConfig(template string, original string) error {
-	bytes, err := ioutil.ReadFile(original)
+	bytes, err := os.ReadFile(original)
 	if err != nil {
 		return err
 	}
@@ -87,7 +87,7 @@ func generateTemplateConfig(template string, original string) error {
 	commentToRemove := regexp.MustCompile(`(?m)^\#\+\+`)
 	content = commentToRemove.ReplaceAllString(content, "")
 
-	err = ioutil.WriteFile(template, []byte(content), FRR_PERMISSIONS)
+	err = os.WriteFile(template, []byte(content), FRR_PERMISSIONS)
 	if err != nil {
 		return err
 	}

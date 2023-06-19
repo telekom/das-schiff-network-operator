@@ -187,7 +187,10 @@ func (r *VRFRouteConfigurationReconciler) ReconcileDebounced(ctx context.Context
 	// Make sure that all created netlink VRFs are up after FRR reload
 	time.Sleep(2 * time.Second)
 	for _, info := range created {
-		r.NLManager.UpL3(info)
+		if err := r.NLManager.UpL3(info); err != nil {
+			r.Logger.Error(err, "error setting L3 to state UP")
+			return err
+		}
 	}
 	return nil
 }

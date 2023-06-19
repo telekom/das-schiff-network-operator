@@ -1,7 +1,6 @@
 package config
 
 import (
-	"io/ioutil"
 	"os"
 
 	"gopkg.in/yaml.v2"
@@ -33,7 +32,7 @@ func LoadConfig() (*Config, error) {
 		vniFile = val
 	}
 
-	read, err := ioutil.ReadFile(vniFile)
+	read, err := os.ReadFile(vniFile)
 	if err != nil {
 		return nil, err
 	}

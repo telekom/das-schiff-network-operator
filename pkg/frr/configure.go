@@ -2,7 +2,6 @@ package frr
 
 import (
 	"bytes"
-	"io/ioutil"
 	"os"
 
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
@@ -32,7 +31,7 @@ func (m *FRRManager) Configure(in FRRConfiguration) (bool, error) {
 		return false, err
 	}
 
-	currentConfig, err := ioutil.ReadFile(m.ConfigPath)
+	currentConfig, err := os.ReadFile(m.ConfigPath)
 	if err != nil {
 		return false, err
 	}
@@ -42,8 +41,8 @@ func (m *FRRManager) Configure(in FRRConfiguration) (bool, error) {
 		return false, err
 	}
 
-	if bytes.Compare(currentConfig, targetConfig) != 0 {
-		err = ioutil.WriteFile(m.ConfigPath, targetConfig, FRR_PERMISSIONS)
+	if bytes.Equal(currentConfig, targetConfig) {
+		err = os.WriteFile(m.ConfigPath, targetConfig, FRR_PERMISSIONS)
 		if err != nil {
 			return false, err
 		}
