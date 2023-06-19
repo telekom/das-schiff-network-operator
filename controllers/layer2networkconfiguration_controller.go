@@ -132,7 +132,7 @@ func (r *Layer2NetworkConfigurationReconciler) ReconcileDebounced(ctx context.Co
 			}
 			if !selector.Matches(labels.Set(node.ObjectMeta.Labels)) {
 				logger.Info("local node does not match nodeSelector of layer2", "layer2", layer2.ObjectMeta.Name, "node", nodeName)
-				return err
+				continue
 			}
 		}
 
