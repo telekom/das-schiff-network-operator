@@ -8,7 +8,7 @@ require (
 	github.com/coreos/go-systemd/v22 v22.3.2
 	github.com/go-logr/logr v0.4.0
 	github.com/google/go-cmp v0.5.6
-	github.com/onsi/ginkgo v1.16.4
+	github.com/onsi/ginkgo v1.16.5
 	github.com/onsi/gomega v1.15.0
 	github.com/prometheus/client_golang v1.11.1
 	github.com/vishvananda/netlink v1.1.1-0.20211129163951-9ada19101fc5
