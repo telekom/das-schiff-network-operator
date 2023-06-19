@@ -1,0 +1,24 @@
+# permissions for end users to edit layer2networkconfigurations.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: layer2networkconfiguration-editor-role
+rules:
+- apiGroups:
+  - network.schiff.telekom.de
+  resources:
+  - layer2networkconfigurations
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - network.schiff.telekom.de
+  resources:
+  - layer2networkconfigurations/status
+  verbs:
+  - get

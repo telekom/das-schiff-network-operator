@@ -13,9 +13,16 @@ var (
 )
 
 type Config struct {
-	VRFToVNI      map[string]int `yaml:"vnimap"`
-	BPFInterfaces []string       `yaml:"bpfInterfaces"`
-	SkipVRFConfig []string       `yaml:"skipVRFConfig"`
+	VRFToVNI      map[string]int       `yaml:"vnimap"`
+	VRFConfig     map[string]VRFConfig `yaml:"vrfConfig"`
+	BPFInterfaces []string             `yaml:"bpfInterfaces"`
+	SkipVRFConfig []string             `yaml:"skipVRFConfig"`
+	ServerASN     int                  `yaml:"serverASN"`
+}
+
+type VRFConfig struct {
+	VNI int    `yaml:"vni"`
+	RT  string `yaml:"rt"`
 }
 
 func LoadConfig() (*Config, error) {

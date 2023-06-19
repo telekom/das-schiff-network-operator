@@ -1,0 +1,6 @@
+apiVersion: network.schiff.telekom.de/v1alpha1
+kind: Layer2NetworkConfiguration
+metadata:
+  name: layer2networkconfiguration-sample
+spec:
+  # TODO(user): Add fields here

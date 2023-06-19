@@ -3,115 +3,162 @@ package nl
 import (
 	"fmt"
 	"net"
+	"os"
 
-	"github.com/telekom/das-schiff-network-operator/pkg/bpf"
 	"github.com/vishvananda/netlink"
+	"github.com/vishvananda/netlink/nl"
+	"golang.org/x/sys/unix"
 )
 
-func (n *NetlinkManager) createVRF(info *VRFInformation) error {
+const IFLA_BRPORT_NEIGH_SUPPRESS = 32
+
+func (n *NetlinkManager) createVRF(vrfName string, table int) (*netlink.Vrf, error) {
 	netlinkVrf := netlink.Vrf{
 		LinkAttrs: netlink.LinkAttrs{
-			Name: VRF_PREFIX + info.Name,
+			Name: vrfName,
 		},
-		Table: uint32(info.table),
+		Table: uint32(table),
 	}
 
 	if err := netlink.LinkAdd(&netlinkVrf); err != nil {
-		return err
+		return nil, err
 	}
-	info.vrfId = netlinkVrf.Attrs().Index
+	if err := n.disableEUIAutogeneration(vrfName); err != nil {
+		return nil, err
+	}
+	if err := netlink.LinkSetUp(&netlinkVrf); err != nil {
+		return nil, err
+	}
 
-	return netlink.LinkSetUp(&netlinkVrf)
+	return &netlinkVrf, nil
 }
 
-func (n *NetlinkManager) createBridge(info *VRFInformation) error {
+func (n *NetlinkManager) createBridge(bridgeName string, macAddress *net.HardwareAddr, masterIdx int, mtu int) (*netlink.Bridge, error) {
 	netlinkBridge := netlink.Bridge{
 		LinkAttrs: netlink.LinkAttrs{
-			Name:        BRIDGE_PREFIX + info.Name,
-			MasterIndex: info.vrfId,
-			MTU:         DEFAULT_MTU,
+			Name: bridgeName,
+			MTU:  mtu,
 		},
+	}
+	if masterIdx != -1 {
+		netlinkBridge.LinkAttrs.MasterIndex = masterIdx
+	}
+	if macAddress != nil {
+		netlinkBridge.LinkAttrs.HardwareAddr = *macAddress
 	}
 
 	if err := netlink.LinkAdd(&netlinkBridge); err != nil {
-		return err
+		return nil, err
 	}
-	info.bridgeId = netlinkBridge.Attrs().Index
-
-	if err := netlink.LinkSetUp(&netlinkBridge); err != nil {
-		return err
+	if err := n.disableEUIAutogeneration(bridgeName); err != nil {
+		return nil, err
 	}
 
-	return bpf.AttachToInterface(&netlinkBridge)
+	return &netlinkBridge, nil
 }
 
-func (n *NetlinkManager) createVXLAN(info *VRFInformation) error {
+func (n *NetlinkManager) createVXLAN(vxlanName string, bridgeIdx int, vni int, mtu int, hairpin bool) (*netlink.Vxlan, error) {
 	vxlanIf, vxlanIP, err := getInterfaceAndIP(UNDERLAY_LOOPBACK)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	macAddress, err := generateMAC(vxlanIP)
+	generatedMac, err := generateMAC(vxlanIP)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	netlinkVXLAN := netlink.Vxlan{
 		LinkAttrs: netlink.LinkAttrs{
-			Name:         VXLAN_PREFIX + info.Name,
-			MasterIndex:  info.bridgeId,
-			MTU:          DEFAULT_MTU,
-			HardwareAddr: macAddress,
+			Name:         vxlanName,
+			MasterIndex:  bridgeIdx,
+			MTU:          mtu,
+			HardwareAddr: generatedMac,
 		},
-		VxlanId:      info.VNI,
+		VxlanId:      vni,
 		VtepDevIndex: vxlanIf,
 		SrcAddr:      vxlanIP,
 		Learning:     false,
 		Port:         4789,
 	}
 	if err := netlink.LinkAdd(&netlinkVXLAN); err != nil {
-		return err
+		return nil, err
 	}
 	if err := netlink.LinkSetLearning(&netlinkVXLAN, false); err != nil {
-		return err
+		return nil, err
 	}
-	if err := netlink.LinkSetHairpin(&netlinkVXLAN, true); err != nil {
-		return err
+	if err := setNeighSuppression(&netlinkVXLAN, os.Getenv("NWOP_NEIGH_SUPPRESSION") == "true"); err != nil {
+		return nil, err
 	}
-	if err := netlink.LinkSetUp(&netlinkVXLAN); err != nil {
-		return err
+	if hairpin {
+		if err := netlink.LinkSetHairpin(&netlinkVXLAN, true); err != nil {
+			return nil, err
+		}
+	}
+	if err := n.disableEUIAutogeneration(vxlanName); err != nil {
+		return nil, err
 	}
 
-	return bpf.AttachToInterface(&netlinkVXLAN)
+	return &netlinkVXLAN, nil
 }
 
-func (n *NetlinkManager) createLink(info *VRFInformation) error {
+func (n *NetlinkManager) disableEUIAutogeneration(intfName string) error {
+	fileName := fmt.Sprintf("/proc/sys/net/ipv6/conf/%s/addr_gen_mode", intfName)
+	file, err := os.OpenFile(fileName, os.O_WRONLY, 0)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	if _, err := file.WriteString("1\n"); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (n *NetlinkManager) createLink(vethName string, peerName string, masterIdx int, mtu int, generateEUI bool) (*netlink.Veth, error) {
 	netlinkVeth := netlink.Veth{
 		LinkAttrs: netlink.LinkAttrs{
-			Name:        VRF_TO_DEFAULT_PREFIX + info.Name,
-			MasterIndex: info.vrfId,
-			MTU:         DEFAULT_MTU,
+			Name:        vethName,
+			MasterIndex: masterIdx,
+			MTU:         mtu,
 		},
-		PeerName: DEFAULT_TO_VRF_PREFIX + info.Name,
+		PeerName: peerName,
 	}
 	if err := netlink.LinkAdd(&netlinkVeth); err != nil {
-		return err
+		return nil, err
 	}
 
-	// Enable VRF side of the interface
-	if err := netlink.LinkSetUp(&netlinkVeth); err != nil {
-		return err
-	}
-	if err := bpf.AttachToInterface(&netlinkVeth); err != nil {
-		return err
-	}
-
-	// Search for other side and enable
-	if err := netlink.LinkSetUp(&netlink.Veth{LinkAttrs: netlink.LinkAttrs{Name: DEFAULT_TO_VRF_PREFIX + info.Name}}); err != nil {
-		return err
+	if !generateEUI {
+		if err := n.disableEUIAutogeneration(vethName); err != nil {
+			return nil, err
+		}
+		if err := n.disableEUIAutogeneration(peerName); err != nil {
+			return nil, err
+		}
 	}
 
-	return nil
+	return &netlinkVeth, nil
+}
+
+func (n *NetlinkManager) setUp(intfName string) error {
+	link, err := netlink.LinkByName(intfName)
+	if err != nil {
+		return err
+	}
+	return netlink.LinkSetUp(link)
+}
+
+func generateUnderlayMAC() (net.HardwareAddr, error) {
+	_, vxlanIP, err := getInterfaceAndIP(UNDERLAY_LOOPBACK)
+	if err != nil {
+		return nil, err
+	}
+
+	generatedMac, err := generateMAC(vxlanIP)
+	if err != nil {
+		return nil, err
+	}
+	return generatedMac, nil
 }
 
 func getInterfaceAndIP(name string) (int, net.IP, error) {
@@ -136,4 +183,28 @@ func generateMAC(ip net.IP) (net.HardwareAddr, error) {
 	copy(hwaddr, MAC_PREFIX)
 	copy(hwaddr[2:], ip.To4())
 	return hwaddr, nil
+}
+
+func setNeighSuppression(link netlink.Link, mode bool) error {
+	req := nl.NewNetlinkRequest(unix.RTM_SETLINK, unix.NLM_F_ACK)
+
+	msg := nl.NewIfInfomsg(unix.AF_BRIDGE)
+	msg.Index = int32(link.Attrs().Index)
+	req.AddData(msg)
+
+	br := nl.NewRtAttr(unix.IFLA_PROTINFO|unix.NLA_F_NESTED, nil)
+	br.AddRtAttr(IFLA_BRPORT_NEIGH_SUPPRESS, boolToByte(mode))
+	req.AddData(br)
+	_, err := req.Execute(unix.NETLINK_ROUTE, 0)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func boolToByte(x bool) []byte {
+	if x {
+		return []byte{1}
+	}
+	return []byte{0}
 }

@@ -42,12 +42,12 @@
 #define AF_INET6 10
 #endif
 
-struct bpf_map_def SEC("maps") lookup_port = {
-	.type = BPF_MAP_TYPE_HASH,
-	.key_size = sizeof(__u32),
-	.value_size = sizeof(__u32),
-	.max_entries = 256,
-};
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, __u32);
+	__type(value, __u32);
+	__uint(max_entries, 256);
+} lookup_port SEC(".maps");
 
 struct datarec
 {
@@ -55,18 +55,19 @@ struct datarec
 	__u64 rx_bytes;
 };
 
-struct bpf_map_def SEC("maps") ebpf_ret_stats_map = {
-	.type = BPF_MAP_TYPE_PERCPU_ARRAY,
-	.key_size = sizeof(__u32),
-	.value_size = sizeof(struct datarec),
-	.max_entries = EBPF_RES_MAX,
-};
-struct bpf_map_def SEC("maps") ebpf_fib_lkup_stats_map = {
-	.type = BPF_MAP_TYPE_PERCPU_ARRAY,
-	.key_size = sizeof(__u32),
-	.value_size = sizeof(struct datarec),
-	.max_entries = BPF_FIB_LKUP_RET_MAX,
-};
+struct {
+	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+	__uint(key_size, sizeof(__u32));
+	__uint(value_size, sizeof(struct datarec));
+	__uint(max_entries, EBPF_RES_MAX);
+} ebpf_ret_stats_map SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+	__uint(key_size, sizeof(__u32));
+	__uint(value_size, sizeof(struct datarec));
+	__uint(max_entries, BPF_FIB_LKUP_RET_MAX);
+} ebpf_fib_lkup_stats_map SEC(".maps");
 
 static __always_inline int ebpf_record_ret_stats(struct __sk_buff *skb, __u32 record, int tc_action)
 {
@@ -202,7 +203,7 @@ static __always_inline int tc_redir(struct __sk_buff *skb)
 		void *data_end = ctx_ptr(skb->data_end);
 		struct ethhdr *eth = ctx_ptr(skb->data);
 
-		if (eth + 1 > data_end)
+		if ((void *)(eth + 1) > data_end)
 			return ebpf_record_ret_stats(skb, EBPF_SIZE_EXC, TC_ACT_SHOT);
 
 		__builtin_memcpy(eth->h_dest, fib_params.dmac, ETH_ALEN);

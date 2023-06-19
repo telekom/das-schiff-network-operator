@@ -102,9 +102,15 @@ func (r *VRFRouteConfigurationReconciler) ReconcileDebounced(ctx context.Context
 		spec := vrf.Spec
 
 		var vni int
+		var rt string
 
 		if val, ok := r.Config.VRFToVNI[spec.VRF]; ok {
 			vni = val
+			r.Logger.Info("Configuring VRF from old VRFToVNI", "vrf", spec.VRF, "vni", val)
+		} else if val, ok := r.Config.VRFConfig[spec.VRF]; ok {
+			vni = val.VNI
+			rt = val.RT
+			r.Logger.Info("Configuring VRF from new VRFConfig", "vrf", spec.VRF, "vni", val.VNI, "rt", rt)
 		} else if r.Config.ShouldSkipVRFConfig(spec.VRF) {
 			vni = config.SKIP_VRF_TEMPLATE_VNI
 		} else {
@@ -117,6 +123,7 @@ func (r *VRFRouteConfigurationReconciler) ReconcileDebounced(ctx context.Context
 			vrfConfigMap[spec.VRF] = frr.VRFConfiguration{
 				Name: spec.VRF,
 				VNI:  vni,
+				RT:   rt,
 			}
 		}
 
@@ -128,7 +135,14 @@ func (r *VRFRouteConfigurationReconciler) ReconcileDebounced(ctx context.Context
 		if len(spec.Import) > 0 {
 			config.Import = append(config.Import, handlePrefixItemList(spec.Import, spec.Seq))
 		}
-
+		for _, aggregate := range spec.Aggregate {
+			_, network, _ := net.ParseCIDR(aggregate)
+			if network.IP.To4() == nil {
+				config.AggregateIPv6 = append(config.AggregateIPv6, aggregate)
+			} else {
+				config.AggregateIPv4 = append(config.AggregateIPv4, aggregate)
+			}
+		}
 		vrfConfigMap[spec.VRF] = config
 	}
 
@@ -141,7 +155,7 @@ func (r *VRFRouteConfigurationReconciler) ReconcileDebounced(ctx context.Context
 		return vrfConfigs[i].VNI < vrfConfigs[j].VNI
 	})
 
-	err = r.reconcileNetlink(vrfConfigs)
+	created, err := r.reconcileNetlink(vrfConfigs)
 	if err != nil {
 		r.Logger.Error(err, "error reconciling Netlink")
 		return err
@@ -150,7 +164,10 @@ func (r *VRFRouteConfigurationReconciler) ReconcileDebounced(ctx context.Context
 	// We wait here for two seconds to let FRR settle after updating netlink devices
 	time.Sleep(2 * time.Second)
 
-	changed, err := r.FRRManager.Configure(vrfConfigs)
+	changed, err := r.FRRManager.Configure(frr.FRRConfiguration{
+		VRFs: vrfConfigs,
+		ASN:  r.Config.ServerASN,
+	})
 	if err != nil {
 		r.Logger.Error(err, "error updating FRR configuration")
 		return err
@@ -166,13 +183,19 @@ func (r *VRFRouteConfigurationReconciler) ReconcileDebounced(ctx context.Context
 		}
 		r.dirtyConfig = false
 	}
+
+	// Make sure that all created netlink VRFs are up after FRR reload
+	time.Sleep(2 * time.Second)
+	for _, info := range created {
+		r.NLManager.UpL3(info)
+	}
 	return nil
 }
 
-func (r *VRFRouteConfigurationReconciler) reconcileNetlink(vrfConfigs []frr.VRFConfiguration) error {
-	existing, err := r.NLManager.List()
+func (r *VRFRouteConfigurationReconciler) reconcileNetlink(vrfConfigs []frr.VRFConfiguration) ([]nl.VRFInformation, error) {
+	existing, err := r.NLManager.ListL3()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Check for VRFs that are configured on the host but no longer in Kubernetes
@@ -180,12 +203,12 @@ func (r *VRFRouteConfigurationReconciler) reconcileNetlink(vrfConfigs []frr.VRFC
 	for _, cfg := range existing {
 		stillExists := false
 		for _, vrf := range vrfConfigs {
-			if vrf.Name == cfg.Name {
+			if vrf.Name == cfg.Name && vrf.VNI == cfg.VNI {
 				stillExists = true
 			}
 		}
 		if !stillExists {
-			delete = append(delete, *cfg)
+			delete = append(delete, cfg)
 		}
 	}
 
@@ -198,7 +221,7 @@ func (r *VRFRouteConfigurationReconciler) reconcileNetlink(vrfConfigs []frr.VRFC
 		}
 		alreadyExists := false
 		for _, cfg := range existing {
-			if vrf.Name == cfg.Name {
+			if vrf.Name == cfg.Name && vrf.VNI == cfg.VNI {
 				alreadyExists = true
 			}
 		}
@@ -213,7 +236,7 @@ func (r *VRFRouteConfigurationReconciler) reconcileNetlink(vrfConfigs []frr.VRFC
 	// Delete / Cleanup VRFs
 	for _, info := range delete {
 		r.Logger.Info("Deleting VRF because it is no longer configured in Kubernetes", "vrf", info.Name, "vni", info.VNI)
-		errs := r.NLManager.Cleanup(info.Name)
+		errs := r.NLManager.CleanupL3(info.Name)
 		for _, err := range errs {
 			r.Logger.Error(err, "Error deleting VRF", "vrf", info.Name, "vni", strconv.Itoa(info.VNI))
 		}
@@ -221,18 +244,18 @@ func (r *VRFRouteConfigurationReconciler) reconcileNetlink(vrfConfigs []frr.VRFC
 	// Create VRFs
 	for _, info := range create {
 		r.Logger.Info("Creating VRF to match Kubernetes", "vrf", info.Name, "vni", info.VNI)
-		err := r.NLManager.Create(&info)
+		err := r.NLManager.CreateL3(info)
 		if err != nil {
-			return fmt.Errorf("error creating VRF %s, VNI %d: %w", info.Name, info.VNI, err)
+			return nil, fmt.Errorf("error creating VRF %s, VNI %d: %w", info.Name, info.VNI, err)
 		}
 	}
 
-	return nil
+	return create, nil
 }
 
 func handlePrefixItemList(input []networkv1alpha1.VrfRouteConfigurationPrefixItem, seq int) frr.PrefixList {
 	prefixList := frr.PrefixList{
-		Seq: seq,
+		Seq: seq + 1,
 	}
 	for i, item := range input {
 		prefixList.Items = append(prefixList.Items, copyPrefixItemToFRRItem(i, item))
@@ -249,6 +272,7 @@ func copyPrefixItemToFRRItem(i int, item networkv1alpha1.VrfRouteConfigurationPr
 	}
 	return frr.PrefixedRouteItem{
 		CIDR:   *network,
+		IPv6:   network.IP.To4() == nil,
 		Seq:    seq,
 		Action: item.Action,
 		GE:     item.GE,

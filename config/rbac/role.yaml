@@ -7,6 +7,40 @@ metadata:
   name: manager-role
 rules:
 - apiGroups:
+  - ""
+  resources:
+  - nodes
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - network.schiff.telekom.de
+  resources:
+  - layer2networkconfigurations
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - network.schiff.telekom.de
+  resources:
+  - layer2networkconfigurations/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - network.schiff.telekom.de
+  resources:
+  - layer2networkconfigurations/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
   - network.schiff.telekom.de
   resources:
   - vrfrouteconfigurations

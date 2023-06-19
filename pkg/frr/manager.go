@@ -25,12 +25,14 @@ type FRRManager struct {
 }
 
 type PrefixList struct {
-	Items []PrefixedRouteItem
-	Seq   int
+	Items     []PrefixedRouteItem
+	Seq       int
+	Community *int
 }
 
 type PrefixedRouteItem struct {
 	CIDR   net.IPNet
+	IPv6   bool
 	Seq    int
 	Action string
 	GE     *int
@@ -38,10 +40,18 @@ type PrefixedRouteItem struct {
 }
 
 type VRFConfiguration struct {
-	Name   string
-	VNI    int
-	Import []PrefixList
-	Export []PrefixList
+	Name          string
+	VNI           int
+	RT            string
+	AggregateIPv4 []string
+	AggregateIPv6 []string
+	Import        []PrefixList
+	Export        []PrefixList
+}
+
+type FRRConfiguration struct {
+	ASN  int
+	VRFs []VRFConfiguration
 }
 
 func NewFRRManager() *FRRManager {
@@ -84,4 +94,8 @@ func (m *FRRManager) ReloadFRR() error {
 
 func (v VRFConfiguration) ShouldTemplateVRF() bool {
 	return v.VNI != config.SKIP_VRF_TEMPLATE_VNI
+}
+
+func (v VRFConfiguration) ShouldDefineRT() bool {
+	return v.RT != ""
 }

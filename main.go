@@ -33,9 +33,11 @@ import (
 
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/controllers"
+	"github.com/telekom/das-schiff-network-operator/pkg/anycast"
 	"github.com/telekom/das-schiff-network-operator/pkg/bpf"
 	"github.com/telekom/das-schiff-network-operator/pkg/config"
 	"github.com/telekom/das-schiff-network-operator/pkg/macvlan"
+	"github.com/telekom/das-schiff-network-operator/pkg/notrack"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -61,7 +63,7 @@ func main() {
 			"Command-line flags override configuration from this file.")
 	flag.BoolVar(&onlyBPFMode, "only-attach-bpf", false,
 		"Only attach BPF to specified interfaces in config. This will not start any reconciliation. Perfect for masters.")
-	flag.StringVar(&interfacePrefix, "macvlan-interface-prefix", "vlan.",
+	flag.StringVar(&interfacePrefix, "macvlan-interface-prefix", "",
 		"Interface prefix for bridge devices for MACVlan sync")
 	opts := zap.Options{
 		Development: true,
@@ -92,6 +94,8 @@ func main() {
 		os.Exit(1)
 	}
 
+	anycastTracker := &anycast.AnycastTracker{}
+
 	// Start VRFRouteConfigurationReconciler when we are not running in only BPF mode.
 	if !onlyBPFMode {
 		if err = (&controllers.VRFRouteConfigurationReconciler{
@@ -106,6 +110,16 @@ func main() {
 	if err = (&networkv1alpha1.VRFRouteConfiguration{}).SetupWebhookWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create webhook", "webhook", "VRFRouteConfiguration")
 		os.Exit(1)
+	}
+	if !onlyBPFMode {
+		if err = (&controllers.Layer2NetworkConfigurationReconciler{
+			Client:         mgr.GetClient(),
+			Scheme:         mgr.GetScheme(),
+			AnycastTracker: anycastTracker,
+		}).SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create controller", "controller", "Layer2NetworkConfiguration")
+			os.Exit(1)
+		}
 	}
 	//+kubebuilder:scaffold:builder
 
@@ -128,8 +142,16 @@ func main() {
 	setupLog.Info("start bpf interface check")
 	bpf.RunInterfaceCheck()
 
-	setupLog.Info("start macvlan sync")
-	macvlan.RunMACSync(interfacePrefix)
+	setupLog.Info("start anycast sync")
+	anycastTracker.RunAnycastSync()
+
+	setupLog.Info("start notrack sync")
+	notrack.RunIPTablesSync()
+
+	if len(interfacePrefix) > 0 {
+		setupLog.Info("start macvlan sync")
+		macvlan.RunMACSync(interfacePrefix)
+	}
 
 	setupLog.Info("starting manager")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {

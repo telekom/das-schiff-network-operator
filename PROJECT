@@ -16,4 +16,13 @@ resources:
   webhooks:
     validation: true
     webhookVersion: v1
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: schiff.telekom.de
+  group: network
+  kind: Layer2NetworkConfiguration
+  path: github.com/telekom/das-schiff-network-operator/api/v1alpha1
+  version: v1alpha1
 version: "3"

@@ -29,6 +29,10 @@ var NEIGHBOR_RAW_TPL string
 //go:embed tpl/bgp-neighbor-v4.tpl
 var NEIGHBOR_V4_RAW_TPL string
 
+// Template for bgp v4 neighbor
+//go:embed tpl/bgp-neighbor-v6.tpl
+var NEIGHBOR_V6_RAW_TPL string
+
 // Template for VRF BGP instance
 //go:embed tpl/bgp.tpl
 var BGP_INSTANCE_RAW_TPL string
@@ -39,6 +43,7 @@ var (
 	PREFIX_LIST_TPL  = mustParse("prefix-list", PREFIX_LIST_RAW_TPL)
 	NEIGHBOR_TPL     = mustParse("neighbor", NEIGHBOR_RAW_TPL)
 	NEIGHBOR_V4_TPL  = mustParse("neighborv4", NEIGHBOR_V4_RAW_TPL)
+	NEIGHBOR_V6_TPL  = mustParse("neighborv6", NEIGHBOR_V6_RAW_TPL)
 	BGP_INSTANCE_TPL = mustParse("bgpinstance", BGP_INSTANCE_RAW_TPL)
 )
 
