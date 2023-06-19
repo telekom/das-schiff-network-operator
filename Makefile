@@ -81,6 +81,19 @@ docker-build: test ## Build docker image with the manager.
 docker-push: ## Push docker image with the manager.
 	docker push ${IMG}
 
+##@ Release
+
+RELEASE_DIR ?= out
+
+$(RELEASE_DIR):
+	mkdir -p $(RELEASE_DIR)/
+
+licenses-report: go-licenses
+	rm -rf $(RELEASE_DIR)/licenses
+	$(GO_LICENSES) save --save_path $(RELEASE_DIR)/licenses ./...
+	$(GO_LICENSES) report --template hack/licenses.md.tpl ./... > $(RELEASE_DIR)/licenses/licenses.md
+	(cd out/licenses && tar -czf ../licenses.tar.gz *)
+
 ##@ Deployment
 
 ifndef ignore-not-found
@@ -119,6 +132,11 @@ ENVTEST = $(shell pwd)/bin/setup-envtest
 envtest: ## Download envtest-setup locally if necessary.
 	$(call go-get-tool,$(ENVTEST),sigs.k8s.io/controller-runtime/tools/setup-envtest@latest)
 
+GO_LICENSES = $(shell pwd)/bin/go-licenses
+.PHONY: go-licenses
+go-licenses: ## Download go-licenses locally if necessary.
+	$(call go-get-tool,$(GO_LICENSES),github.com/google/go-licenses@latest)
+
 # go-get-tool will 'go get' any package $2 and install it to $1.
 PROJECT_DIR := $(shell dirname $(abspath $(lastword $(MAKEFILE_LIST))))
 define go-get-tool
@@ -128,7 +146,7 @@ TMP_DIR=$$(mktemp -d) ;\
 cd $$TMP_DIR ;\
 go mod init tmp ;\
 echo "Downloading $(2)" ;\
-GOBIN=$(PROJECT_DIR)/bin go get $(2) ;\
+GOBIN=$(PROJECT_DIR)/bin go install $(2) ;\
 rm -rf $$TMP_DIR ;\
 }
 endef
