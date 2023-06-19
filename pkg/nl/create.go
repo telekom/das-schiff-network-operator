@@ -6,7 +6,11 @@ import (
 	"os"
 
 	"github.com/vishvananda/netlink"
+	"github.com/vishvananda/netlink/nl"
+	"golang.org/x/sys/unix"
 )
+
+const IFLA_BRPORT_NEIGH_SUPPRESS = 32
 
 func (n *NetlinkManager) createVRF(vrfName string, table int) (*netlink.Vrf, error) {
 	netlinkVrf := netlink.Vrf{
@@ -29,7 +33,7 @@ func (n *NetlinkManager) createVRF(vrfName string, table int) (*netlink.Vrf, err
 	return &netlinkVrf, nil
 }
 
-func (n *NetlinkManager) createBridge(bridgeName string, masterIdx int, mtu int) (*netlink.Bridge, error) {
+func (n *NetlinkManager) createBridge(bridgeName string, macAddress *net.HardwareAddr, masterIdx int, mtu int) (*netlink.Bridge, error) {
 	netlinkBridge := netlink.Bridge{
 		LinkAttrs: netlink.LinkAttrs{
 			Name: bridgeName,
@@ -38,6 +42,9 @@ func (n *NetlinkManager) createBridge(bridgeName string, masterIdx int, mtu int)
 	}
 	if masterIdx != -1 {
 		netlinkBridge.LinkAttrs.MasterIndex = masterIdx
+	}
+	if macAddress != nil {
+		netlinkBridge.LinkAttrs.HardwareAddr = *macAddress
 	}
 
 	if err := netlink.LinkAdd(&netlinkBridge); err != nil {
@@ -50,18 +57,15 @@ func (n *NetlinkManager) createBridge(bridgeName string, masterIdx int, mtu int)
 	return &netlinkBridge, nil
 }
 
-func (n *NetlinkManager) createVXLAN(vxlanName string, bridgeIdx int, macAddress *net.HardwareAddr, vni int, mtu int, hairpin bool) (*netlink.Vxlan, error) {
+func (n *NetlinkManager) createVXLAN(vxlanName string, bridgeIdx int, vni int, mtu int, hairpin bool) (*netlink.Vxlan, error) {
 	vxlanIf, vxlanIP, err := getInterfaceAndIP(UNDERLAY_LOOPBACK)
 	if err != nil {
 		return nil, err
 	}
 
-	if macAddress == nil {
-		generatedMac, err := generateMAC(vxlanIP)
-		if err != nil {
-			return nil, err
-		}
-		macAddress = &generatedMac
+	generatedMac, err := generateMAC(vxlanIP)
+	if err != nil {
+		return nil, err
 	}
 
 	netlinkVXLAN := netlink.Vxlan{
@@ -69,7 +73,7 @@ func (n *NetlinkManager) createVXLAN(vxlanName string, bridgeIdx int, macAddress
 			Name:         vxlanName,
 			MasterIndex:  bridgeIdx,
 			MTU:          mtu,
-			HardwareAddr: *macAddress,
+			HardwareAddr: generatedMac,
 		},
 		VxlanId:      vni,
 		VtepDevIndex: vxlanIf,
@@ -81,6 +85,9 @@ func (n *NetlinkManager) createVXLAN(vxlanName string, bridgeIdx int, macAddress
 		return nil, err
 	}
 	if err := netlink.LinkSetLearning(&netlinkVXLAN, false); err != nil {
+		return nil, err
+	}
+	if err := setNeighSuppression(&netlinkVXLAN, os.Getenv("NWOP_NEIGH_SUPPRESSION") == "true"); err != nil {
 		return nil, err
 	}
 	if hairpin {
@@ -176,4 +183,28 @@ func generateMAC(ip net.IP) (net.HardwareAddr, error) {
 	copy(hwaddr, MAC_PREFIX)
 	copy(hwaddr[2:], ip.To4())
 	return hwaddr, nil
+}
+
+func setNeighSuppression(link netlink.Link, mode bool) error {
+	req := nl.NewNetlinkRequest(unix.RTM_SETLINK, unix.NLM_F_ACK)
+
+	msg := nl.NewIfInfomsg(unix.AF_BRIDGE)
+	msg.Index = int32(link.Attrs().Index)
+	req.AddData(msg)
+
+	br := nl.NewRtAttr(unix.IFLA_PROTINFO|unix.NLA_F_NESTED, nil)
+	br.AddRtAttr(IFLA_BRPORT_NEIGH_SUPPRESS, boolToByte(mode))
+	req.AddData(br)
+	_, err := req.Execute(unix.NETLINK_ROUTE, 0)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func boolToByte(x bool) []byte {
+	if x {
+		return []byte{1}
+	}
+	return []byte{0}
 }

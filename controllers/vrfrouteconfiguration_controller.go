@@ -143,7 +143,6 @@ func (r *VRFRouteConfigurationReconciler) ReconcileDebounced(ctx context.Context
 				config.AggregateIPv4 = append(config.AggregateIPv4, aggregate)
 			}
 		}
-
 		vrfConfigMap[spec.VRF] = config
 	}
 
@@ -204,7 +203,7 @@ func (r *VRFRouteConfigurationReconciler) reconcileNetlink(vrfConfigs []frr.VRFC
 	for _, cfg := range existing {
 		stillExists := false
 		for _, vrf := range vrfConfigs {
-			if vrf.Name == cfg.Name {
+			if vrf.Name == cfg.Name && vrf.VNI == cfg.VNI {
 				stillExists = true
 			}
 		}
@@ -222,7 +221,7 @@ func (r *VRFRouteConfigurationReconciler) reconcileNetlink(vrfConfigs []frr.VRFC
 		}
 		alreadyExists := false
 		for _, cfg := range existing {
-			if vrf.Name == cfg.Name {
+			if vrf.Name == cfg.Name && vrf.VNI == cfg.VNI {
 				alreadyExists = true
 			}
 		}

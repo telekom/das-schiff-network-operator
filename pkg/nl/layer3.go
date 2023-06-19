@@ -32,7 +32,7 @@ func (n *NetlinkManager) CreateL3(info VRFInformation) error {
 		return err
 	}
 
-	bridge, err := n.createBridge(BRIDGE_PREFIX+info.Name, vrf.Attrs().Index, DEFAULT_MTU)
+	bridge, err := n.createBridge(BRIDGE_PREFIX+info.Name, nil, vrf.Attrs().Index, DEFAULT_MTU)
 	if err != nil {
 		return err
 	}
@@ -48,7 +48,7 @@ func (n *NetlinkManager) CreateL3(info VRFInformation) error {
 		return err
 	}
 
-	vxlan, err := n.createVXLAN(VXLAN_PREFIX+info.Name, bridge.Attrs().Index, nil, info.VNI, DEFAULT_MTU, true)
+	vxlan, err := n.createVXLAN(VXLAN_PREFIX+info.Name, bridge.Attrs().Index, info.VNI, DEFAULT_MTU, true)
 	if err != nil {
 		return err
 	}

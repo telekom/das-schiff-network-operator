@@ -67,7 +67,7 @@ func (n *NetlinkManager) listL3() ([]VRFInformation, error) {
 			info.Name = link.Attrs().Name[3:]
 			info.vrfId = vrf.Attrs().Index
 
-			err := n.updateL3Indices(info)
+			err := n.updateL3Indices(&info)
 			if err != nil {
 				return nil, err
 			}
@@ -79,7 +79,7 @@ func (n *NetlinkManager) listL3() ([]VRFInformation, error) {
 	return infos, nil
 }
 
-func (n *NetlinkManager) updateL3Indices(info VRFInformation) error {
+func (n *NetlinkManager) updateL3Indices(info *VRFInformation) error {
 	bridgeLink, err := netlink.LinkByName(BRIDGE_PREFIX + info.Name)
 	if err != nil {
 		return err
