@@ -23,6 +23,10 @@ jobs:
       # - name: generate release notes
       #   run: |
       #     make release-notes
+      - name: Build
+        run: |
+          make build
+
       - name: Create Licenses Report
         run: |
           make licenses-report
@@ -44,6 +48,10 @@ jobs:
         uses: actions/setup-go@v4
         with:
           go-version: "^1.18"
+
+      - name: Build
+        run: |
+          make build
 
       - name: Create Licenses Report
         run: |
