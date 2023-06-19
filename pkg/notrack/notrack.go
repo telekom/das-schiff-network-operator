@@ -11,6 +11,8 @@ import (
 	"github.com/vishvananda/netlink"
 	"k8s.io/utils/strings/slices"
 	ctrl "sigs.k8s.io/controller-runtime"
+
+	"github.com/telekom/das-schiff-network-operator/pkg/nl"
 )
 
 const (
@@ -85,6 +87,8 @@ func RunIPTablesSync() {
 		os.Exit(1)
 	}
 
+	netlinkManager := &nl.NetlinkManager{}
+
 	go func() {
 		for {
 			links, err := netlink.LinkList()
@@ -109,6 +113,13 @@ func RunIPTablesSync() {
 			if err := reconcileIPTables(notrackLinks, ipt6); err != nil {
 				notrackLog.Error(err, "error reconciling notrack in IPv6 iptables")
 			}
+
+			if underlayIP, err := netlinkManager.GetUnderlayIP(); err == nil {
+				ipt4.AppendUnique(IPTABLES_TABLE, IPTABLES_CHAIN, "-d", underlayIP.String(), "-p", "udp", "--dport", "4789", "-j", "NOTRACK")
+			} else {
+				notrackLog.Error(err, "error reconciling VXLAN notrack in IPv4 iptables")
+			}
+
 			time.Sleep(20 * time.Second)
 		}
 	}()
