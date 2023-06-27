@@ -41,7 +41,7 @@ func (m *FRRManager) Configure(in FRRConfiguration) (bool, error) {
 		return false, err
 	}
 
-	if bytes.Equal(currentConfig, targetConfig) {
+	if !bytes.Equal(currentConfig, targetConfig) {
 		err = os.WriteFile(m.ConfigPath, targetConfig, FRR_PERMISSIONS)
 		if err != nil {
 			return false, err

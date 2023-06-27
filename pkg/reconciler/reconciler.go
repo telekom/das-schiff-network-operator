@@ -38,7 +38,7 @@ func NewReconciler(client client.Client, anycastTracker *anycast.AnycastTracker)
 	reconciler := &Reconciler{
 		client:         client,
 		netlinkManager: &nl.NetlinkManager{},
-		frrManager:     &frr.FRRManager{},
+		frrManager:     frr.NewFRRManager(),
 		anycastTracker: anycastTracker,
 	}
 
@@ -49,6 +49,12 @@ func NewReconciler(client client.Client, anycastTracker *anycast.AnycastTracker)
 	}
 	if err := reconciler.frrManager.Init(); err != nil {
 		return nil, err
+	}
+
+	if config, err := config.LoadConfig(); err != nil {
+		return nil, err
+	} else {
+		reconciler.config = config
 	}
 
 	return reconciler, nil

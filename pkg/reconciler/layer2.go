@@ -113,6 +113,7 @@ func (r *reconcile) reconcileLayer2(l2vnis []networkv1alpha1.Layer2NetworkConfig
 		if !alreadyExists {
 			create = append(create, info)
 		} else {
+			r.Logger.Info("Reconciling existing Layer2", "vlan", info.VlanID, "vni", info.VNI)
 			err := r.netlinkManager.ReconcileL2(currentConfig, info)
 			if err != nil {
 				return fmt.Errorf("error reconciling layer2 vlan %d vni %d: %v", info.VlanID, info.VNI, err)
