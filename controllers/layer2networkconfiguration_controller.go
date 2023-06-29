@@ -76,7 +76,7 @@ func (r *Layer2NetworkConfigurationReconciler) Reconcile(ctx context.Context, re
 	// Run ReconcileDebounced through debouncer
 	r.Debouncer.Debounce(ctx)
 
-	return ctrl.Result{}, nil
+	return ctrl.Result{RequeueAfter: 10 * time.Minute}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
