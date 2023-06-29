@@ -41,7 +41,7 @@ func (r *reconcile) fetchLayer2() ([]networkv1alpha1.Layer2NetworkConfiguration,
 			}
 			if !selector.Matches(labels.Set(node.ObjectMeta.Labels)) {
 				r.Logger.Info("local node does not match nodeSelector of layer2", "layer2", item.ObjectMeta.Name, "node", nodeName)
-				return nil, err
+				continue
 			}
 		}
 
@@ -52,7 +52,7 @@ func (r *reconcile) fetchLayer2() ([]networkv1alpha1.Layer2NetworkConfiguration,
 }
 
 func (r *reconcile) reconcileLayer2(l2vnis []networkv1alpha1.Layer2NetworkConfiguration) error {
-	layer2Info := []nl.Layer2Information{}
+	desired := []nl.Layer2Information{}
 
 	for _, layer2 := range l2vnis {
 		spec := layer2.Spec
@@ -68,7 +68,7 @@ func (r *reconcile) reconcileLayer2(l2vnis []networkv1alpha1.Layer2NetworkConfig
 			return err
 		}
 
-		layer2Info = append(layer2Info, nl.Layer2Information{
+		desired = append(desired, nl.Layer2Information{
 			VlanID:                 spec.ID,
 			MTU:                    spec.MTU,
 			VNI:                    spec.VNI,
@@ -88,10 +88,10 @@ func (r *reconcile) reconcileLayer2(l2vnis []networkv1alpha1.Layer2NetworkConfig
 	delete := []nl.Layer2Information{}
 	for _, cfg := range existing {
 		stillExists := false
-		for _, info := range layer2Info {
+		for _, info := range desired {
 			if info.VlanID == cfg.VlanID {
-				// Maybe reconcile to match MTU, gateways?
 				stillExists = true
+				break
 			}
 		}
 		if !stillExists {
@@ -101,13 +101,14 @@ func (r *reconcile) reconcileLayer2(l2vnis []networkv1alpha1.Layer2NetworkConfig
 
 	create := []nl.Layer2Information{}
 	anycastTrackerInterfaces := []int{}
-	for _, info := range layer2Info {
+	for _, info := range desired {
 		alreadyExists := false
 		var currentConfig nl.Layer2Information
 		for _, cfg := range existing {
 			if info.VlanID == cfg.VlanID {
 				alreadyExists = true
 				currentConfig = cfg
+				break
 			}
 		}
 		if !alreadyExists {

@@ -97,11 +97,11 @@ func main() {
 
 	anycastTracker := &anycast.AnycastTracker{}
 
-	// Start VRFRouteConfigurationReconciler when we are not running in only BPF mode.
 	if err = (&networkv1alpha1.VRFRouteConfiguration{}).SetupWebhookWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create webhook", "webhook", "VRFRouteConfiguration")
 		os.Exit(1)
 	}
+	// Start VRFRouteConfigurationReconciler when we are not running in only BPF mode.
 	if !onlyBPFMode {
 		reconciler, err := reconciler.NewReconciler(mgr.GetClient(), anycastTracker)
 		if err != nil {

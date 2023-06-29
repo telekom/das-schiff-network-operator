@@ -33,13 +33,13 @@ func (r *reconcile) reconcileLayer3(l3vnis []networkv1alpha1.VRFRouteConfigurati
 		var vni int
 		var rt string
 
-		if val, ok := r.config.VRFToVNI[spec.VRF]; ok {
-			vni = val
-			r.Logger.Info("Configuring VRF from old VRFToVNI", "vrf", spec.VRF, "vni", val)
-		} else if val, ok := r.config.VRFConfig[spec.VRF]; ok {
+		if val, ok := r.config.VRFConfig[spec.VRF]; ok {
 			vni = val.VNI
 			rt = val.RT
 			r.Logger.Info("Configuring VRF from new VRFConfig", "vrf", spec.VRF, "vni", val.VNI, "rt", rt)
+		} else if val, ok := r.config.VRFToVNI[spec.VRF]; ok {
+			vni = val
+			r.Logger.Info("Configuring VRF from old VRFToVNI", "vrf", spec.VRF, "vni", val)
 		} else if r.config.ShouldSkipVRFConfig(spec.VRF) {
 			vni = config.SKIP_VRF_TEMPLATE_VNI
 		} else {
@@ -60,13 +60,24 @@ func (r *reconcile) reconcileLayer3(l3vnis []networkv1alpha1.VRFRouteConfigurati
 		config := vrfConfigMap[spec.VRF]
 
 		if len(spec.Export) > 0 {
-			config.Export = append(config.Export, handlePrefixItemList(spec.Export, spec.Seq))
+			prefixList, err := handlePrefixItemList(spec.Export, spec.Seq)
+			if err != nil {
+				return err
+			}
+			config.Export = append(config.Export, prefixList)
 		}
 		if len(spec.Import) > 0 {
-			config.Import = append(config.Import, handlePrefixItemList(spec.Import, spec.Seq))
+			prefixList, err := handlePrefixItemList(spec.Import, spec.Seq)
+			if err != nil {
+				return err
+			}
+			config.Import = append(config.Import, prefixList)
 		}
 		for _, aggregate := range spec.Aggregate {
-			_, network, _ := net.ParseCIDR(aggregate)
+			_, network, err := net.ParseCIDR(aggregate)
+			if err != nil {
+				return err
+			}
 			if network.IP.To4() == nil {
 				config.AggregateIPv6 = append(config.AggregateIPv6, aggregate)
 			} else {
@@ -138,6 +149,7 @@ func (r *reconcile) reconcileL3Netlink(vrfConfigs []frr.VRFConfiguration) ([]nl.
 		for _, vrf := range vrfConfigs {
 			if vrf.Name == cfg.Name && vrf.VNI == cfg.VNI {
 				stillExists = true
+				break
 			}
 		}
 		if !stillExists {
@@ -156,6 +168,7 @@ func (r *reconcile) reconcileL3Netlink(vrfConfigs []frr.VRFConfiguration) ([]nl.
 		for _, cfg := range existing {
 			if vrf.Name == cfg.Name && vrf.VNI == cfg.VNI {
 				alreadyExists = true
+				break
 			}
 		}
 		if !alreadyExists {
@@ -186,22 +199,29 @@ func (r *reconcile) reconcileL3Netlink(vrfConfigs []frr.VRFConfiguration) ([]nl.
 	return create, nil
 }
 
-func handlePrefixItemList(input []networkv1alpha1.VrfRouteConfigurationPrefixItem, seq int) frr.PrefixList {
+func handlePrefixItemList(input []networkv1alpha1.VrfRouteConfigurationPrefixItem, seq int) (frr.PrefixList, error) {
 	prefixList := frr.PrefixList{
 		Seq: seq + 1,
 	}
 	for i, item := range input {
-		prefixList.Items = append(prefixList.Items, copyPrefixItemToFRRItem(i, item))
+		frrItem, err := copyPrefixItemToFRRItem(i, item)
+		if err != nil {
+			return frr.PrefixList{}, err
+		}
+		prefixList.Items = append(prefixList.Items, frrItem)
 	}
-	return prefixList
+	return prefixList, nil
 }
 
-func copyPrefixItemToFRRItem(i int, item networkv1alpha1.VrfRouteConfigurationPrefixItem) frr.PrefixedRouteItem {
-	_, network, _ := net.ParseCIDR(item.CIDR)
+func copyPrefixItemToFRRItem(n int, item networkv1alpha1.VrfRouteConfigurationPrefixItem) (frr.PrefixedRouteItem, error) {
+	_, network, err := net.ParseCIDR(item.CIDR)
+	if err != nil {
+		return frr.PrefixedRouteItem{}, err
+	}
 
 	seq := item.Seq
 	if seq <= 0 {
-		seq = i + 1
+		seq = n + 1
 	}
 	return frr.PrefixedRouteItem{
 		CIDR:   *network,
@@ -210,5 +230,5 @@ func copyPrefixItemToFRRItem(i int, item networkv1alpha1.VrfRouteConfigurationPr
 		Action: item.Action,
 		GE:     item.GE,
 		LE:     item.LE,
-	}
+	}, nil
 }
