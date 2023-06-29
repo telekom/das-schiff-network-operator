@@ -18,6 +18,7 @@ package controllers
 
 import (
 	"context"
+	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -51,7 +52,7 @@ func (r *VRFRouteConfigurationReconciler) Reconcile(ctx context.Context, req ctr
 	// Run ReconcileDebounced through debouncer
 	r.Reconciler.Reconcile(ctx)
 
-	return ctrl.Result{}, nil
+	return ctrl.Result{RequeueAfter: 10 * time.Minute}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.

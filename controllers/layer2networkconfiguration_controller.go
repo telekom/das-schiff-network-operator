@@ -19,6 +19,7 @@ package controllers
 import (
 	"context"
 	"os"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -61,7 +62,7 @@ func (r *Layer2NetworkConfigurationReconciler) Reconcile(ctx context.Context, re
 
 	r.Reconciler.Reconcile(ctx)
 
-	return ctrl.Result{}, nil
+	return ctrl.Result{RequeueAfter: 10 * time.Minute}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
