@@ -4,6 +4,8 @@ import (
 	"context"
 	"sync/atomic"
 	"time"
+
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 // Debouncer struct
@@ -35,6 +37,8 @@ func (d *Debouncer) debounceRoutine(ctx context.Context) {
 			// Reset scheduled to 0
 			atomic.StoreInt32(&d.scheduled, 0)
 			break
+		} else {
+			log.FromContext(ctx).Error(err, "error debouncing")
 		}
 	}
 }

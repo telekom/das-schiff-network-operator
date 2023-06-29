@@ -38,6 +38,7 @@ import (
 	"github.com/telekom/das-schiff-network-operator/pkg/config"
 	"github.com/telekom/das-schiff-network-operator/pkg/macvlan"
 	"github.com/telekom/das-schiff-network-operator/pkg/notrack"
+	"github.com/telekom/das-schiff-network-operator/pkg/reconciler"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -96,26 +97,31 @@ func main() {
 
 	anycastTracker := &anycast.AnycastTracker{}
 
-	// Start VRFRouteConfigurationReconciler when we are not running in only BPF mode.
-	if !onlyBPFMode {
-		if err = (&controllers.VRFRouteConfigurationReconciler{
-			Client: mgr.GetClient(),
-			Scheme: mgr.GetScheme(),
-			Config: config,
-		}).SetupWithManager(mgr); err != nil {
-			setupLog.Error(err, "unable to create controller", "controller", "VRFRouteConfiguration")
-			os.Exit(1)
-		}
-	}
 	if err = (&networkv1alpha1.VRFRouteConfiguration{}).SetupWebhookWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create webhook", "webhook", "VRFRouteConfiguration")
 		os.Exit(1)
 	}
+	// Start VRFRouteConfigurationReconciler when we are not running in only BPF mode.
 	if !onlyBPFMode {
+		reconciler, err := reconciler.NewReconciler(mgr.GetClient(), anycastTracker)
+		if err != nil {
+			setupLog.Error(err, "unable to create debounced reconciler")
+			os.Exit(1)
+		}
+
+		if err = (&controllers.VRFRouteConfigurationReconciler{
+			Client:     mgr.GetClient(),
+			Scheme:     mgr.GetScheme(),
+			Reconciler: reconciler,
+		}).SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create controller", "controller", "VRFRouteConfiguration")
+			os.Exit(1)
+		}
+
 		if err = (&controllers.Layer2NetworkConfigurationReconciler{
-			Client:         mgr.GetClient(),
-			Scheme:         mgr.GetScheme(),
-			AnycastTracker: anycastTracker,
+			Client:     mgr.GetClient(),
+			Scheme:     mgr.GetScheme(),
+			Reconciler: reconciler,
 		}).SetupWithManager(mgr); err != nil {
 			setupLog.Error(err, "unable to create controller", "controller", "Layer2NetworkConfiguration")
 			os.Exit(1)
