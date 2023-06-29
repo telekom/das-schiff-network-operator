@@ -118,6 +118,9 @@ func RunIPTablesSync() {
 				if err := ipt4.AppendUnique(IPTABLES_TABLE, IPTABLES_CHAIN, "-d", underlayIP.String(), "-p", "udp", "--dport", "4789", "-j", "NOTRACK"); err != nil {
 					notrackLog.Error(err, "error reconciling VXLAN notrack in IPv4 iptables")
 				}
+				if err := ipt4.AppendUnique(IPTABLES_TABLE, "OUTPUT", "-s", underlayIP.String(), "-p", "udp", "--dport", "4789", "-j", "NOTRACK"); err != nil {
+					notrackLog.Error(err, "error reconciling VXLAN notrack in IPv4 iptables")
+				}
 			} else {
 				notrackLog.Error(err, "error reconciling VXLAN notrack in IPv4 iptables")
 			}
