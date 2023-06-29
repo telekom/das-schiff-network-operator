@@ -53,7 +53,7 @@ func (m *FRRManager) Configure(in FRRConfiguration) (bool, error) {
 }
 
 func (f *FRRManager) renderSubtemplates(in FRRConfiguration) (*FRRTemplateConfig, error) {
-	vrfRouterId, err := (&nl.NetlinkManager{}).GetRouterIDForVRFs()
+	vrfRouterId, err := (&nl.NetlinkManager{}).GetUnderlayIP()
 	if err != nil {
 		return nil, err
 	}
