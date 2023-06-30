@@ -83,6 +83,12 @@ func (r *VRFRouteConfiguration) validateItems() error {
 	if err != nil {
 		return err
 	}
+	for _, item := range r.Spec.Aggregate {
+		_, _, err := net.ParseCIDR(item)
+		if err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

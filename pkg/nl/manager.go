@@ -29,7 +29,7 @@ var (
 type NetlinkManager struct {
 }
 
-func (n *NetlinkManager) GetRouterIDForVRFs() (net.IP, error) {
+func (n *NetlinkManager) GetUnderlayIP() (net.IP, error) {
 	_, ip, err := getInterfaceAndIP(UNDERLAY_LOOPBACK)
 	return ip, err
 }

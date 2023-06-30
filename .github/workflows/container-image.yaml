@@ -1,0 +1,43 @@
+name: container-image
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  main-image:
+    name: build "main" image
+    runs-on: "ubuntu-latest"
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Install Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: "^1.18"
+
+      - name: Install packages
+        run: sudo apt-get update && sudo apt-get install -y llvm clang libbpf-dev gcc-multilib linux-headers-$(uname -r)
+
+      - name: Build
+        run: |
+          make build
+
+      - name: Create Licenses Report
+        run: |
+          make licenses-report
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v2.2.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v4.1.1
+        with:
+          context: .
+          push: true
+          tags: ghcr.io/telekom/das-schiff-network-operator:main

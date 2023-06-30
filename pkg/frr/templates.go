@@ -2,38 +2,45 @@ package frr
 
 import (
 	_ "embed"
+	"os"
 
 	"bytes"
-	"io/ioutil"
 	"regexp"
 	"text/template"
 )
 
 // Template for VRF config
+//
 //go:embed tpl/vrf.tpl
 var VRF_RAW_TPL string
 
 // Template for route-maps
+//
 //go:embed tpl/route-map.tpl
 var ROUTE_MAP_RAW_TPL string
 
 // Template for ip prefix-list
+//
 //go:embed tpl/prefix-list.tpl
 var PREFIX_LIST_RAW_TPL string
 
 // Template for bgp neighbor
+//
 //go:embed tpl/bgp-neighbor.tpl
 var NEIGHBOR_RAW_TPL string
 
 // Template for bgp v4 neighbor
+//
 //go:embed tpl/bgp-neighbor-v4.tpl
 var NEIGHBOR_V4_RAW_TPL string
 
 // Template for bgp v4 neighbor
+//
 //go:embed tpl/bgp-neighbor-v6.tpl
 var NEIGHBOR_V6_RAW_TPL string
 
 // Template for VRF BGP instance
+//
 //go:embed tpl/bgp.tpl
 var BGP_INSTANCE_RAW_TPL string
 
@@ -71,7 +78,7 @@ func render(tpl *template.Template, vrfs interface{}) ([]byte, error) {
 }
 
 func generateTemplateConfig(template string, original string) error {
-	bytes, err := ioutil.ReadFile(original)
+	bytes, err := os.ReadFile(original)
 	if err != nil {
 		return err
 	}
@@ -80,7 +87,7 @@ func generateTemplateConfig(template string, original string) error {
 	commentToRemove := regexp.MustCompile(`(?m)^\#\+\+`)
 	content = commentToRemove.ReplaceAllString(content, "")
 
-	err = ioutil.WriteFile(template, []byte(content), FRR_PERMISSIONS)
+	err = os.WriteFile(template, []byte(content), FRR_PERMISSIONS)
 	if err != nil {
 		return err
 	}

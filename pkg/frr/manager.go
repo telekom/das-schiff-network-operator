@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"io/fs"
-	"io/ioutil"
 	"net"
 	"os"
 	"text/template"
@@ -69,7 +68,7 @@ func (m *FRRManager) Init() error {
 		}
 	}
 
-	bytes, err := ioutil.ReadFile(m.TemplatePath)
+	bytes, err := os.ReadFile(m.TemplatePath)
 	if err != nil {
 		return err
 	}

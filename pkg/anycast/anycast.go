@@ -33,23 +33,9 @@ func (a *AnycastTracker) checkTrackedInterfaces() {
 	}
 }
 
-func createNeighborEntry(mac net.HardwareAddr, intf, master int) *netlink.Neigh {
-	return &netlink.Neigh{
-		State:        netlink.NUD_NOARP,
-		Family:       unix.AF_BRIDGE,
-		HardwareAddr: mac,
-		LinkIndex:    intf,
-		MasterIndex:  master,
-	}
-}
-
-func isUnicastMac(mac net.HardwareAddr) bool {
-	return mac[0]&0x01 == 0
-}
-
 func containsIPNetwork(list []*net.IPNet, dst *net.IPNet) bool {
 	for _, v := range list {
-		if bytes.Equal(v.IP, dst.IP) && bytes.Equal(v.Mask, dst.Mask) {
+		if net.IP.Equal(v.IP, dst.IP) && bytes.Equal(v.Mask, dst.Mask) {
 			return true
 		}
 	}
@@ -58,7 +44,7 @@ func containsIPNetwork(list []*net.IPNet, dst *net.IPNet) bool {
 
 func containsIPAddress(list []netlink.Neigh, dst *net.IPNet) bool {
 	for _, v := range list {
-		if bytes.Equal(v.IP, dst.IP) {
+		if net.IP.Equal(v.IP, dst.IP) {
 			return true
 		}
 	}
@@ -114,7 +100,9 @@ func syncInterfaceByFamily(intf *netlink.Bridge, family int, routingTable uint32
 	alreadyV4Existing := []*net.IPNet{}
 	for _, route := range routes {
 		if !containsIPAddress(bridgeNeighbors, route.Dst) {
-			netlink.RouteDel(&route)
+			if err := netlink.RouteDel(&route); err != nil {
+				fmt.Printf("Error deleting route %v: %v\n", route, err)
+			}
 		} else {
 			alreadyV4Existing = append(alreadyV4Existing, route.Dst)
 		}
@@ -123,7 +111,10 @@ func syncInterfaceByFamily(intf *netlink.Bridge, family int, routingTable uint32
 	for _, neighbor := range bridgeNeighbors {
 		net := netlink.NewIPNet(neighbor.IP)
 		if !containsIPNetwork(alreadyV4Existing, net) {
-			netlink.RouteAdd(buildRoute(family, intf, net, routingTable))
+			route := buildRoute(family, intf, net, routingTable)
+			if err := netlink.RouteAdd(route); err != nil {
+				fmt.Printf("Error adding route %v: %v\n", route, err)
+			}
 		}
 	}
 }
