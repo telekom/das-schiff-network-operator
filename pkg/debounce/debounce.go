@@ -11,7 +11,8 @@ import (
 // Debouncer struct
 type Debouncer struct {
 	// Used for atomic operations
-	scheduled int32
+	scheduled             *atomic.Bool
+	calledDuringExecution *atomic.Bool
 	// Stores the function as an interface so we can use reflect
 	function func(context.Context) error
 	// Duration between function call
@@ -21,9 +22,10 @@ type Debouncer struct {
 // Create a new debouncer
 func NewDebouncer(function func(context.Context) error, debounceTime time.Duration) *Debouncer {
 	return &Debouncer{
-		scheduled:    0,
-		function:     function,
-		debounceTime: debounceTime,
+		scheduled:             &atomic.Bool{},
+		calledDuringExecution: &atomic.Bool{},
+		function:              function,
+		debounceTime:          debounceTime,
 	}
 }
 
@@ -34,8 +36,12 @@ func (d *Debouncer) debounceRoutine(ctx context.Context) {
 
 		err := d.function(ctx)
 		if err == nil {
-			// Reset scheduled to 0
-			atomic.StoreInt32(&d.scheduled, 0)
+			if d.calledDuringExecution.CompareAndSwap(true, false) {
+				d.debounceRoutine(ctx)
+			} else {
+				// Reset scheduled to 0
+				d.scheduled.Store(false)
+			}
 			break
 		} else {
 			log.FromContext(ctx).Error(err, "error debouncing")
@@ -48,7 +54,9 @@ func (d *Debouncer) Debounce(ctx context.Context) {
 	// If we haven't scheduled a goroutine yet, set scheduled=0 and run goroutine
 	// We use atomic compare-and-swap to first check if scheduled equals 0 (not yet scheduled)
 	// and then swap the value with 1
-	if atomic.CompareAndSwapInt32(&d.scheduled, 0, 1) {
+	d.calledDuringExecution.Store(true)
+	if d.scheduled.CompareAndSwap(false, true) {
+		d.calledDuringExecution.Store(false)
 		go d.debounceRoutine(ctx)
 	}
 }
