@@ -11,23 +11,21 @@ type FRRCLI struct {
 	binaryPath string
 }
 
-type ConifgurationTransaction struct {
-	err     error
-	success func(interface{})
-	reply   interface{}
-}
-
-func NewConfigurationTransaction() *ConifgurationTransaction {
-	return &ConifgurationTransaction{}
-}
-
-type VRFDO struct {
-}
-
 func NewFRRCLI() (*FRRCLI, error) {
 	return &FRRCLI{
 		binaryPath: "/usr/bin/vtysh",
 	}, nil
+}
+
+// getVRF returns either the provided vrf from the function params or if its empty.
+// the constant string "all" as the vrf name.
+// if it returns it also provides feedback if the vrf parameter was empty or not as
+// the second return value.
+func getVRF(vrf string) (string, bool) {
+	if vrf == "" {
+		return "all", true
+	}
+	return vrf, false
 }
 
 func (frr *FRRCLI) execute(args []string) []byte {
@@ -44,81 +42,85 @@ func (frr *FRRCLI) execute(args []string) []byte {
 	}
 	return output
 }
-func (transaction *ConifgurationTransaction) Do(cb func(frr FRRCLI)) *ConifgurationTransaction {
-	//pool is a global object that has been setup in my app
-	// c.Send("MULTI")
-	// cb(c)
-	// reply, err := c.Do("EXEC")
-	// t.reply = reply
-	// t.err = err
-	return transaction
+
+func (frr *FRRCLI) ShowEVPNVNIDetail() (EVPNVniDetail, error) {
+	evpnInfo := EVPNVniDetail{}
+	data := frr.execute([]string{
+		"show",
+		"evpn",
+		"vni",
+		"detail",
+	})
+	err := json.Unmarshal(data, &evpnInfo)
+	return evpnInfo, err
 }
 
-func (transaction *ConifgurationTransaction) OnFail(cb func(err error)) *ConifgurationTransaction {
-	if transaction.err != nil {
-		cb(transaction.err)
+func (frr *FRRCLI) ShowBGPSummary(vrf string) (BGPVrfSummary, error) {
+	vrfName, multiVRF := getVRF(vrf)
+	data := frr.execute([]string{
+		"show",
+		"bgp",
+		"vrf",
+		vrfName,
+		"summary",
+	})
+	bgpSummary := BGPVrfSummary{}
+	bgpSummarySpec := BGPVrfSummarySpec{}
+	if multiVRF {
+		json.Unmarshal(data, &bgpSummary)
 	} else {
-		transaction.success(transaction.reply)
+		json.Unmarshal(data, &bgpSummarySpec)
+		bgpSummary[vrfName] = bgpSummarySpec
 	}
-	return transaction
+	return bgpSummary, nil
+
 }
 
-func (transaction *ConifgurationTransaction) OnSuccess(cb func(reply interface{})) *ConifgurationTransaction {
-	transaction.success = cb
-	return transaction
-}
-
-func (frr *FRRCLI) ShowVRFs() {
+func (frr *FRRCLI) ShowVRFs() (VrfVni, error) {
+	vrfInfo := VrfVni{}
 	data := frr.execute([]string{
 		"show",
 		"vrf",
 		"vni",
-		"json",
 	})
-	vrfInfo := VRFDO{}
-	json.Unmarshal(data, vrfInfo)
+	json.Unmarshal(data, &vrfInfo)
+	return vrfInfo, nil
 }
 
-func (frr *FRRCLI) ShowIPRoute() {
-	frr.execute([]string{
-		"show",
-		"ip",
-		"route",
-	})
-	// 	{
-	// 		"prefix":"192.168.255.93/32",
-	// 		"prefixLen":32,
-	// 		"protocol":"bgp",
-	// 		"vrfId":0,
-	// 		"vrfName":"default",
-	// 		"selected":true,
-	// 		"destSelected":true,
-	// 		"distance":20,
-	// 		"metric":0,
-	// 		"installed":true,
-	// 		"tag":20000,
-	// 		"table":254,
-	// 		"internalStatus":16,
-	// 		"internalFlags":8,
-	// 		"internalNextHopNum":1,
-	// 		"internalNextHopActiveNum":1,
-	// 		"nexthopGroupId":832,
-	// 		"installedNexthopGroupId":832,
-	// 		"uptime":"01w6d00h",
-	// 		"nexthops":[
-	// 		  {
-	// 			"flags":267,
-	// 			"fib":true,
-	// 			"ip":"192.168.2.153",
-	// 			"afi":"ipv4",
-	// 			"interfaceIndex":20,
-	// 			"interfaceName":"br.cluster",
-	// 			"active":true,
-	// 			"onLink":true,
-	// 			"weight":1
-	// 		  }
-	// 		]
-	// 	  }
-	// 	]
-	//   }
+func (frr *FRRCLI) ShowIPRoute(vrf string) (VrfRoutes, error) {
+	vrfName, multiVrf := getVRF(vrf)
+	vrfRoute := VrfRoutes{}
+	if multiVrf {
+		// as the opensource project has issues with correctly representing
+		// json in some cli commands
+		// we need this ugly loop to get the necessary parseable data mapping.
+		vrfs, err := frr.ShowVRFs()
+		if err != nil {
+			return nil, err
+		}
+		for _, vrf := range vrfs.VrfVni {
+			routes := Routes{}
+			data := frr.execute([]string{
+				"show",
+				"ip",
+				"route",
+				vrf.Vrf,
+			})
+			json.Unmarshal(data, &routes)
+			vrfRoute[vrfName] = routes
+
+		}
+
+	} else {
+		routes := Routes{}
+		data := frr.execute([]string{
+			"show",
+			"ip",
+			"route",
+			vrfName,
+		})
+		json.Unmarshal(data, &routes)
+		vrfRoute[vrfName] = routes
+	}
+	return vrfRoute, nil
 }
