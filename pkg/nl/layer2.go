@@ -2,7 +2,6 @@ package nl
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -61,7 +60,7 @@ func getNeighborState(state int) (string, error) {
 	case netlink.NUD_STALE:
 		return "stale", nil
 	default:
-		return "", errors.New(fmt.Sprintf("[%x] is not a valid neighbor state", state))
+		return "", fmt.Errorf("[%x] is not a valid neighbor state", state)
 	}
 }
 

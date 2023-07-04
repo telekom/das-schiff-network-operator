@@ -98,7 +98,11 @@ func main() {
 	}
 
 	http.Handle("/metrics", promhttp.Handler())
-	http.ListenAndServe(fmt.Sprintf(":%d", metricsPort), nil)
+	err = http.ListenAndServe(fmt.Sprintf(":%d", metricsPort), nil)
+	if err != nil {
+		setupLog.Error(err, "unable start metrics webserver")
+		os.Exit(1)
+	}
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
 	options := ctrl.Options{Scheme: scheme}

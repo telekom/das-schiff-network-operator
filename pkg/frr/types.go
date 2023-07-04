@@ -115,5 +115,5 @@ type VrfVniSpec struct {
 }
 
 type VrfVni struct {
-	VrfVni []VrfVniSpec `json:"vrfs"`
+	Vrfs []VrfVniSpec `json:"vrfs"`
 }

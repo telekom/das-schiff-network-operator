@@ -52,6 +52,9 @@ func NewNetlinkCollector() (Collector, error) {
 
 func (c *netlinkCollector) Update(ch chan<- prometheus.Metric) error {
 	routes, err := c.netlink.ListRoutes()
+	if err != nil {
+		return err
+	}
 	neighbors, err := c.netlink.ListNeighbors()
 	c.logger.Info("I am in the netlink collector")
 	if err != nil {

@@ -50,7 +50,7 @@ func (n *NetlinkManager) getVRFNameByInterface(tableId int) (string, error) {
 
 func (n *NetlinkManager) getVRFName(tableId int) (string, error) {
 	if tableId < 0 || tableId > 255 {
-		return "", errors.New(fmt.Sprintf("table id %d out of range [0-255]", tableId))
+		return "", fmt.Errorf("table id %d out of range [0-255]", tableId)
 	}
 	switch tableId {
 	case 255:

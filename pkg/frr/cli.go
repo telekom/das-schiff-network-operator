@@ -66,11 +66,16 @@ func (frr *FRRCLI) ShowBGPSummary(vrf string) (BGPVrfSummary, error) {
 	})
 	bgpSummary := BGPVrfSummary{}
 	bgpSummarySpec := BGPVrfSummarySpec{}
+	var err error
 	if multiVRF {
-		json.Unmarshal(data, &bgpSummary)
+		err = json.Unmarshal(data, &bgpSummary)
+
 	} else {
-		json.Unmarshal(data, &bgpSummarySpec)
+		err = json.Unmarshal(data, &bgpSummarySpec)
 		bgpSummary[vrfName] = bgpSummarySpec
+	}
+	if err != nil {
+		return nil, err
 	}
 	return bgpSummary, nil
 
@@ -83,7 +88,10 @@ func (frr *FRRCLI) ShowVRFs() (VrfVni, error) {
 		"vrf",
 		"vni",
 	})
-	json.Unmarshal(data, &vrfInfo)
+	err := json.Unmarshal(data, &vrfInfo)
+	if err != nil {
+		return vrfInfo, err
+	}
 	return vrfInfo, nil
 }
 
@@ -94,11 +102,11 @@ func (frr *FRRCLI) ShowIPRoute(vrf string) (VrfRoutes, error) {
 		// as the opensource project has issues with correctly representing
 		// json in some cli commands
 		// we need this ugly loop to get the necessary parseable data mapping.
-		vrfs, err := frr.ShowVRFs()
+		vrfVni, err := frr.ShowVRFs()
 		if err != nil {
 			return nil, err
 		}
-		for _, vrf := range vrfs.VrfVni {
+		for _, vrf := range vrfVni.Vrfs {
 			routes := Routes{}
 			data := frr.execute([]string{
 				"show",
