@@ -34,10 +34,11 @@ func (d *Debouncer) debounceRoutine(ctx context.Context) {
 
 		err := d.function(ctx)
 		if err == nil {
+			// If debounce was called during execution run debounceRoutine again otherwise reset
+			// scheduled to false
 			if d.calledDuringExecution.CompareAndSwap(true, false) {
 				d.debounceRoutine(ctx)
 			} else {
-				// Reset scheduled to 0
 				d.scheduled.Store(false)
 			}
 			break
@@ -49,9 +50,12 @@ func (d *Debouncer) debounceRoutine(ctx context.Context) {
 
 // Run function. First run will be in debounceTime, runs will be seperated by debounceTime
 func (d *Debouncer) Debounce(ctx context.Context) {
-	// If we haven't scheduled a goroutine yet, set scheduled=0 and run goroutine
-	// We use atomic compare-and-swap to first check if scheduled equals 0 (not yet scheduled)
-	// and then swap the value with 1
+	// If we haven't scheduled a goroutine yet, set scheduled=false and run goroutine
+	// We use atomic compare-and-swap to first check if scheduled equals false (not yet scheduled)
+	// and then swap the value with true
+	// Always set calledDuringExection to true but reset it to false if we schedule it the first time.
+	// This way a debounce during running execution (scheduled is still true, calledDuringExecution will
+	// be true) will run the debounced routine once again
 	d.calledDuringExecution.Store(true)
 	if d.scheduled.CompareAndSwap(false, true) {
 		d.calledDuringExecution.Store(false)
