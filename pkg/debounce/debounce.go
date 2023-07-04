@@ -11,8 +11,8 @@ import (
 // Debouncer struct
 type Debouncer struct {
 	// Used for atomic operations
-	scheduled             *atomic.Bool
-	calledDuringExecution *atomic.Bool
+	scheduled             atomic.Bool
+	calledDuringExecution atomic.Bool
 	// Stores the function as an interface so we can use reflect
 	function func(context.Context) error
 	// Duration between function call
@@ -22,10 +22,8 @@ type Debouncer struct {
 // Create a new debouncer
 func NewDebouncer(function func(context.Context) error, debounceTime time.Duration) *Debouncer {
 	return &Debouncer{
-		scheduled:             &atomic.Bool{},
-		calledDuringExecution: &atomic.Bool{},
-		function:              function,
-		debounceTime:          debounceTime,
+		function:     function,
+		debounceTime: debounceTime,
 	}
 }
 
