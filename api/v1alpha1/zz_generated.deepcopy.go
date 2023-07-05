@@ -206,6 +206,11 @@ func (in *VRFRouteConfigurationSpec) DeepCopyInto(out *VRFRouteConfigurationSpec
 		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}
+	if in.StaticRoutes != nil {
+		in, out := &in.StaticRoutes, &out.StaticRoutes
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	if in.Community != nil {
 		in, out := &in.Community, &out.Community
 		*out = new(int)
