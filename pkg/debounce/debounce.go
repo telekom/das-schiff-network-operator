@@ -11,7 +11,8 @@ import (
 // Debouncer struct
 type Debouncer struct {
 	// Used for atomic operations
-	scheduled int32
+	scheduled             atomic.Bool
+	calledDuringExecution atomic.Bool
 	// Stores the function as an interface so we can use reflect
 	function func(context.Context) error
 	// Duration between function call
@@ -21,7 +22,6 @@ type Debouncer struct {
 // Create a new debouncer
 func NewDebouncer(function func(context.Context) error, debounceTime time.Duration) *Debouncer {
 	return &Debouncer{
-		scheduled:    0,
 		function:     function,
 		debounceTime: debounceTime,
 	}
@@ -31,11 +31,16 @@ func (d *Debouncer) debounceRoutine(ctx context.Context) {
 	for {
 		// First sleep for the debounceTime
 		time.Sleep(d.debounceTime)
-
+		d.calledDuringExecution.Store(false)
 		err := d.function(ctx)
 		if err == nil {
-			// Reset scheduled to 0
-			atomic.StoreInt32(&d.scheduled, 0)
+			// If debounce was called during execution run debounceRoutine again otherwise reset
+			// scheduled to false
+			if d.calledDuringExecution.CompareAndSwap(true, false) {
+				d.debounceRoutine(ctx)
+			} else {
+				d.scheduled.Store(false)
+			}
 			break
 		} else {
 			log.FromContext(ctx).Error(err, "error debouncing")
@@ -45,10 +50,14 @@ func (d *Debouncer) debounceRoutine(ctx context.Context) {
 
 // Run function. First run will be in debounceTime, runs will be seperated by debounceTime
 func (d *Debouncer) Debounce(ctx context.Context) {
-	// If we haven't scheduled a goroutine yet, set scheduled=0 and run goroutine
-	// We use atomic compare-and-swap to first check if scheduled equals 0 (not yet scheduled)
-	// and then swap the value with 1
-	if atomic.CompareAndSwapInt32(&d.scheduled, 0, 1) {
+	// If we haven't scheduled a goroutine yet, set scheduled=false and run goroutine
+	// We use atomic compare-and-swap to first check if scheduled equals false (not yet scheduled)
+	// and then swap the value with true
+	// Always set calledDuringExection to true but reset it to false if we schedule it the first time.
+	// This way a debounce during running execution (scheduled is still true, calledDuringExecution will
+	// be true) will run the debounced routine once again
+	d.calledDuringExecution.Store(true)
+	if d.scheduled.CompareAndSwap(false, true) {
 		go d.debounceRoutine(ctx)
 	}
 }
