@@ -31,7 +31,7 @@ func (d *Debouncer) debounceRoutine(ctx context.Context) {
 	for {
 		// First sleep for the debounceTime
 		time.Sleep(d.debounceTime)
-
+		d.calledDuringExecution.Store(false)
 		err := d.function(ctx)
 		if err == nil {
 			// If debounce was called during execution run debounceRoutine again otherwise reset
@@ -58,7 +58,6 @@ func (d *Debouncer) Debounce(ctx context.Context) {
 	// be true) will run the debounced routine once again
 	d.calledDuringExecution.Store(true)
 	if d.scheduled.CompareAndSwap(false, true) {
-		d.calledDuringExecution.Store(false)
 		go d.debounceRoutine(ctx)
 	}
 }
