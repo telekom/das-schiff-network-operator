@@ -2,9 +2,12 @@ package nl
 
 import (
 	"fmt"
+	"net"
 	"sort"
+	"strings"
 
 	"github.com/telekom/das-schiff-network-operator/pkg/bpf"
+	"github.com/vishvananda/netlink"
 )
 
 type VRFInformation struct {
@@ -138,4 +141,49 @@ func (n *NetlinkManager) GetL3ByName(name string) (*VRFInformation, error) {
 		}
 	}
 	return nil, fmt.Errorf("no VRF with name %s", name)
+}
+
+func (n *NetlinkManager) getVethFromVRF(links []netlink.Link, vrf *netlink.Vrf) (*netlink.Veth, error) {
+	for _, link := range links {
+		if link.Attrs().MasterIndex == vrf.Attrs().Index && link.Type() == "veth" && strings.HasPrefix(link.Attrs().Name, VRF_TO_DEFAULT_PREFIX) {
+			return link.(*netlink.Veth), nil
+		}
+	}
+	return nil, fmt.Errorf("no veth in vrf %s found", vrf.Attrs().Name)
+}
+
+func (n *NetlinkManager) GetInterfaceAndNexthop(vrf string) (string, net.IP, error) {
+	links, err := netlink.LinkList()
+	if err != nil {
+		return "", nil, err
+	}
+	for _, link := range links {
+		if link.Attrs().Name != fmt.Sprintf("Vrf_%s", vrf) && link.Attrs().Name != fmt.Sprintf("%s%s", VRF_PREFIX, vrf) {
+			continue
+		}
+		veth, err := n.getVethFromVRF(links, link.(*netlink.Vrf))
+		if err != nil {
+			return "", nil, err
+		}
+
+		vethPeerIdx, err := netlink.VethPeerIndex(veth)
+		if err != nil {
+			return "", nil, err
+		}
+
+		vethPeer, err := netlink.LinkByIndex(vethPeerIdx)
+		if err != nil {
+			return "", nil, err
+		}
+
+		addresses, err := netlink.AddrList(veth, netlink.FAMILY_V4)
+		if err != nil {
+			return "", nil, err
+		}
+		if len(addresses) != 1 {
+			return "", nil, fmt.Errorf("veth in vrf %s has more than one IPv6 address", vrf)
+		}
+		return vethPeer.Attrs().Name, addresses[0].IP, nil
+	}
+	return "", nil, fmt.Errorf("no vrf with name %s found", vrf)
 }
