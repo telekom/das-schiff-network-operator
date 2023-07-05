@@ -158,6 +158,9 @@ func (n *NetlinkManager) GetInterfaceAndNexthop(vrf string) (string, net.IP, err
 		return "", nil, err
 	}
 	for _, link := range links {
+		if link.Type() != "vrf" {
+			continue
+		}
 		if link.Attrs().Name != fmt.Sprintf("Vrf_%s", vrf) && link.Attrs().Name != fmt.Sprintf("%s%s", VRF_PREFIX, vrf) {
 			continue
 		}
