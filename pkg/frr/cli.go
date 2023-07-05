@@ -11,10 +11,10 @@ type FRRCLI struct {
 	binaryPath string
 }
 
-func NewFRRCLI() (*FRRCLI, error) {
+func NewFRRCLI() *FRRCLI {
 	return &FRRCLI{
 		binaryPath: "/usr/bin/vtysh",
-	}, nil
+	}
 }
 
 // getVRF returns either the provided vrf from the function params or if its empty.
@@ -95,9 +95,36 @@ func (frr *FRRCLI) ShowVRFs() (VrfVni, error) {
 	return vrfInfo, nil
 }
 
-func (frr *FRRCLI) ShowIPRoute(vrf string) (VrfRoutes, error) {
+func (frr *FRRCLI) getDualStackRoutes(vrf string) (Routes, Routes, error) {
+	routes_v4 := Routes{}
+	routes_v6 := Routes{}
+	data_v4 := frr.execute([]string{
+		"show",
+		"ip",
+		"route",
+		vrf,
+	})
+	data_v6 := frr.execute([]string{
+		"show",
+		"ipv6",
+		"route",
+		vrf,
+	})
+	var err error
+	err = json.Unmarshal(data_v4, &routes_v4)
+	if err != nil {
+		return nil, nil, err
+	}
+	err = json.Unmarshal(data_v6, &routes_v6)
+	if err != nil {
+		return nil, nil, err
+	}
+	return routes_v4, routes_v6, nil
+}
+
+func (frr *FRRCLI) ShowRoutes(vrf string) (VrfDualStackRoutes, error) {
 	vrfName, multiVrf := getVRF(vrf)
-	vrfRoute := VrfRoutes{}
+	vrfRoutes := VrfDualStackRoutes{}
 	if multiVrf {
 		// as the opensource project has issues with correctly representing
 		// json in some cli commands
@@ -107,28 +134,19 @@ func (frr *FRRCLI) ShowIPRoute(vrf string) (VrfRoutes, error) {
 			return nil, err
 		}
 		for _, vrf := range vrfVni.Vrfs {
-			routes := Routes{}
-			data := frr.execute([]string{
-				"show",
-				"ip",
-				"route",
-				vrf.Vrf,
-			})
-			json.Unmarshal(data, &routes)
-			vrfRoute[vrfName] = routes
-
+			routes_v4, routes_v6, err := frr.getDualStackRoutes(vrf.Vrf)
+			if err != nil {
+				return nil, err
+			}
+			vrfRoutes[vrf.Vrf] = DualStackRoutes{IPv4: routes_v4, IPv6: routes_v6}
 		}
 
 	} else {
-		routes := Routes{}
-		data := frr.execute([]string{
-			"show",
-			"ip",
-			"route",
-			vrfName,
-		})
-		json.Unmarshal(data, &routes)
-		vrfRoute[vrfName] = routes
+		routes_v4, routes_v6, err := frr.getDualStackRoutes(vrfName)
+		if err != nil {
+			return nil, err
+		}
+		vrfRoutes[vrfName] = DualStackRoutes{IPv4: routes_v4, IPv6: routes_v6}
 	}
-	return vrfRoute, nil
+	return vrfRoutes, nil
 }

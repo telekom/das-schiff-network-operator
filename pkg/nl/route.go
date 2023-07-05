@@ -4,10 +4,11 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/telekom/das-schiff-network-operator/pkg/route"
 	"github.com/vishvananda/netlink"
 )
 
-func getFamily(addressFamily int) (string, error) {
+func GetFamily(addressFamily int) (string, error) {
 
 	switch addressFamily {
 	case netlink.FAMILY_V4:
@@ -21,18 +22,6 @@ func getFamily(addressFamily int) (string, error) {
 	default:
 		return "", errors.New("can't find the addressFamily required")
 	}
-}
-
-type RouteInformation struct {
-	TableId       int
-	VrfName       string
-	RouteProtocol netlink.RouteProtocol
-	AddressFamily string
-	Quantity      int
-}
-
-type RouteKey struct {
-	tableId, routeProtocol, addressFamily int
 }
 
 func (n *NetlinkManager) getVRFNameByInterface(tableId int) (string, error) {
@@ -66,22 +55,22 @@ func (n *NetlinkManager) getVRFName(tableId int) (string, error) {
 	}
 }
 
-func (n *NetlinkManager) ListRoutes() ([]RouteInformation, error) {
+func (n *NetlinkManager) ListRoutes() ([]route.RouteInformation, error) {
 	netlinkRoutes, err := n.listRoutes()
-	routes := map[RouteKey]RouteInformation{}
+	routes := map[route.RouteKey]route.RouteInformation{}
 	if err != nil {
 		return nil, err
 	}
 
 	for _, netlinkRoute := range netlinkRoutes {
-		routeKey := RouteKey{netlinkRoute.Table, int(netlinkRoute.Protocol), netlinkRoute.Family}
+		routeKey := route.RouteKey{TableId: netlinkRoute.Table, RouteProtocol: int(netlinkRoute.Protocol), AddressFamily: netlinkRoute.Family}
 		routeInformation, ok := routes[routeKey]
 		// If the key exists
 		if ok {
 			routeInformation.Quantity = routeInformation.Quantity + 1
 			routes[routeKey] = routeInformation
 		} else {
-			family, err := getFamily(netlinkRoute.Family)
+			family, err := GetFamily(netlinkRoute.Family)
 			if err != nil {
 				return nil, err
 			}
@@ -89,7 +78,7 @@ func (n *NetlinkManager) ListRoutes() ([]RouteInformation, error) {
 			if err != nil {
 				return nil, err
 			}
-			routes[routeKey] = RouteInformation{
+			routes[routeKey] = route.RouteInformation{
 				TableId:       netlinkRoute.Table,
 				VrfName:       vrfName,
 				RouteProtocol: netlinkRoute.Protocol,
@@ -98,7 +87,7 @@ func (n *NetlinkManager) ListRoutes() ([]RouteInformation, error) {
 			}
 		}
 	}
-	routeList := []RouteInformation{}
+	routeList := []route.RouteInformation{}
 	for _, routeInformation := range routes {
 		routeList = append(routeList, routeInformation)
 	}

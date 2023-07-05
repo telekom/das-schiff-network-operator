@@ -104,6 +104,13 @@ type Route struct {
 
 type Routes map[string][]Route
 
+type DualStackRoutes struct {
+	IPv4 Routes `json:"ipv4"`
+	IPv6 Routes `json:"ipv6"`
+}
+
+type VrfDualStackRoutes map[string]DualStackRoutes
+
 type VrfRoutes map[string]Routes
 type VrfVniSpec struct {
 	Vrf       string `json:"vrf"`

@@ -9,8 +9,6 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
-var ()
-
 type netlinkCollector struct {
 	routesDesc    typedFactoryDesc
 	neighborsDesc typedFactoryDesc

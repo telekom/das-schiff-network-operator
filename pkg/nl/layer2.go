@@ -352,7 +352,7 @@ func (n *NetlinkManager) ListNeighbors() ([]NeighborInformation, error) {
 	}
 	neighbors := []NeighborInformation{}
 	for _, netlinkNeighbor := range netlinkNeighbors {
-		family, err := getFamily(netlinkNeighbor.Family)
+		family, err := GetFamily(netlinkNeighbor.Family)
 		if err != nil {
 			return nil, err
 		}

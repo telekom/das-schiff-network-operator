@@ -1,6 +1,8 @@
 package monitoring
 
 import (
+	"fmt"
+
 	"github.com/go-logr/logr"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/telekom/das-schiff-network-operator/pkg/frr"
@@ -8,9 +10,9 @@ import (
 )
 
 type frrCollector struct {
-	// routesDesc typedFactoryDesc
-	frr    *frr.FRRCLI
-	logger logr.Logger
+	routesDesc typedFactoryDesc
+	frr        *frr.FRRManager
+	logger     logr.Logger
 }
 
 func init() {
@@ -19,21 +21,17 @@ func init() {
 
 // NewNetlinkCollector returns a new Collector exposing buddyinfo stats.
 func NewFRRCollector() (Collector, error) {
-	frrCli, err := frr.NewFRRCLI()
-	if err != nil {
-		return nil, err
-	}
 	collector := frrCollector{
-		// routesDesc: typedFactoryDesc{
-		// 	desc: prometheus.NewDesc(
-		// 		prometheus.BuildFQName(namespace, "frr", "routes"),
-		// 		"The number of routes currently in the Linux Dataplane.",
-		// 		[]string{"table", "protocol", "address_family"},
-		// 		nil,
-		// 	),
-		// 	valueType: prometheus.GaugeValue,
-		// },
-		frr:    frrCli,
+		routesDesc: typedFactoryDesc{
+			desc: prometheus.NewDesc(
+				prometheus.BuildFQName(namespace, "frr", "routes"),
+				"The number of routes currently in the frr Controlplane.",
+				[]string{"table", "protocol", "address_family"},
+				nil,
+			),
+			valueType: prometheus.GaugeValue,
+		},
+		frr:    frr.NewFRRManager(),
 		logger: ctrl.Log.WithName("frr.collector"),
 	}
 
@@ -41,13 +39,13 @@ func NewFRRCollector() (Collector, error) {
 }
 
 func (c *frrCollector) Update(ch chan<- prometheus.Metric) error {
-	// routes, err := (nil, nil)
-	// c.logger.Info("I am in the netlink collector")
-	// if err != nil {
-	// 	return err
-	// }
-	// for _, route := range routes {
-	// 	ch <- c.routesDesc.mustNewConstMetric(float64(route.Quantity), fmt.Sprint(route.TableId), route.RouteProtocol.String(), route.AddressFamily)
-	// }
+	routes, err := c.frr.ListRoutes("")
+	c.logger.Info("I am in the frr collector")
+	if err != nil {
+		return err
+	}
+	for _, routePath := range routes {
+		ch <- c.routesDesc.mustNewConstMetric(float64(routePath.Quantity), fmt.Sprint(routePath.TableId), routePath.RouteProtocol.String(), routePath.AddressFamily)
+	}
 	return nil
 }
