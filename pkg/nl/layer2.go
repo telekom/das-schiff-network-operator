@@ -66,6 +66,8 @@ func (n *NetlinkManager) CreateL2(info Layer2Information) error {
 		return err
 	}
 
+	// Wait 500ms before configuring anycast gateways on newly added interface
+	time.Sleep(500 * time.Millisecond)
 	for _, addr := range info.AnycastGateways {
 		err = netlink.AddrAdd(bridge, addr)
 		if err != nil {
