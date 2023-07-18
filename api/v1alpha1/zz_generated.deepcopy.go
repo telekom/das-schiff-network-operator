@@ -93,6 +93,11 @@ func (in *Layer2NetworkConfigurationSpec) DeepCopyInto(out *Layer2NetworkConfigu
 		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}
+	if in.NeighSuppression != nil {
+		in, out := &in.NeighSuppression, &out.NeighSuppression
+		*out = new(bool)
+		**out = **in
+	}
 	if in.NodeSelector != nil {
 		in, out := &in.NodeSelector, &out.NodeSelector
 		*out = new(v1.LabelSelector)

@@ -19,6 +19,7 @@ type Layer2Information struct {
 	AnycastMAC         *net.HardwareAddr
 	AnycastGateways    []*netlink.Addr
 	AdvertiseNeighbors bool
+	NeighSuppression   *bool
 
 	CreateMACVLANInterface bool
 
@@ -75,12 +76,17 @@ func (n *NetlinkManager) CreateL2(info Layer2Information) error {
 		}
 	}
 
+	neighSuppression := os.Getenv("NWOP_NEIGH_SUPPRESSION") == "true"
+	if info.NeighSuppression != nil {
+		neighSuppression = *info.NeighSuppression
+	}
 	vxlan, err := n.createVXLAN(
 		fmt.Sprintf("%s%d", VXLAN_PREFIX, info.VNI),
 		bridge.Attrs().Index,
 		info.VNI,
 		info.MTU,
 		false,
+		neighSuppression,
 	)
 	if err != nil {
 		return err
@@ -277,7 +283,11 @@ func (n *NetlinkManager) ReconcileL2(current Layer2Information, desired Layer2In
 	if err := n.configureBridge(fmt.Sprintf("%s%d", LAYER2_PREFIX, current.VlanID)); err != nil {
 		return err
 	}
-	if err := setNeighSuppression(current.vxlan, os.Getenv("NWOP_NEIGH_SUPPRESSION") == "true"); err != nil {
+	neighSuppression := os.Getenv("NWOP_NEIGH_SUPPRESSION") == "true"
+	if desired.NeighSuppression != nil {
+		neighSuppression = *desired.NeighSuppression
+	}
+	if err := setNeighSuppression(current.vxlan, neighSuppression); err != nil {
 		return err
 	}
 

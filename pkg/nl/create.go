@@ -57,7 +57,7 @@ func (n *NetlinkManager) createBridge(bridgeName string, macAddress *net.Hardwar
 	return &netlinkBridge, nil
 }
 
-func (n *NetlinkManager) createVXLAN(vxlanName string, bridgeIdx int, vni int, mtu int, hairpin bool) (*netlink.Vxlan, error) {
+func (n *NetlinkManager) createVXLAN(vxlanName string, bridgeIdx int, vni int, mtu int, hairpin bool, neighSuppression bool) (*netlink.Vxlan, error) {
 	vxlanIf, vxlanIP, err := getInterfaceAndIP(UNDERLAY_LOOPBACK)
 	if err != nil {
 		return nil, err
@@ -87,7 +87,7 @@ func (n *NetlinkManager) createVXLAN(vxlanName string, bridgeIdx int, vni int, m
 	if err := netlink.LinkSetLearning(&netlinkVXLAN, false); err != nil {
 		return nil, err
 	}
-	if err := setNeighSuppression(&netlinkVXLAN, os.Getenv("NWOP_NEIGH_SUPPRESSION") == "true"); err != nil {
+	if err := setNeighSuppression(&netlinkVXLAN, neighSuppression); err != nil {
 		return nil, err
 	}
 	if hairpin {
