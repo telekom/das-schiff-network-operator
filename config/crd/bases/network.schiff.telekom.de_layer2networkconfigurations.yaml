@@ -51,9 +51,6 @@ spec:
                 description: If anycast is desired, specify anycast gateway MAC address
                 pattern: (?:[[:xdigit:]]{2}:){5}[[:xdigit:]]{2}
                 type: string
-              arpSuppression:
-                description: Enable ARP suppression
-                type: boolean
               createMacVLANInterface:
                 description: Create MACVLAN attach interface
                 type: boolean
@@ -65,6 +62,9 @@ spec:
                 maximum: 9000
                 minimum: 1000
                 type: integer
+              neighSuppression:
+                description: Enable ARP / ND suppression
+                type: boolean
               nodeSelector:
                 description: Select nodes to create Layer2 network on
                 properties:
