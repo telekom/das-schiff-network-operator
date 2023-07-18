@@ -77,6 +77,9 @@ func (n *NetlinkManager) CreateL2(info Layer2Information) error {
 	}
 
 	neighSuppression := os.Getenv("NWOP_NEIGH_SUPPRESSION") == "true"
+	if len(info.AnycastGateways) == 0 {
+		neighSuppression = false
+	}
 	if info.NeighSuppression != nil {
 		neighSuppression = *info.NeighSuppression
 	}
@@ -284,6 +287,9 @@ func (n *NetlinkManager) ReconcileL2(current Layer2Information, desired Layer2In
 		return err
 	}
 	neighSuppression := os.Getenv("NWOP_NEIGH_SUPPRESSION") == "true"
+	if len(desired.AnycastGateways) == 0 {
+		neighSuppression = false
+	}
 	if desired.NeighSuppression != nil {
 		neighSuppression = *desired.NeighSuppression
 	}
