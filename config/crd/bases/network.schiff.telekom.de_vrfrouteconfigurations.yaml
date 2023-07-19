@@ -113,6 +113,10 @@ spec:
                 maximum: 65534
                 minimum: 1
                 type: integer
+              staticRoutes:
+                items:
+                  type: string
+                type: array
               vrf:
                 description: VRF this configuration refers to
                 maxLength: 12

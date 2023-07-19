@@ -46,6 +46,11 @@ type VRFConfiguration struct {
 	AggregateIPv6 []string
 	Import        []PrefixList
 	Export        []PrefixList
+
+	StaticRoutesIPv4       []string
+	StaticRoutesIPv6       []string
+	StaticRouteInterface   string
+	StaticRouteIPv6NextHop string
 }
 
 type FRRConfiguration struct {

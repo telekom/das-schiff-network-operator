@@ -64,6 +64,8 @@ type VRFRouteConfigurationSpec struct {
 	// Aggregate Routes that should be announced
 	Aggregate []string `json:"aggregate,omitempty"`
 
+	StaticRoutes []string `json:"staticRoutes,omitempty"`
+
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=65534

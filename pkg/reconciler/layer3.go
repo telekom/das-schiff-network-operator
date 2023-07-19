@@ -84,6 +84,17 @@ func (r *reconcile) reconcileLayer3(l3vnis []networkv1alpha1.VRFRouteConfigurati
 				config.AggregateIPv4 = append(config.AggregateIPv4, aggregate)
 			}
 		}
+		for _, staticRoute := range spec.StaticRoutes {
+			_, network, err := net.ParseCIDR(staticRoute)
+			if err != nil {
+				return err
+			}
+			if network.IP.To4() == nil {
+				config.StaticRoutesIPv6 = append(config.StaticRoutesIPv6, staticRoute)
+			} else {
+				config.StaticRoutesIPv4 = append(config.StaticRoutesIPv4, staticRoute)
+			}
+		}
 		vrfConfigMap[spec.VRF] = config
 	}
 
@@ -104,6 +115,15 @@ func (r *reconcile) reconcileLayer3(l3vnis []networkv1alpha1.VRFRouteConfigurati
 
 	// We wait here for two seconds to let FRR settle after updating netlink devices
 	time.Sleep(2 * time.Second)
+
+	for _, vrf := range vrfConfigs {
+		routeInterface, routeNextHop, err := r.netlinkManager.GetInterfaceAndNexthop(vrf.Name)
+		if err != nil {
+			return err
+		}
+		vrf.StaticRouteInterface = routeInterface
+		vrf.StaticRouteIPv6NextHop = routeNextHop.String()
+	}
 
 	changed, err := r.frrManager.Configure(frr.FRRConfiguration{
 		VRFs: vrfConfigs,
