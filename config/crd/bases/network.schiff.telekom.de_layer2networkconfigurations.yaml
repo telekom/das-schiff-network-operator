@@ -62,6 +62,9 @@ spec:
                 maximum: 9000
                 minimum: 1000
                 type: integer
+              neighSuppression:
+                description: Enable ARP / ND suppression
+                type: boolean
               nodeSelector:
                 description: Select nodes to create Layer2 network on
                 properties:

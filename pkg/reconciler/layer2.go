@@ -76,6 +76,7 @@ func (r *reconcile) reconcileLayer2(l2vnis []networkv1alpha1.Layer2NetworkConfig
 			AnycastMAC:             anycastMAC,
 			AnycastGateways:        anycastGateways,
 			AdvertiseNeighbors:     spec.AdvertiseNeighbors,
+			NeighSuppression:       spec.NeighSuppression,
 			CreateMACVLANInterface: spec.CreateMACVLANInterface,
 		})
 	}
