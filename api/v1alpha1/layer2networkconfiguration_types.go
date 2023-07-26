@@ -53,6 +53,9 @@ type Layer2NetworkConfigurationSpec struct {
 	// Create MACVLAN attach interface
 	CreateMACVLANInterface bool `json:"createMacVLANInterface,omitempty"`
 
+	// Enable ARP / ND suppression
+	NeighSuppression *bool `json:"neighSuppression,omitempty"`
+
 	// VRF to attach Layer2 network to, default if not set
 	VRF string `json:"vrf,omitempty"`
 
