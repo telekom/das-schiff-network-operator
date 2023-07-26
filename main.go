@@ -32,8 +32,8 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	"sigs.k8s.io/controller-runtime/pkg/metrics"
 
-	"github.com/prometheus/client_golang/prometheus"
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/controllers"
 	"github.com/telekom/das-schiff-network-operator/pkg/anycast"
@@ -90,7 +90,7 @@ func main() {
 	for _, c := range collectors {
 		setupLog.Info("collector", c)
 	}
-	if err := prometheus.Register(collector); err != nil {
+	if err := metrics.Registry.Register(collector); err != nil {
 		setupLog.Error(fmt.Errorf("couldn't register das_schiff_network_operator_collector: %s", err), "registration error")
 	}
 	if err != nil {

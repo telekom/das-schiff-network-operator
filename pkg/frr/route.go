@@ -1,69 +1,17 @@
 package frr
 
 import (
-	"fmt"
-
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
 	"github.com/telekom/das-schiff-network-operator/pkg/route"
 	"github.com/vishvananda/netlink"
-	"golang.org/x/sys/unix"
 )
-
-func getRoutingProtocol(protocol string) int {
-	switch protocol {
-	case "babel":
-		return unix.RTPROT_BABEL
-	case "bgp":
-		return unix.RTPROT_BGP
-	case "bird":
-		return unix.RTPROT_BIRD
-	case "boot":
-		return unix.RTPROT_BOOT
-	case "dhcp":
-		return unix.RTPROT_DHCP
-	case "dnrouted":
-		return unix.RTPROT_DNROUTED
-	case "eigrp":
-		return unix.RTPROT_EIGRP
-	case "gated":
-		return unix.RTPROT_GATED
-	case "isis":
-		return unix.RTPROT_ISIS
-	case "kernel":
-		return unix.RTPROT_KERNEL
-	case "mrouted":
-		return unix.RTPROT_MROUTED
-	case "mrt":
-		return unix.RTPROT_MRT
-	case "ntk":
-		return unix.RTPROT_NTK
-	case "ospf":
-		return unix.RTPROT_OSPF
-	case "ra":
-		return unix.RTPROT_RA
-	case "redirect":
-		return unix.RTPROT_REDIRECT
-	case "rip":
-		return unix.RTPROT_RIP
-	case "static":
-		return unix.RTPROT_STATIC
-	case "unspec":
-		return unix.RTPROT_UNSPEC
-	case "xorp":
-		return unix.RTPROT_XORP
-	case "zebra":
-		return unix.RTPROT_ZEBRA
-	default:
-		panic(fmt.Sprintf("The protocol %s cannot be converted to unix Enum", protocol))
-	}
-}
 
 func getQuantity(routeInfos Routes, family int) ([]route.RouteInformation, error) {
 	routes := map[route.RouteKey]route.RouteInformation{}
 	// _ is the cidr and is ignored.
 	for _, paths := range routeInfos {
 		for _, routePath := range paths {
-			routeProtocol := netlink.RouteProtocol(getRoutingProtocol(routePath.Protocol))
+			routeProtocol := netlink.RouteProtocol(nl.GetProtocolNumber(routePath.Protocol, true))
 			routeKey := route.RouteKey{TableId: routePath.Table, RouteProtocol: int(routeProtocol), AddressFamily: family}
 
 			routeInformation, ok := routes[routeKey]
@@ -92,6 +40,17 @@ func getQuantity(routeInfos Routes, family int) ([]route.RouteInformation, error
 	return routeList, nil
 }
 
+func (frr *FRRManager) ListVrfs() ([]VrfVniSpec, error) {
+	vrfs, err := frr.CLI.ShowVRFs()
+	if err != nil {
+		return vrfs.Vrfs, err
+	}
+	vrfs.Vrfs = Filter(vrfs.Vrfs, func(vrf VrfVniSpec) bool {
+		return vrf.State != ""
+	})
+	return vrfs.Vrfs, nil
+}
+
 func (frr *FRRManager) ListRoutes(vrf string) ([]route.RouteInformation, error) {
 	vrfDualStackRoutes, err := frr.CLI.ShowRoutes(vrf)
 	if err != nil {
@@ -113,4 +72,12 @@ func (frr *FRRManager) ListRoutes(vrf string) ([]route.RouteInformation, error) 
 	}
 
 	return routeList, nil
+}
+
+func (frr *FRRManager) ListNeighbors(vrf string) (bgpSummary BGPVrfSummary, err error) {
+	bgpSummary, err = frr.CLI.ShowBGPSummary(vrf)
+	if err != nil {
+		return bgpSummary, err
+	}
+	return bgpSummary, nil
 }

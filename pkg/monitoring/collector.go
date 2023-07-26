@@ -24,7 +24,7 @@ import (
 )
 
 // Namespace defines the common namespace to be used by all metrics.
-const namespace = "das_schiff_network_operator"
+const namespace = "nwop"
 
 var (
 	scrapeDurationDesc = prometheus.NewDesc(

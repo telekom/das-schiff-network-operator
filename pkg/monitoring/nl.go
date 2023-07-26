@@ -27,7 +27,7 @@ func NewNetlinkCollector() (Collector, error) {
 			desc: prometheus.NewDesc(
 				prometheus.BuildFQName(namespace, "netlink", "routes"),
 				"The number of routes currently in the Linux Dataplane.",
-				[]string{"table", "vrf_name", "protocol", "address_family"},
+				[]string{"table", "vrf", "protocol", "address_family"},
 				nil,
 			),
 			valueType: prometheus.GaugeValue,
@@ -36,7 +36,7 @@ func NewNetlinkCollector() (Collector, error) {
 			desc: prometheus.NewDesc(
 				prometheus.BuildFQName(namespace, "netlink", "neighbors"),
 				"The number of neighbors currently in the Linux Dataplane.",
-				[]string{"mac", "ip", "interface_name", "address_family", "status"},
+				[]string{"mac", "ip", "interface", "address_family", "status"},
 				nil,
 			),
 			valueType: prometheus.GaugeValue,
@@ -62,7 +62,7 @@ func (c *netlinkCollector) Update(ch chan<- prometheus.Metric) error {
 		ch <- c.neighborsDesc.mustNewConstMetric(1.0, neighbor.MAC, neighbor.IP, neighbor.Interface, neighbor.Family, neighbor.State)
 	}
 	for _, route := range routes {
-		ch <- c.routesDesc.mustNewConstMetric(float64(route.Quantity), fmt.Sprint(route.TableId), route.VrfName, route.RouteProtocol.String(), route.AddressFamily)
+		ch <- c.routesDesc.mustNewConstMetric(float64(route.Quantity), fmt.Sprint(route.TableId), route.VrfName, nl.GetProtocolName(route.RouteProtocol), route.AddressFamily)
 	}
 	return nil
 }

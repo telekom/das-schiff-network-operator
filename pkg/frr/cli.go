@@ -1,10 +1,14 @@
 package frr
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"strconv"
 	"strings"
+
+	"golang.org/x/sys/unix"
 )
 
 type FRRCLI struct {
@@ -21,6 +25,7 @@ func NewFRRCLI() *FRRCLI {
 // the constant string "all" as the vrf name.
 // if it returns it also provides feedback if the vrf parameter was empty or not as
 // the second return value.
+
 func getVRF(vrf string) (string, bool) {
 	if vrf == "" {
 		return "all", true
@@ -28,13 +33,18 @@ func getVRF(vrf string) (string, bool) {
 	return vrf, false
 }
 
+func (frr *FRRCLI) executeWithJson(args []string) []byte {
+	args = append(args, "json")
+	return frr.execute(args)
+}
+
 func (frr *FRRCLI) execute(args []string) []byte {
 	// Ensure JSON is always appended
-	args = append(args, "json")
+
 	joinedArgs := strings.Join(args[:], " ")
 	cmd := &exec.Cmd{
 		Path: frr.binaryPath,
-		Args: append([]string{"-c"}, joinedArgs),
+		Args: append([]string{frr.binaryPath, "-c"}, joinedArgs), // it is weird to set path and Args[0] ^^
 	}
 	output, err := cmd.Output()
 	if err != nil {
@@ -45,7 +55,7 @@ func (frr *FRRCLI) execute(args []string) []byte {
 
 func (frr *FRRCLI) ShowEVPNVNIDetail() (EVPNVniDetail, error) {
 	evpnInfo := EVPNVniDetail{}
-	data := frr.execute([]string{
+	data := frr.executeWithJson([]string{
 		"show",
 		"evpn",
 		"vni",
@@ -57,7 +67,7 @@ func (frr *FRRCLI) ShowEVPNVNIDetail() (EVPNVniDetail, error) {
 
 func (frr *FRRCLI) ShowBGPSummary(vrf string) (BGPVrfSummary, error) {
 	vrfName, multiVRF := getVRF(vrf)
-	data := frr.execute([]string{
+	data := frr.executeWithJson([]string{
 		"show",
 		"bgp",
 		"vrf",
@@ -81,33 +91,108 @@ func (frr *FRRCLI) ShowBGPSummary(vrf string) (BGPVrfSummary, error) {
 
 }
 
-func (frr *FRRCLI) ShowVRFs() (VrfVni, error) {
+func (frr *FRRCLI) ShowVRFVnis() (VrfVni, error) {
 	vrfInfo := VrfVni{}
-	data := frr.execute([]string{
+	vrfVniData := frr.executeWithJson([]string{
 		"show",
 		"vrf",
 		"vni",
 	})
-	err := json.Unmarshal(data, &vrfInfo)
+	err := json.Unmarshal(vrfVniData, &vrfInfo)
+	return vrfInfo, err
+}
+func (frr *FRRCLI) ShowVRFs() (VrfVni, error) {
+	vrfInfo, err := frr.ShowVRFVnis()
 	if err != nil {
 		return vrfInfo, err
 	}
+	fmt.Println(vrfInfo.Vrfs)
+	// now we want all vrfs which do not have
+	// a vni assigned
+	// this code is ugly as it needs to parse the following output
+	//
+	// vrf Vrf_coil id 4 table 119
+	// vrf Vrf_kubevip id 6 table 198
+	// vrf Vrf_nwop id 5 table 130
+	// vrf Vrf_om_m2m inactive (configured) #> this one is ignored as it has no table
+	// vrf Vrf_om_refm2m id 3 table 3
+	// vrf Vrf_underlay id 2 table 2
+
+	data := frr.execute([]string{
+		"show",
+		"vrf",
+	})
+	dataAsString := string(data[:])
+	scanner := bufio.NewScanner(strings.NewReader(dataAsString))
+	var dataAsSlice []map[string]string
+	for scanner.Scan() {
+		text := scanner.Text()
+		text = strings.ReplaceAll(text, " (configured)", "")
+		text = strings.ReplaceAll(text, " inactive", "")
+		words := strings.Fields(text)
+		chunkedWords := Chunk(words, 2)
+		vrfMap := make(map[string]string)
+		for _, tuple := range chunkedWords {
+			vrfMap[tuple[0]] = tuple[1]
+		}
+		dataAsSlice = append(dataAsSlice, vrfMap)
+	}
+	dataAsSlice = append(dataAsSlice, map[string]string{
+		"vrf":   "default",
+		"table": strconv.Itoa(unix.RT_CLASS_MAIN),
+		"id":    "0",
+	})
+	for _, vrf := range dataAsSlice {
+		table, ok := vrf["table"]
+		// If the key exists
+		if ok {
+			vrfName, ok := vrf["vrf"]
+			if !ok {
+				return vrfInfo, nil
+			}
+			result, index, ok := Find(vrfInfo.Vrfs, func(element VrfVniSpec) bool {
+				return element.Vrf == vrfName
+			})
+			if !ok {
+				// as we do not have a VRF with EVPN Type 5 Uplink
+				// we just add vrfname and table in spec
+				vrfInfo.Vrfs = append(vrfInfo.Vrfs, VrfVniSpec{
+					Vrf:       vrfName,
+					Vni:       0,
+					VxlanIntf: "",
+					RouterMac: "",
+					SviIntf:   "",
+					State:     "",
+					Table:     table,
+				})
+			} else {
+				result.Table = table
+				// remove the wrong
+				vrfInfo.Vrfs = DeleteByIndex(vrfInfo.Vrfs, index)
+				vrfInfo.Vrfs = append(vrfInfo.Vrfs, result)
+			}
+
+		}
+	}
+	fmt.Println(dataAsSlice)
 	return vrfInfo, nil
 }
 
 func (frr *FRRCLI) getDualStackRoutes(vrf string) (Routes, Routes, error) {
 	routes_v4 := Routes{}
 	routes_v6 := Routes{}
-	data_v4 := frr.execute([]string{
+	data_v4 := frr.executeWithJson([]string{
 		"show",
 		"ip",
 		"route",
+		"vrf",
 		vrf,
 	})
-	data_v6 := frr.execute([]string{
+	data_v6 := frr.executeWithJson([]string{
 		"show",
 		"ipv6",
 		"route",
+		"vrf",
 		vrf,
 	})
 	var err error

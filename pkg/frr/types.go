@@ -42,12 +42,88 @@ type AfiAndSafi struct {
 		MultiPathRelax string `json:"multiPathRelax"`
 	} `json:"bestPath"`
 }
+type BGPAddressFamily int
 
-type BGPVrfSummarySpec struct {
-	Ipv4Unicast AfiAndSafi `json:"ipv4Unicast"`
-	L2VpnEvpn   AfiAndSafi `json:"l2VpnEvpn"`
-	Ipv6Unicast AfiAndSafi `json:"ipv6Unicast"`
+const (
+	IPv4Unicast BGPAddressFamily = iota
+	IPv4Multicast
+	IPv6Unicast
+	IPv6Multicast
+	L2VpnEvpn
+	Unknown
+)
+
+var (
+	bgpAddressFamily = map[string]BGPAddressFamily{
+		"ipv4Unicast":   IPv4Unicast,
+		"ipv4Multicast": IPv4Multicast,
+		"ipv6Unicast":   IPv6Unicast,
+		"ipv6Multicast": IPv6Unicast,
+		"l2VpnEvpn":     L2VpnEvpn,
+		"unknown":       Unknown,
+	}
+)
+
+func (af BGPAddressFamily) Values() (families []BGPAddressFamily) {
+	for i := 0; i <= int(L2VpnEvpn); i++ {
+		families = append(families, BGPAddressFamily(i))
+	}
+	return families
+
 }
+
+func ParseBGPAddressFamily(value string) BGPAddressFamily {
+	af, ok := bgpAddressFamily[value]
+	if !ok {
+		return bgpAddressFamily[Unknown.String()]
+	}
+	return af
+}
+
+func (af BGPAddressFamily) String() string {
+	switch af {
+	case IPv4Unicast:
+		return "ipv4Unicast"
+	case IPv4Multicast:
+		return "ipv4Multicast"
+	case IPv6Unicast:
+		return "ipv6Unicast"
+	case IPv6Multicast:
+		return "ipv6Multicast"
+	case L2VpnEvpn:
+		return "l2VpnEvpn"
+	}
+	return "unknown"
+}
+
+func (af BGPAddressFamily) Afi() string {
+	// Address Family Indicator (AFI)
+	switch af {
+	case IPv4Unicast, IPv4Multicast:
+		return "ipv4"
+	case IPv6Unicast, IPv6Multicast:
+		return "ipv6"
+	case L2VpnEvpn:
+		return "l2vpn"
+	}
+	return "unknown"
+}
+
+func (af BGPAddressFamily) Safi() string {
+	// Subsequent Address Family Indicator (SAFI)
+	switch af {
+	case IPv4Unicast, IPv6Unicast:
+		return "unicast"
+	case IPv4Multicast, IPv6Multicast:
+		return "multicast"
+	case L2VpnEvpn:
+		return "evpn"
+	}
+	return "unknown"
+}
+
+type BGPVrfSummarySpec map[string]AfiAndSafi
+
 type BGPVrfSummary map[string]BGPVrfSummarySpec
 
 type EVPNVniDetail struct {
@@ -119,6 +195,7 @@ type VrfVniSpec struct {
 	SviIntf   string `json:"sviIntf"`
 	State     string `json:"state"`
 	RouterMac string `json:"routerMac"`
+	Table     string `json:"table,omitempty"`
 }
 
 type VrfVni struct {
