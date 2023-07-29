@@ -55,9 +55,10 @@ var (
 )
 
 type bgpInstanceConfig struct {
-	VRFs     []VRFConfiguration
-	RouterID string
-	ASN      int
+	VRFs             []VRFConfiguration
+	RouterID         string
+	ASN              int
+	ECMPMaximumPaths int
 }
 
 func mustParse(name string, rawtpl string) *template.Template {

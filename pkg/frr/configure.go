@@ -3,6 +3,7 @@ package frr
 import (
 	"bytes"
 	"os"
+	"strconv"
 
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
 )
@@ -23,6 +24,7 @@ type FRRTemplateConfig struct {
 	Hostname         string
 	UnderlayRouterID string
 	HostRouterID     string
+	ECMPMaximumPaths int
 }
 
 func (m *FRRManager) Configure(in FRRConfiguration) (bool, error) {
@@ -90,15 +92,24 @@ func (f *FRRManager) renderSubtemplates(in FRRConfiguration) (*FRRTemplateConfig
 	if err != nil {
 		return nil, err
 	}
+	ecmpMaximumPaths := 8 // Default to BCMs preferred target of maximum 8 paths per route.
+	if envECMPMaximumPaths, ok := os.LookupEnv("NWOP_ECMP_MAXIMUM_PATHS"); ok {
+		parsedECMPMaximumPaths, err := strconv.Atoi(envECMPMaximumPaths)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse NWOP_ECMP_MAXIMUM_PATHS: %w", err)
+		}
+		ecmpMaximumPaths = parsedECMPMaximumPaths
+	}
 	asn := in.ASN
 	if asn == 0 {
 		asn = VRF_ASN_CONFIG
 	}
 	// Special handling for BGP instance rendering (we need ASN and Router ID)
 	bgp, err := render(BGP_INSTANCE_TPL, bgpInstanceConfig{
-		VRFs:     in.VRFs,
-		RouterID: vrfRouterId.String(),
-		ASN:      asn,
+		VRFs:             in.VRFs,
+		RouterID:         vrfRouterId.String(),
+		ASN:              asn,
+		ECMPMaximumPaths: ecmpMaximumPaths,
 	})
 	if err != nil {
 		return nil, err
