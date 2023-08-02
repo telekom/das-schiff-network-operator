@@ -87,6 +87,75 @@ An internal loop is tracking these interfaces and reapplies the eBPF code when n
 
 ![eBPF Flow](docs/ebpf-flow.png)
 
+## Development Setup
+
+![Development Setup](docs/test-env-setup.drawio.png)
+First you need to have multiple tools installed to get it working.
+
+* `kind`
+  * `yay -S kind`
+* `podman` or `docker`
+  * `pacman -S docker`
+* `frr`
+  * `yay -S frr-git`
+* `iproute2`
+  * `pacman -S iproute2`
+* optional `containerlab`
+  * `yay -S containerlab-bin`
+
+Configure the frr service for the netns you want to run in in this case we will use the network namespace called `test` and save the configuration.
+
+```bash
+sudo systemctl edit frr.service
+# /etc/systemd/system/frr.service.d/override.conf
+[Service]
+NetworkNamespacePath=/var/run/netns/test
+##
+## Now we need to have the config and the template available. Just copy it inplace
+cp testdata/frr.conf* /etc/frr/
+cp testdata/daemons /etc/frr/
+```
+
+Configure the surrounding kind cluster which should be used to host a kube-apiserver for the local development.
+
+```bash
+# Load the ip6_tables kernel module
+sudo modprobe ip6_tables
+# Start docker
+sudo systemctl start docker
+# create a kind cluster if you already have a cluster
+# just start the docker container of the kind cluster
+kind create cluster
+kind get kubeconfig > ~/.kube/kind
+# start the kind cluster container
+docker start kind-control-plane
+export KUBECONFIG=~/.kube/kind
+# install at least the crds inside the cluster.
+<missing command here>
+
+# create a tls folder locally.
+mkdir -p $(pwd)/tls
+# some setup for tls I just stole it from the cluster.
+<missing commands here>
+```
+
+Optional we need to setup for containerlab.
+
+```bash
+# Currently this part is missng
+```
+
+Now we can setup the network namespace for frr and network-operator to run in it.
+
+```bash
+## This creates the netns and needed interfaces
+## as well as forwards.
+sudo bash test-netns-setup.sh
+
+## This finally starts the Operator for development testing in the network namespace called test.
+OPERATOR_CONFIG=$(pwd)/testdata/config.yaml sudo -E ip netns exec test go run main.go --config $(pwd)/testdata/manager-config.yaml
+```
+
 ## License
 
 This project is licensed under Apache License Version 2.0, with the **exception of the code in [`./bpf/](./bpf/)** which falls under the [GPLv2 license](./bpf/LICENSE).

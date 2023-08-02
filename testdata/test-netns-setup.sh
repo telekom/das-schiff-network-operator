@@ -94,6 +94,9 @@ ip netns exec test ip link set dev br.om_refm2m up
 ip netns exec test ip link set dev br.cluster up
 
 ip netns exec test ip link add def_om_refm2m type veth peer name om_refm2m_def
+
+## This part connects the test netns with our 
+## internal containerlab setup
 ip link add cp1 type veth peer name ens1f0
 ip link add cp2 type veth peer name ens1f1
 ip link add cp3 type veth peer name ens2f0
@@ -140,5 +143,5 @@ ip netns exec test ip link set dev def_om_refm2m up
 ip netns exec test ip link set dev om_refm2m_def up
 
 
-# This can forward the kubernetes api and the metrics ports
+# This forwards the kubernetes api into the netns test and the metrics ports into the host system
 socat "unix-listen:/tmp/kube-api",fork "tcp-connect:127.0.0.1:38781" & ip netns exec test socat "tcp-listen:38781",fork,reuseaddr "unix-connect:/tmp/kube-api" & socat tcp-listen:7080,fork,reuseaddr exec:'ip netns exec test socat STDIO "tcp-connect:127.0.0.1:7080"',nofork && fg
