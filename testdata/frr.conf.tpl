@@ -1,24 +1,24 @@
-frr version 8.0.1
+frr version 8.5.1
 frr defaults traditional
 hostname t14s
 log file /var/log/frr/frr.log
 log stdout informational
 log syslog informational
-vni 5500
+vni 1000
 ip protocol bgp route-map rm_set_nodeip_source
 ip route 0.0.0.2/32 blackhole
 ip route 172.30.64.0/18 lo
 ip route 169.254.1.1/32 lo
 !
-vrf Vrf_om_refm2m
-  vni 500
+vrf Vrf_mgmt
+  vni 20
 exit-vrf
 {{.VRFs}}
 !
 service integrated-vtysh-config
 !
-router bgp 4200065169 vrf Vrf_underlay
-  bgp router-id 192.168.2.57
+router bgp 64511 vrf Vrf_underlay
+  bgp router-id 233.252.0.0
   no bgp ebgp-requires-policy
   no bgp suppress-duplicates
   no bgp default ipv4-unicast
@@ -33,7 +33,7 @@ router bgp 4200065169 vrf Vrf_underlay
   neighbor ens2f1 interface peer-group leaf
   !
   address-family ipv4 unicast
-    network 192.168.2.57/32
+    network 233.252.0.0/32
     neighbor leaf activate
     neighbor leaf allowas-in origin
     neighbor leaf soft-reconfiguration inbound
@@ -48,14 +48,14 @@ router bgp 4200065169 vrf Vrf_underlay
     neighbor leaf route-map TAG-FABRIC-IN in
     neighbor leaf route-map DENY-TAG-FABRIC-OUT out
     advertise-all-vni
-    vni 400
+    vni 30
       advertise-svi-ip
     exit-vni
     advertise-svi-ip
   exit-address-family
 exit
 !
-router bgp 4200065169 vrf default
+router bgp 64511 vrf default
   bgp router-id 172.22.156.48
   no bgp suppress-duplicates
   neighbor 127.0.0.1 remote-as 4200065170
@@ -73,7 +73,7 @@ router bgp 4200065169 vrf default
     neighbor def_om_refm2m allowas-in origin
     neighbor def_om_refm2m soft-reconfiguration inbound
     neighbor def_om_refm2m route-map rm_import_cluster_to_oam out
-    neighbor def_om_refm2m route-map rm_import_Vrf_om_refm2m_to_cluster in
+    neighbor def_om_refm2m route-map rm_import_Vrf_mgmt_to_cluster in
     import vrf Vrf_coil
     import vrf Vrf_nwop
     import vrf Vrf_kubevip
@@ -85,8 +85,8 @@ router bgp 4200065169 vrf default
   exit-address-family
 exit
 !
-router bgp 4200065169 vrf Vrf_om_refm2m
-  bgp router-id 192.168.2.57
+router bgp 64511 vrf Vrf_mgmt
+  bgp router-id 233.252.0.0
   no bgp suppress-duplicates
   neighbor om_refm2m_def interface remote-as internal
   !
@@ -101,24 +101,24 @@ router bgp 4200065169 vrf Vrf_om_refm2m
   exit-address-family
 exit
 !
-router bgp 4200065169 vrf Vrf_coil
-  bgp router-id 192.168.2.57
+router bgp 64511 vrf Vrf_coil
+  bgp router-id 233.252.0.0
   !
   address-family ipv4 unicast
     redistribute kernel
   exit-address-family
 exit
 !
-router bgp 4200065169 vrf Vrf_nwop
-  bgp router-id 192.168.2.57
+router bgp 64511 vrf Vrf_nwop
+  bgp router-id 233.252.0.0
   !
   address-family ipv4 unicast
     redistribute kernel
   exit-address-family
 exit
 !
-router bgp 4200065169 vrf Vrf_kubevip
-  bgp router-id 192.168.2.57
+router bgp 64511 vrf Vrf_kubevip
+  bgp router-id 233.252.0.0
   !
   address-family ipv4 unicast
     redistribute kernel
@@ -127,7 +127,7 @@ exit
 !
 {{.BGP}}
 !
-ip prefix-list pl_node_network seq 10 permit 172.22.156.32/27 le 32
+ip prefix-list pl_node_network seq 10 permit 198.51.100.0/27 le 32
 route-map rm_export_default permit 10
   match ip address prefix-list pl_node_network
 exit
@@ -156,9 +156,9 @@ exit
 route-map rm_om_refm2m_export deny 65535
 exit
 !
-ip prefix-list pl_import_Vrf_om_refm2m_to_cluster seq 10 permit 0.0.0.0/0 le 32
-route-map rm_import_Vrf_om_refm2m_to_cluster permit 10
-  match ip address prefix-list pl_import_Vrf_om_refm2m_to_cluster
+ip prefix-list pl_import_Vrf_mgmt_to_cluster seq 10 permit 0.0.0.0/0 le 32
+route-map rm_import_Vrf_mgmt_to_cluster permit 10
+  match ip address prefix-list pl_import_Vrf_mgmt_to_cluster
 exit
 !
 route-map local_peering_hack permit 10
@@ -169,7 +169,7 @@ exit
 ip prefix-list ANY permit 0.0.0.0/0 le 32
 route-map rm_set_nodeip_source permit 10
   match ip address prefix-list ANY
-  set src 172.22.156.48
+  set src 198.51.100.0
 exit
 !
 # Automatically configured Prefix-Lists and Route-Maps

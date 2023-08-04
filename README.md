@@ -89,6 +89,38 @@ An internal loop is tracking these interfaces and reapplies the eBPF code when n
 
 ## Development Setup
 
+Used Networks:
+```python
+## AS Numbers
+# 64496-64511
+as_numbers = range(64496,64512)
+# [64496, 64497, 64498, 64499, 64500, 64501, 64502, 64503, 64504, 64505, 64506, 64507, 64508, 64509, 64510, 64511]
+## AS Reservations
+gobgp_as_number = 64496
+node_as_number = 64511
+
+## Fabric AS Numbers
+fabric_as_numbers = range(64497,64511)
+# [64497, 64498, 64499, 64500, 64501, 64502, 64503, 64504, 64505, 64506, 64507, 64508, 64509, 64510]
+
+## Underlay Networks
+underlay_network_fabric_ipv4 = "192.0.2.0/24"
+underlay_network_node_ipv4 = "233.252.0.0/24"
+
+## Overlay Networks
+overlay_cluster_network_k8s_node_ipv4 = "198.51.100.0/24"
+overlay_cluster_network_k8s_node_ipv6 = "2001:db8:ffff:ffff::/64"
+
+## Networks which are used for the Route-Dicer
+# Route AS Numbers
+# 65536-65551
+routes_as_numbers = range(65536,65552)
+# [65536, 65537, 65538, 65539, 65540, 65541, 65542, 65543, 65544, 65545, 65546, 65547, 65548, 65549, 65550, 65551]
+
+routes_ipv4 = "203.0.113.0/24"
+routes_ipv6 =  "2001:db8::/48"
+```
+
 ![Development Setup](docs/test-env-setup.drawio.png)
 First you need to have multiple tools installed to get it working.
 
@@ -130,12 +162,12 @@ kind get kubeconfig > ~/.kube/kind
 # start the kind cluster container
 docker start kind-control-plane
 export KUBECONFIG=~/.kube/kind
-# install at least the crds inside the cluster.
+# TODO: install at least the crds inside the cluster.
 <missing command here>
 
 # create a tls folder locally.
 mkdir -p $(pwd)/tls
-# some setup for tls I just stole it from the cluster.
+# TODO: some setup for tls I just stole it from the cluster.
 <missing commands here>
 ```
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+
 ip netns add test
 ip netns list
 
@@ -58,42 +59,42 @@ ip netns exec test sysctl -w net.ipv6.conf.all.accept_ra=1
 ip netns exec test ip link set dev lo up
 
 ip netns exec test ip link add Vrf_underlay type vrf table 2
-ip netns exec test ip link add Vrf_om_refm2m type vrf table 3
+ip netns exec test ip link add Vrf_mgmt type vrf table 3
 ip netns exec test ip link add Vrf_coil type vrf table 119
 ip netns exec test ip link add Vrf_nwop type vrf table 130
 ip netns exec test ip link add Vrf_kubevip type vrf table 198
 
 
 ip netns exec test ip link add dum.underlay type dummy
-ip netns exec test ip link add name br.om_refm2m type bridge
+ip netns exec test ip link add name br.mgmt type bridge
 ip netns exec test ip link add name br.cluster type bridge
 
 ip netns exec test ip link set dev dum.underlay master Vrf_underlay
-ip netns exec test ip link set dev br.om_refm2m master Vrf_om_refm2m
+ip netns exec test ip link set dev br.mgmt master Vrf_mgmt
 ip netns exec test ip link set dev Vrf_underlay up
-ip netns exec test ip link set dev Vrf_om_refm2m up
+ip netns exec test ip link set dev Vrf_mgmt up
 ip netns exec test ip link set dev Vrf_coil up
 ip netns exec test ip link set dev Vrf_nwop up
 ip netns exec test ip link set dev Vrf_kubevip up
 
-ip netns exec test ip addr add 192.168.2.57/32 dev dum.underlay
+ip netns exec test ip addr add 233.252.0.0/32 dev dum.underlay
 ip netns exec test ip link set dev dum.underlay up
 
-ip netns exec test ip link add vx.500 type vxlan id 500 local 192.168.2.57 nolearning dev dum.underlay dstport 4789
-ip netns exec test ip link add vx.5500 type vxlan id 5500 local 192.168.2.57 nolearning dev dum.underlay dstport 4789
-ip netns exec test ip link set dev vx.500 master br.om_refm2m
-ip netns exec test ip link set dev vx.5500 master br.cluster
-ip netns exec test ip link set dev vx.500 mtu 1500
-ip netns exec test ip link set dev vx.5500 mtu 9000
-ip netns exec test ip link set dev vx.500 up
-ip netns exec test ip link set dev vx.5500 up
-ip netns exec test ip addr add 10.89.40.10/32 dev br.cluster
-ip netns exec test ip link set dev br.om_refm2m mtu 1500
+ip netns exec test ip link add vx.20 type vxlan id 20 local 233.252.0.0 nolearning dev dum.underlay dstport 4789
+ip netns exec test ip link add vx.1000 type vxlan id 1000 local 233.252.0.0 nolearning dev dum.underlay dstport 4789
+ip netns exec test ip link set dev vx.20 master br.mgmt
+ip netns exec test ip link set dev vx.1000 master br.cluster
+ip netns exec test ip link set dev vx.20 mtu 1500
+ip netns exec test ip link set dev vx.1000 mtu 9000
+ip netns exec test ip link set dev vx.20 up
+ip netns exec test ip link set dev vx.1000 up
+ip netns exec test ip addr add 198.51.100.0/32 dev br.cluster
+ip netns exec test ip link set dev br.mgmt mtu 1500
 ip netns exec test ip link set dev br.cluster mtu 9000
-ip netns exec test ip link set dev br.om_refm2m up
+ip netns exec test ip link set dev br.mgmt up
 ip netns exec test ip link set dev br.cluster up
 
-ip netns exec test ip link add def_om_refm2m type veth peer name om_refm2m_def
+ip netns exec test ip link add def_mgmt type veth peer name mgmt_def
 
 ## This part connects the test netns with our 
 ## internal containerlab setup
@@ -138,9 +139,9 @@ ip netns exec test ip link set dev ens1f1 up
 ip netns exec test ip link set dev ens2f0 up
 ip netns exec test ip link set dev ens2f1 up
 
-ip netns exec test ip link set dev om_refm2m_def master Vrf_om_refm2m
-ip netns exec test ip link set dev def_om_refm2m up
-ip netns exec test ip link set dev om_refm2m_def up
+ip netns exec test ip link set dev mgmt_def master Vrf_mgmt
+ip netns exec test ip link set dev def_mgmt up
+ip netns exec test ip link set dev mgmt_def up
 
 
 # This forwards the kubernetes api into the netns test and the metrics ports into the host system
