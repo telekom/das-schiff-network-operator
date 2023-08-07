@@ -1,0 +1,19 @@
+[Unit]
+Description=Configure network via netplanner
+DefaultDependencies=no
+Requires=sysinit.target
+After=local-fs.target
+After=cloud-init-local.service
+Before=network-pre.target
+Before=frr.service
+Before=shutdown.target
+Before=basic.target
+Before=systemd-networkd.service
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+KillMode=none
+ExecStartPre=/usr/local/sbin/netplanner --only-networkd configure
+ExecStart=/usr/local/sbin/netplanner --only-networkd --output /run/systemd/network/ configure
+TimeoutSec=10
