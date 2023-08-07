@@ -17,8 +17,8 @@ exit-vrf
 !
 service integrated-vtysh-config
 !
-router bgp 64511 vrf Vrf_underlay
-  bgp router-id 233.252.0.0
+router bgp 64510 vrf Vrf_underlay
+  bgp router-id 192.0.2.128
   no bgp ebgp-requires-policy
   no bgp suppress-duplicates
   no bgp default ipv4-unicast
@@ -33,7 +33,7 @@ router bgp 64511 vrf Vrf_underlay
   neighbor ens2f1 interface peer-group leaf
   !
   address-family ipv4 unicast
-    network 233.252.0.0/32
+    network 192.0.2.128/32
     neighbor leaf activate
     neighbor leaf allowas-in origin
     neighbor leaf soft-reconfiguration inbound
@@ -55,25 +55,25 @@ router bgp 64511 vrf Vrf_underlay
   exit-address-family
 exit
 !
-router bgp 64511 vrf default
-  bgp router-id 172.22.156.48
+router bgp 64510 vrf default
+  bgp router-id 198.51.100.0
   no bgp suppress-duplicates
-  neighbor 127.0.0.1 remote-as 4200065170
+  neighbor 127.0.0.1 remote-as 64511
   neighbor 127.0.0.1 port 1790
   neighbor 127.0.0.1 passive
   neighbor 127.0.0.1 update-source lo
-  neighbor def_om_refm2m interface remote-as internal
+  neighbor def_mgmt interface remote-as internal
 {{.Neighbors}}
   !
   address-family ipv4 unicast
     redistribute connected
     neighbor 127.0.0.1 soft-reconfiguration inbound
     neighbor 127.0.0.1 route-map local_peering_hack in
-    neighbor def_om_refm2m activate
-    neighbor def_om_refm2m allowas-in origin
-    neighbor def_om_refm2m soft-reconfiguration inbound
-    neighbor def_om_refm2m route-map rm_import_cluster_to_oam out
-    neighbor def_om_refm2m route-map rm_import_Vrf_mgmt_to_cluster in
+    neighbor def_mgmt activate
+    neighbor def_mgmt allowas-in origin
+    neighbor def_mgmt soft-reconfiguration inbound
+    neighbor def_mgmt route-map rm_import_cluster_to_oam out
+    neighbor def_mgmt route-map rm_import_Vrf_mgmt_to_cluster in
     import vrf Vrf_coil
     import vrf Vrf_nwop
     import vrf Vrf_kubevip
@@ -85,15 +85,15 @@ router bgp 64511 vrf default
   exit-address-family
 exit
 !
-router bgp 64511 vrf Vrf_mgmt
-  bgp router-id 233.252.0.0
+router bgp 64510 vrf Vrf_mgmt
+  bgp router-id 192.0.2.128
   no bgp suppress-duplicates
-  neighbor om_refm2m_def interface remote-as internal
+  neighbor mgmt_def interface remote-as internal
   !
   address-family ipv4 unicast
-    neighbor om_refm2m_def activate
-    neighbor om_refm2m_def soft-reconfiguration inbound
-    neighbor om_refm2m_def route-map rm_import_cluster_to_oam in
+    neighbor mgmt_def activate
+    neighbor mgmt_def soft-reconfiguration inbound
+    neighbor mgmt_def route-map rm_import_cluster_to_oam in
   exit-address-family
   !
   address-family l2vpn evpn
@@ -101,24 +101,24 @@ router bgp 64511 vrf Vrf_mgmt
   exit-address-family
 exit
 !
-router bgp 64511 vrf Vrf_coil
-  bgp router-id 233.252.0.0
+router bgp 64510 vrf Vrf_coil
+  bgp router-id 192.0.2.128
   !
   address-family ipv4 unicast
     redistribute kernel
   exit-address-family
 exit
 !
-router bgp 64511 vrf Vrf_nwop
-  bgp router-id 233.252.0.0
+router bgp 64510 vrf Vrf_nwop
+  bgp router-id 192.0.2.128
   !
   address-family ipv4 unicast
     redistribute kernel
   exit-address-family
 exit
 !
-router bgp 64511 vrf Vrf_kubevip
-  bgp router-id 233.252.0.0
+router bgp 64510 vrf Vrf_kubevip
+  bgp router-id 192.0.2.128
   !
   address-family ipv4 unicast
     redistribute kernel
@@ -162,7 +162,7 @@ route-map rm_import_Vrf_mgmt_to_cluster permit 10
 exit
 !
 route-map local_peering_hack permit 10
-  set as-path exclude 4200065170
+  set as-path exclude 64511
   set ip next-hop 0.0.0.2
 exit
 !

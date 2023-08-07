@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+echo "${KUBECONFIG}"
 
 ip netns add test
 ip netns list
@@ -77,11 +78,11 @@ ip netns exec test ip link set dev Vrf_coil up
 ip netns exec test ip link set dev Vrf_nwop up
 ip netns exec test ip link set dev Vrf_kubevip up
 
-ip netns exec test ip addr add 233.252.0.0/32 dev dum.underlay
+ip netns exec test ip addr add 192.0.2.128/32 dev dum.underlay
 ip netns exec test ip link set dev dum.underlay up
 
-ip netns exec test ip link add vx.20 type vxlan id 20 local 233.252.0.0 nolearning dev dum.underlay dstport 4789
-ip netns exec test ip link add vx.1000 type vxlan id 1000 local 233.252.0.0 nolearning dev dum.underlay dstport 4789
+ip netns exec test ip link add vx.20 type vxlan id 20 local 192.0.2.128 nolearning dev dum.underlay dstport 4789
+ip netns exec test ip link add vx.1000 type vxlan id 1000 local 192.0.2.128 nolearning dev dum.underlay dstport 4789
 ip netns exec test ip link set dev vx.20 master br.mgmt
 ip netns exec test ip link set dev vx.1000 master br.cluster
 ip netns exec test ip link set dev vx.20 mtu 1500
@@ -144,5 +145,10 @@ ip netns exec test ip link set dev def_mgmt up
 ip netns exec test ip link set dev mgmt_def up
 
 
+CLUSTER_ENDPOINT=$(kubectl config view -o jsonpath='{.clusters[].cluster.server}')
+ENDPOINT=${CLUSTER_ENDPOINT#"https://"}
+ENDPOINT_PORT=${ENDPOINT##*:}
+
+echo "${CLUSTER_ENDPOINT} :: ${ENDPOINT} ${ENDPOINT_PORT}"
 # This forwards the kubernetes api into the netns test and the metrics ports into the host system
-socat "unix-listen:/tmp/kube-api",fork "tcp-connect:127.0.0.1:38781" & ip netns exec test socat "tcp-listen:38781",fork,reuseaddr "unix-connect:/tmp/kube-api" & socat tcp-listen:7080,fork,reuseaddr exec:'ip netns exec test socat STDIO "tcp-connect:127.0.0.1:7080"',nofork && fg
+socat "unix-listen:/tmp/kube-api",fork "tcp-connect:${ENDPOINT}" & ip netns exec test socat "tcp-listen:${ENDPOINT_PORT}",fork,reuseaddr "unix-connect:/tmp/kube-api" & socat tcp-listen:7080,fork,reuseaddr exec:'ip netns exec test socat STDIO "tcp-connect:127.0.0.1:7080"',nofork && fg

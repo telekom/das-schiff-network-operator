@@ -39,7 +39,7 @@ topology:
       image: quay.io/frrouting/frr:8.5.1
       exec:
       - python3 /create-intfs.py 192.0.2.1
-      - ip l set dev eth4 master Vrf_om_m2m
+      - ip l set dev eth4 master Vrf_mgmt
     bl2:
       binds:
       - configs/bl2/daemons:/etc/frr/daemons
@@ -52,7 +52,7 @@ topology:
       image: quay.io/frrouting/frr:8.5.1
       exec:
       - python3 /create-intfs.py 192.0.2.2
-      - ip l set dev eth4 master Vrf_om_m2m
+      - ip l set dev eth4 master Vrf_mgmt
     sp1:
       binds:
       - configs/sp1/daemons:/etc/frr/daemons
@@ -80,18 +80,18 @@ topology:
       image: quay.io/frrouting/frr:8.5.1
       exec:
       - ip a add 192.0.2.5/32 dev lo
-      # - ip l set dev srv1 mtu 9100
-      # - ip l set dev srv1 address 00:50:56:2f:00:01
-      # - ip l set dev srv1 down
-      # - ip l set dev srv1 up
-      # - ip l set dev srv2 mtu 9100
-      # - ip l set dev srv2 address 00:50:56:2f:00:01
-      # - ip l set dev srv2 down
-      # - ip l set dev srv2 up
-      # - ip l set dev srv3 mtu 9100
-      # - ip l set dev srv3 address 00:50:56:2f:00:01
-      # - ip l set dev srv3 down
-      # - ip l set dev srv3 up
+      - ip l set dev srv1 mtu 9100
+      - ip l set dev srv1 address 00:50:56:2f:00:01
+      - ip l set dev srv1 down
+      - ip l set dev srv1 up
+      - ip l set dev srv2 mtu 9100
+      - ip l set dev srv2 address 00:50:56:2f:00:01
+      - ip l set dev srv2 down
+      - ip l set dev srv2 up
+      - ip l set dev srv3 mtu 9100
+      - ip l set dev srv3 address 00:50:56:2f:00:01
+      - ip l set dev srv3 down
+      - ip l set dev srv3 up
       - ip l set dev srv4 mtu 9100
       - ip l set dev srv4 address 00:50:56:2f:00:01
       - ip l set dev srv4 down
@@ -109,18 +109,18 @@ topology:
       image: quay.io/frrouting/frr:8.5.1
       exec:
       - ip a add 192.0.2.6/32 dev lo
-      # - ip l set dev srv1 mtu 9100
-      # - ip l set dev srv1 address 00:50:56:2f:00:02
-      # - ip l set dev srv1 down
-      # - ip l set dev srv1 up
-      # - ip l set dev srv2 mtu 9100
-      # - ip l set dev srv2 address 00:50:56:2f:00:02
-      # - ip l set dev srv2 down
-      # - ip l set dev srv2 up
-      # - ip l set dev srv3 mtu 9100
-      # - ip l set dev srv3 address 00:50:56:2f:00:02
-      # - ip l set dev srv3 down
-      # - ip l set dev srv3 up
+      - ip l set dev srv1 mtu 9100
+      - ip l set dev srv1 address 00:50:56:2f:00:02
+      - ip l set dev srv1 down
+      - ip l set dev srv1 up
+      - ip l set dev srv2 mtu 9100
+      - ip l set dev srv2 address 00:50:56:2f:00:02
+      - ip l set dev srv2 down
+      - ip l set dev srv2 up
+      - ip l set dev srv3 mtu 9100
+      - ip l set dev srv3 address 00:50:56:2f:00:02
+      - ip l set dev srv3 down
+      - ip l set dev srv3 up
       - ip l set dev srv4 mtu 9100
       - ip l set dev srv4 address 00:50:56:2f:00:02
       - ip l set dev srv4 down
@@ -129,24 +129,24 @@ topology:
       - ip l set dev srv5 address 00:50:56:2f:00:02
       - ip l set dev srv5 down
       - ip l set dev srv5 up
-    # srv1-p1:
-    #   kind: bridge
-    #   group: server
-    # srv1-p2:
-    #   kind: bridge
-    #   group: server
-    # srv2-p1:
-    #   kind: bridge
-    #   group: server
-    # srv2-p2:
-    #   kind: bridge
-    #   group: server
-    # srv3-p1:
-    #   kind: bridge
-    #   group: server
-    # srv3-p2:
-    #   kind: bridge
-    #   group: server
+    srv1-p1:
+      kind: bridge
+      group: server
+    srv1-p2:
+      kind: bridge
+      group: server
+    srv2-p1:
+      kind: bridge
+      group: server
+    srv2-p2:
+      kind: bridge
+      group: server
+    srv3-p1:
+      kind: bridge
+      group: server
+    srv3-p2:
+      kind: bridge
+      group: server
     srv4-p1:
       kind: bridge
       group: server
@@ -173,12 +173,12 @@ topology:
     - endpoints: ["lf1:eth2", "sp2:eth3"]
     - endpoints: ["lf2:eth1", "sp1:eth4"]
     - endpoints: ["lf2:eth2", "sp2:eth4"]
-    # - endpoints: ["lf1:srv1", "srv1-p1:srv1-lf1-p1"]
-    # - endpoints: ["lf2:srv1", "srv1-p2:srv1-lf2-p2"]
-    # - endpoints: ["lf1:srv2", "srv2-p1:srv2-lf1-p1"]
-    # - endpoints: ["lf2:srv2", "srv2-p2:srv2-lf2-p2"]
-    # - endpoints: ["lf1:srv3", "srv3-p1:srv3-lf1-p1"]
-    # - endpoints: ["lf2:srv3", "srv3-p2:srv3-lf2-p2"]
+    - endpoints: ["lf1:srv1", "srv1-p1:srv1-lf1-p1"]
+    - endpoints: ["lf2:srv1", "srv1-p2:srv1-lf2-p2"]
+    - endpoints: ["lf1:srv2", "srv2-p1:srv2-lf1-p1"]
+    - endpoints: ["lf2:srv2", "srv2-p2:srv2-lf2-p2"]
+    - endpoints: ["lf1:srv3", "srv3-p1:srv3-lf1-p1"]
+    - endpoints: ["lf2:srv3", "srv3-p2:srv3-lf2-p2"]
     - endpoints: ["lf1:srv4", "srv4-p1:srv4-lf1-p1"]
     - endpoints: ["lf2:srv4", "srv4-p2:srv4-lf2-p2"]
     - endpoints: ["lf1:srv5", "srv5-p1:srv5-lf1-p1"]

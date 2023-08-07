@@ -14,8 +14,8 @@ vni_map = {
 }
 
 ## Underlay Networks
-underlay_network_fabric_ipv4 = "192.0.2.0/24"
-underlay_network_node_ipv4 = "233.252.0.0/24"
+underlay_network_fabric_ipv4 = "192.0.2.0/25"
+underlay_network_node_ipv4 = "192.0.2.128/25"
 
 ## Overlay Networks
 overlay_cluster_network_k8s_node_ipv4 = "198.51.100.0/24"

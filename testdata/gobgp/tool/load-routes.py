@@ -127,6 +127,6 @@ for vrf in vrfs:
     subprocess.check_output(["ip", "link", "add", "link", "eth1", "name", vrf, "type", "vlan", "id", str(vlan)])
     subprocess.check_output(["ip", "link", "set", "dev", vrf, "up"])
     subprocess.check_output(["ip", "address", "add", f"192.168.{vlan}.1/30", "dev", vrf])
-    subprocess.check_output(["gobgp", "neighbor", "add", f"192.168.{vlan}.2", "as", "64513", "vrf", vrf])
+    subprocess.check_output(["gobgp", "neighbor", "add", f"192.168.{vlan}.2", "as", "64497", "vrf", vrf])
     subprocess.check_output(["ip", "address", "add", f"fd00:cafe:{vlan}::1/126", "dev", vrf])
-    subprocess.check_output(["gobgp", "neighbor", "add", f"fd00:cafe:{vlan}::2", "as", "64513", "vrf", vrf])
+    subprocess.check_output(["gobgp", "neighbor", "add", f"fd00:cafe:{vlan}::2", "as", "64497", "vrf", vrf])

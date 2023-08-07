@@ -1,5 +1,5 @@
 # 2 Servers
-for i in $(seq 4 5)
+for i in $(seq 1 5)
 do
   # with 2 ports each
   for j in $(seq 1 2)

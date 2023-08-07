@@ -97,15 +97,16 @@ as_numbers = range(64496,64512)
 # [64496, 64497, 64498, 64499, 64500, 64501, 64502, 64503, 64504, 64505, 64506, 64507, 64508, 64509, 64510, 64511]
 ## AS Reservations
 gobgp_as_number = 64496
-node_as_number = 64511
+node_as_number = 64510
+node_local_as = 64511
 
 ## Fabric AS Numbers
-fabric_as_numbers = range(64497,64511)
-# [64497, 64498, 64499, 64500, 64501, 64502, 64503, 64504, 64505, 64506, 64507, 64508, 64509, 64510]
+fabric_as_numbers = range(64497,64510)
+# [64497, 64498, 64499, 64500, 64501, 64502, 64503, 64504, 64505, 64506, 64507, 64508, 64509]
 
 ## Underlay Networks
-underlay_network_fabric_ipv4 = "192.0.2.0/24"
-underlay_network_node_ipv4 = "233.252.0.0/24"
+underlay_network_fabric_ipv4 = "192.0.2.0/25"
+underlay_network_node_ipv4 = "192.0.2.128/25"
 
 ## Overlay Networks
 overlay_cluster_network_k8s_node_ipv4 = "198.51.100.0/24"
@@ -122,12 +123,15 @@ routes_ipv6 =  "2001:db8::/48"
 ```
 
 ![Development Setup](docs/test-env-setup.drawio.png)
+
+
 First you need to have multiple tools installed to get it working.
 
 * `kind`
   * `yay -S kind`
 * `podman` or `docker`
   * `pacman -S docker`
+  * `pacman -S podman`
 * `frr`
   * `yay -S frr-git`
 * `iproute2`
@@ -135,17 +139,17 @@ First you need to have multiple tools installed to get it working.
 * optional `containerlab`
   * `yay -S containerlab-bin`
 
-Configure the frr service for the netns you want to run in in this case we will use the network namespace called `test` and save the configuration.
+When using podman follow this guide to setup proper rootless container environment:
 
+* https://kind.sigs.k8s.io/docs/user/rootless/
+* https://wiki.archlinux.org/title/Podman
+
+
+
+
+Starting a kind cluster with `podman` rootless:
 ```bash
-sudo systemctl edit frr.service
-# /etc/systemd/system/frr.service.d/override.conf
-[Service]
-NetworkNamespacePath=/var/run/netns/test
-##
-## Now we need to have the config and the template available. Just copy it inplace
-cp testdata/frr.conf* /etc/frr/
-cp testdata/daemons /etc/frr/
+KIND_EXPERIMENTAL_PROVIDER=podman systemd-run --scope --user kind create cluster
 ```
 
 Configure the surrounding kind cluster which should be used to host a kube-apiserver for the local development.
@@ -162,19 +166,34 @@ kind get kubeconfig > ~/.kube/kind
 # start the kind cluster container
 docker start kind-control-plane
 export KUBECONFIG=~/.kube/kind
+# Load the image for network-operator into the kind cluster
+kind load docker-image network-operator:latest
+# Build the gobgp container image with docker
+docker build -t gobgp-fabric:latest -t docker.io/library/gobgp-fabric:latest testdata/gobgp
+# setup the bridges on the local host
+sudo bash testdata/containerlab-bridge-setup.sh
+# Install the containerlab
+sudo containerlab deploy --reconfigure -t testdata/containerlab.yaml
 # TODO: install at least the crds inside the cluster.
-<missing command here>
-
+make install
 # create a tls folder locally.
 mkdir -p $(pwd)/tls
 # TODO: some setup for tls I just stole it from the cluster.
 <missing commands here>
 ```
 
-Optional we need to setup for containerlab.
+
+Configure the frr service for the netns you want to run in in this case we will use the network namespace called `test` and save the configuration.
 
 ```bash
-# Currently this part is missng
+sudo systemctl edit frr.service
+# /etc/systemd/system/frr.service.d/override.conf
+[Service]
+NetworkNamespacePath=/var/run/netns/test
+##
+## Now we need to have the config and the template available. Just copy it inplace
+cp testdata/frr.conf* /etc/frr/
+cp testdata/daemons /etc/frr/
 ```
 
 Now we can setup the network namespace for frr and network-operator to run in it.
@@ -182,7 +201,8 @@ Now we can setup the network namespace for frr and network-operator to run in it
 ```bash
 ## This creates the netns and needed interfaces
 ## as well as forwards.
-sudo bash test-netns-setup.sh
+## the -E is important to forward your local environment
+sudo -E bash testdata/test-netns-setup.sh
 
 ## This finally starts the Operator for development testing in the network namespace called test.
 OPERATOR_CONFIG=$(pwd)/testdata/config.yaml sudo -E ip netns exec test go run main.go --config $(pwd)/testdata/manager-config.yaml
