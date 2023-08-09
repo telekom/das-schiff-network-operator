@@ -1,0 +1,5 @@
+interfaces: ['ifA', 'ifB']
+reachability:
+- host: someAddress
+  port: 42
+timeout: 5s

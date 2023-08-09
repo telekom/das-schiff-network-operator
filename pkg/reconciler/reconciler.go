@@ -11,6 +11,7 @@ import (
 	"github.com/telekom/das-schiff-network-operator/pkg/config"
 	"github.com/telekom/das-schiff-network-operator/pkg/debounce"
 	"github.com/telekom/das-schiff-network-operator/pkg/frr"
+	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -24,6 +25,7 @@ type Reconciler struct {
 	frrManager     *frr.Manager
 	anycastTracker *anycast.Tracker
 	config         *config.Config
+	healthChecker  *healthcheck.HealthChecker
 
 	debouncer *debounce.Debouncer
 
@@ -58,6 +60,19 @@ func NewReconciler(clusterClient client.Client, anycastTracker *anycast.Tracker)
 	}
 	reconciler.config = cfg
 
+	nc, err := healthcheck.LoadConfig(healthcheck.NetHealthcheckFile)
+	if err != nil {
+		return nil, err
+	}
+
+	tcpDialer := healthcheck.NewTCPDialer(nc.Timeout)
+	reconciler.healthChecker, err = healthcheck.NewHealthChecker(reconciler.client,
+		healthcheck.NewDefaultHealthcheckToolkit(reconciler.frrManager, tcpDialer),
+		nc)
+	if err != nil {
+		return nil, err
+	}
+
 	return reconciler, nil
 }
 
@@ -86,5 +101,26 @@ func (reconciler *Reconciler) reconcileDebounced(ctx context.Context) error {
 	if err := r.reconcileLayer2(l2vnis); err != nil {
 		return err
 	}
+
+	if !reconciler.healthChecker.IsInitialized() {
+		_, err := reconciler.healthChecker.IsFRRActive()
+		if err != nil {
+			r.Logger.Error(err, "problem checking FRR status")
+			return err
+		}
+		if err = reconciler.healthChecker.CheckInterfaces(); err != nil {
+			r.Logger.Error(err, "problem checking network interfaces")
+			return err
+		}
+		if err = reconciler.healthChecker.CheckReachability(); err != nil {
+			r.Logger.Error(err, "problem checking network reachability")
+			return err
+		}
+		if err = reconciler.healthChecker.RemoveTaint(healthcheck.TaintKey); err != nil {
+			r.Logger.Error(err, "problem removing taint from the node")
+			return err
+		}
+	}
+
 	return nil
 }

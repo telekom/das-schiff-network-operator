@@ -94,6 +94,21 @@ func (*Manager) ReloadFRR() error {
 	return fmt.Errorf("error realoading %s context: %w", frrUnit, err)
 }
 
+func (m *FRRManager) GetStatusFRR() (string, string, error) {
+	con, err := dbus.NewSystemConnectionContext(context.Background())
+	if err != nil {
+		return "", "", err
+	}
+	defer con.Close()
+
+	prop, err := con.GetUnitPropertiesContext(context.Background(), FRR_UNIT)
+	if err != nil {
+		return "", "", err
+	}
+
+	return prop["ActiveState"].(string), prop["SubState"].(string), err
+}
+
 func (v *VRFConfiguration) ShouldTemplateVRF() bool {
 	return v.VNI != config.SkipVrfTemplateVni
 }
