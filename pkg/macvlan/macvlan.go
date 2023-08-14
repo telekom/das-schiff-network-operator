@@ -2,6 +2,7 @@ package macvlan
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -28,7 +29,8 @@ func ensureMACDummyIntf(intf *netlink.Bridge) (netlink.Link, error) {
 	name := fmt.Sprintf("mvd.%s", intf.Attrs().Name)
 	macDummy, err := netlink.LinkByName(name)
 	if err != nil {
-		if _, ok := err.(netlink.LinkNotFoundError); ok {
+		var linkNotFoundErr *netlink.LinkNotFoundError
+		if errors.As(err, &linkNotFoundErr) {
 			macDummy = &netlink.Dummy{
 				LinkAttrs: netlink.NewLinkAttrs(),
 			}
@@ -88,6 +90,10 @@ func syncInterface(intf *netlink.Bridge) {
 		return
 	}
 
+	configureNeighbors(intf, dummy)
+}
+
+func configureNeighbors(intf *netlink.Bridge, dummy netlink.Link) {
 	// Get neighbors of bridge
 	bridgeNeighbors, err := netlink.NeighList(intf.Attrs().Index, unix.AF_BRIDGE)
 	if err != nil {
@@ -108,23 +114,8 @@ func syncInterface(intf *netlink.Bridge) {
 		fmt.Printf("Error syncing interface %s: %v\n", intf.Attrs().Name, err)
 		return
 	}
-	alreadyExisting := []net.HardwareAddr{}
-	for _, neigh := range dummyNeighbors {
-		// Look for unicast neighbor entries with no flags, no vlan, NUD_NOARP (static) fdb entries
-		if neigh.Vlan == 0 && neigh.Flags == 0 && neigh.State == netlink.NUD_NOARP && isUnicastMac(neigh.HardwareAddr) {
-			if !containsMACAddress(requiredMACAddresses, neigh.HardwareAddr) {
-				// If MAC Address is not in required MAC addresses, delete neighbor
-				err = netlink.NeighDel(&neigh)
-				if err != nil {
-					fmt.Printf("Error deleting neighbor %v: %v\n", neigh, err)
-				}
-				fmt.Printf("Removed MAC address %s from dummy interface %s of bridge %s\n", neigh.HardwareAddr, dummy.Attrs().Name, intf.Attrs().Name)
-			} else {
-				// Add MAC address to alreadyExisting table
-				alreadyExisting = append(alreadyExisting, neigh.HardwareAddr)
-			}
-		}
-	}
+
+	alreadyExisting := getAlreadyExistingNeighbors(dummyNeighbors, requiredMACAddresses, dummy.Attrs().Name, intf.Attrs().Name)
 
 	// Add required MAC addresses when they are not yet existing (aka in alreadyExisting slice)
 	for _, neigh := range requiredMACAddresses {
@@ -136,6 +127,26 @@ func syncInterface(intf *netlink.Bridge) {
 			}
 		}
 	}
+}
+
+func getAlreadyExistingNeighbors(dummyNeighbors []netlink.Neigh, requiredMACAddresses []net.HardwareAddr, dummyName, intfName string) []net.HardwareAddr {
+	alreadyExisting := []net.HardwareAddr{}
+	for _, neigh := range dummyNeighbors {
+		// Look for unicast neighbor entries with no flags, no vlan, NUD_NOARP (static) fdb entries
+		if neigh.Vlan == 0 && neigh.Flags == 0 && neigh.State == netlink.NUD_NOARP && isUnicastMac(neigh.HardwareAddr) {
+			if !containsMACAddress(requiredMACAddresses, neigh.HardwareAddr) {
+				// If MAC Address is not in required MAC addresses, delete neighbor
+				if err := netlink.NeighDel(&neigh); err != nil {
+					fmt.Printf("Error deleting neighbor %v: %v\n", neigh, err)
+				}
+				fmt.Printf("Removed MAC address %s from dummy interface %s of bridge %s\n", neigh.HardwareAddr, dummyName, intfName)
+			} else {
+				// Add MAC address to alreadyExisting table
+				alreadyExisting = append(alreadyExisting, neigh.HardwareAddr)
+			}
+		}
+	}
+	return alreadyExisting
 }
 
 func RunMACSync(interfacePrefix string) {

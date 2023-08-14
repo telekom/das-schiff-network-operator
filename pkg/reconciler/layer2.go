@@ -86,7 +86,7 @@ func (r *reconcile) reconcileLayer2(l2vnis []networkv1alpha1.Layer2NetworkConfig
 		return err
 	}
 
-	delete := []nl.Layer2Information{}
+	toDelete := []nl.Layer2Information{}
 	for _, cfg := range existing {
 		stillExists := false
 		for _, info := range desired {
@@ -96,7 +96,7 @@ func (r *reconcile) reconcileLayer2(l2vnis []networkv1alpha1.Layer2NetworkConfig
 			}
 		}
 		if !stillExists {
-			delete = append(delete, cfg)
+			toDelete = append(toDelete, cfg)
 		}
 	}
 
@@ -116,23 +116,23 @@ func (r *reconcile) reconcileLayer2(l2vnis []networkv1alpha1.Layer2NetworkConfig
 			create = append(create, info)
 		} else {
 			r.Logger.Info("Reconciling existing Layer2", "vlan", info.VlanID, "vni", info.VNI)
-			err := r.netlinkManager.ReconcileL2(currentConfig, info)
+			err := r.netlinkManager.ReconcileL2(&currentConfig, &info)
 			if err != nil {
-				return fmt.Errorf("error reconciling layer2 vlan %d vni %d: %v", info.VlanID, info.VNI, err)
+				return fmt.Errorf("error reconciling layer2 vlan %d vni %d: %w", info.VlanID, info.VNI, err)
 			}
 			if info.AdvertiseNeighbors {
-				bridgeId, err := r.netlinkManager.GetBridgeId(info)
+				bridgeId, err := r.netlinkManager.GetBridgeID(&info)
 				if err != nil {
-					return fmt.Errorf("error getting bridge id for vlanId %d: %v", info.VlanID, err)
+					return fmt.Errorf("error getting bridge id for vlanId %d: %w", info.VlanID, err)
 				}
 				anycastTrackerInterfaces = append(anycastTrackerInterfaces, bridgeId)
 			}
 		}
 	}
 
-	for _, info := range delete {
+	for _, info := range toDelete {
 		r.Logger.Info("Deleting Layer2 because it is no longer configured", "vlan", info.VlanID, "vni", info.VNI)
-		errs := r.netlinkManager.CleanupL2(info)
+		errs := r.netlinkManager.CleanupL2(&info)
 		for _, err := range errs {
 			r.Logger.Error(err, "Error deleting Layer2", "vlan", info.VlanID, "vni", info.VNI)
 		}
@@ -140,14 +140,14 @@ func (r *reconcile) reconcileLayer2(l2vnis []networkv1alpha1.Layer2NetworkConfig
 
 	for _, info := range create {
 		r.Logger.Info("Creating Layer2", "vlan", info.VlanID, "vni", info.VNI)
-		err := r.netlinkManager.CreateL2(info)
+		err := r.netlinkManager.CreateL2(&info)
 		if err != nil {
-			return fmt.Errorf("error creating layer2 vlan %d vni %d: %v", info.VlanID, info.VNI, err)
+			return fmt.Errorf("error creating layer2 vlan %d vni %d: %w", info.VlanID, info.VNI, err)
 		}
 		if info.AdvertiseNeighbors {
-			bridgeId, err := r.netlinkManager.GetBridgeId(info)
+			bridgeId, err := r.netlinkManager.GetBridgeID(&info)
 			if err != nil {
-				return fmt.Errorf("error getting bridge id for vlanId %d: %v", info.VlanID, err)
+				return fmt.Errorf("error getting bridge id for vlanId %d: %w", info.VlanID, err)
 			}
 			anycastTrackerInterfaces = append(anycastTrackerInterfaces, bridgeId)
 		}
