@@ -7,18 +7,22 @@ import (
 	"github.com/telekom/das-schiff-network-operator/pkg/bpf"
 )
 
+const (
+	maxVRFnameLen = 12
+)
+
 type VRFInformation struct {
 	Name string
 	VNI  int
 
 	table    int
-	bridgeId int
-	vrfId    int
+	bridgeID int
+	vrfID    int
 }
 
 // Create will create a VRF and all interfaces neccessary to operate the EVPN and leaking
 func (n *NetlinkManager) CreateL3(info VRFInformation) error {
-	if len(info.Name) > 12 {
+	if len(info.Name) > maxVRFnameLen {
 		return fmt.Errorf("name of VRF can not be longer than 12 (15-3 prefix) chars")
 	}
 	freeTableID, err := n.findFreeTableID()
@@ -36,8 +40,8 @@ func (n *NetlinkManager) CreateL3(info VRFInformation) error {
 	if err != nil {
 		return err
 	}
-	if err = bpf.AttachToInterface(bridge); err != nil {
-		return err
+	if err := bpf.AttachToInterface(bridge); err != nil {
+		return fmt.Errorf("error attaching BPF: %w", err)
 	}
 
 	veth, err := n.createLink(VRF_TO_DEFAULT_PREFIX+info.Name, DEFAULT_TO_VRF_PREFIX+info.Name, vrf.Attrs().Index, DEFAULT_MTU, true)
@@ -45,15 +49,15 @@ func (n *NetlinkManager) CreateL3(info VRFInformation) error {
 		return err
 	}
 	if err := bpf.AttachToInterface(veth); err != nil {
-		return err
+		return fmt.Errorf("error attaching BPF: %w", err)
 	}
 
 	vxlan, err := n.createVXLAN(VXLAN_PREFIX+info.Name, bridge.Attrs().Index, info.VNI, DEFAULT_MTU, true, false)
 	if err != nil {
 		return err
 	}
-	if err = bpf.AttachToInterface(vxlan); err != nil {
-		return err
+	if err := bpf.AttachToInterface(vxlan); err != nil {
+		return fmt.Errorf("error attaching BPF: %w", err)
 	}
 
 	return nil
@@ -98,10 +102,6 @@ func (n *NetlinkManager) CleanupL3(name string) []error {
 	return errors
 }
 
-func (n *NetlinkManager) ListL3() ([]VRFInformation, error) {
-	return n.listL3()
-}
-
 func (n *NetlinkManager) findFreeTableID() (int, error) {
 	configuredVRFs, err := n.ListL3()
 	if err != nil {
@@ -128,7 +128,7 @@ func (n *NetlinkManager) findFreeTableID() (int, error) {
 }
 
 func (n *NetlinkManager) GetL3ByName(name string) (*VRFInformation, error) {
-	list, err := n.listL3()
+	list, err := n.ListL3()
 	if err != nil {
 		return nil, err
 	}

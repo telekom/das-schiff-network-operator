@@ -29,12 +29,12 @@ var (
 type NetlinkManager struct {
 }
 
-func (n *NetlinkManager) GetUnderlayIP() (net.IP, error) {
+func (*NetlinkManager) GetUnderlayIP() (net.IP, error) {
 	_, ip, err := getInterfaceAndIP(UNDERLAY_LOOPBACK)
 	return ip, err
 }
 
-func (n *NetlinkManager) GetHostRouterID() (net.IP, error) {
+func (*NetlinkManager) GetHostRouterID() (net.IP, error) {
 	_, ip, err := getInterfaceAndIP(NODE_LOOPBACK)
 	return ip, err
 }

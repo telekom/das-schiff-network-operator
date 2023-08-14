@@ -34,12 +34,12 @@ type Layer2Information struct {
 	macvlanHost   *netlink.Veth
 }
 
-func (n *NetlinkManager) ParseIPAddresses(addresses []string) ([]*netlink.Addr, error) {
+func (*NetlinkManager) ParseIPAddresses(addresses []string) ([]*netlink.Addr, error) {
 	addrs := []*netlink.Addr{}
 	for _, ip := range addresses {
 		addr, err := netlink.ParseAddr(ip)
 		if err != nil {
-			return nil, fmt.Errorf("error while parsing address: %w", err)
+			return nil, fmt.Errorf("error while parsing IP address: %w", err)
 		}
 		addrs = append(addrs, addr)
 	}
@@ -53,7 +53,7 @@ func (n *NetlinkManager) CreateL2(info *Layer2Information) error {
 		if err != nil {
 			return err
 		}
-		masterIdx = l3Info.vrfId
+		masterIdx = l3Info.vrfID
 	}
 
 	if len(info.AnycastGateways) > 0 && info.AnycastMAC == nil {
@@ -139,7 +139,7 @@ func (n *NetlinkManager) setupVXLAN(info *Layer2Information, bridge *netlink.Bri
 	return nil
 }
 
-func (n *NetlinkManager) CleanupL2(info *Layer2Information) []error {
+func (*NetlinkManager) CleanupL2(info *Layer2Information) []error {
 	errors := []error{}
 	if info.vxlan != nil {
 		if err := netlink.LinkDel(info.vxlan); err != nil {
@@ -168,7 +168,7 @@ func containsNetlinkAddress(list []*netlink.Addr, addr *netlink.Addr) bool {
 	return false
 }
 
-func (n *NetlinkManager) reconcileIPAddresses(intf netlink.Link, current, desired []*netlink.Addr) error {
+func (*NetlinkManager) reconcileIPAddresses(intf netlink.Link, current, desired []*netlink.Addr) error {
 	for _, addr := range desired {
 		if !containsNetlinkAddress(current, addr) {
 			if err := netlink.AddrAdd(intf, addr); err != nil {
@@ -321,7 +321,7 @@ func (n *NetlinkManager) isL2VNIreattachRequired(current, desired *Layer2Informa
 			if err != nil {
 				return shouldReattachL2VNI, fmt.Errorf("error while getting L3 by name: %w", err)
 			}
-			if err := netlink.LinkSetMasterByIndex(current.bridge, l3Info.vrfId); err != nil {
+			if err := netlink.LinkSetMasterByIndex(current.bridge, l3Info.vrfID); err != nil {
 				return shouldReattachL2VNI, fmt.Errorf("error while setting master by index: %w", err)
 			}
 		} else {
@@ -362,7 +362,7 @@ func (n *NetlinkManager) setupMACVLANinterface(current, desired *Layer2Informati
 	return nil
 }
 
-func (n *NetlinkManager) configureBridge(intfName string) error {
+func (*NetlinkManager) configureBridge(intfName string) error {
 	// Ensure bridge can receive gratitious ARP
 	if err := os.WriteFile(fmt.Sprintf("/proc/sys/net/ipv4/conf/%s/arp_accept", intfName), []byte("1"), neighFilePermissions); err != nil {
 		return fmt.Errorf("error setting arp_accept = 1 for interface: %w", err)
@@ -384,11 +384,7 @@ func (n *NetlinkManager) configureBridge(intfName string) error {
 	return nil
 }
 
-func (n *NetlinkManager) ListL2() ([]Layer2Information, error) {
-	return n.listL2()
-}
-
-func (n *NetlinkManager) GetBridgeID(info *Layer2Information) (int, error) {
+func (*NetlinkManager) GetBridgeID(info *Layer2Information) (int, error) {
 	bridgeName := fmt.Sprintf("%s%d", LAYER2_PREFIX, info.VlanID)
 	link, err := netlink.LinkByName(bridgeName)
 	if err != nil {
