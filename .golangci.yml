@@ -1,0 +1,89 @@
+linters:
+  disable-all: true
+  enable:
+  - asciicheck
+  - bodyclose
+  - containedctx
+  - contextcheck
+  - cyclop 
+  - decorder
+  - dogsled
+  - errcheck
+  - errorlint
+  - exportloopref
+  - funlen
+  - gci
+  - ginkgolinter
+  - gocognit
+  - goconst
+  - gocritic
+  - gocyclo
+  - godot
+  - gofmt
+  - goimports
+  - gomnd
+  - goprintffuncname
+  - gosec
+  - gosimple
+  - govet
+  - importas
+  - ineffassign
+  - misspell
+  - nakedret
+  - nilerr
+  - noctx
+  - nolintlint
+  - prealloc
+  - predeclared
+  - revive
+  - rowserrcheck
+  - staticcheck
+  - stylecheck
+  - thelper
+  - typecheck
+  - unconvert
+  - unparam
+  - unused
+  - usestdlibvars
+  - wastedassign
+  - whitespace
+  - wrapcheck
+
+linters-settings:
+  godot:
+    scope: toplevel
+    exclude:
+    - '^ \+.*'
+    - '^ ANCHOR.*'
+  importas:
+    no-unaliased: true
+    alias:
+      # Kubernetes
+      - pkg: k8s.io/api/core/v1
+        alias: corev1
+      - pkg: k8s.io/apimachinery/pkg/apis/meta/v1
+        alias: metav1
+      # Controller Runtime
+      - pkg: sigs.k8s.io/controller-runtime
+        alias: ctrl
+  nolintlint:
+    allow-unused: false
+    allow-leading-space: false
+    require-specific: true
+  staticcheck:
+    go: "1.19"
+  stylecheck:
+    go: "1.19"
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - style
+      - performance
+      - experimental
+      - opinionated
+  unused:
+    go: "1.19"
+
+run:
+  timeout: 10m
+  allow-parallel-runners: true
