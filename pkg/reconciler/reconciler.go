@@ -71,6 +71,9 @@ func (reconciler *Reconciler) reconcileDebounced(ctx context.Context) error {
 		Logger:     log.FromContext(ctx),
 	}
 
+	r.Logger.Info("Reloading config")
+	r.config.ReloadConfig()
+
 	l3vnis, err := r.fetchLayer3()
 	if err != nil {
 		return err
