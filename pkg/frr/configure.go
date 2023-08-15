@@ -57,10 +57,6 @@ func (f *FRRManager) renderSubtemplates(in FRRConfiguration) (*FRRTemplateConfig
 	if err != nil {
 		return nil, err
 	}
-	hostRouterId, err := (&nl.NetlinkManager{}).GetHostRouterID()
-	if err != nil {
-		return nil, err
-	}
 	hostname, err := os.Hostname()
 	if err != nil {
 		return nil, err
@@ -113,7 +109,6 @@ func (f *FRRManager) renderSubtemplates(in FRRConfiguration) (*FRRTemplateConfig
 		PrefixLists:      string(prefixlists),
 		RouteMaps:        string(routemaps),
 		UnderlayRouterID: vrfRouterId.String(),
-		HostRouterID:     hostRouterId.String(),
 		Hostname:         hostname,
 	}, nil
 }
