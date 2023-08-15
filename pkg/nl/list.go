@@ -39,18 +39,18 @@ func (n *NetlinkManager) listL3() ([]VRFInformation, error) {
 
 func (n *NetlinkManager) updateL3Indices(info *VRFInformation) error {
 	bridgeLink, err := netlink.LinkByName(BRIDGE_PREFIX + info.Name)
-	if err != nil {
-		return err
+	if err == nil {
+		info.bridgeId = bridgeLink.Attrs().Index
+	} else {
+		info.MarkForDelete = true
 	}
-	vxlanLink, err := netlink.LinkByName(VXLAN_PREFIX + info.Name)
-	if err != nil {
-		return err
-	}
-	netlinkBridge := bridgeLink.(*netlink.Bridge)
-	netlinkVXLAN := vxlanLink.(*netlink.Vxlan)
 
-	info.bridgeId = netlinkBridge.Attrs().Index
-	info.VNI = netlinkVXLAN.VxlanId
+	vxlanLink, err := netlink.LinkByName(VXLAN_PREFIX + info.Name)
+	if err == nil {
+		info.VNI = vxlanLink.(*netlink.Vxlan).VxlanId
+	} else {
+		info.MarkForDelete = true
+	}
 	return nil
 }
 
