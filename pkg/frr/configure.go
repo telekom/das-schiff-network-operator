@@ -24,7 +24,6 @@ type templateConfig struct {
 
 	Hostname         string
 	UnderlayRouterID string
-	HostRouterID     string
 }
 
 func (m *Manager) Configure(in Configuration) (bool, error) {
@@ -59,10 +58,7 @@ func renderSubtemplates(in Configuration) (*templateConfig, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error getting underlay IP: %w", err)
 	}
-	hostRouterID, err := (&nl.NetlinkManager{}).GetHostRouterID()
-	if err != nil {
-		return nil, fmt.Errorf("error getting host router ID: %w", err)
-	}
+
 	hostname := os.Getenv(healthcheck.NodenameEnv)
 	if hostname == "" {
 		return nil, fmt.Errorf("error getting node's name")
@@ -115,7 +111,6 @@ func renderSubtemplates(in Configuration) (*templateConfig, error) {
 		PrefixLists:      string(prefixlists),
 		RouteMaps:        string(routemaps),
 		UnderlayRouterID: vrfRouterID.String(),
-		HostRouterID:     hostRouterID.String(),
 		Hostname:         hostname,
 	}, nil
 }

@@ -18,7 +18,6 @@ const (
 	vethL2Prefix       = "l2v."
 
 	underlayLoopback = "dum.underlay"
-	nodeLoopback     = "br.cluster"
 
 	vxlanPort  = 4789
 	defaultMtu = 9000
@@ -31,10 +30,5 @@ type NetlinkManager struct {
 
 func (*NetlinkManager) GetUnderlayIP() (net.IP, error) {
 	_, ip, err := getInterfaceAndIP(underlayLoopback)
-	return ip, err
-}
-
-func (*NetlinkManager) GetHostRouterID() (net.IP, error) {
-	_, ip, err := getInterfaceAndIP(nodeLoopback)
 	return ip, err
 }
