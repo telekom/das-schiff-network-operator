@@ -28,6 +28,14 @@ type VRFConfig struct {
 func LoadConfig() (*Config, error) {
 	config := &Config{}
 
+	if err := config.ReloadConfig(); err != nil {
+		return nil, err
+	}
+
+	return config, nil
+}
+
+func (c *Config) ReloadConfig() error {
 	vniFile := vniMapFile
 	if val := os.Getenv("OPERATOR_CONFIG"); val != "" {
 		vniFile = val
@@ -35,14 +43,13 @@ func LoadConfig() (*Config, error) {
 
 	read, err := os.ReadFile(vniFile)
 	if err != nil {
-		return nil, fmt.Errorf("error reading config file: %w", err)
+		return fmt.Errorf("error reading config file: %w", err)
 	}
-	err = yaml.Unmarshal(read, &config)
+	err = yaml.Unmarshal(read, c)
 	if err != nil {
-		return nil, fmt.Errorf("error unmarshalling config file: %w", err)
+		return fmt.Errorf("error unmarshalling config file: %w", err)
 	}
-
-	return config, nil
+	return nil
 }
 
 func (c *Config) ShouldSkipVRFConfig(vrf string) bool {
