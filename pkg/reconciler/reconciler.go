@@ -20,7 +20,7 @@ type Reconciler struct {
 	client         client.Client
 	netlinkManager *nl.NetlinkManager
 	frrManager     *frr.FRRManager
-	anycastTracker *anycast.AnycastTracker
+	anycastTracker *anycast.Tracker
 	config         *config.Config
 
 	debouncer *debounce.Debouncer
@@ -34,7 +34,7 @@ type reconcile struct {
 	logr.Logger
 }
 
-func NewReconciler(client client.Client, anycastTracker *anycast.AnycastTracker) (*Reconciler, error) {
+func NewReconciler(client client.Client, anycastTracker *anycast.Tracker) (*Reconciler, error) {
 	reconciler := &Reconciler{
 		client:         client,
 		netlinkManager: &nl.NetlinkManager{},

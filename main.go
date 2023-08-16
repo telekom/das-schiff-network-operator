@@ -95,7 +95,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	anycastTracker := &anycast.AnycastTracker{}
+	anycastTracker := &anycast.Tracker{}
 
 	if err = (&networkv1alpha1.VRFRouteConfiguration{}).SetupWebhookWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create webhook", "webhook", "VRFRouteConfiguration")
@@ -152,7 +152,9 @@ func main() {
 	anycastTracker.RunAnycastSync()
 
 	setupLog.Info("start notrack sync")
-	notrack.RunIPTablesSync()
+	if err := notrack.RunIPTablesSync(); err != nil {
+		setupLog.Error(err, "error starting IPTables sync")
+	}
 
 	if len(interfacePrefix) > 0 {
 		setupLog.Info("start macvlan sync")
