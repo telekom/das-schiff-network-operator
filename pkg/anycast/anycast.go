@@ -20,7 +20,7 @@ type Tracker struct {
 	TrackedBridges []int
 }
 
-//TODO: Anycast Support is currently highly experimental.
+// TODO: Anycast Support is currently highly experimental.
 
 func (t *Tracker) checkTrackedInterfaces() {
 	for _, intfIdx := range t.TrackedBridges {

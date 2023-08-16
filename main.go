@@ -139,7 +139,10 @@ func main() {
 	}
 
 	setupLog.Info("load bpf program into Kernel")
-	bpf.InitBPFRouter()
+	if err := bpf.InitBPFRouter(); err != nil {
+		setupLog.Error(err, "unable to init BPF router")
+		os.Exit(1)
+	}
 	setupLog.Info("attach bpf to interfaces specified in config")
 	if err := bpf.AttachInterfaces(config.BPFInterfaces); err != nil {
 		setupLog.Error(err, "unable to attach bpf to interfaces")

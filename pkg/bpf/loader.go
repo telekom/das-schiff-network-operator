@@ -2,6 +2,7 @@ package bpf
 
 import (
 	"errors"
+	"fmt"
 	"log"
 	"time"
 
@@ -13,20 +14,27 @@ import (
 
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target amd64 router ../../bpf/router.c
 
+const (
+	majorNumber = 0xffff
+	minorNumebr = 0
+	sleepTime   = 5 * time.Second
+)
+
 var (
 	router                  routerObjects
 	trackedInterfaceIndices []int
-	qdiscHandle             = netlink.MakeHandle(0xffff, 0)
+	qdiscHandle             = netlink.MakeHandle(majorNumber, minorNumebr)
 )
 
-func InitBPFRouter() {
+func InitBPFRouter() error {
 	if err := rlimit.RemoveMemlock(); err != nil {
-		log.Fatal(err)
+		return fmt.Errorf("error removing memlock: %w", err)
 	}
 	if err := loadRouterObjects(&router, nil); err != nil {
-		log.Fatal(err)
+		return err
 	}
 	initMonitoring()
+	return nil
 }
 
 func AttachToInterface(intf netlink.Link) error {
@@ -42,7 +50,7 @@ func AttachInterfaces(intfs []string) error {
 	for _, name := range intfs {
 		intf, err := netlink.LinkByName(name)
 		if err != nil {
-			return err
+			return fmt.Errorf("error getting link %s by name: %w", name, err)
 		}
 		if err := AttachToInterface(intf); err != nil {
 			return err
@@ -56,7 +64,7 @@ func AttachInterfaces(intfs []string) error {
 func ensureQdisc(intf netlink.Link) error {
 	qdiscs, err := netlink.QdiscList(intf)
 	if err != nil {
-		return err
+		return fmt.Errorf("error listing Qdisc for interface %s: %w", intf.Attrs().Name, err)
 	}
 
 	for _, qdisc := range qdiscs {
@@ -72,18 +80,23 @@ func ensureQdisc(intf netlink.Link) error {
 		},
 		QdiscType: "clsact",
 	}
-	return netlink.QdiscAdd(qdisc)
+
+	if err := netlink.QdiscAdd(qdisc); err != nil {
+		return fmt.Errorf("error adding Qdisc: %w", err)
+	}
+
+	return nil
 }
 
 // Ensure a Filter is set on the clsact qdisc which
 func ensureFilter(intf netlink.Link) error {
 	filters, err := netlink.FilterList(intf, netlink.HANDLE_MIN_INGRESS)
 	if err != nil {
-		return err
+		return fmt.Errorf("error getting list of filters for interface %s: %w", intf.Attrs().Name, err)
 	}
 	programInfo, err := router.TcRouterFunc.Info()
 	if err != nil {
-		return err
+		return fmt.Errorf("error getting program info: %w", err)
 	}
 	programID, _ := programInfo.ID()
 	for _, filter := range filters {
@@ -104,7 +117,12 @@ func ensureFilter(intf netlink.Link) error {
 		Fd:           router.TcRouterFunc.FD(),
 		Name:         "tc_router",
 	}
-	return netlink.FilterReplace(filter)
+
+	if err := netlink.FilterReplace(filter); err != nil {
+		return fmt.Errorf("error replacing filter: %w", err)
+	}
+
+	return nil
 }
 
 func attach(intf netlink.Link) error {
@@ -112,7 +130,7 @@ func attach(intf netlink.Link) error {
 
 	if intf.Type() == "vxlan" {
 		if err := router.LookupPort.Put(int32(ifIndex), int32(intf.Attrs().MasterIndex)); err != nil {
-			return err
+			return fmt.Errorf("error attaching eBPF map element: %w", err)
 		}
 	}
 	if err := ensureQdisc(intf); err != nil {
@@ -129,7 +147,7 @@ func checkTrackedInterfaces() {
 		idx := trackedInterfaceIndices[i]
 		link, err := netlink.LinkByIndex(idx)
 
-		if _, ok := err.(netlink.LinkNotFoundError); ok {
+		if errors.As(err, &netlink.LinkNotFoundError{}) {
 			trackedInterfaceIndices = append(trackedInterfaceIndices[:i], trackedInterfaceIndices[i+1:]...)
 			i--
 			log.Printf("Link %d no longer found - removing from all BPF tracked tables\n", idx)
@@ -137,11 +155,9 @@ func checkTrackedInterfaces() {
 				log.Printf("Error removing link %d from BPF Maps: %v\n", idx, err)
 			}
 			continue
-		} else {
-			if err != nil {
-				log.Printf("Error fetching link %d from Netlink: %v\n", idx, err)
-				continue
-			}
+		} else if err != nil {
+			log.Printf("Error fetching link %d from Netlink: %v\n", idx, err)
+			continue
 		}
 
 		if err := attach(link); err != nil {
@@ -152,7 +168,7 @@ func checkTrackedInterfaces() {
 
 func removeFromBPFMap(idx int) error {
 	if err := router.LookupPort.Delete(int32(idx)); err != nil && !errors.Is(err, ebpf.ErrKeyNotExist) {
-		return err
+		return fmt.Errorf("error deleting eBPF map element: %w", err)
 	}
 	return nil
 }
@@ -161,7 +177,7 @@ func RunInterfaceCheck() {
 	go func() {
 		for {
 			checkTrackedInterfaces()
-			time.Sleep(5 * time.Second)
+			time.Sleep(sleepTime)
 		}
 	}()
 }
