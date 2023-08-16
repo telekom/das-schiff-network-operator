@@ -3,6 +3,7 @@ package frr
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"net"
 	"os"
@@ -12,9 +13,11 @@ import (
 	"github.com/telekom/das-schiff-network-operator/pkg/config"
 )
 
+const defaultPermissions = 0o640
+
 var (
-	FRR_UNIT        = "frr.service"
-	FRR_PERMISSIONS = fs.FileMode(0640)
+	frrUnit        = "frr.service"
+	frrPermissions = fs.FileMode(defaultPermissions)
 )
 
 type FRRManager struct {
@@ -70,31 +73,31 @@ func (m *FRRManager) Init() error {
 
 	bytes, err := os.ReadFile(m.TemplatePath)
 	if err != nil {
-		return err
+		return fmt.Errorf("error reading template file %s: %w", m.TemplatePath, err)
 	}
 	tpl, err := template.New("frr_config").Parse(string(bytes))
 	if err != nil {
-		return err
+		return fmt.Errorf("error creating new FRR config: %w", err)
 	}
 	m.configTemplate = tpl
 	return nil
 }
 
-func (m *FRRManager) ReloadFRR() error {
+func (*FRRManager) ReloadFRR() error {
 	con, err := dbus.NewSystemConnectionContext(context.Background())
 	if err != nil {
-		return err
+		return fmt.Errorf("error creating nee D-Bus connection: %w", err)
 	}
 	defer con.Close()
 
-	_, err = con.ReloadUnitContext(context.Background(), FRR_UNIT, "fail", nil)
-	return err
+	_, err = con.ReloadUnitContext(context.Background(), frrUnit, "fail", nil)
+	return fmt.Errorf("error realoading %s context: %w", frrUnit, err)
 }
 
-func (v VRFConfiguration) ShouldTemplateVRF() bool {
+func (v *VRFConfiguration) ShouldTemplateVRF() bool {
 	return v.VNI != config.SkipVrfTemplateVni
 }
 
-func (v VRFConfiguration) ShouldDefineRT() bool {
+func (v *VRFConfiguration) ShouldDefineRT() bool {
 	return v.RT != ""
 }

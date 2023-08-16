@@ -1,10 +1,10 @@
 package frr
 
 import (
-	_ "embed"
-	"os"
-
 	"bytes"
+	_ "embed"
+	"fmt"
+	"os"
 	"regexp"
 	"text/template"
 )
@@ -12,46 +12,46 @@ import (
 // Template for VRF config
 //
 //go:embed tpl/vrf.tpl
-var VRF_RAW_TPL string
+var vrfRawTpl string
 
 // Template for route-maps
 //
 //go:embed tpl/route-map.tpl
-var ROUTE_MAP_RAW_TPL string
+var routeMapRawTpl string
 
 // Template for ip prefix-list
 //
 //go:embed tpl/prefix-list.tpl
-var PREFIX_LIST_RAW_TPL string
+var prefixListRawTpl string
 
 // Template for bgp neighbor
 //
 //go:embed tpl/bgp-neighbor.tpl
-var NEIGHBOR_RAW_TPL string
+var neighborRawTpl string
 
 // Template for bgp v4 neighbor
 //
 //go:embed tpl/bgp-neighbor-v4.tpl
-var NEIGHBOR_V4_RAW_TPL string
+var neighborV4RawTpl string
 
 // Template for bgp v4 neighbor
 //
 //go:embed tpl/bgp-neighbor-v6.tpl
-var NEIGHBOR_V6_RAW_TPL string
+var neighborV6RawTpl string
 
 // Template for VRF BGP instance
 //
 //go:embed tpl/bgp.tpl
-var BGP_INSTANCE_RAW_TPL string
+var bgpInstanceRawTpl string
 
 var (
-	VRF_TPL          = mustParse("vrf", VRF_RAW_TPL)
-	ROUTE_MAP_TPL    = mustParse("route-map", ROUTE_MAP_RAW_TPL)
-	PREFIX_LIST_TPL  = mustParse("prefix-list", PREFIX_LIST_RAW_TPL)
-	NEIGHBOR_TPL     = mustParse("neighbor", NEIGHBOR_RAW_TPL)
-	NEIGHBOR_V4_TPL  = mustParse("neighborv4", NEIGHBOR_V4_RAW_TPL)
-	NEIGHBOR_V6_TPL  = mustParse("neighborv6", NEIGHBOR_V6_RAW_TPL)
-	BGP_INSTANCE_TPL = mustParse("bgpinstance", BGP_INSTANCE_RAW_TPL)
+	vrfTpl         = mustParse("vrf", vrfRawTpl)
+	routeMapTpl    = mustParse("route-map", routeMapRawTpl)
+	prefixListTpl  = mustParse("prefix-list", prefixListRawTpl)
+	neighborTpl    = mustParse("neighbor", neighborRawTpl)
+	neighborV4Tpl  = mustParse("neighborv4", neighborV4RawTpl)
+	neighborV6Tpl  = mustParse("neighborv6", neighborV6RawTpl)
+	bgpInstanceTpl = mustParse("bgpinstance", bgpInstanceRawTpl)
 )
 
 type bgpInstanceConfig struct {
@@ -60,7 +60,7 @@ type bgpInstanceConfig struct {
 	ASN      int
 }
 
-func mustParse(name string, rawtpl string) *template.Template {
+func mustParse(name, rawtpl string) *template.Template {
 	tpl, err := template.New(name).Parse(rawtpl)
 	if err != nil {
 		panic(err)
@@ -72,24 +72,24 @@ func render(tpl *template.Template, vrfs interface{}) ([]byte, error) {
 	buf := bytes.Buffer{}
 	err := tpl.Execute(&buf, vrfs)
 	if err != nil {
-		return []byte{}, err
+		return []byte{}, fmt.Errorf("error executing template: %w", err)
 	}
 	return buf.Bytes(), nil
 }
 
-func generateTemplateConfig(template string, original string) error {
-	bytes, err := os.ReadFile(original)
+func generateTemplateConfig(tplFile, original string) error {
+	fileContent, err := os.ReadFile(original)
 	if err != nil {
-		return err
+		return fmt.Errorf("error reading template file %s: %w", tplFile, err)
 	}
-	content := string(bytes)
+	content := string(fileContent)
 
 	commentToRemove := regexp.MustCompile(`(?m)^\#\+\+`)
 	content = commentToRemove.ReplaceAllString(content, "")
 
-	err = os.WriteFile(template, []byte(content), FRR_PERMISSIONS)
+	err = os.WriteFile(tplFile, []byte(content), frrPermissions)
 	if err != nil {
-		return err
+		return fmt.Errorf("error writing template file %s: %w", tplFile, err)
 	}
 
 	return nil

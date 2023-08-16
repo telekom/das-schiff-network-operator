@@ -2,6 +2,7 @@ package frr
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
@@ -11,7 +12,7 @@ var (
 	VRF_ASN_CONFIG = 4200065169
 )
 
-type FRRTemplateConfig struct {
+type templateConfig struct {
 	VRFs        string
 	Neighbors   string
 	NeighborsV4 string
@@ -33,7 +34,7 @@ func (m *FRRManager) Configure(in FRRConfiguration) (bool, error) {
 
 	currentConfig, err := os.ReadFile(m.ConfigPath)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("error reading configuration file: %w", err)
 	}
 
 	targetConfig, err := render(m.configTemplate, config)
@@ -42,51 +43,51 @@ func (m *FRRManager) Configure(in FRRConfiguration) (bool, error) {
 	}
 
 	if !bytes.Equal(currentConfig, targetConfig) {
-		err = os.WriteFile(m.ConfigPath, targetConfig, FRR_PERMISSIONS)
+		err = os.WriteFile(m.ConfigPath, targetConfig, frrPermissions)
 		if err != nil {
-			return false, err
+			return false, fmt.Errorf("error writing configuration file: %w", err)
 		}
 
-		return true, err
+		return true, nil
 	}
 	return false, nil
 }
 
-func (f *FRRManager) renderSubtemplates(in FRRConfiguration) (*FRRTemplateConfig, error) {
-	vrfRouterId, err := (&nl.NetlinkManager{}).GetUnderlayIP()
+func (*FRRManager) renderSubtemplates(in FRRConfiguration) (*templateConfig, error) {
+	vrfRouterID, err := (&nl.NetlinkManager{}).GetUnderlayIP()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error getting underly IP: %w", err)
 	}
-	hostRouterId, err := (&nl.NetlinkManager{}).GetHostRouterID()
+	hostRouterID, err := (&nl.NetlinkManager{}).GetHostRouterID()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error gettigng hostname: %w", err)
 	}
 	hostname, err := os.Hostname()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error gettigng hostname: %w", err)
 	}
 
-	vrfs, err := render(VRF_TPL, in.VRFs)
+	vrfs, err := render(vrfTpl, in.VRFs)
 	if err != nil {
 		return nil, err
 	}
-	neighbors, err := render(NEIGHBOR_TPL, in.VRFs)
+	neighbors, err := render(neighborTpl, in.VRFs)
 	if err != nil {
 		return nil, err
 	}
-	neighborsV4, err := render(NEIGHBOR_V4_TPL, in.VRFs)
+	neighborsV4, err := render(neighborV4Tpl, in.VRFs)
 	if err != nil {
 		return nil, err
 	}
-	neighborsV6, err := render(NEIGHBOR_V6_TPL, in.VRFs)
+	neighborsV6, err := render(neighborV6Tpl, in.VRFs)
 	if err != nil {
 		return nil, err
 	}
-	prefixlists, err := render(PREFIX_LIST_TPL, in.VRFs)
+	prefixlists, err := render(prefixListTpl, in.VRFs)
 	if err != nil {
 		return nil, err
 	}
-	routemaps, err := render(ROUTE_MAP_TPL, in.VRFs)
+	routemaps, err := render(routeMapTpl, in.VRFs)
 	if err != nil {
 		return nil, err
 	}
@@ -95,16 +96,16 @@ func (f *FRRManager) renderSubtemplates(in FRRConfiguration) (*FRRTemplateConfig
 		asn = VRF_ASN_CONFIG
 	}
 	// Special handling for BGP instance rendering (we need ASN and Router ID)
-	bgp, err := render(BGP_INSTANCE_TPL, bgpInstanceConfig{
+	bgp, err := render(bgpInstanceTpl, bgpInstanceConfig{
 		VRFs:     in.VRFs,
-		RouterID: vrfRouterId.String(),
+		RouterID: vrfRouterID.String(),
 		ASN:      asn,
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	return &FRRTemplateConfig{
+	return &templateConfig{
 		VRFs:             string(vrfs),
 		Neighbors:        string(neighbors),
 		NeighborsV4:      string(neighborsV4),
@@ -112,8 +113,8 @@ func (f *FRRManager) renderSubtemplates(in FRRConfiguration) (*FRRTemplateConfig
 		BGP:              string(bgp),
 		PrefixLists:      string(prefixlists),
 		RouteMaps:        string(routemaps),
-		UnderlayRouterID: vrfRouterId.String(),
-		HostRouterID:     hostRouterId.String(),
+		UnderlayRouterID: vrfRouterID.String(),
+		HostRouterID:     hostRouterID.String(),
 		Hostname:         hostname,
 	}, nil
 }
