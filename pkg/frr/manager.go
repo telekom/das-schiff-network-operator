@@ -92,7 +92,7 @@ func (m *FRRManager) ReloadFRR() error {
 }
 
 func (v VRFConfiguration) ShouldTemplateVRF() bool {
-	return v.VNI != config.SKIP_VRF_TEMPLATE_VNI
+	return v.VNI != config.SkipVrfTemplateVni
 }
 
 func (v VRFConfiguration) ShouldDefineRT() bool {

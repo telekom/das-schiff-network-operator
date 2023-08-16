@@ -41,7 +41,7 @@ func (r *reconcile) reconcileLayer3(l3vnis []networkv1alpha1.VRFRouteConfigurati
 			vni = val
 			r.Logger.Info("Configuring VRF from old VRFToVNI", "vrf", spec.VRF, "vni", val)
 		} else if r.config.ShouldSkipVRFConfig(spec.VRF) {
-			vni = config.SKIP_VRF_TEMPLATE_VNI
+			vni = config.SkipVrfTemplateVni
 		} else {
 			err := fmt.Errorf("vrf not in vrf vni map")
 			r.Logger.Error(err, "VRF does not exist in VRF VNI config", "vrf", spec.VRF, "name", vrf.ObjectMeta.Name, "namespace", vrf.ObjectMeta.Namespace)
@@ -161,7 +161,7 @@ func (r *reconcile) reconcileL3Netlink(vrfConfigs []frr.VRFConfiguration) ([]nl.
 	create := []nl.VRFInformation{}
 	for _, vrf := range vrfConfigs {
 		// Skip VRF with VNI SKIP_VRF_TEMPLATE_VNI
-		if vrf.VNI == config.SKIP_VRF_TEMPLATE_VNI {
+		if vrf.VNI == config.SkipVrfTemplateVni {
 			continue
 		}
 		alreadyExists := false
