@@ -61,7 +61,7 @@ func (n *NetlinkManager) createBridge(bridgeName string, macAddress *net.Hardwar
 }
 
 func (n *NetlinkManager) createVXLAN(vxlanName string, bridgeIdx, vni, mtu int, hairpin, neighSuppression bool) (*netlink.Vxlan, error) {
-	vxlanIf, vxlanIP, err := getInterfaceAndIP(UNDERLAY_LOOPBACK)
+	vxlanIf, vxlanIP, err := getInterfaceAndIP(underlayLoopback)
 	if err != nil {
 		return nil, err
 	}
@@ -82,7 +82,7 @@ func (n *NetlinkManager) createVXLAN(vxlanName string, bridgeIdx, vni, mtu int, 
 		VtepDevIndex: vxlanIf,
 		SrcAddr:      vxlanIP,
 		Learning:     false,
-		Port:         VXLAN_PORT,
+		Port:         vxlanPort,
 	}
 	if err := netlink.LinkAdd(&netlinkVXLAN); err != nil {
 		return nil, fmt.Errorf("error adding link: %w", err)
@@ -155,7 +155,7 @@ func (*NetlinkManager) setUp(intfName string) error {
 }
 
 func generateUnderlayMAC() (net.HardwareAddr, error) {
-	_, vxlanIP, err := getInterfaceAndIP(UNDERLAY_LOOPBACK)
+	_, vxlanIP, err := getInterfaceAndIP(underlayLoopback)
 	if err != nil {
 		return nil, err
 	}
@@ -186,7 +186,7 @@ func generateMAC(ip net.IP) (net.HardwareAddr, error) {
 		return nil, fmt.Errorf("generateMAC is only working with IPv4 addresses")
 	}
 	hwaddr := make([]byte, hwAddrByteSize)
-	copy(hwaddr, MAC_PREFIX)
+	copy(hwaddr, macPrefix)
 	copy(hwaddr[2:], ip.To4())
 	return hwaddr, nil
 }

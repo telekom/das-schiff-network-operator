@@ -69,7 +69,7 @@ func (n *NetlinkManager) CreateL2(info *Layer2Information) error {
 }
 
 func (n *NetlinkManager) setupBridge(info *Layer2Information, masterIdx int) (*netlink.Bridge, error) {
-	bridge, err := n.createBridge(fmt.Sprintf("%s%d", LAYER2_PREFIX, info.VlanID), info.AnycastMAC, masterIdx, info.MTU)
+	bridge, err := n.createBridge(fmt.Sprintf("%s%d", layer2Prefix, info.VlanID), info.AnycastMAC, masterIdx, info.MTU)
 	if err != nil {
 		return nil, err
 	}
@@ -102,7 +102,7 @@ func (n *NetlinkManager) setupVXLAN(info *Layer2Information, bridge *netlink.Bri
 		neighSuppression = *info.NeighSuppression
 	}
 	vxlan, err := n.createVXLAN(
-		fmt.Sprintf("%s%d", VXLAN_PREFIX, info.VNI),
+		fmt.Sprintf("%s%d", vxlanPrefix, info.VNI),
 		bridge.Attrs().Index,
 		info.VNI,
 		info.MTU,
@@ -119,8 +119,8 @@ func (n *NetlinkManager) setupVXLAN(info *Layer2Information, bridge *netlink.Bri
 
 	if info.CreateMACVLANInterface {
 		_, err := n.createLink(
-			fmt.Sprintf("%s%d", VETH_L2_PREFIX, info.VlanID),
-			fmt.Sprintf("%s%d", MACVLAN_PREFIX, info.VlanID),
+			fmt.Sprintf("%s%d", vethL2Prefix, info.VlanID),
+			fmt.Sprintf("%s%d", macvlanPrefix, info.VlanID),
 			bridge.Attrs().Index,
 			info.MTU,
 			false,
@@ -128,10 +128,10 @@ func (n *NetlinkManager) setupVXLAN(info *Layer2Information, bridge *netlink.Bri
 		if err != nil {
 			return err
 		}
-		if err := n.setUp(fmt.Sprintf("%s%d", VETH_L2_PREFIX, info.VlanID)); err != nil {
+		if err := n.setUp(fmt.Sprintf("%s%d", vethL2Prefix, info.VlanID)); err != nil {
 			return err
 		}
-		if err := n.setUp(fmt.Sprintf("%s%d", MACVLAN_PREFIX, info.VlanID)); err != nil {
+		if err := n.setUp(fmt.Sprintf("%s%d", macvlanPrefix, info.VlanID)); err != nil {
 			return err
 		}
 	}
@@ -221,7 +221,7 @@ func (n *NetlinkManager) ReconcileL2(current, desired *Layer2Information) error 
 		return err
 	}
 
-	if err := n.configureBridge(fmt.Sprintf("%s%d", LAYER2_PREFIX, current.VlanID)); err != nil {
+	if err := n.configureBridge(fmt.Sprintf("%s%d", layer2Prefix, current.VlanID)); err != nil {
 		return err
 	}
 
@@ -349,8 +349,8 @@ func (n *NetlinkManager) setupMACVLANinterface(current, desired *Layer2Informati
 		}
 	} else if !current.CreateMACVLANInterface && desired.CreateMACVLANInterface {
 		_, err := n.createLink(
-			fmt.Sprintf("%s%d", VETH_L2_PREFIX, current.VlanID),
-			fmt.Sprintf("%s%d", MACVLAN_PREFIX, current.VlanID),
+			fmt.Sprintf("%s%d", vethL2Prefix, current.VlanID),
+			fmt.Sprintf("%s%d", macvlanPrefix, current.VlanID),
 			current.bridge.Attrs().Index,
 			desired.MTU,
 			false,
@@ -385,7 +385,7 @@ func (*NetlinkManager) configureBridge(intfName string) error {
 }
 
 func (*NetlinkManager) GetBridgeID(info *Layer2Information) (int, error) {
-	bridgeName := fmt.Sprintf("%s%d", LAYER2_PREFIX, info.VlanID)
+	bridgeName := fmt.Sprintf("%s%d", layer2Prefix, info.VlanID)
 	link, err := netlink.LinkByName(bridgeName)
 	if err != nil {
 		return -1, fmt.Errorf("error while getting link by name: %w", err)

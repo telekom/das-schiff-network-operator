@@ -31,12 +31,12 @@ func (n *NetlinkManager) CreateL3(info VRFInformation) error {
 	}
 	info.table = freeTableID
 
-	vrf, err := n.createVRF(VRF_PREFIX+info.Name, info.table)
+	vrf, err := n.createVRF(vrfPrefix+info.Name, info.table)
 	if err != nil {
 		return err
 	}
 
-	bridge, err := n.createBridge(BRIDGE_PREFIX+info.Name, nil, vrf.Attrs().Index, DEFAULT_MTU)
+	bridge, err := n.createBridge(bridgePrefix+info.Name, nil, vrf.Attrs().Index, defaultMtu)
 	if err != nil {
 		return err
 	}
@@ -44,7 +44,7 @@ func (n *NetlinkManager) CreateL3(info VRFInformation) error {
 		return fmt.Errorf("error attaching BPF: %w", err)
 	}
 
-	veth, err := n.createLink(VRF_TO_DEFAULT_PREFIX+info.Name, DEFAULT_TO_VRF_PREFIX+info.Name, vrf.Attrs().Index, DEFAULT_MTU, true)
+	veth, err := n.createLink(vrfToDefaultPrefix+info.Name, defaultToVrfPrefix+info.Name, vrf.Attrs().Index, defaultMtu, true)
 	if err != nil {
 		return err
 	}
@@ -52,7 +52,7 @@ func (n *NetlinkManager) CreateL3(info VRFInformation) error {
 		return fmt.Errorf("error attaching BPF: %w", err)
 	}
 
-	vxlan, err := n.createVXLAN(VXLAN_PREFIX+info.Name, bridge.Attrs().Index, info.VNI, DEFAULT_MTU, true, false)
+	vxlan, err := n.createVXLAN(vxlanPrefix+info.Name, bridge.Attrs().Index, info.VNI, defaultMtu, true, false)
 	if err != nil {
 		return err
 	}
@@ -65,16 +65,16 @@ func (n *NetlinkManager) CreateL3(info VRFInformation) error {
 
 // UpL3 will set all interfaces up. This is done after the FRR reload to not have a L2VNI for a short period of time
 func (n *NetlinkManager) UpL3(info VRFInformation) error {
-	if err := n.setUp(BRIDGE_PREFIX + info.Name); err != nil {
+	if err := n.setUp(bridgePrefix + info.Name); err != nil {
 		return err
 	}
-	if err := n.setUp(VRF_TO_DEFAULT_PREFIX + info.Name); err != nil {
+	if err := n.setUp(vrfToDefaultPrefix + info.Name); err != nil {
 		return err
 	}
-	if err := n.setUp(DEFAULT_TO_VRF_PREFIX + info.Name); err != nil {
+	if err := n.setUp(defaultToVrfPrefix + info.Name); err != nil {
 		return err
 	}
-	if err := n.setUp(VXLAN_PREFIX + info.Name); err != nil {
+	if err := n.setUp(vxlanPrefix + info.Name); err != nil {
 		return err
 	}
 	return nil
@@ -83,19 +83,19 @@ func (n *NetlinkManager) UpL3(info VRFInformation) error {
 // Cleanup will try to delete all interfaces associated with this VRF and return a list of errors (for logging) as a slice
 func (n *NetlinkManager) CleanupL3(name string) []error {
 	errors := []error{}
-	err := n.deleteLink(VXLAN_PREFIX + name)
+	err := n.deleteLink(vxlanPrefix + name)
 	if err != nil {
 		errors = append(errors, err)
 	}
-	err = n.deleteLink(BRIDGE_PREFIX + name)
+	err = n.deleteLink(bridgePrefix + name)
 	if err != nil {
 		errors = append(errors, err)
 	}
-	err = n.deleteLink(VRF_TO_DEFAULT_PREFIX + name)
+	err = n.deleteLink(vrfToDefaultPrefix + name)
 	if err != nil {
 		errors = append(errors, err)
 	}
-	err = n.deleteLink(VRF_PREFIX + name)
+	err = n.deleteLink(vrfPrefix + name)
 	if err != nil {
 		errors = append(errors, err)
 	}
@@ -112,7 +112,7 @@ func (n *NetlinkManager) findFreeTableID() (int, error) {
 		return configuredVRFs[i].table < configuredVRFs[j].table
 	})
 	// first table should be at VRF_TABLE_START
-	freeTableID := VRF_TABLE_START
+	freeTableID := vrfTableStart
 	// iterate over all configured VRFS
 	for _, vrf := range configuredVRFs {
 		// if VRF table matches, raised table ID by one. Because we've sorted earlier this allows us to find the first free one
@@ -121,8 +121,8 @@ func (n *NetlinkManager) findFreeTableID() (int, error) {
 		}
 	}
 	// If a free table id equals or is larger than the VRF_TABLE_END no IDs are available
-	if freeTableID >= VRF_TABLE_END {
-		return -1, fmt.Errorf("no more free tables available in range %d-%d", VRF_TABLE_START, VRF_TABLE_END)
+	if freeTableID >= vrfTableEnd {
+		return -1, fmt.Errorf("no more free tables available in range %d-%d", vrfTableStart, vrfTableEnd)
 	}
 	return freeTableID, nil
 }

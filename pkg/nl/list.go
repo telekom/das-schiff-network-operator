@@ -18,7 +18,7 @@ func (n *NetlinkManager) ListL3() ([]VRFInformation, error) {
 	}
 
 	for _, link := range links {
-		if !(link.Type() == "vrf" && strings.HasPrefix(link.Attrs().Name, VRF_PREFIX)) {
+		if !(link.Type() == "vrf" && strings.HasPrefix(link.Attrs().Name, vrfPrefix)) {
 			continue
 		}
 		vrf := link.(*netlink.Vrf)
@@ -40,11 +40,11 @@ func (n *NetlinkManager) ListL3() ([]VRFInformation, error) {
 }
 
 func (*NetlinkManager) updateL3Indices(info *VRFInformation) error {
-	bridgeLink, err := netlink.LinkByName(BRIDGE_PREFIX + info.Name)
+	bridgeLink, err := netlink.LinkByName(bridgePrefix + info.Name)
 	if err != nil {
 		return fmt.Errorf("error getting link by name: %w", err)
 	}
-	vxlanLink, err := netlink.LinkByName(VXLAN_PREFIX + info.Name)
+	vxlanLink, err := netlink.LinkByName(vxlanPrefix + info.Name)
 	if err != nil {
 		return fmt.Errorf("error getting link by name: %w", err)
 	}
@@ -94,13 +94,13 @@ func (*NetlinkManager) updateL2Indices(info *Layer2Information, links []netlink.
 
 func updateLink(info *Layer2Information, link netlink.Link) error {
 	// If subinterface is VXLAN
-	if link.Type() == "vxlan" && strings.HasPrefix(link.Attrs().Name, VXLAN_PREFIX) {
+	if link.Type() == "vxlan" && strings.HasPrefix(link.Attrs().Name, vxlanPrefix) {
 		info.vxlan = link.(*netlink.Vxlan)
 		info.VNI = info.vxlan.VxlanId
 	}
 
 	// If subinterface is VETH
-	if link.Type() == "veth" && strings.HasPrefix(link.Attrs().Name, VETH_L2_PREFIX) {
+	if link.Type() == "veth" && strings.HasPrefix(link.Attrs().Name, vethL2Prefix) {
 		info.macvlanBridge = link.(*netlink.Veth)
 		peerIdx, err := netlink.VethPeerIndex(info.macvlanBridge)
 		if err != nil {
@@ -126,7 +126,7 @@ func (n *NetlinkManager) ListL2() ([]Layer2Information, error) {
 	}
 
 	for _, link := range links {
-		if !(link.Type() == "bridge" && strings.HasPrefix(link.Attrs().Name, LAYER2_PREFIX)) {
+		if !(link.Type() == "bridge" && strings.HasPrefix(link.Attrs().Name, layer2Prefix)) {
 			continue
 		}
 		info := Layer2Information{}
