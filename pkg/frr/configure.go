@@ -9,7 +9,7 @@ import (
 )
 
 var (
-	VRF_ASN_CONFIG = 4200065169
+	vrfAsnConfig = 4200065169
 )
 
 type templateConfig struct {
@@ -26,7 +26,7 @@ type templateConfig struct {
 	HostRouterID     string
 }
 
-func (m *FRRManager) Configure(in FRRConfiguration) (bool, error) {
+func (m *Manager) Configure(in Configuration) (bool, error) {
 	config, err := m.renderSubtemplates(in)
 	if err != nil {
 		return false, err
@@ -53,7 +53,7 @@ func (m *FRRManager) Configure(in FRRConfiguration) (bool, error) {
 	return false, nil
 }
 
-func (*FRRManager) renderSubtemplates(in FRRConfiguration) (*templateConfig, error) {
+func (*Manager) renderSubtemplates(in Configuration) (*templateConfig, error) {
 	vrfRouterID, err := (&nl.NetlinkManager{}).GetUnderlayIP()
 	if err != nil {
 		return nil, fmt.Errorf("error getting underly IP: %w", err)
@@ -93,7 +93,7 @@ func (*FRRManager) renderSubtemplates(in FRRConfiguration) (*templateConfig, err
 	}
 	asn := in.ASN
 	if asn == 0 {
-		asn = VRF_ASN_CONFIG
+		asn = vrfAsnConfig
 	}
 	// Special handling for BGP instance rendering (we need ASN and Router ID)
 	bgp, err := render(bgpInstanceTpl, bgpInstanceConfig{

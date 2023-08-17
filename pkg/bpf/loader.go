@@ -60,7 +60,7 @@ func AttachInterfaces(intfs []string) error {
 }
 
 // First we ensure the qdisc is there. It is a very basic check, ensuring we have an clsact qdisc with the correct handle
-// As no other app should modify the tc options on existing interfaces (other than deleting/adding them alltogether) there shouldn't be a risk
+// as no other app should modify the tc options on existing interfaces (other than deleting/adding them altogether) there shouldn't be a risk.
 func ensureQdisc(intf netlink.Link) error {
 	qdiscs, err := netlink.QdiscList(intf)
 	if err != nil {
@@ -88,7 +88,7 @@ func ensureQdisc(intf netlink.Link) error {
 	return nil
 }
 
-// Ensure a Filter is set on the clsact qdisc which
+// Ensure a Filter is set on the clsact qdisc which.
 func ensureFilter(intf netlink.Link) error {
 	filters, err := netlink.FilterList(intf, netlink.HANDLE_MIN_INGRESS)
 	if err != nil {

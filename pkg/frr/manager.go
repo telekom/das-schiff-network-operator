@@ -20,7 +20,7 @@ var (
 	frrPermissions = fs.FileMode(defaultPermissions)
 )
 
-type FRRManager struct {
+type Manager struct {
 	configTemplate *template.Template
 	ConfigPath     string
 	TemplatePath   string
@@ -51,19 +51,19 @@ type VRFConfiguration struct {
 	Export        []PrefixList
 }
 
-type FRRConfiguration struct {
+type Configuration struct {
 	ASN  int
 	VRFs []VRFConfiguration
 }
 
-func NewFRRManager() *FRRManager {
-	return &FRRManager{
+func NewFRRManager() *Manager {
+	return &Manager{
 		ConfigPath:   "/etc/frr/frr.conf",
 		TemplatePath: "/etc/frr/frr.conf.tpl",
 	}
 }
 
-func (m *FRRManager) Init() error {
+func (m *Manager) Init() error {
 	if _, err := os.Stat(m.TemplatePath); errors.Is(err, os.ErrNotExist) {
 		err = generateTemplateConfig(m.TemplatePath, m.ConfigPath)
 		if err != nil {
@@ -83,7 +83,7 @@ func (m *FRRManager) Init() error {
 	return nil
 }
 
-func (*FRRManager) ReloadFRR() error {
+func (*Manager) ReloadFRR() error {
 	con, err := dbus.NewSystemConnectionContext(context.Background())
 	if err != nil {
 		return fmt.Errorf("error creating nee D-Bus connection: %w", err)

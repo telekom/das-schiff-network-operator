@@ -20,7 +20,7 @@ type VRFInformation struct {
 	vrfID    int
 }
 
-// Create will create a VRF and all interfaces neccessary to operate the EVPN and leaking
+// Create will create a VRF and all interfaces necessary to operate the EVPN and leaking.
 func (n *NetlinkManager) CreateL3(info VRFInformation) error {
 	if len(info.Name) > maxVRFnameLen {
 		return fmt.Errorf("name of VRF can not be longer than 12 (15-3 prefix) chars")
@@ -63,7 +63,7 @@ func (n *NetlinkManager) CreateL3(info VRFInformation) error {
 	return nil
 }
 
-// UpL3 will set all interfaces up. This is done after the FRR reload to not have a L2VNI for a short period of time
+// UpL3 will set all interfaces up. This is done after the FRR reload to not have a L2VNI for a short period of time.
 func (n *NetlinkManager) UpL3(info VRFInformation) error {
 	if err := n.setUp(bridgePrefix + info.Name); err != nil {
 		return err
@@ -80,7 +80,7 @@ func (n *NetlinkManager) UpL3(info VRFInformation) error {
 	return nil
 }
 
-// Cleanup will try to delete all interfaces associated with this VRF and return a list of errors (for logging) as a slice
+// Cleanup will try to delete all interfaces associated with this VRF and return a list of errors (for logging) as a slice.
 func (n *NetlinkManager) CleanupL3(name string) []error {
 	errors := []error{}
 	err := n.deleteLink(vxlanPrefix + name)
