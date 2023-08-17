@@ -26,13 +26,16 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 )
 
+const geLen = 8
+
 // log is for logging in this package.
 var vrfrouteconfigurationlog = logf.Log.WithName("vrfrouteconfiguration-resource")
 
 func (r *VRFRouteConfiguration) SetupWebhookWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewWebhookManagedBy(mgr).
-		For(r).
-		Complete()
+	if err := ctrl.NewWebhookManagedBy(mgr).For(r).Complete(); err != nil {
+		return fmt.Errorf("error building webhook: %w", err)
+	}
+	return nil
 }
 
 // TODO(user): EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
@@ -42,7 +45,7 @@ func (r *VRFRouteConfiguration) SetupWebhookWithManager(mgr ctrl.Manager) error 
 
 var _ webhook.Validator = &VRFRouteConfiguration{}
 
-// ValidateCreate implements webhook.Validator so a webhook will be registered for the type
+// ValidateCreate implements webhook.Validator so a webhook will be registered for the type.
 func (r *VRFRouteConfiguration) ValidateCreate() error {
 	vrfrouteconfigurationlog.Info("validate create", "name", r.Name)
 
@@ -54,8 +57,8 @@ func (r *VRFRouteConfiguration) ValidateCreate() error {
 	return nil
 }
 
-// ValidateUpdate implements webhook.Validator so a webhook will be registered for the type
-func (r *VRFRouteConfiguration) ValidateUpdate(old runtime.Object) error {
+// ValidateUpdate implements webhook.Validator so a webhook will be registered for the type.
+func (r *VRFRouteConfiguration) ValidateUpdate(_ runtime.Object) error {
 	vrfrouteconfigurationlog.Info("validate update", "name", r.Name)
 
 	err := r.validateItems()
@@ -66,7 +69,7 @@ func (r *VRFRouteConfiguration) ValidateUpdate(old runtime.Object) error {
 	return nil
 }
 
-// ValidateDelete implements webhook.Validator so a webhook will be registered for the type
+// ValidateDelete implements webhook.Validator so a webhook will be registered for the type.
 func (r *VRFRouteConfiguration) ValidateDelete() error {
 	vrfrouteconfigurationlog.Info("validate delete", "name", r.Name)
 
@@ -86,7 +89,7 @@ func (r *VRFRouteConfiguration) validateItems() error {
 	for _, item := range r.Spec.Aggregate {
 		_, _, err := net.ParseCIDR(item)
 		if err != nil {
-			return err
+			return fmt.Errorf("error parsing CIDR %s: %w", item, err)
 		}
 	}
 	return nil
@@ -116,21 +119,21 @@ func validateItemList(items []VrfRouteConfigurationPrefixItem) error {
 func (item VrfRouteConfigurationPrefixItem) validateItem() error {
 	ip, _, err := net.ParseCIDR(item.CIDR)
 	if err != nil {
-		return err
+		return fmt.Errorf("error parsing CIDR %s: %w", item.CIDR, err)
 	}
 	if ip.To4() != nil {
 		ip = ip.To4()
 	}
 	if item.GE != nil {
 		ge := *item.GE
-		if ge < 0 || ge > len(ip)*8 {
-			return fmt.Errorf("ge for IPv4 addresses must be in range of 0-%d", len(ip)*8)
+		if ge < 0 || ge > len(ip)*geLen {
+			return fmt.Errorf("ge for IPv4 addresses must be in range of 0-%d", len(ip)*geLen)
 		}
 	}
 	if item.LE != nil {
 		le := *item.LE
-		if le < 0 || le > len(ip)*8 {
-			return fmt.Errorf("le for IPv4 addresses must be in range of 0-%d", len(ip)*8)
+		if le < 0 || le > len(ip)*geLen {
+			return fmt.Errorf("le for IPv4 addresses must be in range of 0-%d", len(ip)*geLen)
 		}
 	}
 	return nil

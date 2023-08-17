@@ -23,7 +23,7 @@ import (
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
-// VRFRouteConfigurationPrefixItem defines a prefix item
+// VRFRouteConfigurationPrefixItem defines a prefix item.
 type VrfRouteConfigurationPrefixItem struct {
 
 	// +kubebuilder:validation:Required
@@ -46,7 +46,7 @@ type VrfRouteConfigurationPrefixItem struct {
 	Action string `json:"action"`
 }
 
-// VRFRouteConfigurationSpec defines the desired state of VRFRouteConfiguration
+// VRFRouteConfigurationSpec defines the desired state of VRFRouteConfiguration.
 type VRFRouteConfigurationSpec struct {
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MaxLength=12
@@ -75,7 +75,7 @@ type VRFRouteConfigurationSpec struct {
 	Community *int `json:"community,omitempty"`
 }
 
-// VRFRouteConfigurationStatus defines the observed state of VRFRouteConfiguration
+// VRFRouteConfigurationStatus defines the observed state of VRFRouteConfiguration.
 type VRFRouteConfigurationStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
@@ -85,7 +85,7 @@ type VRFRouteConfigurationStatus struct {
 //+kubebuilder:subresource:status
 //+kubebuilder:resource:shortName=vrf,scope=Cluster
 
-// VRFRouteConfiguration is the Schema for the vrfrouteconfigurations API
+// VRFRouteConfiguration is the Schema for the vrfrouteconfigurations API.
 type VRFRouteConfiguration struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -96,7 +96,7 @@ type VRFRouteConfiguration struct {
 
 //+kubebuilder:object:root=true
 
-// VRFRouteConfigurationList contains a list of VRFRouteConfiguration
+// VRFRouteConfigurationList contains a list of VRFRouteConfiguration.
 type VRFRouteConfigurationList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
