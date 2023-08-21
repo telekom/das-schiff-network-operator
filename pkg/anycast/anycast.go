@@ -26,7 +26,7 @@ func (t *Tracker) checkTrackedInterfaces() {
 	for _, intfIdx := range t.TrackedBridges {
 		intf, err := netlink.LinkByIndex(intfIdx)
 		if err != nil {
-			_, _ = fmt.Printf("Couldn't load interface idx %d: %v\n", intfIdx, err)
+			fmt.Printf("Couldn't load interface idx %d: %v\n", intfIdx, err)
 			continue
 		}
 
@@ -82,7 +82,7 @@ func filterNeighbors(neighIn []netlink.Neigh) (neighOut []netlink.Neigh) {
 func syncInterfaceByFamily(intf *netlink.Bridge, family int, routingTable uint32) {
 	bridgeNeighbors, err := netlink.NeighList(intf.Attrs().Index, family)
 	if err != nil {
-		_, _ = fmt.Printf("Error getting v4 neighbors of interface %s: %v\n", intf.Attrs().Name, err)
+		fmt.Printf("Error getting v4 neighbors of interface %s: %v\n", intf.Attrs().Name, err)
 		return
 	}
 	bridgeNeighbors = filterNeighbors(bridgeNeighbors)
@@ -94,7 +94,7 @@ func syncInterfaceByFamily(intf *netlink.Bridge, family int, routingTable uint32
 	}
 	routes, err := netlink.RouteListFiltered(family, routeFilterV4, netlink.RT_FILTER_OIF|netlink.RT_FILTER_TABLE|netlink.RT_FILTER_PROTOCOL)
 	if err != nil {
-		_, _ = fmt.Printf("Error getting v4 routes of interface %s: %v\n", intf.Attrs().Name, err)
+		fmt.Printf("Error getting v4 routes of interface %s: %v\n", intf.Attrs().Name, err)
 		return
 	}
 
@@ -102,7 +102,7 @@ func syncInterfaceByFamily(intf *netlink.Bridge, family int, routingTable uint32
 	for i := range routes {
 		if !containsIPAddress(bridgeNeighbors, routes[i].Dst) {
 			if err := netlink.RouteDel(&routes[i]); err != nil {
-				_, _ = fmt.Printf("Error deleting route %v: %v\n", routes[i], err)
+				fmt.Printf("Error deleting route %v: %v\n", routes[i], err)
 			}
 		} else {
 			alreadyV4Existing = append(alreadyV4Existing, routes[i].Dst)
@@ -114,7 +114,7 @@ func syncInterfaceByFamily(intf *netlink.Bridge, family int, routingTable uint32
 		if !containsIPNetwork(alreadyV4Existing, ipnet) {
 			route := buildRoute(family, intf, ipnet, routingTable)
 			if err := netlink.RouteAdd(route); err != nil {
-				_, _ = fmt.Printf("Error adding route %v: %v\n", route, err)
+				fmt.Printf("Error adding route %v: %v\n", route, err)
 			}
 		}
 	}
@@ -125,11 +125,11 @@ func syncInterface(intf *netlink.Bridge) {
 	if intf.Attrs().MasterIndex > 0 {
 		nl, err := netlink.LinkByIndex(intf.Attrs().MasterIndex)
 		if err != nil {
-			_, _ = fmt.Printf("Error getting VRF parent of interface %s: %v\n", intf.Attrs().Name, err)
+			fmt.Printf("Error getting VRF parent of interface %s: %v\n", intf.Attrs().Name, err)
 			return
 		}
 		if nl.Type() != "vrf" {
-			_, _ = fmt.Printf("Parent interface of %s is not a VRF: %v\n", intf.Attrs().Name, err)
+			fmt.Printf("Parent interface of %s is not a VRF: %v\n", intf.Attrs().Name, err)
 			return
 		}
 		routingTable = nl.(*netlink.Vrf).Table

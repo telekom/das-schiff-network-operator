@@ -20,7 +20,7 @@ func checkTrackedInterfaces() {
 	for _, intfIdx := range trackedBridges {
 		intf, err := netlink.LinkByIndex(intfIdx)
 		if err != nil {
-			_, _ = fmt.Printf("Couldn't load interface idx %d: %v\n", intfIdx, err)
+			fmt.Printf("Couldn't load interface idx %d: %v\n", intfIdx, err)
 		}
 
 		syncInterface(intf.(*netlink.Bridge))
@@ -52,7 +52,7 @@ func ensureMACDummyIntf(intf *netlink.Bridge) (netlink.Link, error) {
 		}
 	}
 	if macDummy.Attrs().OperState != netlink.OperDown {
-		_, _ = fmt.Printf("Interface %s not down, setting down - otherwise it would route traffic\n", name)
+		fmt.Printf("Interface %s not down, setting down - otherwise it would route traffic\n", name)
 		err = netlink.LinkSetDown(macDummy)
 		if err != nil {
 			return nil, fmt.Errorf("error setting link %s down: %w", macDummy.Attrs().Name, err)
@@ -88,7 +88,7 @@ func syncInterface(intf *netlink.Bridge) {
 	// First ensure that we have a dummy interface
 	dummy, err := ensureMACDummyIntf(intf)
 	if err != nil {
-		_, _ = fmt.Printf("Error syncing interface %s: %v\n", intf.Attrs().Name, err)
+		fmt.Printf("Error syncing interface %s: %v\n", intf.Attrs().Name, err)
 		return
 	}
 
@@ -99,7 +99,7 @@ func configureNeighbors(intf *netlink.Bridge, dummy netlink.Link) {
 	// Get neighbors of bridge
 	bridgeNeighbors, err := netlink.NeighList(intf.Attrs().Index, unix.AF_BRIDGE)
 	if err != nil {
-		_, _ = fmt.Printf("Error syncing interface %s: %v\n", intf.Attrs().Name, err)
+		fmt.Printf("Error syncing interface %s: %v\n", intf.Attrs().Name, err)
 		return
 	}
 	requiredMACAddresses := []net.HardwareAddr{}
@@ -114,7 +114,7 @@ func configureNeighbors(intf *netlink.Bridge, dummy netlink.Link) {
 	// Get neighbors of dummy
 	dummyNeighbors, err := netlink.NeighList(dummy.Attrs().Index, unix.AF_BRIDGE)
 	if err != nil {
-		_, _ = fmt.Printf("Error syncing interface %s: %v\n", intf.Attrs().Name, err)
+		fmt.Printf("Error syncing interface %s: %v\n", intf.Attrs().Name, err)
 		return
 	}
 
@@ -123,10 +123,10 @@ func configureNeighbors(intf *netlink.Bridge, dummy netlink.Link) {
 	// Add required MAC addresses when they are not yet existing (aka in alreadyExisting slice)
 	for _, neigh := range requiredMACAddresses {
 		if !containsMACAddress(alreadyExisting, neigh) {
-			_, _ = fmt.Printf("Adding MAC address %s on dummy interface %s of bridge %s\n", neigh, dummy.Attrs().Name, intf.Attrs().Name)
+			fmt.Printf("Adding MAC address %s on dummy interface %s of bridge %s\n", neigh, dummy.Attrs().Name, intf.Attrs().Name)
 			err = netlink.NeighSet(createNeighborEntry(neigh, dummy.Attrs().Index, intf.Attrs().Index))
 			if err != nil {
-				_, _ = fmt.Printf("Error adding neighbor %s to intf %s (br %s): %v\n", neigh, dummy.Attrs().Name, intf.Attrs().Name, err)
+				fmt.Printf("Error adding neighbor %s to intf %s (br %s): %v\n", neigh, dummy.Attrs().Name, intf.Attrs().Name, err)
 			}
 		}
 	}
@@ -141,9 +141,9 @@ func getAlreadyExistingNeighbors(dummyNeighbors []netlink.Neigh, requiredMACAddr
 			if !containsMACAddress(requiredMACAddresses, neigh.HardwareAddr) {
 				// If MAC Address is not in required MAC addresses, delete neighbor
 				if err := netlink.NeighDel(neigh); err != nil {
-					_, _ = fmt.Printf("Error deleting neighbor %v: %v\n", neigh, err)
+					fmt.Printf("Error deleting neighbor %v: %v\n", neigh, err)
 				}
-				_, _ = fmt.Printf("Removed MAC address %s from dummy interface %s of bridge %s\n", neigh.HardwareAddr, dummyName, intfName)
+				fmt.Printf("Removed MAC address %s from dummy interface %s of bridge %s\n", neigh.HardwareAddr, dummyName, intfName)
 			} else {
 				// Add MAC address to alreadyExisting table
 				alreadyExisting = append(alreadyExisting, neigh.HardwareAddr)
@@ -156,12 +156,12 @@ func getAlreadyExistingNeighbors(dummyNeighbors []netlink.Neigh, requiredMACAddr
 func RunMACSync(interfacePrefix string) {
 	links, err := netlink.LinkList()
 	if err != nil {
-		_, _ = fmt.Printf("Couldn't load interfaces: %v\n", err)
+		fmt.Printf("Couldn't load interfaces: %v\n", err)
 		return
 	}
 	for _, link := range links {
 		if strings.HasPrefix(link.Attrs().Name, interfacePrefix) && link.Type() == "bridge" {
-			_, _ = fmt.Printf("Tracking interface %s (bridge and Prefix '%s')\n", link.Attrs().Name, interfacePrefix)
+			fmt.Printf("Tracking interface %s (bridge and Prefix '%s')\n", link.Attrs().Name, interfacePrefix)
 			trackedBridges = append(trackedBridges, link.Attrs().Index)
 		}
 	}

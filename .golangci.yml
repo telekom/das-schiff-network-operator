@@ -132,6 +132,11 @@ linters-settings:
           - "json,inline"
         severity: warning
         disabled: false
+      - name: unhandled-error
+        severity: warning
+        disabled: false
+        arguments:
+          - "fmt.Printf"
       - name: use-any
         disabled: true
   funlen:

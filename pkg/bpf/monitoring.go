@@ -33,7 +33,7 @@ func registerMap(m *ebpf.Map, prefix string, keys []string) {
 		panic(err)
 	}
 	mapID, _ := mapInfo.ID()
-	_, _ = fmt.Printf("adding monitoring for map %s (id: %d) with prefix %s\n", mapInfo.Name, mapID, prefix)
+	fmt.Printf("adding monitoring for map %s (id: %d) with prefix %s\n", mapInfo.Name, mapID, prefix)
 	for idx, name := range keys {
 		// eBPF map by packets
 		metrics.Registry.MustRegister(prometheus.NewCounterFunc(prometheus.CounterOpts{
@@ -63,7 +63,7 @@ func fetchEbpfStatistics(m *ebpf.Map, key uint32) *StatsRecord {
 	var perCPUStats []*StatsRecord
 	err := m.Lookup(key, &perCPUStats)
 	if err != nil {
-		_, _ = fmt.Printf("Error reading eBPF statistics from map: %v\n", err)
+		fmt.Printf("Error reading eBPF statistics from map: %v\n", err)
 		return nil
 	}
 	var aggregatedStats StatsRecord
