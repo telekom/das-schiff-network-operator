@@ -20,7 +20,7 @@ const (
 
 	iptablesTimeout    = 5
 	sleepTime          = 20 * time.Second
-	ruleeMatchesNumber = 2
+	ruleMatchesCount = 2
 )
 
 var (
