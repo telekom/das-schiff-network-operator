@@ -12,7 +12,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const defaultSleep = 5 * time.Second
+const checkInterval = 5 * time.Second
 
 var trackedBridges []int
 
@@ -170,7 +170,7 @@ func RunMACSync(interfacePrefix string) {
 		go func() {
 			for {
 				checkTrackedInterfaces()
-				time.Sleep(defaultSleep)
+				time.Sleep(checkInterval)
 			}
 		}()
 	}

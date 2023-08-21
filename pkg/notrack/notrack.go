@@ -18,8 +18,8 @@ const (
 	iptablesPrerouting = "PREROUTING"
 	iptablesOutput     = "OUTPUT"
 
-	iptablesTimeout    = 5
-	sleepTime          = 20 * time.Second
+	iptablesTimeout  = 5
+	syncInterval     = 20 * time.Second
 	ruleMatchesCount = 2
 )
 
@@ -33,8 +33,8 @@ var (
 
 func parseRuleInterface(rule string) (string, error) {
 	matches := inputInterfaceRegex.FindStringSubmatch(rule)
-	if len(matches) != ruleeMatchesNumber {
-		return "", fmt.Errorf("illegal matchcount %d (should be %d)", len(matches), ruleeMatchesNumber)
+	if len(matches) != ruleMatchesCount {
+		return "", fmt.Errorf("illegal matchcount %d (should be %d)", len(matches), ruleMatchesCount)
 	}
 	return matches[1], nil
 }
@@ -131,6 +131,6 @@ func syncIPTTables(netlinkManager *nl.NetlinkManager, ipt4, ipt6 *iptables.IPTab
 			notrackLog.Error(err, "error reconciling VXLAN notrack in IPv4 iptables")
 		}
 
-		time.Sleep(sleepTime)
+		time.Sleep(syncInterval)
 	}
 }

@@ -11,8 +11,8 @@ import (
 )
 
 const (
-	waitTimeInMs         = 500
-	neighFilePermissions = 0o600
+	interfaceConfigTimeout = 500 * time.Millisecond
+	neighFilePermissions   = 0o600
 )
 
 type Layer2Information struct {
@@ -82,7 +82,7 @@ func (n *NetlinkManager) setupBridge(info *Layer2Information, masterIdx int) (*n
 	}
 
 	// Wait 500ms before configuring anycast gateways on newly added interface
-	time.Sleep(waitTimeInMs * time.Millisecond)
+	time.Sleep(interfaceConfigTimeout)
 	for _, addr := range info.AnycastGateways {
 		err = netlink.AddrAdd(bridge, addr)
 		if err != nil {
@@ -257,11 +257,11 @@ func setHardwareAddresses(current, desired *Layer2Information, vxlanMAC net.Hard
 		if err := netlink.LinkSetDown(current.vxlan); err != nil {
 			return fmt.Errorf("error downing vxlan before changing MAC: %w", err)
 		}
-		time.Sleep(waitTimeInMs * time.Millisecond) // Wait for FRR to pickup interface down
+		time.Sleep(interfaceConfigTimeout) // Wait for FRR to pickup interface down
 		if err := netlink.LinkSetHardwareAddr(current.bridge, *desired.AnycastMAC); err != nil {
 			return fmt.Errorf("error setting vxlan mac address: %w", err)
 		}
-		time.Sleep(waitTimeInMs * time.Millisecond)
+		time.Sleep(interfaceConfigTimeout)
 		if err := netlink.LinkSetUp(current.vxlan); err != nil {
 			return fmt.Errorf("error upping vxlan after changing MAC: %w", err)
 		}

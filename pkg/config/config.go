@@ -7,7 +7,7 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
-var (
+const (
 	vniMapFile         = "/opt/network-operator/config.yaml"
 	SkipVrfTemplateVni = -1
 )
