@@ -56,7 +56,7 @@ func (m *Manager) Configure(in Configuration) (bool, error) {
 func renderSubtemplates(in Configuration) (*templateConfig, error) {
 	vrfRouterID, err := (&nl.NetlinkManager{}).GetUnderlayIP()
 	if err != nil {
-		return nil, fmt.Errorf("error getting underly IP: %w", err)
+		return nil, fmt.Errorf("error getting underlay IP: %w", err)
 	}
 	hostRouterID, err := (&nl.NetlinkManager{}).GetHostRouterID()
 	if err != nil {
