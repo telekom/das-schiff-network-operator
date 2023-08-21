@@ -27,7 +27,7 @@ type templateConfig struct {
 }
 
 func (m *Manager) Configure(in Configuration) (bool, error) {
-	config, err := m.renderSubtemplates(in)
+	config, err := renderSubtemplates(in)
 	if err != nil {
 		return false, err
 	}
@@ -53,7 +53,7 @@ func (m *Manager) Configure(in Configuration) (bool, error) {
 	return false, nil
 }
 
-func (*Manager) renderSubtemplates(in Configuration) (*templateConfig, error) {
+func renderSubtemplates(in Configuration) (*templateConfig, error) {
 	vrfRouterID, err := (&nl.NetlinkManager{}).GetUnderlayIP()
 	if err != nil {
 		return nil, fmt.Errorf("error getting underly IP: %w", err)

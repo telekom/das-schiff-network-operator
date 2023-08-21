@@ -15,9 +15,9 @@ import (
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target amd64 router ../../bpf/router.c
 
 const (
-	majorNumber = 0xffff
-	minorNumebr = 0
-	sleepTime   = 5 * time.Second
+	majorNumber            = 0xffff
+	minorNumebr            = 0
+	interfaceCheckInterval = 5 * time.Second
 )
 
 var (
@@ -177,7 +177,7 @@ func RunInterfaceCheck() {
 	go func() {
 		for {
 			checkTrackedInterfaces()
-			time.Sleep(sleepTime)
+			time.Sleep(interfaceCheckInterval)
 		}
 	}()
 }

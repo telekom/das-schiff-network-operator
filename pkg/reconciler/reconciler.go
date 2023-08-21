@@ -52,7 +52,6 @@ func NewReconciler(clusterClient client.Client, anycastTracker *anycast.Tracker)
 		return nil, fmt.Errorf("error trying to init FRR Manager: %w", err)
 	}
 
-	var cfg *config.Config
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		return nil, fmt.Errorf("error loading config: %w", err)

@@ -53,7 +53,7 @@ func (r *reconcile) fetchLayer2(ctx context.Context) ([]networkv1alpha1.Layer2Ne
 }
 
 func (r *reconcile) reconcileLayer2(l2vnis []networkv1alpha1.Layer2NetworkConfiguration) error {
-	desired, err := r.createDesired(l2vnis)
+	desired, err := r.getDesired(l2vnis)
 	if err != nil {
 		return err
 	}
@@ -63,7 +63,7 @@ func (r *reconcile) reconcileLayer2(l2vnis []networkv1alpha1.Layer2NetworkConfig
 		return fmt.Errorf("error listing L2: %w", err)
 	}
 
-	toDelete := createToDelete(existing, desired)
+	toDelete := determineToBeDeleted(existing, desired)
 
 	create := []nl.Layer2Information{}
 	anycastTrackerInterfaces := []int{}
@@ -121,7 +121,7 @@ func (r *reconcile) createL2(info *nl.Layer2Information, anycastTrackerInterface
 	return nil
 }
 
-func (r *reconcile) createDesired(l2vnis []networkv1alpha1.Layer2NetworkConfiguration) ([]nl.Layer2Information, error) {
+func (r *reconcile) getDesired(l2vnis []networkv1alpha1.Layer2NetworkConfiguration) ([]nl.Layer2Information, error) {
 	desired := []nl.Layer2Information{}
 	for i := range l2vnis {
 		spec := l2vnis[i].Spec
@@ -153,7 +153,7 @@ func (r *reconcile) createDesired(l2vnis []networkv1alpha1.Layer2NetworkConfigur
 	return desired, nil
 }
 
-func createToDelete(existing, desired []nl.Layer2Information) []nl.Layer2Information {
+func determineToBeDeleted(existing, desired []nl.Layer2Information) []nl.Layer2Information {
 	toDelete := []nl.Layer2Information{}
 	for i := range existing {
 		stillExists := false
