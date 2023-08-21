@@ -64,7 +64,7 @@ func renderSubtemplates(in Configuration) (*templateConfig, error) {
 	}
 	hostname, err := os.Hostname()
 	if err != nil {
-		return nil, fmt.Errorf("error gettigng hostname: %w", err)
+		return nil, fmt.Errorf("error getting hostname: %w", err)
 	}
 
 	vrfs, err := render(vrfTpl, in.VRFs)
