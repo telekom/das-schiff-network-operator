@@ -24,6 +24,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
+	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
 const geLen = 8
@@ -46,35 +47,35 @@ func (r *VRFRouteConfiguration) SetupWebhookWithManager(mgr ctrl.Manager) error 
 var _ webhook.Validator = &VRFRouteConfiguration{}
 
 // ValidateCreate implements webhook.Validator so a webhook will be registered for the type.
-func (r *VRFRouteConfiguration) ValidateCreate() error {
+func (r *VRFRouteConfiguration) ValidateCreate() (admission.Warnings, error) {
 	vrfrouteconfigurationlog.Info("validate create", "name", r.Name)
 
 	err := r.validateItems()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	return nil
+	return nil, nil
 }
 
 // ValidateUpdate implements webhook.Validator so a webhook will be registered for the type.
-func (r *VRFRouteConfiguration) ValidateUpdate(_ runtime.Object) error {
+func (r *VRFRouteConfiguration) ValidateUpdate(runtime.Object) (admission.Warnings, error) {
 	vrfrouteconfigurationlog.Info("validate update", "name", r.Name)
 
 	err := r.validateItems()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	return nil
+	return nil, nil
 }
 
 // ValidateDelete implements webhook.Validator so a webhook will be registered for the type.
-func (r *VRFRouteConfiguration) ValidateDelete() error {
+func (r *VRFRouteConfiguration) ValidateDelete() (admission.Warnings, error) {
 	vrfrouteconfigurationlog.Info("validate delete", "name", r.Name)
 
 	// TODO(user): fill in your validation logic upon object deletion.
-	return nil
+	return nil, nil
 }
 
 func (r *VRFRouteConfiguration) validateItems() error {

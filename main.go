@@ -31,23 +31,21 @@ import (
 	"github.com/telekom/das-schiff-network-operator/pkg/config"
 	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
 	"github.com/telekom/das-schiff-network-operator/pkg/macvlan"
+	"github.com/telekom/das-schiff-network-operator/pkg/managerconfig"
 	"github.com/telekom/das-schiff-network-operator/pkg/monitoring"
 	"github.com/telekom/das-schiff-network-operator/pkg/notrack"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
-	"k8s.io/client-go/rest"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.) //nolint:gci
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
-	"sigs.k8s.io/controller-runtime/pkg/metrics"
 	//nolint:gci // kubebuilder import
 	//+kubebuilder:scaffold:imports
 )
@@ -105,14 +103,15 @@ func main() {
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
 	var err error
-	options := ctrl.Options{Scheme: scheme}
-
+	var options manager.Options
 	if configFile != "" {
-		options, err = options.AndFrom(ctrl.ConfigFile().AtPath(configFile))
+		options, err = managerconfig.Load(configFile, scheme)
 		if err != nil {
 			setupLog.Error(err, "unable to load the config file")
 			os.Exit(1)
 		}
+	} else {
+		options = ctrl.Options{Scheme: scheme}
 	}
 
 	if options.MetricsBindAddress != "0" {
