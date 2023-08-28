@@ -1,10 +1,10 @@
 package bpf
 
 import (
-	"fmt"
-
 	"github.com/cilium/ebpf"
+	"github.com/go-logr/logr"
 	"github.com/prometheus/client_golang/prometheus"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
 )
 
@@ -18,8 +18,9 @@ var (
 )
 
 func initMonitoring() {
-	registerMap(router.routerMaps.EbpfRetStatsMap, "ebpf_return_reasons", epbfReturnReasons)
-	registerMap(router.routerMaps.EbpfFibLkupStatsMap, "ebpf_fib_lookup", ebpfFibLookuPResult)
+	logger := ctrl.Log.WithName("bpf-monitoring")
+	registerMap(router.routerMaps.EbpfRetStatsMap, "ebpf_return_reasons", epbfReturnReasons, logger)
+	registerMap(router.routerMaps.EbpfFibLkupStatsMap, "ebpf_fib_lookup", ebpfFibLookuPResult, logger)
 }
 
 type StatsRecord struct {
@@ -27,13 +28,13 @@ type StatsRecord struct {
 	RXBytes   uint64
 }
 
-func registerMap(m *ebpf.Map, prefix string, keys []string) {
+func registerMap(m *ebpf.Map, prefix string, keys []string, logger logr.Logger) {
 	mapInfo, err := m.Info()
 	if err != nil {
 		panic(err)
 	}
 	mapID, _ := mapInfo.ID()
-	fmt.Printf("adding monitoring for map %s (id: %d) with prefix %s\n", mapInfo.Name, mapID, prefix)
+	logger.Info("adding monitoring for map %s (id: %d) with prefix %s", mapInfo.Name, mapID, prefix)
 	for idx, name := range keys {
 		// eBPF map by packets
 		metrics.Registry.MustRegister(prometheus.NewCounterFunc(prometheus.CounterOpts{
@@ -42,7 +43,7 @@ func registerMap(m *ebpf.Map, prefix string, keys []string) {
 				"key": name,
 			},
 		}, func() float64 {
-			stats := fetchEbpfStatistics(m, uint32(idx))
+			stats := fetchEbpfStatistics(m, uint32(idx), logger)
 			return float64(stats.RXPackets)
 		}))
 
@@ -53,17 +54,17 @@ func registerMap(m *ebpf.Map, prefix string, keys []string) {
 				"key": name,
 			},
 		}, func() float64 {
-			stats := fetchEbpfStatistics(m, uint32(idx))
+			stats := fetchEbpfStatistics(m, uint32(idx), logger)
 			return float64(stats.RXBytes)
 		}))
 	}
 }
 
-func fetchEbpfStatistics(m *ebpf.Map, key uint32) *StatsRecord {
+func fetchEbpfStatistics(m *ebpf.Map, key uint32, logger logr.Logger) *StatsRecord {
 	var perCPUStats []*StatsRecord
 	err := m.Lookup(key, &perCPUStats)
 	if err != nil {
-		fmt.Printf("Error reading eBPF statistics from map: %v\n", err)
+		logger.Error(err, "error reading eBPF statistics from map")
 		return nil
 	}
 	var aggregatedStats StatsRecord
