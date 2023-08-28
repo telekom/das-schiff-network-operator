@@ -8,7 +8,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-// Debouncer struct
+// Debouncer struct.
 type Debouncer struct {
 	// Used for atomic operations
 	scheduled             atomic.Bool
@@ -19,7 +19,7 @@ type Debouncer struct {
 	debounceTime time.Duration
 }
 
-// Create a new debouncer
+// Create a new debouncer.
 func NewDebouncer(function func(context.Context) error, debounceTime time.Duration) *Debouncer {
 	return &Debouncer{
 		function:     function,
@@ -42,13 +42,12 @@ func (d *Debouncer) debounceRoutine(ctx context.Context) {
 				d.scheduled.Store(false)
 			}
 			break
-		} else {
-			log.FromContext(ctx).Error(err, "error debouncing")
 		}
+		log.FromContext(ctx).Error(err, "error debouncing")
 	}
 }
 
-// Run function. First run will be in debounceTime, runs will be seperated by debounceTime
+// Run function. First run will be in debounceTime, runs will be separated by debounceTime.
 func (d *Debouncer) Debounce(ctx context.Context) {
 	// If we haven't scheduled a goroutine yet, set scheduled=false and run goroutine
 	// We use atomic compare-and-swap to first check if scheduled equals false (not yet scheduled)

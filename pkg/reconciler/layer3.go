@@ -1,6 +1,7 @@
 package reconciler
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"sort"
@@ -13,83 +14,29 @@ import (
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
 )
 
-func (r *reconcile) fetchLayer3() ([]networkv1alpha1.VRFRouteConfiguration, error) {
+const defaultSleep = 2 * time.Second
+
+func (r *reconcile) fetchLayer3(ctx context.Context) ([]networkv1alpha1.VRFRouteConfiguration, error) {
 	vrfs := &networkv1alpha1.VRFRouteConfigurationList{}
-	err := r.client.List(r.Context, vrfs)
+	err := r.client.List(ctx, vrfs)
 	if err != nil {
 		r.Logger.Error(err, "error getting list of VRFs from Kubernetes")
-		return nil, err
+		return nil, fmt.Errorf("error getting list of VRFs from Kubernetes: %w", err)
 	}
 
 	return vrfs.Items, nil
 }
 
+// nolint: contextcheck // context is not relevant
 func (r *reconcile) reconcileLayer3(l3vnis []networkv1alpha1.VRFRouteConfiguration) error {
-	vrfConfigMap := map[string]frr.VRFConfiguration{}
-
-	for _, vrf := range l3vnis {
-		spec := vrf.Spec
-
-		var vni int
-		var rt string
-
-		if val, ok := r.config.VRFConfig[spec.VRF]; ok {
-			vni = val.VNI
-			rt = val.RT
-			r.Logger.Info("Configuring VRF from new VRFConfig", "vrf", spec.VRF, "vni", val.VNI, "rt", rt)
-		} else if val, ok := r.config.VRFToVNI[spec.VRF]; ok {
-			vni = val
-			r.Logger.Info("Configuring VRF from old VRFToVNI", "vrf", spec.VRF, "vni", val)
-		} else if r.config.ShouldSkipVRFConfig(spec.VRF) {
-			vni = config.SKIP_VRF_TEMPLATE_VNI
-		} else {
-			err := fmt.Errorf("vrf not in vrf vni map")
-			r.Logger.Error(err, "VRF does not exist in VRF VNI config", "vrf", spec.VRF, "name", vrf.ObjectMeta.Name, "namespace", vrf.ObjectMeta.Namespace)
-			return err
-		}
-
-		// If VRF is not yet in dict, initialize it
-		if _, ok := vrfConfigMap[spec.VRF]; !ok {
-			vrfConfigMap[spec.VRF] = frr.VRFConfiguration{
-				Name: spec.VRF,
-				VNI:  vni,
-				RT:   rt,
-			}
-		}
-
-		config := vrfConfigMap[spec.VRF]
-
-		if len(spec.Export) > 0 {
-			prefixList, err := handlePrefixItemList(spec.Export, spec.Seq)
-			if err != nil {
-				return err
-			}
-			config.Export = append(config.Export, prefixList)
-		}
-		if len(spec.Import) > 0 {
-			prefixList, err := handlePrefixItemList(spec.Import, spec.Seq)
-			if err != nil {
-				return err
-			}
-			config.Import = append(config.Import, prefixList)
-		}
-		for _, aggregate := range spec.Aggregate {
-			_, network, err := net.ParseCIDR(aggregate)
-			if err != nil {
-				return err
-			}
-			if network.IP.To4() == nil {
-				config.AggregateIPv6 = append(config.AggregateIPv6, aggregate)
-			} else {
-				config.AggregateIPv4 = append(config.AggregateIPv4, aggregate)
-			}
-		}
-		vrfConfigMap[spec.VRF] = config
+	vrfConfigMap, err := r.createVrfConfigMap(l3vnis)
+	if err != nil {
+		return err
 	}
 
 	vrfConfigs := []frr.VRFConfiguration{}
-	for _, vrf := range vrfConfigMap {
-		vrfConfigs = append(vrfConfigs, vrf)
+	for key := range vrfConfigMap {
+		vrfConfigs = append(vrfConfigs, vrfConfigMap[key])
 	}
 
 	sort.SliceStable(vrfConfigs, func(i, j int) bool {
@@ -103,15 +50,15 @@ func (r *reconcile) reconcileLayer3(l3vnis []networkv1alpha1.VRFRouteConfigurati
 	}
 
 	// We wait here for two seconds to let FRR settle after updating netlink devices
-	time.Sleep(2 * time.Second)
+	time.Sleep(defaultSleep)
 
-	changed, err := r.frrManager.Configure(frr.FRRConfiguration{
+	changed, err := r.frrManager.Configure(frr.Configuration{
 		VRFs: vrfConfigs,
 		ASN:  r.config.ServerASN,
 	})
 	if err != nil {
 		r.Logger.Error(err, "error updating FRR configuration")
-		return err
+		return fmt.Errorf("error updating FRR configuration: %w", err)
 	}
 
 	if changed || r.dirtyFRRConfig {
@@ -120,67 +67,122 @@ func (r *reconcile) reconcileLayer3(l3vnis []networkv1alpha1.VRFRouteConfigurati
 		if err != nil {
 			r.dirtyFRRConfig = true
 			r.Logger.Error(err, "error reloading FRR systemd unit")
-			return err
+			return fmt.Errorf("error reloading FRR systemd unit: %w", err)
 		}
 		r.dirtyFRRConfig = false
 	}
 
 	// Make sure that all created netlink VRFs are up after FRR reload
-	time.Sleep(2 * time.Second)
+	time.Sleep(defaultSleep)
 	for _, info := range created {
 		if err := r.netlinkManager.UpL3(info); err != nil {
 			r.Logger.Error(err, "error setting L3 to state UP")
-			return err
+			return fmt.Errorf("error setting L3 to state UP: %w", err)
 		}
 	}
 	return nil
 }
 
+func (r *reconcile) createVrfConfigMap(l3vnis []networkv1alpha1.VRFRouteConfiguration) (map[string]frr.VRFConfiguration, error) {
+	vrfConfigMap := map[string]frr.VRFConfiguration{}
+
+	for i := range l3vnis {
+		spec := l3vnis[i].Spec
+
+		var vni int
+		var rt string
+
+		if val, ok := r.config.VRFConfig[spec.VRF]; ok {
+			vni = val.VNI
+			rt = val.RT
+			r.Logger.Info("Configuring VRF from new VRFConfig", "vrf", spec.VRF, "vni", val.VNI, "rt", rt)
+		} else if val, ok := r.config.VRFToVNI[spec.VRF]; ok {
+			vni = val
+			r.Logger.Info("Configuring VRF from old VRFToVNI", "vrf", spec.VRF, "vni", val)
+		} else if r.config.ShouldSkipVRFConfig(spec.VRF) {
+			vni = config.SkipVrfTemplateVni
+		} else {
+			err := fmt.Errorf("vrf not in vrf vni map")
+			r.Logger.Error(err, "VRF does not exist in VRF VNI config", "vrf", spec.VRF, "name", l3vnis[i].ObjectMeta.Name, "namespace", l3vnis[i].ObjectMeta.Namespace)
+			return nil, err
+		}
+
+		cfg, err := createVrfConfig(vrfConfigMap, &spec, vni, rt)
+		if err != nil {
+			return nil, err
+		}
+		vrfConfigMap[spec.VRF] = *cfg
+	}
+
+	return vrfConfigMap, nil
+}
+
+func createVrfConfig(vrfConfigMap map[string]frr.VRFConfiguration, spec *networkv1alpha1.VRFRouteConfigurationSpec, vni int, rt string) (*frr.VRFConfiguration, error) {
+	// If VRF is not yet in dict, initialize it
+	if _, ok := vrfConfigMap[spec.VRF]; !ok {
+		vrfConfigMap[spec.VRF] = frr.VRFConfiguration{
+			Name: spec.VRF,
+			VNI:  vni,
+			RT:   rt,
+		}
+	}
+
+	cfg := vrfConfigMap[spec.VRF]
+
+	if len(spec.Export) > 0 {
+		prefixList, err := handlePrefixItemList(spec.Export, spec.Seq)
+		if err != nil {
+			return nil, err
+		}
+		cfg.Export = append(cfg.Export, prefixList)
+	}
+	if len(spec.Import) > 0 {
+		prefixList, err := handlePrefixItemList(spec.Import, spec.Seq)
+		if err != nil {
+			return nil, err
+		}
+		cfg.Import = append(cfg.Import, prefixList)
+	}
+	for _, aggregate := range spec.Aggregate {
+		_, network, err := net.ParseCIDR(aggregate)
+		if err != nil {
+			return nil, fmt.Errorf("error parsing CIDR %s: %w", aggregate, err)
+		}
+		if network.IP.To4() == nil {
+			cfg.AggregateIPv6 = append(cfg.AggregateIPv6, aggregate)
+		} else {
+			cfg.AggregateIPv4 = append(cfg.AggregateIPv4, aggregate)
+		}
+	}
+	return &cfg, nil
+}
+
 func (r *reconcile) reconcileL3Netlink(vrfConfigs []frr.VRFConfiguration) ([]nl.VRFInformation, error) {
 	existing, err := r.netlinkManager.ListL3()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error listing L3 VRF information: %w", err)
 	}
 
 	// Check for VRFs that are configured on the host but no longer in Kubernetes
-	delete := []nl.VRFInformation{}
+	toDelete := []nl.VRFInformation{}
 	for _, cfg := range existing {
 		stillExists := false
-		for _, vrf := range vrfConfigs {
-			if vrf.Name == cfg.Name && vrf.VNI == cfg.VNI {
+		for i := range vrfConfigs {
+			if vrfConfigs[i].Name == cfg.Name && vrfConfigs[i].VNI == cfg.VNI {
 				stillExists = true
 				break
 			}
 		}
 		if !stillExists {
-			delete = append(delete, cfg)
+			toDelete = append(toDelete, cfg)
 		}
 	}
 
 	// Check for VRFs that are in Kubernetes but not yet configured on the host
-	create := []nl.VRFInformation{}
-	for _, vrf := range vrfConfigs {
-		// Skip VRF with VNI SKIP_VRF_TEMPLATE_VNI
-		if vrf.VNI == config.SKIP_VRF_TEMPLATE_VNI {
-			continue
-		}
-		alreadyExists := false
-		for _, cfg := range existing {
-			if vrf.Name == cfg.Name && vrf.VNI == cfg.VNI {
-				alreadyExists = true
-				break
-			}
-		}
-		if !alreadyExists {
-			create = append(create, nl.VRFInformation{
-				Name: vrf.Name,
-				VNI:  vrf.VNI,
-			})
-		}
-	}
+	toCreate := prepareVRFsToCreate(vrfConfigs, existing)
 
 	// Delete / Cleanup VRFs
-	for _, info := range delete {
+	for _, info := range toDelete {
 		r.Logger.Info("Deleting VRF because it is no longer configured in Kubernetes", "vrf", info.Name, "vni", info.VNI)
 		errs := r.netlinkManager.CleanupL3(info.Name)
 		for _, err := range errs {
@@ -188,7 +190,7 @@ func (r *reconcile) reconcileL3Netlink(vrfConfigs []frr.VRFConfiguration) ([]nl.
 		}
 	}
 	// Create VRFs
-	for _, info := range create {
+	for _, info := range toCreate {
 		r.Logger.Info("Creating VRF to match Kubernetes", "vrf", info.Name, "vni", info.VNI)
 		err := r.netlinkManager.CreateL3(info)
 		if err != nil {
@@ -196,7 +198,31 @@ func (r *reconcile) reconcileL3Netlink(vrfConfigs []frr.VRFConfiguration) ([]nl.
 		}
 	}
 
-	return create, nil
+	return toCreate, nil
+}
+
+func prepareVRFsToCreate(vrfConfigs []frr.VRFConfiguration, existing []nl.VRFInformation) []nl.VRFInformation {
+	create := []nl.VRFInformation{}
+	for i := range vrfConfigs {
+		// Skip VRF with VNI SKIP_VRF_TEMPLATE_VNI
+		if vrfConfigs[i].VNI == config.SkipVrfTemplateVni {
+			continue
+		}
+		alreadyExists := false
+		for _, cfg := range existing {
+			if vrfConfigs[i].Name == cfg.Name && vrfConfigs[i].VNI == cfg.VNI {
+				alreadyExists = true
+				break
+			}
+		}
+		if !alreadyExists {
+			create = append(create, nl.VRFInformation{
+				Name: vrfConfigs[i].Name,
+				VNI:  vrfConfigs[i].VNI,
+			})
+		}
+	}
+	return create
 }
 
 func handlePrefixItemList(input []networkv1alpha1.VrfRouteConfigurationPrefixItem, seq int) (frr.PrefixList, error) {
@@ -216,7 +242,7 @@ func handlePrefixItemList(input []networkv1alpha1.VrfRouteConfigurationPrefixIte
 func copyPrefixItemToFRRItem(n int, item networkv1alpha1.VrfRouteConfigurationPrefixItem) (frr.PrefixedRouteItem, error) {
 	_, network, err := net.ParseCIDR(item.CIDR)
 	if err != nil {
-		return frr.PrefixedRouteItem{}, err
+		return frr.PrefixedRouteItem{}, fmt.Errorf("error parsing CIDR :%s: %w", item.CIDR, err)
 	}
 
 	seq := item.Seq

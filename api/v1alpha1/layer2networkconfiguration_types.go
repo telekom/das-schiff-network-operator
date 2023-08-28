@@ -23,7 +23,7 @@ import (
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
-// Layer2NetworkConfigurationSpec defines the desired state of Layer2NetworkConfiguration
+// Layer2NetworkConfigurationSpec defines the desired state of Layer2NetworkConfiguration.
 type Layer2NetworkConfigurationSpec struct {
 	// +kubebuilder:validation:Required
 	// VLAN Id of the layer 2 network
@@ -63,7 +63,7 @@ type Layer2NetworkConfigurationSpec struct {
 	NodeSelector *metav1.LabelSelector `json:"nodeSelector,omitempty"`
 }
 
-// Layer2NetworkConfigurationStatus defines the observed state of Layer2NetworkConfiguration
+// Layer2NetworkConfigurationStatus defines the observed state of Layer2NetworkConfiguration.
 type Layer2NetworkConfigurationStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
@@ -73,7 +73,7 @@ type Layer2NetworkConfigurationStatus struct {
 //+kubebuilder:subresource:status
 //+kubebuilder:resource:shortName=layer2,scope=Cluster
 
-// Layer2NetworkConfiguration is the Schema for the layer2networkconfigurations API
+// Layer2NetworkConfiguration is the Schema for the layer2networkconfigurations API.
 type Layer2NetworkConfiguration struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -84,7 +84,7 @@ type Layer2NetworkConfiguration struct {
 
 //+kubebuilder:object:root=true
 
-// Layer2NetworkConfigurationList contains a list of Layer2NetworkConfiguration
+// Layer2NetworkConfigurationList contains a list of Layer2NetworkConfiguration.
 type Layer2NetworkConfigurationList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
