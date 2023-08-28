@@ -214,7 +214,7 @@ var _ = Describe("HealthCheck", func() {
 			nc := &NetHealthcheckConfig{
 				Reachability: []netReachabilityItem{{Host: "someHost", Port: 42}},
 			}
-			dialerMock.EXPECT().Dial("tcp", "someHost:42").Return(nil, errors.New("fake error")).Times(DefaultRetries)
+			dialerMock.EXPECT().Dial("tcp", "someHost:42").Return(nil, errors.New("fake error")).Times(defaultRetries)
 			hc, err := NewHealthChecker(c, NewHealthCheckToolkit(nil, fakeUpGetByName, dialerMock), nc)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(hc).ToNot(BeNil())

@@ -29,7 +29,7 @@ const (
 	configEnv          = "OPERATOR_NETHEALTHCHECK_CONFIG"
 	nodenameEnv        = "NODE_NAME"
 	defaultTCPTimeout  = 3
-	DefaultRetries     = 3
+	defaultRetries     = 3
 )
 
 // HealthChecker is a struct that holds data required for networking healthcheck.
@@ -46,7 +46,7 @@ type HealthChecker struct {
 func NewHealthChecker(clusterClient client.Client, toolkit *Toolkit, netconf *NetHealthcheckConfig) (*HealthChecker, error) {
 	var retries int
 	if netconf.Retries <= 0 {
-		retries = DefaultRetries
+		retries = defaultRetries
 	} else {
 		retries = netconf.Retries
 	}
