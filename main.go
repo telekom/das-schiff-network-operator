@@ -18,6 +18,7 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -34,6 +35,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.) //nolint:gci
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -108,7 +110,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := initComponents(mgr, anycastTracker, cfg, onlyBPFMode); err != nil {
+	if err := initComponents(mgr, anycastTracker, cfg, clientConfig, onlyBPFMode); err != nil {
 		setupLog.Error(err, "unable to initialize components")
 		os.Exit(1)
 	}
@@ -125,7 +127,7 @@ func main() {
 	}
 }
 
-func initComponents(mgr manager.Manager, anycastTracker *anycast.Tracker, cfg *config.Config, onlyBPFMode bool) error {
+func initComponents(mgr manager.Manager, anycastTracker *anycast.Tracker, cfg *config.Config, clientConfig *rest.Config, onlyBPFMode bool) error {
 	// Start VRFRouteConfigurationReconciler when we are not running in only BPF mode.
 	if !onlyBPFMode {
 		if err := setupReconcilers(mgr, anycastTracker); err != nil {
@@ -161,31 +163,28 @@ func initComponents(mgr manager.Manager, anycastTracker *anycast.Tracker, cfg *c
 		setupLog.Error(err, "error starting IPTables sync")
 	}
 
-	nc, err := healthcheck.LoadConfig(healthcheck.NetHealthcheckFile)
-	if err != nil {
-		setupLog.Error(err, "problem loading network healthcheck config")
-		os.Exit(1)
-	}
+	if onlyBPFMode {
+		clusterClient, err := client.New(clientConfig, client.Options{})
+		if err != nil {
+			return fmt.Errorf("error creating controller-runtime client: %w", err)
+		}
 
-	tcpDialer := healthcheck.NewTCPDialer(nc.Timeout)
-	hc, err := healthcheck.NewHealthChecker(clusterClient,
-		healthcheck.NewDefaultHealthcheckToolkit(nil, tcpDialer),
-		nc)
-	if err != nil {
-		setupLog.Error(err, "problem initializing healthchecker")
-		os.Exit(1)
-	}
-	if err = hc.CheckInterfaces(); err != nil {
-		setupLog.Error(err, "problem with network interfaces")
-		os.Exit(1)
-	}
-	if err = hc.CheckReachability(); err != nil {
-		setupLog.Error(err, "problem with network reachability")
-		os.Exit(1)
-	}
-	if err = hc.RemoveTaint(healthcheck.TaintKey); err != nil {
-		setupLog.Error(err, "problem removing taint")
-		os.Exit(1)
+		nc, err := healthcheck.LoadConfig(healthcheck.NetHealthcheckFile)
+		if err != nil {
+			return fmt.Errorf("error loading network healthcheck config: %w", err)
+		}
+
+		tcpDialer := healthcheck.NewTCPDialer(nc.Timeout)
+		hc, err := healthcheck.NewHealthChecker(clusterClient,
+			healthcheck.NewDefaultHealthcheckToolkit(nil, tcpDialer),
+			nc)
+		if err != nil {
+			setupLog.Error(err, "problem initializing healthchecker")
+			return fmt.Errorf("error initializing healthchecker: %w", err)
+		}
+		if err = performNetworkingHealthcheck(hc); err != nil {
+			return fmt.Errorf("error performing healthcheck: %w", err)
+		}
 	}
 
 	return nil
@@ -213,5 +212,18 @@ func setupReconcilers(mgr manager.Manager, anycastTracker *anycast.Tracker) erro
 		return fmt.Errorf("unable to create Layer2NetworkConfiguration controller: %w", err)
 	}
 
+	return nil
+}
+
+func performNetworkingHealthcheck(hc *healthcheck.HealthChecker) error {
+	if err := hc.CheckInterfaces(); err != nil {
+		return fmt.Errorf("error checking network interfaces: %w", err)
+	}
+	if err := hc.CheckReachability(); err != nil {
+		return fmt.Errorf("error checking network reachability: %w", err)
+	}
+	if err := hc.RemoveTaint(context.Background(), healthcheck.TaintKey); err != nil {
+		return fmt.Errorf("error removing taint: %w", err)
+	}
 	return nil
 }

@@ -62,7 +62,7 @@ func NewReconciler(clusterClient client.Client, anycastTracker *anycast.Tracker)
 
 	nc, err := healthcheck.LoadConfig(healthcheck.NetHealthcheckFile)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error loading networking healthcheck config: %w", err)
 	}
 
 	tcpDialer := healthcheck.NewTCPDialer(nc.Timeout)
@@ -70,7 +70,7 @@ func NewReconciler(clusterClient client.Client, anycastTracker *anycast.Tracker)
 		healthcheck.NewDefaultHealthcheckToolkit(reconciler.frrManager, tcpDialer),
 		nc)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error creating netwokring healthchecker: %w", err)
 	}
 
 	return reconciler, nil
@@ -105,20 +105,17 @@ func (reconciler *Reconciler) reconcileDebounced(ctx context.Context) error {
 	if !reconciler.healthChecker.IsInitialized() {
 		_, err := reconciler.healthChecker.IsFRRActive()
 		if err != nil {
-			r.Logger.Error(err, "problem checking FRR status")
-			return err
+			return fmt.Errorf("error checking FRR status: %w", err)
 		}
 		if err = reconciler.healthChecker.CheckInterfaces(); err != nil {
-			r.Logger.Error(err, "problem checking network interfaces")
-			return err
+			return fmt.Errorf("error checking FRR status: %w", err)
 		}
 		if err = reconciler.healthChecker.CheckReachability(); err != nil {
-			r.Logger.Error(err, "problem checking network reachability")
-			return err
+			return fmt.Errorf("error checking network reachability: %w", err)
 		}
-		if err = reconciler.healthChecker.RemoveTaint(healthcheck.TaintKey); err != nil {
+		if err = reconciler.healthChecker.RemoveTaint(ctx, healthcheck.TaintKey); err != nil {
 			r.Logger.Error(err, "problem removing taint from the node")
-			return err
+			return fmt.Errorf("error removing taint from the node: %w", err)
 		}
 	}
 

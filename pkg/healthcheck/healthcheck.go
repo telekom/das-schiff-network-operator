@@ -67,9 +67,9 @@ func (hc *HealthChecker) IsInitialized() bool {
 }
 
 // RemoveTaint removes taint from the node.
-func (hc *HealthChecker) RemoveTaint(taintKey string) error {
+func (hc *HealthChecker) RemoveTaint(ctx context.Context, taintKey string) error {
 	node := &corev1.Node{}
-	err := hc.client.Get(context.Background(),
+	err := hc.client.Get(ctx,
 		types.NamespacedName{Name: os.Getenv(nodenameEnv)}, node)
 	if err != nil {
 		hc.Logger.Error(err, "error while getting node's info")
@@ -79,7 +79,7 @@ func (hc *HealthChecker) RemoveTaint(taintKey string) error {
 	for i, v := range node.Spec.Taints {
 		if v.Key == taintKey {
 			node.Spec.Taints = append(node.Spec.Taints[:i], node.Spec.Taints[i+1:]...)
-			if err := hc.client.Update(context.Background(), node, &client.UpdateOptions{}); err != nil {
+			if err := hc.client.Update(ctx, node, &client.UpdateOptions{}); err != nil {
 				hc.Logger.Error(err, "")
 				return fmt.Errorf("error while updating node: %w", err)
 			}
