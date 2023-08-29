@@ -114,7 +114,6 @@ func (reconciler *Reconciler) reconcileDebounced(ctx context.Context) error {
 			return fmt.Errorf("error checking network reachability: %w", err)
 		}
 		if err = reconciler.healthChecker.RemoveTaint(ctx, healthcheck.TaintKey); err != nil {
-			r.Logger.Error(err, "problem removing taint from the node")
 			return fmt.Errorf("error removing taint from the node: %w", err)
 		}
 	}
