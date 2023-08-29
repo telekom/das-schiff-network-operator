@@ -92,7 +92,7 @@ func (*Manager) ReloadFRR() error {
 
 	_, err = con.ReloadUnitContext(context.Background(), frrUnit, "fail", nil)
 	if err != nil {
-		return fmt.Errorf("error realoading %s context: %w", frrUnit, err)
+		return fmt.Errorf("error reloading %s context: %w", frrUnit, err)
 	}
 	return nil
 }
