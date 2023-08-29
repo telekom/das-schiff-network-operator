@@ -91,7 +91,10 @@ func (*Manager) ReloadFRR() error {
 	defer con.Close()
 
 	_, err = con.ReloadUnitContext(context.Background(), frrUnit, "fail", nil)
-	return fmt.Errorf("error realoading %s context: %w", frrUnit, err)
+	if err != nil {
+		return fmt.Errorf("error reloading %s context: %w", frrUnit, err)
+	}
+	return nil
 }
 
 func (v *VRFConfiguration) ShouldTemplateVRF() bool {
