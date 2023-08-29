@@ -7,6 +7,7 @@ import (
 	"os"
 
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
+	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -22,7 +23,7 @@ func (r *reconcile) fetchLayer2(ctx context.Context) ([]networkv1alpha1.Layer2Ne
 		return nil, fmt.Errorf("error getting list of Layer2s from Kubernetes: %w", err)
 	}
 
-	nodeName := os.Getenv("HOSTNAME")
+	nodeName := os.Getenv(healthcheck.NodenameEnv)
 	node := &corev1.Node{}
 	err = r.client.Get(ctx, types.NamespacedName{Name: nodeName}, node)
 	if err != nil {

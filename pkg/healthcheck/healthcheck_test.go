@@ -39,7 +39,7 @@ var _ = BeforeSuite(func() {
 
 func TestHealthCheck(t *testing.T) {
 	RegisterFailHandler(Fail)
-	t.Setenv(nodenameEnv, testHostname)
+	t.Setenv(NodenameEnv, testHostname)
 	tmpPath = t.TempDir()
 	ctrl = gomock.NewController(t)
 	defer ctrl.Finish()

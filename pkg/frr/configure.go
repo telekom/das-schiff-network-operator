@@ -60,7 +60,7 @@ func renderSubtemplates(in Configuration) (*templateConfig, error) {
 	}
 	hostRouterID, err := (&nl.NetlinkManager{}).GetHostRouterID()
 	if err != nil {
-		return nil, fmt.Errorf("error getting hostname: %w", err)
+		return nil, fmt.Errorf("error getting host router ID: %w", err)
 	}
 	hostname, err := os.Hostname()
 	if err != nil {
