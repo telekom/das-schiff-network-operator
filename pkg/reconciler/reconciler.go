@@ -108,7 +108,7 @@ func (reconciler *Reconciler) reconcileDebounced(ctx context.Context) error {
 			return fmt.Errorf("error checking FRR status: %w", err)
 		}
 		if err = reconciler.healthChecker.CheckInterfaces(); err != nil {
-			return fmt.Errorf("error checking FRR status: %w", err)
+			return fmt.Errorf("error checking network interfaces: %w", err)
 		}
 		if err = reconciler.healthChecker.CheckReachability(); err != nil {
 			return fmt.Errorf("error checking network reachability: %w", err)
