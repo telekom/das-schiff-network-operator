@@ -22,7 +22,6 @@ import (
 )
 
 const (
-
 	// NetHealthcheckFile is default path for healtcheck config file.
 	NetHealthcheckFile = "/opt/network-operator/net-healthcheck-config.yaml"
 	// NodenameEnv is an env variable that holds Kubernetes node's name.
