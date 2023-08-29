@@ -179,7 +179,6 @@ func initComponents(mgr manager.Manager, anycastTracker *anycast.Tracker, cfg *c
 			healthcheck.NewDefaultHealthcheckToolkit(nil, tcpDialer),
 			nc)
 		if err != nil {
-			setupLog.Error(err, "problem initializing healthchecker")
 			return fmt.Errorf("error initializing healthchecker: %w", err)
 		}
 		if err = performNetworkingHealthcheck(hc); err != nil {
