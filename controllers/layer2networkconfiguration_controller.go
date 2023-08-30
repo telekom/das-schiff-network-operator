@@ -18,10 +18,14 @@ package controllers
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"time"
 
 	"github.com/google/go-cmp/cmp"
+	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
+	"github.com/telekom/das-schiff-network-operator/pkg/reconciler"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -32,14 +36,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
-
-	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
-	"github.com/telekom/das-schiff-network-operator/pkg/reconciler"
-
-	corev1 "k8s.io/api/core/v1"
 )
 
-// Layer2NetworkConfigurationReconciler reconciles a Layer2NetworkConfiguration object
+const requeueTime = 10 * time.Minute
+
+// Layer2NetworkConfigurationReconciler reconciles a Layer2NetworkConfiguration object.
 type Layer2NetworkConfigurationReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
@@ -57,12 +58,12 @@ type Layer2NetworkConfigurationReconciler struct {
 //
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.11.0/pkg/reconcile
-func (r *Layer2NetworkConfigurationReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *Layer2NetworkConfigurationReconciler) Reconcile(ctx context.Context, _ ctrl.Request) (ctrl.Result, error) {
 	_ = log.FromContext(ctx)
 
 	r.Reconciler.Reconcile(ctx)
 
-	return ctrl.Result{RequeueAfter: 10 * time.Minute}, nil
+	return ctrl.Result{RequeueAfter: requeueTime}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -78,8 +79,12 @@ func (r *Layer2NetworkConfigurationReconciler) SetupWithManager(mgr ctrl.Manager
 		GenericFunc: func(e event.GenericEvent) bool { return false },
 	}
 
-	return ctrl.NewControllerManagedBy(mgr).
+	err := ctrl.NewControllerManagedBy(mgr).
 		For(&networkv1alpha1.Layer2NetworkConfiguration{}).
 		Watches(&source.Kind{Type: &corev1.Node{}}, nodesMapFn, builder.WithPredicates(nodePredicates)).
 		Complete(r)
+	if err != nil {
+		return fmt.Errorf("error creating controller: %w", err)
+	}
+	return nil
 }

@@ -10,7 +10,10 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const IFLA_BRPORT_NEIGH_SUPPRESS = 32
+const (
+	iflaBrPortNeighSuppress = 32
+	hwAddrByteSize          = 6
+)
 
 func (n *NetlinkManager) createVRF(vrfName string, table int) (*netlink.Vrf, error) {
 	netlinkVrf := netlink.Vrf{
@@ -21,19 +24,19 @@ func (n *NetlinkManager) createVRF(vrfName string, table int) (*netlink.Vrf, err
 	}
 
 	if err := netlink.LinkAdd(&netlinkVrf); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error adding link: %w", err)
 	}
 	if err := n.disableEUIAutogeneration(vrfName); err != nil {
 		return nil, err
 	}
 	if err := netlink.LinkSetUp(&netlinkVrf); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error setting link up: %w", err)
 	}
 
 	return &netlinkVrf, nil
 }
 
-func (n *NetlinkManager) createBridge(bridgeName string, macAddress *net.HardwareAddr, masterIdx int, mtu int) (*netlink.Bridge, error) {
+func (n *NetlinkManager) createBridge(bridgeName string, macAddress *net.HardwareAddr, masterIdx, mtu int) (*netlink.Bridge, error) {
 	netlinkBridge := netlink.Bridge{
 		LinkAttrs: netlink.LinkAttrs{
 			Name: bridgeName,
@@ -48,17 +51,17 @@ func (n *NetlinkManager) createBridge(bridgeName string, macAddress *net.Hardwar
 	}
 
 	if err := netlink.LinkAdd(&netlinkBridge); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error adding link: %w", err)
 	}
 	if err := n.disableEUIAutogeneration(bridgeName); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error disabling EUI autogeneration: %w", err)
 	}
 
 	return &netlinkBridge, nil
 }
 
-func (n *NetlinkManager) createVXLAN(vxlanName string, bridgeIdx int, vni int, mtu int, hairpin bool, neighSuppression bool) (*netlink.Vxlan, error) {
-	vxlanIf, vxlanIP, err := getInterfaceAndIP(UNDERLAY_LOOPBACK)
+func (n *NetlinkManager) createVXLAN(vxlanName string, bridgeIdx, vni, mtu int, hairpin, neighSuppression bool) (*netlink.Vxlan, error) {
+	vxlanIf, vxlanIP, err := getInterfaceAndIP(underlayLoopback)
 	if err != nil {
 		return nil, err
 	}
@@ -79,20 +82,20 @@ func (n *NetlinkManager) createVXLAN(vxlanName string, bridgeIdx int, vni int, m
 		VtepDevIndex: vxlanIf,
 		SrcAddr:      vxlanIP,
 		Learning:     false,
-		Port:         4789,
+		Port:         vxlanPort,
 	}
 	if err := netlink.LinkAdd(&netlinkVXLAN); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error adding link: %w", err)
 	}
 	if err := netlink.LinkSetLearning(&netlinkVXLAN, false); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error disabling link learning: %w", err)
 	}
 	if err := setNeighSuppression(&netlinkVXLAN, neighSuppression); err != nil {
 		return nil, err
 	}
 	if hairpin {
 		if err := netlink.LinkSetHairpin(&netlinkVXLAN, true); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("error setting link's hairpin mode: %w", err)
 		}
 	}
 	if err := n.disableEUIAutogeneration(vxlanName); err != nil {
@@ -102,20 +105,20 @@ func (n *NetlinkManager) createVXLAN(vxlanName string, bridgeIdx int, vni int, m
 	return &netlinkVXLAN, nil
 }
 
-func (n *NetlinkManager) disableEUIAutogeneration(intfName string) error {
+func (*NetlinkManager) disableEUIAutogeneration(intfName string) error {
 	fileName := fmt.Sprintf("/proc/sys/net/ipv6/conf/%s/addr_gen_mode", intfName)
 	file, err := os.OpenFile(fileName, os.O_WRONLY, 0)
 	if err != nil {
-		return err
+		return fmt.Errorf("error opening file: %w", err)
 	}
 	defer file.Close()
 	if _, err := file.WriteString("1\n"); err != nil {
-		return err
+		return fmt.Errorf("error writing to file: %w", err)
 	}
 	return nil
 }
 
-func (n *NetlinkManager) createLink(vethName string, peerName string, masterIdx int, mtu int, generateEUI bool) (*netlink.Veth, error) {
+func (n *NetlinkManager) createLink(vethName, peerName string, masterIdx, mtu int, generateEUI bool) (*netlink.Veth, error) {
 	netlinkVeth := netlink.Veth{
 		LinkAttrs: netlink.LinkAttrs{
 			Name:        vethName,
@@ -125,7 +128,7 @@ func (n *NetlinkManager) createLink(vethName string, peerName string, masterIdx 
 		PeerName: peerName,
 	}
 	if err := netlink.LinkAdd(&netlinkVeth); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error adding link: %w", err)
 	}
 
 	if !generateEUI {
@@ -140,16 +143,19 @@ func (n *NetlinkManager) createLink(vethName string, peerName string, masterIdx 
 	return &netlinkVeth, nil
 }
 
-func (n *NetlinkManager) setUp(intfName string) error {
+func (*NetlinkManager) setUp(intfName string) error {
 	link, err := netlink.LinkByName(intfName)
 	if err != nil {
-		return err
+		return fmt.Errorf("error getting link by name: %w", err)
 	}
-	return netlink.LinkSetUp(link)
+	if err := netlink.LinkSetUp(link); err != nil {
+		return fmt.Errorf("error setting link up: %w", err)
+	}
+	return nil
 }
 
 func generateUnderlayMAC() (net.HardwareAddr, error) {
-	_, vxlanIP, err := getInterfaceAndIP(UNDERLAY_LOOPBACK)
+	_, vxlanIP, err := getInterfaceAndIP(underlayLoopback)
 	if err != nil {
 		return nil, err
 	}
@@ -166,7 +172,7 @@ func getInterfaceAndIP(name string) (int, net.IP, error) {
 
 	addresses, err := netlink.AddrList(&dummy, netlink.FAMILY_V4)
 	if err != nil {
-		return -1, nil, err
+		return -1, nil, fmt.Errorf("error listing link's addresses: %w", err)
 	}
 	if len(addresses) != 1 {
 		return -1, nil, fmt.Errorf("count of v4 addresses on %s do not exactly match 1", dummy.Attrs().Name)
@@ -179,8 +185,8 @@ func generateMAC(ip net.IP) (net.HardwareAddr, error) {
 	if ip.To4() == nil {
 		return nil, fmt.Errorf("generateMAC is only working with IPv4 addresses")
 	}
-	hwaddr := make([]byte, 6)
-	copy(hwaddr, MAC_PREFIX)
+	hwaddr := make([]byte, hwAddrByteSize)
+	copy(hwaddr, macPrefix)
 	copy(hwaddr[2:], ip.To4())
 	return hwaddr, nil
 }
@@ -193,11 +199,11 @@ func setNeighSuppression(link netlink.Link, mode bool) error {
 	req.AddData(msg)
 
 	br := nl.NewRtAttr(unix.IFLA_PROTINFO|unix.NLA_F_NESTED, nil)
-	br.AddRtAttr(IFLA_BRPORT_NEIGH_SUPPRESS, boolToByte(mode))
+	br.AddRtAttr(iflaBrPortNeighSuppress, boolToByte(mode))
 	req.AddData(br)
 	_, err := req.Execute(unix.NETLINK_ROUTE, 0)
 	if err != nil {
-		return err
+		return fmt.Errorf("error executing request: %w", err)
 	}
 	return nil
 }

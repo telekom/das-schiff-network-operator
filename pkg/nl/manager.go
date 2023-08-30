@@ -4,37 +4,37 @@ import (
 	"net"
 )
 
-var (
-	VRF_TABLE_START = 50
-	VRF_TABLE_END   = 80
+const (
+	vrfTableStart = 50
+	vrfTableEnd   = 80
 
-	VRF_PREFIX            = "vr."
-	BRIDGE_PREFIX         = "br."
-	VXLAN_PREFIX          = "vx."
-	VRF_TO_DEFAULT_PREFIX = "vd."
-	DEFAULT_TO_VRF_PREFIX = "dv."
-	LAYER2_PREFIX         = "l2."
-	MACVLAN_PREFIX        = "vlan."
-	VETH_L2_PREFIX        = "l2v."
+	vrfPrefix          = "vr."
+	bridgePrefix       = "br."
+	vxlanPrefix        = "vx."
+	vrfToDefaultPrefix = "vd."
+	defaultToVrfPrefix = "dv."
+	layer2Prefix       = "l2."
+	macvlanPrefix      = "vlan."
+	vethL2Prefix       = "l2v."
 
-	UNDERLAY_LOOPBACK = "dum.underlay"
-	NODE_LOOPBACK     = "br.cluster"
+	underlayLoopback = "dum.underlay"
+	nodeLoopback     = "br.cluster"
 
-	VXLAN_PORT  = 4789
-	DEFAULT_MTU = 9000
-
-	MAC_PREFIX = []byte("\x02\x54")
+	vxlanPort  = 4789
+	defaultMtu = 9000
 )
+
+var macPrefix = []byte("\x02\x54")
 
 type NetlinkManager struct {
 }
 
-func (n *NetlinkManager) GetUnderlayIP() (net.IP, error) {
-	_, ip, err := getInterfaceAndIP(UNDERLAY_LOOPBACK)
+func (*NetlinkManager) GetUnderlayIP() (net.IP, error) {
+	_, ip, err := getInterfaceAndIP(underlayLoopback)
 	return ip, err
 }
 
-func (n *NetlinkManager) GetHostRouterID() (net.IP, error) {
-	_, ip, err := getInterfaceAndIP(NODE_LOOPBACK)
+func (*NetlinkManager) GetHostRouterID() (net.IP, error) {
+	_, ip, err := getInterfaceAndIP(nodeLoopback)
 	return ip, err
 }

@@ -18,18 +18,17 @@ package controllers
 
 import (
 	"context"
-	"time"
+	"fmt"
 
+	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
+	"github.com/telekom/das-schiff-network-operator/pkg/reconciler"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-
-	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
-	"github.com/telekom/das-schiff-network-operator/pkg/reconciler"
 )
 
-// VRFRouteConfigurationReconciler reconciles a VRFRouteConfiguration object
+// VRFRouteConfigurationReconciler reconciles a VRFRouteConfiguration object.
 type VRFRouteConfigurationReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
@@ -46,18 +45,22 @@ type VRFRouteConfigurationReconciler struct {
 //
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.10.0/pkg/reconcile
-func (r *VRFRouteConfigurationReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *VRFRouteConfigurationReconciler) Reconcile(ctx context.Context, _ ctrl.Request) (ctrl.Result, error) {
 	_ = log.FromContext(ctx)
 
 	// Run ReconcileDebounced through debouncer
 	r.Reconciler.Reconcile(ctx)
 
-	return ctrl.Result{RequeueAfter: 10 * time.Minute}, nil
+	return ctrl.Result{RequeueAfter: requeueTime}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *VRFRouteConfigurationReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewControllerManagedBy(mgr).
+	err := ctrl.NewControllerManagedBy(mgr).
 		For(&networkv1alpha1.VRFRouteConfiguration{}).
 		Complete(r)
+	if err != nil {
+		return fmt.Errorf("error creating controller: %w", err)
+	}
+	return nil
 }

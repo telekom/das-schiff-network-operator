@@ -1,43 +1,44 @@
 package reconciler
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"os"
 
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
-	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/types"
-
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/types"
 )
 
-func (r *reconcile) fetchLayer2() ([]networkv1alpha1.Layer2NetworkConfiguration, error) {
+func (r *reconcile) fetchLayer2(ctx context.Context) ([]networkv1alpha1.Layer2NetworkConfiguration, error) {
 	layer2List := &networkv1alpha1.Layer2NetworkConfigurationList{}
-	err := r.client.List(r.Context, layer2List)
+	err := r.client.List(ctx, layer2List)
 	if err != nil {
 		r.Logger.Error(err, "error getting list of Layer2s from Kubernetes")
-		return nil, err
+		return nil, fmt.Errorf("error getting list of Layer2s from Kubernetes: %w", err)
 	}
 
 	nodeName := os.Getenv("HOSTNAME")
 	node := &corev1.Node{}
-	err = r.client.Get(r.Context, types.NamespacedName{Name: nodeName}, node)
+	err = r.client.Get(ctx, types.NamespacedName{Name: nodeName}, node)
 	if err != nil {
 		r.Logger.Error(err, "error getting local node name")
-		return nil, err
+		return nil, fmt.Errorf("error getting local node name: %w", err)
 	}
 
 	l2vnis := []networkv1alpha1.Layer2NetworkConfiguration{}
 
-	for _, item := range layer2List.Items {
+	for i := range layer2List.Items {
+		item := &layer2List.Items[i]
 		if item.Spec.NodeSelector != nil {
 			selector, err := metav1.LabelSelectorAsSelector(item.Spec.NodeSelector)
 			if err != nil {
 				r.Logger.Error(err, "error converting nodeSelector of layer2 to selector", "layer2", item.ObjectMeta.Name)
-				return nil, err
+				return nil, fmt.Errorf("error converting nodeSelector of layer2 to selector: %w", err)
 			}
 			if !selector.Matches(labels.Set(node.ObjectMeta.Labels)) {
 				r.Logger.Info("local node does not match nodeSelector of layer2", "layer2", item.ObjectMeta.Name, "node", nodeName)
@@ -45,17 +46,85 @@ func (r *reconcile) fetchLayer2() ([]networkv1alpha1.Layer2NetworkConfiguration,
 			}
 		}
 
-		l2vnis = append(l2vnis, item)
+		l2vnis = append(l2vnis, *item)
 	}
 
 	return l2vnis, nil
 }
 
 func (r *reconcile) reconcileLayer2(l2vnis []networkv1alpha1.Layer2NetworkConfiguration) error {
-	desired := []nl.Layer2Information{}
+	desired, err := r.getDesired(l2vnis)
+	if err != nil {
+		return err
+	}
 
-	for _, layer2 := range l2vnis {
-		spec := layer2.Spec
+	existing, err := r.netlinkManager.ListL2()
+	if err != nil {
+		return fmt.Errorf("error listing L2: %w", err)
+	}
+
+	toDelete := determineToBeDeleted(existing, desired)
+
+	create := []nl.Layer2Information{}
+	anycastTrackerInterfaces := []int{}
+	for i := range desired {
+		alreadyExists := false
+		var currentConfig nl.Layer2Information
+		for j := range existing {
+			if desired[i].VlanID == existing[j].VlanID {
+				alreadyExists = true
+				currentConfig = existing[j]
+				break
+			}
+		}
+		if !alreadyExists {
+			create = append(create, desired[i])
+		} else {
+			if err := r.reconcileExistingLayer(&desired[i], &currentConfig, &anycastTrackerInterfaces); err != nil {
+				return err
+			}
+		}
+	}
+
+	for i := range toDelete {
+		r.Logger.Info("Deleting Layer2 because it is no longer configured", "vlan", toDelete[i].VlanID, "vni", toDelete[i].VNI)
+		errs := r.netlinkManager.CleanupL2(&toDelete[i])
+		for _, err := range errs {
+			r.Logger.Error(err, "Error deleting Layer2", "vlan", toDelete[i].VlanID, "vni", toDelete[i].VNI)
+		}
+	}
+
+	for i := range create {
+		if err := r.createL2(&create[i], &anycastTrackerInterfaces); err != nil {
+			return err
+		}
+	}
+
+	r.anycastTracker.TrackedBridges = anycastTrackerInterfaces
+
+	return nil
+}
+
+func (r *reconcile) createL2(info *nl.Layer2Information, anycastTrackerInterfaces *[]int) error {
+	r.Logger.Info("Creating Layer2", "vlan", info.VlanID, "vni", info.VNI)
+	err := r.netlinkManager.CreateL2(info)
+	if err != nil {
+		return fmt.Errorf("error creating layer2 vlan %d vni %d: %w", info.VlanID, info.VNI, err)
+	}
+	if info.AdvertiseNeighbors {
+		bridgeID, err := r.netlinkManager.GetBridgeID(info)
+		if err != nil {
+			return fmt.Errorf("error getting bridge id for vlanId %d: %w", info.VlanID, err)
+		}
+		*anycastTrackerInterfaces = append(*anycastTrackerInterfaces, bridgeID)
+	}
+	return nil
+}
+
+func (r *reconcile) getDesired(l2vnis []networkv1alpha1.Layer2NetworkConfiguration) ([]nl.Layer2Information, error) {
+	desired := []nl.Layer2Information{}
+	for i := range l2vnis {
+		spec := l2vnis[i].Spec
 
 		var anycastMAC *net.HardwareAddr
 		if mac, err := net.ParseMAC(spec.AnycastMac); err == nil {
@@ -64,8 +133,8 @@ func (r *reconcile) reconcileLayer2(l2vnis []networkv1alpha1.Layer2NetworkConfig
 
 		anycastGateways, err := r.netlinkManager.ParseIPAddresses(spec.AnycastGateways)
 		if err != nil {
-			r.Logger.Error(err, "error parsing anycast gateways", "layer", layer2.ObjectMeta.Name, "gw", spec.AnycastGateways)
-			return err
+			r.Logger.Error(err, "error parsing anycast gateways", "layer", l2vnis[i].ObjectMeta.Name, "gw", spec.AnycastGateways)
+			return nil, fmt.Errorf("error parsing anycast gateways: %w", err)
 		}
 
 		desired = append(desired, nl.Layer2Information{
@@ -81,79 +150,38 @@ func (r *reconcile) reconcileLayer2(l2vnis []networkv1alpha1.Layer2NetworkConfig
 		})
 	}
 
-	existing, err := r.netlinkManager.ListL2()
-	if err != nil {
-		return err
-	}
+	return desired, nil
+}
 
-	delete := []nl.Layer2Information{}
-	for _, cfg := range existing {
+func determineToBeDeleted(existing, desired []nl.Layer2Information) []nl.Layer2Information {
+	toDelete := []nl.Layer2Information{}
+	for i := range existing {
 		stillExists := false
-		for _, info := range desired {
-			if info.VlanID == cfg.VlanID {
+		for j := range desired {
+			if desired[j].VlanID == existing[i].VlanID {
 				stillExists = true
 				break
 			}
 		}
 		if !stillExists {
-			delete = append(delete, cfg)
+			toDelete = append(toDelete, existing[i])
 		}
 	}
+	return toDelete
+}
 
-	create := []nl.Layer2Information{}
-	anycastTrackerInterfaces := []int{}
-	for _, info := range desired {
-		alreadyExists := false
-		var currentConfig nl.Layer2Information
-		for _, cfg := range existing {
-			if info.VlanID == cfg.VlanID {
-				alreadyExists = true
-				currentConfig = cfg
-				break
-			}
-		}
-		if !alreadyExists {
-			create = append(create, info)
-		} else {
-			r.Logger.Info("Reconciling existing Layer2", "vlan", info.VlanID, "vni", info.VNI)
-			err := r.netlinkManager.ReconcileL2(currentConfig, info)
-			if err != nil {
-				return fmt.Errorf("error reconciling layer2 vlan %d vni %d: %v", info.VlanID, info.VNI, err)
-			}
-			if info.AdvertiseNeighbors {
-				bridgeId, err := r.netlinkManager.GetBridgeId(info)
-				if err != nil {
-					return fmt.Errorf("error getting bridge id for vlanId %d: %v", info.VlanID, err)
-				}
-				anycastTrackerInterfaces = append(anycastTrackerInterfaces, bridgeId)
-			}
-		}
+func (r *reconcile) reconcileExistingLayer(desired, currentConfig *nl.Layer2Information, anycastTrackerInterfaces *[]int) error {
+	r.Logger.Info("Reconciling existing Layer2", "vlan", desired.VlanID, "vni", desired.VNI)
+	err := r.netlinkManager.ReconcileL2(currentConfig, desired)
+	if err != nil {
+		return fmt.Errorf("error reconciling layer2 vlan %d vni %d: %w", desired.VlanID, desired.VNI, err)
 	}
-
-	for _, info := range delete {
-		r.Logger.Info("Deleting Layer2 because it is no longer configured", "vlan", info.VlanID, "vni", info.VNI)
-		errs := r.netlinkManager.CleanupL2(info)
-		for _, err := range errs {
-			r.Logger.Error(err, "Error deleting Layer2", "vlan", info.VlanID, "vni", info.VNI)
-		}
-	}
-
-	for _, info := range create {
-		r.Logger.Info("Creating Layer2", "vlan", info.VlanID, "vni", info.VNI)
-		err := r.netlinkManager.CreateL2(info)
+	if desired.AdvertiseNeighbors {
+		bridgeID, err := r.netlinkManager.GetBridgeID(desired)
 		if err != nil {
-			return fmt.Errorf("error creating layer2 vlan %d vni %d: %v", info.VlanID, info.VNI, err)
+			return fmt.Errorf("error getting bridge id for vlanId %d: %w", desired.VlanID, err)
 		}
-		if info.AdvertiseNeighbors {
-			bridgeId, err := r.netlinkManager.GetBridgeId(info)
-			if err != nil {
-				return fmt.Errorf("error getting bridge id for vlanId %d: %v", info.VlanID, err)
-			}
-			anycastTrackerInterfaces = append(anycastTrackerInterfaces, bridgeId)
-		}
+		*anycastTrackerInterfaces = append(*anycastTrackerInterfaces, bridgeID)
 	}
-
-	r.anycastTracker.TrackedBridges = anycastTrackerInterfaces
-
 	return nil
 }

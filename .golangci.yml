@@ -1,0 +1,147 @@
+linters:
+  disable-all: true
+  enable:
+  - asciicheck
+  - bodyclose
+  - containedctx
+  - contextcheck
+  - cyclop 
+  - decorder
+  - dogsled
+  - errcheck
+  - errorlint
+  - exportloopref
+  - funlen
+  - gci
+  - ginkgolinter
+  - gocognit
+  - goconst
+  - gocritic
+  - gocyclo
+  - godot
+  - gofmt
+  - gomnd
+  - goprintffuncname
+  - gosec
+  - gosimple
+  - govet
+  - importas
+  - ineffassign
+  - misspell
+  - nakedret
+  - nilerr
+  - noctx
+  - prealloc
+  - predeclared
+  - revive
+  - rowserrcheck
+  - staticcheck
+  - stylecheck
+  - thelper
+  - typecheck
+  - unconvert
+  - unparam
+  - unused
+  - usestdlibvars
+  - wastedassign
+  - whitespace
+  - wrapcheck
+
+linters-settings:
+  godot:
+    scope: toplevel
+    exclude:
+    - '^ \+.*'
+    - '^ ANCHOR.*'
+  importas:
+    no-unaliased: true
+    alias:
+      # Kubernetes
+      - pkg: k8s.io/api/core/v1
+        alias: corev1
+      - pkg: k8s.io/apimachinery/pkg/apis/meta/v1
+        alias: metav1
+      # Controller Runtime
+      - pkg: sigs.k8s.io/controller-runtime
+        alias: ctrl
+  nolintlint:
+    allow-unused: false
+    allow-leading-space: false
+    require-specific: true
+  staticcheck:
+    go: "1.19"
+  stylecheck:
+    go: "1.19"
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - style
+      - performance
+      - experimental
+      - opinionated
+    disabled-checks:
+      - regexpSimplify
+      - whyNoLint
+  unused:
+    go: "1.19"
+  cyclop:
+    max-complexity: 13
+  revive:
+    ignore-generated-header: true
+    severity: error
+    enable-all-rules: true
+    rules:
+      - name: add-constant
+        disabled: true
+      - name: argument-limit
+        disabled: true
+      - name: banned-characters
+        disabled: true
+      - name: cognitive-complexity
+        severity: error
+        disabled: false
+        arguments: [24]
+      - name: comment-spacings
+        severity: warning
+        disabled: false
+        arguments:
+          - +kubebuilder
+      - name: cyclomatic
+        severity: error
+        disabled: false
+        arguments: [13]
+      - name: file-header
+        disabled: true
+      - name: flag-parameter
+        severity: warning
+        disabled: true
+      - name: function-result-limit
+        disabled: true
+      - name: function-length
+        severity: error
+        disabled: false
+        arguments: [40, 0]
+      - name: if-return
+        disabled: true
+      - name: line-length-limit
+        disabled: true
+      - name: max-public-structs
+        disabled: true
+      - name: struct-tag
+        arguments:
+          - "json,inline"
+        severity: warning
+        disabled: false
+      - name: unhandled-error
+        severity: warning
+        disabled: false
+        arguments:
+          - "fmt.Printf"
+      - name: use-any
+        disabled: true
+  funlen:
+    lines: 65
+
+run:
+  timeout: 10m
+  allow-parallel-runners: true

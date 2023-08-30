@@ -22,7 +22,7 @@ type frrCollector struct {
 	bgpPrefixesTransmittedDesc typedFactoryDesc
 	bgpMessagesReceivedDesc    typedFactoryDesc
 	bgpMessagesTransmittedDesc typedFactoryDesc
-	frr                        *frr.FRRManager
+	frr                        *frr.Manager
 	logger                     logr.Logger
 }
 

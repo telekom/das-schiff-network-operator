@@ -1,14 +1,15 @@
 package config
 
 import (
+	"fmt"
 	"os"
 
 	"gopkg.in/yaml.v2"
 )
 
-var (
-	VNI_MAP_FILE          = "/opt/network-operator/config.yaml"
-	SKIP_VRF_TEMPLATE_VNI = -1
+const (
+	vniMapFile         = "/opt/network-operator/config.yaml"
+	SkipVrfTemplateVni = -1
 )
 
 type Config struct {
@@ -27,18 +28,18 @@ type VRFConfig struct {
 func LoadConfig() (*Config, error) {
 	config := &Config{}
 
-	vniFile := VNI_MAP_FILE
+	vniFile := vniMapFile
 	if val := os.Getenv("OPERATOR_CONFIG"); val != "" {
 		vniFile = val
 	}
 
 	read, err := os.ReadFile(vniFile)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error reading config file: %w", err)
 	}
 	err = yaml.Unmarshal(read, &config)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error unmarshalling config file: %w", err)
 	}
 
 	return config, nil

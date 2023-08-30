@@ -2,23 +2,25 @@ package notrack
 
 import (
 	"fmt"
-	"os"
 	"regexp"
 	"strings"
 	"time"
 
 	"github.com/coreos/go-iptables/iptables"
+	"github.com/telekom/das-schiff-network-operator/pkg/nl"
 	"github.com/vishvananda/netlink"
 	"k8s.io/utils/strings/slices"
 	ctrl "sigs.k8s.io/controller-runtime"
-
-	"github.com/telekom/das-schiff-network-operator/pkg/nl"
 )
 
 const (
-	IPTABLES_TABLE      = "raw"
-	IPTABLES_PREROUTING = "PREROUTING"
-	IPTABLES_OUTPUT     = "OUTPUT"
+	iptablesTable      = "raw"
+	iptablesPrerouting = "PREROUTING"
+	iptablesOutput     = "OUTPUT"
+
+	iptablesTimeout  = 5
+	syncInterval     = 20 * time.Second
+	ruleMatchesCount = 2
 )
 
 var (
@@ -31,8 +33,8 @@ var (
 
 func parseRuleInterface(rule string) (string, error) {
 	matches := inputInterfaceRegex.FindStringSubmatch(rule)
-	if len(matches) != 2 {
-		return "", fmt.Errorf("illegal matchcount %d (should be 2)", len(matches))
+	if len(matches) != ruleMatchesCount {
+		return "", fmt.Errorf("illegal matchcount %d (should be %d)", len(matches), ruleMatchesCount)
 	}
 	return matches[1], nil
 }
@@ -42,12 +44,12 @@ func buildRule(link string) []string {
 }
 
 func reconcileIPTables(notrackLinks []string, ipt *iptables.IPTables) error {
-	rules, err := ipt.List(IPTABLES_TABLE, IPTABLES_PREROUTING)
+	rules, err := ipt.List(iptablesTable, iptablesPrerouting)
 	if err != nil {
-		return err
+		return fmt.Errorf("error listing IPTables rules: %w", err)
 	}
 
-	var existingLinks []string
+	existingLinks := []string{}
 	for _, rule := range rules {
 		if !rulesRegex.MatchString(rule) {
 			continue
@@ -58,8 +60,8 @@ func reconcileIPTables(notrackLinks []string, ipt *iptables.IPTables) error {
 		}
 
 		if !slices.Contains(notrackLinks, link) {
-			if err := ipt.Delete(IPTABLES_TABLE, IPTABLES_PREROUTING, buildRule(link)...); err != nil {
-				return err
+			if err := ipt.Delete(iptablesTable, iptablesPrerouting, buildRule(link)...); err != nil {
+				return fmt.Errorf("error deleting IPTables rule: %w", err)
 			}
 		}
 
@@ -69,64 +71,66 @@ func reconcileIPTables(notrackLinks []string, ipt *iptables.IPTables) error {
 		if slices.Contains(existingLinks, notrackLink) {
 			continue
 		}
-		if err := ipt.Append(IPTABLES_TABLE, IPTABLES_PREROUTING, buildRule(notrackLink)...); err != nil {
-			return err
+		if err := ipt.Append(iptablesTable, iptablesPrerouting, buildRule(notrackLink)...); err != nil {
+			return fmt.Errorf("error appending IPTables rule: %w", err)
 		}
 	}
 	return nil
 }
 
-func RunIPTablesSync() {
-	ipt4, err := iptables.New(iptables.IPFamily(iptables.ProtocolIPv4), iptables.Timeout(5))
+func RunIPTablesSync() error {
+	ipt4, err := iptables.New(iptables.IPFamily(iptables.ProtocolIPv4), iptables.Timeout(iptablesTimeout))
 	if err != nil {
-		notrackLog.Error(err, "error connecting to ip4tables for notrack")
-		os.Exit(1)
+		return fmt.Errorf("error connecting to ip4tables for notrack: %w", err)
 	}
-	ipt6, err := iptables.New(iptables.IPFamily(iptables.ProtocolIPv6), iptables.Timeout(5))
+	ipt6, err := iptables.New(iptables.IPFamily(iptables.ProtocolIPv6), iptables.Timeout(iptablesTimeout))
 	if err != nil {
-		notrackLog.Error(err, "error connecting to ip6tables for notrack")
-		os.Exit(1)
+		return fmt.Errorf("error connecting to ip6tables for notrack: %w", err)
 	}
 
 	netlinkManager := &nl.NetlinkManager{}
 
-	go func() {
-		for {
-			links, err := netlink.LinkList()
-			if err != nil {
-				notrackLog.Error(err, "error getting link list for notrack check")
-				continue
-			}
+	go syncIPTTables(netlinkManager, ipt4, ipt6)
 
-			var notrackLinks []string
-			for _, link := range links {
-				for _, notrackPrefix := range notrackLinkPrefixes {
-					if strings.HasPrefix(link.Attrs().Name, notrackPrefix) {
-						notrackLinks = append(notrackLinks, link.Attrs().Name)
-						break
-					}
+	return nil
+}
+
+func syncIPTTables(netlinkManager *nl.NetlinkManager, ipt4, ipt6 *iptables.IPTables) {
+	for {
+		links, err := netlink.LinkList()
+		if err != nil {
+			notrackLog.Error(err, "error getting link list for notrack check")
+			continue
+		}
+
+		var notrackLinks []string
+		for _, link := range links {
+			for _, notrackPrefix := range notrackLinkPrefixes {
+				if strings.HasPrefix(link.Attrs().Name, notrackPrefix) {
+					notrackLinks = append(notrackLinks, link.Attrs().Name)
+					break
 				}
 			}
+		}
 
-			if err := reconcileIPTables(notrackLinks, ipt4); err != nil {
-				notrackLog.Error(err, "error reconciling notrack in IPv4 iptables")
-			}
-			if err := reconcileIPTables(notrackLinks, ipt6); err != nil {
-				notrackLog.Error(err, "error reconciling notrack in IPv6 iptables")
-			}
+		if err := reconcileIPTables(notrackLinks, ipt4); err != nil {
+			notrackLog.Error(err, "error reconciling notrack in IPv4 iptables")
+		}
+		if err := reconcileIPTables(notrackLinks, ipt6); err != nil {
+			notrackLog.Error(err, "error reconciling notrack in IPv6 iptables")
+		}
 
-			if underlayIP, err := netlinkManager.GetUnderlayIP(); err == nil {
-				if err := ipt4.AppendUnique(IPTABLES_TABLE, IPTABLES_PREROUTING, "-d", underlayIP.String(), "-p", "udp", "--dport", "4789", "-j", "NOTRACK"); err != nil {
-					notrackLog.Error(err, "error reconciling VXLAN notrack in IPv4 iptables")
-				}
-				if err := ipt4.AppendUnique(IPTABLES_TABLE, IPTABLES_OUTPUT, "-s", underlayIP.String(), "-p", "udp", "--dport", "4789", "-j", "NOTRACK"); err != nil {
-					notrackLog.Error(err, "error reconciling VXLAN notrack in IPv4 iptables")
-				}
-			} else {
+		if underlayIP, err := netlinkManager.GetUnderlayIP(); err == nil {
+			if err := ipt4.AppendUnique(iptablesTable, iptablesPrerouting, "-d", underlayIP.String(), "-p", "udp", "--dport", "4789", "-j", "NOTRACK"); err != nil {
 				notrackLog.Error(err, "error reconciling VXLAN notrack in IPv4 iptables")
 			}
-
-			time.Sleep(20 * time.Second)
+			if err := ipt4.AppendUnique(iptablesTable, iptablesOutput, "-s", underlayIP.String(), "-p", "udp", "--dport", "4789", "-j", "NOTRACK"); err != nil {
+				notrackLog.Error(err, "error reconciling VXLAN notrack in IPv4 iptables")
+			}
+		} else {
+			notrackLog.Error(err, "error reconciling VXLAN notrack in IPv4 iptables")
 		}
-	}()
+
+		time.Sleep(syncInterval)
+	}
 }

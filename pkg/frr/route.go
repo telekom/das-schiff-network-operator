@@ -40,7 +40,7 @@ func getQuantity(routeInfos Routes, family int) ([]route.RouteInformation, error
 	return routeList, nil
 }
 
-func (frr *FRRManager) ListVrfs() ([]VrfVniSpec, error) {
+func (frr *Manager) ListVrfs() ([]VrfVniSpec, error) {
 	vrfs, err := frr.CLI.ShowVRFs()
 	if err != nil {
 		return vrfs.Vrfs, err
@@ -51,7 +51,7 @@ func (frr *FRRManager) ListVrfs() ([]VrfVniSpec, error) {
 	return vrfs.Vrfs, nil
 }
 
-func (frr *FRRManager) ListRoutes(vrf string) ([]route.RouteInformation, error) {
+func (frr *Manager) ListRoutes(vrf string) ([]route.RouteInformation, error) {
 	vrfDualStackRoutes, err := frr.CLI.ShowRoutes(vrf)
 	if err != nil {
 		return nil, err
@@ -74,7 +74,7 @@ func (frr *FRRManager) ListRoutes(vrf string) ([]route.RouteInformation, error) 
 	return routeList, nil
 }
 
-func (frr *FRRManager) ListNeighbors(vrf string) (bgpSummary BGPVrfSummary, err error) {
+func (frr *Manager) ListNeighbors(vrf string) (bgpSummary BGPVrfSummary, err error) {
 	bgpSummary, err = frr.CLI.ShowBGPSummary(vrf)
 	if err != nil {
 		return bgpSummary, err
