@@ -142,5 +142,5 @@ type Collector interface {
 var ErrNoData = errors.New("collector returned no data")
 
 func IsNoDataError(err error) bool {
-	return err == ErrNoData
+	return errors.Is(err, ErrNoData)
 }
