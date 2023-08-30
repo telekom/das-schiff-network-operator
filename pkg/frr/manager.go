@@ -9,8 +9,8 @@ import (
 	"os"
 	"text/template"
 
-	"github.com/coreos/go-systemd/v22/dbus"
 	"github.com/telekom/das-schiff-network-operator/pkg/config"
+	"github.com/telekom/das-schiff-network-operator/pkg/frr/dbus"
 )
 
 const defaultPermissions = 0o640
@@ -25,6 +25,7 @@ type Manager struct {
 	ConfigPath     string
 	TemplatePath   string
 	Cli            *Cli
+	dbusToolkit    dbus.System
 }
 
 type PrefixList struct {
@@ -64,6 +65,7 @@ func NewFRRManager() *Manager {
 		ConfigPath:   "/etc/frr/frr.conf",
 		TemplatePath: "/etc/frr/frr.conf.tpl",
 		Cli:          NewCli(),
+		dbusToolkit:  &dbus.Toolkit{},
 	}
 }
 
@@ -87,10 +89,10 @@ func (m *Manager) Init() error {
 	return nil
 }
 
-func (*Manager) ReloadFRR() error {
-	con, err := dbus.NewSystemConnectionContext(context.Background())
+func (m *Manager) ReloadFRR() error {
+	con, err := m.dbusToolkit.NewConn(context.Background())
 	if err != nil {
-		return fmt.Errorf("error creating nee D-Bus connection: %w", err)
+		return fmt.Errorf("error creating new D-Bus connection: %w", err)
 	}
 	defer con.Close()
 
@@ -105,8 +107,8 @@ func (*Manager) ReloadFRR() error {
 	return nil
 }
 
-func (*Manager) RestartFRR() error {
-	con, err := dbus.NewSystemConnectionContext(context.Background())
+func (n *Manager) RestartFRR() error {
+	con, err := n.dbusToolkit.NewConn(context.Background())
 	if err != nil {
 		return fmt.Errorf("error creating nee D-Bus connection: %w", err)
 	}
@@ -123,8 +125,8 @@ func (*Manager) RestartFRR() error {
 	return nil
 }
 
-func (*Manager) GetStatusFRR() (activeState, subState string, err error) {
-	con, err := dbus.NewSystemConnectionContext(context.Background())
+func (m *Manager) GetStatusFRR() (activeState, subState string, err error) {
+	con, err := m.dbusToolkit.NewConn(context.Background())
 	if err != nil {
 		return "", "", fmt.Errorf("error creating D-Bus connection: %w", err)
 	}

@@ -1,0 +1,10 @@
+vnimap: # VRF name to VNI mapping for the site
+  vrf1: 100
+  vrf2: 101
+  vrf3: 102
+skipVRFConfig: # Only configure route-maps / prefix-lists for VRFs from the provisioning process
+- mgmt_vrf
+bpfInterfaces: # Attach eBPF program to the interfaces from the provisioning process
+- "br.mgmt_vrf"
+- "mgmt_vrf_def"
+- "vx.200"

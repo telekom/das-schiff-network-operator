@@ -138,7 +138,7 @@ func GetAddressFamily(addressFamily int) (string, error) {
 	}
 }
 
-func (*NetlinkManager) getVRFName(tableID int, vrfInterfaces map[int]VRFInformation) (string, error) {
+func (*Manager) getVRFName(tableID int, vrfInterfaces map[int]VRFInformation) (string, error) {
 	if tableID < 0 || tableID > 255 {
 		return "", fmt.Errorf("table id %d out of range [0-255]", tableID)
 	}
@@ -160,7 +160,7 @@ func (*NetlinkManager) getVRFName(tableID int, vrfInterfaces map[int]VRFInformat
 	}
 }
 
-func (n *NetlinkManager) ListRouteInformation() ([]route.Information, error) {
+func (n *Manager) ListRouteInformation() ([]route.Information, error) {
 	netlinkRoutes, err := n.listRoutes()
 	if err != nil {
 		return nil, fmt.Errorf("error listing routes: %w", err)

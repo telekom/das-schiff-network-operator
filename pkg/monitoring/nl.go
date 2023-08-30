@@ -16,7 +16,7 @@ type netlinkCollector struct {
 	basicCollector
 	routesFibDesc typedFactoryDesc
 	neighborsDesc typedFactoryDesc
-	netlink       *nl.NetlinkManager
+	netlink       *nl.Manager
 }
 
 func init() {
@@ -44,7 +44,7 @@ func NewNetlinkCollector() (Collector, error) {
 			),
 			valueType: prometheus.GaugeValue,
 		},
-		netlink: &nl.NetlinkManager{},
+		netlink: &nl.Manager{},
 	}
 	collector.name = nlCollectorName
 	collector.logger = ctrl.Log.WithName("netlink.collector")
