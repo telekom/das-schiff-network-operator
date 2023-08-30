@@ -20,7 +20,7 @@ const defaultDebounceTime = 20 * time.Second
 
 type Reconciler struct {
 	client         client.Client
-	netlinkManager *nl.NetlinkManager
+	netlinkManager *nl.Manager
 	frrManager     *frr.Manager
 	anycastTracker *anycast.Tracker
 	config         *config.Config
@@ -40,7 +40,7 @@ type reconcile struct {
 func NewReconciler(clusterClient client.Client, anycastTracker *anycast.Tracker, logger logr.Logger) (*Reconciler, error) {
 	reconciler := &Reconciler{
 		client:         clusterClient,
-		netlinkManager: &nl.NetlinkManager{},
+		netlinkManager: nl.NewManager(&nl.Toolkit{}),
 		frrManager:     frr.NewFRRManager(),
 		anycastTracker: anycastTracker,
 		logger:         logger,

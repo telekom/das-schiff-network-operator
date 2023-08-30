@@ -25,7 +25,7 @@ type VRFInformation struct {
 }
 
 // Create will create a VRF and all interfaces necessary to operate the EVPN and leaking.
-func (n *NetlinkManager) CreateL3(info VRFInformation) error {
+func (n *Manager) CreateL3(info VRFInformation) error {
 	if len(info.Name) > maxVRFnameLen {
 		return fmt.Errorf("name of VRF can not be longer than 12 (15-3 prefix) chars")
 	}
@@ -68,7 +68,7 @@ func (n *NetlinkManager) CreateL3(info VRFInformation) error {
 }
 
 // UpL3 will set all interfaces up. This is done after the FRR reload to not have a L2VNI for a short period of time.
-func (n *NetlinkManager) UpL3(info VRFInformation) error {
+func (n *Manager) UpL3(info VRFInformation) error {
 	if err := n.setUp(bridgePrefix + info.Name); err != nil {
 		return err
 	}
@@ -85,7 +85,7 @@ func (n *NetlinkManager) UpL3(info VRFInformation) error {
 }
 
 // Cleanup will try to delete all interfaces associated with this VRF and return a list of errors (for logging) as a slice.
-func (n *NetlinkManager) CleanupL3(name string) []error {
+func (n *Manager) CleanupL3(name string) []error {
 	errors := []error{}
 	err := n.deleteLink(vxlanPrefix + name)
 	if err != nil {
@@ -106,7 +106,7 @@ func (n *NetlinkManager) CleanupL3(name string) []error {
 	return errors
 }
 
-func (n *NetlinkManager) findFreeTableID() (int, error) {
+func (n *Manager) findFreeTableID() (int, error) {
 	configuredVRFs, err := n.ListL3()
 	if err != nil {
 		return -1, err
@@ -131,7 +131,7 @@ func (n *NetlinkManager) findFreeTableID() (int, error) {
 	return freeTableID, nil
 }
 
-func (n *NetlinkManager) GetL3ByName(name string) (*VRFInformation, error) {
+func (n *Manager) GetL3ByName(name string) (*VRFInformation, error) {
 	list, err := n.ListL3()
 	if err != nil {
 		return nil, err
