@@ -95,7 +95,28 @@ func (r *VRFRouteConfiguration) validateItems() error {
 	return nil
 }
 
+func findDuplicates(items []VrfRouteConfigurationPrefixItem) []string {
+	counter := map[string]int{}
+	for _, item := range items {
+		counter[item.CIDR]++
+	}
+
+	duplicates := []string{}
+	for key, value := range counter {
+		if value > 1 {
+			duplicates = append(duplicates, key)
+		}
+	}
+
+	return duplicates
+}
+
 func validateItemList(items []VrfRouteConfigurationPrefixItem) error {
+	duplicates := findDuplicates(items)
+	if len(duplicates) > 0 {
+		return fmt.Errorf("there are duplicated items in the VrfRouteConfiguration: %v", duplicates)
+	}
+
 	usedPriorities := map[int]struct{}{}
 	for i, item := range items {
 		seq := i + 1
@@ -108,7 +129,7 @@ func validateItemList(items []VrfRouteConfigurationPrefixItem) error {
 
 		err := item.validateItem()
 		if err != nil {
-			return err
+			return fmt.Errorf("error validating configuration item: %w", err)
 		}
 
 		usedPriorities[seq] = struct{}{}
@@ -117,10 +138,15 @@ func validateItemList(items []VrfRouteConfigurationPrefixItem) error {
 }
 
 func (item VrfRouteConfigurationPrefixItem) validateItem() error {
-	ip, _, err := net.ParseCIDR(item.CIDR)
+	ip, network, err := net.ParseCIDR(item.CIDR)
 	if err != nil {
 		return fmt.Errorf("error parsing CIDR %s: %w", item.CIDR, err)
 	}
+
+	if !network.IP.Equal(ip) {
+		return fmt.Errorf("CIDR %s is invalid, CIDR for this network should be %s", item.CIDR, network.String())
+	}
+
 	if ip.To4() != nil {
 		ip = ip.To4()
 	}
