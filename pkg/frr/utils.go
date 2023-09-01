@@ -76,15 +76,12 @@ func Filter[T any](slice []T, predicate func(T) bool) []T {
 }
 
 func Exists[T any](slice []T, predicate func(T) bool) (resultIndex int, ok bool) {
-	ok = false
 	for index, element := range slice {
 		if predicate(element) {
-			ok = true
-			resultIndex = index
-			break
+			return index, true
 		}
 	}
-	return resultIndex, ok
+	return -1, false
 }
 
 func Find[T any](slice []T, predicate func(T) bool) (result T, resultIndex int, ok bool) {
