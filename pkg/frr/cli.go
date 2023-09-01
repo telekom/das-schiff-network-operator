@@ -41,7 +41,7 @@ func (frr *FRRCLI) executeWithJson(args []string) []byte {
 func (frr *FRRCLI) execute(args []string) []byte {
 	// Ensure JSON is always appended
 
-	joinedArgs := strings.Join(args[:], " ")
+	joinedArgs := strings.Join(args, " ")
 	cmd := &exec.Cmd{
 		Path: frr.binaryPath,
 		Args: append([]string{frr.binaryPath, "-c"}, joinedArgs), // it is weird to set path and Args[0] ^^
