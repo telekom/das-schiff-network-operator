@@ -91,7 +91,7 @@ func (frr *FRRCLI) ShowBGPSummary(vrf string) (BGPVrfSummary, error) {
 
 }
 
-func (frr *FRRCLI) ShowVRFVnis() (VrfVni, error) {
+func (frr *FRRCLI) showVRFVnis() (VrfVni, error) {
 	vrfInfo := VrfVni{}
 	vrfVniData := frr.executeWithJson([]string{
 		"show",
@@ -102,7 +102,7 @@ func (frr *FRRCLI) ShowVRFVnis() (VrfVni, error) {
 	return vrfInfo, err
 }
 func (frr *FRRCLI) ShowVRFs() (VrfVni, error) {
-	vrfInfo, err := frr.ShowVRFVnis()
+	vrfInfo, err := frr.showVRFVnis()
 	if err != nil {
 		return vrfInfo, err
 	}
@@ -207,9 +207,9 @@ func (frr *FRRCLI) getDualStackRoutes(vrf string) (Routes, Routes, error) {
 	return routes_v4, routes_v6, nil
 }
 
-func (frr *FRRCLI) ShowRoutes(vrf string) (VrfDualStackRoutes, error) {
+func (frr *FRRCLI) ShowRoutes(vrf string) (VRFDualStackRoutes, error) {
 	vrfName, multiVrf := getVRF(vrf)
-	vrfRoutes := VrfDualStackRoutes{}
+	vrfRoutes := VRFDualStackRoutes{}
 	if multiVrf {
 		// as the opensource project has issues with correctly representing
 		// json in some cli commands

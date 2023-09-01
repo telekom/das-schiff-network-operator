@@ -72,14 +72,6 @@ func (af BGPAddressFamily) Values() (families []BGPAddressFamily) {
 
 }
 
-func ParseBGPAddressFamily(value string) BGPAddressFamily {
-	af, ok := bgpAddressFamily[value]
-	if !ok {
-		return bgpAddressFamily[Unknown.String()]
-	}
-	return af
-}
-
 func (af BGPAddressFamily) String() string {
 	switch af {
 	case IPv4Unicast:
@@ -185,9 +177,7 @@ type DualStackRoutes struct {
 	IPv6 Routes `json:"ipv6"`
 }
 
-type VrfDualStackRoutes map[string]DualStackRoutes
-
-type VrfRoutes map[string]Routes
+type VRFDualStackRoutes map[string]DualStackRoutes
 type VrfVniSpec struct {
 	Vrf       string `json:"vrf"`
 	Vni       int    `json:"vni"`

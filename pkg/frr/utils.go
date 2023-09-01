@@ -11,7 +11,7 @@ func Chunk[E any](values []E, size int) [][]E {
 			size = remaining
 		}
 
-		chunks = append(chunks, values[:size:size])
+		chunks = append(chunks, values[:size])
 		values = values[size:]
 	}
 
