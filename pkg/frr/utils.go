@@ -19,8 +19,7 @@ func Chunk[E any](values []E, size int) [][]E {
 }
 
 func DeleteByIndex[T any](slice []T, index int) []T {
-	sliceLen := len(slice)
-	sliceLastIndex := sliceLen - 1
+	sliceLastIndex := len(slice) - 1
 
 	if index != sliceLastIndex {
 		slice[index] = slice[sliceLastIndex]
