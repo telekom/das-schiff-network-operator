@@ -122,7 +122,7 @@ func (frr *FRRCLI) ShowVRFs() (VrfVni, error) {
 		"show",
 		"vrf",
 	})
-	dataAsString := string(data[:])
+	dataAsString := string(data)
 	scanner := bufio.NewScanner(strings.NewReader(dataAsString))
 	var dataAsSlice []map[string]string
 	for scanner.Scan() {
