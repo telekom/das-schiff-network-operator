@@ -114,7 +114,6 @@ func GetProtocolNumber(protocol string, frr bool) int {
 }
 
 func GetFamily(addressFamily int) (string, error) {
-
 	switch addressFamily {
 	case netlink.FAMILY_V4:
 		return "ipv4", nil

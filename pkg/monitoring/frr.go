@@ -171,30 +171,11 @@ func NewFRRCollector() (Collector, error) {
 	return &collector, nil
 }
 
-func (c *frrCollector) Update(ch chan<- prometheus.Metric) error {
-	routes, err := c.frr.ListRoutes("")
-	if err != nil {
-		c.logger.Error(err, "Can't get routes from frr")
-		return err
-	}
+func (c *frrCollector) UpdateVrfs(ch chan<- prometheus.Metric) error {
 	vrfs, err := c.frr.ListVrfs()
 	if err != nil {
 		c.logger.Error(err, "Can't get vrfs from frr")
 		return err
-	}
-	bgpNeighbors, err := c.frr.ListNeighbors("")
-	if err != nil {
-		c.logger.Error(err, "Can't get bgpNeighbors from frr")
-		return err
-	}
-	c.logger.Info("I am in the frr collector")
-
-	for _, routePath := range routes {
-		if routePath.VrfName == "default" {
-			routePath.VrfName = "main"
-			routePath.TableId = unix.RT_CLASS_MAIN
-		}
-		ch <- c.routesDesc.mustNewConstMetric(float64(routePath.Quantity), strconv.Itoa(routePath.TableId), routePath.VrfName, nl.GetProtocolName(routePath.RouteProtocol), routePath.AddressFamily)
 	}
 	for _, vrf := range vrfs {
 		// hotfix for default as it is called
@@ -206,6 +187,32 @@ func (c *frrCollector) Update(ch chan<- prometheus.Metric) error {
 		state := convertToStateFloat(vrf.State)
 		ch <- c.vrfVniDesc.mustNewConstMetric(state, vrf.Table, vrf.Vrf, vrf.SviIntf, vrf.VxlanIntf)
 	}
+	return nil
+}
+
+func (c *frrCollector) UpdateRoutes(ch chan<- prometheus.Metric) error {
+	routes, err := c.frr.ListRoutes("")
+	if err != nil {
+		c.logger.Error(err, "Can't get routes from frr")
+		return err
+	}
+	for _, routePath := range routes {
+		if routePath.VrfName == "default" {
+			routePath.VrfName = "main"
+			routePath.TableId = unix.RT_CLASS_MAIN
+		}
+		ch <- c.routesDesc.mustNewConstMetric(float64(routePath.Quantity), strconv.Itoa(routePath.TableId), routePath.VrfName, nl.GetProtocolName(routePath.RouteProtocol), routePath.AddressFamily)
+	}
+	return nil
+}
+
+func (c *frrCollector) UpdateBGPNeighbors(ch chan<- prometheus.Metric) error {
+	bgpNeighbors, err := c.frr.ListNeighbors("")
+	if err != nil {
+		c.logger.Error(err, "Can't get bgpNeighbors from frr")
+		return err
+	}
+
 	for _, families := range bgpNeighbors {
 		for _, family := range frr.Unknown.Values() {
 			neighbor, ok := families[family.String()]
@@ -234,9 +241,16 @@ func (c *frrCollector) Update(ch chan<- prometheus.Metric) error {
 				ch <- c.bgpMessagesReceivedDesc.mustNewConstMetric(float64(peerData.MsgRcvd), bgpLabels...)
 				ch <- c.bgpMessagesTransmittedDesc.mustNewConstMetric(float64(peerData.MsgSent), bgpLabels...)
 			}
-
 		}
-
 	}
 	return nil
+}
+
+func (c *frrCollector) Update(ch chan<- prometheus.Metric) error {
+	c.logger.Info("I am in the frr collector")
+	var err error = nil
+	err = c.UpdateVrfs(ch)
+	err = c.UpdateRoutes(ch)
+	err = c.UpdateBGPNeighbors(ch)
+	return err
 }
