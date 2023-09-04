@@ -33,7 +33,7 @@ func getVRF(vrf string) (string, bool) {
 	return vrf, false
 }
 
-func (frr *Cli) executeWithJson(args []string) []byte {
+func (frr *Cli) executeWithJSON(args []string) []byte {
 	args = append(args, "json")
 	return frr.execute(args)
 }
@@ -55,7 +55,7 @@ func (frr *Cli) execute(args []string) []byte {
 
 func (frr *Cli) ShowEVPNVNIDetail() (EVPNVniDetail, error) {
 	evpnInfo := EVPNVniDetail{}
-	data := frr.executeWithJson([]string{
+	data := frr.executeWithJSON([]string{
 		"show",
 		"evpn",
 		"vni",
@@ -70,7 +70,7 @@ func (frr *Cli) ShowEVPNVNIDetail() (EVPNVniDetail, error) {
 
 func (frr *Cli) ShowBGPSummary(vrf string) (bgpVrfSummary, error) {
 	vrfName, multiVRF := getVRF(vrf)
-	data := frr.executeWithJson([]string{
+	data := frr.executeWithJSON([]string{
 		"show",
 		"bgp",
 		"vrf",
@@ -98,7 +98,7 @@ func (frr *Cli) ShowBGPSummary(vrf string) (bgpVrfSummary, error) {
 
 func (frr *Cli) showVRFVnis() (VrfVni, error) {
 	vrfInfo := VrfVni{}
-	vrfVniData := frr.executeWithJson([]string{
+	vrfVniData := frr.executeWithJSON([]string{
 		"show",
 		"vrf",
 		"vni",
@@ -187,14 +187,14 @@ func (frr *Cli) ShowVRFs() (VrfVni, error) {
 func (frr *Cli) getDualStackRoutes(vrf string) (Routes, Routes, error) {
 	routesV4 := Routes{}
 	routesV6 := Routes{}
-	dataV4 := frr.executeWithJson([]string{
+	dataV4 := frr.executeWithJSON([]string{
 		"show",
 		"ip",
 		"route",
 		"vrf",
 		vrf,
 	})
-	dataV6 := frr.executeWithJson([]string{
+	dataV6 := frr.executeWithJSON([]string{
 		"show",
 		"ipv6",
 		"route",
