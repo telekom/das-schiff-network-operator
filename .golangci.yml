@@ -142,6 +142,13 @@ linters-settings:
   funlen:
     lines: 65
 
+issues:
+  exclude-rules:
+    - path: '(.+)/unix/(coil|frr)\.go'
+      text: "var-naming: don't use ALL_CAPS in Go names; use CamelCase (revive)"
+    - path: '(.+)\.go'
+      text: "string `vrf` has (\\d+) occurrences, make it a constant"
+
 run:
   timeout: 10m
   allow-parallel-runners: true

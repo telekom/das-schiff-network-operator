@@ -187,14 +187,14 @@ func (frr *Cli) ShowVRFs() (VrfVni, error) {
 func (frr *Cli) getDualStackRoutes(vrf string) (Routes, Routes, error) {
 	routesV4 := Routes{}
 	routesV6 := Routes{}
-	data_v4 := frr.executeWithJson([]string{
+	dataV4 := frr.executeWithJson([]string{
 		"show",
 		"ip",
 		"route",
 		"vrf",
 		vrf,
 	})
-	data_v6 := frr.executeWithJson([]string{
+	dataV6 := frr.executeWithJson([]string{
 		"show",
 		"ipv6",
 		"route",
@@ -202,11 +202,11 @@ func (frr *Cli) getDualStackRoutes(vrf string) (Routes, Routes, error) {
 		vrf,
 	})
 	var err error
-	err = json.Unmarshal(data_v4, &routesV4)
+	err = json.Unmarshal(dataV4, &routesV4)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed parsing json into struct ipv4 Routes: %w", err)
 	}
-	err = json.Unmarshal(data_v6, &routesV6)
+	err = json.Unmarshal(dataV6, &routesV6)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed parsing json into struct ipv6 Routes: %w", err)
 	}
