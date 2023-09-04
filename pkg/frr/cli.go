@@ -68,7 +68,7 @@ func (frr *Cli) ShowEVPNVNIDetail() (EVPNVniDetail, error) {
 	return evpnInfo, err
 }
 
-func (frr *Cli) ShowBGPSummary(vrf string) (BGPVrfSummary, error) {
+func (frr *Cli) ShowBGPSummary(vrf string) (bgpVrfSummary, error) {
 	vrfName, multiVRF := getVRF(vrf)
 	data := frr.executeWithJson([]string{
 		"show",
@@ -77,8 +77,8 @@ func (frr *Cli) ShowBGPSummary(vrf string) (BGPVrfSummary, error) {
 		vrfName,
 		"summary",
 	})
-	bgpSummary := BGPVrfSummary{}
-	bgpSummarySpec := BGPVrfSummarySpec{}
+	bgpSummary := bgpVrfSummary{}
+	bgpSummarySpec := bgpVrfSummarySpec{}
 	var err error
 	if multiVRF {
 		err = json.Unmarshal(data, &bgpSummary)

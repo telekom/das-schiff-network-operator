@@ -116,9 +116,9 @@ func (af bgpAF) Safi() string {
 	return frrUnknown
 }
 
-type BGPVrfSummarySpec map[string]AfiAndSafi
+type bgpVrfSummarySpec map[string]AfiAndSafi
 
-type BGPVrfSummary map[string]BGPVrfSummarySpec
+type bgpVrfSummary map[string]bgpVrfSummarySpec
 
 type EVPNVniDetail struct {
 	Vni                   int      `json:"vni"`

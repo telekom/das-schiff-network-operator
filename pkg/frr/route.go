@@ -77,7 +77,7 @@ func (frr *Manager) ListRoutes(vrf string) ([]route.Information, error) {
 	return routeList, nil
 }
 
-func (frr *Manager) ListNeighbors(vrf string) (bgpSummary BGPVrfSummary, err error) {
+func (frr *Manager) ListNeighbors(vrf string) (bgpSummary bgpVrfSummary, err error) {
 	bgpSummary, err = frr.Cli.ShowBGPSummary(vrf)
 	if err != nil {
 		return bgpSummary, fmt.Errorf("cannot get BGPSummary for vrf %s: %w", vrf, err)
