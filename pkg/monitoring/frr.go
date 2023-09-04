@@ -171,11 +171,10 @@ func NewFRRCollector() (Collector, error) {
 	return &collector, nil
 }
 
-func (c *frrCollector) UpdateVrfs(ch chan<- prometheus.Metric) error {
+func (c *frrCollector) UpdateVrfs(ch chan<- prometheus.Metric) {
 	vrfs, err := c.frr.ListVrfs()
 	if err != nil {
 		c.logger.Error(err, "Can't get vrfs from frr")
-		return err
 	}
 	for _, vrf := range vrfs {
 		// hotfix for default as it is called
@@ -187,14 +186,12 @@ func (c *frrCollector) UpdateVrfs(ch chan<- prometheus.Metric) error {
 		state := convertToStateFloat(vrf.State)
 		ch <- c.vrfVniDesc.mustNewConstMetric(state, vrf.Table, vrf.Vrf, vrf.SviIntf, vrf.VxlanIntf)
 	}
-	return nil
 }
 
-func (c *frrCollector) UpdateRoutes(ch chan<- prometheus.Metric) error {
+func (c *frrCollector) UpdateRoutes(ch chan<- prometheus.Metric) {
 	routes, err := c.frr.ListRoutes("")
 	if err != nil {
 		c.logger.Error(err, "Can't get routes from frr")
-		return err
 	}
 	for _, routePath := range routes {
 		if routePath.VrfName == "default" {
@@ -203,14 +200,12 @@ func (c *frrCollector) UpdateRoutes(ch chan<- prometheus.Metric) error {
 		}
 		ch <- c.routesDesc.mustNewConstMetric(float64(routePath.Quantity), strconv.Itoa(routePath.TableId), routePath.VrfName, nl.GetProtocolName(routePath.RouteProtocol), routePath.AddressFamily)
 	}
-	return nil
 }
 
-func (c *frrCollector) UpdateBGPNeighbors(ch chan<- prometheus.Metric) error {
+func (c *frrCollector) UpdateBGPNeighbors(ch chan<- prometheus.Metric) {
 	bgpNeighbors, err := c.frr.ListNeighbors("")
 	if err != nil {
-		c.logger.Error(err, "Can't get bgpNeighbors from frr")
-		return err
+		c.logger.Error(err, "Can't get bgpNeighbors from frr: %w")
 	}
 
 	for _, families := range bgpNeighbors {
@@ -243,14 +238,12 @@ func (c *frrCollector) UpdateBGPNeighbors(ch chan<- prometheus.Metric) error {
 			}
 		}
 	}
-	return nil
 }
 
 func (c *frrCollector) Update(ch chan<- prometheus.Metric) error {
 	c.logger.Info("I am in the frr collector")
-	var err error = nil
-	err = c.UpdateVrfs(ch)
-	err = c.UpdateRoutes(ch)
-	err = c.UpdateBGPNeighbors(ch)
-	return err
+	c.UpdateVrfs(ch)
+	c.UpdateRoutes(ch)
+	c.UpdateBGPNeighbors(ch)
+	return nil
 }

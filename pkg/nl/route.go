@@ -113,7 +113,7 @@ func GetProtocolNumber(protocol string, frr bool) int {
 	}
 }
 
-func GetFamily(addressFamily int) (string, error) {
+func GetAddressFamily(addressFamily int) (string, error) {
 	switch addressFamily {
 	case netlink.FAMILY_V4:
 		return "ipv4", nil
@@ -131,7 +131,7 @@ func GetFamily(addressFamily int) (string, error) {
 func (n *NetlinkManager) getVRFNameByInterface(tableId int) (string, error) {
 	links, err := n.listVRFInterfaces()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("error getting vrf interfaces: %w", err)
 	}
 	for _, link := range links {
 		if tableId == link.table {
@@ -161,10 +161,10 @@ func (n *NetlinkManager) getVRFName(tableId int) (string, error) {
 
 func (n *NetlinkManager) ListRoutes() ([]route.RouteInformation, error) {
 	netlinkRoutes, err := n.listRoutes()
-	routes := map[route.RouteKey]route.RouteInformation{}
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error listing routes: %w", err)
 	}
+	routes := map[route.RouteKey]route.RouteInformation{}
 
 	for _, netlinkRoute := range netlinkRoutes {
 		routeKey := route.RouteKey{TableId: netlinkRoute.Table, RouteProtocol: int(netlinkRoute.Protocol), AddressFamily: netlinkRoute.Family}
@@ -174,13 +174,13 @@ func (n *NetlinkManager) ListRoutes() ([]route.RouteInformation, error) {
 			routeInformation.Quantity = routeInformation.Quantity + 1
 			routes[routeKey] = routeInformation
 		} else {
-			family, err := GetFamily(netlinkRoute.Family)
+			family, err := GetAddressFamily(netlinkRoute.Family)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("error converting addressFamily [%d]: %w", netlinkRoute.Family, err)
 			}
 			vrfName, err := n.getVRFName(netlinkRoute.Table)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("error getting vrfName for table id %d: %w", netlinkRoute.Table, err)
 			}
 			routes[routeKey] = route.RouteInformation{
 				TableId:       netlinkRoute.Table,

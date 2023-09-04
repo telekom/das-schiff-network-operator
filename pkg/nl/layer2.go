@@ -422,18 +422,18 @@ func (n *NetlinkManager) ListNeighbors() ([]NeighborInformation, error) {
 	}
 	neighbors := []NeighborInformation{}
 	for _, netlinkNeighbor := range netlinkNeighbors {
-		family, err := GetFamily(netlinkNeighbor.Family)
+		family, err := GetAddressFamily(netlinkNeighbor.Family)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("error converting addressFamily [%d]: %w", &netlinkNeighbor.Family, err)
 		}
 		state, err := getNeighborState(netlinkNeighbor.State)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("error converting neighborState [%d]: %w", &netlinkNeighbor.State, err)
 		}
 
 		linkInfo, err := netlink.LinkByIndex(netlinkNeighbor.LinkIndex)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("error getting link by index: %w", err)
 		}
 		interfaceName := linkInfo.Attrs().Name
 		hardwareAddr := netlinkNeighbor.HardwareAddr.String()

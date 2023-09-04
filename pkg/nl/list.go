@@ -14,7 +14,7 @@ func (n *NetlinkManager) listRoutes() ([]netlink.Route, error) {
 		Table: 0,
 	}, netlink.RT_FILTER_TABLE)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error listing all routes: %w", err)
 	}
 	return routes, nil
 }
@@ -22,7 +22,7 @@ func (n *NetlinkManager) listRoutes() ([]netlink.Route, error) {
 func (n *NetlinkManager) listNeighbors() ([]netlink.Neigh, error) {
 	neighbors, err := netlink.NeighList(0, netlink.FAMILY_ALL)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error listing all neighbors: %w", err)
 	}
 	return neighbors, nil
 }
