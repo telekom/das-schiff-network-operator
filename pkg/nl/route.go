@@ -146,13 +146,13 @@ func (n *NetlinkManager) getVRFName(tableId int) (string, error) {
 		return "", fmt.Errorf("table id %d out of range [0-255]", tableId)
 	}
 	switch tableId {
-	case 255:
+	case localTableID:
 		return "local", nil
-	case 254:
+	case mainTableID:
 		return "main", nil
-	case 253:
+	case defaultTableID:
 		return "default", nil
-	case 0:
+	case unspecifiedTableID:
 		return "unspecified", nil
 	default:
 		return n.getVRFNameByInterface(tableId)

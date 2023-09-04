@@ -185,8 +185,8 @@ func (frr *FRRCLI) ShowVRFs() (VrfVni, error) {
 }
 
 func (frr *FRRCLI) getDualStackRoutes(vrf string) (Routes, Routes, error) {
-	routes_v4 := Routes{}
-	routes_v6 := Routes{}
+	routesV4 := Routes{}
+	routesV6 := Routes{}
 	data_v4 := frr.executeWithJson([]string{
 		"show",
 		"ip",
@@ -202,15 +202,15 @@ func (frr *FRRCLI) getDualStackRoutes(vrf string) (Routes, Routes, error) {
 		vrf,
 	})
 	var err error
-	err = json.Unmarshal(data_v4, &routes_v4)
+	err = json.Unmarshal(data_v4, &routesV4)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed parsing json into struct ipv4 Routes: %w", err)
 	}
-	err = json.Unmarshal(data_v6, &routes_v6)
+	err = json.Unmarshal(data_v6, &routesV6)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed parsing json into struct ipv6 Routes: %w", err)
 	}
-	return routes_v4, routes_v6, nil
+	return routesV4, routesV6, nil
 }
 
 func (frr *FRRCLI) ShowRoutes(vrf string) (VRFDualStackRoutes, error) {
@@ -225,19 +225,19 @@ func (frr *FRRCLI) ShowRoutes(vrf string) (VRFDualStackRoutes, error) {
 			return nil, fmt.Errorf("cannot get vrfs from frr: %w", err)
 		}
 		for _, vrf := range vrfVni.Vrfs {
-			routes_v4, routes_v6, err := frr.getDualStackRoutes(vrf.Vrf)
+			routesV4, routesV6, err := frr.getDualStackRoutes(vrf.Vrf)
 			if err != nil {
 				return nil, fmt.Errorf("cannot get DualStackRoutes for vrf %s: %w", vrf.Vrf, err)
 			}
-			vrfRoutes[vrf.Vrf] = DualStackRoutes{IPv4: routes_v4, IPv6: routes_v6}
+			vrfRoutes[vrf.Vrf] = DualStackRoutes{IPv4: routesV4, IPv6: routesV6}
 		}
 
 	} else {
-		routes_v4, routes_v6, err := frr.getDualStackRoutes(vrfName)
+		routesV4, routesV6, err := frr.getDualStackRoutes(vrfName)
 		if err != nil {
 			return nil, fmt.Errorf("cannot get DualStackRoutes for vrf %s: %w", vrfName, err)
 		}
-		vrfRoutes[vrfName] = DualStackRoutes{IPv4: routes_v4, IPv6: routes_v6}
+		vrfRoutes[vrfName] = DualStackRoutes{IPv4: routesV4, IPv6: routesV6}
 	}
 	return vrfRoutes, nil
 }
