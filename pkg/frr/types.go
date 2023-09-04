@@ -55,17 +55,6 @@ const (
 	Unknown
 )
 
-var (
-	bgpAddressFamily = map[string]bgpAF{
-		"ipv4Unicast":   IPv4Unicast,
-		"ipv4Multicast": IPv4Multicast,
-		"ipv6Unicast":   IPv6Unicast,
-		"ipv6Multicast": IPv6Unicast,
-		"l2VpnEvpn":     L2VpnEvpn,
-		"unknown":       Unknown,
-	}
-)
-
 func (af bgpAF) Values() (families []bgpAF) {
 	for i := 0; i <= int(L2VpnEvpn); i++ {
 		families = append(families, bgpAF(i))
