@@ -42,10 +42,12 @@ type AfiAndSafi struct {
 		MultiPathRelax string `json:"multiPathRelax"`
 	} `json:"bestPath"`
 }
-type BGPAddressFamily int
+
+// bgpAF == bgpAddressFamily.
+type bgpAF int
 
 const (
-	IPv4Unicast BGPAddressFamily = iota
+	IPv4Unicast bgpAF = iota
 	IPv4Multicast
 	IPv6Unicast
 	IPv6Multicast
@@ -54,7 +56,7 @@ const (
 )
 
 var (
-	bgpAddressFamily = map[string]BGPAddressFamily{
+	bgpAddressFamily = map[string]bgpAF{
 		"ipv4Unicast":   IPv4Unicast,
 		"ipv4Multicast": IPv4Multicast,
 		"ipv6Unicast":   IPv6Unicast,
@@ -64,15 +66,15 @@ var (
 	}
 )
 
-func (af BGPAddressFamily) Values() (families []BGPAddressFamily) {
+func (af bgpAF) Values() (families []bgpAF) {
 	for i := 0; i <= int(L2VpnEvpn); i++ {
-		families = append(families, BGPAddressFamily(i))
+		families = append(families, bgpAF(i))
 	}
 	return families
 
 }
 
-func (af BGPAddressFamily) String() string {
+func (af bgpAF) String() string {
 	switch af {
 	case IPv4Unicast:
 		return "ipv4Unicast"
@@ -88,7 +90,7 @@ func (af BGPAddressFamily) String() string {
 	return frrUnknown
 }
 
-func (af BGPAddressFamily) Afi() string {
+func (af bgpAF) Afi() string {
 	// Address Family Indicator (AFI)
 	switch af {
 	case IPv4Unicast, IPv4Multicast:
@@ -101,7 +103,7 @@ func (af BGPAddressFamily) Afi() string {
 	return frrUnknown
 }
 
-func (af BGPAddressFamily) Safi() string {
+func (af bgpAF) Safi() string {
 	// Subsequent Address Family Indicator (SAFI)
 	switch af {
 	case IPv4Unicast, IPv6Unicast:
