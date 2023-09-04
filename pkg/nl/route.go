@@ -129,7 +129,7 @@ func GetAddressFamily(addressFamily int) (string, error) {
 }
 
 func (n *NetlinkManager) getVRFNameByInterface(tableId int) (string, error) {
-	links, err := n.listVRFInterfaces()
+	links, err := n.ListVRFInterfaces()
 	if err != nil {
 		return "", fmt.Errorf("error getting vrf interfaces: %w", err)
 	}

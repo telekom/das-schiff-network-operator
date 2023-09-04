@@ -27,7 +27,7 @@ func (n *NetlinkManager) listNeighbors() ([]netlink.Neigh, error) {
 	return neighbors, nil
 }
 
-func (n *NetlinkManager) listVRFInterfaces() ([]VRFInformation, error) {
+func (n *NetlinkManager) ListVRFInterfaces() ([]VRFInformation, error) {
 	infos := []VRFInformation{}
 
 	links, err := netlink.LinkList()
