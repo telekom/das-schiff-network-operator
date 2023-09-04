@@ -145,7 +145,7 @@ func (frr *Cli) ShowVRFs() (VrfVni, error) {
 		dataAsSlice = append(dataAsSlice, vrfMap)
 	}
 	dataAsSlice = append(dataAsSlice, map[string]string{
-		frrVRF:  "default",
+		"vrf":   "default",
 		"table": strconv.Itoa(unix.RT_CLASS_MAIN),
 		"id":    "0",
 	})
