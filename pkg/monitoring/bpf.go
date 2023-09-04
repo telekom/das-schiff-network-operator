@@ -5,17 +5,14 @@ package monitoring
 // 	"github.com/prometheus/client_golang/prometheus"
 // 	ctrl "sigs.k8s.io/controller-runtime"
 // )
-
 // type bpfCollector struct {
 // 	// routesDesc typedFactoryDesc
 // 	bpf    string
 // 	logger logr.Logger
 // }
-
 // func init() {
 // 	registerCollector("bpf", NewBPFCollector)
 // }
-
 // func NewBPFCollector() (Collector, error) {
 // 	// frrCli, err := bpf.
 // 	var err error
@@ -35,10 +32,8 @@ package monitoring
 // 		// bpf:    nil,
 // 		logger: ctrl.Log.WithName("bpf.collector"),
 // 	}
-
 // 	return &collector, nil
 // }
-
 // func (c *bpfCollector) Update(ch chan<- prometheus.Metric) error {
 // 	// routes, err := (nil, nil)
 // 	// c.logger.Info("I am in the netlink collector")
@@ -49,4 +44,4 @@ package monitoring
 // 	// 	ch <- c.routesDesc.mustNewConstMetric(float64(route.Quantity), fmt.Sprint(route.TableID), route.RouteProtocol.String(), route.AddressFamily)
 // 	// }
 // 	return nil
-// }
+// }.

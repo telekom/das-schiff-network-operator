@@ -93,7 +93,7 @@ func NewDasSchiffNetworkOperatorCollector() (*DasSchiffNetworkOperatorCollector,
 }
 
 // Describe implements the prometheus.Collector interface.
-func (n DasSchiffNetworkOperatorCollector) Describe(ch chan<- *prometheus.Desc) {
+func (DasSchiffNetworkOperatorCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- scrapeDurationDesc
 	ch <- scrapeSuccessDesc
 }

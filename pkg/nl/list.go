@@ -9,7 +9,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func (n *NetlinkManager) listRoutes() ([]netlink.Route, error) {
+func (*NetlinkManager) listRoutes() ([]netlink.Route, error) {
 	routes, err := netlink.RouteListFiltered(netlink.FAMILY_ALL, &netlink.Route{
 		Table: 0,
 	}, netlink.RT_FILTER_TABLE)
@@ -19,7 +19,7 @@ func (n *NetlinkManager) listRoutes() ([]netlink.Route, error) {
 	return routes, nil
 }
 
-func (n *NetlinkManager) listNeighbors() ([]netlink.Neigh, error) {
+func (*NetlinkManager) listNeighbors() ([]netlink.Neigh, error) {
 	neighbors, err := netlink.NeighList(0, netlink.FAMILY_ALL)
 	if err != nil {
 		return nil, fmt.Errorf("error listing all neighbors: %w", err)
@@ -27,7 +27,7 @@ func (n *NetlinkManager) listNeighbors() ([]netlink.Neigh, error) {
 	return neighbors, nil
 }
 
-func (n *NetlinkManager) ListVRFInterfaces() ([]VRFInformation, error) {
+func (*NetlinkManager) ListVRFInterfaces() ([]VRFInformation, error) {
 	infos := []VRFInformation{}
 
 	links, err := netlink.LinkList()
@@ -36,16 +36,16 @@ func (n *NetlinkManager) ListVRFInterfaces() ([]VRFInformation, error) {
 	}
 
 	for _, link := range links {
-		if link.Type() == "vrf" {
-			vrf := link.(*netlink.Vrf)
-
-			info := VRFInformation{}
-			info.table = int(vrf.Table)
-			info.Name = link.Attrs().Name
-			// info.Name = strings.TrimPrefix(strings.TrimPrefix(link.Attrs().Name, vrfPrefix), "Vrf_")
-			info.vrfID = vrf.Attrs().Index
-			infos = append(infos, info)
+		if link.Type() != "vrf" {
+			continue
 		}
+		vrf := link.(*netlink.Vrf)
+
+		info := VRFInformation{}
+		info.table = int(vrf.Table)
+		info.Name = link.Attrs().Name
+		info.vrfID = vrf.Attrs().Index
+		infos = append(infos, info)
 	}
 
 	return infos, nil

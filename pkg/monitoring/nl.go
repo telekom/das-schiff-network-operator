@@ -48,21 +48,29 @@ func NewNetlinkCollector() (Collector, error) {
 	return &collector, nil
 }
 
-func (c *netlinkCollector) Update(ch chan<- prometheus.Metric) error {
-	routes, err := c.netlink.ListRoutes()
+func (c *netlinkCollector) updateRoutes(ch chan<- prometheus.Metric) {
+	routes, err := c.netlink.ListRouteInformation()
 	if err != nil {
-		return err
-	}
-	neighbors, err := c.netlink.ListNeighbors()
-	c.logger.Info("I am in the netlink collector")
-	if err != nil {
-		return err
-	}
-	for _, neighbor := range neighbors {
-		ch <- c.neighborsDesc.mustNewConstMetric(1.0, neighbor.MAC, neighbor.IP, neighbor.Interface, neighbor.Family, neighbor.State)
+		c.logger.Error(err, "cannot get routes from netlink")
 	}
 	for _, route := range routes {
 		ch <- c.routesDesc.mustNewConstMetric(float64(route.Quantity), fmt.Sprint(route.TableID), route.VrfName, nl.GetProtocolName(route.RouteProtocol), route.AddressFamily)
 	}
+}
+
+func (c *netlinkCollector) updateNeighbors(ch chan<- prometheus.Metric) {
+	neighbors, err := c.netlink.ListNeighborInformation()
+	if err != nil {
+		c.logger.Error(err, "Cannot get neighbors from netlink")
+	}
+	for _, neighbor := range neighbors {
+		ch <- c.neighborsDesc.mustNewConstMetric(1.0, neighbor.MAC, neighbor.IP, neighbor.Interface, neighbor.Family, neighbor.State)
+	}
+}
+
+func (c *netlinkCollector) Update(ch chan<- prometheus.Metric) error {
+	c.logger.Info("I am in the netlink collector")
+	c.updateRoutes(ch)
+	c.updateNeighbors(ch)
 	return nil
 }

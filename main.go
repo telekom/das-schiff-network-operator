@@ -80,7 +80,8 @@ func main() {
 	var err error
 	collector, err := monitoring.NewDasSchiffNetworkOperatorCollector()
 	if err != nil {
-		setupLog.Error(fmt.Errorf("couldn't create collector: %s", err), "metrics export not setup")
+		err = fmt.Errorf("couldn't create collector: %w", err)
+		setupLog.Error(err, "metrics export not setup")
 		os.Exit(1)
 	}
 	setupLog.Info("msg", "Enabled collectors")
@@ -93,7 +94,8 @@ func main() {
 		setupLog.Info("collector", c)
 	}
 	if err := metrics.Registry.Register(collector); err != nil {
-		setupLog.Error(fmt.Errorf("couldn't register das_schiff_network_operator_collector: %s", err), "registration error")
+		err = fmt.Errorf("couldn't register das_schiff_network_operator_collector: %w", err)
+		setupLog.Error(err, "registration error")
 	}
 	if err != nil {
 		setupLog.Error(err, "unable start metrics webserver")

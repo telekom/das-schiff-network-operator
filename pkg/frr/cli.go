@@ -65,10 +65,10 @@ func (frr *Cli) ShowEVPNVNIDetail() (EVPNVniDetail, error) {
 	if err != nil {
 		return evpnInfo, fmt.Errorf("failed parsing json into struct EVPNVniDetail: %w", err)
 	}
-	return evpnInfo, err
+	return evpnInfo, nil
 }
 
-func (frr *Cli) ShowBGPSummary(vrf string) (bgpVrfSummary, error) {
+func (frr *Cli) ShowBGPSummary(vrf string) (BGPVrfSummary, error) {
 	vrfName, multiVRF := getVRF(vrf)
 	data := frr.executeWithJSON([]string{
 		"show",
@@ -77,8 +77,8 @@ func (frr *Cli) ShowBGPSummary(vrf string) (bgpVrfSummary, error) {
 		vrfName,
 		"summary",
 	})
-	bgpSummary := bgpVrfSummary{}
-	bgpSummarySpec := bgpVrfSummarySpec{}
+	bgpSummary := BGPVrfSummary{}
+	bgpSummarySpec := BGPVrfSummarySpec{}
 	var err error
 	if multiVRF {
 		err = json.Unmarshal(data, &bgpSummary)
@@ -93,7 +93,6 @@ func (frr *Cli) ShowBGPSummary(vrf string) (bgpVrfSummary, error) {
 		bgpSummary[vrfName] = bgpSummarySpec
 	}
 	return bgpSummary, nil
-
 }
 
 func (frr *Cli) showVRFVnis() (VrfVni, error) {
@@ -107,9 +106,10 @@ func (frr *Cli) showVRFVnis() (VrfVni, error) {
 	if err != nil {
 		return vrfInfo, fmt.Errorf("failed parsing json into struct VrfVni: %w", err)
 	}
-	return vrfInfo, err
+	return vrfInfo, nil
 }
 func (frr *Cli) ShowVRFs() (VrfVni, error) {
+	const chunkSize = 2
 	vrfInfo, err := frr.showVRFVnis()
 	if err != nil {
 		return vrfInfo, fmt.Errorf("cannot get vrf vni mapping from frr: %w", err)
@@ -137,7 +137,7 @@ func (frr *Cli) ShowVRFs() (VrfVni, error) {
 		text = strings.ReplaceAll(text, " (configured)", "")
 		text = strings.ReplaceAll(text, " inactive", "")
 		words := strings.Fields(text)
-		chunkedWords := Chunk(words, 2)
+		chunkedWords := Chunk(words, chunkSize)
 		vrfMap := make(map[string]string)
 		for _, tuple := range chunkedWords {
 			vrfMap[tuple[0]] = tuple[1]
@@ -178,15 +178,12 @@ func (frr *Cli) ShowVRFs() (VrfVni, error) {
 				vrfInfo.Vrfs = DeleteByIndex(vrfInfo.Vrfs, index)
 				vrfInfo.Vrfs = append(vrfInfo.Vrfs, result)
 			}
-
 		}
 	}
 	return vrfInfo, nil
 }
 
-func (frr *Cli) getDualStackRoutes(vrf string) (Routes, Routes, error) {
-	routesV4 := Routes{}
-	routesV6 := Routes{}
+func (frr *Cli) getDualStackRoutes(vrf string) (routesV4, routesV6 Routes, err error) {
 	dataV4 := frr.executeWithJSON([]string{
 		"show",
 		"ip",
@@ -201,7 +198,6 @@ func (frr *Cli) getDualStackRoutes(vrf string) (Routes, Routes, error) {
 		"vrf",
 		vrf,
 	})
-	var err error
 	err = json.Unmarshal(dataV4, &routesV4)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed parsing json into struct ipv4 Routes: %w", err)
@@ -231,7 +227,6 @@ func (frr *Cli) ShowRoutes(vrf string) (VRFDualStackRoutes, error) {
 			}
 			vrfRoutes[vrf.Vrf] = DualStackRoutes{IPv4: routesV4, IPv6: routesV6}
 		}
-
 	} else {
 		routesV4, routesV6, err := frr.getDualStackRoutes(vrfName)
 		if err != nil {

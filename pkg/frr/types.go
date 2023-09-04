@@ -21,6 +21,9 @@ type Peer struct {
 	ConnectionsDropped         int    `json:"connectionsDropped"`
 	IDType                     string `json:"idType"`
 }
+type bestPath struct {
+	MultiPathRelax string `json:"multiPathRelax"`
+}
 type AfiAndSafi struct {
 	RouterID        string          `json:"routerId"`
 	As              int64           `json:"as"`
@@ -38,16 +41,14 @@ type AfiAndSafi struct {
 	DisplayedPeers  int             `json:"displayedPeers"`
 	TotalPeers      int             `json:"totalPeers"`
 	DynamicPeers    int             `json:"dynamicPeers"`
-	BestPath        struct {
-		MultiPathRelax string `json:"multiPathRelax"`
-	} `json:"bestPath"`
+	BestPath        bestPath        `json:"bestPath"`
 }
 
 // bgpAF == bgpAddressFamily.
-type bgpAF int
+type BGPAddressFamily int
 
 const (
-	IPv4Unicast bgpAF = iota
+	IPv4Unicast BGPAddressFamily = iota
 	IPv4Multicast
 	IPv6Unicast
 	IPv6Multicast
@@ -55,15 +56,14 @@ const (
 	Unknown
 )
 
-func (af bgpAF) Values() (families []bgpAF) {
+func BGPAddressFamilyValues() (families []BGPAddressFamily) {
 	for i := 0; i <= int(L2VpnEvpn); i++ {
-		families = append(families, bgpAF(i))
+		families = append(families, BGPAddressFamily(i))
 	}
 	return families
-
 }
 
-func (af bgpAF) String() string {
+func (af BGPAddressFamily) String() string {
 	switch af {
 	case IPv4Unicast:
 		return "ipv4Unicast"
@@ -79,7 +79,7 @@ func (af bgpAF) String() string {
 	return frrUnknown
 }
 
-func (af bgpAF) Afi() string {
+func (af BGPAddressFamily) Afi() string {
 	// Address Family Indicator (AFI)
 	switch af {
 	case IPv4Unicast, IPv4Multicast:
@@ -92,7 +92,7 @@ func (af bgpAF) Afi() string {
 	return frrUnknown
 }
 
-func (af bgpAF) Safi() string {
+func (af BGPAddressFamily) Safi() string {
 	// Subsequent Address Family Indicator (SAFI)
 	switch af {
 	case IPv4Unicast, IPv6Unicast:
@@ -105,9 +105,9 @@ func (af bgpAF) Safi() string {
 	return frrUnknown
 }
 
-type bgpVrfSummarySpec map[string]AfiAndSafi
+type BGPVrfSummarySpec map[string]AfiAndSafi
 
-type bgpVrfSummary map[string]bgpVrfSummarySpec
+type BGPVrfSummary map[string]BGPVrfSummarySpec
 
 type EVPNVniDetail struct {
 	Vni                   int      `json:"vni"`

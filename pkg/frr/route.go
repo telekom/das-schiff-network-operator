@@ -11,10 +11,10 @@ import (
 func getQuantity(routeInfos Routes, addressFamily int) ([]route.Information, error) {
 	routes := map[route.Key]route.Information{}
 	// _ is the cidr and is ignored.
-	for _, paths := range routeInfos {
-		for _, routePath := range paths {
-			routeProtocol := netlink.RouteProtocol(nl.GetProtocolNumber(routePath.Protocol, true))
-			routeKey := route.Key{TableID: routePath.Table, RouteProtocol: int(routeProtocol), AddressFamily: addressFamily}
+	for index := range routeInfos {
+		for innerIndex := range routeInfos[index] {
+			routeProtocol := netlink.RouteProtocol(nl.GetProtocolNumber(routeInfos[index][innerIndex].Protocol, true))
+			routeKey := route.Key{TableID: routeInfos[index][innerIndex].Table, RouteProtocol: int(routeProtocol), AddressFamily: addressFamily}
 
 			routeInformation, ok := routes[routeKey]
 			if ok {
@@ -27,8 +27,8 @@ func getQuantity(routeInfos Routes, addressFamily int) ([]route.Information, err
 					return nil, fmt.Errorf("error converting addressFamily [%d]: %w", addressFamily, err)
 				}
 				routes[routeKey] = route.Information{
-					TableID:       routePath.Table,
-					VrfName:       routePath.VrfName,
+					TableID:       routeInfos[index][innerIndex].Table,
+					VrfName:       routeInfos[index][innerIndex].VrfName,
 					RouteProtocol: routeProtocol,
 					AddressFamily: family,
 					Quantity:      1,
@@ -43,8 +43,8 @@ func getQuantity(routeInfos Routes, addressFamily int) ([]route.Information, err
 	return routeList, nil
 }
 
-func (frr *Manager) ListVrfs() ([]VrfVniSpec, error) {
-	vrfs, err := frr.Cli.ShowVRFs()
+func (m *Manager) ListVrfs() ([]VrfVniSpec, error) {
+	vrfs, err := m.Cli.ShowVRFs()
 	if err != nil {
 		return vrfs.Vrfs, fmt.Errorf("cannot get all vrfs: %w", err)
 	}
@@ -54,8 +54,8 @@ func (frr *Manager) ListVrfs() ([]VrfVniSpec, error) {
 	return vrfs.Vrfs, nil
 }
 
-func (frr *Manager) ListRoutes(vrf string) ([]route.Information, error) {
-	vrfDualStackRoutes, err := frr.Cli.ShowRoutes(vrf)
+func (m *Manager) ListRoutes(vrf string) ([]route.Information, error) {
+	vrfDualStackRoutes, err := m.Cli.ShowRoutes(vrf)
 	if err != nil {
 		return nil, fmt.Errorf("cannot get Routes for vrf %s: %w", vrf, err)
 	}
@@ -77,8 +77,8 @@ func (frr *Manager) ListRoutes(vrf string) ([]route.Information, error) {
 	return routeList, nil
 }
 
-func (frr *Manager) ListNeighbors(vrf string) (bgpSummary bgpVrfSummary, err error) {
-	bgpSummary, err = frr.Cli.ShowBGPSummary(vrf)
+func (m *Manager) ListNeighbors(vrf string) (bgpSummary BGPVrfSummary, err error) {
+	bgpSummary, err = m.Cli.ShowBGPSummary(vrf)
 	if err != nil {
 		return bgpSummary, fmt.Errorf("cannot get BGPSummary for vrf %s: %w", vrf, err)
 	}

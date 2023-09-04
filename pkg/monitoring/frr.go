@@ -12,6 +12,8 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
+const secondToMillisecond = 1000
+
 type frrCollector struct {
 	routesDesc                 typedFactoryDesc
 	vrfVniDesc                 typedFactoryDesc
@@ -38,35 +40,7 @@ func convertToStateFloat(state string) float64 {
 	return 0.0
 }
 
-// self.metric_bgp_uptime_seconds = CounterMetricFamily(
-// 	"sonic_bgp_uptime_seconds_total",
-// 	"Uptime of the session with the other BGP Peer",
-// 	labels=bgp_labels,
-// )
-// self.metric_bgp_status = GaugeMetricFamily(
-// 	"sonic_bgp_status",
-// 	"The Session Status to the other BGP Peer",
-// 	labels=bgp_labels,
-// )
-// self.metric_bgp_prefixes_received = CounterMetricFamily(
-// 	"sonic_bgp_prefixes_received_total",
-// 	"The Prefixes Received from the other peer.",
-// 	labels=bgp_labels,
-// )
-// self.metric_bgp_prefixes_transmitted = CounterMetricFamily(
-// 	"sonic_bgp_prefixes_transmitted_total",
-// 	"The Prefixes Transmitted to the other peer.",
-// 	labels=bgp_labels,
-// )
-// self.metric_bgp_messages_received = CounterMetricFamily(
-// 	"sonic_bgp_messages_received_total",
-// 	"The messages Received from the other peer.",
-// 	labels=bgp_labels,
-// )
-// self.metric_bgp_messages_transmitted = CounterMetricFamily(
-// 	"sonic_bgp_messages_transmitted_total",
-
-// NewNetlinkCollector returns a new Collector exposing buddyinfo stats.
+// NewFRRCollector returns a new Collector exposing buddyinfo stats.
 func NewFRRCollector() (Collector, error) {
 	bgpLabels := []string{
 		"vrf",
@@ -209,32 +183,32 @@ func (c *frrCollector) UpdateBGPNeighbors(ch chan<- prometheus.Metric) {
 	}
 
 	for _, families := range bgpNeighbors {
-		for _, family := range frr.Unknown.Values() {
+		for _, family := range frr.BGPAddressFamilyValues() {
 			neighbor, ok := families[family.String()]
 			if !ok {
 				// this family is not configured
 				continue
 			}
-			for peerName, peerData := range neighbor.Peers {
-				remoteAs := strconv.Itoa(int(peerData.RemoteAs))
+			for peerName := range neighbor.Peers {
+				remoteAs := strconv.Itoa(int(neighbor.Peers[peerName].RemoteAs))
 				as := strconv.Itoa(int(neighbor.As))
 				bgpLabels := []string{
 					neighbor.VrfName,
 					as,
 					peerName,
-					peerData.Hostname,
-					peerData.IDType,
+					neighbor.Peers[peerName].Hostname,
+					neighbor.Peers[peerName].IDType,
 					family.Afi(),
 					family.Safi(),
 					remoteAs,
 				}
-				upTimeSeconds := float64(peerData.PeerUptimeMsec) / 1000
+				upTimeSeconds := float64(neighbor.Peers[peerName].PeerUptimeMsec) / secondToMillisecond
 				ch <- c.bgpUptimeDesc.mustNewConstMetric(upTimeSeconds, bgpLabels...)
-				ch <- c.bgpStatusDesc.mustNewConstMetric(convertToStateFloat(peerData.State), bgpLabels...)
-				ch <- c.bgpPrefixesReceivedDesc.mustNewConstMetric(float64(peerData.PfxRcd), bgpLabels...)
-				ch <- c.bgpPrefixesTransmittedDesc.mustNewConstMetric(float64(peerData.PfxSnt), bgpLabels...)
-				ch <- c.bgpMessagesReceivedDesc.mustNewConstMetric(float64(peerData.MsgRcvd), bgpLabels...)
-				ch <- c.bgpMessagesTransmittedDesc.mustNewConstMetric(float64(peerData.MsgSent), bgpLabels...)
+				ch <- c.bgpStatusDesc.mustNewConstMetric(convertToStateFloat(neighbor.Peers[peerName].State), bgpLabels...)
+				ch <- c.bgpPrefixesReceivedDesc.mustNewConstMetric(float64(neighbor.Peers[peerName].PfxRcd), bgpLabels...)
+				ch <- c.bgpPrefixesTransmittedDesc.mustNewConstMetric(float64(neighbor.Peers[peerName].PfxSnt), bgpLabels...)
+				ch <- c.bgpMessagesReceivedDesc.mustNewConstMetric(float64(neighbor.Peers[peerName].MsgRcvd), bgpLabels...)
+				ch <- c.bgpMessagesTransmittedDesc.mustNewConstMetric(float64(neighbor.Peers[peerName].MsgSent), bgpLabels...)
 			}
 		}
 	}

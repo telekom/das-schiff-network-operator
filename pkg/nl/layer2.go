@@ -415,40 +415,40 @@ func (*NetlinkManager) configureBridge(intfName string) error {
 	return nil
 }
 
-func (n *NetlinkManager) ListNeighbors() ([]NeighborInformation, error) {
+func (n *NetlinkManager) ListNeighborInformation() ([]NeighborInformation, error) {
 	netlinkNeighbors, err := n.listNeighbors()
 	if err != nil {
 		return nil, err
 	}
 	neighbors := []NeighborInformation{}
-	for _, netlinkNeighbor := range netlinkNeighbors {
-		family, err := GetAddressFamily(netlinkNeighbor.Family)
+	for index := range netlinkNeighbors {
+		family, err := GetAddressFamily(netlinkNeighbors[index].Family)
 		if err != nil {
-			return nil, fmt.Errorf("error converting addressFamily [%d]: %w", &netlinkNeighbor.Family, err)
+			return nil, fmt.Errorf("error converting addressFamily [%d]: %w", &netlinkNeighbors[index].Family, err)
 		}
-		state, err := getNeighborState(netlinkNeighbor.State)
+		state, err := getNeighborState(netlinkNeighbors[index].State)
 		if err != nil {
-			return nil, fmt.Errorf("error converting neighborState [%d]: %w", &netlinkNeighbor.State, err)
+			return nil, fmt.Errorf("error converting neighborState [%d]: %w", &netlinkNeighbors[index].State, err)
 		}
 
-		linkInfo, err := netlink.LinkByIndex(netlinkNeighbor.LinkIndex)
+		linkInfo, err := netlink.LinkByIndex(netlinkNeighbors[index].LinkIndex)
 		if err != nil {
 			return nil, fmt.Errorf("error getting link by index: %w", err)
 		}
 		interfaceName := linkInfo.Attrs().Name
-		hardwareAddr := netlinkNeighbor.HardwareAddr.String()
+		hardwareAddr := netlinkNeighbors[index].HardwareAddr.String()
 		// This ensures that only neighbors of secondary interfaces are imported
 		// or hardware interfaces which support VFs
 		if strings.HasPrefix(interfaceName, vethL2Prefix) ||
 			strings.HasPrefix(interfaceName, macvlanPrefix) ||
 			strings.HasPrefix(interfaceName, layer2Prefix) ||
 			linkInfo.Attrs().Vfs != nil ||
-			netlinkNeighbor.State != netlink.NUD_NOARP {
+			netlinkNeighbors[index].State != netlink.NUD_NOARP {
 			neighbor := NeighborInformation{
 				Family:    family,
 				State:     state,
 				MAC:       hardwareAddr,
-				IP:        netlinkNeighbor.IP.String(),
+				IP:        netlinkNeighbors[index].IP.String(),
 				Interface: interfaceName,
 			}
 			neighbors = append(neighbors, neighbor)
