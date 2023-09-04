@@ -32,7 +32,7 @@ func (n *NetlinkManager) ListVRFInterfaces() ([]VRFInformation, error) {
 
 	links, err := netlink.LinkList()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("cannot get links from netlink: %w", err)
 	}
 
 	for _, link := range links {
