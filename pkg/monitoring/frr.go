@@ -196,9 +196,9 @@ func (c *frrCollector) UpdateRoutes(ch chan<- prometheus.Metric) {
 	for _, routePath := range routes {
 		if routePath.VrfName == "default" {
 			routePath.VrfName = "main"
-			routePath.TableId = unix.RT_CLASS_MAIN
+			routePath.TableID = unix.RT_CLASS_MAIN
 		}
-		ch <- c.routesDesc.mustNewConstMetric(float64(routePath.Quantity), strconv.Itoa(routePath.TableId), routePath.VrfName, nl.GetProtocolName(routePath.RouteProtocol), routePath.AddressFamily)
+		ch <- c.routesDesc.mustNewConstMetric(float64(routePath.Quantity), strconv.Itoa(routePath.TableID), routePath.VrfName, nl.GetProtocolName(routePath.RouteProtocol), routePath.AddressFamily)
 	}
 }
 

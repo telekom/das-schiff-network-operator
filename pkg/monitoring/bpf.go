@@ -46,7 +46,7 @@ package monitoring
 // 	// 	return err
 // 	// }
 // 	// for _, route := range routes {
-// 	// 	ch <- c.routesDesc.mustNewConstMetric(float64(route.Quantity), fmt.Sprint(route.TableId), route.RouteProtocol.String(), route.AddressFamily)
+// 	// 	ch <- c.routesDesc.mustNewConstMetric(float64(route.Quantity), fmt.Sprint(route.TableID), route.RouteProtocol.String(), route.AddressFamily)
 // 	// }
 // 	return nil
 // }

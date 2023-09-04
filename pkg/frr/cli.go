@@ -145,7 +145,7 @@ func (frr *FRRCLI) ShowVRFs() (VrfVni, error) {
 		dataAsSlice = append(dataAsSlice, vrfMap)
 	}
 	dataAsSlice = append(dataAsSlice, map[string]string{
-		"vrf":   "default",
+		frrVRF:  "default",
 		"table": strconv.Itoa(unix.RT_CLASS_MAIN),
 		"id":    "0",
 	})
@@ -153,7 +153,7 @@ func (frr *FRRCLI) ShowVRFs() (VrfVni, error) {
 		table, ok := vrf["table"]
 		// If the key exists
 		if ok {
-			vrfName, ok := vrf["vrf"]
+			vrfName, ok := vrf[frrVRF]
 			if !ok {
 				return vrfInfo, nil
 			}

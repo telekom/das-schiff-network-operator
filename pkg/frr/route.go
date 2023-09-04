@@ -8,13 +8,13 @@ import (
 	"github.com/vishvananda/netlink"
 )
 
-func getQuantity(routeInfos Routes, addressFamily int) ([]route.RouteInformation, error) {
-	routes := map[route.RouteKey]route.RouteInformation{}
+func getQuantity(routeInfos Routes, addressFamily int) ([]route.Information, error) {
+	routes := map[route.Key]route.Information{}
 	// _ is the cidr and is ignored.
 	for _, paths := range routeInfos {
 		for _, routePath := range paths {
 			routeProtocol := netlink.RouteProtocol(nl.GetProtocolNumber(routePath.Protocol, true))
-			routeKey := route.RouteKey{TableId: routePath.Table, RouteProtocol: int(routeProtocol), AddressFamily: addressFamily}
+			routeKey := route.Key{TableID: routePath.Table, RouteProtocol: int(routeProtocol), AddressFamily: addressFamily}
 
 			routeInformation, ok := routes[routeKey]
 			if ok {
@@ -26,8 +26,8 @@ func getQuantity(routeInfos Routes, addressFamily int) ([]route.RouteInformation
 				if err != nil {
 					return nil, fmt.Errorf("error converting addressFamily [%d]: %w", addressFamily, err)
 				}
-				routes[routeKey] = route.RouteInformation{
-					TableId:       routePath.Table,
+				routes[routeKey] = route.Information{
+					TableID:       routePath.Table,
 					VrfName:       routePath.VrfName,
 					RouteProtocol: routeProtocol,
 					AddressFamily: family,
@@ -36,7 +36,7 @@ func getQuantity(routeInfos Routes, addressFamily int) ([]route.RouteInformation
 			}
 		}
 	}
-	routeList := []route.RouteInformation{}
+	routeList := []route.Information{}
 	for _, routeInformation := range routes {
 		routeList = append(routeList, routeInformation)
 	}
@@ -54,13 +54,13 @@ func (frr *Manager) ListVrfs() ([]VrfVniSpec, error) {
 	return vrfs.Vrfs, nil
 }
 
-func (frr *Manager) ListRoutes(vrf string) ([]route.RouteInformation, error) {
+func (frr *Manager) ListRoutes(vrf string) ([]route.Information, error) {
 	vrfDualStackRoutes, err := frr.CLI.ShowRoutes(vrf)
 	if err != nil {
 		return nil, fmt.Errorf("cannot get Routes for vrf %s: %w", vrf, err)
 	}
 
-	routeList := []route.RouteInformation{}
+	routeList := []route.Information{}
 	for _, dualStackRoutes := range vrfDualStackRoutes {
 		routeInfoV4, err := getQuantity(dualStackRoutes.IPv4, netlink.FAMILY_V4)
 		if err != nil {

@@ -1,5 +1,8 @@
 package frr
 
+const frrUnknown = "unknown"
+const frrVRF = "vrf"
+
 type Peer struct {
 	Hostname                   string `json:"hostname"`
 	RemoteAs                   int64  `json:"remoteAs"`
@@ -60,7 +63,7 @@ var (
 		"ipv6Unicast":   IPv6Unicast,
 		"ipv6Multicast": IPv6Unicast,
 		"l2VpnEvpn":     L2VpnEvpn,
-		"unknown":       Unknown,
+		frrUnknown:      Unknown,
 	}
 )
 
@@ -85,7 +88,7 @@ func (af BGPAddressFamily) String() string {
 	case L2VpnEvpn:
 		return "l2VpnEvpn"
 	}
-	return "unknown"
+	return frrUnknown
 }
 
 func (af BGPAddressFamily) Afi() string {
@@ -98,7 +101,7 @@ func (af BGPAddressFamily) Afi() string {
 	case L2VpnEvpn:
 		return "l2vpn"
 	}
-	return "unknown"
+	return frrUnknown
 }
 
 func (af BGPAddressFamily) Safi() string {
@@ -111,7 +114,7 @@ func (af BGPAddressFamily) Safi() string {
 	case L2VpnEvpn:
 		return "evpn"
 	}
-	return "unknown"
+	return frrUnknown
 }
 
 type BGPVrfSummarySpec map[string]AfiAndSafi

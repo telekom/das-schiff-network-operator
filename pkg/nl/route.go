@@ -159,19 +159,19 @@ func (n *NetlinkManager) getVRFName(tableId int) (string, error) {
 	}
 }
 
-func (n *NetlinkManager) ListRoutes() ([]route.RouteInformation, error) {
+func (n *NetlinkManager) ListRoutes() ([]route.Information, error) {
 	netlinkRoutes, err := n.listRoutes()
 	if err != nil {
 		return nil, fmt.Errorf("error listing routes: %w", err)
 	}
-	routes := map[route.RouteKey]route.RouteInformation{}
+	routes := map[route.Key]route.Information{}
 
 	for _, netlinkRoute := range netlinkRoutes {
-		routeKey := route.RouteKey{TableId: netlinkRoute.Table, RouteProtocol: int(netlinkRoute.Protocol), AddressFamily: netlinkRoute.Family}
+		routeKey := route.Key{TableID: netlinkRoute.Table, RouteProtocol: int(netlinkRoute.Protocol), AddressFamily: netlinkRoute.Family}
 		routeInformation, ok := routes[routeKey]
 		// If the key exists
 		if ok {
-			routeInformation.Quantity = routeInformation.Quantity + 1
+			routeInformation.Quantity++
 			routes[routeKey] = routeInformation
 		} else {
 			family, err := GetAddressFamily(netlinkRoute.Family)
@@ -182,8 +182,8 @@ func (n *NetlinkManager) ListRoutes() ([]route.RouteInformation, error) {
 			if err != nil {
 				return nil, fmt.Errorf("error getting vrfName for table id %d: %w", netlinkRoute.Table, err)
 			}
-			routes[routeKey] = route.RouteInformation{
-				TableId:       netlinkRoute.Table,
+			routes[routeKey] = route.Information{
+				TableID:       netlinkRoute.Table,
 				VrfName:       vrfName,
 				RouteProtocol: netlinkRoute.Protocol,
 				AddressFamily: family,
@@ -191,7 +191,7 @@ func (n *NetlinkManager) ListRoutes() ([]route.RouteInformation, error) {
 			}
 		}
 	}
-	routeList := []route.RouteInformation{}
+	routeList := []route.Information{}
 	for _, routeInformation := range routes {
 		routeList = append(routeList, routeInformation)
 	}

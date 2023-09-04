@@ -62,7 +62,7 @@ func (c *netlinkCollector) Update(ch chan<- prometheus.Metric) error {
 		ch <- c.neighborsDesc.mustNewConstMetric(1.0, neighbor.MAC, neighbor.IP, neighbor.Interface, neighbor.Family, neighbor.State)
 	}
 	for _, route := range routes {
-		ch <- c.routesDesc.mustNewConstMetric(float64(route.Quantity), fmt.Sprint(route.TableId), route.VrfName, nl.GetProtocolName(route.RouteProtocol), route.AddressFamily)
+		ch <- c.routesDesc.mustNewConstMetric(float64(route.Quantity), fmt.Sprint(route.TableID), route.VrfName, nl.GetProtocolName(route.RouteProtocol), route.AddressFamily)
 	}
 	return nil
 }
