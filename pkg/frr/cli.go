@@ -108,12 +108,8 @@ func (frr *Cli) showVRFVnis() (VrfVni, error) {
 	}
 	return vrfInfo, nil
 }
-func (frr *Cli) ShowVRFs() (VrfVni, error) {
-	const chunkSize = 2
-	vrfInfo, err := frr.showVRFVnis()
-	if err != nil {
-		return vrfInfo, fmt.Errorf("cannot get vrf vni mapping from frr: %w", err)
-	}
+
+func parseVRFS(data string) []map[string]string {
 	// now we want all vrfs which do not have
 	// a vni assigned
 	// this code is ugly as it needs to parse the following output
@@ -124,13 +120,8 @@ func (frr *Cli) ShowVRFs() (VrfVni, error) {
 	// vrf Vrf_om_m2m inactive (configured) #> this one is ignored as it has no table
 	// vrf Vrf_om_refm2m id 3 table 3
 	// vrf Vrf_underlay id 2 table 2
-
-	data := frr.execute([]string{
-		"show",
-		"vrf",
-	})
-	dataAsString := string(data)
-	scanner := bufio.NewScanner(strings.NewReader(dataAsString))
+	const chunkSize = 2
+	scanner := bufio.NewScanner(strings.NewReader(data))
 	var dataAsSlice []map[string]string
 	for scanner.Scan() {
 		text := scanner.Text()
@@ -149,6 +140,20 @@ func (frr *Cli) ShowVRFs() (VrfVni, error) {
 		"table": strconv.Itoa(unix.RT_CLASS_MAIN),
 		"id":    "0",
 	})
+	return dataAsSlice
+}
+
+func (frr *Cli) ShowVRFs() (VrfVni, error) {
+	vrfInfo, err := frr.showVRFVnis()
+	if err != nil {
+		return vrfInfo, fmt.Errorf("cannot get vrf vni mapping from frr: %w", err)
+	}
+	data := frr.execute([]string{
+		"show",
+		"vrf",
+	})
+	dataAsString := string(data)
+	dataAsSlice := parseVRFS(dataAsString)
 	for _, vrf := range dataAsSlice {
 		table, ok := vrf["table"]
 		// If the key exists
