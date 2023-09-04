@@ -24,7 +24,7 @@ type Manager struct {
 	configTemplate *template.Template
 	ConfigPath     string
 	TemplatePath   string
-	CLI            *FRRCLI
+	Cli            *Cli
 }
 
 type PrefixList struct {
@@ -61,7 +61,7 @@ func NewFRRManager() *Manager {
 	return &Manager{
 		ConfigPath:   "/etc/frr/frr.conf",
 		TemplatePath: "/etc/frr/frr.conf.tpl",
-		CLI:          NewFRRCLI(),
+		Cli:          NewCli(),
 	}
 }
 

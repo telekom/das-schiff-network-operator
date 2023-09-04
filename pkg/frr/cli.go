@@ -11,12 +11,12 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-type FRRCLI struct {
+type Cli struct {
 	binaryPath string
 }
 
-func NewFRRCLI() *FRRCLI {
-	return &FRRCLI{
+func NewCli() *Cli {
+	return &Cli{
 		binaryPath: "/usr/bin/vtysh",
 	}
 }
@@ -33,12 +33,12 @@ func getVRF(vrf string) (string, bool) {
 	return vrf, false
 }
 
-func (frr *FRRCLI) executeWithJson(args []string) []byte {
+func (frr *Cli) executeWithJson(args []string) []byte {
 	args = append(args, "json")
 	return frr.execute(args)
 }
 
-func (frr *FRRCLI) execute(args []string) []byte {
+func (frr *Cli) execute(args []string) []byte {
 	// Ensure JSON is always appended
 
 	joinedArgs := strings.Join(args, " ")
@@ -53,7 +53,7 @@ func (frr *FRRCLI) execute(args []string) []byte {
 	return output
 }
 
-func (frr *FRRCLI) ShowEVPNVNIDetail() (EVPNVniDetail, error) {
+func (frr *Cli) ShowEVPNVNIDetail() (EVPNVniDetail, error) {
 	evpnInfo := EVPNVniDetail{}
 	data := frr.executeWithJson([]string{
 		"show",
@@ -68,7 +68,7 @@ func (frr *FRRCLI) ShowEVPNVNIDetail() (EVPNVniDetail, error) {
 	return evpnInfo, err
 }
 
-func (frr *FRRCLI) ShowBGPSummary(vrf string) (BGPVrfSummary, error) {
+func (frr *Cli) ShowBGPSummary(vrf string) (BGPVrfSummary, error) {
 	vrfName, multiVRF := getVRF(vrf)
 	data := frr.executeWithJson([]string{
 		"show",
@@ -96,7 +96,7 @@ func (frr *FRRCLI) ShowBGPSummary(vrf string) (BGPVrfSummary, error) {
 
 }
 
-func (frr *FRRCLI) showVRFVnis() (VrfVni, error) {
+func (frr *Cli) showVRFVnis() (VrfVni, error) {
 	vrfInfo := VrfVni{}
 	vrfVniData := frr.executeWithJson([]string{
 		"show",
@@ -109,7 +109,7 @@ func (frr *FRRCLI) showVRFVnis() (VrfVni, error) {
 	}
 	return vrfInfo, err
 }
-func (frr *FRRCLI) ShowVRFs() (VrfVni, error) {
+func (frr *Cli) ShowVRFs() (VrfVni, error) {
 	vrfInfo, err := frr.showVRFVnis()
 	if err != nil {
 		return vrfInfo, fmt.Errorf("cannot get vrf vni mapping from frr: %w", err)
@@ -184,7 +184,7 @@ func (frr *FRRCLI) ShowVRFs() (VrfVni, error) {
 	return vrfInfo, nil
 }
 
-func (frr *FRRCLI) getDualStackRoutes(vrf string) (Routes, Routes, error) {
+func (frr *Cli) getDualStackRoutes(vrf string) (Routes, Routes, error) {
 	routesV4 := Routes{}
 	routesV6 := Routes{}
 	data_v4 := frr.executeWithJson([]string{
@@ -213,12 +213,12 @@ func (frr *FRRCLI) getDualStackRoutes(vrf string) (Routes, Routes, error) {
 	return routesV4, routesV6, nil
 }
 
-func (frr *FRRCLI) ShowRoutes(vrf string) (VRFDualStackRoutes, error) {
+func (frr *Cli) ShowRoutes(vrf string) (VRFDualStackRoutes, error) {
 	vrfName, multiVrf := getVRF(vrf)
 	vrfRoutes := VRFDualStackRoutes{}
 	if multiVrf {
 		// as the opensource project has issues with correctly representing
-		// json in some cli commands
+		// json in some Cli commands
 		// we need this ugly loop to get the necessary parseable data mapping.
 		vrfVni, err := frr.ShowVRFs()
 		if err != nil {

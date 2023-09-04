@@ -44,7 +44,7 @@ func getQuantity(routeInfos Routes, addressFamily int) ([]route.Information, err
 }
 
 func (frr *Manager) ListVrfs() ([]VrfVniSpec, error) {
-	vrfs, err := frr.CLI.ShowVRFs()
+	vrfs, err := frr.Cli.ShowVRFs()
 	if err != nil {
 		return vrfs.Vrfs, fmt.Errorf("cannot get all vrfs: %w", err)
 	}
@@ -55,7 +55,7 @@ func (frr *Manager) ListVrfs() ([]VrfVniSpec, error) {
 }
 
 func (frr *Manager) ListRoutes(vrf string) ([]route.Information, error) {
-	vrfDualStackRoutes, err := frr.CLI.ShowRoutes(vrf)
+	vrfDualStackRoutes, err := frr.Cli.ShowRoutes(vrf)
 	if err != nil {
 		return nil, fmt.Errorf("cannot get Routes for vrf %s: %w", vrf, err)
 	}
@@ -78,7 +78,7 @@ func (frr *Manager) ListRoutes(vrf string) ([]route.Information, error) {
 }
 
 func (frr *Manager) ListNeighbors(vrf string) (bgpSummary BGPVrfSummary, err error) {
-	bgpSummary, err = frr.CLI.ShowBGPSummary(vrf)
+	bgpSummary, err = frr.Cli.ShowBGPSummary(vrf)
 	if err != nil {
 		return bgpSummary, fmt.Errorf("cannot get BGPSummary for vrf %s: %w", vrf, err)
 	}
