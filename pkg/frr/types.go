@@ -1,8 +1,5 @@
 package frr
 
-const frrUnknown = "unknown"
-const frrVRF = "vrf"
-
 type Peer struct {
 	Hostname                   string `json:"hostname"`
 	RemoteAs                   int64  `json:"remoteAs"`
@@ -63,7 +60,7 @@ var (
 		"ipv6Unicast":   IPv6Unicast,
 		"ipv6Multicast": IPv6Unicast,
 		"l2VpnEvpn":     L2VpnEvpn,
-		frrUnknown:      Unknown,
+		"unknown":       Unknown,
 	}
 )
 
