@@ -148,7 +148,7 @@ func NewFRRCollector() (Collector, error) {
 func (c *frrCollector) UpdateVrfs(ch chan<- prometheus.Metric) {
 	vrfs, err := c.frr.ListVrfs()
 	if err != nil {
-		c.logger.Error(err, "Can't get vrfs from frr")
+		c.logger.Error(err, "can't get vrfs from frr")
 	}
 	for _, vrf := range vrfs {
 		// hotfix for default as it is called
@@ -165,7 +165,7 @@ func (c *frrCollector) UpdateVrfs(ch chan<- prometheus.Metric) {
 func (c *frrCollector) UpdateRoutes(ch chan<- prometheus.Metric) {
 	routes, err := c.frr.ListRoutes("")
 	if err != nil {
-		c.logger.Error(err, "Can't get routes from frr")
+		c.logger.Error(err, "can't get routes from frr")
 	}
 	for _, routePath := range routes {
 		if routePath.VrfName == "default" {
@@ -179,7 +179,7 @@ func (c *frrCollector) UpdateRoutes(ch chan<- prometheus.Metric) {
 func (c *frrCollector) UpdateBGPNeighbors(ch chan<- prometheus.Metric) {
 	bgpNeighbors, err := c.frr.ListNeighbors("")
 	if err != nil {
-		c.logger.Error(err, "Can't get bgpNeighbors from frr: %w")
+		c.logger.Error(err, "can't get bgpNeighbors from frr: %w")
 	}
 
 	for _, families := range bgpNeighbors {
@@ -215,7 +215,6 @@ func (c *frrCollector) UpdateBGPNeighbors(ch chan<- prometheus.Metric) {
 }
 
 func (c *frrCollector) Update(ch chan<- prometheus.Metric) error {
-	c.logger.Info("I am in the frr collector")
 	c.UpdateVrfs(ch)
 	c.UpdateRoutes(ch)
 	c.UpdateBGPNeighbors(ch)

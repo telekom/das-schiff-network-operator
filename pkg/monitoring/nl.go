@@ -69,7 +69,6 @@ func (c *netlinkCollector) updateNeighbors(ch chan<- prometheus.Metric) {
 }
 
 func (c *netlinkCollector) Update(ch chan<- prometheus.Metric) error {
-	c.logger.Info("I am in the netlink collector")
 	c.updateRoutes(ch)
 	c.updateNeighbors(ch)
 	return nil
