@@ -3,7 +3,7 @@ kind: ControllerManagerConfig
 health:
   healthProbeBindAddress: :7081
 metrics:
-  bindAddress: 127.0.0.1:7080
+  bindAddress: 127.0.0.1:7080 # "0" can disable the metrics export
 webhook:
   certDir: ./tls
   port: 7443

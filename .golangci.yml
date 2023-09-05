@@ -146,13 +146,9 @@ issues:
   exclude-rules:
     # As of now we ignore the statements in main
     - path: 'main.go'
-      text: "Function '\\w+' has too many statements"
+      text: "Function 'main' has too many statements"
     - path: 'main.go'
       text: "function-length: maximum number of statements per function exceeded; max \\d+ but got \\d+"
-    - path: 'main.go'
-      text: "cyclomatic: function main has cyclomatic complexity 14"
-    - path: 'main.go'
-      text: "calculated cyclomatic complexity for function main is 14, max is 13"
     # This is very C near and those const values are easier to google.
     - path: '(.+)/unix/(coil|frr)\.go'
       text: "ST1003: should not use ALL_CAPS in Go names; use CamelCase instead"

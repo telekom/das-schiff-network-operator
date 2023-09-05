@@ -60,6 +60,27 @@ func init() {
 	//+kubebuilder:scaffold:scheme
 }
 
+func initCollectors() error {
+	var err error
+	collector, err := monitoring.NewDasSchiffNetworkOperatorCollector()
+	if err != nil {
+		return fmt.Errorf("failed to create collector: %w", err)
+	}
+	setupLog.Info("initialize collectors")
+	collectors := []string{}
+	for c := range collector.Collectors {
+		collectors = append(collectors, c)
+	}
+	sort.Strings(collectors)
+	for index := range collectors {
+		setupLog.Info("registered collector", "collector", collectors[index])
+	}
+	if err := metrics.Registry.Register(collector); err != nil {
+		return fmt.Errorf("failed to register collector: %w", err)
+	}
+	return nil
+}
+
 func main() {
 	var onlyBPFMode bool
 	var configFile string
@@ -77,33 +98,11 @@ func main() {
 	}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
-	var err error
-	collector, err := monitoring.NewDasSchiffNetworkOperatorCollector()
-	if err != nil {
-		err = fmt.Errorf("couldn't create collector: %w", err)
-		setupLog.Error(err, "metrics export not setup")
-		os.Exit(1)
-	}
-	setupLog.Info("msg", "Enabled collectors")
-	collectors := []string{}
-	for n := range collector.Collectors {
-		collectors = append(collectors, n)
-	}
-	sort.Strings(collectors)
-	for _, c := range collectors {
-		setupLog.Info("collector", c)
-	}
-	if err := metrics.Registry.Register(collector); err != nil {
-		err = fmt.Errorf("couldn't register das_schiff_network_operator_collector: %w", err)
-		setupLog.Error(err, "registration error")
-	}
-	if err != nil {
-		setupLog.Error(err, "unable start metrics webserver")
-		os.Exit(1)
-	}
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
+	var err error
 	options := ctrl.Options{Scheme: scheme}
+
 	if configFile != "" {
 		options, err = options.AndFrom(ctrl.ConfigFile().AtPath(configFile))
 		if err != nil {
@@ -111,6 +110,15 @@ func main() {
 			os.Exit(1)
 		}
 	}
+
+	if options.MetricsBindAddress != "0" {
+		err = initCollectors()
+		if err != nil {
+			setupLog.Error(err, "unable to initialize metrics collectors")
+			os.Exit(1)
+		}
+	}
+
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), options)
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
