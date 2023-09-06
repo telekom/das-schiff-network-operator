@@ -31,13 +31,12 @@ func getVRFInfo(vrf string) (name string, isMulti bool) {
 }
 
 func (frr *Cli) executeWithJSON(args []string) []byte {
+	// Ensure JSON is always appended
 	args = append(args, "json")
 	return frr.execute(args)
 }
 
 func (frr *Cli) execute(args []string) []byte {
-	// Ensure JSON is always appended
-
 	joinedArgs := strings.Join(args, " ")
 	cmd := &exec.Cmd{
 		Path: frr.binaryPath,
@@ -106,7 +105,7 @@ func (frr *Cli) showVRFVnis() (VrfVni, error) {
 	return vrfInfo, nil
 }
 
-func parseVRFS(data string) []map[string]string {
+func parseVRFS(data string) ([]map[string]string, error) {
 	// now we want all vrfs which do not have
 	// a vni assigned
 	// this code is ugly as it needs to parse the following output
@@ -125,7 +124,10 @@ func parseVRFS(data string) []map[string]string {
 		text = strings.ReplaceAll(text, " (configured)", "")
 		text = strings.ReplaceAll(text, " inactive", "")
 		words := strings.Fields(text)
-		chunkedWords := Chunk(words, chunkSize)
+		chunkedWords, err := Chunk(words, chunkSize)
+		if err != nil {
+			return nil, fmt.Errorf("failed batching of line [%s]: %w", text, err)
+		}
 		vrfMap := make(map[string]string)
 		for _, tuple := range chunkedWords {
 			vrfMap[tuple[0]] = tuple[1]
@@ -137,7 +139,7 @@ func parseVRFS(data string) []map[string]string {
 		"table": strconv.Itoa(unix.RT_CLASS_MAIN),
 		"id":    "0",
 	})
-	return dataAsSlice
+	return dataAsSlice, nil
 }
 
 func (frr *Cli) ShowVRFs() (VrfVni, error) {
@@ -150,7 +152,10 @@ func (frr *Cli) ShowVRFs() (VrfVni, error) {
 		"vrf",
 	})
 	dataAsString := string(data)
-	dataAsSlice := parseVRFS(dataAsString)
+	dataAsSlice, err := parseVRFS(dataAsString)
+	if err != nil {
+		return vrfInfo, fmt.Errorf("cannot get vrf list information from frr: %w", err)
+	}
 	for _, vrf := range dataAsSlice {
 		table, ok := vrf["table"]
 		// If the key exists

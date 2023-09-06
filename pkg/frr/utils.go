@@ -1,8 +1,10 @@
 package frr
 
-func Chunk[E any](values []E, size int) [][]E {
+import "fmt"
+
+func Chunk[E any](values []E, size int) ([][]E, error) {
 	if size <= 0 {
-		panic("size must be > 0")
+		return nil, fmt.Errorf("size [%d] must be > 0", size)
 	}
 
 	var chunks [][]E
@@ -15,7 +17,7 @@ func Chunk[E any](values []E, size int) [][]E {
 		values = values[size:]
 	}
 
-	return chunks
+	return chunks, nil
 }
 
 func DeleteByIndex[T any](slice []T, index int) []T {
