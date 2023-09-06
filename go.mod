@@ -5,7 +5,7 @@ go 1.19
 require (
 	github.com/cilium/ebpf v0.9.1
 	github.com/coreos/go-iptables v0.6.0
-	github.com/coreos/go-systemd/v22 v22.3.2
+	github.com/coreos/go-systemd/v22 v22.5.0
 	github.com/go-logr/logr v0.4.0
 	github.com/google/go-cmp v0.5.6
 	github.com/onsi/ginkgo v1.16.4
