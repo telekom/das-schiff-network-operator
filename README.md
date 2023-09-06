@@ -94,31 +94,31 @@ After deployment basic networking connectivity can be tested to ensure that the 
 There are 3 types of checks implemented currently:
  - FRR check - will check if FRR's daemon is up and running. This check will be only used in pods that DO NOT work in bpf-only mode.
  - interfaces - will check if all network interfaces that are expected to are up
- - reachability - will check if TCP connection to provided hosts can be achieved. Each host will be queired `retries` times before reporting failure.
+ - reachability - will check if TCP connection to provided hosts can be achieved. Each host will be queried `retries` times before reporting failure.
 
- Interfaces and reachability checks can be configured using config file located in `/opt/network-operator/net-healthcheck-config.yaml` on the node.
+ Interfaces and reachability checks can be configured through a config file located in `/opt/network-operator/net-healthcheck-config.yaml` on the node.
 
  The syntax of the config file is as follow:
 
  ```
-interfaces: // list of interfaces that should have UP state
+interfaces: # list of interfaces that should have UP state
   - eth0
-reachability: // list of hosts and ports to query in reachability check
+reachability: # list of hosts and ports to query in reachability check
 - host: "host.domain.com"
   port: 80
 - host: "192.168.1.100"
   port: 8400
-timeout: 5s // timeout for reachability test (if not provided, default 3s will be used)
-retries: 10 // idicates how many times each host provided in reachibility list will be queried before failure will be reported, default 3
+timeout: 5s # timeout for reachability test (if not provided, default 3s will be used)
+retries: 10 # indicates how many times each host provided in reachibility list will be queried before failure will be reported, default 3
  ```
 
-Location of the networking healthcheck config file can be altered by setting `OPERATOR_NETHEALTHCHECK_CONFIG` enviromental vairable on the node to selected path, e.q.
+The location of the networking healthcheck config file can be altered by setting the `OPERATOR_NETHEALTHCHECK_CONFIG` environment variable on the node to the desired path, e.g.:
 
 ```bash
 OPERATOR_NETHEALTHCHECK_CONFIG=/etc/network-operator/my-healtcheck-config.yaml
 ```
 
-> NOTE: Please be aware that custom config file location has to be mounted into the network-operator pod.
+> NOTE: Please be aware that the custom config file location has to be mounted into the network-operator pod.
 
 ## License
 
