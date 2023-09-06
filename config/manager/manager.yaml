@@ -19,12 +19,20 @@ spec:
         control-plane: controller-manager
         app: network-operator-worker
     spec:
+      tolerations:
+      - effect: NoSchedule
+        key: node.cloudprovider.kubernetes.io/uninitialized
       hostNetwork: true
       hostPID: true
       containers:
       - command:
         - /manager
         args: []
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
         image: controller:latest
         name: manager
         securityContext:
@@ -54,6 +62,8 @@ spec:
         volumeMounts:
         - mountPath: /etc/frr
           name: frr-config
+        - mountPath: /opt/network-operator
+          name: opt-config
         - mountPath: /var/run/dbus/system_bus_socket
           name: dbus-socket
       serviceAccountName: controller-manager
@@ -62,6 +72,10 @@ spec:
       - name: frr-config
         hostPath:
           path: /etc/frr
+          type: Directory
+      - name: opt-config
+        hostPath:
+          path: /opt/network-operator
           type: Directory
       - name: dbus-socket
         hostPath:

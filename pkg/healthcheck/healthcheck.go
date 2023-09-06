@@ -1,0 +1,272 @@
+// Package healthcheck is used for basic networking healthcheck.
+package healthcheck
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/go-logr/logr"
+	"github.com/vishvananda/netlink"
+	"gopkg.in/yaml.v2"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
+)
+
+const (
+	// NetHealthcheckFile is default path for healtcheck config file.
+	NetHealthcheckFile = "/opt/network-operator/net-healthcheck-config.yaml"
+	// NodenameEnv is an env variable that holds Kubernetes node's name.
+	NodenameEnv = "NODE_NAME"
+	// TaintKey is a node's CPI taint key that causes NoSchedule effect.
+	TaintKey = "node.cloudprovider.kubernetes.io/uninitialized"
+
+	configEnv         = "OPERATOR_NETHEALTHCHECK_CONFIG"
+	defaultTCPTimeout = 3
+	defaultRetries    = 3
+)
+
+// HealthChecker is a struct that holds data required for networking healthcheck.
+type HealthChecker struct {
+	client              client.Client
+	isNetworkingHealthy bool
+	logr.Logger
+	netConfig *NetHealthcheckConfig
+	toolkit   *Toolkit
+	retries   int
+}
+
+// NewHealthChecker creates new HealthChecker.
+func NewHealthChecker(clusterClient client.Client, toolkit *Toolkit, netconf *NetHealthcheckConfig) (*HealthChecker, error) {
+	var retries int
+	if netconf.Retries <= 0 {
+		retries = defaultRetries
+	} else {
+		retries = netconf.Retries
+	}
+
+	return &HealthChecker{
+		client:              clusterClient,
+		isNetworkingHealthy: false,
+		Logger:              log.Log.WithName("HealthCheck"),
+		netConfig:           netconf,
+		toolkit:             toolkit,
+		retries:             retries,
+	}, nil
+}
+
+// IsNetworkingHealthy returns value of isNetworkingHealthly bool.
+func (hc *HealthChecker) IsNetworkingHealthy() bool {
+	return hc.isNetworkingHealthy
+}
+
+// RemoveTaint removes taint from the node.
+func (hc *HealthChecker) RemoveTaint(ctx context.Context, taintKey string) error {
+	node := &corev1.Node{}
+	err := hc.client.Get(ctx,
+		types.NamespacedName{Name: os.Getenv(NodenameEnv)}, node)
+	if err != nil {
+		hc.Logger.Error(err, "error while getting node's info")
+		return fmt.Errorf("error while getting node's info: %w", err)
+	}
+
+	for i, v := range node.Spec.Taints {
+		if v.Key == taintKey {
+			node.Spec.Taints = append(node.Spec.Taints[:i], node.Spec.Taints[i+1:]...)
+			if err := hc.client.Update(ctx, node, &client.UpdateOptions{}); err != nil {
+				hc.Logger.Error(err, "")
+				return fmt.Errorf("error while updating node: %w", err)
+			}
+			break
+		}
+	}
+
+	hc.isNetworkingHealthy = true
+
+	return nil
+}
+
+// IsFRRActive checks if FRR daemon is in active and running state.
+func (hc *HealthChecker) IsFRRActive() (bool, error) {
+	activeState, subState, err := hc.toolkit.frr.GetStatusFRR()
+	if err != nil {
+		return false, fmt.Errorf("error while ugetting FRR's status: %w", err)
+	}
+
+	if activeState != "active" || subState != "running" {
+		return false, errors.New("FRR is inactive with ActiveState=" + activeState + " and SubState=" + subState)
+	}
+
+	return true, nil
+}
+
+// CheckInterfaces checks if all interfaces in the Interfaces slice are in UP state.
+func (hc *HealthChecker) CheckInterfaces() error {
+	issuesFound := false
+	for _, i := range hc.netConfig.Interfaces {
+		if err := hc.checkInterface(i); err != nil {
+			hc.Logger.Error(err, "problem with network interface "+i)
+			issuesFound = true
+		}
+	}
+	if issuesFound {
+		return errors.New("one or more problems with network interfaces found")
+	}
+
+	return nil
+}
+
+func (hc *HealthChecker) checkInterface(intf string) error {
+	link, err := hc.toolkit.linkByName(intf)
+	if err != nil {
+		return err
+	}
+	if link.Attrs().OperState != netlink.OperUp {
+		return errors.New("link " + intf + " is not up - current state: " + link.Attrs().OperState.String())
+	}
+	return nil
+}
+
+// CheckReachability checks if all hosts in Reachability slice are reachable.
+func (hc *HealthChecker) CheckReachability() error {
+	for _, i := range hc.netConfig.Reachability {
+		if err := hc.checkReachabilityItemWithRetry(i); err != nil {
+			if strings.Contains(err.Error(), "refused") {
+				// refused connection will not return error, as host is reachable,
+				// just actively refuses connections (e.g. port is blocked)
+				continue
+			}
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (hc *HealthChecker) checkReachabilityItem(r netReachabilityItem) error {
+	target := r.Host + ":" + strconv.Itoa(r.Port)
+	conn, err := hc.toolkit.tcpDialer.Dial("tcp", target)
+	if err != nil {
+		return fmt.Errorf("error trying to connect to %s: %w", target, err)
+	}
+	if conn != nil {
+		if err = conn.Close(); err != nil {
+			return fmt.Errorf("error closing connection: %w", err)
+		}
+	}
+	return nil
+}
+
+func (hc *HealthChecker) checkReachabilityItemWithRetry(r netReachabilityItem) error {
+	var err error
+	for i := 0; i < hc.retries; i++ {
+		err = hc.checkReachabilityItem(r)
+		if err == nil {
+			return nil
+		}
+		if strings.Contains(err.Error(), "refused") || i >= hc.retries-1 {
+			break
+		}
+	}
+	return err
+}
+
+// NetHealthcheckConfig is a struct that holds healtcheck config.
+type NetHealthcheckConfig struct {
+	Interfaces   []string              `yaml:"interfaces,omitempty"`
+	Reachability []netReachabilityItem `yaml:"reachability,omitempty"`
+	Timeout      string                `yaml:"timeout,omitempty"`
+	Retries      int                   `yaml:"retries,omitempty"`
+}
+
+type netReachabilityItem struct {
+	Host string `yaml:"host"`
+	Port int    `yaml:"port"`
+}
+
+// LoadConfig loads healtcheck config from file.
+func LoadConfig(configFile string) (*NetHealthcheckConfig, error) {
+	config := &NetHealthcheckConfig{}
+
+	isMandatory := false
+	if val := os.Getenv(configEnv); val != "" {
+		isMandatory = true
+		configFile = val
+	}
+
+	configExists := false
+
+	read, err := os.ReadFile(filepath.Clean(configFile))
+	if err != nil {
+		if isMandatory {
+			return nil, fmt.Errorf("error opening config file: %w", err)
+		}
+	} else {
+		configExists = true
+	}
+
+	if configExists {
+		err = yaml.Unmarshal(read, &config)
+		if err != nil {
+			return nil, fmt.Errorf("error unmarshalling config file: %w", err)
+		}
+	}
+
+	return config, nil
+}
+
+// Toolkit is a helper structure that holds interfaces and functions used by HealthChecker.
+type Toolkit struct {
+	frr        FRRInterface
+	linkByName func(name string) (netlink.Link, error)
+	tcpDialer  TCPDialerInterface
+}
+
+// NewHealthCheckToolkit returns new HealthCheckToolkit.
+func NewHealthCheckToolkit(frr FRRInterface, linkByName func(name string) (netlink.Link, error), tcpDialer TCPDialerInterface) *Toolkit {
+	return &Toolkit{
+		frr:        frr,
+		linkByName: linkByName,
+		tcpDialer:  tcpDialer,
+	}
+}
+
+// NewTCPDialer returns new tcpDialerInterface.
+func NewTCPDialer(dialerTimeout string) TCPDialerInterface {
+	timeout, err := time.ParseDuration(dialerTimeout)
+	logger := log.Log.WithName("HealthCheck - TCP dialer")
+	if err != nil {
+		logger.Info("unable to parse TCP dialer timeout provided in HealtCheck config, will try to parse provided value as seconds: %w", err)
+		seconds, err := strconv.Atoi(dialerTimeout)
+		if err != nil {
+			logger.Info("unable to parse provided TCP dialer timeout as seconds, will use default timeout of %d seconds: %w", defaultTCPTimeout, err)
+			timeout = time.Second * defaultTCPTimeout
+		} else {
+			timeout = time.Second * time.Duration(seconds)
+		}
+	}
+	return &net.Dialer{Timeout: timeout}
+}
+
+// NewDefaultHealthcheckToolkit returns.
+func NewDefaultHealthcheckToolkit(frr FRRInterface, tcpDialer TCPDialerInterface) *Toolkit {
+	return NewHealthCheckToolkit(frr, netlink.LinkByName, tcpDialer)
+}
+
+//go:generate mockgen -destination ./mock/mock_healthcheck.go . FRRInterface,TCPDialerInterface
+type FRRInterface interface {
+	GetStatusFRR() (string, string, error)
+}
+
+type TCPDialerInterface interface {
+	Dial(network string, address string) (net.Conn, error)
+}
