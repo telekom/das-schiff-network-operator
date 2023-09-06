@@ -21,12 +21,9 @@ func NewCli() *Cli {
 	}
 }
 
-// getVRF returns either the provided vrf from the function params or if its empty.
-// the constant string "all" as the vrf name.
-// if it returns it also provides feedback if the vrf parameter was empty or not as
-// the second return value.
-
-func getVRF(vrf string) (string, bool) {
+// getVRFInfo returns either the provided vrf from the function params - or if it's empty -
+// the constant string "all" as the vrf name as well as whether it received an empty input
+func getVRFInfo(vrf string) (name string, isMulti bool) {
 	if vrf == "" {
 		return "all", true
 	}
