@@ -1,5 +1,6 @@
 package monitoring
 
+// TODO: move bpf monitoring in here from pkg/bpf/monioring.go
 // import (
 // 	"github.com/go-logr/logr"
 // 	"github.com/prometheus/client_golang/prometheus"
