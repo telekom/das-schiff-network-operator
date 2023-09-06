@@ -66,7 +66,7 @@ func (frr *Cli) ShowEVPNVNIDetail() (EVPNVniDetail, error) {
 }
 
 func (frr *Cli) ShowBGPSummary(vrf string) (BGPVrfSummary, error) {
-	vrfName, multiVRF := getVRF(vrf)
+	vrfName, multiVRF := getVRFInfo(vrf)
 	data := frr.executeWithJSON([]string{
 		"show",
 		"bgp",
@@ -212,7 +212,7 @@ func (frr *Cli) getDualStackRoutes(vrf string) (routesV4, routesV6 Routes, err e
 }
 
 func (frr *Cli) ShowRoutes(vrf string) (VRFDualStackRoutes, error) {
-	vrfName, multiVrf := getVRF(vrf)
+	vrfName, multiVrf := getVRFInfo(vrf)
 	vrfRoutes := VRFDualStackRoutes{}
 	if multiVrf {
 		// as the opensource project has issues with correctly representing
