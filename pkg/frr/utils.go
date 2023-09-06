@@ -59,16 +59,13 @@ func DeleteElementsByIndices[T any](slice []T, indices []int) []T {
 	return slice[:backIndex+1]
 }
 
-func Filter[T any](slice []T, predicate func(T) bool) []T {
-	indices := make([]int, 0, len(slice))
-
-	for index, element := range slice {
-		if !predicate(element) {
-			indices = append(indices, index)
+func Filter[T any](slice []T, predicate func(T) bool) (res []T) {
+	for _, elem := range slice {
+		if predicate(elem) {
+			res = append(res, elem)
 		}
 	}
-
-	return DeleteElementsByIndices(slice, indices)
+	return res
 }
 
 func Exists[T any](slice []T, predicate func(T) bool) (resultIndex int, ok bool) {
