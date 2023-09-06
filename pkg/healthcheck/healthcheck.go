@@ -36,8 +36,8 @@ const (
 
 // HealthChecker is a struct that holds data required for networking healthcheck.
 type HealthChecker struct {
-	client        client.Client
-	isInitialized bool
+	client               client.Client
+	isNetworkingHealthly bool
 	logr.Logger
 	netConfig *NetHealthcheckConfig
 	toolkit   *Toolkit
@@ -54,18 +54,18 @@ func NewHealthChecker(clusterClient client.Client, toolkit *Toolkit, netconf *Ne
 	}
 
 	return &HealthChecker{
-		client:        clusterClient,
-		isInitialized: false,
-		Logger:        log.Log.WithName("HealthCheck"),
-		netConfig:     netconf,
-		toolkit:       toolkit,
-		retries:       retries,
+		client:               clusterClient,
+		isNetworkingHealthly: false,
+		Logger:               log.Log.WithName("HealthCheck"),
+		netConfig:            netconf,
+		toolkit:              toolkit,
+		retries:              retries,
 	}, nil
 }
 
-// IsInitialized returns value of isIntialized bool.
-func (hc *HealthChecker) IsInitialized() bool {
-	return hc.isInitialized
+// IsNetworkingHealthly returns value of isNetworkingHealthly bool.
+func (hc *HealthChecker) IsNetworkingHealthly() bool {
+	return hc.isNetworkingHealthly
 }
 
 // RemoveTaint removes taint from the node.
@@ -89,7 +89,7 @@ func (hc *HealthChecker) RemoveTaint(ctx context.Context, taintKey string) error
 		}
 	}
 
-	hc.isInitialized = true
+	hc.isNetworkingHealthly = true
 
 	return nil
 }
@@ -243,9 +243,12 @@ func NewHealthCheckToolkit(frr FRRInterface, linkByName func(name string) (netli
 // NewTCPDialer returns new tcpDialerInterface.
 func NewTCPDialer(dialerTimeout string) TCPDialerInterface {
 	timeout, err := time.ParseDuration(dialerTimeout)
+	logger := log.Log.WithName("HealthCheck - TCP dialer")
 	if err != nil {
+		logger.Info("unable to parse TCP dialer timeout provided in HealtCheck config, will try to parse provided value as seconds: %w", err)
 		seconds, err := strconv.Atoi(dialerTimeout)
 		if err != nil {
+			logger.Info("unable to parse provided TCP dialer timeout as seconds, will use default timeout of %d seconds: %w", defaultTCPTimeout, err)
 			timeout = time.Second * defaultTCPTimeout
 		} else {
 			timeout = time.Second * time.Duration(seconds)
