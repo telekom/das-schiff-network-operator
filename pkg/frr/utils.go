@@ -20,43 +20,8 @@ func Chunk[E any](values []E, size int) [][]E {
 
 func DeleteByIndex[T any](slice []T, index int) []T {
 	sliceLastIndex := len(slice) - 1
-slice[index] = slice[sliceLastIndex]
+	slice[index] = slice[sliceLastIndex]
 	return slice[:sliceLastIndex]
-}
-
-func DeleteElementsByIndices[T any](slice []T, indices []int) []T {
-	indicesMap := make(map[int]int)
-
-	for _, index := range indices {
-		indicesMap[index] = index
-	}
-
-	lastIndex := len(slice) - 1
-	backIndex := lastIndex
-
-	for _, index := range indices {
-		if index < 0 || index > lastIndex {
-			continue
-		}
-
-		mappedIndex := indicesMap[index]
-
-		if mappedIndex == -1 {
-			continue
-		}
-
-		if mappedIndex != backIndex {
-			slice[mappedIndex] = slice[backIndex]
-
-			indicesMap[backIndex] = indicesMap[mappedIndex]
-		}
-
-		indicesMap[index] = -1
-
-		backIndex--
-	}
-
-	return slice[:backIndex+1]
 }
 
 func Filter[T any](slice []T, predicate func(T) bool) (res []T) {
