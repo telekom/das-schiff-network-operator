@@ -97,6 +97,21 @@ func (*Manager) ReloadFRR() error {
 	return nil
 }
 
+func (*Manager) GetStatusFRR() (activeState, subState string, err error) {
+	con, err := dbus.NewSystemConnectionContext(context.Background())
+	if err != nil {
+		return "", "", fmt.Errorf("error creating D-Bus connection: %w", err)
+	}
+	defer con.Close()
+
+	prop, err := con.GetUnitPropertiesContext(context.Background(), frrUnit)
+	if err != nil {
+		return "", "", fmt.Errorf("error getting unit %s properties: %w", frrUnit, err)
+	}
+
+	return prop["ActiveState"].(string), prop["SubState"].(string), nil
+}
+
 func (v *VRFConfiguration) ShouldTemplateVRF() bool {
 	return v.VNI != config.SkipVrfTemplateVni
 }

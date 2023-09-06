@@ -24,6 +24,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
+	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -48,7 +49,7 @@ type Layer2NetworkConfigurationReconciler struct {
 	Reconciler *reconciler.Reconciler
 }
 
-//+kubebuilder:rbac:groups=core,resources=nodes,verbs=get;list;watch
+//+kubebuilder:rbac:groups=core,resources=nodes,verbs=get;list;update;watch
 //+kubebuilder:rbac:groups=network.schiff.telekom.de,resources=layer2networkconfigurations,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=network.schiff.telekom.de,resources=layer2networkconfigurations/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=network.schiff.telekom.de,resources=layer2networkconfigurations/finalizers,verbs=update
@@ -73,7 +74,7 @@ func (r *Layer2NetworkConfigurationReconciler) SetupWithManager(mgr ctrl.Manager
 	nodePredicates := predicate.Funcs{
 		CreateFunc: func(e event.CreateEvent) bool { return false },
 		UpdateFunc: func(e event.UpdateEvent) bool {
-			return os.Getenv("HOSTNAME") == e.ObjectNew.GetName() && !cmp.Equal(e.ObjectNew.GetLabels(), e.ObjectOld.GetLabels())
+			return os.Getenv(healthcheck.NodenameEnv) == e.ObjectNew.GetName() && !cmp.Equal(e.ObjectNew.GetLabels(), e.ObjectOld.GetLabels())
 		},
 		DeleteFunc:  func(e event.DeleteEvent) bool { return false },
 		GenericFunc: func(e event.GenericEvent) bool { return false },

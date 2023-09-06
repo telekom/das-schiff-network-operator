@@ -18,6 +18,7 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -27,17 +28,20 @@ import (
 	"github.com/telekom/das-schiff-network-operator/pkg/anycast"
 	"github.com/telekom/das-schiff-network-operator/pkg/bpf"
 	"github.com/telekom/das-schiff-network-operator/pkg/config"
+	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
 	"github.com/telekom/das-schiff-network-operator/pkg/macvlan"
 	"github.com/telekom/das-schiff-network-operator/pkg/notrack"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.) //nolint:gci
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -86,7 +90,8 @@ func main() {
 			os.Exit(1)
 		}
 	}
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), options)
+	clientConfig := ctrl.GetConfigOrDie()
+	mgr, err := ctrl.NewManager(clientConfig, options)
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
 		os.Exit(1)
@@ -105,7 +110,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := initComponents(mgr, anycastTracker, cfg, onlyBPFMode); err != nil {
+	if err := initComponents(mgr, anycastTracker, cfg, clientConfig, onlyBPFMode); err != nil {
 		setupLog.Error(err, "unable to initialize components")
 		os.Exit(1)
 	}
@@ -122,7 +127,7 @@ func main() {
 	}
 }
 
-func initComponents(mgr manager.Manager, anycastTracker *anycast.Tracker, cfg *config.Config, onlyBPFMode bool) error {
+func initComponents(mgr manager.Manager, anycastTracker *anycast.Tracker, cfg *config.Config, clientConfig *rest.Config, onlyBPFMode bool) error {
 	// Start VRFRouteConfigurationReconciler when we are not running in only BPF mode.
 	if !onlyBPFMode {
 		if err := setupReconcilers(mgr, anycastTracker); err != nil {
@@ -158,6 +163,29 @@ func initComponents(mgr manager.Manager, anycastTracker *anycast.Tracker, cfg *c
 		setupLog.Error(err, "error starting IPTables sync")
 	}
 
+	if onlyBPFMode {
+		clusterClient, err := client.New(clientConfig, client.Options{})
+		if err != nil {
+			return fmt.Errorf("error creating controller-runtime client: %w", err)
+		}
+
+		nc, err := healthcheck.LoadConfig(healthcheck.NetHealthcheckFile)
+		if err != nil {
+			return fmt.Errorf("error loading network healthcheck config: %w", err)
+		}
+
+		tcpDialer := healthcheck.NewTCPDialer(nc.Timeout)
+		hc, err := healthcheck.NewHealthChecker(clusterClient,
+			healthcheck.NewDefaultHealthcheckToolkit(nil, tcpDialer),
+			nc)
+		if err != nil {
+			return fmt.Errorf("error initializing healthchecker: %w", err)
+		}
+		if err = performNetworkingHealthcheck(hc); err != nil {
+			return fmt.Errorf("error performing healthcheck: %w", err)
+		}
+	}
+
 	return nil
 }
 
@@ -183,5 +211,18 @@ func setupReconcilers(mgr manager.Manager, anycastTracker *anycast.Tracker) erro
 		return fmt.Errorf("unable to create Layer2NetworkConfiguration controller: %w", err)
 	}
 
+	return nil
+}
+
+func performNetworkingHealthcheck(hc *healthcheck.HealthChecker) error {
+	if err := hc.CheckInterfaces(); err != nil {
+		return fmt.Errorf("error checking network interfaces: %w", err)
+	}
+	if err := hc.CheckReachability(); err != nil {
+		return fmt.Errorf("error checking network reachability: %w", err)
+	}
+	if err := hc.RemoveTaint(context.Background(), healthcheck.TaintKey); err != nil {
+		return fmt.Errorf("error removing taint: %w", err)
+	}
 	return nil
 }

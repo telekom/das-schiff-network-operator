@@ -24,6 +24,8 @@ spec:
         key: node-role.kubernetes.io/master
       - effect: NoSchedule
         key: node-role.kubernetes.io/control-plane
+      - effect: NoSchedule
+        key: node.cloudprovider.kubernetes.io/uninitialized
       nodeSelector:
         node-role.kubernetes.io/control-plane: ""
       hostNetwork: true
@@ -33,6 +35,11 @@ spec:
         - /manager
         args:
           - -only-attach-bpf
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
         image: controller:latest
         name: manager
         securityContext:
@@ -59,5 +66,19 @@ spec:
           requests:
             cpu: 10m
             memory: 64Mi
+        volumeMounts:
+        - mountPath: /etc/frr
+          name: frr-config
+        - mountPath: /opt/network-operator
+          name: opt-config
       serviceAccountName: controller-manager
       terminationGracePeriodSeconds: 10
+      volumes:
+      - name: frr-config
+        hostPath:
+          path: /etc/frr
+          type: Directory
+      - name: opt-config
+        hostPath:
+          path: /opt/network-operator
+          type: Directory
