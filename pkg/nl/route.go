@@ -15,9 +15,11 @@ func GetProtocolName(p netlink.RouteProtocol) string {
 	protocol := p.String()
 	integer, err := strconv.Atoi(protocol)
 	if err != nil {
+		// protocol exists in the netlink library
 		return protocol
 	}
 	switch integer {
+	// protocol leveraged from internal mapping
 	case schiff_unix.RTPROT_NHRP:
 		return "nhrp"
 	case schiff_unix.RTPROT_LDP:
@@ -35,7 +37,8 @@ func GetProtocolName(p netlink.RouteProtocol) string {
 	case schiff_unix.RTPROT_COIL:
 		return "coil"
 	default:
-		return strconv.Itoa(int(p))
+		// Neither netlink nor our internal schiff_unix knows a name to that number
+		return protocol
 	}
 }
 
