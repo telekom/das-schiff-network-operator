@@ -102,7 +102,7 @@ func (reconciler *Reconciler) reconcileDebounced(ctx context.Context) error {
 		return err
 	}
 
-	if !reconciler.healthChecker.IsNetworkingHealthly() {
+	if !reconciler.healthChecker.IsNetworkingHealthy() {
 		_, err := reconciler.healthChecker.IsFRRActive()
 		if err != nil {
 			return fmt.Errorf("error checking FRR status: %w", err)
