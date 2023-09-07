@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/vishvananda/netlink"
@@ -16,22 +17,52 @@ const (
 )
 
 type Layer2Information struct {
-	VlanID int
-	MTU    int
-	VNI    int
-	VRF    string
-
-	AnycastMAC         *net.HardwareAddr
-	AnycastGateways    []*netlink.Addr
-	AdvertiseNeighbors bool
-	NeighSuppression   *bool
-
+	VlanID                 int
+	MTU                    int
+	VNI                    int
+	VRF                    string
+	AnycastMAC             *net.HardwareAddr
+	AnycastGateways        []*netlink.Addr
+	AdvertiseNeighbors     bool
+	NeighSuppression       *bool
 	CreateMACVLANInterface bool
+	bridge                 *netlink.Bridge
+	vxlan                  *netlink.Vxlan
+	macvlanBridge          *netlink.Veth
+	macvlanHost            *netlink.Veth
+}
 
-	bridge        *netlink.Bridge
-	vxlan         *netlink.Vxlan
-	macvlanBridge *netlink.Veth
-	macvlanHost   *netlink.Veth
+type NeighborInformation struct {
+	Interface string
+	State     string
+	Family    string
+	IP        string
+	MAC       string
+}
+
+func getNeighborState(state int) (string, error) {
+	switch state {
+	case netlink.NUD_DELAY:
+		return "delay", nil
+	case netlink.NUD_FAILED:
+		return "failed", nil
+	case netlink.NUD_INCOMPLETE:
+		return "incomplete", nil
+	case netlink.NUD_NOARP:
+		return "no_arp", nil
+	case netlink.NUD_NONE:
+		return "none", nil
+	case netlink.NUD_PERMANENT:
+		return "permanent", nil
+	case netlink.NUD_PROBE:
+		return "probe", nil
+	case netlink.NUD_REACHABLE:
+		return "reachable", nil
+	case netlink.NUD_STALE:
+		return "stale", nil
+	default:
+		return "", fmt.Errorf("[%x] is not a valid neighbor state", state)
+	}
 }
 
 func (*NetlinkManager) ParseIPAddresses(addresses []string) ([]*netlink.Addr, error) {
@@ -382,6 +413,48 @@ func (*NetlinkManager) configureBridge(intfName string) error {
 		return fmt.Errorf("error setting ipv6 base_reachable_time_ms = %s for interface: %w", baseTimer, err)
 	}
 	return nil
+}
+
+func (n *NetlinkManager) ListNeighborInformation() ([]NeighborInformation, error) {
+	netlinkNeighbors, err := n.listNeighbors()
+	if err != nil {
+		return nil, err
+	}
+	neighbors := []NeighborInformation{}
+	for index := range netlinkNeighbors {
+		family, err := GetAddressFamily(netlinkNeighbors[index].Family)
+		if err != nil {
+			return nil, fmt.Errorf("error converting addressFamily [%d]: %w", &netlinkNeighbors[index].Family, err)
+		}
+		state, err := getNeighborState(netlinkNeighbors[index].State)
+		if err != nil {
+			return nil, fmt.Errorf("error converting neighborState [%d]: %w", &netlinkNeighbors[index].State, err)
+		}
+
+		linkInfo, err := netlink.LinkByIndex(netlinkNeighbors[index].LinkIndex)
+		if err != nil {
+			return nil, fmt.Errorf("error getting link by index: %w", err)
+		}
+		interfaceName := linkInfo.Attrs().Name
+		hardwareAddr := netlinkNeighbors[index].HardwareAddr.String()
+		// This ensures that only neighbors of secondary interfaces are imported
+		// or hardware interfaces which support VFs
+		if strings.HasPrefix(interfaceName, vethL2Prefix) ||
+			strings.HasPrefix(interfaceName, macvlanPrefix) ||
+			strings.HasPrefix(interfaceName, layer2Prefix) ||
+			linkInfo.Attrs().Vfs != nil ||
+			netlinkNeighbors[index].State != netlink.NUD_NOARP {
+			neighbor := NeighborInformation{
+				Family:    family,
+				State:     state,
+				MAC:       hardwareAddr,
+				IP:        netlinkNeighbors[index].IP.String(),
+				Interface: interfaceName,
+			}
+			neighbors = append(neighbors, neighbor)
+		}
+	}
+	return neighbors, nil
 }
 
 func (*NetlinkManager) GetBridgeID(info *Layer2Information) (int, error) {

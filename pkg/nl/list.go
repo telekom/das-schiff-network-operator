@@ -9,6 +9,48 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+func (*NetlinkManager) listRoutes() ([]netlink.Route, error) {
+	routes, err := netlink.RouteListFiltered(netlink.FAMILY_ALL, &netlink.Route{
+		Table: 0,
+	}, netlink.RT_FILTER_TABLE)
+	if err != nil {
+		return nil, fmt.Errorf("error listing all routes: %w", err)
+	}
+	return routes, nil
+}
+
+func (*NetlinkManager) listNeighbors() ([]netlink.Neigh, error) {
+	neighbors, err := netlink.NeighList(0, netlink.FAMILY_ALL)
+	if err != nil {
+		return nil, fmt.Errorf("error listing all neighbors: %w", err)
+	}
+	return neighbors, nil
+}
+
+func (*NetlinkManager) ListVRFInterfaces() ([]VRFInformation, error) {
+	infos := []VRFInformation{}
+
+	links, err := netlink.LinkList()
+	if err != nil {
+		return nil, fmt.Errorf("cannot get links from netlink: %w", err)
+	}
+
+	for _, link := range links {
+		if link.Type() != "vrf" {
+			continue
+		}
+		vrf := link.(*netlink.Vrf)
+
+		info := VRFInformation{}
+		info.table = int(vrf.Table)
+		info.Name = link.Attrs().Name
+		info.vrfID = vrf.Attrs().Index
+		infos = append(infos, info)
+	}
+
+	return infos, nil
+}
+
 func (n *NetlinkManager) ListL3() ([]VRFInformation, error) {
 	infos := []VRFInformation{}
 

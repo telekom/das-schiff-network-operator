@@ -7,7 +7,10 @@
 *.dylib
 bin
 out
+tls/*
 testbin/*
+testdata/clab-containerlab-test-setup/*
+testdata/.containerlab.yaml.bak
 
 # Test binary, build with `go test -c`
 *.test

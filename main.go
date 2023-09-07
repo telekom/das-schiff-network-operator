@@ -22,6 +22,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"sort"
 
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/controllers"
@@ -30,6 +31,7 @@ import (
 	"github.com/telekom/das-schiff-network-operator/pkg/config"
 	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
 	"github.com/telekom/das-schiff-network-operator/pkg/macvlan"
+	"github.com/telekom/das-schiff-network-operator/pkg/monitoring"
 	"github.com/telekom/das-schiff-network-operator/pkg/notrack"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -45,6 +47,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/metrics"
 	//nolint:gci // kubebuilder import
 	//+kubebuilder:scaffold:imports
 )
@@ -59,6 +62,27 @@ func init() {
 
 	utilruntime.Must(networkv1alpha1.AddToScheme(scheme))
 	//+kubebuilder:scaffold:scheme
+}
+
+func initCollectors() error {
+	var err error
+	collector, err := monitoring.NewDasSchiffNetworkOperatorCollector()
+	if err != nil {
+		return fmt.Errorf("failed to create collector: %w", err)
+	}
+	setupLog.Info("initialize collectors")
+	collectors := []string{}
+	for c := range collector.Collectors {
+		collectors = append(collectors, c)
+	}
+	sort.Strings(collectors)
+	for index := range collectors {
+		setupLog.Info("registered collector", "collector", collectors[index])
+	}
+	if err := metrics.Registry.Register(collector); err != nil {
+		return fmt.Errorf("failed to register collector: %w", err)
+	}
+	return nil
 }
 
 func main() {
@@ -78,11 +102,11 @@ func main() {
 	}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
-
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
 	var err error
 	options := ctrl.Options{Scheme: scheme}
+
 	if configFile != "" {
 		options, err = options.AndFrom(ctrl.ConfigFile().AtPath(configFile))
 		if err != nil {
@@ -90,6 +114,15 @@ func main() {
 			os.Exit(1)
 		}
 	}
+
+	if options.MetricsBindAddress != "0" {
+		err = initCollectors()
+		if err != nil {
+			setupLog.Error(err, "unable to initialize metrics collectors")
+			os.Exit(1)
+		}
+	}
+
 	clientConfig := ctrl.GetConfigOrDie()
 	mgr, err := ctrl.NewManager(clientConfig, options)
 	if err != nil {

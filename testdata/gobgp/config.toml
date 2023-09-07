@@ -1,0 +1,4 @@
+[global.config]
+  as = 64496
+  router-id = "192.168.255.1"
+  port = 179

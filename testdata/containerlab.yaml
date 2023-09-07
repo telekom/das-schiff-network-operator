@@ -1,0 +1,185 @@
+name: containerlab-test-setup
+
+topology:
+  nodes:
+    host-gw:
+      binds:
+      - configs/host-gw/daemons:/etc/frr/daemons
+      - configs/host-gw/frr.conf:/etc/frr/frr.conf
+      kind: linux
+      group: '9'
+      image: quay.io/frrouting/frr:8.5.1
+    injector1:
+      binds:
+      - routes/ipv4.json:/ipv4.json:ro
+      - routes/ipv6.json:/ipv6.json:ro
+      kind: linux
+      group: '10'
+      image: gobgp-fabric:latest
+      exec:
+      - python3 /tool/load-routes.py
+    injector2:
+      binds:
+      - routes/ipv4.json:/ipv4.json:ro
+      - routes/ipv6.json:/ipv6.json:ro
+      kind: linux
+      group: '10'
+      image: gobgp-fabric:latest
+      exec:
+      - python3 /tool/load-routes.py
+    bl1:
+      binds:
+      - configs/bl1/daemons:/etc/frr/daemons
+      - configs/bl1/frr.conf:/etc/frr/frr.conf
+      - scripts/create-intfs.py:/create-intfs.py:ro
+      - routes/ipv4.json:/ipv4.json:ro
+      - routes/ipv6.json:/ipv6.json:ro
+      kind: linux
+      group: dc-gw
+      image: quay.io/frrouting/frr:8.5.1
+      exec:
+      - python3 /create-intfs.py 192.0.2.1
+      - ip l set dev eth4 master Vrf_mgmt
+    bl2:
+      binds:
+      - configs/bl2/daemons:/etc/frr/daemons
+      - configs/bl2/frr.conf:/etc/frr/frr.conf
+      - scripts/create-intfs.py:/create-intfs.py:ro
+      - routes/ipv4.json:/ipv4.json:ro
+      - routes/ipv6.json:/ipv6.json:ro
+      kind: linux
+      group: dc-gw
+      image: quay.io/frrouting/frr:8.5.1
+      exec:
+      - python3 /create-intfs.py 192.0.2.2
+      - ip l set dev eth4 master Vrf_mgmt
+    sp1:
+      binds:
+      - configs/sp1/daemons:/etc/frr/daemons
+      - configs/sp1/frr.conf:/etc/frr/frr.conf
+      kind: linux
+      group: spine
+      image: quay.io/frrouting/frr:8.5.1
+      exec:
+      - ip a add 192.0.2.3/32 dev lo
+    sp2:
+      binds:
+      - configs/sp2/daemons:/etc/frr/daemons
+      - configs/sp2/frr.conf:/etc/frr/frr.conf
+      kind: linux
+      group: spine
+      image: quay.io/frrouting/frr:8.5.1
+      exec:
+      - ip a add 192.0.2.4/32 dev lo
+    lf1:
+      binds:
+      - configs/lf1/daemons:/etc/frr/daemons
+      - configs/lf1/frr.conf:/etc/frr/frr.conf
+      kind: linux
+      group: leaf
+      image: quay.io/frrouting/frr:8.5.1
+      exec:
+      - ip a add 192.0.2.5/32 dev lo
+      - ip l set dev srv1 mtu 9100
+      - ip l set dev srv1 address 00:50:56:2f:00:01
+      - ip l set dev srv1 down
+      - ip l set dev srv1 up
+      - ip l set dev srv2 mtu 9100
+      - ip l set dev srv2 address 00:50:56:2f:00:01
+      - ip l set dev srv2 down
+      - ip l set dev srv2 up
+      - ip l set dev srv3 mtu 9100
+      - ip l set dev srv3 address 00:50:56:2f:00:01
+      - ip l set dev srv3 down
+      - ip l set dev srv3 up
+      - ip l set dev srv4 mtu 9100
+      - ip l set dev srv4 address 00:50:56:2f:00:01
+      - ip l set dev srv4 down
+      - ip l set dev srv4 up
+      - ip l set dev srv5 mtu 9100
+      - ip l set dev srv5 address 00:50:56:2f:00:01
+      - ip l set dev srv5 down
+      - ip l set dev srv5 up
+    lf2:
+      binds:
+      - configs/lf2/daemons:/etc/frr/daemons
+      - configs/lf2/frr.conf:/etc/frr/frr.conf
+      kind: linux
+      group: leaf
+      image: quay.io/frrouting/frr:8.5.1
+      exec:
+      - ip a add 192.0.2.6/32 dev lo
+      - ip l set dev srv1 mtu 9100
+      - ip l set dev srv1 address 00:50:56:2f:00:02
+      - ip l set dev srv1 down
+      - ip l set dev srv1 up
+      - ip l set dev srv2 mtu 9100
+      - ip l set dev srv2 address 00:50:56:2f:00:02
+      - ip l set dev srv2 down
+      - ip l set dev srv2 up
+      - ip l set dev srv3 mtu 9100
+      - ip l set dev srv3 address 00:50:56:2f:00:02
+      - ip l set dev srv3 down
+      - ip l set dev srv3 up
+      - ip l set dev srv4 mtu 9100
+      - ip l set dev srv4 address 00:50:56:2f:00:02
+      - ip l set dev srv4 down
+      - ip l set dev srv4 up
+      - ip l set dev srv5 mtu 9100
+      - ip l set dev srv5 address 00:50:56:2f:00:02
+      - ip l set dev srv5 down
+      - ip l set dev srv5 up
+    srv1-p1:
+      kind: bridge
+      group: server
+    srv1-p2:
+      kind: bridge
+      group: server
+    srv2-p1:
+      kind: bridge
+      group: server
+    srv2-p2:
+      kind: bridge
+      group: server
+    srv3-p1:
+      kind: bridge
+      group: server
+    srv3-p2:
+      kind: bridge
+      group: server
+    srv4-p1:
+      kind: bridge
+      group: server
+    srv4-p2:
+      kind: bridge
+      group: server
+    srv5-p1:
+      kind: bridge
+      group: server
+    srv5-p2:
+      kind: bridge
+      group: server
+  links:
+    - endpoints: ["host-gw:host", "host:frr-lab"]
+    - endpoints: ["injector1:eth1", "bl1:eth1"]
+    - endpoints: ["injector2:eth1", "bl2:eth1"]
+    - endpoints: ["bl1:eth4", "host-gw:bl1"]
+    - endpoints: ["bl1:eth2", "sp1:eth1"]
+    - endpoints: ["bl1:eth3", "sp2:eth1"]
+    - endpoints: ["bl2:eth2", "sp1:eth2"]
+    - endpoints: ["bl2:eth3", "sp2:eth2"]
+    - endpoints: ["bl2:eth4", "host-gw:bl2"]
+    - endpoints: ["lf1:eth1", "sp1:eth3"]
+    - endpoints: ["lf1:eth2", "sp2:eth3"]
+    - endpoints: ["lf2:eth1", "sp1:eth4"]
+    - endpoints: ["lf2:eth2", "sp2:eth4"]
+    - endpoints: ["lf1:srv1", "srv1-p1:srv1-lf1-p1"]
+    - endpoints: ["lf2:srv1", "srv1-p2:srv1-lf2-p2"]
+    - endpoints: ["lf1:srv2", "srv2-p1:srv2-lf1-p1"]
+    - endpoints: ["lf2:srv2", "srv2-p2:srv2-lf2-p2"]
+    - endpoints: ["lf1:srv3", "srv3-p1:srv3-lf1-p1"]
+    - endpoints: ["lf2:srv3", "srv3-p2:srv3-lf2-p2"]
+    - endpoints: ["lf1:srv4", "srv4-p1:srv4-lf1-p1"]
+    - endpoints: ["lf2:srv4", "srv4-p2:srv4-lf2-p2"]
+    - endpoints: ["lf1:srv5", "srv5-p1:srv5-lf1-p1"]
+    - endpoints: ["lf2:srv5", "srv5-p2:srv5-lf2-p2"]

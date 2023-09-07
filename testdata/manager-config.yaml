@@ -1,0 +1,12 @@
+apiVersion: controller-runtime.sigs.k8s.io/v1alpha1
+kind: ControllerManagerConfig
+health:
+  healthProbeBindAddress: :7081
+metrics:
+  bindAddress: 127.0.0.1:7080 # "0" can disable the metrics export
+webhook:
+  certDir: ./tls
+  port: 7443
+leaderElection:
+  leaderElect: false
+  resourceName: 186580d0-dev.schiff.telekom.de

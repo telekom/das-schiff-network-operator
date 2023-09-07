@@ -87,6 +87,126 @@ An internal loop is tracking these interfaces and reapplies the eBPF code when n
 
 ![eBPF Flow](docs/ebpf-flow.png)
 
+## Development Setup
+
+Used Networks:
+```python
+## AS Numbers
+# 64496-64511
+as_numbers = range(64496,64512)
+# [64496, 64497, 64498, 64499, 64500, 64501, 64502, 64503, 64504, 64505, 64506, 64507, 64508, 64509, 64510, 64511]
+## AS Reservations
+gobgp_as_number = 64496
+node_as_number = 64510
+node_local_as = 64511
+
+## Fabric AS Numbers
+fabric_as_numbers = range(64497,64510)
+# [64497, 64498, 64499, 64500, 64501, 64502, 64503, 64504, 64505, 64506, 64507, 64508, 64509]
+
+## Underlay Networks
+underlay_network_fabric_ipv4 = "192.0.2.0/25"
+underlay_network_node_ipv4 = "192.0.2.128/25"
+
+## Overlay Networks
+overlay_cluster_network_k8s_node_ipv4 = "198.51.100.0/24"
+overlay_cluster_network_k8s_node_ipv6 = "2001:db8:ffff:ffff::/64"
+
+## Networks which are used for the Route-Dicer
+# Route AS Numbers
+# 65536-65551
+routes_as_numbers = range(65536,65552)
+# [65536, 65537, 65538, 65539, 65540, 65541, 65542, 65543, 65544, 65545, 65546, 65547, 65548, 65549, 65550, 65551]
+
+routes_ipv4 = "203.0.113.0/24"
+routes_ipv6 =  "2001:db8::/48"
+```
+
+![Development Setup](docs/test-env-setup.drawio.png)
+
+
+First you need to have multiple tools installed to get it working.
+
+* `kind`
+  * `yay -S kind`
+* `podman` or `docker`
+  * `pacman -S docker`
+  * `pacman -S podman`
+* `frr`
+  * `yay -S frr-git`
+* `iproute2`
+  * `pacman -S iproute2`
+* optional `containerlab`
+  * `yay -S containerlab-bin`
+
+When using podman follow this guide to setup proper rootless container environment:
+
+* https://kind.sigs.k8s.io/docs/user/rootless/
+* https://wiki.archlinux.org/title/Podman
+
+
+
+
+Starting a kind cluster with `podman` rootless:
+```bash
+KIND_EXPERIMENTAL_PROVIDER=podman systemd-run --scope --user kind create cluster
+```
+
+Configure the surrounding kind cluster which should be used to host a kube-apiserver for the local development.
+
+```bash
+# Load the ip6_tables kernel module
+sudo modprobe ip6_tables
+# Start docker
+sudo systemctl start docker
+# create a kind cluster if you already have a cluster
+# just start the docker container of the kind cluster
+kind create cluster
+kind get kubeconfig > ~/.kube/kind
+# start the kind cluster container
+docker start kind-control-plane
+export KUBECONFIG=~/.kube/kind
+# Load the image for network-operator into the kind cluster
+kind load docker-image network-operator:latest
+# Build the gobgp container image with docker
+docker build -t gobgp-fabric:latest -t docker.io/library/gobgp-fabric:latest testdata/gobgp
+# setup the bridges on the local host
+sudo bash testdata/containerlab-bridge-setup.sh
+# Install the containerlab
+sudo containerlab deploy --reconfigure -t testdata/containerlab.yaml
+# TODO: install at least the crds inside the cluster.
+make install
+# create a tls folder locally.
+mkdir -p $(pwd)/tls
+# TODO: some setup for tls I just stole it from the cluster.
+<missing commands here>
+```
+
+
+Configure the frr service for the netns you want to run in in this case we will use the network namespace called `test` and save the configuration.
+
+```bash
+sudo systemctl edit frr.service
+# /etc/systemd/system/frr.service.d/override.conf
+[Service]
+NetworkNamespacePath=/var/run/netns/test
+##
+## Now we need to have the config and the template available. Just copy it inplace
+cp testdata/frr.conf* /etc/frr/
+cp testdata/daemons /etc/frr/
+```
+
+Now we can setup the network namespace for frr and network-operator to run in it.
+
+```bash
+## This creates the netns and needed interfaces
+## as well as forwards.
+## the -E is important to forward your local environment
+sudo -E bash testdata/test-netns-setup.sh
+
+## This finally starts the Operator for development testing in the network namespace called test.
+OPERATOR_CONFIG=$(pwd)/testdata/config.yaml sudo -E ip netns exec test go run main.go --config $(pwd)/testdata/manager-config.yaml
+```
 ### Networking healthcheck
 
 After deployment basic networking connectivity can be tested to ensure that the node is fully operable. If all checks will pass, taint `node.cloudprovider.kubernetes.io/uninitialized` will be removed from the node if applied.

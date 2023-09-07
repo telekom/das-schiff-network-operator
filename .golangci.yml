@@ -142,6 +142,33 @@ linters-settings:
   funlen:
     lines: 65
 
+issues:
+  exclude-rules:
+    # As of now we ignore the statements in main
+    - path: 'main.go'
+      text: "Function 'main' has too many statements"
+    - path: 'main.go'
+      text: "function-length: maximum number of statements per function exceeded; max \\d+ but got \\d+"
+    # This is very C near and those const values are easier to google.
+    - path: '(.+)/unix/(coil|frr)\.go'
+      text: "ST1003: should not use ALL_CAPS in Go names; use CamelCase instead"
+    - path: '(.+)/unix/(coil|frr)\.go'
+      text: "var-naming: don't use ALL_CAPS in Go names; use CamelCase"
+    # fix issues i currently can't fix.
+    - path: '(.+)\.go'
+      text: "string `vrf` has (\\d+) occurrences, make it a constant"
+    - path: '(.+)/monitoring/frr\.go'
+      text: "Function '\\w+' is too long"
+    - path: '(.+)/monitoring/frr\.go'
+      text: "Function '\\w+' has too many statements"
+    - path: '(.+)/nl/route\.go'
+      text: "Function '\\w+' has too many statements"
+    - path: '(.+)/nl/route\.go'
+      text: "cyclomatic complexity \\d+ of func `\\w+` is high"
+    - path: '(.+)/nl/route\.go'
+      text: "cyclomatic: function \\w+ has cyclomatic complexity \\d+"
+    - path: '(.+)/nl/route\.go'
+      text: "calculated cyclomatic complexity for function \\w+ is \\d+, max is \\d+"
 run:
   timeout: 10m
   allow-parallel-runners: true
