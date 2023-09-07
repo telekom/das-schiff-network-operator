@@ -3,7 +3,7 @@ kind: Service
 metadata:
   labels:
     app.kubernetes.io/name: network-operator
-  name: metrics
+  name: metrics-service
   namespace: system
 spec:
   ports:
