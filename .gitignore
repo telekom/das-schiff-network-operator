@@ -7,9 +7,10 @@
 *.dylib
 bin
 out
+.vscode/
+clab-containerlab-test-setup/
 tls/*
 testbin/*
-testdata/clab-containerlab-test-setup/*
 testdata/.containerlab.yaml.bak
 
 # Test binary, build with `go test -c`
