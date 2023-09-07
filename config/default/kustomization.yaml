@@ -9,7 +9,8 @@ namespace: kube-system
 namePrefix: network-operator-
 
 # Labels to add to all resources and selectors.
-#commonLabels:
+commonLabels:
+  app.kubernetes.io/name: network-operator
 #  someName: someValue
 
 bases:

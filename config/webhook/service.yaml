@@ -10,4 +10,4 @@ spec:
       protocol: TCP
       targetPort: 7443
   selector:
-    control-plane: controller-manager
+    app.kubernetes.io/name: network-operator

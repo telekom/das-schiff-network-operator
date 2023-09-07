@@ -4,17 +4,17 @@ apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
   labels:
-    control-plane: controller-manager
-  name: controller-manager-metrics-monitor
+    app.kubernetes.io/name: network-operator
+  name: metrics
   namespace: system
 spec:
   endpoints:
     - path: /metrics
-      port: https
-      scheme: https
+      port: metrics
+      scheme: metrics
       bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
       tlsConfig:
         insecureSkipVerify: true
   selector:
     matchLabels:
-      control-plane: controller-manager
+      app.kubernetes.io/name: network-operator

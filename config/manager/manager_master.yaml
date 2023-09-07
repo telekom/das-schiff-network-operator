@@ -4,20 +4,17 @@ metadata:
   name: master
   namespace: system
   labels:
-    control-plane: controller-manager
-    app: network-operator-master
+    app.kubernetes.io/component: master
 spec:
   selector:
     matchLabels:
-      control-plane: controller-manager
-      app: network-operator-master
+      app.kubernetes.io/component: master
   template:
     metadata:
       annotations:
         kubectl.kubernetes.io/default-container: manager
       labels:
-        control-plane: controller-manager
-        app: network-operator-master
+        app.kubernetes.io/component: master
     spec:
       tolerations:
       - effect: NoSchedule
@@ -48,13 +45,13 @@ spec:
         livenessProbe:
           httpGet:
             path: /healthz
-            port: 8081
+            port: 7081
           initialDelaySeconds: 15
           periodSeconds: 20
         readinessProbe:
           httpGet:
             path: /readyz
-            port: 8081
+            port: 7081
           initialDelaySeconds: 5
           periodSeconds: 10
         # TODO(user): Configure the resources accordingly based on the project requirements.
