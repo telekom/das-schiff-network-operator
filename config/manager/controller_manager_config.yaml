@@ -3,7 +3,7 @@ kind: ControllerManagerConfig
 health:
   healthProbeBindAddress: :7081
 metrics:
-  bindAddress: 127.0.0.1:7080
+  bindAddress: :7080
 webhook:
   port: 7443
 leaderElection:
