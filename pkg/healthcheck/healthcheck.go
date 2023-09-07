@@ -245,10 +245,10 @@ func NewTCPDialer(dialerTimeout string) TCPDialerInterface {
 	timeout, err := time.ParseDuration(dialerTimeout)
 	logger := log.Log.WithName("HealthCheck - TCP dialer")
 	if err != nil {
-		logger.Info("unable to parse TCP dialer timeout provided in HealtCheck config, will try to parse provided value as seconds: %w", err)
+		logger.Info("unable to parse TCP dialer timeout provided in HealtCheck config as duration", "timeout", timeout, "value", dialerTimeout)
 		seconds, err := strconv.Atoi(dialerTimeout)
 		if err != nil {
-			logger.Info("unable to parse provided TCP dialer timeout as seconds, will use default timeout of %d seconds: %w", defaultTCPTimeout, err)
+			logger.Info("unable to parse TCP dialer timeout provided in HealtCheck config as integer, will use default Timeout", "timeout", fmt.Sprintf("%ds", defaultTCPTimeout), "value", dialerTimeout)
 			timeout = time.Second * defaultTCPTimeout
 		} else {
 			timeout = time.Second * time.Duration(seconds)
