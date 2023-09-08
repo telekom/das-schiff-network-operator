@@ -18,7 +18,7 @@ spec:
     spec:
       tolerations:
       - effect: NoSchedule
-        key: node.cloudprovider.kubernetes.io/uninitialized
+        key: node.schiff.telekom.de/uninitialized
       hostNetwork: true
       hostPID: true
       containers:

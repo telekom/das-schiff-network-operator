@@ -22,7 +22,7 @@ spec:
       - effect: NoSchedule
         key: node-role.kubernetes.io/control-plane
       - effect: NoSchedule
-        key: node.cloudprovider.kubernetes.io/uninitialized
+        key: node.schiff.telekom.de/uninitialized
       nodeSelector:
         node-role.kubernetes.io/control-plane: ""
       hostNetwork: true
