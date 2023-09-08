@@ -18,11 +18,14 @@ spec:
     spec:
       tolerations:
       - effect: NoSchedule
-        key: node-role.kubernetes.io/master
-      - effect: NoSchedule
-        key: node-role.kubernetes.io/control-plane
-      - effect: NoSchedule
         key: node.schiff.telekom.de/uninitialized
+        operator: Exists
+      - key: node.cloudprovider.kubernetes.io/uninitialized
+        value: "true"
+        effect: NoSchedule
+      - key: node.kubernetes.io/not-ready
+        effect: NoSchedule
+        operator: Exists
       nodeSelector:
         node-role.kubernetes.io/control-plane: ""
       hostNetwork: true

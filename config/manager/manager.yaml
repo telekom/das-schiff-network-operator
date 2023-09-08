@@ -19,6 +19,13 @@ spec:
       tolerations:
       - effect: NoSchedule
         key: node.schiff.telekom.de/uninitialized
+        operator: Exists
+      - key: node.cloudprovider.kubernetes.io/uninitialized
+        value: "true"
+        effect: NoSchedule
+      - key: node.kubernetes.io/not-ready
+        effect: NoSchedule
+        operator: Exists
       hostNetwork: true
       hostPID: true
       containers:
