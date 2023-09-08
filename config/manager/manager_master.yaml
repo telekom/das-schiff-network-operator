@@ -66,16 +66,10 @@ spec:
         volumeMounts:
         - mountPath: /etc/frr
           name: frr-config
-        - mountPath: /opt/network-operator
-          name: opt-config
       serviceAccountName: controller-manager
       terminationGracePeriodSeconds: 10
       volumes:
       - name: frr-config
         hostPath:
           path: /etc/frr
-          type: Directory
-      - name: opt-config
-        hostPath:
-          path: /opt/network-operator
           type: Directory
