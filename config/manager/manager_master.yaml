@@ -64,6 +64,9 @@ spec:
             cpu: 10m
             memory: 64Mi
         volumeMounts:
+        - mountPath: /opt/network-operator/config.yaml
+          name: network-config
+          subPath: config.yaml
         - mountPath: /etc/frr
           name: frr-config
       serviceAccountName: controller-manager
@@ -73,3 +76,6 @@ spec:
         hostPath:
           path: /etc/frr
           type: Directory
+      - configMap:
+          name: network-operator-config
+        name: network-config

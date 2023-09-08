@@ -57,6 +57,9 @@ spec:
             cpu: 10m
             memory: 64Mi
         volumeMounts:
+        - mountPath: /opt/network-operator/config.yaml
+          name: network-config
+          subPath: config.yaml
         - mountPath: /etc/frr
           name: frr-config
         - mountPath: /var/run/dbus/system_bus_socket
@@ -72,3 +75,6 @@ spec:
         hostPath:
           path: /var/run/dbus/system_bus_socket
           type: Socket
+      - configMap:
+          name: network-operator-config
+        name: network-config

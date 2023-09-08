@@ -1,7 +1,7 @@
 resources:
 - manager.yaml
 - manager_master.yaml
-- namespace.yaml
+# - namespace.yaml
 
 generatorOptions:
   disableNameSuffixHash: true
@@ -10,6 +10,9 @@ configMapGenerator:
 - files:
   - controller_manager_config.yaml
   name: manager-config
+- files:
+  - config.yaml
+  name: config
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 images:
