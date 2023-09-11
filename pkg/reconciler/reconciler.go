@@ -88,7 +88,7 @@ func (reconciler *Reconciler) reconcileDebounced(ctx context.Context) error {
 
 	r.Logger.Info("Reloading config")
 	if err := r.config.ReloadConfig(); err != nil {
-		return err
+		return fmt.Errorf("error reloading network-operator config: %w", err)
 	}
 
 	l3vnis, err := r.fetchLayer3(ctx)
