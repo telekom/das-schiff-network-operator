@@ -44,7 +44,7 @@ func (*NetlinkManager) ListVRFInterfaces() ([]VRFInformation, error) {
 		info := VRFInformation{}
 		info.table = int(vrf.Table)
 		info.Name = link.Attrs().Name
-		info.vrfID = vrf.Attrs().Index
+		info.vrfId = vrf.Attrs().Index
 		infos = append(infos, info)
 	}
 
@@ -68,7 +68,7 @@ func (n *NetlinkManager) ListL3() ([]VRFInformation, error) {
 		info := VRFInformation{}
 		info.table = int(vrf.Table)
 		info.Name = link.Attrs().Name[3:]
-		info.vrfID = vrf.Attrs().Index
+		info.vrfId = vrf.Attrs().Index
 
 		err := n.updateL3Indices(&info)
 		if err != nil {
