@@ -213,7 +213,7 @@ func (in *VRFRouteConfigurationSpec) DeepCopyInto(out *VRFRouteConfigurationSpec
 	}
 	if in.Community != nil {
 		in, out := &in.Community, &out.Community
-		*out = new(int)
+		*out = new(string)
 		**out = **in
 	}
 }

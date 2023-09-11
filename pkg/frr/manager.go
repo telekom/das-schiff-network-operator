@@ -30,7 +30,7 @@ type Manager struct {
 type PrefixList struct {
 	Items     []PrefixedRouteItem
 	Seq       int
-	Community *int
+	Community *string
 }
 
 type PrefixedRouteItem struct {
