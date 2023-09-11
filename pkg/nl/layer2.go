@@ -84,7 +84,7 @@ func (n *NetlinkManager) CreateL2(info *Layer2Information) error {
 		if err != nil {
 			return err
 		}
-		masterIdx = l3Info.vrfId
+		masterIdx = l3Info.vrfID
 	}
 
 	if len(info.AnycastGateways) > 0 && info.AnycastMAC == nil {
@@ -352,7 +352,7 @@ func (n *NetlinkManager) isL2VNIreattachRequired(current, desired *Layer2Informa
 			if err != nil {
 				return shouldReattachL2VNI, fmt.Errorf("error while getting L3 by name: %w", err)
 			}
-			if err := netlink.LinkSetMasterByIndex(current.bridge, l3Info.vrfId); err != nil {
+			if err := netlink.LinkSetMasterByIndex(current.bridge, l3Info.vrfID); err != nil {
 				return shouldReattachL2VNI, fmt.Errorf("error while setting master by index: %w", err)
 			}
 		} else {
