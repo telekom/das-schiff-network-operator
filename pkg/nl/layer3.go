@@ -16,8 +16,8 @@ type VRFInformation struct {
 	VNI  int
 
 	table    int
-	bridgeId int
-	vrfId    int
+	bridgeID int
+	vrfID    int
 
 	MarkForDelete bool
 }

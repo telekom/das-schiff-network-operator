@@ -44,7 +44,7 @@ func (*NetlinkManager) ListVRFInterfaces() ([]VRFInformation, error) {
 		info := VRFInformation{}
 		info.table = int(vrf.Table)
 		info.Name = link.Attrs().Name
-		info.vrfId = vrf.Attrs().Index
+		info.vrfID = vrf.Attrs().Index
 		infos = append(infos, info)
 	}
 
@@ -68,12 +68,9 @@ func (n *NetlinkManager) ListL3() ([]VRFInformation, error) {
 		info := VRFInformation{}
 		info.table = int(vrf.Table)
 		info.Name = link.Attrs().Name[3:]
-		info.vrfId = vrf.Attrs().Index
+		info.vrfID = vrf.Attrs().Index
 
-		err := n.updateL3Indices(&info)
-		if err != nil {
-			return nil, err
-		}
+		n.updateL3Indices(&info)
 
 		infos = append(infos, info)
 	}
@@ -81,10 +78,10 @@ func (n *NetlinkManager) ListL3() ([]VRFInformation, error) {
 	return infos, nil
 }
 
-func (*NetlinkManager) updateL3Indices(info *VRFInformation) error {
+func (*NetlinkManager) updateL3Indices(info *VRFInformation) {
 	bridgeLink, err := netlink.LinkByName(bridgePrefix + info.Name)
 	if err == nil {
-		info.bridgeId = bridgeLink.Attrs().Index
+		info.bridgeID = bridgeLink.Attrs().Index
 	} else {
 		info.MarkForDelete = true
 	}
@@ -94,7 +91,6 @@ func (*NetlinkManager) updateL3Indices(info *VRFInformation) error {
 	} else {
 		info.MarkForDelete = true
 	}
-	return nil
 }
 
 func (*NetlinkManager) updateL2Indices(info *Layer2Information, links []netlink.Link) error {
