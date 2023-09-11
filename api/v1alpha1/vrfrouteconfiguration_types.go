@@ -72,7 +72,7 @@ type VRFRouteConfigurationSpec struct {
 	Seq int `json:"seq"`
 
 	// Community for export, if omitted no community will be set
-	Community *int `json:"community,omitempty"`
+	Community *string `json:"community,omitempty"`
 }
 
 // VRFRouteConfigurationStatus defines the observed state of VRFRouteConfiguration.

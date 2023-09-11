@@ -45,7 +45,7 @@ spec:
               community:
                 description: Community for export, if omitted no community will be
                   set
-                type: integer
+                type: string
               export:
                 description: Routes exported from the cluster VRF into the specified
                   VRF
