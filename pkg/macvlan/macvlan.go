@@ -8,26 +8,28 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-logr/logr"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
+	ctrl "sigs.k8s.io/controller-runtime"
 )
 
 const checkInterval = 5 * time.Second
 
 var trackedBridges []int
 
-func checkTrackedInterfaces() {
+func checkTrackedInterfaces(logger logr.Logger) {
 	for _, intfIdx := range trackedBridges {
 		intf, err := netlink.LinkByIndex(intfIdx)
 		if err != nil {
-			fmt.Printf("Couldn't load interface idx %d: %v\n", intfIdx, err)
+			logger.Error(err, "couldn't load interface idx %d", intfIdx)
 		}
 
-		syncInterface(intf.(*netlink.Bridge))
+		syncInterface(intf.(*netlink.Bridge), logger)
 	}
 }
 
-func ensureMACDummyIntf(intf *netlink.Bridge) (netlink.Link, error) {
+func ensureMACDummyIntf(intf *netlink.Bridge, logger logr.Logger) (netlink.Link, error) {
 	name := fmt.Sprintf("mvd.%s", intf.Attrs().Name)
 	macDummy, err := netlink.LinkByName(name)
 	if err != nil {
@@ -52,7 +54,7 @@ func ensureMACDummyIntf(intf *netlink.Bridge) (netlink.Link, error) {
 		}
 	}
 	if macDummy.Attrs().OperState != netlink.OperDown {
-		fmt.Printf("Interface %s not down, setting down - otherwise it would route traffic\n", name)
+		logger.Info("interface %s not down, setting down - otherwise it would route traffic", name)
 		err = netlink.LinkSetDown(macDummy)
 		if err != nil {
 			return nil, fmt.Errorf("error setting link %s down: %w", macDummy.Attrs().Name, err)
@@ -84,22 +86,22 @@ func containsMACAddress(list []net.HardwareAddr, mac net.HardwareAddr) bool {
 	return false
 }
 
-func syncInterface(intf *netlink.Bridge) {
+func syncInterface(intf *netlink.Bridge, logger logr.Logger) {
 	// First ensure that we have a dummy interface
-	dummy, err := ensureMACDummyIntf(intf)
+	dummy, err := ensureMACDummyIntf(intf, logger)
 	if err != nil {
-		fmt.Printf("Error syncing interface %s: %v\n", intf.Attrs().Name, err)
+		logger.Error(err, "error syncing interface %s", intf.Attrs().Name)
 		return
 	}
 
-	configureNeighbors(intf, dummy)
+	configureNeighbors(intf, dummy, logger)
 }
 
-func configureNeighbors(intf *netlink.Bridge, dummy netlink.Link) {
+func configureNeighbors(intf *netlink.Bridge, dummy netlink.Link, logger logr.Logger) {
 	// Get neighbors of bridge
 	bridgeNeighbors, err := netlink.NeighList(intf.Attrs().Index, unix.AF_BRIDGE)
 	if err != nil {
-		fmt.Printf("Error syncing interface %s: %v\n", intf.Attrs().Name, err)
+		logger.Error(err, "error syncing interface %s", intf.Attrs().Name)
 		return
 	}
 	requiredMACAddresses := []net.HardwareAddr{}
@@ -114,25 +116,25 @@ func configureNeighbors(intf *netlink.Bridge, dummy netlink.Link) {
 	// Get neighbors of dummy
 	dummyNeighbors, err := netlink.NeighList(dummy.Attrs().Index, unix.AF_BRIDGE)
 	if err != nil {
-		fmt.Printf("Error syncing interface %s: %v\n", intf.Attrs().Name, err)
+		logger.Error(err, "error syncing interface %s", intf.Attrs().Name)
 		return
 	}
 
-	alreadyExisting := getAlreadyExistingNeighbors(dummyNeighbors, requiredMACAddresses, dummy.Attrs().Name, intf.Attrs().Name)
+	alreadyExisting := getAlreadyExistingNeighbors(dummyNeighbors, requiredMACAddresses, dummy.Attrs().Name, intf.Attrs().Name, logger)
 
 	// Add required MAC addresses when they are not yet existing (aka in alreadyExisting slice)
 	for _, neigh := range requiredMACAddresses {
 		if !containsMACAddress(alreadyExisting, neigh) {
-			fmt.Printf("Adding MAC address %s on dummy interface %s of bridge %s\n", neigh, dummy.Attrs().Name, intf.Attrs().Name)
+			logger.Info("adding MAC address %s on dummy interface %s of bridge %s", neigh, dummy.Attrs().Name, intf.Attrs().Name)
 			err = netlink.NeighSet(createNeighborEntry(neigh, dummy.Attrs().Index, intf.Attrs().Index))
 			if err != nil {
-				fmt.Printf("Error adding neighbor %s to intf %s (br %s): %v\n", neigh, dummy.Attrs().Name, intf.Attrs().Name, err)
+				logger.Error(err, "error adding neighbor %s to intf %s (br %s)", neigh, dummy.Attrs().Name, intf.Attrs().Name)
 			}
 		}
 	}
 }
 
-func getAlreadyExistingNeighbors(dummyNeighbors []netlink.Neigh, requiredMACAddresses []net.HardwareAddr, dummyName, intfName string) []net.HardwareAddr {
+func getAlreadyExistingNeighbors(dummyNeighbors []netlink.Neigh, requiredMACAddresses []net.HardwareAddr, dummyName, intfName string, logger logr.Logger) []net.HardwareAddr {
 	alreadyExisting := []net.HardwareAddr{}
 	for i := range dummyNeighbors {
 		neigh := &dummyNeighbors[i]
@@ -141,9 +143,9 @@ func getAlreadyExistingNeighbors(dummyNeighbors []netlink.Neigh, requiredMACAddr
 			if !containsMACAddress(requiredMACAddresses, neigh.HardwareAddr) {
 				// If MAC Address is not in required MAC addresses, delete neighbor
 				if err := netlink.NeighDel(neigh); err != nil {
-					fmt.Printf("Error deleting neighbor %v: %v\n", neigh, err)
+					logger.Error(err, "error deleting neighbor %v", neigh)
 				}
-				fmt.Printf("Removed MAC address %s from dummy interface %s of bridge %s\n", neigh.HardwareAddr, dummyName, intfName)
+				logger.Info("removed MAC address %s from dummy interface %s of bridge %s", neigh.HardwareAddr, dummyName, intfName)
 			} else {
 				// Add MAC address to alreadyExisting table
 				alreadyExisting = append(alreadyExisting, neigh.HardwareAddr)
@@ -154,14 +156,15 @@ func getAlreadyExistingNeighbors(dummyNeighbors []netlink.Neigh, requiredMACAddr
 }
 
 func RunMACSync(interfacePrefix string) {
+	logger := ctrl.Log.WithName("macvlan")
 	links, err := netlink.LinkList()
 	if err != nil {
-		fmt.Printf("Couldn't load interfaces: %v\n", err)
+		logger.Error(err, "couldn't load interfaces")
 		return
 	}
 	for _, link := range links {
 		if strings.HasPrefix(link.Attrs().Name, interfacePrefix) && link.Type() == "bridge" {
-			fmt.Printf("Tracking interface %s (bridge and Prefix '%s')\n", link.Attrs().Name, interfacePrefix)
+			logger.Info("tracking interface %s (bridge and Prefix '%s')", link.Attrs().Name, interfacePrefix)
 			trackedBridges = append(trackedBridges, link.Attrs().Index)
 		}
 	}
@@ -169,7 +172,7 @@ func RunMACSync(interfacePrefix string) {
 	if len(trackedBridges) > 0 {
 		go func() {
 			for {
-				checkTrackedInterfaces()
+				checkTrackedInterfaces(logger)
 				time.Sleep(checkInterval)
 			}
 		}()
