@@ -12,6 +12,10 @@ route-map rm_{{$vrf.Name}}_export deny 1
   match tag 20000
 exit
 
+route-map rm6_{{$vrf.Name}}_export deny 1
+  match tag 20000
+exit
+
 {{range $i, $pl := $vrf.Export}}
 route-map rm_{{$vrf.Name}}_export permit {{$pl.Seq}}
   match ip address prefix-list pl_{{$vrf.Name}}_export_{{$i}}
