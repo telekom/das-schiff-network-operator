@@ -18,6 +18,8 @@ type VRFInformation struct {
 	table    int
 	bridgeID int
 	vrfID    int
+
+	MarkForDelete bool
 }
 
 // Create will create a VRF and all interfaces necessary to operate the EVPN and leaking.

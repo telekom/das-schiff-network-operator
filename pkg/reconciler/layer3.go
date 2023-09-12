@@ -173,7 +173,7 @@ func (r *reconcile) reconcileL3Netlink(vrfConfigs []frr.VRFConfiguration) ([]nl.
 				break
 			}
 		}
-		if !stillExists {
+		if !stillExists || cfg.MarkForDelete {
 			toDelete = append(toDelete, cfg)
 		}
 	}
@@ -210,7 +210,7 @@ func prepareVRFsToCreate(vrfConfigs []frr.VRFConfiguration, existing []nl.VRFInf
 		}
 		alreadyExists := false
 		for _, cfg := range existing {
-			if vrfConfigs[i].Name == cfg.Name && vrfConfigs[i].VNI == cfg.VNI {
+			if vrfConfigs[i].Name == cfg.Name && vrfConfigs[i].VNI == cfg.VNI && !cfg.MarkForDelete {
 				alreadyExists = true
 				break
 			}

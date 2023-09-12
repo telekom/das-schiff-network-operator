@@ -70,10 +70,7 @@ func (n *NetlinkManager) ListL3() ([]VRFInformation, error) {
 		info.Name = link.Attrs().Name[3:]
 		info.vrfID = vrf.Attrs().Index
 
-		err := n.updateL3Indices(&info)
-		if err != nil {
-			return nil, err
-		}
+		n.updateL3Indices(&info)
 
 		infos = append(infos, info)
 	}
@@ -81,21 +78,19 @@ func (n *NetlinkManager) ListL3() ([]VRFInformation, error) {
 	return infos, nil
 }
 
-func (*NetlinkManager) updateL3Indices(info *VRFInformation) error {
+func (*NetlinkManager) updateL3Indices(info *VRFInformation) {
 	bridgeLink, err := netlink.LinkByName(bridgePrefix + info.Name)
-	if err != nil {
-		return fmt.Errorf("error getting link by name: %w", err)
+	if err == nil {
+		info.bridgeID = bridgeLink.Attrs().Index
+	} else {
+		info.MarkForDelete = true
 	}
 	vxlanLink, err := netlink.LinkByName(vxlanPrefix + info.Name)
-	if err != nil {
-		return fmt.Errorf("error getting link by name: %w", err)
+	if err == nil {
+		info.VNI = vxlanLink.(*netlink.Vxlan).VxlanId
+	} else {
+		info.MarkForDelete = true
 	}
-	netlinkBridge := bridgeLink.(*netlink.Bridge)
-	netlinkVXLAN := vxlanLink.(*netlink.Vxlan)
-
-	info.bridgeID = netlinkBridge.Attrs().Index
-	info.VNI = netlinkVXLAN.VxlanId
-	return nil
 }
 
 func (*NetlinkManager) updateL2Indices(info *Layer2Information, links []netlink.Link) error {
