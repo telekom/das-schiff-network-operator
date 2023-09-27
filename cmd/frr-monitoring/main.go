@@ -19,10 +19,9 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
-
-	ctrl "sigs.k8s.io/controller-runtime"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
@@ -31,8 +30,7 @@ import (
 )
 
 var (
-	addr   = flag.String("listen-address", ":7082", "The address to listen on for HTTP requests.")
-	logger = ctrl.Log.WithName("frr-monitoring")
+	addr = flag.String("listen-address", ":7082", "The address to listen on for HTTP requests.")
 )
 
 func main() {
@@ -51,7 +49,7 @@ func main() {
 			"netlink": false,
 		})
 	if err != nil {
-		logger.Error(err, "failed to create collector")
+		log.Fatal(fmt.Errorf("failed to create collector %w", err))
 	}
 	reg.MustRegister(collector)
 
