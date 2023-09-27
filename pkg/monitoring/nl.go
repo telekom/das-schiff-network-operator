@@ -17,7 +17,7 @@ type netlinkCollector struct {
 }
 
 func init() {
-	registerCollector("netlink", NewNetlinkCollector)
+	registerCollector("netlink", defaultEnabled, NewNetlinkCollector)
 }
 
 // NewNetlinkCollector returns a new Collector exposing buddyinfo stats.

@@ -28,8 +28,10 @@ type frrCollector struct {
 	logger                     logr.Logger
 }
 
+// as we do not want to have frr collector registered within network operator
+// it is commented here.
 func init() {
-	registerCollector("frr", NewFRRCollector)
+	registerCollector("frr", defaultDisabled, NewFRRCollector)
 }
 
 func convertToStateFloat(state string) float64 {

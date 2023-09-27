@@ -66,7 +66,7 @@ func init() {
 
 func initCollectors() error {
 	var err error
-	collector, err := monitoring.NewDasSchiffNetworkOperatorCollector()
+	collector, err := monitoring.NewDasSchiffNetworkOperatorCollector(map[string]bool{})
 	if err != nil {
 		return fmt.Errorf("failed to create collector: %w", err)
 	}

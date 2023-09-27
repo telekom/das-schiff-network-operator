@@ -12,7 +12,7 @@ package monitoring
 // 	logger logr.Logger
 // }
 // func init() {
-// 	registerCollector("bpf", NewBPFCollector)
+// 	registerCollector("bpf", defaultEnabled, NewBPFCollector)
 // }
 // func NewBPFCollector() (Collector, error) {
 // 	// frrCli, err := bpf.

@@ -205,7 +205,7 @@ Now we can setup the network namespace for frr and network-operator to run in it
 sudo -E bash testdata/test-netns-setup.sh
 
 ## This finally starts the Operator for development testing in the network namespace called test.
-OPERATOR_CONFIG=$(pwd)/testdata/config.yaml sudo -E ip netns exec test go run main.go --config $(pwd)/testdata/manager-config.yaml
+OPERATOR_CONFIG=$(pwd)/testdata/config.yaml sudo -E ip netns exec test go run cmd/manager/main.go --config $(pwd)/testdata/manager-config.yaml
 ```
 ### Networking healthcheck
 

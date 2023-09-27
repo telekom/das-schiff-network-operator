@@ -145,9 +145,9 @@ linters-settings:
 issues:
   exclude-rules:
     # As of now we ignore the statements in main
-    - path: 'main.go'
+    - path: 'cmd/manager/main.go'
       text: "Function 'main' has too many statements"
-    - path: 'main.go'
+    - path: 'cmd/manager/main.go'
       text: "function-length: maximum number of statements per function exceeded; max \\d+ but got \\d+"
     # This is very C near and those const values are easier to google.
     - path: '(.+)/unix/(coil|frr)\.go'
