@@ -18,7 +18,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
-	"sigs.k8s.io/controller-runtime/pkg/envtest/printer"
 )
 
 const testHostname = "worker"
@@ -43,9 +42,8 @@ func TestHealthCheck(t *testing.T) {
 	tmpPath = t.TempDir()
 	ctrl = gomock.NewController(t)
 	defer ctrl.Finish()
-	RunSpecsWithDefaultAndCustomReporters(t,
-		"HealthCheck Suite",
-		[]Reporter{printer.NewlineReporter{}})
+	RunSpecs(t,
+		"HealthCheck Suite")
 }
 
 var _ = Describe("HealthCheck", func() {
@@ -347,7 +345,7 @@ func (*updateErrorClient) Update(
 	return errors.New("fake error")
 }
 
-func (*updateErrorClient) Get(_ context.Context, _ types.NamespacedName, o client.Object) error {
+func (*updateErrorClient) Get(_ context.Context, _ types.NamespacedName, o client.Object, _ ...client.GetOption) error {
 	a := o.(*corev1.Node)
 	a.Name = testHostname
 	a.Spec.Taints = []corev1.Taint{{
