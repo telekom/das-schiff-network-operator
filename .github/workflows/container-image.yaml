@@ -41,3 +41,10 @@ jobs:
           context: .
           push: true
           tags: ghcr.io/telekom/das-schiff-network-operator:main
+      - name: Build and push sidecar Docker image
+        uses: docker/build-push-action@v5.0.0
+        with:
+          context: .
+          file: frr-monitoring.Dockerfile
+          push: true
+          tags: ghcr.io/telekom/frr-monitoring:main

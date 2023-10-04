@@ -69,6 +69,10 @@ test: manifests generate fmt vet envtest ## Run tests.
 build: generate fmt vet ## Build manager binary.
 	go build -o bin/manager cmd/manager/main.go
 
+.PHONY: build
+sidecar-build: build
+	go build -o bin/frr-monitoring cmd/frr-monitoring/main.go
+
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
 	go run ./cmd/manager/main.go
