@@ -36,7 +36,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
 const requeueTime = 10 * time.Minute
@@ -70,7 +69,7 @@ func (r *Layer2NetworkConfigurationReconciler) Reconcile(ctx context.Context, _ 
 // SetupWithManager sets up the controller with the Manager.
 func (r *Layer2NetworkConfigurationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	// Create empty request for changes to node
-	nodesMapFn := handler.EnqueueRequestsFromMapFunc(func(o client.Object) []reconcile.Request { return []reconcile.Request{{}} })
+	nodesMapFn := handler.EnqueueRequestsFromMapFunc(func(_ context.Context, _ client.Object) []reconcile.Request { return []reconcile.Request{{}} })
 	nodePredicates := predicate.Funcs{
 		CreateFunc: func(e event.CreateEvent) bool { return false },
 		UpdateFunc: func(e event.UpdateEvent) bool {
@@ -82,7 +81,7 @@ func (r *Layer2NetworkConfigurationReconciler) SetupWithManager(mgr ctrl.Manager
 
 	err := ctrl.NewControllerManagedBy(mgr).
 		For(&networkv1alpha1.Layer2NetworkConfiguration{}).
-		Watches(&source.Kind{Type: &corev1.Node{}}, nodesMapFn, builder.WithPredicates(nodePredicates)).
+		Watches(&corev1.Node{}, nodesMapFn, builder.WithPredicates(nodePredicates)).
 		Complete(r)
 	if err != nil {
 		return fmt.Errorf("error creating controller: %w", err)

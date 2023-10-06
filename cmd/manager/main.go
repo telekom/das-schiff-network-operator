@@ -31,6 +31,7 @@ import (
 	"github.com/telekom/das-schiff-network-operator/pkg/config"
 	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
 	"github.com/telekom/das-schiff-network-operator/pkg/macvlan"
+	"github.com/telekom/das-schiff-network-operator/pkg/managerconfig"
 	"github.com/telekom/das-schiff-network-operator/pkg/monitoring"
 	"github.com/telekom/das-schiff-network-operator/pkg/notrack"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler"
@@ -105,14 +106,15 @@ func main() {
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
 	var err error
-	options := ctrl.Options{Scheme: scheme}
-
+	var options manager.Options
 	if configFile != "" {
-		options, err = options.AndFrom(ctrl.ConfigFile().AtPath(configFile))
+		options, err = managerconfig.Load(configFile, scheme)
 		if err != nil {
 			setupLog.Error(err, "unable to load the config file")
 			os.Exit(1)
 		}
+	} else {
+		options = ctrl.Options{Scheme: scheme}
 	}
 
 	if options.MetricsBindAddress != "0" {

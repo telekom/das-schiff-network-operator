@@ -1,0 +1,9 @@
+health:
+  healthProbeBindAddress: :7081
+metrics:
+  bindAddress: 127.0.0.1:7080
+webhook:
+  port: 7443
+leaderElection:
+  leaderElect: false
+  resourceName: 186580d0.schiff.telekom.de
