@@ -14,7 +14,7 @@ RUN go mod download
 RUN apk add llvm clang linux-headers libbpf-dev musl-dev
 
 # Copy the go source
-COPY main.go main.go
+COPY cmd/manager/main.go main.go
 COPY api/ api/
 COPY controllers/ controllers/
 COPY pkg/ pkg/
