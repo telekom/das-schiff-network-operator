@@ -12,6 +12,9 @@ spec:
     - path: /metrics
       port: metrics
       scheme: metrics
+    - path: /metrics
+      port: frr-metrics
+      scheme: metrics
       # bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
       # tlsConfig:
       #   insecureSkipVerify: true
