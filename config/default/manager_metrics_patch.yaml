@@ -9,6 +9,6 @@ spec:
       containers:
       - name: manager
         ports:
-        - containerPort: 7080
+        - containerPort: 7082
           name: mertics
           protocol: TCP

@@ -19,3 +19,6 @@ images:
 - name: controller
   newName: ghcr.io/telekom/das-schiff-network-operator
   newTag: latest
+- name: frr-monitoring
+  newName: ghcr.io/telekom/frr-monitoring
+  newTag: latest
