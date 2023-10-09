@@ -16,7 +16,17 @@ spec:
       labels:
         app.kubernetes.io/component: master
     spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-role.kubernetes.io/control-plane
+                    operator: Exists
       tolerations:
+      - effect: NoSchedule
+        key: node-role.kubernetes.io/control-plane
+        operator: Exists
       - effect: NoSchedule
         key: node.schiff.telekom.de/uninitialized
         operator: Exists
@@ -26,8 +36,6 @@ spec:
       - key: node.kubernetes.io/not-ready
         effect: NoSchedule
         operator: Exists
-      nodeSelector:
-        node-role.kubernetes.io/control-plane: ""
       hostNetwork: true
       hostPID: true
       containers:
