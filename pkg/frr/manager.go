@@ -92,9 +92,21 @@ func (*Manager) ReloadFRR() error {
 	}
 	defer con.Close()
 
-	_, err = con.ReloadUnitContext(context.Background(), frrUnit, "fail", nil)
-	if err != nil {
+	jobChan := make(chan string)
+	if _, err = con.ReloadUnitContext(context.Background(), frrUnit, "fail", jobChan); err != nil {
 		return fmt.Errorf("error reloading %s context: %w", frrUnit, err)
+	}
+	reloadStatus := <-jobChan
+	if reloadStatus == "done" {
+		return nil
+	}
+
+	if _, err = con.RestartUnitContext(context.Background(), frrUnit, "fail", jobChan); err != nil {
+		return fmt.Errorf("error restarting %s context: %w", frrUnit, err)
+	}
+	restartStatus := <-jobChan
+	if restartStatus != "done" {
+		return fmt.Errorf("error restarting unit after failed reload: %s (reload error: %s)", restartStatus, reloadStatus)
 	}
 	return nil
 }
