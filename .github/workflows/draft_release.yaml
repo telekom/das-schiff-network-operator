@@ -91,5 +91,6 @@ jobs:
         with:
           context: .
           push: true
+          file: frr-monitoring.Dockerfile
           tags: ${{ steps.monitor_meta.outputs.tags }}
           labels: ${{ steps.monitor_meta.outputs.labels }}
