@@ -70,6 +70,7 @@ func (r *reconcile) reconcileLayer3(l3vnis []networkv1alpha1.VRFRouteConfigurati
 			return fmt.Errorf("error reloading FRR systemd unit: %w", err)
 		}
 		r.dirtyFRRConfig = false
+		r.Logger.Info("reloaded FRR config")
 	}
 
 	// Make sure that all created netlink VRFs are up after FRR reload
