@@ -65,11 +65,17 @@ func (r *reconcile) reconcileLayer3(l3vnis []networkv1alpha1.VRFRouteConfigurati
 		r.Logger.Info("trying to reload FRR config because it changed")
 		err = r.frrManager.ReloadFRR()
 		if err != nil {
-			r.dirtyFRRConfig = true
-			r.Logger.Error(err, "error reloading FRR systemd unit")
-			return fmt.Errorf("error reloading FRR systemd unit: %w", err)
+			r.Logger.Error(err, "error reloading FRR systemd unit, trying restart")
+
+			err = r.frrManager.RestartFRR()
+			if err != nil {
+				r.dirtyFRRConfig = true
+				r.Logger.Error(err, "error restarting FRR systemd unit")
+				return fmt.Errorf("error reloading / restarting FRR systemd unit: %w", err)
+			}
 		}
 		r.dirtyFRRConfig = false
+		r.Logger.Info("reloaded FRR config")
 	}
 
 	// Make sure that all created netlink VRFs are up after FRR reload

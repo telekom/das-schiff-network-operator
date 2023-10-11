@@ -92,9 +92,31 @@ func (*Manager) ReloadFRR() error {
 	}
 	defer con.Close()
 
-	_, err = con.ReloadUnitContext(context.Background(), frrUnit, "fail", nil)
-	if err != nil {
+	jobChan := make(chan string)
+	if _, err = con.ReloadUnitContext(context.Background(), frrUnit, "fail", jobChan); err != nil {
 		return fmt.Errorf("error reloading %s context: %w", frrUnit, err)
+	}
+	reloadStatus := <-jobChan
+	if reloadStatus != "done" {
+		return fmt.Errorf("error reloading %s, job status is %s", frrUnit, reloadStatus)
+	}
+	return nil
+}
+
+func (*Manager) RestartFRR() error {
+	con, err := dbus.NewSystemConnectionContext(context.Background())
+	if err != nil {
+		return fmt.Errorf("error creating nee D-Bus connection: %w", err)
+	}
+	defer con.Close()
+
+	jobChan := make(chan string)
+	if _, err = con.RestartUnitContext(context.Background(), frrUnit, "fail", jobChan); err != nil {
+		return fmt.Errorf("error restarting %s context: %w", frrUnit, err)
+	}
+	restartStatus := <-jobChan
+	if restartStatus != "done" {
+		return fmt.Errorf("error restarting %s, job status is %s", restartStatus, restartStatus)
 	}
 	return nil
 }
