@@ -214,11 +214,11 @@ This container needs a lot of rights as it needs to be able to connect to frr.
 We currently enforce that the vtysh instantiated by the container is not able to write any configuration to the main system.
 
 ```bash
-## Building the image for frr-monitoring
-sudo podman build --network=host -t frr-monitoring:latest -f frr-monitoring.Dockerfile .
+## Building the image for frr-exporter
+sudo podman build --network=host -t frr-exporter:latest -f frr-exporter.Dockerfile .
 
 ## Run the container as root as its required.
-sudo podman run --net=host -v /var/run/frr:/var/run/frr -v ./testdata/vtysh.conf:/etc/frr/vtysh.conf localhost/frr-monitoring:latest
+sudo podman run --net=host -v /var/run/frr:/var/run/frr -v ./testdata/vtysh.conf:/etc/frr/vtysh.conf localhost/frr-exporter:latest
 ```
 ### Networking healthcheck
 

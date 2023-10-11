@@ -45,6 +45,6 @@ jobs:
         uses: docker/build-push-action@v5.0.0
         with:
           context: .
-          file: frr-monitoring.Dockerfile
+          file: frr-exporter.Dockerfile
           push: true
-          tags: ghcr.io/telekom/frr-monitoring:main
+          tags: ghcr.io/telekom/frr-exporter:main

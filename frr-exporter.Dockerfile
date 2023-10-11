@@ -12,11 +12,11 @@ COPY go.sum go.sum
 RUN go mod download
 
 # Copy the go source
-COPY cmd/frr-monitoring/main.go main.go
+COPY cmd/frr-exporter/main.go main.go
 COPY pkg/ pkg/
 
 # Build
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -o frr-monitoring main.go
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -o frr-exporter main.go
 
 
 FROM ${REGISTRY}/frrouting/frr:v${FRR_VERSION}
@@ -24,10 +24,10 @@ FROM ${REGISTRY}/frrouting/frr:v${FRR_VERSION}
 RUN apk add --no-cache frr
 
 WORKDIR /
-COPY --from=builder /workspace/frr-monitoring .
+COPY --from=builder /workspace/frr-exporter .
 ## Needs to run as root
 ##  vtysh is required to have extended rights 
 ## to be able to connect to vty sockets on the host
 # USER 65532:65532
 
-ENTRYPOINT ["/frr-monitoring"]
+ENTRYPOINT ["/frr-exporter"]

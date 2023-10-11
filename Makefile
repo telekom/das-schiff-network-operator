@@ -71,7 +71,7 @@ build: generate fmt vet ## Build manager binary.
 
 .PHONY: build
 sidecar-build: build
-	go build -o bin/frr-monitoring cmd/frr-monitoring/main.go
+	go build -o bin/frr-exporter cmd/frr-exporter/main.go
 
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
