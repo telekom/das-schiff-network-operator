@@ -11,7 +11,7 @@ webhooks:
       name: webhook-service
       namespace: system
       path: /validate-network-schiff-telekom-de-v1alpha1-vrfrouteconfiguration
-  failurePolicy: Fail
+  failurePolicy: Ignore # TODO: Fail should be working but it is not on first boot.
   name: vvrfrouteconfiguration.kb.io
   rules:
   - apiGroups:
