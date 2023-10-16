@@ -9,4 +9,5 @@
 {{range $item := $vrf.AggregateIPv6}}
   aggregate-address {{$item}}
 {{- end }}
+{{- end }}
 {{- end -}}

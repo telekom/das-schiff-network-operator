@@ -9,5 +9,5 @@
 {{range $item := $vrf.AggregateIPv4}}
   aggregate-address {{$item}}
 {{- end }}
-{{end}}
+{{- end }}
 {{- end -}}
