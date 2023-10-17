@@ -2,6 +2,7 @@ package nl
 
 import (
 	"fmt"
+	"github.com/vishvananda/netlink"
 	"sort"
 
 	"github.com/telekom/das-schiff-network-operator/pkg/bpf"
@@ -140,4 +141,32 @@ func (n *NetlinkManager) GetL3ByName(name string) (*VRFInformation, error) {
 		}
 	}
 	return nil, fmt.Errorf("no VRF with name %s", name)
+}
+
+func (n *NetlinkManager) EnsureBPFProgram(info VRFInformation) error {
+	if link, err := netlink.LinkByName(bridgePrefix + info.Name); err == nil {
+		if err := bpf.AttachToInterface(link); err != nil {
+			return err
+		}
+	} else {
+		return err
+	}
+
+	if link, err := netlink.LinkByName(vrfToDefaultPrefix + info.Name); err == nil {
+		if err := bpf.AttachToInterface(link); err != nil {
+			return err
+		}
+	} else {
+		return err
+	}
+
+	if link, err := netlink.LinkByName(vxlanPrefix + info.Name); err == nil {
+		if err := bpf.AttachToInterface(link); err != nil {
+			return err
+		}
+	} else {
+		return err
+	}
+
+	return nil
 }
