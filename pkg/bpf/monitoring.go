@@ -74,13 +74,13 @@ func fetchEbpfStatistics(m *ebpf.Map, key uint32, logger logr.Logger) *StatsReco
 		buf := bytes.NewBuffer(stat[:])
 		var count uint64
 
-		if err := binary.Read(buf, binary.NativeEndian, &count); err != nil {
+		if err := binary.Read(buf, binary.LittleEndian, &count); err != nil {
 			logger.Error(err, "error reading rxpackets from map")
 			return nil
 		}
 		aggregatedStats.RXPackets += count
 
-		if err := binary.Read(buf, binary.NativeEndian, &count); err != nil {
+		if err := binary.Read(buf, binary.LittleEndian, &count); err != nil {
 			logger.Error(err, "error reading rxbytes from map")
 			return nil
 		}
