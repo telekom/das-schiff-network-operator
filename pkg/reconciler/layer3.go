@@ -136,14 +136,14 @@ func createVrfConfig(vrfConfigMap map[string]frr.VRFConfiguration, spec *network
 	cfg := vrfConfigMap[spec.VRF]
 
 	if len(spec.Export) > 0 {
-		prefixList, err := handlePrefixItemList(spec.Export, spec.Seq)
+		prefixList, err := handlePrefixItemList(spec.Export, spec.Seq, spec.Community)
 		if err != nil {
 			return nil, err
 		}
 		cfg.Export = append(cfg.Export, prefixList)
 	}
 	if len(spec.Import) > 0 {
-		prefixList, err := handlePrefixItemList(spec.Import, spec.Seq)
+		prefixList, err := handlePrefixItemList(spec.Import, spec.Seq, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -231,9 +231,10 @@ func prepareVRFsToCreate(vrfConfigs []frr.VRFConfiguration, existing []nl.VRFInf
 	return create
 }
 
-func handlePrefixItemList(input []networkv1alpha1.VrfRouteConfigurationPrefixItem, seq int) (frr.PrefixList, error) {
+func handlePrefixItemList(input []networkv1alpha1.VrfRouteConfigurationPrefixItem, seq int, community *string) (frr.PrefixList, error) {
 	prefixList := frr.PrefixList{
-		Seq: seq + 1,
+		Seq:       seq + 1,
+		Community: community,
 	}
 	for i, item := range input {
 		frrItem, err := copyPrefixItemToFRRItem(i, item)
