@@ -1,0 +1,58 @@
+package main
+
+import (
+	"flag"
+	"fmt"
+	"log"
+	"net/http"
+	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/telekom/das-schiff-network-operator/pkg/monitoring"
+)
+
+const (
+	twenty = 20
+)
+
+var (
+	addr = flag.String("listen-address", ":7082", "The address to listen on for HTTP requests.")
+)
+
+func main() {
+	flag.Parse()
+
+	// Create a new registry.
+	reg := prometheus.NewRegistry()
+
+	// Add Go module build info.
+	reg.MustRegister(collectors.NewBuildInfoCollector())
+	reg.MustRegister(collectors.NewGoCollector())
+	collector, err := monitoring.NewDasSchiffNetworkOperatorCollector(
+		map[string]bool{
+			"frr":     true,
+			"netlink": false,
+		})
+	if err != nil {
+		log.Fatal(fmt.Errorf("failed to create collector %w", err))
+	}
+	reg.MustRegister(collector)
+
+	// Expose the registered metrics via HTTP.
+	http.Handle("/metrics", promhttp.HandlerFor(
+		reg,
+		promhttp.HandlerOpts{
+			// Opt into OpenMetrics to support exemplars.
+			EnableOpenMetrics: true,
+			Timeout:           time.Minute,
+		},
+	))
+	server := http.Server{
+		Addr:              *addr,
+		ReadHeaderTimeout: twenty * time.Second,
+		ReadTimeout:       time.Minute,
+	}
+	log.Fatal(server.ListenAndServe())
+}

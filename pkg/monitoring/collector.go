@@ -10,7 +10,11 @@ import (
 )
 
 // Namespace defines the common namespace to be used by all metrics.
-const namespace = "nwop"
+const (
+	namespace       = "nwop"
+	defaultEnabled  = true
+	defaultDisabled = false
+)
 
 var (
 	scrapeDurationDesc = prometheus.NewDesc(
@@ -44,9 +48,8 @@ func (d *typedFactoryDesc) mustNewConstMetric(value float64, labels ...string) p
 	return prometheus.MustNewConstMetric(d.desc, d.valueType, value, labels...)
 }
 
-func registerCollector(collector string, factory func() (Collector, error)) {
-	collectorStateSimplex := true
-	collectorState[collector] = &collectorStateSimplex
+func registerCollector(collector string, isDefaultEnabled bool, factory func() (Collector, error)) {
+	collectorState[collector] = &isDefaultEnabled
 	factories[collector] = factory
 }
 
@@ -56,11 +59,15 @@ type DasSchiffNetworkOperatorCollector struct {
 }
 
 // NewDasSchiffNetworkOperatorCollector creates a new DasSchiffNetworkOperatorCollector.
-func NewDasSchiffNetworkOperatorCollector() (*DasSchiffNetworkOperatorCollector, error) {
+func NewDasSchiffNetworkOperatorCollector(collectorConfig map[string]bool) (*DasSchiffNetworkOperatorCollector, error) {
 	collectors := make(map[string]Collector)
 	initiatedCollectorsMtx.Lock()
 	defer initiatedCollectorsMtx.Unlock()
 	for key, enabled := range collectorState {
+		if collectorEnabled, ok := collectorConfig[key]; ok {
+			// This overwrites the default state of the Collector.
+			enabled = &collectorEnabled
+		}
 		if !*enabled {
 			continue
 		}

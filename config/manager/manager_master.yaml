@@ -16,7 +16,17 @@ spec:
       labels:
         app.kubernetes.io/component: master
     spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-role.kubernetes.io/control-plane
+                    operator: Exists
       tolerations:
+      - effect: NoSchedule
+        key: node-role.kubernetes.io/control-plane
+        operator: Exists
       - effect: NoSchedule
         key: node.schiff.telekom.de/uninitialized
         operator: Exists
@@ -26,8 +36,6 @@ spec:
       - key: node.kubernetes.io/not-ready
         effect: NoSchedule
         operator: Exists
-      nodeSelector:
-        node-role.kubernetes.io/control-plane: ""
       hostNetwork: true
       hostPID: true
       containers:
@@ -72,12 +80,40 @@ spec:
           subPath: config.yaml
         - mountPath: /etc/frr
           name: frr-config
+      - command:
+        - /frr-exporter
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        image: frr-exporter:latest
+        name: frr-exporter
+        securityContext:
+          privileged: true
+          runAsUser: 0
+        resources:
+          limits:
+            cpu: 100m
+            memory: 64Mi
+          requests:
+            cpu: 10m
+            memory: 64Mi
+        volumeMounts:
+        - mountPath: /etc/frr
+          name: frr-config
+        - mountPath: /var/run/frr
+          name: frr-run
       serviceAccountName: controller-manager
       terminationGracePeriodSeconds: 10
       volumes:
       - name: frr-config
         hostPath:
           path: /etc/frr
+          type: Directory
+      - name: frr-run
+        hostPath:
+          path: /var/run/frr
           type: Directory
       - configMap:
           name: network-operator-config

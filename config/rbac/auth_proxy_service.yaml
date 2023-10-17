@@ -8,8 +8,12 @@ metadata:
 spec:
   ports:
   - name: metrics
-    port: 9443
+    port: 7080
     protocol: TCP
     targetPort: metrics
+  - name: frr-metrics
+    port: 7082
+    protocol: TCP
+    targetPort: frr-metrics
   selector:
     app.kubernetes.io/name: network-operator

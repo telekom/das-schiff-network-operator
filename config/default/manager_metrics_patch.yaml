@@ -10,5 +10,10 @@ spec:
       - name: manager
         ports:
         - containerPort: 7080
-          name: mertics
+          name: metrics
+          protocol: TCP
+      - name: frr-exporter
+        ports:
+        - containerPort: 7082
+          name: frr-metrics
           protocol: TCP

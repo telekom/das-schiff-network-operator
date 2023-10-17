@@ -79,3 +79,18 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Extract Metadata (tags, labels) for Docker
+        id: exporter
+        uses: docker/metadata-action@v5.0.0
+        with:
+          images: ghcr.io/telekom/frr-exporter
+
+      - name: Build and Push Docker Image
+        uses: docker/build-push-action@v5.0.0
+        with:
+          context: .
+          push: true
+          file: frr-exporter.Dockerfile
+          tags: ${{ steps.exporter.outputs.tags }}
+          labels: ${{ steps.exporter.outputs.labels }}

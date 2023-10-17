@@ -12,4 +12,8 @@ spec:
         - containerPort: 7080
           name: metrics
           protocol: TCP
-
+      - name: frr-exporter
+        ports:
+        - containerPort: 7082
+          name: frr-metrics
+          protocol: TCP

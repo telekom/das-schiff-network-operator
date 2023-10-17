@@ -205,7 +205,20 @@ Now we can setup the network namespace for frr and network-operator to run in it
 sudo -E bash testdata/test-netns-setup.sh
 
 ## This finally starts the Operator for development testing in the network namespace called test.
-OPERATOR_CONFIG=$(pwd)/testdata/config.yaml sudo -E ip netns exec test go run main.go --config $(pwd)/testdata/manager-config.yaml
+OPERATOR_CONFIG=$(pwd)/testdata/config.yaml sudo -E ip netns exec test go run cmd/manager/main.go --config $(pwd)/testdata/manager-config.yaml
+```
+
+#### Building and running the frr monitoring container
+
+This container needs a lot of rights as it needs to be able to connect to frr.
+We currently enforce that the vtysh instantiated by the container is not able to write any configuration to the main system.
+
+```bash
+## Building the image for frr-exporter
+sudo podman build --network=host -t frr-exporter:latest -f frr-exporter.Dockerfile .
+
+## Run the container as root as its required.
+sudo podman run --net=host -v /var/run/frr:/var/run/frr -v ./testdata/vtysh.conf:/etc/frr/vtysh.conf localhost/frr-exporter:latest
 ```
 ### Networking healthcheck
 
