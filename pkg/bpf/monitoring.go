@@ -36,6 +36,7 @@ func registerMap(m *ebpf.Map, prefix string, keys []string, logger logr.Logger) 
 	mapID, _ := mapInfo.ID()
 	logger.Info("adding monitoring", "map", mapInfo.Name, "id", mapID, "prefix", prefix)
 	for idx, name := range keys {
+		idxCopy := idx
 		// eBPF map by packets
 		metrics.Registry.MustRegister(prometheus.NewCounterFunc(prometheus.CounterOpts{
 			Name: prefix + "_packets",
@@ -43,7 +44,7 @@ func registerMap(m *ebpf.Map, prefix string, keys []string, logger logr.Logger) 
 				"key": name,
 			},
 		}, func() float64 {
-			stats := fetchEbpfStatistics(m, uint32(idx), logger)
+			stats := fetchEbpfStatistics(m, uint32(idxCopy), logger)
 			return float64(stats.RXPackets)
 		}))
 
@@ -54,7 +55,7 @@ func registerMap(m *ebpf.Map, prefix string, keys []string, logger logr.Logger) 
 				"key": name,
 			},
 		}, func() float64 {
-			stats := fetchEbpfStatistics(m, uint32(idx), logger)
+			stats := fetchEbpfStatistics(m, uint32(idxCopy), logger)
 			return float64(stats.RXBytes)
 		}))
 	}
