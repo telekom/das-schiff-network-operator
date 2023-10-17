@@ -3,6 +3,7 @@ package bpf
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"github.com/cilium/ebpf"
 	"github.com/go-logr/logr"
 	"github.com/prometheus/client_golang/prometheus"
@@ -64,15 +65,15 @@ func registerMap(m *ebpf.Map, prefix string, keys []string, logger logr.Logger) 
 
 func fetchEbpfStatistics(m *ebpf.Map, key uint32, logger logr.Logger) *StatsRecord {
 	var perCPUStats [][]byte
-	keyBytes := make([]byte, 4)
-	binary.BigEndian.PutUint32(keyBytes, key)
-	err := m.Lookup(keyBytes, &perCPUStats)
+	err := m.Lookup(key, &perCPUStats)
 	if err != nil {
 		logger.Error(err, "error reading eBPF statistics from map")
 		return nil
 	}
 	var aggregatedStats StatsRecord
+	logger.Info(fmt.Sprintf("key=%d, len(perCPUStats): %d", key, len(perCPUStats)))
 	for _, stat := range perCPUStats {
+		logger.Info(fmt.Sprintf("stat: %v", stat))
 		buf := bytes.NewBuffer(stat)
 		var count uint64
 
@@ -80,13 +81,17 @@ func fetchEbpfStatistics(m *ebpf.Map, key uint32, logger logr.Logger) *StatsReco
 			logger.Error(err, "error reading rxpackets from map")
 			return nil
 		}
+		logger.Info(fmt.Sprintf("rxpackets: %d", count))
 		aggregatedStats.RXPackets += count
+		logger.Info(fmt.Sprintf("a rxpackets: %d", aggregatedStats.RXPackets))
 
 		if err := binary.Read(buf, binary.BigEndian, &count); err != nil {
 			logger.Error(err, "error reading rxbytes from map")
 			return nil
 		}
+		logger.Info(fmt.Sprintf("rxbytes: %d", count))
 		aggregatedStats.RXBytes += count
+		logger.Info(fmt.Sprintf("a rxbytes: %d", aggregatedStats.RXBytes))
 	}
 	return &aggregatedStats
 }
