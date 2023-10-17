@@ -63,7 +63,7 @@ func registerMap(m *ebpf.Map, prefix string, keys []string, logger logr.Logger) 
 }
 
 func fetchEbpfStatistics(m *ebpf.Map, key uint32, logger logr.Logger) *StatsRecord {
-	var perCPUStats [][8]byte
+	var perCPUStats [][16]byte
 	err := m.Lookup(key, &perCPUStats)
 	if err != nil {
 		logger.Error(err, "error reading eBPF statistics from map")
