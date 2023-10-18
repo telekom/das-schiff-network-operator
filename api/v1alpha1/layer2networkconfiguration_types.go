@@ -72,6 +72,10 @@ type Layer2NetworkConfigurationStatus struct {
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
 //+kubebuilder:resource:shortName=layer2,scope=Cluster
+//+kubebuilder:printcolumn:name="VLAN",type=integer,JSONPath=`.spec.id`
+//+kubebuilder:printcolumn:name="Gateway",type=string,JSONPath=`.spec.anycastGateways`
+//+kubebuilder:printcolumn:name="VRF",type=string,JSONPath=`.spec.vrf`
+//+kubebuilder:printcolumn:name="VNI",type=string,JSONPath=`.spec.vni`,priority=10
 
 // Layer2NetworkConfiguration is the Schema for the layer2networkconfigurations API.
 type Layer2NetworkConfiguration struct {

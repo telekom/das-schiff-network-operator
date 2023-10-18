@@ -84,6 +84,9 @@ type VRFRouteConfigurationStatus struct {
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
 //+kubebuilder:resource:shortName=vrf,scope=Cluster
+//+kubebuilder:printcolumn:name="VRF",type=string,JSONPath=`.spec.vrf`
+//+kubebuilder:printcolumn:name="Sequence",type=integer,JSONPath=`.spec.seq`
+//+kubebuilder:printcolumn:name="Community",type=string,JSONPath=`.spec.community`
 
 // VRFRouteConfiguration is the Schema for the vrfrouteconfigurations API.
 type VRFRouteConfiguration struct {

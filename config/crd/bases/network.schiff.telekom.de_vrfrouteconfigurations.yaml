@@ -16,7 +16,17 @@ spec:
     singular: vrfrouteconfiguration
   scope: Cluster
   versions:
-  - name: v1alpha1
+  - additionalPrinterColumns:
+    - jsonPath: .spec.vrf
+      name: VRF
+      type: string
+    - jsonPath: .spec.seq
+      name: Sequence
+      type: integer
+    - jsonPath: .spec.community
+      name: Community
+      type: string
+    name: v1alpha1
     schema:
       openAPIV3Schema:
         description: VRFRouteConfiguration is the Schema for the vrfrouteconfigurations
