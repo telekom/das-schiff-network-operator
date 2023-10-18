@@ -34,6 +34,7 @@ func main() {
 		map[string]bool{
 			"frr":     true,
 			"netlink": false,
+			"bpf":     false,
 		})
 	if err != nil {
 		log.Fatal(fmt.Errorf("failed to create collector %w", err))
