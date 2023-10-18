@@ -16,7 +16,21 @@ spec:
     singular: layer2networkconfiguration
   scope: Cluster
   versions:
-  - name: v1alpha1
+  - additionalPrinterColumns:
+    - jsonPath: .spec.id
+      name: VLAN
+      type: integer
+    - jsonPath: .spec.anycastGateways
+      name: Gateway
+      type: string
+    - jsonPath: .spec.vrf
+      name: VRF
+      type: string
+    - jsonPath: .spec.vni
+      name: VNI
+      priority: 10
+      type: string
+    name: v1alpha1
     schema:
       openAPIV3Schema:
         description: Layer2NetworkConfiguration is the Schema for the layer2networkconfigurations
