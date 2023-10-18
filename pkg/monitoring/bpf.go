@@ -1,6 +1,7 @@
 package monitoring
 
 import (
+	"fmt"
 	"github.com/cilium/ebpf"
 	"github.com/go-logr/logr"
 	"github.com/prometheus/client_golang/prometheus"
@@ -82,7 +83,7 @@ func (c *bpfCollector) fetchEbpfStatistics(m *ebpf.Map, key uint32) (*statsRecor
 	var perCPUStats []*statsRecord
 	err := m.Lookup(key, &perCPUStats)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error looking up bpf key: %w", err)
 	}
 	var aggregatedStats statsRecord
 	for _, stat := range perCPUStats {
