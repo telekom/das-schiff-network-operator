@@ -2,6 +2,7 @@ package monitoring
 
 import (
 	"fmt"
+
 	"github.com/cilium/ebpf"
 	"github.com/go-logr/logr"
 	"github.com/prometheus/client_golang/prometheus"

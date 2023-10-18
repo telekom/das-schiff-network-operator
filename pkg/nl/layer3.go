@@ -2,10 +2,10 @@ package nl
 
 import (
 	"fmt"
-	"github.com/vishvananda/netlink"
 	"sort"
 
 	"github.com/telekom/das-schiff-network-operator/pkg/bpf"
+	"github.com/vishvananda/netlink"
 )
 
 const (
