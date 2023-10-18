@@ -143,7 +143,7 @@ func (n *NetlinkManager) GetL3ByName(name string) (*VRFInformation, error) {
 	return nil, fmt.Errorf("no VRF with name %s", name)
 }
 
-func (n *NetlinkManager) EnsureBPFProgram(info VRFInformation) error {
+func (*NetlinkManager) EnsureBPFProgram(info VRFInformation) error {
 	if link, err := netlink.LinkByName(bridgePrefix + info.Name); err != nil {
 		return fmt.Errorf("error getting bridge interface of vrf %s: %w", info.Name, err)
 	} else if err := bpf.AttachToInterface(link); err != nil {

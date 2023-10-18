@@ -79,7 +79,7 @@ func NewBPFCollector() (Collector, error) {
 	return &collector, nil
 }
 
-func (c *bpfCollector) fetchEbpfStatistics(m *ebpf.Map, key uint32) (*statsRecord, error) {
+func (*bpfCollector) fetchEbpfStatistics(m *ebpf.Map, key uint32) (*statsRecord, error) {
 	var perCPUStats []*statsRecord
 	err := m.Lookup(key, &perCPUStats)
 	if err != nil {
