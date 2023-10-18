@@ -33,7 +33,6 @@ func InitBPFRouter() error {
 	if err := loadRouterObjects(&router, nil); err != nil {
 		return err
 	}
-	initMonitoring()
 	return nil
 }
 
@@ -57,6 +56,14 @@ func AttachInterfaces(intfs []string) error {
 		}
 	}
 	return nil
+}
+
+func EbpfRetStatsMap() *ebpf.Map {
+	return router.routerMaps.EbpfRetStatsMap
+}
+
+func EbpfFibLkupStatsMap() *ebpf.Map {
+	return router.routerMaps.EbpfFibLkupStatsMap
 }
 
 // First we ensure the qdisc is there. It is a very basic check, ensuring we have an clsact qdisc with the correct handle

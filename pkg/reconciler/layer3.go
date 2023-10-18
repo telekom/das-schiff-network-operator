@@ -181,6 +181,8 @@ func (r *reconcile) reconcileL3Netlink(vrfConfigs []frr.VRFConfiguration) ([]nl.
 		}
 		if !stillExists || cfg.MarkForDelete {
 			toDelete = append(toDelete, cfg)
+		} else if err := r.netlinkManager.EnsureBPFProgram(cfg); err != nil {
+			r.Logger.Error(err, "Error ensuring BPF program on VRF", "vrf", cfg.Name, "vni", strconv.Itoa(cfg.VNI))
 		}
 	}
 
