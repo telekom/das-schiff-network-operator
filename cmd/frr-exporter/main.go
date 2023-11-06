@@ -11,18 +11,23 @@ import (
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/telekom/das-schiff-network-operator/pkg/monitoring"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
 
 const (
 	twenty = 20
 )
 
-var (
-	addr = flag.String("listen-address", ":7082", "The address to listen on for HTTP requests.")
-)
-
 func main() {
+	var addr string
+	flag.StringVar(&addr, "listen-address", ":7082", "The address to listen on for HTTP requests.")
+	opts := zap.Options{
+		Development: true,
+	}
+	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
+	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
 	// Create a new registry.
 	reg := prometheus.NewRegistry()
@@ -51,7 +56,7 @@ func main() {
 		},
 	))
 	server := http.Server{
-		Addr:              *addr,
+		Addr:              addr,
 		ReadHeaderTimeout: twenty * time.Second,
 		ReadTimeout:       time.Minute,
 	}
