@@ -29,6 +29,6 @@ type NetlinkManager struct {
 }
 
 func (*NetlinkManager) GetUnderlayIP() (net.IP, error) {
-	_, ip, err := getInterfaceAndIP(underlayLoopback)
+	_, ip, err := getUnderlayInterfaceAndIP()
 	return ip, err
 }
