@@ -36,7 +36,7 @@ func (n *NetlinkManager) createVRF(vrfName string, table int) (*netlink.Vrf, err
 	return &netlinkVrf, nil
 }
 
-func (n *NetlinkManager) createBridge(bridgeName string, macAddress *net.HardwareAddr, masterIdx, mtu int) (*netlink.Bridge, error) {
+func (n *NetlinkManager) createBridge(bridgeName string, macAddress *net.HardwareAddr, masterIdx, mtu int, underlayRMAC bool) (*netlink.Bridge, error) {
 	netlinkBridge := netlink.Bridge{
 		LinkAttrs: netlink.LinkAttrs{
 			Name: bridgeName,
@@ -48,6 +48,17 @@ func (n *NetlinkManager) createBridge(bridgeName string, macAddress *net.Hardwar
 	}
 	if macAddress != nil {
 		netlinkBridge.LinkAttrs.HardwareAddr = *macAddress
+	} else if underlayRMAC {
+		_, vxlanIP, err := getInterfaceAndIP(underlayLoopback)
+		if err != nil {
+			return nil, err
+		}
+
+		generatedMac, err := generateMAC(vxlanIP)
+		if err != nil {
+			return nil, err
+		}
+		netlinkBridge.LinkAttrs.HardwareAddr = generatedMac
 	}
 
 	if err := netlink.LinkAdd(&netlinkBridge); err != nil {

@@ -100,7 +100,7 @@ func (n *NetlinkManager) CreateL2(info *Layer2Information) error {
 }
 
 func (n *NetlinkManager) setupBridge(info *Layer2Information, masterIdx int) (*netlink.Bridge, error) {
-	bridge, err := n.createBridge(fmt.Sprintf("%s%d", layer2Prefix, info.VlanID), info.AnycastMAC, masterIdx, info.MTU)
+	bridge, err := n.createBridge(fmt.Sprintf("%s%d", layer2Prefix, info.VlanID), info.AnycastMAC, masterIdx, info.MTU, false)
 	if err != nil {
 		return nil, err
 	}
