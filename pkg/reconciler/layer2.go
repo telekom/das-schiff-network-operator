@@ -5,13 +5,14 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/types"
 )
 
@@ -36,11 +37,29 @@ func (r *reconcile) fetchLayer2(ctx context.Context) ([]networkv1alpha1.Layer2Ne
 	for i := range layer2List.Items {
 		item := &layer2List.Items[i]
 		if item.Spec.NodeSelector != nil {
-			selector, err := metav1.LabelSelectorAsSelector(item.Spec.NodeSelector)
-			if err != nil {
-				r.Logger.Error(err, "error converting nodeSelector of layer2 to selector", "layer2", item.ObjectMeta.Name)
-				return nil, fmt.Errorf("error converting nodeSelector of layer2 to selector: %w", err)
+			selector := labels.NewSelector()
+			var reqs labels.Requirements
+
+			for key, value := range item.Spec.NodeSelector.MatchLabels {
+				requirement, err := labels.NewRequirement(key, selection.Equals, []string{value})
+				if err != nil {
+					r.Logger.Error(err, "error creating MatchLabel requirement")
+					return nil, fmt.Errorf("error creating MatchLabel requirement: %w", err)
+				}
+				reqs = append(reqs, *requirement)
 			}
+
+			for _, req := range item.Spec.NodeSelector.MatchExpressions {
+				lowercaseOperator := selection.Operator(strings.ToLower(string(req.Operator)))
+				requirement, err := labels.NewRequirement(req.Key, lowercaseOperator, req.Values)
+				if err != nil {
+					r.Logger.Error(err, "error creating MatchExpression requirement")
+					return nil, fmt.Errorf("error creating MatchExpression requirement: %w", err)
+				}
+				reqs = append(reqs, *requirement)
+			}
+			selector = selector.Add(reqs...)
+
 			if !selector.Matches(labels.Set(node.ObjectMeta.Labels)) {
 				r.Logger.Info("local node does not match nodeSelector of layer2", "layer2", item.ObjectMeta.Name, "node", nodeName)
 				continue
