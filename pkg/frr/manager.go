@@ -74,7 +74,7 @@ func NewFRRManager() *Manager {
 	}
 }
 
-func (m *Manager) Init(config *config.Config) error {
+func (m *Manager) Init(cfg *config.Config) error {
 	if _, err := os.Stat(m.TemplatePath); errors.Is(err, os.ErrNotExist) {
 		err = generateTemplateConfig(m.TemplatePath, m.ConfigPath)
 		if err != nil {
@@ -92,18 +92,18 @@ func (m *Manager) Init(config *config.Config) error {
 	}
 	m.configTemplate = tpl
 
-	m.mgmtVrf = config.SkipVRFConfig[0]
-	if routeMap, err := getRouteMapName(m.ConfigPath, "ipv4", m.mgmtVrf); err != nil {
+	m.mgmtVrf = cfg.SkipVRFConfig[0]
+	routeMap, err := getRouteMapName(m.ConfigPath, "ipv4", m.mgmtVrf)
+	if err != nil {
 		return fmt.Errorf("error getting v4 mgmt route-map from FRR config: %w", err)
-	} else {
-		m.ipv4MgmtRouteMapIn = routeMap
 	}
+	m.ipv4MgmtRouteMapIn = routeMap
 
-	if routeMap, err := getRouteMapName(m.ConfigPath, "ipv6", m.mgmtVrf); err != nil {
+	routeMap, err = getRouteMapName(m.ConfigPath, "ipv6", m.mgmtVrf)
+	if err != nil {
 		return fmt.Errorf("error getting v6 mgmt route-map from FRR config: %w", err)
-	} else {
-		m.ipv6MgmtRouteMapIn = routeMap
 	}
+	m.ipv6MgmtRouteMapIn = routeMap
 
 	return nil
 }

@@ -97,7 +97,7 @@ func getRouteMapName(file, addressFamily, mgmtVrfName string) (*string, error) {
 	content := string(fileContent)
 	re := regexp.MustCompile(`(?ms)address-family\s+` + addressFamily + `\s+unicast.*?neighbor\s+def_` + mgmtVrfName + `\s+route-map (\w*)\s+in`)
 	matches := re.FindStringSubmatch(content)
-	if len(matches) != 2 {
+	if len(matches) != len(re.SubexpNames()) {
 		return nil, nil
 	}
 	return &matches[1], nil
