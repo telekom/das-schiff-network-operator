@@ -27,7 +27,24 @@ type templateConfig struct {
 }
 
 func (m *Manager) Configure(in Configuration) (bool, error) {
-	config, err := renderSubtemplates(in)
+	// Remove permit from VRF and only allow deny rules
+	for i, vrf := range in.VRFs {
+		for i, in := range vrf.Import {
+			var items []PrefixedRouteItem
+			for _, item := range in.Items {
+				if item.Action != "deny" {
+					continue
+				}
+				// Swap deny to permit, this will be a prefix-list called from a deny route-map
+				item.Action = "permit"
+				items = append(items, item)
+			}
+			vrf.Import[i].Items = items
+		}
+		in.VRFs[i] = vrf
+	}
+
+	config, err := m.renderSubtemplates(in)
 	if err != nil {
 		return false, err
 	}
@@ -53,7 +70,7 @@ func (m *Manager) Configure(in Configuration) (bool, error) {
 	return false, nil
 }
 
-func renderSubtemplates(in Configuration) (*templateConfig, error) {
+func (m *Manager) renderSubtemplates(in Configuration) (*templateConfig, error) {
 	vrfRouterID, err := (&nl.NetlinkManager{}).GetUnderlayIP()
 	if err != nil {
 		return nil, fmt.Errorf("error getting underlay IP: %w", err)
@@ -88,6 +105,14 @@ func renderSubtemplates(in Configuration) (*templateConfig, error) {
 	if err != nil {
 		return nil, err
 	}
+	routemapMgmtIn, err := render(routeMapMgmtInTpl, mgmtImportConfig{
+		IPv4MgmtRouteMapIn: m.ipv4MgmtRouteMapIn,
+		IPv6MgmtRouteMapIn: m.ipv6MgmtRouteMapIn,
+		MgmtVrfName:        m.mgmtVrf,
+	})
+	if err != nil {
+		return nil, err
+	}
 	asn := in.ASN
 	if asn == 0 {
 		asn = vrfAsnConfig
@@ -109,7 +134,7 @@ func renderSubtemplates(in Configuration) (*templateConfig, error) {
 		NeighborsV6:      string(neighborsV6),
 		BGP:              string(bgp),
 		PrefixLists:      string(prefixlists),
-		RouteMaps:        string(routemaps),
+		RouteMaps:        string(routemaps) + "\n" + string(routemapMgmtIn),
 		UnderlayRouterID: vrfRouterID.String(),
 		Hostname:         hostname,
 	}, nil

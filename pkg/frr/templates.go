@@ -19,6 +19,11 @@ var vrfRawTpl string
 //go:embed tpl/route-map.tpl
 var routeMapRawTpl string
 
+// Template for mgmt vrf in route-map
+//
+//go:embed tpl/route-map-mgmt-in.tpl
+var routeMapMgmtInRawTpl string
+
 // Template for ip prefix-list
 //
 //go:embed tpl/prefix-list.tpl
@@ -45,19 +50,26 @@ var neighborV6RawTpl string
 var bgpInstanceRawTpl string
 
 var (
-	vrfTpl         = mustParse("vrf", vrfRawTpl)
-	routeMapTpl    = mustParse("route-map", routeMapRawTpl)
-	prefixListTpl  = mustParse("prefix-list", prefixListRawTpl)
-	neighborTpl    = mustParse("neighbor", neighborRawTpl)
-	neighborV4Tpl  = mustParse("neighborv4", neighborV4RawTpl)
-	neighborV6Tpl  = mustParse("neighborv6", neighborV6RawTpl)
-	bgpInstanceTpl = mustParse("bgpinstance", bgpInstanceRawTpl)
+	vrfTpl            = mustParse("vrf", vrfRawTpl)
+	routeMapTpl       = mustParse("route-map", routeMapRawTpl)
+	routeMapMgmtInTpl = mustParse("route-map-mgmt-in", routeMapMgmtInRawTpl)
+	prefixListTpl     = mustParse("prefix-list", prefixListRawTpl)
+	neighborTpl       = mustParse("neighbor", neighborRawTpl)
+	neighborV4Tpl     = mustParse("neighborv4", neighborV4RawTpl)
+	neighborV6Tpl     = mustParse("neighborv6", neighborV6RawTpl)
+	bgpInstanceTpl    = mustParse("bgpinstance", bgpInstanceRawTpl)
 )
 
 type bgpInstanceConfig struct {
 	VRFs     []VRFConfiguration
 	RouterID string
 	ASN      int
+}
+
+type mgmtImportConfig struct {
+	IPv4MgmtRouteMapIn *string
+	IPv6MgmtRouteMapIn *string
+	MgmtVrfName        string
 }
 
 func mustParse(name, rawtpl string) *template.Template {
@@ -75,6 +87,20 @@ func render(tpl *template.Template, vrfs interface{}) ([]byte, error) {
 		return []byte{}, fmt.Errorf("error executing template: %w", err)
 	}
 	return buf.Bytes(), nil
+}
+
+func getRouteMapName(file, addressFamily, mgmtVrfName string) (*string, error) {
+	fileContent, err := os.ReadFile(file)
+	if err != nil {
+		return nil, fmt.Errorf("error reading frr config file %s: %w", file, err)
+	}
+	content := string(fileContent)
+	re := regexp.MustCompile(`(?ms)address-family\s+` + addressFamily + `\s+unicast.*?neighbor\s+def_` + mgmtVrfName + `\s+route-map (\w*)\s+in`)
+	matches := re.FindStringSubmatch(content)
+	if len(matches) != 2 {
+		return nil, nil
+	}
+	return &matches[1], nil
 }
 
 func generateTemplateConfig(tplFile, original string) error {
