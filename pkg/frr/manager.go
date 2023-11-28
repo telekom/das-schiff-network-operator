@@ -22,6 +22,11 @@ var (
 
 type Manager struct {
 	configTemplate *template.Template
+
+	ipv4MgmtRouteMapIn *string
+	ipv6MgmtRouteMapIn *string
+	mgmtVrf            string
+
 	ConfigPath     string
 	TemplatePath   string
 	Cli            *Cli
@@ -69,7 +74,7 @@ func NewFRRManager() *Manager {
 	}
 }
 
-func (m *Manager) Init() error {
+func (m *Manager) Init(config *config.Config) error {
 	if _, err := os.Stat(m.TemplatePath); errors.Is(err, os.ErrNotExist) {
 		err = generateTemplateConfig(m.TemplatePath, m.ConfigPath)
 		if err != nil {
@@ -86,6 +91,20 @@ func (m *Manager) Init() error {
 		return fmt.Errorf("error creating new FRR config: %w", err)
 	}
 	m.configTemplate = tpl
+
+	m.mgmtVrf = config.SkipVRFConfig[0]
+	if routeMap, err := getRouteMapName(m.ConfigPath, "ipv4", m.mgmtVrf); err != nil {
+		return fmt.Errorf("error getting v4 mgmt route-map from FRR config: %w", err)
+	} else {
+		m.ipv4MgmtRouteMapIn = routeMap
+	}
+
+	if routeMap, err := getRouteMapName(m.ConfigPath, "ipv6", m.mgmtVrf); err != nil {
+		return fmt.Errorf("error getting v6 mgmt route-map from FRR config: %w", err)
+	} else {
+		m.ipv6MgmtRouteMapIn = routeMap
+	}
+
 	return nil
 }
 
