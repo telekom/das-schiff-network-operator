@@ -47,18 +47,18 @@ func NewReconciler(clusterClient client.Client, anycastTracker *anycast.Tracker)
 
 	reconciler.debouncer = debounce.NewDebouncer(reconciler.reconcileDebounced, defaultDebounceTime)
 
-	if val := os.Getenv("FRR_CONFIG_FILE"); val != "" {
-		reconciler.frrManager.ConfigPath = val
-	}
-	if err := reconciler.frrManager.Init(); err != nil {
-		return nil, fmt.Errorf("error trying to init FRR Manager: %w", err)
-	}
-
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		return nil, fmt.Errorf("error loading config: %w", err)
 	}
 	reconciler.config = cfg
+
+	if val := os.Getenv("FRR_CONFIG_FILE"); val != "" {
+		reconciler.frrManager.ConfigPath = val
+	}
+	if err := reconciler.frrManager.Init(cfg); err != nil {
+		return nil, fmt.Errorf("error trying to init FRR Manager: %w", err)
+	}
 
 	nc, err := healthcheck.LoadConfig(healthcheck.NetHealthcheckFile)
 	if err != nil {
