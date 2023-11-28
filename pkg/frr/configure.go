@@ -29,20 +29,16 @@ type templateConfig struct {
 
 func (m *Manager) Configure(in Configuration, nm *nl.Manager) (bool, error) {
 	// Remove permit from VRF and only allow deny rules
-	for i, vrf := range in.VRFs {
-		for i, in := range vrf.Import {
-			var items []PrefixedRouteItem
-			for _, item := range in.Items {
-				if item.Action != "deny" {
+	for i := range in.VRFs {
+		for j := range in.VRFs[i].Import {
+			for k := range in.VRFs[i].Import[j].Items {
+				if in.VRFs[i].Import[j].Items[k].Action != "deny" {
 					continue
 				}
 				// Swap deny to permit, this will be a prefix-list called from a deny route-map
-				item.Action = "permit"
-				items = append(items, item)
+				in.VRFs[i].Import[j].Items[k].Action = "permit"
 			}
-			vrf.Import[i].Items = items
 		}
-		in.VRFs[i] = vrf
 	}
 
 	config, err := m.renderSubtemplates(in, nm)
@@ -69,6 +65,14 @@ func (m *Manager) Configure(in Configuration, nm *nl.Manager) (bool, error) {
 		return true, nil
 	}
 	return false, nil
+}
+
+func (m *Manager) renderRouteMapMgmtIn() ([]byte, error) {
+	return render(routeMapMgmtInTpl, mgmtImportConfig{
+		IPv4MgmtRouteMapIn: m.ipv4MgmtRouteMapIn,
+		IPv6MgmtRouteMapIn: m.ipv6MgmtRouteMapIn,
+		MgmtVrfName:        m.mgmtVrf,
+	})
 }
 
 func (m *Manager) renderSubtemplates(in Configuration, nlManager *nl.Manager) (*templateConfig, error) {
@@ -106,11 +110,7 @@ func (m *Manager) renderSubtemplates(in Configuration, nlManager *nl.Manager) (*
 	if err != nil {
 		return nil, err
 	}
-	routemapMgmtIn, err := render(routeMapMgmtInTpl, mgmtImportConfig{
-		IPv4MgmtRouteMapIn: m.ipv4MgmtRouteMapIn,
-		IPv6MgmtRouteMapIn: m.ipv6MgmtRouteMapIn,
-		MgmtVrfName:        m.mgmtVrf,
-	})
+	routemapMgmtIn, err := m.renderRouteMapMgmtIn()
 	if err != nil {
 		return nil, err
 	}
