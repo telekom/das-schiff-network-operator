@@ -42,6 +42,8 @@ func (m *Manager) Configure(in Configuration) (bool, error) {
 		return false, err
 	}
 
+	targetConfig = bytes.Replace(targetConfig, []byte("timers 1 3"), []byte("timers 30 90"), -1)
+
 	if !bytes.Equal(currentConfig, targetConfig) {
 		err = os.WriteFile(m.ConfigPath, targetConfig, frrPermissions)
 		if err != nil {
