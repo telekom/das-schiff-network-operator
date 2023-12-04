@@ -189,7 +189,7 @@ static __always_inline int tc_redir(struct __sk_buff *skb)
 
 	fib_params.ifindex = bpf_get_interface(skb->ingress_ifindex);
 
-	ret = bpf_fib_lookup(skb, &fib_params, sizeof(fib_params), 0);
+	ret = bpf_fib_lookup(skb, &fib_params, sizeof(fib_params), BPF_FIB_LOOKUP_DIRECT);
 	ebpf_record_fib_lkup(skb, ret);
 	if (ret == BPF_FIB_LKUP_RET_NOT_FWDED || ret < 0)
 		return ebpf_record_ret_stats(skb, EBPF_NOT_FWD, TC_ACT_OK);
