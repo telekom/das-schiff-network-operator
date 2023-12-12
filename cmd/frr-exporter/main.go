@@ -63,6 +63,6 @@ func main() {
 	err = server.ListenAndServe()
 	// Run server
 	if err != nil {
-		log.Fatal(fmt.Errorf("failed to start server %w", err))
+		log.Fatal(fmt.Errorf("failed to start server: %w", err))
 	}
 }
