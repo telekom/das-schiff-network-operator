@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/vishvananda/netlink"
+	"golang.org/x/exp/maps"
 )
 
 const (
@@ -36,8 +37,10 @@ type NeighborInformation struct {
 	Interface string
 	State     string
 	Family    string
-	IP        string
-	MAC       string
+	Quantity  float64
+}
+type NeighborKey struct {
+	InterfaceIndex, State, Family int
 }
 
 func getNeighborState(state int) (string, error) {
@@ -420,41 +423,46 @@ func (n *NetlinkManager) ListNeighborInformation() ([]NeighborInformation, error
 	if err != nil {
 		return nil, err
 	}
-	neighbors := []NeighborInformation{}
+	neighbors := map[NeighborKey]NeighborInformation{}
 	for index := range netlinkNeighbors {
-		family, err := GetAddressFamily(netlinkNeighbors[index].Family)
-		if err != nil {
-			return nil, fmt.Errorf("error converting addressFamily [%d]: %w", &netlinkNeighbors[index].Family, err)
-		}
-		state, err := getNeighborState(netlinkNeighbors[index].State)
-		if err != nil {
-			return nil, fmt.Errorf("error converting neighborState [%d]: %w", &netlinkNeighbors[index].State, err)
-		}
-
 		linkInfo, err := netlink.LinkByIndex(netlinkNeighbors[index].LinkIndex)
 		if err != nil {
 			return nil, fmt.Errorf("error getting link by index: %w", err)
 		}
 		interfaceName := linkInfo.Attrs().Name
-		hardwareAddr := netlinkNeighbors[index].HardwareAddr.String()
 		// This ensures that only neighbors of secondary interfaces are imported
 		// or hardware interfaces which support VFs
 		if strings.HasPrefix(interfaceName, vethL2Prefix) ||
 			strings.HasPrefix(interfaceName, macvlanPrefix) ||
 			strings.HasPrefix(interfaceName, layer2Prefix) ||
-			linkInfo.Attrs().Vfs != nil ||
-			netlinkNeighbors[index].State != netlink.NUD_NOARP {
-			neighbor := NeighborInformation{
-				Family:    family,
-				State:     state,
-				MAC:       hardwareAddr,
-				IP:        netlinkNeighbors[index].IP.String(),
-				Interface: interfaceName,
+			linkInfo.Attrs().Vfs != nil &&
+				netlinkNeighbors[index].State != netlink.NUD_NOARP {
+			neighborKey := NeighborKey{InterfaceIndex: netlinkNeighbors[index].LinkIndex, State: netlinkNeighbors[index].State, Family: netlinkNeighbors[index].Family}
+			neighborInformation, ok := neighbors[neighborKey]
+			if ok {
+				neighborInformation.Quantity++
+				neighbors[neighborKey] = neighborInformation
+			} else {
+				family, err := GetAddressFamily(netlinkNeighbors[index].Family)
+				if err != nil {
+					return nil, fmt.Errorf("error converting addressFamily [%d]: %w", &netlinkNeighbors[index].Family, err)
+				}
+				state, err := getNeighborState(netlinkNeighbors[index].State)
+				if err != nil {
+					return nil, fmt.Errorf("error converting neighborState [%d]: %w", &netlinkNeighbors[index].State, err)
+				}
+				neighbors[neighborKey] = NeighborInformation{
+					Family:    family,
+					State:     state,
+					Interface: interfaceName,
+					Quantity:  1,
+				}
 			}
-			neighbors = append(neighbors, neighbor)
+
 		}
 	}
-	return neighbors, nil
+
+	return maps.Values(neighbors), nil
 }
 
 func (*NetlinkManager) GetBridgeID(info *Layer2Information) (int, error) {

@@ -1,4 +1,4 @@
-ARG FRR_VERSION="8.2.2"
+ARG FRR_VERSION="9.1.0"
 ARG REGISTRY="docker.io"
 # Build the manager binary
 FROM docker.io/library/golang:1.19-alpine as builder

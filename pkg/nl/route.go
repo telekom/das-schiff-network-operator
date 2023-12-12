@@ -8,6 +8,7 @@ import (
 	"github.com/telekom/das-schiff-network-operator/pkg/route"
 	schiff_unix "github.com/telekom/das-schiff-network-operator/pkg/unix"
 	"github.com/vishvananda/netlink"
+	"golang.org/x/exp/maps"
 	"golang.org/x/sys/unix"
 )
 
@@ -194,9 +195,5 @@ func (n *NetlinkManager) ListRouteInformation() ([]route.Information, error) {
 			}
 		}
 	}
-	routeList := []route.Information{}
-	for _, routeInformation := range routes {
-		routeList = append(routeList, routeInformation)
-	}
-	return routeList, nil
+	return maps.Values(routes), nil
 }

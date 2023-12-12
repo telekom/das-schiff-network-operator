@@ -36,7 +36,7 @@ func NewNetlinkCollector() (Collector, error) {
 			desc: prometheus.NewDesc(
 				prometheus.BuildFQName(namespace, "netlink", "neighbors"),
 				"The number of neighbors currently in the Linux Dataplane.",
-				[]string{"mac", "ip", "interface", "address_family", "status"},
+				[]string{"interface", "address_family", "status"},
 				nil,
 			),
 			valueType: prometheus.GaugeValue,
@@ -64,7 +64,7 @@ func (c *netlinkCollector) updateNeighbors(ch chan<- prometheus.Metric) {
 		c.logger.Error(err, "Cannot get neighbors from netlink")
 	}
 	for _, neighbor := range neighbors {
-		ch <- c.neighborsDesc.mustNewConstMetric(1.0, neighbor.MAC, neighbor.IP, neighbor.Interface, neighbor.Family, neighbor.State)
+		ch <- c.neighborsDesc.mustNewConstMetric(neighbor.Quantity, neighbor.Interface, neighbor.Family, neighbor.State)
 	}
 }
 

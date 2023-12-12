@@ -14,7 +14,6 @@ import (
 	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 const defaultDebounceTime = 20 * time.Second
@@ -25,6 +24,7 @@ type Reconciler struct {
 	frrManager     *frr.Manager
 	anycastTracker *anycast.Tracker
 	config         *config.Config
+	logger         logr.Logger
 	healthChecker  *healthcheck.HealthChecker
 
 	debouncer *debounce.Debouncer
@@ -37,12 +37,13 @@ type reconcile struct {
 	logr.Logger
 }
 
-func NewReconciler(clusterClient client.Client, anycastTracker *anycast.Tracker) (*Reconciler, error) {
+func NewReconciler(clusterClient client.Client, anycastTracker *anycast.Tracker, logger logr.Logger) (*Reconciler, error) {
 	reconciler := &Reconciler{
 		client:         clusterClient,
 		netlinkManager: &nl.NetlinkManager{},
 		frrManager:     frr.NewFRRManager(),
 		anycastTracker: anycastTracker,
+		logger:         logger,
 	}
 
 	reconciler.debouncer = debounce.NewDebouncer(reconciler.reconcileDebounced, defaultDebounceTime)
@@ -83,7 +84,7 @@ func (reconciler *Reconciler) Reconcile(ctx context.Context) {
 func (reconciler *Reconciler) reconcileDebounced(ctx context.Context) error {
 	r := &reconcile{
 		Reconciler: reconciler,
-		Logger:     log.FromContext(ctx),
+		Logger:     reconciler.logger,
 	}
 
 	r.Logger.Info("Reloading config")
