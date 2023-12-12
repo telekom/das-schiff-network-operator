@@ -1,5 +1,5 @@
 ARG FRR_VERSION="9.1.0"
-ARG REGISTRY="docker.io"
+ARG REGISTRY="quay.io"
 # Build the manager binary
 FROM docker.io/library/golang:1.21-alpine as builder
 
@@ -19,7 +19,7 @@ COPY pkg/ pkg/
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -o frr-exporter main.go
 
 
-FROM ${REGISTRY}/frrouting/frr:v${FRR_VERSION}
+FROM ${REGISTRY}/frrouting/frr:${FRR_VERSION}
 
 RUN apk add --no-cache frr
 

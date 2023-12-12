@@ -430,13 +430,16 @@ func (n *NetlinkManager) ListNeighborInformation() ([]NeighborInformation, error
 			return nil, fmt.Errorf("error getting link by index: %w", err)
 		}
 		interfaceName := linkInfo.Attrs().Name
+		// If NOARP is set on neighbor we skip it here
+		if netlinkNeighbors[index].State == netlink.NUD_NOARP {
+			continue
+		}
 		// This ensures that only neighbors of secondary interfaces are imported
 		// or hardware interfaces which support VFs
 		if strings.HasPrefix(interfaceName, vethL2Prefix) ||
 			strings.HasPrefix(interfaceName, macvlanPrefix) ||
 			strings.HasPrefix(interfaceName, layer2Prefix) ||
-			linkInfo.Attrs().Vfs != nil &&
-				netlinkNeighbors[index].State != netlink.NUD_NOARP {
+			linkInfo.Attrs().Vfs != nil {
 			neighborKey := NeighborKey{InterfaceIndex: netlinkNeighbors[index].LinkIndex, State: netlinkNeighbors[index].State, Family: netlinkNeighbors[index].Family}
 			neighborInformation, ok := neighbors[neighborKey]
 			if ok {
@@ -458,7 +461,6 @@ func (n *NetlinkManager) ListNeighborInformation() ([]NeighborInformation, error
 					Quantity:  1,
 				}
 			}
-
 		}
 	}
 
