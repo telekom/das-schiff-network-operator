@@ -46,7 +46,7 @@ func NewReconciler(clusterClient client.Client, anycastTracker *anycast.Tracker,
 		logger:         logger,
 	}
 
-	reconciler.debouncer = debounce.NewDebouncer(reconciler.reconcileDebounced, defaultDebounceTime)
+	reconciler.debouncer = debounce.NewDebouncer(reconciler.reconcileDebounced, defaultDebounceTime, logger)
 
 	if val := os.Getenv("FRR_CONFIG_FILE"); val != "" {
 		reconciler.frrManager.ConfigPath = val

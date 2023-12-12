@@ -5,7 +5,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"sigs.k8s.io/controller-runtime/pkg/log"
+	"github.com/go-logr/logr"
 )
 
 // Debouncer struct.
@@ -17,13 +17,15 @@ type Debouncer struct {
 	function func(context.Context) error
 	// Duration between function call
 	debounceTime time.Duration
+	logger       logr.Logger
 }
 
 // Create a new debouncer.
-func NewDebouncer(function func(context.Context) error, debounceTime time.Duration) *Debouncer {
+func NewDebouncer(function func(context.Context) error, debounceTime time.Duration, logger logr.Logger) *Debouncer {
 	return &Debouncer{
 		function:     function,
 		debounceTime: debounceTime,
+		logger:       logger,
 	}
 }
 
@@ -43,7 +45,7 @@ func (d *Debouncer) debounceRoutine(ctx context.Context) {
 			}
 			break
 		}
-		log.FromContext(ctx).Error(err, "error debouncing")
+		d.logger.Error(err, "error debouncing")
 	}
 }
 
