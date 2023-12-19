@@ -142,6 +142,11 @@ func (r *reconcile) createL2(info *nl.Layer2Information, anycastTrackerInterface
 }
 
 func (r *reconcile) getDesired(l2vnis []networkv1alpha1.Layer2NetworkConfiguration) ([]nl.Layer2Information, error) {
+	availableVrfs, err := r.netlinkManager.ListL3()
+	if err != nil {
+		return nil, fmt.Errorf("error loading available VRFs: %w", err)
+	}
+
 	desired := []nl.Layer2Information{}
 	for i := range l2vnis {
 		spec := l2vnis[i].Spec
@@ -155,6 +160,20 @@ func (r *reconcile) getDesired(l2vnis []networkv1alpha1.Layer2NetworkConfigurati
 		if err != nil {
 			r.Logger.Error(err, "error parsing anycast gateways", "layer", l2vnis[i].ObjectMeta.Name, "gw", spec.AnycastGateways)
 			return nil, fmt.Errorf("error parsing anycast gateways: %w", err)
+		}
+
+		if len(spec.VRF) > 0 {
+			vrfAvailable := false
+			for _, info := range availableVrfs {
+				if info.Name == spec.VRF {
+					vrfAvailable = true
+					break
+				}
+			}
+			if !vrfAvailable {
+				r.Logger.Error(err, "VRF of Layer2 not found on node", "layer", l2vnis[i].ObjectMeta.Name, "vrf", spec.VRF)
+				continue
+			}
 		}
 
 		desired = append(desired, nl.Layer2Information{

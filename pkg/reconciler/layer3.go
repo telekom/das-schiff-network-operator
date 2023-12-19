@@ -109,8 +109,8 @@ func (r *reconcile) createVrfConfigMap(l3vnis []networkv1alpha1.VRFRouteConfigur
 			vni = config.SkipVrfTemplateVni
 		} else {
 			err := fmt.Errorf("vrf not in vrf vni map")
-			r.Logger.Error(err, "VRF does not exist in VRF VNI config", "vrf", spec.VRF, "name", l3vnis[i].ObjectMeta.Name, "namespace", l3vnis[i].ObjectMeta.Namespace)
-			return nil, err
+			r.Logger.Error(err, "VRF does not exist in VRF VNI config, ignoring", "vrf", spec.VRF, "name", l3vnis[i].ObjectMeta.Name, "namespace", l3vnis[i].ObjectMeta.Namespace)
+			continue
 		}
 
 		cfg, err := createVrfConfig(vrfConfigMap, &spec, vni, rt)
