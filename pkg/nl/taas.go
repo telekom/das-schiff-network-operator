@@ -8,12 +8,12 @@ type TaasInformation struct {
 }
 
 func (n *NetlinkManager) CreateTaas(info TaasInformation) error {
-	_, err := n.createVRF(taasVrfPrefix+info.Name, info.Table)
+	_, err := n.createVRF(info.Name, info.Table)
 	if err != nil {
 		return fmt.Errorf("error creating VRF for TaaS: %w", err)
 	}
 
-	err = n.setUp(taasVrfPrefix + info.Name)
+	err = n.setUp(info.Name)
 	if err != nil {
 		return fmt.Errorf("error set VRF up for TaaS: %w", err)
 	}
@@ -22,7 +22,7 @@ func (n *NetlinkManager) CreateTaas(info TaasInformation) error {
 }
 
 func (n *NetlinkManager) CleanupTaas(info TaasInformation) error {
-	err := n.deleteLink(taasVrfPrefix + info.Name)
+	err := n.deleteLink(info.Name)
 	if err != nil {
 		return fmt.Errorf("error deleting VRF for TaaS: %w", err)
 	}

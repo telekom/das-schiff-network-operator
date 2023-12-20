@@ -211,7 +211,7 @@ func (*NetlinkManager) ListTaas() ([]TaasInformation, error) {
 		}
 
 		info := TaasInformation{
-			Name:  link.Attrs().Name[3:],
+			Name:  link.Attrs().Name,
 			Table: int(link.(*netlink.Vrf).Table),
 		}
 

@@ -47,25 +47,29 @@ func (r *reconcile) reconcileLayer3(l3vnis []networkv1alpha1.VRFRouteConfigurati
 
 	vrfFromTaas := createVrfFromTaaS(taas)
 
-	vrfConfigs := []frr.VRFConfiguration{}
+	allConfigs := []frr.VRFConfiguration{}
+	l3Configs := []frr.VRFConfiguration{}
+	taasConfigs := []frr.VRFConfiguration{}
 	for key := range vrfConfigMap {
-		vrfConfigs = append(vrfConfigs, vrfConfigMap[key])
+		allConfigs = append(allConfigs, vrfConfigMap[key])
+		l3Configs = append(l3Configs, vrfConfigMap[key])
 	}
 	for key := range vrfFromTaas {
-		vrfConfigs = append(vrfConfigs, vrfFromTaas[key])
+		allConfigs = append(allConfigs, vrfFromTaas[key])
+		taasConfigs = append(taasConfigs, vrfConfigMap[key])
 	}
 
-	sort.SliceStable(vrfConfigs, func(i, j int) bool {
-		return vrfConfigs[i].VNI < vrfConfigs[j].VNI
+	sort.SliceStable(allConfigs, func(i, j int) bool {
+		return allConfigs[i].VNI < allConfigs[j].VNI
 	})
 
-	created, err := r.reconcileL3Netlink(vrfConfigs)
+	created, err := r.reconcileL3Netlink(l3Configs)
 	if err != nil {
 		r.Logger.Error(err, "error reconciling Netlink")
 		return err
 	}
 
-	err = r.reconcileTaasNetlink(vrfConfigs)
+	err = r.reconcileTaasNetlink(taasConfigs)
 	if err != nil {
 		return err
 	}
@@ -73,7 +77,7 @@ func (r *reconcile) reconcileLayer3(l3vnis []networkv1alpha1.VRFRouteConfigurati
 	// We wait here for two seconds to let FRR settle after updating netlink devices
 	time.Sleep(defaultSleep)
 
-	err = r.configureFRR(vrfConfigs)
+	err = r.configureFRR(allConfigs)
 	if err != nil {
 		return err
 	}
