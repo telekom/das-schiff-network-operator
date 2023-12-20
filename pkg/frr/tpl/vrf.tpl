@@ -1,5 +1,5 @@
 {{range $vrf := .}}
-{{if $vrf.ShouldTemplateVRF}}
+{{if and $vrf.ShouldTemplateVRF (not $vrf.IsTaaS)}}
 vrf vr.{{$vrf.Name}}
  vni {{$vrf.VNI}}
 exit-vrf

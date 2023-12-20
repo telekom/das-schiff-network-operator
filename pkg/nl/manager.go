@@ -16,6 +16,7 @@ const (
 	layer2Prefix       = "l2."
 	macvlanPrefix      = "vlan."
 	vethL2Prefix       = "l2v."
+	taasVrfPrefix      = "taas."
 
 	underlayLoopback = "dum.underlay"
 

@@ -1,4 +1,5 @@
 {{range $vrf := .}}
+{{if not $vrf.IsTaaS}}
 {{range $i, $pl := $vrf.Import}}
 route-map rm_{{$vrf.Name}}_import permit {{$pl.Seq}}
   match ip address prefix-list pl_{{$vrf.Name}}_import_{{$i}}
@@ -29,5 +30,6 @@ route-map rm6_{{$vrf.Name}}_export permit {{$pl.Seq}}
   set community {{$pl.Community}}
 {{- end}}
 exit
+{{- end -}}
 {{- end -}}
 {{- end -}}

@@ -196,3 +196,27 @@ func (n *NetlinkManager) ListL2() ([]Layer2Information, error) {
 
 	return infos, nil
 }
+
+func (*NetlinkManager) ListTaas() ([]TaasInformation, error) {
+	infos := []TaasInformation{}
+
+	links, err := netlink.LinkList()
+	if err != nil {
+		return nil, fmt.Errorf("error listing links: %w", err)
+	}
+
+	for _, link := range links {
+		if !(link.Type() == "vrf" && strings.HasPrefix(link.Attrs().Name, taasVrfPrefix)) {
+			continue
+		}
+
+		info := TaasInformation{
+			Name:  link.Attrs().Name[3:],
+			Table: int(link.(*netlink.Vrf).Table),
+		}
+
+		infos = append(infos, info)
+	}
+
+	return infos, nil
+}

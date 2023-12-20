@@ -27,16 +27,32 @@ func (r *reconcile) fetchLayer3(ctx context.Context) ([]networkv1alpha1.VRFRoute
 	return vrfs.Items, nil
 }
 
+func (r *reconcile) fetchTaas(ctx context.Context) ([]networkv1alpha1.RoutingTable, error) {
+	tables := &networkv1alpha1.RoutingTableList{}
+	err := r.client.List(ctx, tables)
+	if err != nil {
+		r.Logger.Error(err, "error getting list of TaaS from Kubernetes")
+		return nil, fmt.Errorf("error getting list of TaaS from Kubernetes: %w", err)
+	}
+
+	return tables.Items, nil
+}
+
 // nolint: contextcheck // context is not relevant
-func (r *reconcile) reconcileLayer3(l3vnis []networkv1alpha1.VRFRouteConfiguration) error {
+func (r *reconcile) reconcileLayer3(l3vnis []networkv1alpha1.VRFRouteConfiguration, taas []networkv1alpha1.RoutingTable) error {
 	vrfConfigMap, err := r.createVrfConfigMap(l3vnis)
 	if err != nil {
 		return err
 	}
 
+	vrfFromTaas := createVrfFromTaaS(taas)
+
 	vrfConfigs := []frr.VRFConfiguration{}
 	for key := range vrfConfigMap {
 		vrfConfigs = append(vrfConfigs, vrfConfigMap[key])
+	}
+	for key := range vrfFromTaas {
+		vrfConfigs = append(vrfConfigs, vrfFromTaas[key])
 	}
 
 	sort.SliceStable(vrfConfigs, func(i, j int) bool {
@@ -49,9 +65,31 @@ func (r *reconcile) reconcileLayer3(l3vnis []networkv1alpha1.VRFRouteConfigurati
 		return err
 	}
 
+	err = r.reconcileTaasNetlink(vrfConfigs)
+	if err != nil {
+		return err
+	}
+
 	// We wait here for two seconds to let FRR settle after updating netlink devices
 	time.Sleep(defaultSleep)
 
+	err = r.configureFRR(vrfConfigs)
+	if err != nil {
+		return err
+	}
+
+	// Make sure that all created netlink VRFs are up after FRR reload
+	time.Sleep(defaultSleep)
+	for _, info := range created {
+		if err := r.netlinkManager.UpL3(info); err != nil {
+			r.Logger.Error(err, "error setting L3 to state UP")
+			return fmt.Errorf("error setting L3 to state UP: %w", err)
+		}
+	}
+	return nil
+}
+
+func (r *reconcile) configureFRR(vrfConfigs []frr.VRFConfiguration) error {
 	changed, err := r.frrManager.Configure(frr.Configuration{
 		VRFs: vrfConfigs,
 		ASN:  r.config.ServerASN,
@@ -76,15 +114,6 @@ func (r *reconcile) reconcileLayer3(l3vnis []networkv1alpha1.VRFRouteConfigurati
 		}
 		r.dirtyFRRConfig = false
 		r.Logger.Info("reloaded FRR config")
-	}
-
-	// Make sure that all created netlink VRFs are up after FRR reload
-	time.Sleep(defaultSleep)
-	for _, info := range created {
-		if err := r.netlinkManager.UpL3(info); err != nil {
-			r.Logger.Error(err, "error setting L3 to state UP")
-			return fmt.Errorf("error setting L3 to state UP: %w", err)
-		}
 	}
 	return nil
 }
@@ -121,6 +150,24 @@ func (r *reconcile) createVrfConfigMap(l3vnis []networkv1alpha1.VRFRouteConfigur
 	}
 
 	return vrfConfigMap, nil
+}
+
+func createVrfFromTaaS(taas []networkv1alpha1.RoutingTable) map[string]frr.VRFConfiguration {
+	vrfConfigMap := map[string]frr.VRFConfiguration{}
+
+	for i := range taas {
+		spec := taas[i].Spec
+
+		name := fmt.Sprintf("taas.%d", spec.TableID)
+
+		vrfConfigMap[name] = frr.VRFConfiguration{
+			Name:   name,
+			VNI:    spec.TableID,
+			IsTaaS: true,
+		}
+	}
+
+	return vrfConfigMap
 }
 
 func createVrfConfig(vrfConfigMap map[string]frr.VRFConfiguration, spec *networkv1alpha1.VRFRouteConfigurationSpec, vni int, rt string) (*frr.VRFConfiguration, error) {
@@ -207,6 +254,69 @@ func (r *reconcile) reconcileL3Netlink(vrfConfigs []frr.VRFConfiguration) ([]nl.
 	}
 
 	return toCreate, nil
+}
+
+func (r *reconcile) reconcileTaasNetlink(vrfConfigs []frr.VRFConfiguration) error {
+	existing, err := r.netlinkManager.ListTaas()
+	if err != nil {
+		return fmt.Errorf("error listing TaaS VRF information: %w", err)
+	}
+
+	err = r.cleanupTaasNetlink(existing, vrfConfigs)
+	if err != nil {
+		return err
+	}
+
+	err = r.createTaasNetlink(existing, vrfConfigs)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (r *reconcile) cleanupTaasNetlink(existing []nl.TaasInformation, intended []frr.VRFConfiguration) error {
+	for _, cfg := range existing {
+		stillExists := false
+		for i := range intended {
+			if intended[i].IsTaaS && intended[i].Name == cfg.Name && intended[i].VNI == cfg.Table {
+				stillExists = true
+			}
+		}
+		if !stillExists {
+			err := r.netlinkManager.CleanupTaas(cfg)
+			if err != nil {
+				return fmt.Errorf("error deleting TaaS %s, table %d: %w", cfg.Name, cfg.Table, err)
+			}
+		}
+	}
+	return nil
+}
+
+func (r *reconcile) createTaasNetlink(existing []nl.TaasInformation, intended []frr.VRFConfiguration) error {
+	for i := range intended {
+		if !intended[i].IsTaaS {
+			continue
+		}
+		alreadyExists := false
+		for _, cfg := range existing {
+			if intended[i].Name == cfg.Name && intended[i].VNI == cfg.Table {
+				alreadyExists = true
+				break
+			}
+		}
+		if !alreadyExists {
+			info := nl.TaasInformation{
+				Name:  intended[i].Name,
+				Table: intended[i].VNI,
+			}
+			err := r.netlinkManager.CreateTaas(info)
+			if err != nil {
+				return fmt.Errorf("error creating Taas %s, table %d: %w", info.Name, info.Table, err)
+			}
+		}
+	}
+	return nil
 }
 
 func prepareVRFsToCreate(vrfConfigs []frr.VRFConfiguration, existing []nl.VRFInformation) []nl.VRFInformation {
