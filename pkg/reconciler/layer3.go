@@ -63,21 +63,22 @@ func (r *reconcile) reconcileLayer3(l3vnis []networkv1alpha1.VRFRouteConfigurati
 		return allConfigs[i].VNI < allConfigs[j].VNI
 	})
 
-	created, err := r.reconcileL3Netlink(l3Configs)
+	created, deletedVRF, err := r.reconcileL3Netlink(l3Configs)
 	if err != nil {
 		r.Logger.Error(err, "error reconciling Netlink")
 		return err
 	}
 
-	err = r.reconcileTaasNetlink(taasConfigs)
+	deletedTaas, err := r.reconcileTaasNetlink(taasConfigs)
 	if err != nil {
 		return err
 	}
+	reloadTwice := deletedVRF || deletedTaas
 
 	// We wait here for two seconds to let FRR settle after updating netlink devices
 	time.Sleep(defaultSleep)
 
-	err = r.configureFRR(allConfigs)
+	err = r.configureFRR(allConfigs, reloadTwice)
 	if err != nil {
 		return err
 	}
@@ -93,7 +94,7 @@ func (r *reconcile) reconcileLayer3(l3vnis []networkv1alpha1.VRFRouteConfigurati
 	return nil
 }
 
-func (r *reconcile) configureFRR(vrfConfigs []frr.VRFConfiguration) error {
+func (r *reconcile) configureFRR(vrfConfigs []frr.VRFConfiguration, reloadTwice bool) error {
 	changed, err := r.frrManager.Configure(frr.Configuration{
 		VRFs: vrfConfigs,
 		ASN:  r.config.ServerASN,
@@ -104,21 +105,39 @@ func (r *reconcile) configureFRR(vrfConfigs []frr.VRFConfiguration) error {
 	}
 
 	if changed || r.dirtyFRRConfig {
-		r.Logger.Info("trying to reload FRR config because it changed")
-		err = r.frrManager.ReloadFRR()
+		err := r.reloadFRR()
 		if err != nil {
-			r.Logger.Error(err, "error reloading FRR systemd unit, trying restart")
+			r.dirtyFRRConfig = true
+			return err
+		}
 
-			err = r.frrManager.RestartFRR()
+		// When a BGP VRF is deleted there is a leftover running configuration after reload
+		// A second reload fixes this.
+		if reloadTwice {
+			err := r.reloadFRR()
 			if err != nil {
 				r.dirtyFRRConfig = true
-				r.Logger.Error(err, "error restarting FRR systemd unit")
-				return fmt.Errorf("error reloading / restarting FRR systemd unit: %w", err)
+				return err
 			}
 		}
 		r.dirtyFRRConfig = false
-		r.Logger.Info("reloaded FRR config")
 	}
+	return nil
+}
+
+func (r *reconcile) reloadFRR() error {
+	r.Logger.Info("trying to reload FRR config because it changed")
+	err := r.frrManager.ReloadFRR()
+	if err != nil {
+		r.Logger.Error(err, "error reloading FRR systemd unit, trying restart")
+
+		err = r.frrManager.RestartFRR()
+		if err != nil {
+			r.Logger.Error(err, "error restarting FRR systemd unit")
+			return fmt.Errorf("error reloading / restarting FRR systemd unit: %w", err)
+		}
+	}
+	r.Logger.Info("reloaded FRR config")
 	return nil
 }
 
@@ -214,10 +233,10 @@ func createVrfConfig(vrfConfigMap map[string]frr.VRFConfiguration, spec *network
 	return &cfg, nil
 }
 
-func (r *reconcile) reconcileL3Netlink(vrfConfigs []frr.VRFConfiguration) ([]nl.VRFInformation, error) {
+func (r *reconcile) reconcileL3Netlink(vrfConfigs []frr.VRFConfiguration) ([]nl.VRFInformation, bool, error) {
 	existing, err := r.netlinkManager.ListL3()
 	if err != nil {
-		return nil, fmt.Errorf("error listing L3 VRF information: %w", err)
+		return nil, false, fmt.Errorf("error listing L3 VRF information: %w", err)
 	}
 
 	// Check for VRFs that are configured on the host but no longer in Kubernetes
@@ -253,33 +272,34 @@ func (r *reconcile) reconcileL3Netlink(vrfConfigs []frr.VRFConfiguration) ([]nl.
 		r.Logger.Info("Creating VRF to match Kubernetes", "vrf", info.Name, "vni", info.VNI)
 		err := r.netlinkManager.CreateL3(info)
 		if err != nil {
-			return nil, fmt.Errorf("error creating VRF %s, VNI %d: %w", info.Name, info.VNI, err)
+			return nil, false, fmt.Errorf("error creating VRF %s, VNI %d: %w", info.Name, info.VNI, err)
 		}
 	}
 
-	return toCreate, nil
+	return toCreate, len(toDelete) > 0, nil
 }
 
-func (r *reconcile) reconcileTaasNetlink(vrfConfigs []frr.VRFConfiguration) error {
+func (r *reconcile) reconcileTaasNetlink(vrfConfigs []frr.VRFConfiguration) (bool, error) {
 	existing, err := r.netlinkManager.ListTaas()
 	if err != nil {
-		return fmt.Errorf("error listing TaaS VRF information: %w", err)
+		return false, fmt.Errorf("error listing TaaS VRF information: %w", err)
 	}
 
-	err = r.cleanupTaasNetlink(existing, vrfConfigs)
+	deletedInterface, err := r.cleanupTaasNetlink(existing, vrfConfigs)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	err = r.createTaasNetlink(existing, vrfConfigs)
 	if err != nil {
-		return err
+		return false, err
 	}
 
-	return nil
+	return deletedInterface, nil
 }
 
-func (r *reconcile) cleanupTaasNetlink(existing []nl.TaasInformation, intended []frr.VRFConfiguration) error {
+func (r *reconcile) cleanupTaasNetlink(existing []nl.TaasInformation, intended []frr.VRFConfiguration) (bool, error) {
+	deletedInterface := false
 	for _, cfg := range existing {
 		stillExists := false
 		for i := range intended {
@@ -288,13 +308,14 @@ func (r *reconcile) cleanupTaasNetlink(existing []nl.TaasInformation, intended [
 			}
 		}
 		if !stillExists {
+			deletedInterface = true
 			err := r.netlinkManager.CleanupTaas(cfg)
 			if err != nil {
-				return fmt.Errorf("error deleting TaaS %s, table %d: %w", cfg.Name, cfg.Table, err)
+				return false, fmt.Errorf("error deleting TaaS %s, table %d: %w", cfg.Name, cfg.Table, err)
 			}
 		}
 	}
-	return nil
+	return deletedInterface, nil
 }
 
 func (r *reconcile) createTaasNetlink(existing []nl.TaasInformation, intended []frr.VRFConfiguration) error {
