@@ -56,7 +56,7 @@ func (r *reconcile) reconcileLayer3(l3vnis []networkv1alpha1.VRFRouteConfigurati
 	}
 	for key := range vrfFromTaas {
 		allConfigs = append(allConfigs, vrfFromTaas[key])
-		taasConfigs = append(taasConfigs, vrfConfigMap[key])
+		taasConfigs = append(taasConfigs, vrfFromTaas[key])
 	}
 
 	sort.SliceStable(allConfigs, func(i, j int) bool {
@@ -283,7 +283,7 @@ func (r *reconcile) cleanupTaasNetlink(existing []nl.TaasInformation, intended [
 	for _, cfg := range existing {
 		stillExists := false
 		for i := range intended {
-			if intended[i].IsTaaS && intended[i].Name == cfg.Name && intended[i].VNI == cfg.Table {
+			if intended[i].Name == cfg.Name && intended[i].VNI == cfg.Table {
 				stillExists = true
 			}
 		}
@@ -299,9 +299,6 @@ func (r *reconcile) cleanupTaasNetlink(existing []nl.TaasInformation, intended [
 
 func (r *reconcile) createTaasNetlink(existing []nl.TaasInformation, intended []frr.VRFConfiguration) error {
 	for i := range intended {
-		if !intended[i].IsTaaS {
-			continue
-		}
 		alreadyExists := false
 		for _, cfg := range existing {
 			if intended[i].Name == cfg.Name && intended[i].VNI == cfg.Table {
