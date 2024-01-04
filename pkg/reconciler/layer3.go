@@ -181,13 +181,8 @@ func (r *reconcile) reconcileL3Netlink(vrfConfigs []frr.VRFConfiguration) ([]nl.
 		}
 		if !stillExists || cfg.MarkForDelete {
 			toDelete = append(toDelete, cfg)
-		} else {
-			if err := r.netlinkManager.EnsureBPFProgram(cfg); err != nil {
-				r.Logger.Error(err, "Error ensuring BPF program on VRF", "vrf", cfg.Name, "vni", strconv.Itoa(cfg.VNI))
-			}
-			if err := r.netlinkManager.EnsureMTU(cfg); err != nil {
-				r.Logger.Error(err, "Error ensuring VRF veth link MTU", "vrf", cfg.Name, "vni", strconv.Itoa(cfg.VNI), "mtu", strconv.Itoa(cfg.MTU))
-			}
+		} else if err := r.reconcileExisting(cfg); err != nil {
+			r.Logger.Error(err, "error reconciling existing VRF", "vrf", cfg.Name, "vni", strconv.Itoa(cfg.VNI))
 		}
 	}
 
@@ -212,6 +207,16 @@ func (r *reconcile) reconcileL3Netlink(vrfConfigs []frr.VRFConfiguration) ([]nl.
 	}
 
 	return toCreate, nil
+}
+
+func (r *reconcile) reconcileExisting(cfg nl.VRFInformation) error {
+	if err := r.netlinkManager.EnsureBPFProgram(cfg); err != nil {
+		return fmt.Errorf("error ensuring BPF program on VRF")
+	}
+	if err := r.netlinkManager.EnsureMTU(cfg); err != nil {
+		return fmt.Errorf("error setting VRF veth link MTU: %d", cfg.MTU)
+	}
+	return nil
 }
 
 func prepareVRFsToCreate(vrfConfigs []frr.VRFConfiguration, existing []nl.VRFInformation) []nl.VRFInformation {
