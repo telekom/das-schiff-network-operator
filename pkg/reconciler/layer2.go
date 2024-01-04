@@ -69,6 +69,10 @@ func (r *reconcile) fetchLayer2(ctx context.Context) ([]networkv1alpha1.Layer2Ne
 		l2vnis = append(l2vnis, *item)
 	}
 
+	if err := r.checkL2Duplicates(l2vnis); err != nil {
+		return nil, err
+	}
+
 	return l2vnis, nil
 }
 
@@ -221,6 +225,24 @@ func (r *reconcile) reconcileExistingLayer(desired, currentConfig *nl.Layer2Info
 			return fmt.Errorf("error getting bridge id for vlanId %d: %w", desired.VlanID, err)
 		}
 		*anycastTrackerInterfaces = append(*anycastTrackerInterfaces, bridgeID)
+	}
+	return nil
+}
+
+func (r *reconcile) checkL2Duplicates(configs []networkv1alpha1.Layer2NetworkConfiguration) error {
+	for i, config1 := range configs {
+		for j, config2 := range configs {
+			if i == j {
+				continue
+			}
+
+			if config1.Spec.ID == config2.Spec.ID {
+				return fmt.Errorf("dupliate Layer2 ID found: %s %s", config1.ObjectMeta.Name, config2.ObjectMeta.Name)
+			}
+			if config1.Spec.VNI == config2.Spec.VNI {
+				return fmt.Errorf("dupliate Layer2 VNI found: %s %s", config1.ObjectMeta.Name, config2.ObjectMeta.Name)
+			}
+		}
 	}
 	return nil
 }
