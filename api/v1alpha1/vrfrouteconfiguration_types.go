@@ -71,6 +71,10 @@ type VRFRouteConfigurationSpec struct {
 	// Sequence of the generated route-map, maximum of 65534 because we sometimes have to set an explicit default-deny
 	Seq int `json:"seq"`
 
+	// +kubebuilder:default=9000
+	// The MTU of the VRF
+	MTU int `json:"mtu"`
+
 	// Community for export, if omitted no community will be set
 	Community *string `json:"community,omitempty"`
 }

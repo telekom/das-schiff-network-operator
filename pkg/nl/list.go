@@ -91,6 +91,12 @@ func (*NetlinkManager) updateL3Indices(info *VRFInformation) {
 	} else {
 		info.MarkForDelete = true
 	}
+	vethLink, err := netlink.LinkByName(vrfToDefaultPrefix + info.Name)
+	if err == nil {
+		info.MTU = vethLink.Attrs().MTU
+	} else {
+		info.MarkForDelete = true
+	}
 }
 
 func (*NetlinkManager) updateL2Indices(info *Layer2Information, links []netlink.Link) error {

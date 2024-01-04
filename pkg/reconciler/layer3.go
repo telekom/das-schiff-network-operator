@@ -181,8 +181,13 @@ func (r *reconcile) reconcileL3Netlink(vrfConfigs []frr.VRFConfiguration) ([]nl.
 		}
 		if !stillExists || cfg.MarkForDelete {
 			toDelete = append(toDelete, cfg)
-		} else if err := r.netlinkManager.EnsureBPFProgram(cfg); err != nil {
-			r.Logger.Error(err, "Error ensuring BPF program on VRF", "vrf", cfg.Name, "vni", strconv.Itoa(cfg.VNI))
+		} else {
+			if err := r.netlinkManager.EnsureBPFProgram(cfg); err != nil {
+				r.Logger.Error(err, "Error ensuring BPF program on VRF", "vrf", cfg.Name, "vni", strconv.Itoa(cfg.VNI))
+			}
+			if err := r.netlinkManager.EnsureMTU(cfg); err != nil {
+				r.Logger.Error(err, "Error ensuring VRF veth link MTU", "vrf", cfg.Name, "vni", strconv.Itoa(cfg.VNI), "mtu", strconv.Itoa(cfg.MTU))
+			}
 		}
 	}
 
@@ -227,6 +232,7 @@ func prepareVRFsToCreate(vrfConfigs []frr.VRFConfiguration, existing []nl.VRFInf
 			create = append(create, nl.VRFInformation{
 				Name: vrfConfigs[i].Name,
 				VNI:  vrfConfigs[i].VNI,
+				MTU:  vrfConfigs[i].MTU,
 			})
 		}
 	}
