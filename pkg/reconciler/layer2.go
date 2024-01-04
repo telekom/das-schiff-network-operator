@@ -229,18 +229,18 @@ func (r *reconcile) reconcileExistingLayer(desired, currentConfig *nl.Layer2Info
 	return nil
 }
 
-func (r *reconcile) checkL2Duplicates(configs []networkv1alpha1.Layer2NetworkConfiguration) error {
-	for i, config1 := range configs {
-		for j, config2 := range configs {
+func (*reconcile) checkL2Duplicates(configs []networkv1alpha1.Layer2NetworkConfiguration) error {
+	for i := range configs {
+		for j := range configs {
 			if i == j {
 				continue
 			}
 
-			if config1.Spec.ID == config2.Spec.ID {
-				return fmt.Errorf("dupliate Layer2 ID found: %s %s", config1.ObjectMeta.Name, config2.ObjectMeta.Name)
+			if configs[i].Spec.ID == configs[j].Spec.ID {
+				return fmt.Errorf("dupliate Layer2 ID found: %s %s", configs[i].ObjectMeta.Name, configs[j].ObjectMeta.Name)
 			}
-			if config1.Spec.VNI == config2.Spec.VNI {
-				return fmt.Errorf("dupliate Layer2 VNI found: %s %s", config1.ObjectMeta.Name, config2.ObjectMeta.Name)
+			if configs[i].Spec.VNI == configs[j].Spec.VNI {
+				return fmt.Errorf("dupliate Layer2 VNI found: %s %s", configs[i].ObjectMeta.Name, configs[j].ObjectMeta.Name)
 			}
 		}
 	}
