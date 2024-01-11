@@ -130,6 +130,7 @@ func createVrfConfig(vrfConfigMap map[string]frr.VRFConfiguration, spec *network
 			Name: spec.VRF,
 			VNI:  vni,
 			RT:   rt,
+			MTU:  spec.MTU,
 		}
 	}
 
