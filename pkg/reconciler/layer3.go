@@ -171,18 +171,19 @@ func (r *reconcile) reconcileL3Netlink(vrfConfigs []frr.VRFConfiguration) ([]nl.
 
 	// Check for VRFs that are configured on the host but no longer in Kubernetes
 	toDelete := []nl.VRFInformation{}
-	for _, cfg := range existing {
+	for i := range existing {
 		stillExists := false
-		for i := range vrfConfigs {
-			if vrfConfigs[i].Name == cfg.Name && vrfConfigs[i].VNI == cfg.VNI {
+		for j := range vrfConfigs {
+			if vrfConfigs[j].Name == existing[i].Name && vrfConfigs[j].VNI == existing[i].VNI {
 				stillExists = true
+				existing[i].MTU = vrfConfigs[j].MTU
 				break
 			}
 		}
-		if !stillExists || cfg.MarkForDelete {
-			toDelete = append(toDelete, cfg)
-		} else if err := r.reconcileExisting(cfg); err != nil {
-			r.Logger.Error(err, "error reconciling existing VRF", "vrf", cfg.Name, "vni", strconv.Itoa(cfg.VNI))
+		if !stillExists || existing[i].MarkForDelete {
+			toDelete = append(toDelete, existing[i])
+		} else if err := r.reconcileExisting(existing[i]); err != nil {
+			r.Logger.Error(err, "error reconciling existing VRF", "vrf", existing[i].Name, "vni", strconv.Itoa(existing[i].VNI))
 		}
 	}
 
