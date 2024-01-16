@@ -15,6 +15,7 @@ const (
 type VRFInformation struct {
 	Name string
 	VNI  int
+	MTU  int
 
 	table    int
 	bridgeID int
@@ -47,7 +48,7 @@ func (n *NetlinkManager) CreateL3(info VRFInformation) error {
 		return fmt.Errorf("error attaching BPF: %w", err)
 	}
 
-	veth, err := n.createLink(vrfToDefaultPrefix+info.Name, defaultToVrfPrefix+info.Name, vrf.Attrs().Index, defaultMtu, true)
+	veth, err := n.createLink(vrfToDefaultPrefix+info.Name, defaultToVrfPrefix+info.Name, vrf.Attrs().Index, info.linkMTU(), true)
 	if err != nil {
 		return err
 	}
@@ -162,5 +163,35 @@ func (*NetlinkManager) EnsureBPFProgram(info VRFInformation) error {
 		return fmt.Errorf("error attaching bpf program to vxlan interface of vrf %s: %w", info.Name, err)
 	}
 
+	return nil
+}
+
+func (info VRFInformation) linkMTU() int {
+	if info.MTU == 0 {
+		return defaultMtu
+	}
+	return info.MTU
+}
+
+func (*NetlinkManager) EnsureMTU(info VRFInformation) error {
+	link, err := netlink.LinkByName(vrfToDefaultPrefix + info.Name)
+	if err != nil {
+		return fmt.Errorf("error getting vrf2default interface of vrf %s: %w", info.Name, err)
+	}
+	if link.Attrs().MTU != info.linkMTU() {
+		if err := netlink.LinkSetMTU(link, info.MTU); err != nil {
+			return fmt.Errorf("error setting MTU of vrf2default interface of vrf %s: %w", info.Name, err)
+		}
+	}
+
+	link, err = netlink.LinkByName(defaultToVrfPrefix + info.Name)
+	if err != nil {
+		return fmt.Errorf("error getting default2vrf interface of vrf %s: %w", info.Name, err)
+	}
+	if link.Attrs().MTU != info.linkMTU() {
+		if err := netlink.LinkSetMTU(link, info.MTU); err != nil {
+			return fmt.Errorf("error setting MTU of default2vrw interface of vrf %s: %w", info.Name, err)
+		}
+	}
 	return nil
 }
