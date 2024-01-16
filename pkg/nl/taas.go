@@ -15,7 +15,7 @@ func (n *NetlinkManager) CreateTaas(info TaasInformation) error {
 
 	err = n.setUp(info.Name)
 	if err != nil {
-		return fmt.Errorf("error set VRF up for TaaS: %w", err)
+		return fmt.Errorf("error setting up VRF for TaaS: %w", err)
 	}
 
 	return nil
