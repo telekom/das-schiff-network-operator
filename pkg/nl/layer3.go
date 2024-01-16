@@ -186,7 +186,7 @@ func (*NetlinkManager) EnsureMTU(info VRFInformation) error {
 
 	link, err = netlink.LinkByName(defaultToVrfPrefix + info.Name)
 	if err != nil {
-		return fmt.Errorf("error getting vrf2default interface of vrf %s: %w", info.Name, err)
+		return fmt.Errorf("error getting default2vrf interface of vrf %s: %w", info.Name, err)
 	}
 	if link.Attrs().MTU != info.linkMTU() {
 		if err := netlink.LinkSetMTU(link, info.MTU); err != nil {
