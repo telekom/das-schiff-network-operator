@@ -231,11 +231,7 @@ func (r *reconcile) reconcileExistingLayer(desired, currentConfig *nl.Layer2Info
 
 func (*reconcile) checkL2Duplicates(configs []networkv1alpha1.Layer2NetworkConfiguration) error {
 	for i := range configs {
-		for j := range configs {
-			if i == j {
-				continue
-			}
-
+		for j := i + 1; j < len(configs); j++ {
 			if configs[i].Spec.ID == configs[j].Spec.ID {
 				return fmt.Errorf("dupliate Layer2 ID found: %s %s", configs[i].ObjectMeta.Name, configs[j].ObjectMeta.Name)
 			}
