@@ -160,18 +160,18 @@ func (frr *Cli) ShowVRFs(vrfName string) (VrfVni, error) {
 		table, ok := vrf["table"]
 		// If the key exists
 		if ok {
-			vrfNameTemp, ok := vrf[frrVRF]
+			vrfName, ok := vrf[frrVRF]
 			if !ok {
 				return vrfInfo, nil
 			}
 			result, index, ok := Find(vrfInfo.Vrfs, func(element VrfVniSpec) bool {
-				return element.Vrf == vrfNameTemp
+				return element.Vrf == vrfName
 			})
 			if !ok {
 				// as we do not have a VRF with EVPN Type 5 Uplink
 				// we just add vrfname and table in spec
 				vrfInfo.Vrfs = append(vrfInfo.Vrfs, VrfVniSpec{
-					Vrf:       vrfNameTemp,
+					Vrf:       vrfName,
 					Vni:       0,
 					VxlanIntf: "",
 					RouterMac: "",

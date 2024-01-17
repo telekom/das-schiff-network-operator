@@ -9,7 +9,7 @@ import (
 	"github.com/vishvananda/netlink"
 )
 
-func getQuantity(routeSummaries RouteSummaries, addressFamily int, vrf string, table string) ([]route.Information, error) {
+func getQuantity(routeSummaries RouteSummaries, addressFamily int, vrf, table string) ([]route.Information, error) {
 	// _ is the cidr and is ignored.
 	routeSummaryList := []route.Information{}
 	for _, routeSummary := range routeSummaries.Routes {
@@ -18,12 +18,12 @@ func getQuantity(routeSummaries RouteSummaries, addressFamily int, vrf string, t
 		if err != nil {
 			return nil, fmt.Errorf("error converting addressFamily [%d]: %w", addressFamily, err)
 		}
-		tableId, err := strconv.Atoi(table)
+		tableID, err := strconv.Atoi(table)
 		if err != nil {
 			return nil, fmt.Errorf("error converting string to integer [%s]: %w", table, err)
 		}
 		routeInfo := route.Information{
-			TableID:       tableId,
+			TableID:       tableID,
 			VrfName:       vrf,
 			RouteProtocol: routeProtocol,
 			AddressFamily: family,
