@@ -12,6 +12,7 @@ import (
 func getQuantity(routeSummaries RouteSummaries, addressFamily int, vrf, table string) ([]route.Information, error) {
 	// _ is the cidr and is ignored.
 	routeSummaryList := []route.Information{}
+	routeSummaryMap := map[route.Key]route.Information{}
 	for _, routeSummary := range routeSummaries.Routes {
 		routeProtocol := netlink.RouteProtocol(nl.GetProtocolNumber(routeSummary.Type, true))
 		family, err := nl.GetAddressFamily(addressFamily)
@@ -22,15 +23,26 @@ func getQuantity(routeSummaries RouteSummaries, addressFamily int, vrf, table st
 		if err != nil {
 			return nil, fmt.Errorf("error converting string to integer [%s]: %w", table, err)
 		}
-		routeInfo := route.Information{
-			TableID:       tableID,
-			VrfName:       vrf,
-			RouteProtocol: routeProtocol,
-			AddressFamily: family,
-			Fib:           routeSummary.Fib,
-			Rib:           routeSummary.Rib,
+		routeKey := route.Key{TableID: tableID, RouteProtocol: int(routeProtocol), AddressFamily: addressFamily}
+		routeInformation, ok := routeSummaryMap[routeKey]
+		if !ok {
+			routeSummaryMap[routeKey] = route.Information{
+				TableID:       tableID,
+				VrfName:       vrf,
+				RouteProtocol: routeProtocol,
+				AddressFamily: family,
+				Fib:           routeSummary.Fib,
+				Rib:           routeSummary.Rib,
+			}
+		} else {
+			// if we have ibgp and ebgp they both.
+			routeInformation.Rib = routeInformation.Rib + routeSummary.Rib
+			routeInformation.Fib = routeInformation.Fib + routeSummary.Fib
+			routeSummaryMap[routeKey] = routeInformation
 		}
-		routeSummaryList = append(routeSummaryList, routeInfo)
+	}
+	for _, routeSummary := range routeSummaryMap {
+		routeSummaryList = append(routeSummaryList, routeSummary)
 	}
 	return routeSummaryList, nil
 }
