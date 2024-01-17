@@ -49,6 +49,10 @@ func GetProtocolNumber(protocol string, frr bool) int {
 		return unix.RTPROT_BABEL
 	case "bgp":
 		return unix.RTPROT_BGP
+	case "ibgp":
+		return unix.RTPROT_BGP
+	case "ebgp":
+		return unix.RTPROT_BGP
 	case "bird":
 		return unix.RTPROT_BIRD
 	case "boot":
