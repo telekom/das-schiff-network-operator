@@ -70,6 +70,10 @@ func (r *reconcile) fetchLayer2(ctx context.Context) ([]networkv1alpha1.Layer2Ne
 		l2vnis = append(l2vnis, *item)
 	}
 
+	if err := r.checkL2Duplicates(l2vnis); err != nil {
+		return nil, err
+	}
+
 	return l2vnis, nil
 }
 
@@ -143,6 +147,11 @@ func (r *reconcile) createL2(info *nl.Layer2Information, anycastTrackerInterface
 }
 
 func (r *reconcile) getDesired(l2vnis []networkv1alpha1.Layer2NetworkConfiguration) ([]nl.Layer2Information, error) {
+	availableVrfs, err := r.netlinkManager.ListL3()
+	if err != nil {
+		return nil, fmt.Errorf("error loading available VRFs: %w", err)
+	}
+
 	desired := []nl.Layer2Information{}
 	for i := range l2vnis {
 		spec := l2vnis[i].Spec
@@ -156,6 +165,20 @@ func (r *reconcile) getDesired(l2vnis []networkv1alpha1.Layer2NetworkConfigurati
 		if err != nil {
 			r.Logger.Error(err, "error parsing anycast gateways", "layer", l2vnis[i].ObjectMeta.Name, "gw", spec.AnycastGateways)
 			return nil, fmt.Errorf("error parsing anycast gateways: %w", err)
+		}
+
+		if len(spec.VRF) > 0 {
+			vrfAvailable := false
+			for _, info := range availableVrfs {
+				if info.Name == spec.VRF {
+					vrfAvailable = true
+					break
+				}
+			}
+			if !vrfAvailable {
+				r.Logger.Error(err, "VRF of Layer2 not found on node", "layer", l2vnis[i].ObjectMeta.Name, "vrf", spec.VRF)
+				continue
+			}
 		}
 
 		desired = append(desired, nl.Layer2Information{
@@ -203,6 +226,20 @@ func (r *reconcile) reconcileExistingLayer(desired, currentConfig *nl.Layer2Info
 			return fmt.Errorf("error getting bridge id for vlanId %d: %w", desired.VlanID, err)
 		}
 		*anycastTrackerInterfaces = append(*anycastTrackerInterfaces, bridgeID)
+	}
+	return nil
+}
+
+func (*reconcile) checkL2Duplicates(configs []networkv1alpha1.Layer2NetworkConfiguration) error {
+	for i := range configs {
+		for j := i + 1; j < len(configs); j++ {
+			if configs[i].Spec.ID == configs[j].Spec.ID {
+				return fmt.Errorf("dupliate Layer2 ID found: %s %s", configs[i].ObjectMeta.Name, configs[j].ObjectMeta.Name)
+			}
+			if configs[i].Spec.VNI == configs[j].Spec.VNI {
+				return fmt.Errorf("dupliate Layer2 VNI found: %s %s", configs[i].ObjectMeta.Name, configs[j].ObjectMeta.Name)
+			}
+		}
 	}
 	return nil
 }

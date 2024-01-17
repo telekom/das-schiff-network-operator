@@ -110,8 +110,8 @@ func (r *reconcile) createVrfConfigMap(l3vnis []networkv1alpha1.VRFRouteConfigur
 			vni = config.SkipVrfTemplateVni
 		} else {
 			err := fmt.Errorf("vrf not in vrf vni map")
-			logger.Error(err, "VRF does not exist in VRF VNI config")
-			return nil, err
+			r.Logger.Error(err, "VRF does not exist in VRF VNI config, ignoring", "vrf", spec.VRF, "name", l3vnis[i].ObjectMeta.Name, "namespace", l3vnis[i].ObjectMeta.Namespace)
+			continue
 		}
 
 		cfg, err := createVrfConfig(vrfConfigMap, &spec, vni, rt)
@@ -131,6 +131,7 @@ func createVrfConfig(vrfConfigMap map[string]frr.VRFConfiguration, spec *network
 			Name: spec.VRF,
 			VNI:  vni,
 			RT:   rt,
+			MTU:  spec.MTU,
 		}
 	}
 
@@ -172,18 +173,19 @@ func (r *reconcile) reconcileL3Netlink(vrfConfigs []frr.VRFConfiguration) ([]nl.
 
 	// Check for VRFs that are configured on the host but no longer in Kubernetes
 	toDelete := []nl.VRFInformation{}
-	for _, cfg := range existing {
+	for i := range existing {
 		stillExists := false
-		for i := range vrfConfigs {
-			if vrfConfigs[i].Name == cfg.Name && vrfConfigs[i].VNI == cfg.VNI {
+		for j := range vrfConfigs {
+			if vrfConfigs[j].Name == existing[i].Name && vrfConfigs[j].VNI == existing[i].VNI {
 				stillExists = true
+				existing[i].MTU = vrfConfigs[j].MTU
 				break
 			}
 		}
-		if !stillExists || cfg.MarkForDelete {
-			toDelete = append(toDelete, cfg)
-		} else if err := r.netlinkManager.EnsureBPFProgram(cfg); err != nil {
-			r.Logger.Error(err, "Error ensuring BPF program on VRF", "vrf", cfg.Name, "vni", strconv.Itoa(cfg.VNI))
+		if !stillExists || existing[i].MarkForDelete {
+			toDelete = append(toDelete, existing[i])
+		} else if err := r.reconcileExisting(existing[i]); err != nil {
+			r.Logger.Error(err, "error reconciling existing VRF", "vrf", existing[i].Name, "vni", strconv.Itoa(existing[i].VNI))
 		}
 	}
 
@@ -210,6 +212,16 @@ func (r *reconcile) reconcileL3Netlink(vrfConfigs []frr.VRFConfiguration) ([]nl.
 	return toCreate, nil
 }
 
+func (r *reconcile) reconcileExisting(cfg nl.VRFInformation) error {
+	if err := r.netlinkManager.EnsureBPFProgram(cfg); err != nil {
+		return fmt.Errorf("error ensuring BPF program on VRF")
+	}
+	if err := r.netlinkManager.EnsureMTU(cfg); err != nil {
+		return fmt.Errorf("error setting VRF veth link MTU: %d", cfg.MTU)
+	}
+	return nil
+}
+
 func prepareVRFsToCreate(vrfConfigs []frr.VRFConfiguration, existing []nl.VRFInformation) []nl.VRFInformation {
 	create := []nl.VRFInformation{}
 	for i := range vrfConfigs {
@@ -228,6 +240,7 @@ func prepareVRFsToCreate(vrfConfigs []frr.VRFConfiguration, existing []nl.VRFInf
 			create = append(create, nl.VRFInformation{
 				Name: vrfConfigs[i].Name,
 				VNI:  vrfConfigs[i].VNI,
+				MTU:  vrfConfigs[i].MTU,
 			})
 		}
 	}

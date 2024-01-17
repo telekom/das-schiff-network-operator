@@ -45,6 +45,7 @@ type PrefixedRouteItem struct {
 type VRFConfiguration struct {
 	Name          string
 	VNI           int
+	MTU           int
 	RT            string
 	AggregateIPv4 []string
 	AggregateIPv6 []string
