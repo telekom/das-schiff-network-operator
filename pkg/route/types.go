@@ -7,7 +7,8 @@ type Information struct {
 	VrfName       string
 	RouteProtocol netlink.RouteProtocol
 	AddressFamily string
-	Quantity      int
+	Rib           int
+	Fib           int
 }
 
 type Key struct {

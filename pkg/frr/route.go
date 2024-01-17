@@ -2,49 +2,41 @@ package frr
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
 	"github.com/telekom/das-schiff-network-operator/pkg/route"
 	"github.com/vishvananda/netlink"
 )
 
-func getQuantity(routeInfos Routes, addressFamily int) ([]route.Information, error) {
-	routes := map[route.Key]route.Information{}
+func getQuantity(routeSummaries RouteSummaries, addressFamily int, vrf string, table string) ([]route.Information, error) {
 	// _ is the cidr and is ignored.
-	for index := range routeInfos {
-		for innerIndex := range routeInfos[index] {
-			routeProtocol := netlink.RouteProtocol(nl.GetProtocolNumber(routeInfos[index][innerIndex].Protocol, true))
-			routeKey := route.Key{TableID: routeInfos[index][innerIndex].Table, RouteProtocol: int(routeProtocol), AddressFamily: addressFamily}
-
-			routeInformation, ok := routes[routeKey]
-			if ok {
-				// count one up
-				routeInformation.Quantity++
-				routes[routeKey] = routeInformation
-			} else {
-				family, err := nl.GetAddressFamily(addressFamily)
-				if err != nil {
-					return nil, fmt.Errorf("error converting addressFamily [%d]: %w", addressFamily, err)
-				}
-				routes[routeKey] = route.Information{
-					TableID:       routeInfos[index][innerIndex].Table,
-					VrfName:       routeInfos[index][innerIndex].VrfName,
-					RouteProtocol: routeProtocol,
-					AddressFamily: family,
-					Quantity:      1,
-				}
-			}
+	routeSummaryList := []route.Information{}
+	for _, routeSummary := range routeSummaries.Routes {
+		routeProtocol := netlink.RouteProtocol(nl.GetProtocolNumber(routeSummary.Type, true))
+		family, err := nl.GetAddressFamily(addressFamily)
+		if err != nil {
+			return nil, fmt.Errorf("error converting addressFamily [%d]: %w", addressFamily, err)
 		}
+		tableId, err := strconv.Atoi(table)
+		if err != nil {
+			return nil, fmt.Errorf("error converting string to integer [%s]: %w", table, err)
+		}
+		routeInfo := route.Information{
+			TableID:       tableId,
+			VrfName:       vrf,
+			RouteProtocol: routeProtocol,
+			AddressFamily: family,
+			Fib:           routeSummary.Fib,
+			Rib:           routeSummary.Rib,
+		}
+		routeSummaryList = append(routeSummaryList, routeInfo)
 	}
-	routeList := []route.Information{}
-	for _, routeInformation := range routes {
-		routeList = append(routeList, routeInformation)
-	}
-	return routeList, nil
+	return routeSummaryList, nil
 }
 
 func (m *Manager) ListVrfs() ([]VrfVniSpec, error) {
-	vrfs, err := m.Cli.ShowVRFs()
+	vrfs, err := m.Cli.ShowVRFs("")
 	if err != nil {
 		return vrfs.Vrfs, fmt.Errorf("cannot get all vrfs: %w", err)
 	}
@@ -54,19 +46,19 @@ func (m *Manager) ListVrfs() ([]VrfVniSpec, error) {
 	return vrfs.Vrfs, nil
 }
 
-func (m *Manager) ListRoutes(vrf string) ([]route.Information, error) {
-	vrfDualStackRoutes, err := m.Cli.ShowRoutes(vrf)
+func (m *Manager) ListRouteSummary(vrf string) ([]route.Information, error) {
+	vrfDualStackRouteSummaries, err := m.Cli.ShowRouteSummary(vrf)
 	if err != nil {
 		return nil, fmt.Errorf("cannot get Routes for vrf %s: %w", vrf, err)
 	}
 
 	routeList := []route.Information{}
-	for _, dualStackRoutes := range vrfDualStackRoutes {
-		routeInfoV4, err := getQuantity(dualStackRoutes.IPv4, netlink.FAMILY_V4)
+	for vrfName, dualStackRouteSummary := range vrfDualStackRouteSummaries {
+		routeInfoV4, err := getQuantity(dualStackRouteSummary.IPv4, netlink.FAMILY_V4, vrfName, dualStackRouteSummary.Table)
 		if err != nil {
 			return nil, fmt.Errorf("cannot calculate number of ipv4 routes in vrf %s: %w", vrf, err)
 		}
-		routeInfoV6, err := getQuantity(dualStackRoutes.IPv6, netlink.FAMILY_V6)
+		routeInfoV6, err := getQuantity(dualStackRouteSummary.IPv6, netlink.FAMILY_V6, vrfName, dualStackRouteSummary.Table)
 		if err != nil {
 			return nil, fmt.Errorf("cannot calculate number of ipv6 routes in vrf %s: %w", vrf, err)
 		}

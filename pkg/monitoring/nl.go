@@ -10,7 +10,7 @@ import (
 )
 
 type netlinkCollector struct {
-	routesDesc    typedFactoryDesc
+	routesFibDesc typedFactoryDesc
 	neighborsDesc typedFactoryDesc
 	netlink       *nl.NetlinkManager
 	logger        logr.Logger
@@ -23,7 +23,7 @@ func init() {
 // NewNetlinkCollector returns a new Collector exposing buddyinfo stats.
 func NewNetlinkCollector() (Collector, error) {
 	collector := netlinkCollector{
-		routesDesc: typedFactoryDesc{
+		routesFibDesc: typedFactoryDesc{
 			desc: prometheus.NewDesc(
 				prometheus.BuildFQName(namespace, "netlink", "routes"),
 				"The number of routes currently in the Linux Dataplane.",
@@ -54,7 +54,7 @@ func (c *netlinkCollector) updateRoutes(ch chan<- prometheus.Metric) {
 		c.logger.Error(err, "cannot get routes from netlink")
 	}
 	for _, route := range routes {
-		ch <- c.routesDesc.mustNewConstMetric(float64(route.Quantity), fmt.Sprint(route.TableID), route.VrfName, nl.GetProtocolName(route.RouteProtocol), route.AddressFamily)
+		ch <- c.routesFibDesc.mustNewConstMetric(float64(route.Fib), fmt.Sprint(route.TableID), route.VrfName, nl.GetProtocolName(route.RouteProtocol), route.AddressFamily)
 	}
 }
 

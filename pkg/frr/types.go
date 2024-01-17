@@ -125,50 +125,27 @@ type EVPNVniDetail struct {
 	NumArpNd              int      `json:"numArpNd"`
 	NumRemoteVteps        []string `json:"numRemoteVteps"`
 }
-
-type NextHop struct {
-	Flags          int    `json:"flags"`
-	Fib            bool   `json:"fib"`
-	IP             string `json:"ip"`
-	Afi            string `json:"afi"`
-	InterfaceIndex int    `json:"interfaceIndex"`
-	InterfaceName  string `json:"interfaceName"`
-	Active         bool   `json:"active"`
-	OnLink         bool   `json:"onLink"`
-	Weight         int    `json:"weight"`
+type RouteSummary struct {
+	Fib          int    `json:"fib"`
+	Rib          int    `json:"rib"`
+	FibOffLoaded int    `json:"fibOffLoaded"`
+	FibTrapped   int    `json:"fibTrapped"`
+	Type         string `json:"type"`
 }
 
-type Route struct {
-	Prefix                   string    `json:"prefix"`
-	PrefixLen                int       `json:"prefixLen"`
-	Protocol                 string    `json:"protocol"`
-	VrfID                    int       `json:"vrfId"`
-	VrfName                  string    `json:"vrfName"`
-	Selected                 bool      `json:"selected"`
-	DestSelected             bool      `json:"destSelected"`
-	Distance                 int       `json:"distance"`
-	Metric                   int       `json:"metric"`
-	Installed                bool      `json:"installed"`
-	Tag                      int       `json:"tag"`
-	Table                    int       `json:"table"`
-	InternalStatus           int       `json:"internalStatus"`
-	InternalFlags            int       `json:"internalFlags"`
-	InternalNextHopNum       int       `json:"internalNextHopNum"`
-	InternalNextHopActiveNum int       `json:"internalNextHopActiveNum"`
-	NexthopGroupID           int       `json:"nexthopGroupId"`
-	InstalledNexthopGroupID  int       `json:"installedNexthopGroupId"`
-	Uptime                   string    `json:"uptime"`
-	Nexthops                 []NextHop `json:"nexthops"`
+type RouteSummaries struct {
+	Routes         []RouteSummary `json:"routes"`
+	RoutesTotal    int            `json:"routesTotal"`
+	RoutesTotalFib int            `json:"routesTotalFib"`
 }
 
-type Routes map[string][]Route
-
-type DualStackRoutes struct {
-	IPv4 Routes `json:"ipv4"`
-	IPv6 Routes `json:"ipv6"`
+type DualStackRouteSummary struct {
+	IPv4  RouteSummaries `json:"ipv4"`
+	IPv6  RouteSummaries `json:"ipv6"`
+	Table string         `json:"table,omitempty"`
 }
 
-type VRFDualStackRoutes map[string]DualStackRoutes
+type VRFDualStackRouteSummary map[string]DualStackRouteSummary
 type VrfVniSpec struct {
 	Vrf       string `json:"vrf"`
 	Vni       int    `json:"vni"`

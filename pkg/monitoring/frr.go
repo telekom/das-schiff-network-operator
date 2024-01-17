@@ -15,7 +15,8 @@ import (
 const secondToMillisecond = 1000
 
 type frrCollector struct {
-	routesDesc                 typedFactoryDesc
+	routesFibDesc              typedFactoryDesc
+	routesRibDesc              typedFactoryDesc
 	vrfVniDesc                 typedFactoryDesc
 	evpnVniDesc                typedFactoryDesc
 	bgpUptimeDesc              typedFactoryDesc
@@ -55,9 +56,18 @@ func NewFRRCollector() (Collector, error) {
 		"remote_as",
 	}
 	collector := frrCollector{
-		routesDesc: typedFactoryDesc{
+		routesFibDesc: typedFactoryDesc{
 			desc: prometheus.NewDesc(
-				prometheus.BuildFQName(namespace, "frr", "routes"),
+				prometheus.BuildFQName(namespace, "frr", "routes_fib"),
+				"The number of routes currently in the frr Controlplane.",
+				[]string{"table", "vrf", "protocol", "address_family"},
+				nil,
+			),
+			valueType: prometheus.GaugeValue,
+		},
+		routesRibDesc: typedFactoryDesc{
+			desc: prometheus.NewDesc(
+				prometheus.BuildFQName(namespace, "frr", "routes_rib"),
 				"The number of routes currently in the frr Controlplane.",
 				[]string{"table", "vrf", "protocol", "address_family"},
 				nil,
@@ -165,16 +175,17 @@ func (c *frrCollector) UpdateVrfs(ch chan<- prometheus.Metric) {
 }
 
 func (c *frrCollector) UpdateRoutes(ch chan<- prometheus.Metric) {
-	routes, err := c.frr.ListRoutes("")
+	routeSummaries, err := c.frr.ListRouteSummary("")
 	if err != nil {
 		c.logger.Error(err, "can't get routes from frr")
 	}
-	for _, routePath := range routes {
-		if routePath.VrfName == "default" {
-			routePath.VrfName = "main"
-			routePath.TableID = unix.RT_CLASS_MAIN
+	for _, routeSummary := range routeSummaries {
+		if routeSummary.VrfName == "default" {
+			routeSummary.VrfName = "main"
+			routeSummary.TableID = unix.RT_CLASS_MAIN
 		}
-		ch <- c.routesDesc.mustNewConstMetric(float64(routePath.Quantity), strconv.Itoa(routePath.TableID), routePath.VrfName, nl.GetProtocolName(routePath.RouteProtocol), routePath.AddressFamily)
+		ch <- c.routesFibDesc.mustNewConstMetric(float64(routeSummary.Fib), strconv.Itoa(routeSummary.TableID), routeSummary.VrfName, nl.GetProtocolName(routeSummary.RouteProtocol), routeSummary.AddressFamily)
+		ch <- c.routesRibDesc.mustNewConstMetric(float64(routeSummary.Rib), strconv.Itoa(routeSummary.TableID), routeSummary.VrfName, nl.GetProtocolName(routeSummary.RouteProtocol), routeSummary.AddressFamily)
 	}
 }
 

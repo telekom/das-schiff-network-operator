@@ -175,7 +175,9 @@ func (n *NetlinkManager) ListRouteInformation() ([]route.Information, error) {
 		routeInformation, ok := routes[routeKey]
 		// If the key exists
 		if ok {
-			routeInformation.Quantity++
+			// linux has no rib so we just assume rib and fib are counted equally
+			routeInformation.Rib++
+			routeInformation.Fib++
 			routes[routeKey] = routeInformation
 		} else {
 			family, err := GetAddressFamily(netlinkRoutes[index].Family)
@@ -191,7 +193,8 @@ func (n *NetlinkManager) ListRouteInformation() ([]route.Information, error) {
 				VrfName:       vrfName,
 				RouteProtocol: netlinkRoutes[index].Protocol,
 				AddressFamily: family,
-				Quantity:      1,
+				Rib:           1,
+				Fib:           1,
 			}
 		}
 	}

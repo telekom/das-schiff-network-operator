@@ -142,7 +142,7 @@ func parseVRFS(data string) ([]map[string]string, error) {
 	return dataAsSlice, nil
 }
 
-func (frr *Cli) ShowVRFs() (VrfVni, error) {
+func (frr *Cli) ShowVRFs(vrfName string) (VrfVni, error) {
 	vrfInfo, err := frr.showVRFVnis()
 	if err != nil {
 		return vrfInfo, fmt.Errorf("cannot get vrf vni mapping from frr: %w", err)
@@ -160,18 +160,18 @@ func (frr *Cli) ShowVRFs() (VrfVni, error) {
 		table, ok := vrf["table"]
 		// If the key exists
 		if ok {
-			vrfName, ok := vrf[frrVRF]
+			vrfNameTemp, ok := vrf[frrVRF]
 			if !ok {
 				return vrfInfo, nil
 			}
 			result, index, ok := Find(vrfInfo.Vrfs, func(element VrfVniSpec) bool {
-				return element.Vrf == vrfName
+				return element.Vrf == vrfNameTemp
 			})
 			if !ok {
 				// as we do not have a VRF with EVPN Type 5 Uplink
 				// we just add vrfname and table in spec
 				vrfInfo.Vrfs = append(vrfInfo.Vrfs, VrfVniSpec{
-					Vrf:       vrfName,
+					Vrf:       vrfNameTemp,
 					Vni:       0,
 					VxlanIntf: "",
 					RouterMac: "",
@@ -187,16 +187,30 @@ func (frr *Cli) ShowVRFs() (VrfVni, error) {
 			}
 		}
 	}
+	if vrfName != "" {
+		var vrfVniInfo VrfVni
+		result, _, ok := Find(vrfInfo.Vrfs, func(element VrfVniSpec) bool {
+			return element.Vrf == vrfName
+		})
+		if !ok {
+			return vrfVniInfo, fmt.Errorf("cannot find %s in frr and kernel", vrfName)
+		}
+		vrfVniInfo = VrfVni{
+			Vrfs: []VrfVniSpec{result},
+		}
+		return vrfVniInfo, nil
+	}
 	return vrfInfo, nil
 }
 
-func (frr *Cli) getDualStackRoutes(vrf string) (routesV4, routesV6 Routes, err error) {
+func (frr *Cli) getDualStackRouteSummaries(vrf string) (routeSummariesV4, routeSummariesV6 RouteSummaries, err error) {
 	dataV4 := frr.executeWithJSON([]string{
 		"show",
 		"ip",
 		"route",
 		"vrf",
 		vrf,
+		"summary",
 	})
 	dataV6 := frr.executeWithJSON([]string{
 		"show",
@@ -204,42 +218,47 @@ func (frr *Cli) getDualStackRoutes(vrf string) (routesV4, routesV6 Routes, err e
 		"route",
 		"vrf",
 		vrf,
+		"summary",
 	})
-	err = json.Unmarshal(dataV4, &routesV4)
+	err = json.Unmarshal(dataV4, &routeSummariesV4)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed parsing json into struct ipv4 Routes: %w", err)
+		return routeSummariesV4, routeSummariesV6, fmt.Errorf("failed parsing json into struct ipv4 Routes: %w", err)
 	}
-	err = json.Unmarshal(dataV6, &routesV6)
+	err = json.Unmarshal(dataV6, &routeSummariesV6)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed parsing json into struct ipv6 Routes: %w", err)
+		return routeSummariesV4, routeSummariesV6, fmt.Errorf("failed parsing json into struct ipv6 Routes: %w", err)
 	}
-	return routesV4, routesV6, nil
+	return routeSummariesV4, routeSummariesV6, nil
 }
 
-func (frr *Cli) ShowRoutes(vrf string) (VRFDualStackRoutes, error) {
+func (frr *Cli) ShowRouteSummary(vrf string) (VRFDualStackRouteSummary, error) {
 	vrfName, multiVrf := getVRFInfo(vrf)
-	vrfRoutes := VRFDualStackRoutes{}
+	vrfRoutes := VRFDualStackRouteSummary{}
 	if multiVrf {
 		// as the opensource project has issues with correctly representing
 		// json in some Cli commands
 		// we need this ugly loop to get the necessary parseable data mapping.
-		vrfVni, err := frr.ShowVRFs()
+		vrfVni, err := frr.ShowVRFs("")
 		if err != nil {
 			return nil, fmt.Errorf("cannot get vrfs from frr: %w", err)
 		}
 		for _, vrf := range vrfVni.Vrfs {
-			routesV4, routesV6, err := frr.getDualStackRoutes(vrf.Vrf)
+			routeSummariesV4, routesSummariesV6, err := frr.getDualStackRouteSummaries(vrf.Vrf)
 			if err != nil {
 				return nil, fmt.Errorf("cannot get DualStackRoutes for vrf %s: %w", vrf.Vrf, err)
 			}
-			vrfRoutes[vrf.Vrf] = DualStackRoutes{IPv4: routesV4, IPv6: routesV6}
+			vrfRoutes[vrf.Vrf] = DualStackRouteSummary{IPv4: routeSummariesV4, IPv6: routesSummariesV6, Table: vrf.Table}
 		}
 	} else {
-		routesV4, routesV6, err := frr.getDualStackRoutes(vrfName)
+		vrfVni, err := frr.ShowVRFs(vrfName)
+		if err != nil {
+			return nil, fmt.Errorf("cannot get vrf from frr: %w", err)
+		}
+		routeSummariesV4, routesSummariesV6, err := frr.getDualStackRouteSummaries(vrfName)
 		if err != nil {
 			return nil, fmt.Errorf("cannot get DualStackRoutes for vrf %s: %w", vrfName, err)
 		}
-		vrfRoutes[vrfName] = DualStackRoutes{IPv4: routesV4, IPv6: routesV6}
+		vrfRoutes[vrfName] = DualStackRouteSummary{IPv4: routeSummariesV4, IPv6: routesSummariesV6, Table: vrfVni.Vrfs[0].Table}
 	}
 	return vrfRoutes, nil
 }
