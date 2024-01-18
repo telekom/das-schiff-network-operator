@@ -42,7 +42,7 @@ type NeighborInformation struct {
 	Quantity  float64
 }
 type NeighborKey struct {
-	InterfaceIndex, State, Family int
+	InterfaceIndex, State, Flags, Family int
 }
 
 func getNeighborState(state int) (string, error) {
@@ -469,7 +469,7 @@ func (n *NetlinkManager) ListNeighborInformation() ([]NeighborInformation, error
 			strings.HasPrefix(interfaceName, macvlanPrefix) ||
 			strings.HasPrefix(interfaceName, layer2Prefix) ||
 			linkInfo.Attrs().Vfs != nil {
-			neighborKey := NeighborKey{InterfaceIndex: netlinkNeighbors[index].LinkIndex, State: netlinkNeighbors[index].State, Family: netlinkNeighbors[index].Family}
+			neighborKey := NeighborKey{InterfaceIndex: netlinkNeighbors[index].LinkIndex, State: netlinkNeighbors[index].State, Flags: netlinkNeighbors[index].Flags, Family: netlinkNeighbors[index].Family}
 			neighborInformation, ok := neighbors[neighborKey]
 			if ok {
 				neighborInformation.Quantity++
