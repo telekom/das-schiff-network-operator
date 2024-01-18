@@ -10,6 +10,7 @@ import (
 
 	"github.com/vishvananda/netlink"
 	"golang.org/x/exp/maps"
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -37,6 +38,7 @@ type NeighborInformation struct {
 	Interface string
 	State     string
 	Family    string
+	Flag      string
 	Quantity  float64
 }
 type NeighborKey struct {
@@ -65,6 +67,27 @@ func getNeighborState(state int) (string, error) {
 		return "stale", nil
 	default:
 		return "", fmt.Errorf("[%x] is not a valid neighbor state", state)
+	}
+}
+
+func getFlags(flag int) (string, error) {
+	switch flag {
+	case netlink.NTF_MASTER:
+		return "permanent", nil
+	case netlink.NTF_ROUTER:
+		return "router", nil
+	case netlink.NTF_SELF:
+		return "self", nil
+	case netlink.NTF_PROXY:
+		return "proxy", nil
+	case netlink.NTF_USE:
+		return "use", nil
+	case unix.NTF_EXT_LEARNED:
+		return "extern_learn", nil
+	case unix.NTF_OFFLOADED:
+		return "offloaded", nil
+	default:
+		return "", fmt.Errorf("cannot convert flag %d", flag)
 	}
 }
 
@@ -423,6 +446,11 @@ func (n *NetlinkManager) ListNeighborInformation() ([]NeighborInformation, error
 	if err != nil {
 		return nil, err
 	}
+	fdbTable, err := n.listBridgeForwardingTable()
+	if err != nil {
+		return nil, err
+	}
+	netlinkNeighbors = append(netlinkNeighbors, fdbTable...)
 	neighbors := map[NeighborKey]NeighborInformation{}
 	for index := range netlinkNeighbors {
 		linkInfo, err := netlink.LinkByIndex(netlinkNeighbors[index].LinkIndex)
@@ -431,9 +459,10 @@ func (n *NetlinkManager) ListNeighborInformation() ([]NeighborInformation, error
 		}
 		interfaceName := linkInfo.Attrs().Name
 		// If NOARP is set on neighbor we skip it here
-		if netlinkNeighbors[index].State == netlink.NUD_NOARP {
-			continue
-		}
+		// We also want the vxlan neighbors probably.
+		// if netlinkNeighbors[index].State == netlink.NUD_NOARP {
+		// 	continue
+		// }
 		// This ensures that only neighbors of secondary interfaces are imported
 		// or hardware interfaces which support VFs
 		if strings.HasPrefix(interfaceName, vethL2Prefix) ||
@@ -454,10 +483,15 @@ func (n *NetlinkManager) ListNeighborInformation() ([]NeighborInformation, error
 				if err != nil {
 					return nil, fmt.Errorf("error converting neighborState [%d]: %w", &netlinkNeighbors[index].State, err)
 				}
+				flag, err := getFlags(netlinkNeighbors[index].Flags)
+				if err != nil {
+					return nil, fmt.Errorf("error converting flag [%d]: %w", &netlinkNeighbors[index].Flags, err)
+				}
 				neighbors[neighborKey] = NeighborInformation{
 					Family:    family,
 					State:     state,
 					Interface: interfaceName,
+					Flag:      flag,
 					Quantity:  1,
 				}
 			}

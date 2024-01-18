@@ -19,10 +19,18 @@ func (*NetlinkManager) listRoutes() ([]netlink.Route, error) {
 	return routes, nil
 }
 
+func (*NetlinkManager) listBridgeForwardingTable() ([]netlink.Neigh, error) {
+	entries, err := netlink.NeighList(0, unix.AF_BRIDGE)
+	if err != nil {
+		return nil, fmt.Errorf("error listing bridge fdb entries: %w", err)
+	}
+	return entries, nil
+}
+
 func (*NetlinkManager) listNeighbors() ([]netlink.Neigh, error) {
 	neighbors, err := netlink.NeighList(0, netlink.FAMILY_ALL)
 	if err != nil {
-		return nil, fmt.Errorf("error listing all neighbors: %w", err)
+		return nil, fmt.Errorf("error listing ipv4,ipv6 neighbors: %w", err)
 	}
 	return neighbors, nil
 }

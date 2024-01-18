@@ -131,6 +131,8 @@ func GetAddressFamily(addressFamily int) (string, error) {
 		return "mpls", nil
 	case netlink.FAMILY_ALL:
 		return "all", nil
+	case unix.AF_BRIDGE:
+		return "bridge", nil
 	default:
 		return "", errors.New("can't find the addressFamily required")
 	}

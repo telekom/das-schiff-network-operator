@@ -36,8 +36,8 @@ func getQuantity(routeSummaries RouteSummaries, addressFamily int, vrf, table st
 			}
 		} else {
 			// if we have ibgp and ebgp they both.
-			routeInformation.Rib = routeInformation.Rib + routeSummary.Rib
-			routeInformation.Fib = routeInformation.Fib + routeSummary.Fib
+			routeInformation.Rib += routeSummary.Rib
+			routeInformation.Fib += routeSummary.Fib
 			routeSummaryMap[routeKey] = routeInformation
 		}
 	}
