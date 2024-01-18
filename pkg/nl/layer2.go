@@ -72,6 +72,8 @@ func getNeighborState(state int) (string, error) {
 
 func getFlags(flag int) (string, error) {
 	switch flag {
+	case 0x00:
+		return "", nil
 	case netlink.NTF_MASTER:
 		return "permanent", nil
 	case netlink.NTF_ROUTER:
@@ -87,7 +89,7 @@ func getFlags(flag int) (string, error) {
 	case unix.NTF_OFFLOADED:
 		return "offloaded", nil
 	default:
-		return "", fmt.Errorf("cannot convert flag %d", flag)
+		return "", fmt.Errorf("cannot convert flag %x", flag)
 	}
 }
 
@@ -472,15 +474,15 @@ func (n *NetlinkManager) ListNeighborInformation() ([]NeighborInformation, error
 			} else {
 				family, err := GetAddressFamily(netlinkNeighbors[index].Family)
 				if err != nil {
-					return nil, fmt.Errorf("error converting addressFamily [%d]: %w", &netlinkNeighbors[index].Family, err)
+					return nil, fmt.Errorf("error converting addressFamily: %w", err)
 				}
 				state, err := getNeighborState(netlinkNeighbors[index].State)
 				if err != nil {
-					return nil, fmt.Errorf("error converting neighborState [%d]: %w", &netlinkNeighbors[index].State, err)
+					return nil, fmt.Errorf("error converting neighborState: %w", err)
 				}
 				flag, err := getFlags(netlinkNeighbors[index].Flags)
 				if err != nil {
-					return nil, fmt.Errorf("error converting flag [%d]: %w", &netlinkNeighbors[index].Flags, err)
+					return nil, fmt.Errorf("error converting flag: %w", err)
 				}
 				neighbors[neighborKey] = NeighborInformation{
 					Family:    family,
