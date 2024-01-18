@@ -33,7 +33,6 @@ func (r *reconcile) fetchLayer2(ctx context.Context) ([]networkv1alpha1.Layer2Ne
 	}
 
 	l2vnis := []networkv1alpha1.Layer2NetworkConfiguration{}
-	// TODO: 2023-12-12T09:41:28Z	INFO	Reconciling existing Layer2	{"controller": "vrfrouteconfiguration", "controllerGroup": "network.schiff.telekom.de", "controllerKind": "VRFRouteConfiguration", "VRFRouteConfiguration": {"name":"p-zerotrust"}, "namespace": "", "name": "p-zerotrust", "reconcileID": "38868e85-db9f-4ca1-94ad-4bf3aa23118e", "vlan": 1002, "vni": 3020002}
 	for i := range layer2List.Items {
 		item := &layer2List.Items[i]
 		logger := r.Logger.WithValues("name", item.ObjectMeta.Name, "namespace", item.ObjectMeta.Namespace, "vlan", item.Spec.ID, "vni", item.Spec.VNI)

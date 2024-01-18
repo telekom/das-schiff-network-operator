@@ -91,7 +91,6 @@ func (r *reconcile) reconcileLayer3(l3vnis []networkv1alpha1.VRFRouteConfigurati
 
 func (r *reconcile) createVrfConfigMap(l3vnis []networkv1alpha1.VRFRouteConfiguration) (map[string]frr.VRFConfiguration, error) {
 	vrfConfigMap := map[string]frr.VRFConfiguration{}
-	// TODO: 2023-12-12T09:41:23Z	INFO	Configuring VRF from new VRFConfig	{"controller": "vrfrouteconfiguration", "controllerGroup": "network.schiff.telekom.de", "controllerKind": "VRFRouteConfiguration", "VRFRouteConfiguration": {"name":"p-zerotrust"}, "namespace": "", "name": "p-zerotrust", "reconcileID": "38868e85-db9f-4ca1-94ad-4bf3aa23118e", "vrf": "san", "vni": 2001018, "rt": "65183:1018"}
 	for i := range l3vnis {
 		spec := l3vnis[i].Spec
 		logger := r.Logger.WithValues("name", l3vnis[i].ObjectMeta.Name, "namespace", l3vnis[i].ObjectMeta.Namespace, "vrf", spec.VRF)
