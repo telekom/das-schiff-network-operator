@@ -225,7 +225,7 @@ func initComponents(mgr manager.Manager, anycastTracker *anycast.Tracker, cfg *c
 }
 
 func setupReconcilers(mgr manager.Manager, anycastTracker *anycast.Tracker) error {
-	r, err := reconciler.NewReconciler(mgr.GetClient(), anycastTracker)
+	r, err := reconciler.NewReconciler(mgr.GetClient(), anycastTracker, mgr.GetLogger())
 	if err != nil {
 		return fmt.Errorf("unable to create debounced reconciler: %w", err)
 	}

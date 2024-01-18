@@ -10,7 +10,7 @@ import (
 )
 
 type netlinkCollector struct {
-	routesDesc    typedFactoryDesc
+	routesFibDesc typedFactoryDesc
 	neighborsDesc typedFactoryDesc
 	netlink       *nl.NetlinkManager
 	logger        logr.Logger
@@ -23,9 +23,9 @@ func init() {
 // NewNetlinkCollector returns a new Collector exposing buddyinfo stats.
 func NewNetlinkCollector() (Collector, error) {
 	collector := netlinkCollector{
-		routesDesc: typedFactoryDesc{
+		routesFibDesc: typedFactoryDesc{
 			desc: prometheus.NewDesc(
-				prometheus.BuildFQName(namespace, "netlink", "routes"),
+				prometheus.BuildFQName(namespace, "netlink", "routes_fib"),
 				"The number of routes currently in the Linux Dataplane.",
 				[]string{"table", "vrf", "protocol", "address_family"},
 				nil,
@@ -36,7 +36,7 @@ func NewNetlinkCollector() (Collector, error) {
 			desc: prometheus.NewDesc(
 				prometheus.BuildFQName(namespace, "netlink", "neighbors"),
 				"The number of neighbors currently in the Linux Dataplane.",
-				[]string{"mac", "ip", "interface", "address_family", "status"},
+				[]string{"interface", "address_family", "flags", "status"},
 				nil,
 			),
 			valueType: prometheus.GaugeValue,
@@ -54,7 +54,7 @@ func (c *netlinkCollector) updateRoutes(ch chan<- prometheus.Metric) {
 		c.logger.Error(err, "cannot get routes from netlink")
 	}
 	for _, route := range routes {
-		ch <- c.routesDesc.mustNewConstMetric(float64(route.Quantity), fmt.Sprint(route.TableID), route.VrfName, nl.GetProtocolName(route.RouteProtocol), route.AddressFamily)
+		ch <- c.routesFibDesc.mustNewConstMetric(float64(route.Fib), fmt.Sprint(route.TableID), route.VrfName, nl.GetProtocolName(route.RouteProtocol), route.AddressFamily)
 	}
 }
 
@@ -64,7 +64,7 @@ func (c *netlinkCollector) updateNeighbors(ch chan<- prometheus.Metric) {
 		c.logger.Error(err, "Cannot get neighbors from netlink")
 	}
 	for _, neighbor := range neighbors {
-		ch <- c.neighborsDesc.mustNewConstMetric(1.0, neighbor.MAC, neighbor.IP, neighbor.Interface, neighbor.Family, neighbor.State)
+		ch <- c.neighborsDesc.mustNewConstMetric(neighbor.Quantity, neighbor.Interface, neighbor.Family, neighbor.Flag, neighbor.State)
 	}
 }
 

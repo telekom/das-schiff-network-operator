@@ -33,9 +33,9 @@ func (r *reconcile) fetchLayer2(ctx context.Context) ([]networkv1alpha1.Layer2Ne
 	}
 
 	l2vnis := []networkv1alpha1.Layer2NetworkConfiguration{}
-
 	for i := range layer2List.Items {
 		item := &layer2List.Items[i]
+		logger := r.Logger.WithValues("name", item.ObjectMeta.Name, "namespace", item.ObjectMeta.Namespace, "vlan", item.Spec.ID, "vni", item.Spec.VNI)
 		if item.Spec.NodeSelector != nil {
 			selector := labels.NewSelector()
 			var reqs labels.Requirements
@@ -43,7 +43,7 @@ func (r *reconcile) fetchLayer2(ctx context.Context) ([]networkv1alpha1.Layer2Ne
 			for key, value := range item.Spec.NodeSelector.MatchLabels {
 				requirement, err := labels.NewRequirement(key, selection.Equals, []string{value})
 				if err != nil {
-					r.Logger.Error(err, "error creating MatchLabel requirement")
+					logger.Error(err, "error creating MatchLabel requirement")
 					return nil, fmt.Errorf("error creating MatchLabel requirement: %w", err)
 				}
 				reqs = append(reqs, *requirement)
@@ -53,7 +53,7 @@ func (r *reconcile) fetchLayer2(ctx context.Context) ([]networkv1alpha1.Layer2Ne
 				lowercaseOperator := selection.Operator(strings.ToLower(string(req.Operator)))
 				requirement, err := labels.NewRequirement(req.Key, lowercaseOperator, req.Values)
 				if err != nil {
-					r.Logger.Error(err, "error creating MatchExpression requirement")
+					logger.Error(err, "error creating MatchExpression requirement")
 					return nil, fmt.Errorf("error creating MatchExpression requirement: %w", err)
 				}
 				reqs = append(reqs, *requirement)
@@ -61,7 +61,7 @@ func (r *reconcile) fetchLayer2(ctx context.Context) ([]networkv1alpha1.Layer2Ne
 			selector = selector.Add(reqs...)
 
 			if !selector.Matches(labels.Set(node.ObjectMeta.Labels)) {
-				r.Logger.Info("local node does not match nodeSelector of layer2", "layer2", item.ObjectMeta.Name, "node", nodeName)
+				logger.Info("local node does not match nodeSelector of layer2", "node", nodeName)
 				continue
 			}
 		}

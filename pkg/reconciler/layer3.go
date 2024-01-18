@@ -91,9 +91,9 @@ func (r *reconcile) reconcileLayer3(l3vnis []networkv1alpha1.VRFRouteConfigurati
 
 func (r *reconcile) createVrfConfigMap(l3vnis []networkv1alpha1.VRFRouteConfiguration) (map[string]frr.VRFConfiguration, error) {
 	vrfConfigMap := map[string]frr.VRFConfiguration{}
-
 	for i := range l3vnis {
 		spec := l3vnis[i].Spec
+		logger := r.Logger.WithValues("name", l3vnis[i].ObjectMeta.Name, "namespace", l3vnis[i].ObjectMeta.Namespace, "vrf", spec.VRF)
 
 		var vni int
 		var rt string
@@ -101,10 +101,10 @@ func (r *reconcile) createVrfConfigMap(l3vnis []networkv1alpha1.VRFRouteConfigur
 		if val, ok := r.config.VRFConfig[spec.VRF]; ok {
 			vni = val.VNI
 			rt = val.RT
-			r.Logger.Info("Configuring VRF from new VRFConfig", "vrf", spec.VRF, "vni", val.VNI, "rt", rt)
+			logger.Info("Configuring VRF from new VRFConfig", "vni", val.VNI, "rt", rt)
 		} else if val, ok := r.config.VRFToVNI[spec.VRF]; ok {
 			vni = val
-			r.Logger.Info("Configuring VRF from old VRFToVNI", "vrf", spec.VRF, "vni", val)
+			logger.Info("Configuring VRF from old VRFToVNI", "vni", val)
 		} else if r.config.ShouldSkipVRFConfig(spec.VRF) {
 			vni = config.SkipVrfTemplateVni
 		} else {

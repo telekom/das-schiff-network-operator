@@ -60,5 +60,9 @@ func main() {
 		ReadHeaderTimeout: twenty * time.Second,
 		ReadTimeout:       time.Minute,
 	}
-	log.Fatal(server.ListenAndServe())
+	err = server.ListenAndServe()
+	// Run server
+	if err != nil {
+		log.Fatal(fmt.Errorf("failed to start server: %w", err))
+	}
 }

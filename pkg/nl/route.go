@@ -8,6 +8,7 @@ import (
 	"github.com/telekom/das-schiff-network-operator/pkg/route"
 	schiff_unix "github.com/telekom/das-schiff-network-operator/pkg/unix"
 	"github.com/vishvananda/netlink"
+	"golang.org/x/exp/maps"
 	"golang.org/x/sys/unix"
 )
 
@@ -47,6 +48,10 @@ func GetProtocolNumber(protocol string, frr bool) int {
 	case "babel":
 		return unix.RTPROT_BABEL
 	case "bgp":
+		return unix.RTPROT_BGP
+	case "ibgp":
+		return unix.RTPROT_BGP
+	case "ebgp":
 		return unix.RTPROT_BGP
 	case "bird":
 		return unix.RTPROT_BIRD
@@ -126,6 +131,8 @@ func GetAddressFamily(addressFamily int) (string, error) {
 		return "mpls", nil
 	case netlink.FAMILY_ALL:
 		return "all", nil
+	case unix.AF_BRIDGE:
+		return "bridge", nil
 	default:
 		return "", errors.New("can't find the addressFamily required")
 	}
@@ -174,7 +181,9 @@ func (n *NetlinkManager) ListRouteInformation() ([]route.Information, error) {
 		routeInformation, ok := routes[routeKey]
 		// If the key exists
 		if ok {
-			routeInformation.Quantity++
+			// linux has no rib so we just assume rib and fib are counted equally
+			routeInformation.Rib++
+			routeInformation.Fib++
 			routes[routeKey] = routeInformation
 		} else {
 			family, err := GetAddressFamily(netlinkRoutes[index].Family)
@@ -190,13 +199,10 @@ func (n *NetlinkManager) ListRouteInformation() ([]route.Information, error) {
 				VrfName:       vrfName,
 				RouteProtocol: netlinkRoutes[index].Protocol,
 				AddressFamily: family,
-				Quantity:      1,
+				Rib:           1,
+				Fib:           1,
 			}
 		}
 	}
-	routeList := []route.Information{}
-	for _, routeInformation := range routes {
-		routeList = append(routeList, routeInformation)
-	}
-	return routeList, nil
+	return maps.Values(routes), nil
 }
