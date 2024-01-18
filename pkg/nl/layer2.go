@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	schiff_unix "github.com/telekom/das-schiff-network-operator/pkg/unix"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/exp/maps"
 	"golang.org/x/sys/unix"
@@ -72,7 +73,7 @@ func getNeighborState(state int) (string, error) {
 
 func getFlags(flag int) (string, error) {
 	switch flag {
-	case 0x00:
+	case schiff_unix.NTF_UNSPEC:
 		return "", nil
 	case netlink.NTF_MASTER:
 		return "permanent", nil
