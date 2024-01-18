@@ -7,12 +7,12 @@ import (
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
 	"github.com/telekom/das-schiff-network-operator/pkg/route"
 	"github.com/vishvananda/netlink"
+	"golang.org/x/exp/maps"
 )
 
 func getQuantity(routeSummaries RouteSummaries, addressFamily int, vrf, table string) ([]route.Information, error) {
 	// _ is the cidr and is ignored.
-	routeSummaryList := []route.Information{}
-	routeSummaryMap := map[route.Key]route.Information{}
+	routeSummaryInfos := map[route.Key]route.Information{}
 	for _, routeSummary := range routeSummaries.Routes {
 		routeProtocol := netlink.RouteProtocol(nl.GetProtocolNumber(routeSummary.Type, true))
 		family, err := nl.GetAddressFamily(addressFamily)
@@ -24,9 +24,9 @@ func getQuantity(routeSummaries RouteSummaries, addressFamily int, vrf, table st
 			return nil, fmt.Errorf("error converting string to integer [%s]: %w", table, err)
 		}
 		routeKey := route.Key{TableID: tableID, RouteProtocol: int(routeProtocol), AddressFamily: addressFamily}
-		routeInformation, ok := routeSummaryMap[routeKey]
+		routeInformation, ok := routeSummaryInfos[routeKey]
 		if !ok {
-			routeSummaryMap[routeKey] = route.Information{
+			routeSummaryInfos[routeKey] = route.Information{
 				TableID:       tableID,
 				VrfName:       vrf,
 				RouteProtocol: routeProtocol,
@@ -38,13 +38,10 @@ func getQuantity(routeSummaries RouteSummaries, addressFamily int, vrf, table st
 			// if we have ibgp and ebgp they both.
 			routeInformation.Rib += routeSummary.Rib
 			routeInformation.Fib += routeSummary.Fib
-			routeSummaryMap[routeKey] = routeInformation
+			routeSummaryInfos[routeKey] = routeInformation
 		}
 	}
-	for _, routeSummary := range routeSummaryMap {
-		routeSummaryList = append(routeSummaryList, routeSummary)
-	}
-	return routeSummaryList, nil
+	return maps.Values(routeSummaryInfos), nil
 }
 
 func (m *Manager) ListVrfs() ([]VrfVniSpec, error) {
@@ -81,7 +78,7 @@ func (m *Manager) ListRouteSummary(vrf string) ([]route.Information, error) {
 	return routeList, nil
 }
 
-func (m *Manager) ListNeighbors(vrf string) (bgpSummary BGPVrfSummary, err error) {
+func (m *Manager) ListBGPNeighbors(vrf string) (bgpSummary BGPVrfSummary, err error) {
 	bgpSummary, err = m.Cli.ShowBGPSummary(vrf)
 	if err != nil {
 		return bgpSummary, fmt.Errorf("cannot get BGPSummary for vrf %s: %w", vrf, err)

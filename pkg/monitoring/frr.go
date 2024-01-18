@@ -190,7 +190,7 @@ func (c *frrCollector) UpdateRoutes(ch chan<- prometheus.Metric) {
 }
 
 func (c *frrCollector) UpdateBGPNeighbors(ch chan<- prometheus.Metric) {
-	bgpNeighbors, err := c.frr.ListNeighbors("")
+	bgpNeighbors, err := c.frr.ListBGPNeighbors("")
 	if err != nil {
 		c.logger.Error(err, "can't get bgpNeighbors from frr: %w")
 	}

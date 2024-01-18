@@ -458,11 +458,6 @@ func (n *NetlinkManager) ListNeighborInformation() ([]NeighborInformation, error
 			return nil, fmt.Errorf("error getting link by index: %w", err)
 		}
 		interfaceName := linkInfo.Attrs().Name
-		// If NOARP is set on neighbor we skip it here
-		// We also want the vxlan neighbors probably.
-		// if netlinkNeighbors[index].State == netlink.NUD_NOARP {
-		// 	continue
-		// }
 		// This ensures that only neighbors of secondary interfaces are imported
 		// or hardware interfaces which support VFs
 		if strings.HasPrefix(interfaceName, vethL2Prefix) ||

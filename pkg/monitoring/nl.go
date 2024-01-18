@@ -25,7 +25,7 @@ func NewNetlinkCollector() (Collector, error) {
 	collector := netlinkCollector{
 		routesFibDesc: typedFactoryDesc{
 			desc: prometheus.NewDesc(
-				prometheus.BuildFQName(namespace, "netlink", "routes"),
+				prometheus.BuildFQName(namespace, "netlink", "routes_fib"),
 				"The number of routes currently in the Linux Dataplane.",
 				[]string{"table", "vrf", "protocol", "address_family"},
 				nil,
