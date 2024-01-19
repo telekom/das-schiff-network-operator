@@ -47,6 +47,7 @@ type VRFConfiguration struct {
 	VNI           int
 	MTU           int
 	RT            string
+	IsTaaS        bool
 	AggregateIPv4 []string
 	AggregateIPv6 []string
 	Import        []PrefixList

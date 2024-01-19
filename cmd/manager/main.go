@@ -24,6 +24,11 @@ import (
 	"os"
 	"sort"
 
+	"k8s.io/apimachinery/pkg/runtime"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
+
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/controllers"
 	"github.com/telekom/das-schiff-network-operator/pkg/anycast"
@@ -35,10 +40,6 @@ import (
 	"github.com/telekom/das-schiff-network-operator/pkg/monitoring"
 	"github.com/telekom/das-schiff-network-operator/pkg/notrack"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler"
-	"k8s.io/apimachinery/pkg/runtime"
-	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
-	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
-	"k8s.io/client-go/rest"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.) //nolint:gci
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -244,6 +245,14 @@ func setupReconcilers(mgr manager.Manager, anycastTracker *anycast.Tracker) erro
 		Reconciler: r,
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("unable to create Layer2NetworkConfiguration controller: %w", err)
+	}
+
+	if err = (&controllers.RoutingTableReconciler{
+		Client:     mgr.GetClient(),
+		Scheme:     mgr.GetScheme(),
+		Reconciler: r,
+	}).SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to create RoutingTable controller: %w", err)
 	}
 
 	return nil

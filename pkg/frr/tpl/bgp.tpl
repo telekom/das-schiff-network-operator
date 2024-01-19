@@ -1,4 +1,17 @@
 {{range $vrf := .VRFs}}
+{{if $vrf.IsTaaS}}
+router bgp {{$.ASN}} vrf taas.{{$vrf.VNI}}
+ bgp router-id {{$.RouterID}}
+ !
+ address-family ipv4 unicast
+  redistribute kernel
+ exit-address-family
+ !
+ address-family ipv6 unicast
+  redistribute kernel
+ exit-address-family
+exit
+{{else}}
 {{if $vrf.ShouldTemplateVRF}}
 router bgp {{$.ASN}} vrf vr.{{$vrf.Name}}
  bgp router-id {{$.RouterID}}
@@ -39,5 +52,6 @@ router bgp {{$.ASN}} vrf vr.{{$vrf.Name}}
  exit-address-family
 exit
 !
+{{end}}
 {{end}}
 {{- end -}}

@@ -1,0 +1,27 @@
+# permissions for end users to view routingtables.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: clusterrole
+    app.kubernetes.io/instance: routingtable-viewer-role
+    app.kubernetes.io/component: rbac
+    app.kubernetes.io/created-by: network-operator
+    app.kubernetes.io/part-of: network-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: routingtable-viewer-role
+rules:
+- apiGroups:
+  - network.schiff.telekom.de
+  resources:
+  - routingtables
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - network.schiff.telekom.de
+  resources:
+  - routingtables/status
+  verbs:
+  - get

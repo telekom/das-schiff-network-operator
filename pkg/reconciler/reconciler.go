@@ -100,8 +100,12 @@ func (reconciler *Reconciler) reconcileDebounced(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	taas, err := r.fetchTaas(ctx)
+	if err != nil {
+		return err
+	}
 
-	if err := r.reconcileLayer3(l3vnis); err != nil {
+	if err := r.reconcileLayer3(l3vnis, taas); err != nil {
 		return err
 	}
 	if err := r.reconcileLayer2(l2vnis); err != nil {
