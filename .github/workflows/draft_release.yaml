@@ -68,7 +68,7 @@ jobs:
 
       - name: Extract Metadata (tags, labels) for Docker
         id: meta
-        uses: docker/metadata-action@v5.5.0
+        uses: docker/metadata-action@v5.5.1
         with:
           images: ghcr.io/telekom/das-schiff-network-operator
 
@@ -82,7 +82,7 @@ jobs:
 
       - name: Extract Metadata (tags, labels) for Docker
         id: exporter
-        uses: docker/metadata-action@v5.5.0
+        uses: docker/metadata-action@v5.5.1
         with:
           images: ghcr.io/telekom/frr-exporter
 
