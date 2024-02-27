@@ -9,8 +9,8 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func (*Manager) listRoutes() ([]netlink.Route, error) {
-	routes, err := netlink.RouteListFiltered(netlink.FAMILY_ALL, &netlink.Route{
+func (n *Manager) listRoutes() ([]netlink.Route, error) {
+	routes, err := n.toolkit.RouteListFiltered(netlink.FAMILY_ALL, &netlink.Route{
 		Table: 0,
 	}, netlink.RT_FILTER_TABLE)
 	if err != nil {
@@ -19,26 +19,26 @@ func (*Manager) listRoutes() ([]netlink.Route, error) {
 	return routes, nil
 }
 
-func (*NetlinkManager) listBridgeForwardingTable() ([]netlink.Neigh, error) {
-	entries, err := netlink.NeighList(0, unix.AF_BRIDGE)
+func (n *Manager) listBridgeForwardingTable() ([]netlink.Neigh, error) {
+	entries, err := n.toolkit.NeighList(0, unix.AF_BRIDGE)
 	if err != nil {
 		return nil, fmt.Errorf("error listing bridge fdb entries: %w", err)
 	}
 	return entries, nil
 }
 
-func (*Manager) listNeighbors() ([]netlink.Neigh, error) {
-	neighbors, err := netlink.NeighList(0, netlink.FAMILY_ALL)
+func (n *Manager) listNeighbors() ([]netlink.Neigh, error) {
+	neighbors, err := n.toolkit.NeighList(0, netlink.FAMILY_ALL)
 	if err != nil {
 		return nil, fmt.Errorf("error listing all neighbors: %w", err)
 	}
 	return neighbors, nil
 }
 
-func (*Manager) ListVRFInterfaces() ([]VRFInformation, error) {
+func (n *Manager) ListVRFInterfaces() ([]VRFInformation, error) {
 	infos := []VRFInformation{}
 
-	links, err := netlink.LinkList()
+	links, err := n.toolkit.LinkList()
 	if err != nil {
 		return nil, fmt.Errorf("cannot get links from netlink: %w", err)
 	}

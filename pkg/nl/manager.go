@@ -34,7 +34,7 @@ func NewManager(toolkit ToolkitInterface) *Manager {
 	return &Manager{toolkit: toolkit}
 }
 
-func (*Manager) GetUnderlayIP() (net.IP, error) {
-	_, ip, err := getUnderlayInterfaceAndIP()
+func (n *Manager) GetUnderlayIP() (net.IP, error) {
+	_, ip, err := n.getUnderlayInterfaceAndIP()
 	return ip, err
 }

@@ -49,7 +49,7 @@ func (n *Manager) createBridge(bridgeName string, macAddress *net.HardwareAddr, 
 	if macAddress != nil {
 		netlinkBridge.LinkAttrs.HardwareAddr = *macAddress
 	} else if underlayRMAC {
-		_, vxlanIP, err := getUnderlayInterfaceAndIP()
+		_, vxlanIP, err := n.getUnderlayInterfaceAndIP()
 		if err != nil {
 			return nil, err
 		}
@@ -72,7 +72,7 @@ func (n *Manager) createBridge(bridgeName string, macAddress *net.HardwareAddr, 
 }
 
 func (n *Manager) createVXLAN(vxlanName string, bridgeIdx, vni, mtu int, hairpin, neighSuppression bool) (*netlink.Vxlan, error) {
-	vxlanIf, vxlanIP, err := getUnderlayInterfaceAndIP()
+	vxlanIf, vxlanIP, err := n.getUnderlayInterfaceAndIP()
 	if err != nil {
 		return nil, err
 	}
@@ -165,8 +165,8 @@ func (n *Manager) setUp(intfName string) error {
 	return nil
 }
 
-func generateUnderlayMAC() (net.HardwareAddr, error) {
-	_, vxlanIP, err := getUnderlayInterfaceAndIP()
+func (n *Manager) generateUnderlayMAC() (net.HardwareAddr, error) {
+	_, vxlanIP, err := n.getUnderlayInterfaceAndIP()
 	if err != nil {
 		return nil, err
 	}
@@ -178,7 +178,7 @@ func generateUnderlayMAC() (net.HardwareAddr, error) {
 	return generatedMac, nil
 }
 
-func getUnderlayInterfaceAndIP() (int, net.IP, error) {
+func (n *Manager) getUnderlayInterfaceAndIP() (int, net.IP, error) {
 	dummy := netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: underlayLoopback}}
 
 	addresses, err := n.toolkit.AddrList(&dummy, netlink.FAMILY_V4)

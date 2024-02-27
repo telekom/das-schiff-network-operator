@@ -79,7 +79,7 @@ var _ = Describe("filterNeighbors()", func() {
 })
 
 var _ = Describe("syncInterfaceByFamily()", func() {
-	netlinkMock := mock_nl.NewMockNetlinkToolkitInterface(mockctrl)
+	netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
 	It("returns error if cannot get neighbors", func() {
 		netlinkMock.EXPECT().NeighList(0, 0).Return(nil, errors.New("fake error"))
 		err := syncInterfaceByFamily(&netlink.Bridge{}, 0, 0, netlinkMock, logger)
@@ -121,7 +121,7 @@ var _ = Describe("syncInterfaceByFamily()", func() {
 })
 
 var _ = Describe("syncInterface()", func() {
-	netlinkMock := mock_nl.NewMockNetlinkToolkitInterface(mockctrl)
+	netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
 	It("returns no error if interface's Master Index <= 0", func() {
 		intf := &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{MasterIndex: 0}}
 		// returning error just to quit syncInterfaceByFamily call
@@ -164,7 +164,7 @@ var _ = Describe("NewTracker()", func() {
 })
 
 var _ = Describe("checkTrackedInterfaces()", func() {
-	netlinkMock := mock_nl.NewMockNetlinkToolkitInterface(mockctrl)
+	netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
 	It("returns no error if cannot get link by index", func() {
 		netlinkMock.EXPECT().LinkByIndex(gomock.Any()).Return(nil, errors.New("fake error"))
 		tracker := NewTracker(netlinkMock)

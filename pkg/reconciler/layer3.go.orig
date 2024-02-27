@@ -78,7 +78,14 @@ func (r *reconcile) reconcileLayer3(l3vnis []networkv1alpha1.VRFRouteConfigurati
 	// We wait here for two seconds to let FRR settle after updating netlink devices
 	time.Sleep(defaultSleep)
 
+<<<<<<< HEAD
 	err = r.configureFRR(allConfigs, reloadTwice)
+=======
+	changed, err := r.frrManager.Configure(frr.Configuration{
+		VRFs: vrfConfigs,
+		ASN:  r.config.ServerASN,
+	}, r.netlinkManager)
+>>>>>>> 9c7cb71 (Added unit tests)
 	if err != nil {
 		return err
 	}
@@ -98,7 +105,7 @@ func (r *reconcile) configureFRR(vrfConfigs []frr.VRFConfiguration, reloadTwice 
 	changed, err := r.frrManager.Configure(frr.Configuration{
 		VRFs: vrfConfigs,
 		ASN:  r.config.ServerASN,
-	}, r.netlinkManager)
+	})
 	if err != nil {
 		r.Logger.Error(err, "error updating FRR configuration")
 		return fmt.Errorf("error updating FRR configuration: %w", err)

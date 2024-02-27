@@ -107,8 +107,8 @@ func (m *Manager) ReloadFRR() error {
 	return nil
 }
 
-func (*Manager) RestartFRR() error {
-	con, err := dbus.NewSystemConnectionContext(context.Background())
+func (n *Manager) RestartFRR() error {
+	con, err := n.dbusToolkit.NewConn(context.Background())
 	if err != nil {
 		return fmt.Errorf("error creating nee D-Bus connection: %w", err)
 	}

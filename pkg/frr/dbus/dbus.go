@@ -16,6 +16,7 @@ type Connection interface {
 	Close()
 	ReloadUnitContext(context.Context, string, string, chan<- string) (int, error)
 	GetUnitPropertiesContext(ctx context.Context, unit string) (map[string]interface{}, error)
+	RestartUnitContext(ctx context.Context, name string, mode string, ch chan<- string) (int, error)
 }
 
 type Toolkit struct{}

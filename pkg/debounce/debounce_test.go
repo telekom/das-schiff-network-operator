@@ -28,7 +28,7 @@ func TestDebounce(t *testing.T) {
 var _ = Describe("debounce", func() {
 	Context("NewDebouncer() should", func() {
 		It("create new debouncer", func() {
-			d := NewDebouncer(nil, time.Millisecond)
+			d := NewDebouncer(nil, time.Millisecond, logger)
 			Expect(d).ToNot(BeNil())
 		})
 	})
