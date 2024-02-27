@@ -9,8 +9,8 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func (*NetlinkManager) listRoutes() ([]netlink.Route, error) {
-	routes, err := netlink.RouteListFiltered(netlink.FAMILY_ALL, &netlink.Route{
+func (n *Manager) listRoutes() ([]netlink.Route, error) {
+	routes, err := n.toolkit.RouteListFiltered(netlink.FAMILY_ALL, &netlink.Route{
 		Table: 0,
 	}, netlink.RT_FILTER_TABLE)
 	if err != nil {
@@ -19,26 +19,26 @@ func (*NetlinkManager) listRoutes() ([]netlink.Route, error) {
 	return routes, nil
 }
 
-func (*NetlinkManager) listBridgeForwardingTable() ([]netlink.Neigh, error) {
-	entries, err := netlink.NeighList(0, unix.AF_BRIDGE)
+func (n *Manager) listBridgeForwardingTable() ([]netlink.Neigh, error) {
+	entries, err := n.toolkit.NeighList(0, unix.AF_BRIDGE)
 	if err != nil {
 		return nil, fmt.Errorf("error listing bridge fdb entries: %w", err)
 	}
 	return entries, nil
 }
 
-func (*NetlinkManager) listNeighbors() ([]netlink.Neigh, error) {
-	neighbors, err := netlink.NeighList(0, netlink.FAMILY_ALL)
+func (n *Manager) listNeighbors() ([]netlink.Neigh, error) {
+	neighbors, err := n.toolkit.NeighList(0, netlink.FAMILY_ALL)
 	if err != nil {
-		return nil, fmt.Errorf("error listing ipv4,ipv6 neighbors: %w", err)
+		return nil, fmt.Errorf("error listing all neighbors: %w", err)
 	}
 	return neighbors, nil
 }
 
-func (*NetlinkManager) ListVRFInterfaces() ([]VRFInformation, error) {
+func (n *Manager) ListVRFInterfaces() ([]VRFInformation, error) {
 	infos := []VRFInformation{}
 
-	links, err := netlink.LinkList()
+	links, err := n.toolkit.LinkList()
 	if err != nil {
 		return nil, fmt.Errorf("cannot get links from netlink: %w", err)
 	}
@@ -59,10 +59,10 @@ func (*NetlinkManager) ListVRFInterfaces() ([]VRFInformation, error) {
 	return infos, nil
 }
 
-func (n *NetlinkManager) ListL3() ([]VRFInformation, error) {
+func (n *Manager) ListL3() ([]VRFInformation, error) {
 	infos := []VRFInformation{}
 
-	links, err := netlink.LinkList()
+	links, err := n.toolkit.LinkList()
 	if err != nil {
 		return nil, fmt.Errorf("error listing links: %w", err)
 	}
@@ -86,20 +86,20 @@ func (n *NetlinkManager) ListL3() ([]VRFInformation, error) {
 	return infos, nil
 }
 
-func (*NetlinkManager) updateL3Indices(info *VRFInformation) {
-	bridgeLink, err := netlink.LinkByName(bridgePrefix + info.Name)
+func (n *Manager) updateL3Indices(info *VRFInformation) {
+	bridgeLink, err := n.toolkit.LinkByName(bridgePrefix + info.Name)
 	if err == nil {
 		info.bridgeID = bridgeLink.Attrs().Index
 	} else {
 		info.MarkForDelete = true
 	}
-	vxlanLink, err := netlink.LinkByName(vxlanPrefix + info.Name)
+	vxlanLink, err := n.toolkit.LinkByName(vxlanPrefix + info.Name)
 	if err == nil {
 		info.VNI = vxlanLink.(*netlink.Vxlan).VxlanId
 	} else {
 		info.MarkForDelete = true
 	}
-	vethLink, err := netlink.LinkByName(vrfToDefaultPrefix + info.Name)
+	vethLink, err := n.toolkit.LinkByName(vrfToDefaultPrefix + info.Name)
 	if err == nil {
 		info.MTU = vethLink.Attrs().MTU
 	} else {
@@ -107,24 +107,24 @@ func (*NetlinkManager) updateL3Indices(info *VRFInformation) {
 	}
 }
 
-func (*NetlinkManager) updateL2Indices(info *Layer2Information, links []netlink.Link) error {
+func (n *Manager) updateL2Indices(info *Layer2Information, links []netlink.Link) error {
 	for _, link := range links {
 		// Check if master of interface is bridge
 		if link.Attrs().MasterIndex != info.bridge.Attrs().Index {
 			continue
 		}
 
-		if err := updateLink(info, link); err != nil {
+		if err := n.updateLink(info, link); err != nil {
 			return err
 		}
 	}
 
 	// Read IP addresses
-	currentV4, err := netlink.AddrList(info.bridge, unix.AF_INET)
+	currentV4, err := n.toolkit.AddrList(info.bridge, unix.AF_INET)
 	if err != nil {
 		return fmt.Errorf("error listing link's IPv4 addresses: %w", err)
 	}
-	currentV6, err := netlink.AddrList(info.bridge, unix.AF_INET6)
+	currentV6, err := n.toolkit.AddrList(info.bridge, unix.AF_INET6)
 	if err != nil {
 		return fmt.Errorf("error listing link's IPv6 addresses: %w", err)
 	}
@@ -143,7 +143,7 @@ func (*NetlinkManager) updateL2Indices(info *Layer2Information, links []netlink.
 	return nil
 }
 
-func updateLink(info *Layer2Information, link netlink.Link) error {
+func (n *Manager) updateLink(info *Layer2Information, link netlink.Link) error {
 	// If subinterface is VXLAN
 	if link.Type() == "vxlan" && strings.HasPrefix(link.Attrs().Name, vxlanPrefix) {
 		info.vxlan = link.(*netlink.Vxlan)
@@ -153,11 +153,11 @@ func updateLink(info *Layer2Information, link netlink.Link) error {
 	// If subinterface is VETH
 	if link.Type() == "veth" && strings.HasPrefix(link.Attrs().Name, vethL2Prefix) {
 		info.macvlanBridge = link.(*netlink.Veth)
-		peerIdx, err := netlink.VethPeerIndex(info.macvlanBridge)
+		peerIdx, err := n.toolkit.VethPeerIndex(info.macvlanBridge)
 		if err != nil {
 			return fmt.Errorf("error getting veth perr by index: %w", err)
 		}
-		peerInterface, err := netlink.LinkByIndex(peerIdx)
+		peerInterface, err := n.toolkit.LinkByIndex(peerIdx)
 		if err != nil {
 			return fmt.Errorf("error getting link by index: %w", err)
 		}
@@ -168,10 +168,10 @@ func updateLink(info *Layer2Information, link netlink.Link) error {
 	return nil
 }
 
-func (n *NetlinkManager) ListL2() ([]Layer2Information, error) {
+func (n *Manager) ListL2() ([]Layer2Information, error) {
 	infos := []Layer2Information{}
 
-	links, err := netlink.LinkList()
+	links, err := n.toolkit.LinkList()
 	if err != nil {
 		return nil, fmt.Errorf("error listing links: %w", err)
 	}
@@ -191,7 +191,7 @@ func (n *NetlinkManager) ListL2() ([]Layer2Information, error) {
 		info.VlanID = vlanID
 
 		if info.bridge.MasterIndex > 0 {
-			vrf, err := netlink.LinkByIndex(info.bridge.MasterIndex)
+			vrf, err := n.toolkit.LinkByIndex(info.bridge.MasterIndex)
 			if err != nil {
 				return nil, fmt.Errorf("error getting link by index: %w", err)
 			}
@@ -211,7 +211,7 @@ func (n *NetlinkManager) ListL2() ([]Layer2Information, error) {
 	return infos, nil
 }
 
-func (*NetlinkManager) ListTaas() ([]TaasInformation, error) {
+func (*Manager) ListTaas() ([]TaasInformation, error) {
 	infos := []TaasInformation{}
 
 	links, err := netlink.LinkList()

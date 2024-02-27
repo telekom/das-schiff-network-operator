@@ -12,6 +12,7 @@ clab-containerlab-test-setup/
 tls/*
 testbin/*
 testdata/.containerlab.yaml.bak
+pkg/*/testdata*
 
 # Test binary, build with `go test -c`
 *.test
