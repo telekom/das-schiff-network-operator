@@ -46,6 +46,12 @@ func main() {
 	}
 	reg.MustRegister(collector)
 
+	endpoint := monitoring.NewEndpoint()
+
+	http.HandleFunc("/show/route", endpoint.ShowRoute)
+	http.HandleFunc("/show/bgp", endpoint.ShowBGP)
+	http.HandleFunc("/show/evpn", endpoint.ShowEVPN)
+
 	// Expose the registered metrics via HTTP.
 	http.Handle("/metrics", promhttp.HandlerFor(
 		reg,
