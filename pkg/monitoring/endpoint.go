@@ -7,30 +7,30 @@ import (
 	"github.com/telekom/das-schiff-network-operator/pkg/frr"
 )
 
-type endpoint struct {
+const (
+	vrfAll = "all"
+)
+
+type Endpoint struct {
 	cli *frr.Cli
 }
 
-func NewEndpoint() *endpoint {
-	return &endpoint{cli: frr.NewCli()}
+func NewEndpoint() *Endpoint {
+	return &Endpoint{cli: frr.NewCli()}
 }
 
 func writeResponse(data *[]byte, w http.ResponseWriter) {
-	// if len(*data) <= 0 {
-	// 	http.Error(w, "failed to get data:", http.StatusInternalServerError)
-	// 	return
-	// }
-
 	_, err := w.Write(*data)
 	if err != nil {
 		http.Error(w, "failed to write response: "+err.Error(), http.StatusInternalServerError)
+		return
 	}
 }
 
-func (e *endpoint) ShowRoute(w http.ResponseWriter, r *http.Request) {
+func (e *Endpoint) ShowRoute(w http.ResponseWriter, r *http.Request) {
 	vrf := r.URL.Query().Get("vrf")
 	if vrf == "" {
-		vrf = "all"
+		vrf = vrfAll
 	}
 
 	protocol := r.URL.Query().Get("protocol")
@@ -49,16 +49,16 @@ func (e *endpoint) ShowRoute(w http.ResponseWriter, r *http.Request) {
 	writeResponse(&data, w)
 }
 
-func (e *endpoint) ShowBGP(w http.ResponseWriter, r *http.Request) {
+func (e *Endpoint) ShowBGP(w http.ResponseWriter, r *http.Request) {
 	vrf := r.URL.Query().Get("vrf")
 	if vrf == "" {
-		vrf = "all"
+		vrf = vrfAll
 	}
 
 	data := []byte{}
 
 	requestType := r.URL.Query().Get("type")
-	if strings.ToLower(requestType) == "summary" {
+	if strings.EqualFold(requestType, "summary") {
 		data = e.cli.ExecuteWithJSON([]string{
 			"show",
 			"bgp",
@@ -80,13 +80,12 @@ func (e *endpoint) ShowBGP(w http.ResponseWriter, r *http.Request) {
 			protocol,
 			"unicast",
 		})
-
 	}
 
 	writeResponse(&data, w)
 }
 
-func (e *endpoint) ShowEVPN(w http.ResponseWriter, r *http.Request) {
+func (e *Endpoint) ShowEVPN(w http.ResponseWriter, r *http.Request) {
 	data := []byte{}
 	requestType := r.URL.Query().Get("type")
 	if requestType == "" {
@@ -98,7 +97,7 @@ func (e *endpoint) ShowEVPN(w http.ResponseWriter, r *http.Request) {
 	} else {
 		vrf := r.URL.Query().Get("vrf")
 		if vrf == "" {
-			vrf = "all"
+			vrf = vrfAll
 		}
 
 		data = e.cli.ExecuteWithJSON([]string{
@@ -108,7 +107,6 @@ func (e *endpoint) ShowEVPN(w http.ResponseWriter, r *http.Request) {
 			"vni",
 			vrf,
 		})
-
 	}
 
 	writeResponse(&data, w)
