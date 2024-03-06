@@ -54,6 +54,7 @@ func main() {
 	http.HandleFunc("/show/route", endpoint.ShowRoute)
 	http.HandleFunc("/show/bgp", endpoint.ShowBGP)
 	http.HandleFunc("/show/evpn", endpoint.ShowEVPN)
+	http.HandleFunc("/all/show/route", endpoint.ShowAllRoute)
 
 	// Expose the registered metrics via HTTP.
 	http.Handle("/metrics", promhttp.HandlerFor(

@@ -1,12 +1,17 @@
 package monitoring
 
 import (
+	"context"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
+	"os"
 	"strconv"
 
 	"github.com/telekom/das-schiff-network-operator/pkg/frr"
+	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
+	corev1 "k8s.io/api/core/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -66,7 +71,52 @@ func (e *Endpoint) ShowRoute(w http.ResponseWriter, r *http.Request) {
 
 	data := e.cli.ExecuteWithJSON(command)
 
-	writeResponse(&data, w)
+	nodename := os.Getenv(healthcheck.NodenameEnv)
+	nodeField := fmt.Sprintf("%s:\n", nodename)
+
+	result := []byte{}
+
+	if nodename != "" {
+		result = append(result, []byte(nodeField)...)
+	}
+
+	result = append(result, data...)
+
+	writeResponse(&result, w)
+}
+
+func (e *Endpoint) ShowAllRoute(w http.ResponseWriter, r *http.Request) {
+	ctx := context.TODO()
+	pods := &corev1.PodList{}
+	matchLabels := &client.MatchingLabels{
+		"app.kubernetes.io/component": "worker",
+	}
+
+	err := e.c.List(ctx, pods, matchLabels)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("error listing pods: %s", err.Error()), http.StatusInternalServerError)
+		return
+	}
+
+	if len(pods.Items) == 0 {
+		http.Error(w, "error listing pods: no pods found", http.StatusInternalServerError)
+		return
+	}
+
+	for _, pod := range pods.Items {
+		fmt.Println(pod.Status.PodIP)
+		url := fmt.Sprintf("http://%s/show/route?%s", pod.Status.PodIP, r.URL.RawQuery)
+		fmt.Println(url)
+		resp, err := http.Get(url)
+		if err != nil {
+			log.Fatalln(err)
+		}
+
+		data := []byte{}
+		resp.Body.Read(data)
+		resp.Body.Close()
+		writeResponse(&data, w)
+	}
 }
 
 func (e *Endpoint) ShowBGP(w http.ResponseWriter, r *http.Request) {
