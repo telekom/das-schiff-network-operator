@@ -46,7 +46,10 @@ func main() {
 	}
 	reg.MustRegister(collector)
 
-	endpoint := monitoring.NewEndpoint()
+	endpoint, err := monitoring.NewEndpoint()
+	if err != nil {
+		log.Fatal(fmt.Errorf("failed to create monitoring endpoint %w", err))
+	}
 
 	http.HandleFunc("/show/route", endpoint.ShowRoute)
 	http.HandleFunc("/show/bgp", endpoint.ShowBGP)
