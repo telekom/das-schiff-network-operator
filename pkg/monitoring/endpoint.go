@@ -3,11 +3,12 @@ package monitoring
 import (
 	"context"
 	"fmt"
-	"log"
+	"io"
 	"net"
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/telekom/das-schiff-network-operator/pkg/frr"
 	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
@@ -28,6 +29,7 @@ type Endpoint struct {
 	c   client.Client
 }
 
+// NewEndpoint creates new endpoint object.
 func NewEndpoint() (*Endpoint, error) {
 	clientConfig := ctrl.GetConfigOrDie()
 	c, err := client.New(clientConfig, client.Options{})
@@ -37,6 +39,18 @@ func NewEndpoint() (*Endpoint, error) {
 	return &Endpoint{cli: frr.NewCli(), c: c}, nil
 }
 
+// SetHandlers configures HTTP handlers.
+func (e *Endpoint) SetHandlers() {
+	http.HandleFunc("/show/route", e.ShowRoute)
+	http.HandleFunc("/show/bgp", e.ShowBGP)
+	http.HandleFunc("/show/evpn", e.ShowEVPN)
+	http.HandleFunc("/all/show/route", e.PassRequest)
+	http.HandleFunc("/all/show/bgp", e.PassRequest)
+	http.HandleFunc("/all/show/evpn", e.PassRequest)
+}
+
+// ShowRoute returns result of show ip/ipv6 route command.
+// show ip/ipv6 route (vrf <vrf>) <input> (longer-prefixes)
 func (e *Endpoint) ShowRoute(w http.ResponseWriter, r *http.Request) {
 	vrf := r.URL.Query().Get("vrf")
 	if vrf == "" {
@@ -71,62 +85,20 @@ func (e *Endpoint) ShowRoute(w http.ResponseWriter, r *http.Request) {
 
 	data := e.cli.ExecuteWithJSON(command)
 
-	nodename := os.Getenv(healthcheck.NodenameEnv)
-	nodeField := fmt.Sprintf("%s:\n", nodename)
-
-	result := []byte{}
-
-	if nodename != "" {
-		result = append(result, []byte(nodeField)...)
-	}
-
-	result = append(result, data...)
-
-	writeResponse(&result, w)
+	result := addNodename(&data)
+	writeResponse(result, w)
 }
 
-func (e *Endpoint) ShowAllRoute(w http.ResponseWriter, r *http.Request) {
-	ctx := context.TODO()
-	pods := &corev1.PodList{}
-	matchLabels := &client.MatchingLabels{
-		"app.kubernetes.io/component": "worker",
-	}
-
-	err := e.c.List(ctx, pods, matchLabels)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("error listing pods: %s", err.Error()), http.StatusInternalServerError)
-		return
-	}
-
-	if len(pods.Items) == 0 {
-		http.Error(w, "error listing pods: no pods found", http.StatusInternalServerError)
-		return
-	}
-
-	for _, pod := range pods.Items {
-		fmt.Println(pod.Status.PodIP)
-		url := fmt.Sprintf("http://%s/show/route?%s", pod.Status.PodIP, r.URL.RawQuery)
-		fmt.Println(url)
-		resp, err := http.Get(url)
-		if err != nil {
-			log.Fatalln(err)
-		}
-
-		data := []byte{}
-		resp.Body.Read(data)
-		resp.Body.Close()
-		writeResponse(&data, w)
-	}
-}
-
+// ShowBGP returns a result of show bgp command.
+// show bgp (vrf <vrf>) ipv4/ipv6 unicast <input> (longer-prefixes)
+// show bgp vrf <all|vrf> summary
 func (e *Endpoint) ShowBGP(w http.ResponseWriter, r *http.Request) {
 	vrf := r.URL.Query().Get("vrf")
 	if vrf == "" {
 		vrf = all
 	}
 
-	data := []byte{}
-
+	var data []byte
 	requestType := r.URL.Query().Get("type")
 	switch requestType {
 	case "summary":
@@ -171,11 +143,17 @@ func (e *Endpoint) ShowBGP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeResponse(&data, w)
+	result := addNodename(&data)
+	writeResponse(result, w)
 }
 
+// ShowEVPN returns result of show evpn command.
+// show evpn vni json
+// show evpn rmac vni <all|vrf>
+// show evpn mac vni <all|vrf>
+// show evpn next-hops vni <all|vrf> json
 func (e *Endpoint) ShowEVPN(w http.ResponseWriter, r *http.Request) {
-	data := []byte{}
+	var data []byte
 	requestType := r.URL.Query().Get("type")
 	switch requestType {
 	case "":
@@ -202,7 +180,61 @@ func (e *Endpoint) ShowEVPN(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeResponse(&data, w)
+	result := addNodename(&data)
+	writeResponse(result, w)
+}
+
+//+kubebuilder:rbac:groups=core,resources=pods,verbs=list
+
+// PassRequest - when called, will pass the request to all nodes and return their respones.
+func (e *Endpoint) PassRequest(w http.ResponseWriter, r *http.Request) {
+	ctx := context.TODO()
+	pods := &corev1.PodList{}
+	matchLabels := &client.MatchingLabels{
+		"app.kubernetes.io/component": "worker",
+	}
+
+	err := e.c.List(ctx, pods, matchLabels)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("error listing pods: %s", err.Error()), http.StatusInternalServerError)
+		return
+	}
+
+	if len(pods.Items) == 0 {
+		http.Error(w, "error listing pods: no pods found", http.StatusInternalServerError)
+		return
+	}
+
+	query := strings.ReplaceAll(r.URL.String(), "all/", "")
+
+	s := strings.Split(r.Host, ":")
+	port := ""
+	if len(s) > 1 {
+		port = s[1]
+	}
+
+	buffer := []byte{}
+
+	for _, pod := range pods.Items {
+		url := fmt.Sprintf("http://%s:%s%s", pod.Status.PodIP, port, query)
+		resp, err := http.Get(url)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("error getting data from %s: %s", pod.Status.PodIP, err.Error()), http.StatusInternalServerError)
+			return
+		}
+
+		data, err := io.ReadAll(resp.Body)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("error reading repsonse from %s: %s", pod.Status.PodIP, err.Error()), http.StatusInternalServerError)
+			return
+		}
+
+		buffer = append(buffer, data...)
+		buffer = append(buffer, '\n')
+		resp.Body.Close()
+	}
+
+	writeResponse(&buffer, w)
 }
 
 func writeResponse(data *[]byte, w http.ResponseWriter) {
@@ -236,4 +268,16 @@ func setInput(r *http.Request, command *[]string) error {
 		*command = append(*command, input)
 	}
 	return nil
+}
+
+func addNodename(data *[]byte) *[]byte {
+	nodename := os.Getenv(healthcheck.NodenameEnv)
+	nodeField := fmt.Sprintf("%s:\n", nodename)
+
+	result := []byte{}
+	if nodename != "" {
+		result = append(result, []byte(nodeField)...)
+	}
+	result = append(result, *data...)
+	return &result
 }

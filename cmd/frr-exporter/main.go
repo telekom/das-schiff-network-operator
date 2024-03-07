@@ -51,10 +51,7 @@ func main() {
 		log.Fatal(fmt.Errorf("failed to create monitoring endpoint %w", err))
 	}
 
-	http.HandleFunc("/show/route", endpoint.ShowRoute)
-	http.HandleFunc("/show/bgp", endpoint.ShowBGP)
-	http.HandleFunc("/show/evpn", endpoint.ShowEVPN)
-	http.HandleFunc("/all/show/route", endpoint.ShowAllRoute)
+	endpoint.SetHandlers()
 
 	// Expose the registered metrics via HTTP.
 	http.Handle("/metrics", promhttp.HandlerFor(
