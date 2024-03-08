@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/telekom/das-schiff-network-operator/pkg/frr"
 	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
@@ -215,23 +216,46 @@ func (e *Endpoint) PassRequest(w http.ResponseWriter, r *http.Request) {
 
 	buffer := []byte{}
 
+	var wg sync.WaitGroup
+	results := make(chan []byte, len(pods.Items))
+	errors := make(chan error, len(pods.Items))
+
 	for _, pod := range pods.Items {
-		url := fmt.Sprintf("http://%s:%s%s", pod.Status.PodIP, port, query)
-		resp, err := http.Get(url)
-		if err != nil {
-			http.Error(w, fmt.Sprintf("error getting data from %s: %s", pod.Status.PodIP, err.Error()), http.StatusInternalServerError)
-			return
-		}
+		wg.Add(1)
+		go func(pod corev1.Pod) {
+			defer wg.Done()
 
-		data, err := io.ReadAll(resp.Body)
-		if err != nil {
-			http.Error(w, fmt.Sprintf("error reading repsonse from %s: %s", pod.Status.PodIP, err.Error()), http.StatusInternalServerError)
-			return
-		}
+			url := fmt.Sprintf("http://%s:%s%s", pod.Status.PodIP, port, query)
+			resp, err := http.Get(url)
+			if err != nil {
+				errors <- fmt.Errorf("error getting data from %s: %s", pod.Status.PodIP, err.Error())
+				return
+			}
 
-		buffer = append(buffer, data...)
+			data, err := io.ReadAll(resp.Body)
+			defer resp.Body.Close()
+			if err != nil {
+				fmt.Println(err.Error())
+				errors <- fmt.Errorf("error reading repsonse from %s: %s", pod.Status.PodIP, err.Error())
+				return
+			}
+
+			results <- data
+		}(pod)
+	}
+
+	wg.Wait()
+	close(results)
+	close(errors)
+
+	for err := range errors {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	for result := range results {
+		buffer = append(buffer, result...)
 		buffer = append(buffer, '\n')
-		resp.Body.Close()
 	}
 
 	writeResponse(&buffer, w)
