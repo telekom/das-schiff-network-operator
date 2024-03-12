@@ -190,6 +190,7 @@ func (e *Endpoint) ShowEVPN(w http.ResponseWriter, r *http.Request) {
 func (e *Endpoint) PassRequest(w http.ResponseWriter, r *http.Request) {
 	pods := &corev1.PodList{}
 	matchLabels := &client.MatchingLabels{
+		"app.kubernetes.io/name":      "network-operator",
 		"app.kubernetes.io/component": "worker",
 	}
 
