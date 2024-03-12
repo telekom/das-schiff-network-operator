@@ -14,8 +14,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
-const testHostname = "worker"
-
 var (
 	fakePodsJSON = `{
 		"items": [
