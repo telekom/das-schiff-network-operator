@@ -1,6 +1,7 @@
 package monitoring
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -83,7 +84,12 @@ func (e *Endpoint) ShowRoute(w http.ResponseWriter, r *http.Request) {
 
 	data := e.cli.ExecuteWithJSON(command)
 
-	result := addNodename(&data)
+	result, err := withNodename(&data)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("error adding nodename: %s", err.Error()), http.StatusBadRequest)
+		return
+	}
+
 	writeResponse(result, w)
 }
 
@@ -141,7 +147,12 @@ func (e *Endpoint) ShowBGP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result := addNodename(&data)
+	result, err := withNodename(&data)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("error adding nodename: %s", err.Error()), http.StatusBadRequest)
+		return
+	}
+
 	writeResponse(result, w)
 }
 
@@ -178,7 +189,12 @@ func (e *Endpoint) ShowEVPN(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result := addNodename(&data)
+	result, err := withNodename(&data)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("error adding nodename: %s", err.Error()), http.StatusBadRequest)
+		return
+	}
+
 	writeResponse(result, w)
 }
 
@@ -211,7 +227,7 @@ func (e *Endpoint) PassRequest(w http.ResponseWriter, r *http.Request) {
 		port = s[1]
 	}
 
-	buffer := []byte{}
+	responses := []json.RawMessage{}
 
 	var wg sync.WaitGroup
 	results := make(chan []byte, len(pods.Items))
@@ -232,11 +248,16 @@ func (e *Endpoint) PassRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for result := range results {
-		buffer = append(buffer, result...)
-		buffer = append(buffer, '\n')
+		responses = append(responses, json.RawMessage(result))
 	}
 
-	writeResponse(&buffer, w)
+	jsn, err := json.MarshalIndent(responses, "", "\t")
+	if err != nil {
+		http.Error(w, "error marshalling data: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	writeResponse(&jsn, w)
 }
 
 func writeResponse(data *[]byte, w http.ResponseWriter) {
@@ -272,16 +293,21 @@ func setInput(r *http.Request, command *[]string) error {
 	return nil
 }
 
-func addNodename(data *[]byte) *[]byte {
+func withNodename(data *[]byte) (*[]byte, error) {
+	res := map[string]json.RawMessage{}
 	nodename := os.Getenv(healthcheck.NodenameEnv)
-	nodeField := fmt.Sprintf("%s:\n", nodename)
 
-	result := []byte{}
+	result := data
 	if nodename != "" {
-		result = append(result, []byte(nodeField)...)
+		res[nodename] = json.RawMessage(*data)
+		var err error
+		*result, err = json.MarshalIndent(res, "", "\t")
+		if err != nil {
+			return nil, fmt.Errorf("error marshalling data: %w", err)
+		}
 	}
-	result = append(result, *data...)
-	return &result
+
+	return result, nil
 }
 
 func passToPod(pod *corev1.Pod, port, query string, results chan []byte, errors chan error, wg *sync.WaitGroup) {
