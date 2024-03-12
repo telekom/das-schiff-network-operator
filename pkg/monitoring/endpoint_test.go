@@ -200,8 +200,14 @@ var _ = Describe("Endpoint", func() {
 		})
 	})
 	Context("PassRequest() should", func() {
-		It("return error if there are no instances to query", func() {
+		It("return error if service name is not provided", func() {
 			req := httptest.NewRequest(http.MethodGet, "/all/show/route", http.NoBody)
+			res := httptest.NewRecorder()
+			e.PassRequest(res, req)
+			Expect(res.Code).To(Equal(http.StatusBadRequest))
+		})
+		It("return error if there are no instances to query", func() {
+			req := httptest.NewRequest(http.MethodGet, "/all/show/route?service=test", http.NoBody)
 			res := httptest.NewRecorder()
 			e.PassRequest(res, req)
 			Expect(res.Code).To(Equal(http.StatusInternalServerError))
@@ -209,7 +215,7 @@ var _ = Describe("Endpoint", func() {
 		It("return error if cannot get data from target pod", func() {
 			c := fake.NewClientBuilder().WithRuntimeObjects(fakePods).Build()
 			e := NewEndpoint(c, fcm)
-			req := httptest.NewRequest(http.MethodGet, "/all/show/route", http.NoBody)
+			req := httptest.NewRequest(http.MethodGet, "/all/show/route?service=test", http.NoBody)
 			res := httptest.NewRecorder()
 			e.PassRequest(res, req)
 			Expect(res.Code).To(Equal(http.StatusInternalServerError))

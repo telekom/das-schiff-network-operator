@@ -1,6 +1,7 @@
 package monitoring
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -21,6 +23,8 @@ const (
 	protocolIP   = "ip"
 	protocolIPv4 = "ipv4"
 	protocolIPv6 = "ipv6"
+
+	defaultNamespace = "kube-system"
 )
 
 //go:generate mockgen -destination ./mock/mock_endpoint.go . FRRClient
@@ -198,66 +202,48 @@ func (e *Endpoint) ShowEVPN(w http.ResponseWriter, r *http.Request) {
 	writeResponse(result, w)
 }
 
-//+kubebuilder:rbac:groups=core,resources=pods,verbs=list
+//+kubebuilder:rbac:groups=core,resources=services,verbs=get
+//+kubebuilder:rbac:groups=core,resources=endpoints,verbs=get
+//+kubebuilder:rbac:groups=discovery.k8s.io,resources=endpointslices,verbs=list
 
 // PassRequest - when called, will pass the request to all nodes and return their responses.
 func (e *Endpoint) PassRequest(w http.ResponseWriter, r *http.Request) {
-	pods := &corev1.PodList{}
-	matchLabels := &client.MatchingLabels{
-		"app.kubernetes.io/name":      "network-operator",
-		"app.kubernetes.io/component": "worker",
+	serviceName := r.URL.Query().Get("service")
+	if serviceName == "" {
+		http.Error(w, "error looking for service: service name not provided", http.StatusBadRequest)
+		return
 	}
 
-	err := e.c.List(r.Context(), pods, matchLabels)
+	namespace := r.URL.Query().Get("namespace")
+	if namespace == "" {
+		namespace = defaultNamespace
+	}
+
+	service := &corev1.Service{}
+	err := e.c.Get(r.Context(), client.ObjectKey{Name: serviceName, Namespace: namespace}, service)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("error listing pods: %s", err.Error()), http.StatusInternalServerError)
 		return
 	}
 
-	if len(pods.Items) == 0 {
-		http.Error(w, "error listing pods: no pods found", http.StatusInternalServerError)
-		return
-	}
-
-	query := strings.ReplaceAll(r.URL.String(), "all/", "")
-
-	s := strings.Split(r.Host, ":")
-	port := ""
-	if len(s) > 1 {
-		port = s[1]
-	}
-
-	responses := []json.RawMessage{}
-
-	var wg sync.WaitGroup
-	results := make(chan []byte, len(pods.Items))
-	errors := make(chan error, len(pods.Items))
-
-	for i := range pods.Items {
-		wg.Add(1)
-		go passToPod(&pods.Items[i], port, query, results, errors, &wg)
-	}
-
-	wg.Wait()
-	close(results)
-	close(errors)
-
-	for err := range errors {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	for result := range results {
-		responses = append(responses, json.RawMessage(result))
-	}
-
-	jsn, err := json.MarshalIndent(responses, "", "\t")
+	addr, err := e.getAddresses(r.Context(), service)
 	if err != nil {
-		http.Error(w, "error marshalling data: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("error getting addresses: %s", err.Error()), http.StatusInternalServerError)
 		return
 	}
 
-	writeResponse(&jsn, w)
+	if len(addr) == 0 {
+		http.Error(w, "error listing addresses: no addresses found", http.StatusInternalServerError)
+		return
+	}
+
+	response, err := queryEndpoints(r, addr)
+	if err != nil {
+		http.Error(w, "error querying endpoints: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	writeResponse(&response, w)
 }
 
 func writeResponse(data *[]byte, w http.ResponseWriter) {
@@ -310,22 +296,111 @@ func withNodename(data *[]byte) (*[]byte, error) {
 	return result, nil
 }
 
-func passToPod(pod *corev1.Pod, port, query string, results chan []byte, errors chan error, wg *sync.WaitGroup) {
+func passRequest(addr, port, query string, results chan []byte, errors chan error, wg *sync.WaitGroup) {
 	defer wg.Done()
 
-	url := fmt.Sprintf("http://%s:%s%s", pod.Status.PodIP, port, query)
+	url := fmt.Sprintf("http://%s:%s%s", addr, port, query)
 	resp, err := http.Get(url) //nolint
 	if err != nil {
-		errors <- fmt.Errorf("error getting data from %s: %w", pod.Status.PodIP, err)
+		errors <- fmt.Errorf("error getting data from %s: %w", addr, err)
 		return
 	}
 
 	data, err := io.ReadAll(resp.Body)
 	defer resp.Body.Close()
 	if err != nil {
-		errors <- fmt.Errorf("error reading response from %s: %w", pod.Status.PodIP, err)
+		errors <- fmt.Errorf("error reading response from %s: %w", addr, err)
 		return
 	}
 
 	results <- data
+}
+
+func (e *Endpoint) getEndpointslices(ctx context.Context, svc *corev1.Service) (*discoveryv1.EndpointSlice, error) {
+	endpoints := &discoveryv1.EndpointSliceList{}
+	if err := e.c.List(ctx, endpoints); err != nil {
+		return nil, fmt.Errorf("error listing endpointslices: %w", err)
+	}
+
+	for i := range endpoints.Items {
+		for _, or := range endpoints.Items[i].OwnerReferences {
+			if or.UID == svc.UID {
+				return &endpoints.Items[i], nil
+			}
+		}
+	}
+
+	return nil, nil
+}
+
+func (e *Endpoint) getEndpoints(ctx context.Context, svc *corev1.Service) (*corev1.Endpoints, error) {
+	endpoints := &corev1.Endpoints{}
+	if err := e.c.Get(ctx, client.ObjectKeyFromObject(svc), endpoints); err != nil {
+		return nil, fmt.Errorf("error getting endpoints: %w", err)
+	}
+	return endpoints, nil
+}
+
+func (e *Endpoint) getAddresses(ctx context.Context, svc *corev1.Service) ([]string, error) {
+	es, err := e.getEndpointslices(ctx, svc)
+	addresses := []string{}
+	if err != nil {
+		return nil, fmt.Errorf("error getting endpointslices: %w", err)
+	}
+	if es != nil {
+		for _, ep := range es.Endpoints {
+			addresses = append(addresses, ep.Addresses...)
+		}
+		return addresses, nil
+	}
+	ep, err := e.getEndpoints(ctx, svc)
+	if err != nil {
+		return nil, fmt.Errorf("error getting endpoints: %w", err)
+	}
+	for _, s := range ep.Subsets {
+		for _, a := range s.Addresses {
+			addresses = append(addresses, a.IP)
+		}
+	}
+	return addresses, nil
+}
+
+func queryEndpoints(r *http.Request, addr []string) ([]byte, error) {
+	query := strings.ReplaceAll(r.URL.String(), "all/", "")
+
+	s := strings.Split(r.Host, ":")
+	port := ""
+	if len(s) > 1 {
+		port = s[1]
+	}
+
+	responses := []json.RawMessage{}
+
+	var wg sync.WaitGroup
+	results := make(chan []byte, len(addr))
+	errors := make(chan error, len(addr))
+
+	for i := range addr {
+		wg.Add(1)
+		go passRequest(addr[i], port, query, results, errors, &wg)
+	}
+
+	wg.Wait()
+	close(results)
+	close(errors)
+
+	for err := range errors {
+		return nil, fmt.Errorf("error occurred: %w", err)
+	}
+
+	for result := range results {
+		responses = append(responses, json.RawMessage(result))
+	}
+
+	jsn, err := json.MarshalIndent(responses, "", "\t")
+	if err != nil {
+		return nil, fmt.Errorf("error marshalling data: %w", err)
+	}
+
+	return jsn, nil
 }

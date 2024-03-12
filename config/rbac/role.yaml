@@ -7,6 +7,12 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - endpoints
+  verbs:
+  - get
+- apiGroups:
+  - ""
+  resources:
   - nodes
   verbs:
   - get
@@ -16,7 +22,13 @@ rules:
 - apiGroups:
   - ""
   resources:
-  - pods
+  - services
+  verbs:
+  - get
+- apiGroups:
+  - discovery.k8s.io
+  resources:
+  - endpointslices
   verbs:
   - list
 - apiGroups:
