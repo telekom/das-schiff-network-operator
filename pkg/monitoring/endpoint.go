@@ -10,10 +10,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/telekom/das-schiff-network-operator/pkg/frr"
 	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
 	corev1 "k8s.io/api/core/v1"
-	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -24,19 +22,19 @@ const (
 	protocolIPv6 = "ipv6"
 )
 
+//go:generate mockgen -destination ./mock/mock_endpoint.go . FRRClient
+type FRRClient interface {
+	ExecuteWithJSON(args []string) []byte
+}
+
 type Endpoint struct {
-	cli *frr.Cli
+	cli FRRClient
 	c   client.Client
 }
 
 // NewEndpoint creates new endpoint object.
-func NewEndpoint() (*Endpoint, error) {
-	clientConfig := ctrl.GetConfigOrDie()
-	c, err := client.New(clientConfig, client.Options{})
-	if err != nil {
-		return nil, fmt.Errorf("error creating controller-runtime client: %w", err)
-	}
-	return &Endpoint{cli: frr.NewCli(), c: c}, nil
+func NewEndpoint(k8sClient client.Client, frrcli FRRClient) *Endpoint {
+	return &Endpoint{cli: frrcli, c: k8sClient}
 }
 
 // SetHandlers configures HTTP handlers.

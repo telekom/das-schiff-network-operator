@@ -10,8 +10,10 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/telekom/das-schiff-network-operator/pkg/frr"
 	"github.com/telekom/das-schiff-network-operator/pkg/monitoring"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
 
@@ -46,11 +48,15 @@ func main() {
 	}
 	reg.MustRegister(collector)
 
-	endpoint, err := monitoring.NewEndpoint()
+	clientConfig := ctrl.GetConfigOrDie()
+	c, err := client.New(clientConfig, client.Options{})
 	if err != nil {
-		log.Fatal(fmt.Errorf("failed to create monitoring endpoint %w", err))
+		log.Fatal(fmt.Errorf("error creating controller-runtime client: %w", err))
 	}
 
+	frrCli := frr.NewCli()
+
+	endpoint := monitoring.NewEndpoint(c, frrCli)
 	endpoint.SetHandlers()
 
 	// Expose the registered metrics via HTTP.
