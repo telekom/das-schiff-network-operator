@@ -109,7 +109,7 @@ func (e *Endpoint) ShowBGP(w http.ResponseWriter, r *http.Request) {
 		})
 	case "":
 		protocol := r.URL.Query().Get("protocol")
-		if protocol == "" {
+		if protocol == "" || protocol == protocolIP {
 			protocol = protocolIPv4
 		} else if protocol != protocolIPv4 && protocol != protocolIPv6 {
 			http.Error(w, fmt.Sprintf("protocol '%s' is not supported", protocol), http.StatusBadRequest)
