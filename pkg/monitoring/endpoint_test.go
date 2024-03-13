@@ -396,7 +396,7 @@ var _ = Describe("Endpoint", func() {
 			err := json.Unmarshal([]byte(fakeEndpointSlicesJSON), fakeEndpointSlices)
 			Expect(err).ShouldNot(HaveOccurred())
 
-			svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				fmt.Fprintf(w, "invalidJson")
 			}))
 			defer svr.Close()
@@ -414,7 +414,7 @@ var _ = Describe("Endpoint", func() {
 			err := json.Unmarshal([]byte(fakeEndpointSlicesJSON), fakeEndpointSlices)
 			Expect(err).ShouldNot(HaveOccurred())
 
-			svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				fmt.Fprintf(w, "{}")
 			}))
 			defer svr.Close()
