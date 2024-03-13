@@ -399,7 +399,7 @@ func queryEndpoints(r *http.Request, addr []string) ([]byte, error) {
 
 	jsn, err := json.MarshalIndent(responses, "", "\t")
 	if err != nil {
-		return nil, fmt.Errorf("error marshalling data: %w", err)
+		return nil, fmt.Errorf("error marshaling data: %w", err)
 	}
 
 	return jsn, nil
