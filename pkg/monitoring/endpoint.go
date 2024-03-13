@@ -289,7 +289,7 @@ func withNodename(data *[]byte) (*[]byte, error) {
 		var err error
 		*result, err = json.MarshalIndent(res, "", "\t")
 		if err != nil {
-			return nil, fmt.Errorf("error marshalling data: %w", err)
+			return nil, fmt.Errorf("error marshaling data: %w", err)
 		}
 	}
 
