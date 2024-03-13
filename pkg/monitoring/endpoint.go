@@ -306,7 +306,12 @@ func passRequest(r *http.Request, addr, query string, results chan []byte, error
 		port = s[1]
 	}
 
-	url := strings.Replace(query, r.Host, addr+":"+port, 1)
+	protocol := "http"
+	if r.TLS != nil {
+		protocol = "https"
+	}
+
+	url := fmt.Sprintf("%s://%s:%s%s", protocol, addr, port, query)
 	resp, err := http.Get(url) //nolint
 	if err != nil {
 		errors <- fmt.Errorf("error getting data from %s: %w", addr, err)
@@ -373,8 +378,7 @@ func (e *Endpoint) getAddresses(ctx context.Context, svc *corev1.Service) ([]str
 }
 
 func queryEndpoints(r *http.Request, addr []string) ([]byte, error) {
-	query := strings.ReplaceAll(r.RequestURI, "all/", "")
-
+	query := strings.ReplaceAll(r.URL.RequestURI(), "all/", "")
 	responses := []json.RawMessage{}
 
 	var wg sync.WaitGroup
