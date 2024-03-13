@@ -33,9 +33,8 @@ type FRRClient interface {
 }
 
 type Endpoint struct {
-	cli   FRRClient
-	c     client.Client
-	httpC http.Client
+	cli FRRClient
+	c   client.Client
 }
 
 // NewEndpoint creates new endpoint object.
