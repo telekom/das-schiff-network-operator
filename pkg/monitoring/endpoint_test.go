@@ -2,6 +2,7 @@ package monitoring
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -389,6 +390,42 @@ var _ = Describe("Endpoint", func() {
 			res := httptest.NewRecorder()
 			e.PassRequest(res, req)
 			Expect(res.Code).To(Equal(http.StatusInternalServerError))
+		})
+		It("return error if request was properly passed to the endpoint but the response is malformed", func() {
+			fakeEndpointSlices = &discoveryv1.EndpointSliceList{}
+			err := json.Unmarshal([]byte(fakeEndpointSlicesJSON), fakeEndpointSlices)
+			Expect(err).ShouldNot(HaveOccurred())
+
+			svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				fmt.Fprintf(w, "invalidJson")
+			}))
+			defer svr.Close()
+
+			c := fake.NewClientBuilder().WithRuntimeObjects(fakePods, fakeServices, fakeEndpointSlices).Build()
+			e := NewEndpoint(c, fcm)
+			req := httptest.NewRequest(http.MethodGet, svr.URL+"?service=test-service&namespace=test-namespace", http.NoBody)
+			res := httptest.NewRecorder()
+
+			e.PassRequest(res, req)
+			Expect(res.Code).To(Equal(http.StatusInternalServerError))
+		})
+		It("return no error if request was properly passed to the endpoint", func() {
+			fakeEndpointSlices = &discoveryv1.EndpointSliceList{}
+			err := json.Unmarshal([]byte(fakeEndpointSlicesJSON), fakeEndpointSlices)
+			Expect(err).ShouldNot(HaveOccurred())
+
+			svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				fmt.Fprintf(w, "{}")
+			}))
+			defer svr.Close()
+
+			c := fake.NewClientBuilder().WithRuntimeObjects(fakePods, fakeServices, fakeEndpointSlices).Build()
+			e := NewEndpoint(c, fcm)
+			req := httptest.NewRequest(http.MethodGet, svr.URL+"?service=test-service&namespace=test-namespace", http.NoBody)
+			res := httptest.NewRecorder()
+
+			e.PassRequest(res, req)
+			Expect(res.Code).To(Equal(http.StatusOK))
 		})
 	})
 })

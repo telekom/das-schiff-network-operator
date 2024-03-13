@@ -33,8 +33,9 @@ type FRRClient interface {
 }
 
 type Endpoint struct {
-	cli FRRClient
-	c   client.Client
+	cli   FRRClient
+	c     client.Client
+	httpC http.Client
 }
 
 // NewEndpoint creates new endpoint object.
@@ -296,10 +297,18 @@ func withNodename(data *[]byte) (*[]byte, error) {
 	return result, nil
 }
 
-func passRequest(addr, port, query string, results chan []byte, errors chan error, wg *sync.WaitGroup) {
+func passRequest(r *http.Request, addr, query string, results chan []byte, errors chan error, wg *sync.WaitGroup) {
 	defer wg.Done()
 
-	url := fmt.Sprintf("http://%s:%s%s", addr, port, query)
+	s := strings.Split(r.Host, ":")
+	port := ""
+	if len(s) > 1 {
+		port = s[1]
+	}
+
+	url := strings.Replace(query, r.Host, addr+":"+port, 1)
+
+	// url := fmt.Sprintf("http://%s:%s%s", addr, port, query)
 	resp, err := http.Get(url) //nolint
 	if err != nil {
 		errors <- fmt.Errorf("error getting data from %s: %w", addr, err)
@@ -366,13 +375,7 @@ func (e *Endpoint) getAddresses(ctx context.Context, svc *corev1.Service) ([]str
 }
 
 func queryEndpoints(r *http.Request, addr []string) ([]byte, error) {
-	query := strings.ReplaceAll(r.URL.String(), "all/", "")
-
-	s := strings.Split(r.Host, ":")
-	port := ""
-	if len(s) > 1 {
-		port = s[1]
-	}
+	query := strings.ReplaceAll(r.RequestURI, "all/", "")
 
 	responses := []json.RawMessage{}
 
@@ -382,7 +385,7 @@ func queryEndpoints(r *http.Request, addr []string) ([]byte, error) {
 
 	for i := range addr {
 		wg.Add(1)
-		go passRequest(addr[i], port, query, results, errors, &wg)
+		go passRequest(r, addr[i], query, results, errors, &wg)
 	}
 
 	wg.Wait()
