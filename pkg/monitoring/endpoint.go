@@ -307,8 +307,6 @@ func passRequest(r *http.Request, addr, query string, results chan []byte, error
 	}
 
 	url := strings.Replace(query, r.Host, addr+":"+port, 1)
-
-	// url := fmt.Sprintf("http://%s:%s%s", addr, port, query)
 	resp, err := http.Get(url) //nolint
 	if err != nil {
 		errors <- fmt.Errorf("error getting data from %s: %w", addr, err)
