@@ -171,29 +171,6 @@ var (
 		]
 	}`
 
-	fakeEndpointsJSON = `{
-		"items": [
-			{
-				"apiVersion": "v1",
-				"kind": "Endpoints",
-				"metadata": {
-					"name": "test-service",
-					"namespace": "test-namespace",
-					"uid": "c147ff3f-bb3f-4376-b6de-b5638c23968a"
-				},
-				"subsets": [
-					{
-						"addresses": [
-							{
-								"ip": "127.0.0.1"
-							}
-						]
-					}
-				]
-			}
-		]
-	}`
-
 	fakePods           *corev1.PodList
 	fakeServices       *corev1.ServiceList
 	fakeEndpointSlices *discoveryv1.EndpointSliceList
@@ -208,7 +185,6 @@ var _ = BeforeSuite(func() {
 	fakeServices = &corev1.ServiceList{}
 	err = json.Unmarshal([]byte(fakeServicesJSON), fakeServices)
 	Expect(err).ShouldNot(HaveOccurred())
-
 })
 
 func TestHealthCheck(t *testing.T) {
@@ -259,7 +235,7 @@ var _ = Describe("Endpoint", func() {
 			e.ShowRoute(res, req)
 			Expect(res.Code).To(Equal(http.StatusOK))
 		})
-		It("return no error and add node name to the respone if "+healthcheck.NodenameEnv+" env is set", func() {
+		It("return no error and add node name to the response if "+healthcheck.NodenameEnv+" env is set", func() {
 			testNodename := "test-nodename"
 			err := os.Setenv(healthcheck.NodenameEnv, testNodename)
 			Expect(err).ToNot(HaveOccurred())
@@ -272,7 +248,8 @@ var _ = Describe("Endpoint", func() {
 			data, err := io.ReadAll(resp.Body)
 			Expect(err).ToNot(HaveOccurred())
 			m := map[string]json.RawMessage{}
-			json.Unmarshal(data, &m)
+			err = json.Unmarshal(data, &m)
+			Expect(err).ToNot(HaveOccurred())
 			_, exists := m[testNodename]
 			Expect(exists).To(BeTrue())
 		})
