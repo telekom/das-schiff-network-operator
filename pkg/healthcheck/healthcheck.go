@@ -75,8 +75,8 @@ func (hc *HealthChecker) IsNetworkingHealthy() bool {
 	return hc.isNetworkingHealthy
 }
 
-// RemoveTaint removes taint from the node.
-func (hc *HealthChecker) RemoveTaint(ctx context.Context, taintKey string) error {
+// RemoveTaints removes taint from the node.
+func (hc *HealthChecker) RemoveTaints(ctx context.Context) error {
 	node := &corev1.Node{}
 	err := hc.client.Get(ctx,
 		types.NamespacedName{Name: os.Getenv(NodenameEnv)}, node)
