@@ -26,7 +26,6 @@ const (
 	NetHealthcheckFile = "/opt/network-operator/net-healthcheck-config.yaml"
 	// NodenameEnv is an env variable that holds Kubernetes node's name.
 	NodenameEnv = "NODE_NAME"
-	// TaintKey is a node's CPI taint key that causes NoSchedule effect.
 	//
 	// TaintKey = "node.cloudprovider.kubernetes.io/uninitialized"
 	// we need to use our own TaintKey as dual-stack is not supported
@@ -37,6 +36,15 @@ const (
 	configEnv         = "OPERATOR_NETHEALTHCHECK_CONFIG"
 	defaultTCPTimeout = 3
 	defaultRetries    = 3
+)
+
+var (
+	// InitTaints is a list of taints that are applied during initialisation of a node
+	// to prevent workloads being scheduled before the network stack is initialised.
+	InitTaints = []string{
+		"node.schiff.telekom.de/uninitialized",
+		"node.cloudprovider.kubernetes.io/uninitialized",
+	}
 )
 
 // HealthChecker is a struct that holds data required for networking healthcheck.
@@ -83,14 +91,19 @@ func (hc *HealthChecker) RemoveTaint(ctx context.Context, taintKey string) error
 		return fmt.Errorf("error while getting node's info: %w", err)
 	}
 
+	updateNode := false
 	for i, v := range node.Spec.Taints {
-		if v.Key == taintKey {
-			node.Spec.Taints = append(node.Spec.Taints[:i], node.Spec.Taints[i+1:]...)
-			if err := hc.client.Update(ctx, node, &client.UpdateOptions{}); err != nil {
-				hc.Logger.Error(err, "")
-				return fmt.Errorf("error while updating node: %w", err)
+		for _, t := range InitTaints {
+			if v.Key == t {
+				node.Spec.Taints = append(node.Spec.Taints[:i], node.Spec.Taints[i+1:]...)
+				updateNode = true
 			}
-			break
+		}
+	}
+	if updateNode {
+		if err := hc.client.Update(ctx, node, &client.UpdateOptions{}); err != nil {
+			hc.Logger.Error(err, "")
+			return fmt.Errorf("error while updating node: %w", err)
 		}
 	}
 
