@@ -86,11 +86,12 @@ func (hc *HealthChecker) RemoveTaints(ctx context.Context) error {
 	}
 
 	updateNode := false
-	for i, v := range node.Spec.Taints {
-		for _, t := range InitTaints {
+	for _, t := range InitTaints {
+		for i, v := range node.Spec.Taints {
 			if v.Key == t {
 				node.Spec.Taints = append(node.Spec.Taints[:i], node.Spec.Taints[i+1:]...)
 				updateNode = true
+				break
 			}
 		}
 	}
