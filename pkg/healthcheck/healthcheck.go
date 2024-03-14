@@ -26,12 +26,6 @@ const (
 	NetHealthcheckFile = "/opt/network-operator/net-healthcheck-config.yaml"
 	// NodenameEnv is an env variable that holds Kubernetes node's name.
 	NodenameEnv = "NODE_NAME"
-	//
-	// TaintKey = "node.cloudprovider.kubernetes.io/uninitialized"
-	// we need to use our own TaintKey as dual-stack is not supported
-	// for external cloud-providers in kubernetes until 1.27.x.
-	// ref: https://kubernetes.io/docs/concepts/services-networking/dual-stack/#configure-ipv4-ipv6-dual-stack
-	TaintKey = "node.schiff.telekom.de/uninitialized"
 
 	configEnv         = "OPERATOR_NETHEALTHCHECK_CONFIG"
 	defaultTCPTimeout = 3
