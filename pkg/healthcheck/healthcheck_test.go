@@ -24,7 +24,7 @@ const testHostname = "worker"
 
 var (
 	fakeNodesJSON = `{"items":[{"metadata":{"name":"` + testHostname + `"},"spec":{"taints":[{"effect":"NoSchedule",
-					"key":"` + TaintKey + `"}]}}]}`
+					"key":"` + InitTaints[0] + `"}]}}]}`
 	fakeNodes *corev1.NodeList
 	tmpPath   string
 	ctrl      *gomock.Controller
@@ -105,7 +105,7 @@ var _ = Describe("HealthCheck", func() {
 			Expect(result).To(BeTrue())
 		})
 	})
-	Context("RemoveTaint() should", func() {
+	Context("RemoveTaints() should", func() {
 		It("return error about no nodes", func() {
 			c := fake.NewClientBuilder().Build()
 			nc := &NetHealthcheckConfig{}
@@ -113,7 +113,7 @@ var _ = Describe("HealthCheck", func() {
 			Expect(err).ToNot(HaveOccurred())
 			Expect(hc).ToNot(BeNil())
 			Expect(hc.IsNetworkingHealthy()).To(BeFalse())
-			err = hc.RemoveTaint(context.Background(), TaintKey)
+			err = hc.RemoveTaints(context.Background())
 			Expect(err).To(HaveOccurred())
 			Expect(hc.IsNetworkingHealthy()).To(BeFalse())
 		})
@@ -124,7 +124,7 @@ var _ = Describe("HealthCheck", func() {
 			Expect(err).ToNot(HaveOccurred())
 			Expect(hc).ToNot(BeNil())
 			Expect(hc.IsNetworkingHealthy()).To(BeFalse())
-			err = hc.RemoveTaint(context.Background(), TaintKey)
+			err = hc.RemoveTaints(context.Background())
 			Expect(err).To(HaveOccurred())
 			Expect(hc.IsNetworkingHealthy()).To(BeFalse())
 		})
@@ -135,7 +135,7 @@ var _ = Describe("HealthCheck", func() {
 			Expect(err).ToNot(HaveOccurred())
 			Expect(hc).ToNot(BeNil())
 			Expect(hc.IsNetworkingHealthy()).To(BeFalse())
-			err = hc.RemoveTaint(context.Background(), TaintKey)
+			err = hc.RemoveTaints(context.Background())
 			Expect(err).ToNot(HaveOccurred())
 			Expect(hc.IsNetworkingHealthy()).To(BeTrue())
 		})
@@ -348,9 +348,11 @@ func (*updateErrorClient) Update(
 func (*updateErrorClient) Get(_ context.Context, _ types.NamespacedName, o client.Object, _ ...client.GetOption) error {
 	a := o.(*corev1.Node)
 	a.Name = testHostname
-	a.Spec.Taints = []corev1.Taint{{
-		Key:    TaintKey,
-		Effect: corev1.TaintEffectNoSchedule},
+	for _, t := range InitTaints {
+		a.Spec.Taints = append(a.Spec.Taints, corev1.Taint{
+			Key:    t,
+			Effect: corev1.TaintEffectNoSchedule,
+		})
 	}
 	return nil
 }

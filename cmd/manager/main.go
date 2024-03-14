@@ -265,7 +265,7 @@ func performNetworkingHealthcheck(hc *healthcheck.HealthChecker) error {
 	if err := hc.CheckReachability(); err != nil {
 		return fmt.Errorf("error checking network reachability: %w", err)
 	}
-	if err := hc.RemoveTaint(context.Background(), healthcheck.TaintKey); err != nil {
+	if err := hc.RemoveTaints(context.Background()); err != nil {
 		return fmt.Errorf("error removing taint: %w", err)
 	}
 	return nil

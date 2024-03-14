@@ -26,17 +26,19 @@ const (
 	NetHealthcheckFile = "/opt/network-operator/net-healthcheck-config.yaml"
 	// NodenameEnv is an env variable that holds Kubernetes node's name.
 	NodenameEnv = "NODE_NAME"
-	// TaintKey is a node's CPI taint key that causes NoSchedule effect.
-	//
-	// TaintKey = "node.cloudprovider.kubernetes.io/uninitialized"
-	// we need to use our own TaintKey as dual-stack is not supported
-	// for external cloud-providers in kubernetes until 1.27.x.
-	// ref: https://kubernetes.io/docs/concepts/services-networking/dual-stack/#configure-ipv4-ipv6-dual-stack
-	TaintKey = "node.schiff.telekom.de/uninitialized"
 
 	configEnv         = "OPERATOR_NETHEALTHCHECK_CONFIG"
 	defaultTCPTimeout = 3
 	defaultRetries    = 3
+)
+
+var (
+	// InitTaints is a list of taints that are applied during initialisation of a node
+	// to prevent workloads being scheduled before the network stack is initialised.
+	InitTaints = []string{
+		"node.schiff.telekom.de/uninitialized",
+		"node.cloudprovider.kubernetes.io/uninitialized",
+	}
 )
 
 // HealthChecker is a struct that holds data required for networking healthcheck.
@@ -73,8 +75,8 @@ func (hc *HealthChecker) IsNetworkingHealthy() bool {
 	return hc.isNetworkingHealthy
 }
 
-// RemoveTaint removes taint from the node.
-func (hc *HealthChecker) RemoveTaint(ctx context.Context, taintKey string) error {
+// RemoveTaints removes taint from the node.
+func (hc *HealthChecker) RemoveTaints(ctx context.Context) error {
 	node := &corev1.Node{}
 	err := hc.client.Get(ctx,
 		types.NamespacedName{Name: os.Getenv(NodenameEnv)}, node)
@@ -83,14 +85,20 @@ func (hc *HealthChecker) RemoveTaint(ctx context.Context, taintKey string) error
 		return fmt.Errorf("error while getting node's info: %w", err)
 	}
 
-	for i, v := range node.Spec.Taints {
-		if v.Key == taintKey {
-			node.Spec.Taints = append(node.Spec.Taints[:i], node.Spec.Taints[i+1:]...)
-			if err := hc.client.Update(ctx, node, &client.UpdateOptions{}); err != nil {
-				hc.Logger.Error(err, "")
-				return fmt.Errorf("error while updating node: %w", err)
+	updateNode := false
+	for _, t := range InitTaints {
+		for i, v := range node.Spec.Taints {
+			if v.Key == t {
+				node.Spec.Taints = append(node.Spec.Taints[:i], node.Spec.Taints[i+1:]...)
+				updateNode = true
+				break
 			}
-			break
+		}
+	}
+	if updateNode {
+		if err := hc.client.Update(ctx, node, &client.UpdateOptions{}); err != nil {
+			hc.Logger.Error(err, "")
+			return fmt.Errorf("error while updating node: %w", err)
 		}
 	}
 
