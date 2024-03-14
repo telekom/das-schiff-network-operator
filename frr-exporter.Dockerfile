@@ -11,9 +11,16 @@ COPY go.sum go.sum
 # and so that source changes don't invalidate our downloaded layer
 RUN go mod download
 
+# Build router
+RUN apk add llvm clang linux-headers libbpf-dev musl-dev
+
 # Copy the go source
 COPY cmd/frr-exporter/main.go main.go
 COPY pkg/ pkg/
+
+# Build router
+COPY bpf/ bpf/
+RUN cd pkg/bpf/ && go generate
 
 # Build
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -o frr-exporter main.go
