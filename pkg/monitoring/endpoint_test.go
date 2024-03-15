@@ -121,7 +121,7 @@ func TestHealthCheck(t *testing.T) {
 var _ = Describe("Endpoint", func() {
 	fcm := monmock.NewMockFRRClient(mockCtrl)
 	c := fake.NewClientBuilder().Build()
-	e := NewEndpoint(c, fcm)
+	e := NewEndpoint(c, fcm, "test-service", "test-namespace")
 	e.SetHandlers()
 
 	Context("ShowRoute() should", func() {
@@ -255,24 +255,10 @@ var _ = Describe("Endpoint", func() {
 		})
 	})
 	Context("PassRequest() should", func() {
-		It("return error if service name is not provided", func() {
-			req := httptest.NewRequest(http.MethodGet, "/all/show/route", http.NoBody)
-			res := httptest.NewRecorder()
-			e.PassRequest(res, req)
-			Expect(res.Code).To(Equal(http.StatusBadRequest))
-		})
-		It("return error if namespace was not provided and service not exist in kube-system namespace", func() {
-			c := fake.NewClientBuilder().WithRuntimeObjects(fakePods, fakeServices).Build()
-			e := NewEndpoint(c, fcm)
-			req := httptest.NewRequest(http.MethodGet, "/all/show/route?service=test-service", http.NoBody)
-			res := httptest.NewRecorder()
-			e.PassRequest(res, req)
-			Expect(res.Code).To(Equal(http.StatusInternalServerError))
-		})
 		It("return error if there are no instances to query", func() {
 			c := fake.NewClientBuilder().WithRuntimeObjects(fakePods, fakeServices).Build()
-			e := NewEndpoint(c, fcm)
-			req := httptest.NewRequest(http.MethodGet, "/all/show/route?service=test-service-no-endpoints&namespace=test-namespace", http.NoBody)
+			e := NewEndpoint(c, fcm, "test-service-no-endpoints", "test-namespace")
+			req := httptest.NewRequest(http.MethodGet, "/all/show/route", http.NoBody)
 			res := httptest.NewRecorder()
 			e.PassRequest(res, req)
 			Expect(res.Code).To(Equal(http.StatusInternalServerError))
@@ -280,8 +266,8 @@ var _ = Describe("Endpoint", func() {
 
 		It("return error if cannot get data from the endpoint", func() {
 			c := fake.NewClientBuilder().WithRuntimeObjects(fakePods, fakeServices).Build()
-			e := NewEndpoint(c, fcm)
-			req := httptest.NewRequest(http.MethodGet, "/all/show/route?service=test-service&namespace=test-namespace", http.NoBody)
+			e := NewEndpoint(c, fcm, "test-service", "test-namespace")
+			req := httptest.NewRequest(http.MethodGet, "/all/show/route", http.NoBody)
 			res := httptest.NewRecorder()
 			e.PassRequest(res, req)
 			Expect(res.Code).To(Equal(http.StatusInternalServerError))
@@ -293,8 +279,8 @@ var _ = Describe("Endpoint", func() {
 			defer svr.Close()
 
 			c := fake.NewClientBuilder().WithRuntimeObjects(fakePods, fakeServices).Build()
-			e := NewEndpoint(c, fcm)
-			req := httptest.NewRequest(http.MethodGet, svr.URL+"?service=test-service&namespace=test-namespace", http.NoBody)
+			e := NewEndpoint(c, fcm, "test-service", "test-namespace")
+			req := httptest.NewRequest(http.MethodGet, svr.URL, http.NoBody)
 			res := httptest.NewRecorder()
 
 			e.PassRequest(res, req)
@@ -307,7 +293,7 @@ var _ = Describe("Endpoint", func() {
 			defer svr.Close()
 
 			c := fake.NewClientBuilder().WithRuntimeObjects(fakePods, fakeServices).Build()
-			e := NewEndpoint(c, fcm)
+			e := NewEndpoint(c, fcm, "test-service", "test-namespace")
 			req := httptest.NewRequest(http.MethodGet, svr.URL+"?service=test-service&namespace=test-namespace", http.NoBody)
 			res := httptest.NewRecorder()
 

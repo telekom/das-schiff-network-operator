@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -56,7 +57,17 @@ func main() {
 
 	frrCli := frr.NewCli()
 
-	endpoint := monitoring.NewEndpoint(c, frrCli)
+	svcName := os.Getenv(monitoring.StatusSvcNameEnv)
+	if svcName == "" {
+		log.Fatalf("environment variable %s is not set", monitoring.StatusSvcNameEnv)
+	}
+
+	svcNamespace := os.Getenv(monitoring.StatusSvcNamespaceEnv)
+	if svcNamespace == "" {
+		log.Fatalf("environment variable %s is not set", monitoring.StatusSvcNamespaceEnv)
+	}
+
+	endpoint := monitoring.NewEndpoint(c, frrCli, svcName, svcNamespace)
 	endpoint.SetHandlers()
 
 	// Expose the registered metrics via HTTP.

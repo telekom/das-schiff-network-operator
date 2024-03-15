@@ -25,6 +25,9 @@ const (
 	protocolIPv6 = "ipv6"
 
 	defaultNamespace = "kube-system"
+
+	StatusSvcNameEnv      = "STATUS_SVC_NAME"
+	StatusSvcNamespaceEnv = "STATUS_SVC_NAMESPACE"
 )
 
 //go:generate mockgen -destination ./mock/mock_endpoint.go . FRRClient
@@ -35,11 +38,14 @@ type FRRClient interface {
 type Endpoint struct {
 	cli FRRClient
 	c   client.Client
+
+	statusSvcName      string
+	statusSvcNamespace string
 }
 
 // NewEndpoint creates new endpoint object.
-func NewEndpoint(k8sClient client.Client, frrcli FRRClient) *Endpoint {
-	return &Endpoint{cli: frrcli, c: k8sClient}
+func NewEndpoint(k8sClient client.Client, frrcli FRRClient, svcName, svcNamespace string) *Endpoint {
+	return &Endpoint{cli: frrcli, c: k8sClient, statusSvcName: svcName, statusSvcNamespace: svcNamespace}
 }
 
 // SetHandlers configures HTTP handlers.
@@ -207,19 +213,8 @@ func (e *Endpoint) ShowEVPN(w http.ResponseWriter, r *http.Request) {
 
 // PassRequest - when called, will pass the request to all nodes and return their responses.
 func (e *Endpoint) PassRequest(w http.ResponseWriter, r *http.Request) {
-	serviceName := r.URL.Query().Get("service")
-	if serviceName == "" {
-		http.Error(w, "error looking for service: service name not provided", http.StatusBadRequest)
-		return
-	}
-
-	namespace := r.URL.Query().Get("namespace")
-	if namespace == "" {
-		namespace = defaultNamespace
-	}
-
 	service := &corev1.Service{}
-	err := e.c.Get(r.Context(), client.ObjectKey{Name: serviceName, Namespace: namespace}, service)
+	err := e.c.Get(r.Context(), client.ObjectKey{Name: e.statusSvcName, Namespace: e.statusSvcNamespace}, service)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("error listing pods: %s", err.Error()), http.StatusInternalServerError)
 		return
