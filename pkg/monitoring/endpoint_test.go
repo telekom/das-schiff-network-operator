@@ -15,7 +15,6 @@ import (
 	monmock "github.com/telekom/das-schiff-network-operator/pkg/monitoring/mock"
 	"go.uber.org/mock/gomock"
 	corev1 "k8s.io/api/core/v1"
-	discoveryv1 "k8s.io/api/discovery/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
@@ -31,14 +30,14 @@ var (
 						"app.kubernetes.io/name": "network-operator"
 					},
 					"name": "network-operator-worker-1",
-					"namespace": "kube-system"
+					"namespace": "test-namespace"
 				},
 				"status": {
-					"hostIP": "172.18.0.3",
-					"podIP": "172.18.0.3",
+					"hostIP": "127.0.0.1",
+					"podIP": "127.0.0.1",
 					"podIPs": [
 						{
-							"ip": "172.18.0.3"
+							"ip": "127.0.0.1"
 						}
 					]
 				}
@@ -52,14 +51,14 @@ var (
 						"app.kubernetes.io/name": "network-operator"
 					},
 					"name": "network-operator-worker-2",
-					"namespace": "kube-system"
+					"namespace": "test-namespace"
 				},
 				"status": {
-					"hostIP": "172.18.0.4",
-					"podIP": "172.18.0.4",
+					"hostIP": "127.0.0.1",
+					"podIP": "127.0.0.1",
 					"podIPs": [
 						{
-							"ip": "172.18.0.4"
+							"ip": "127.0.0.1"
 						}
 					]
 				}
@@ -77,106 +76,29 @@ var (
 					"namespace": "test-namespace",
 					"uid": "ca97f774-7b91-47fd-a333-5fa7ee87f940"
 				}
-			}
-		]
-	}`
-
-	fakeEmptyEndpointSlicesJSON = `{
-		"items": [
-			{
-				"addressType": "IPv4",
-				"apiVersion": "discovery.k8s.io/v1",
-				"endpoints": [],
-				"kind": "EndpointSlice",
-				"metadata": {
-					"generateName": "test-service-",
-					"generation": 9,
-					"labels": {
-						"endpointslice.kubernetes.io/managed-by": "endpointslice-controller.k8s.io",
-						"kubernetes.io/service-name": "test-service"
-					},
-					"name": "test-service-fvbrx",
-					"namespace": "kube-system",
-					"ownerReferences": [
-						{
-							"apiVersion": "v1",
-							"blockOwnerDeletion": true,
-							"controller": true,
-							"kind": "Service",
-							"name": "test-service",
-							"uid": "ca97f774-7b91-47fd-a333-5fa7ee87f940"
-						}
-					],
-					"resourceVersion": "53518",
-					"uid": "1f358e69-aefa-4181-b9fb-3e218dac09d5"
-				}
-			}
-		]
-	}`
-
-	fakeEndpointSlicesJSON = `{
-		"items": [
-			{
-				"addressType": "IPv4",
-				"apiVersion": "discovery.k8s.io/v1",
-				"endpoints": [
-					{
-						"addresses": [
-							"127.0.0.1"
-						]
-					}
-				],
-				"kind": "EndpointSlice",
-				"metadata": {
-					"generateName": "test-service-",
-					"generation": 9,
-					"labels": {
-						"endpointslice.kubernetes.io/managed-by": "endpointslice-controller.k8s.io",
-						"kubernetes.io/service-name": "test-service"
-					},
-					"name": "test-service-fvbrx",
-					"namespace": "test-namespace",
-					"ownerReferences": [
-						{
-							"apiVersion": "v1",
-							"blockOwnerDeletion": true,
-							"controller": true,
-							"kind": "Service",
-							"name": "test-service",
-							"uid": "ca97f774-7b91-47fd-a333-5fa7ee87f940"
-						}
-					],
-					"resourceVersion": "53518",
-					"uid": "1f358e69-aefa-4181-b9fb-3e218dac09d5"
-				}
-			}
-		]
-	}`
-
-	fakeEmptyEndpointsJSON = `{
-		"items": [
+				
+			},
 			{
 				"apiVersion": "v1",
-				"kind": "Endpoints",
+				"kind": "Service",
 				"metadata": {
-					"name": "test-service",
+					"name": "test-service-no-endpoints",
 					"namespace": "test-namespace",
-					"uid": "c147ff3f-bb3f-4376-b6de-b5638c23968a"
+					"uid": "ca97f774-7b91-47fd-a333-5fa7ee87f941"
 				},
-				"subsets": [
-					{
-						"addresses": []
+				"spec": {
+					"selector": {
+						"app.kubernetes.io/component": "bad-selector",
+						"app.kubernetes.io/name": "bad-selector"
 					}
-				]
+				}
 			}
 		]
 	}`
 
-	fakePods           *corev1.PodList
-	fakeServices       *corev1.ServiceList
-	fakeEndpointSlices *discoveryv1.EndpointSliceList
-	tmpPath            string
-	mockCtrl           *gomock.Controller
+	fakePods     *corev1.PodList
+	fakeServices *corev1.ServiceList
+	mockCtrl     *gomock.Controller
 )
 
 var _ = BeforeSuite(func() {
@@ -190,7 +112,6 @@ var _ = BeforeSuite(func() {
 
 func TestHealthCheck(t *testing.T) {
 	RegisterFailHandler(Fail)
-	tmpPath = t.TempDir()
 	mockCtrl = gomock.NewController(t)
 	defer mockCtrl.Finish()
 	RunSpecs(t,
@@ -340,7 +261,7 @@ var _ = Describe("Endpoint", func() {
 			e.PassRequest(res, req)
 			Expect(res.Code).To(Equal(http.StatusBadRequest))
 		})
-		It("return error if namsepace was not provided and service not exist in kube-system namespace", func() {
+		It("return error if namespace was not provided and service not exist in kube-system namespace", func() {
 			c := fake.NewClientBuilder().WithRuntimeObjects(fakePods, fakeServices).Build()
 			e := NewEndpoint(c, fcm)
 			req := httptest.NewRequest(http.MethodGet, "/all/show/route?service=test-service", http.NoBody)
@@ -349,18 +270,15 @@ var _ = Describe("Endpoint", func() {
 			Expect(res.Code).To(Equal(http.StatusInternalServerError))
 		})
 		It("return error if there are no instances to query", func() {
-			fakeEndpointSlices = &discoveryv1.EndpointSliceList{}
-			err := json.Unmarshal([]byte(fakeEmptyEndpointSlicesJSON), fakeEndpointSlices)
-			Expect(err).ShouldNot(HaveOccurred())
-
-			c := fake.NewClientBuilder().WithRuntimeObjects(fakePods, fakeServices, fakeEndpointSlices).Build()
+			c := fake.NewClientBuilder().WithRuntimeObjects(fakePods, fakeServices).Build()
 			e := NewEndpoint(c, fcm)
-			req := httptest.NewRequest(http.MethodGet, "/all/show/route?service=test-service&namespace=test-namespace", http.NoBody)
+			req := httptest.NewRequest(http.MethodGet, "/all/show/route?service=test-service-no-endpoints&namespace=test-namespace", http.NoBody)
 			res := httptest.NewRecorder()
 			e.PassRequest(res, req)
 			Expect(res.Code).To(Equal(http.StatusInternalServerError))
 		})
-		It("return error if both endpointslices and legacy endpoints are not available", func() {
+
+		It("return error if cannot get data from the endpoint", func() {
 			c := fake.NewClientBuilder().WithRuntimeObjects(fakePods, fakeServices).Build()
 			e := NewEndpoint(c, fcm)
 			req := httptest.NewRequest(http.MethodGet, "/all/show/route?service=test-service&namespace=test-namespace", http.NoBody)
@@ -368,40 +286,13 @@ var _ = Describe("Endpoint", func() {
 			e.PassRequest(res, req)
 			Expect(res.Code).To(Equal(http.StatusInternalServerError))
 		})
-		It("return error if there are no instances to query and legacy endpoints are used", func() {
-			fakeEndpoints := &corev1.EndpointsList{}
-			err := json.Unmarshal([]byte(fakeEmptyEndpointsJSON), fakeEndpoints)
-			Expect(err).ShouldNot(HaveOccurred())
-
-			c := fake.NewClientBuilder().WithRuntimeObjects(fakePods, fakeServices, fakeEndpoints).Build()
-			e := NewEndpoint(c, fcm)
-			req := httptest.NewRequest(http.MethodGet, "/all/show/route?service=test-service&namespace=test-namespace", http.NoBody)
-			res := httptest.NewRecorder()
-			e.PassRequest(res, req)
-			Expect(res.Code).To(Equal(http.StatusInternalServerError))
-		})
-		It("return error if cannot get data from the endpoint", func() {
-			fakeEndpointSlices = &discoveryv1.EndpointSliceList{}
-			err := json.Unmarshal([]byte(fakeEndpointSlicesJSON), fakeEndpointSlices)
-			Expect(err).ShouldNot(HaveOccurred())
-			c := fake.NewClientBuilder().WithRuntimeObjects(fakePods, fakeServices, fakeEndpointSlices).Build()
-			e := NewEndpoint(c, fcm)
-			req := httptest.NewRequest(http.MethodGet, "/all/show/route?service=test-service&namespace=test-namespace", http.NoBody)
-			res := httptest.NewRecorder()
-			e.PassRequest(res, req)
-			Expect(res.Code).To(Equal(http.StatusInternalServerError))
-		})
 		It("return error if request was properly passed to the endpoint but the response is malformed", func() {
-			fakeEndpointSlices = &discoveryv1.EndpointSliceList{}
-			err := json.Unmarshal([]byte(fakeEndpointSlicesJSON), fakeEndpointSlices)
-			Expect(err).ShouldNot(HaveOccurred())
-
 			svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				fmt.Fprintf(w, "invalidJson")
 			}))
 			defer svr.Close()
 
-			c := fake.NewClientBuilder().WithRuntimeObjects(fakePods, fakeServices, fakeEndpointSlices).Build()
+			c := fake.NewClientBuilder().WithRuntimeObjects(fakePods, fakeServices).Build()
 			e := NewEndpoint(c, fcm)
 			req := httptest.NewRequest(http.MethodGet, svr.URL+"?service=test-service&namespace=test-namespace", http.NoBody)
 			res := httptest.NewRecorder()
@@ -410,16 +301,12 @@ var _ = Describe("Endpoint", func() {
 			Expect(res.Code).To(Equal(http.StatusInternalServerError))
 		})
 		It("return no error if request was properly passed to the endpoint", func() {
-			fakeEndpointSlices = &discoveryv1.EndpointSliceList{}
-			err := json.Unmarshal([]byte(fakeEndpointSlicesJSON), fakeEndpointSlices)
-			Expect(err).ShouldNot(HaveOccurred())
-
 			svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				fmt.Fprintf(w, "{}")
 			}))
 			defer svr.Close()
 
-			c := fake.NewClientBuilder().WithRuntimeObjects(fakePods, fakeServices, fakeEndpointSlices).Build()
+			c := fake.NewClientBuilder().WithRuntimeObjects(fakePods, fakeServices).Build()
 			e := NewEndpoint(c, fcm)
 			req := httptest.NewRequest(http.MethodGet, svr.URL+"?service=test-service&namespace=test-namespace", http.NoBody)
 			res := httptest.NewRecorder()

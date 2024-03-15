@@ -14,7 +14,7 @@ import (
 
 	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
 	corev1 "k8s.io/api/core/v1"
-	discoveryv1 "k8s.io/api/discovery/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -202,9 +202,8 @@ func (e *Endpoint) ShowEVPN(w http.ResponseWriter, r *http.Request) {
 	writeResponse(result, w)
 }
 
+//+kubebuilder:rbac:groups=core,resources=pods,verbs=list
 //+kubebuilder:rbac:groups=core,resources=services,verbs=get
-//+kubebuilder:rbac:groups=core,resources=endpoints,verbs=get
-//+kubebuilder:rbac:groups=discovery.k8s.io,resources=endpointslices,verbs=list
 
 // PassRequest - when called, will pass the request to all nodes and return their responses.
 func (e *Endpoint) PassRequest(w http.ResponseWriter, r *http.Request) {
@@ -327,52 +326,21 @@ func passRequest(r *http.Request, addr, query string, results chan []byte, error
 	results <- data
 }
 
-func (e *Endpoint) getEndpointslices(ctx context.Context, svc *corev1.Service) (*discoveryv1.EndpointSlice, error) {
-	endpoints := &discoveryv1.EndpointSliceList{}
-	if err := e.c.List(ctx, endpoints); err != nil {
-		return nil, fmt.Errorf("error listing endpointslices: %w", err)
-	}
-
-	for i := range endpoints.Items {
-		for _, or := range endpoints.Items[i].OwnerReferences {
-			if or.UID == svc.UID {
-				return &endpoints.Items[i], nil
-			}
-		}
-	}
-
-	return nil, nil
-}
-
-func (e *Endpoint) getEndpoints(ctx context.Context, svc *corev1.Service) (*corev1.Endpoints, error) {
-	endpoints := &corev1.Endpoints{}
-	if err := e.c.Get(ctx, client.ObjectKeyFromObject(svc), endpoints); err != nil {
-		return nil, fmt.Errorf("error getting endpoints: %w", err)
-	}
-	return endpoints, nil
-}
-
 func (e *Endpoint) getAddresses(ctx context.Context, svc *corev1.Service) ([]string, error) {
-	es, err := e.getEndpointslices(ctx, svc)
+	var serviceLabels labels.Set = svc.Spec.Selector
+	pods := &corev1.PodList{}
+	if err := e.c.List(ctx, pods, &client.ListOptions{
+		LabelSelector: serviceLabels.AsSelector(),
+		Namespace:     svc.Namespace,
+	}); err != nil {
+		return nil, fmt.Errorf("error getting pods: %w", err)
+	}
+
 	addresses := []string{}
-	if err != nil {
-		return nil, fmt.Errorf("error getting endpointslices: %w", err)
+	for _, pod := range pods.Items {
+		addresses = append(addresses, pod.Status.PodIP)
 	}
-	if es != nil {
-		for _, ep := range es.Endpoints {
-			addresses = append(addresses, ep.Addresses...)
-		}
-		return addresses, nil
-	}
-	ep, err := e.getEndpoints(ctx, svc)
-	if err != nil {
-		return nil, fmt.Errorf("error getting endpoints: %w", err)
-	}
-	for _, s := range ep.Subsets {
-		for _, a := range s.Addresses {
-			addresses = append(addresses, a.IP)
-		}
-	}
+
 	return addresses, nil
 }
 
