@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -57,14 +56,9 @@ func main() {
 
 	frrCli := frr.NewCli()
 
-	svcName := os.Getenv(monitoring.StatusSvcNameEnv)
-	if svcName == "" {
-		log.Fatalf("environment variable %s is not set", monitoring.StatusSvcNameEnv)
-	}
-
-	svcNamespace := os.Getenv(monitoring.StatusSvcNamespaceEnv)
-	if svcNamespace == "" {
-		log.Fatalf("environment variable %s is not set", monitoring.StatusSvcNamespaceEnv)
+	svcName, svcNamespace, err := monitoring.GetStatusServiceConfig()
+	if err != nil {
+		log.Fatal(fmt.Errorf("error getting status service info: %w", err))
 	}
 
 	endpoint := monitoring.NewEndpoint(c, frrCli, svcName, svcNamespace)

@@ -24,8 +24,6 @@ const (
 	protocolIPv4 = "ipv4"
 	protocolIPv6 = "ipv6"
 
-	defaultNamespace = "kube-system"
-
 	StatusSvcNameEnv      = "STATUS_SVC_NAME"
 	StatusSvcNamespaceEnv = "STATUS_SVC_NAMESPACE"
 )
@@ -332,8 +330,8 @@ func (e *Endpoint) getAddresses(ctx context.Context, svc *corev1.Service) ([]str
 	}
 
 	addresses := []string{}
-	for _, pod := range pods.Items {
-		addresses = append(addresses, pod.Status.PodIP)
+	for i := range pods.Items {
+		addresses = append(addresses, pods.Items[i].Status.PodIP)
 	}
 
 	return addresses, nil
@@ -370,4 +368,21 @@ func queryEndpoints(r *http.Request, addr []string) ([]byte, error) {
 	}
 
 	return jsn, nil
+}
+
+// GetStatusServiceConfig gets status service's name and namespace from the environment.
+func GetStatusServiceConfig() (name, namespace string, err error) {
+	name = os.Getenv(StatusSvcNameEnv)
+	if name == "" {
+		err = fmt.Errorf("environment variable %s is not set", StatusSvcNameEnv)
+		return name, namespace, err
+	}
+
+	namespace = os.Getenv(StatusSvcNamespaceEnv)
+	if namespace == "" {
+		err = fmt.Errorf("environment variable %s is not set", StatusSvcNamespaceEnv)
+		return name, namespace, err
+	}
+
+	return name, namespace, err
 }
