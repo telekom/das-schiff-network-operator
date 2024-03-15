@@ -37,6 +37,7 @@ type Layer2NetworkConfigurationSpec struct {
 	MTU int `json:"mtu"`
 
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Minimum=1
 	// VXLAN VNI Id for the layer 2 network
 	VNI int `json:"vni"`
 
