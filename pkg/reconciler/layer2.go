@@ -166,7 +166,7 @@ func (r *reconcile) getDesired(l2vnis []networkv1alpha1.Layer2NetworkConfigurati
 			return nil, fmt.Errorf("error parsing anycast gateways: %w", err)
 		}
 
-		if len(spec.VRF) > 0 {
+		if spec.VRF != "" {
 			vrfAvailable := false
 			for _, info := range availableVrfs {
 				if info.Name == spec.VRF {
