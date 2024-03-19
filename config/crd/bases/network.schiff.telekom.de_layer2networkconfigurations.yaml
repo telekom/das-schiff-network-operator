@@ -126,6 +126,7 @@ spec:
                 x-kubernetes-map-type: atomic
               vni:
                 description: VXLAN VNI Id for the layer 2 network
+                maximum: 16777215
                 minimum: 1
                 type: integer
               vrf:
