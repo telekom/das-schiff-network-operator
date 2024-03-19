@@ -40,15 +40,18 @@ func (*NetlinkManager) ListVRFInterfaces() ([]VRFInformation, error) {
 
 	links, err := netlink.LinkList()
 	if err != nil {
-		return nil, fmt.Errorf("cannot get links from netlink: %w", err)
+		return nil, fmt.Errorf("error listing links: %w", err)
 	}
 
 	for _, link := range links {
 		if link.Type() != "vrf" {
 			continue
 		}
-		vrf := link.(*netlink.Vrf)
 
+		vrf, ok := link.(*netlink.Vrf)
+		if !ok {
+			return nil, fmt.Errorf("error casting link %v as netlink.Vrf", link)
+		}
 		info := VRFInformation{}
 		info.table = int(vrf.Table)
 		info.Name = link.Attrs().Name
@@ -71,8 +74,10 @@ func (n *NetlinkManager) ListL3() ([]VRFInformation, error) {
 		if !(link.Type() == "vrf" && strings.HasPrefix(link.Attrs().Name, vrfPrefix)) {
 			continue
 		}
-		vrf := link.(*netlink.Vrf)
-
+		vrf, ok := link.(*netlink.Vrf)
+		if !ok {
+			return nil, fmt.Errorf("error casting link %v as netlink.Vrf", link)
+		}
 		info := VRFInformation{}
 		info.table = int(vrf.Table)
 		info.Name = link.Attrs().Name[3:]
@@ -146,13 +151,21 @@ func (*NetlinkManager) updateL2Indices(info *Layer2Information, links []netlink.
 func updateLink(info *Layer2Information, link netlink.Link) error {
 	// If subinterface is VXLAN
 	if link.Type() == "vxlan" && strings.HasPrefix(link.Attrs().Name, vxlanPrefix) {
-		info.vxlan = link.(*netlink.Vxlan)
+		vxlan, ok := link.(*netlink.Vxlan)
+		if !ok {
+			return fmt.Errorf("error casting link %v as netlink.Vxlan", link)
+		}
+		info.vxlan = vxlan
 		info.VNI = info.vxlan.VxlanId
 	}
 
 	// If subinterface is VETH
 	if link.Type() == "veth" && strings.HasPrefix(link.Attrs().Name, vethL2Prefix) {
-		info.macvlanBridge = link.(*netlink.Veth)
+		macvlanBridge, ok := link.(*netlink.Veth)
+		if !ok {
+			return fmt.Errorf("error casting link %v as netlink.Veth", link)
+		}
+		info.macvlanBridge = macvlanBridge
 		peerIdx, err := netlink.VethPeerIndex(info.macvlanBridge)
 		if err != nil {
 			return fmt.Errorf("error getting veth perr by index: %w", err)
@@ -161,7 +174,11 @@ func updateLink(info *Layer2Information, link netlink.Link) error {
 		if err != nil {
 			return fmt.Errorf("error getting link by index: %w", err)
 		}
-		info.macvlanHost = peerInterface.(*netlink.Veth)
+		macvlanHost, ok := peerInterface.(*netlink.Veth)
+		if !ok {
+			return fmt.Errorf("error casting link %v as netlink.Veth", link)
+		}
+		info.macvlanHost = macvlanHost
 		info.CreateMACVLANInterface = true
 	}
 
@@ -181,7 +198,12 @@ func (n *NetlinkManager) ListL2() ([]Layer2Information, error) {
 			continue
 		}
 		info := Layer2Information{}
-		info.bridge = link.(*netlink.Bridge)
+
+		bridge, ok := link.(*netlink.Bridge)
+		if !ok {
+			return nil, fmt.Errorf("cannot cast link %v as netlink.Bridge", link)
+		}
+		info.bridge = bridge
 		info.AnycastMAC = &info.bridge.HardwareAddr
 		info.MTU = info.bridge.MTU
 		vlanID, err := strconv.Atoi(info.bridge.Name[3:])

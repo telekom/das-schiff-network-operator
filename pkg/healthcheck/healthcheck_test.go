@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"testing"
@@ -346,10 +347,13 @@ func (*updateErrorClient) Update(
 }
 
 func (*updateErrorClient) Get(_ context.Context, _ types.NamespacedName, o client.Object, _ ...client.GetOption) error {
-	a := o.(*corev1.Node)
-	a.Name = testHostname
+	node, ok := o.(*corev1.Node)
+	if !ok {
+		return fmt.Errorf("error casting object %v as corev1.Node", o)
+	}
+	node.Name = testHostname
 	for _, t := range InitTaints {
-		a.Spec.Taints = append(a.Spec.Taints, corev1.Taint{
+		node.Spec.Taints = append(node.Spec.Taints, corev1.Taint{
 			Key:    t,
 			Effect: corev1.TaintEffectNoSchedule,
 		})

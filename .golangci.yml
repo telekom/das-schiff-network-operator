@@ -66,12 +66,11 @@ linters-settings:
         alias: ctrl
   nolintlint:
     allow-unused: false
-    allow-leading-space: false
     require-specific: true
   staticcheck:
-    go: "1.19"
+    go: "1.22"
   stylecheck:
-    go: "1.19"
+    go: "1.22"
   gocritic:
     enabled-tags:
       - diagnostic
@@ -82,8 +81,6 @@ linters-settings:
     disabled-checks:
       - regexpSimplify
       - whyNoLint
-  unused:
-    go: "1.19"
   cyclop:
     max-complexity: 13
   revive:
@@ -154,6 +151,15 @@ issues:
       text: "ST1003: should not use ALL_CAPS in Go names; use CamelCase instead"
     - path: '(.+)/unix/(coil|frr|nl)\.go'
       text: "var-naming: don't use ALL_CAPS in Go names; use CamelCase"
+    - path: '(.+)/nl/(route|layer2)\.go'
+      text: 'import-alias-naming:.+\(schiff_unix\).*$'
+    # Test file exclusions
+    - path: '(.+)_test\.go'
+      text: 'unchecked-type-assertion:'
+    - path: '(.+)_test\.go'
+      text: 'import-alias-naming:'
+    - path: '(.+)_test\.go'
+      text: 'dot-imports:'
     # fix issues i currently can't fix.
     - path: '(.+)\.go'
       text: "string `vrf` has (\\d+) occurrences, make it a constant"

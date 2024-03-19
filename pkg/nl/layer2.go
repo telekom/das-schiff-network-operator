@@ -108,7 +108,7 @@ func (*NetlinkManager) ParseIPAddresses(addresses []string) ([]*netlink.Addr, er
 
 func (n *NetlinkManager) CreateL2(info *Layer2Information) error {
 	masterIdx := -1
-	if len(info.VRF) > 0 {
+	if info.VRF != "" {
 		l3Info, err := n.GetL3ByName(info.VRF)
 		if err != nil {
 			return err
@@ -376,7 +376,7 @@ func (n *NetlinkManager) isL2VNIreattachRequired(current, desired *Layer2Informa
 	// Reconcile VRF
 	if current.VRF != desired.VRF {
 		shouldReattachL2VNI = true
-		if len(desired.VRF) > 0 {
+		if desired.VRF != "" {
 			l3Info, err := n.GetL3ByName(desired.VRF)
 			if err != nil {
 				return shouldReattachL2VNI, fmt.Errorf("error while getting L3 by name: %w", err)

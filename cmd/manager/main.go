@@ -151,7 +151,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if len(interfacePrefix) > 0 {
+	if interfacePrefix != "" {
 		setupLog.Info("start macvlan sync")
 		macvlan.RunMACSync(interfacePrefix)
 	}

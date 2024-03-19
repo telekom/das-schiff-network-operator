@@ -157,9 +157,7 @@ func (hc *HealthChecker) CheckReachability() error {
 				// just actively refuses connections (e.g. port is blocked)
 				continue
 			}
-			if err != nil {
-				return err
-			}
+			return err
 		}
 	}
 	return nil

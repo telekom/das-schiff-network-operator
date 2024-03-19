@@ -134,8 +134,16 @@ func (*Manager) GetStatusFRR() (activeState, subState string, err error) {
 	if err != nil {
 		return "", "", fmt.Errorf("error getting unit %s properties: %w", frrUnit, err)
 	}
-
-	return prop["ActiveState"].(string), prop["SubState"].(string), nil
+	var ok bool
+	activeState, ok = prop["ActiveState"].(string)
+	if !ok {
+		return "", "", fmt.Errorf("error casting property %v [\"ActiveState\"] as string", prop)
+	}
+	subState, ok = prop["SubState"].(string)
+	if !ok {
+		return activeState, "", fmt.Errorf("error casting property %v [\"SubState\"] as string", prop)
+	}
+	return activeState, subState, nil
 }
 
 func (v *VRFConfiguration) ShouldTemplateVRF() bool {
