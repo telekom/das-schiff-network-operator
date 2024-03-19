@@ -127,6 +127,7 @@ spec:
               vni:
                 description: VXLAN VNI Id for the layer 2 network
                 minimum: 1
+                maximum: 16777215
                 type: integer
               vrf:
                 description: VRF to attach Layer2 network to, default if not set
