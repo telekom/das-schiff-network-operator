@@ -71,12 +71,12 @@ func (r *Layer2NetworkConfigurationReconciler) SetupWithManager(mgr ctrl.Manager
 	// Create empty request for changes to node
 	nodesMapFn := handler.EnqueueRequestsFromMapFunc(func(_ context.Context, _ client.Object) []reconcile.Request { return []reconcile.Request{{}} })
 	nodePredicates := predicate.Funcs{
-		CreateFunc: func(e event.CreateEvent) bool { return false },
+		CreateFunc: func(_ event.CreateEvent) bool { return false },
 		UpdateFunc: func(e event.UpdateEvent) bool {
 			return os.Getenv(healthcheck.NodenameEnv) == e.ObjectNew.GetName() && !cmp.Equal(e.ObjectNew.GetLabels(), e.ObjectOld.GetLabels())
 		},
-		DeleteFunc:  func(e event.DeleteEvent) bool { return false },
-		GenericFunc: func(e event.GenericEvent) bool { return false },
+		DeleteFunc:  func(_ event.DeleteEvent) bool { return false },
+		GenericFunc: func(_ event.GenericEvent) bool { return false },
 	}
 
 	err := ctrl.NewControllerManagedBy(mgr).
