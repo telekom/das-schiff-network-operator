@@ -165,7 +165,7 @@ func (r *reconcile) createVrfConfigMap(l3vnis []networkv1alpha1.VRFRouteConfigur
 			continue
 		}
 
-		if vni > 0 && vni < 16777215 {
+		if vni == 0 && vni > 16777215 {
 			err := fmt.Errorf("VNI can not be set to 0")
 			r.Logger.Error(err, "VNI can not be set to 0, ignoring", "vrf", spec.VRF, "name", l3vnis[i].ObjectMeta.Name, "namespace", l3vnis[i].ObjectMeta.Namespace)
 			continue
