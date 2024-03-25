@@ -3,7 +3,7 @@
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
-  name: worker
+  name: agent
   namespace: system
 spec:
   template:

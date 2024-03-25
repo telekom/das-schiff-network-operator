@@ -43,8 +43,8 @@ var (
 
 // HealthChecker is a struct that holds data required for networking healthcheck.
 type HealthChecker struct {
-	client              client.Client
-	isNetworkingHealthy bool
+	client        client.Client
+	taintsRemoved bool
 	logr.Logger
 	netConfig *NetHealthcheckConfig
 	toolkit   *Toolkit
@@ -61,18 +61,18 @@ func NewHealthChecker(clusterClient client.Client, toolkit *Toolkit, netconf *Ne
 	}
 
 	return &HealthChecker{
-		client:              clusterClient,
-		isNetworkingHealthy: false,
-		Logger:              log.Log.WithName("HealthCheck"),
-		netConfig:           netconf,
-		toolkit:             toolkit,
-		retries:             retries,
+		client:        clusterClient,
+		taintsRemoved: false,
+		Logger:        log.Log.WithName("HealthCheck"),
+		netConfig:     netconf,
+		toolkit:       toolkit,
+		retries:       retries,
 	}, nil
 }
 
-// IsNetworkingHealthy returns value of isNetworkingHealthly bool.
-func (hc *HealthChecker) IsNetworkingHealthy() bool {
-	return hc.isNetworkingHealthy
+// TaintsRemoved returns value of isNetworkingHealthly bool.
+func (hc *HealthChecker) TaintsRemoved() bool {
+	return hc.taintsRemoved
 }
 
 // RemoveTaints removes taint from the node.
@@ -102,7 +102,7 @@ func (hc *HealthChecker) RemoveTaints(ctx context.Context) error {
 		}
 	}
 
-	hc.isNetworkingHealthy = true
+	hc.taintsRemoved = true
 
 	return nil
 }
@@ -137,17 +137,6 @@ func (hc *HealthChecker) CheckInterfaces() error {
 	return nil
 }
 
-func (hc *HealthChecker) checkInterface(intf string) error {
-	link, err := hc.toolkit.linkByName(intf)
-	if err != nil {
-		return err
-	}
-	if link.Attrs().OperState != netlink.OperUp {
-		return errors.New("link " + intf + " is not up - current state: " + link.Attrs().OperState.String())
-	}
-	return nil
-}
-
 // CheckReachability checks if all hosts in Reachability slice are reachable.
 func (hc *HealthChecker) CheckReachability() error {
 	for _, i := range hc.netConfig.Reachability {
@@ -159,6 +148,25 @@ func (hc *HealthChecker) CheckReachability() error {
 			}
 			return err
 		}
+	}
+	return nil
+}
+
+// CheckAPIServer checks if Kubernetes Api server is reachable from the pod.
+func (hc HealthChecker) CheckAPIServer(ctx context.Context) error {
+	if err := hc.client.List(ctx, &corev1.NodeList{}); err != nil {
+		return fmt.Errorf("unable to reach API server: %w", err)
+	}
+	return nil
+}
+
+func (hc *HealthChecker) checkInterface(intf string) error {
+	link, err := hc.toolkit.linkByName(intf)
+	if err != nil {
+		return err
+	}
+	if link.Attrs().OperState != netlink.OperUp {
+		return errors.New("link " + intf + " is not up - current state: " + link.Attrs().OperState.String())
 	}
 	return nil
 }
