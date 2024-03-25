@@ -1,6 +1,8 @@
 
 # Image URL to use all building/pushing image targets
 IMG ?= ghcr.io/telekom/das-schiff-network-operator:latest
+# Sidecar image URL to use all building/pushing image targets
+SIDECAR_IMG ?= ghcr.io/telekom/frr-exporter:latest
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 ENVTEST_K8S_VERSION = 1.25
 
@@ -81,9 +83,18 @@ run: manifests generate fmt vet ## Run a controller from your host.
 docker-build: test ## Build docker image with the manager.
 	docker build -t ${IMG} .
 
+.PHONY: docker-build-sidecar
+docker-build-sidecar: test ## Build docker image with the manager.
+	docker build -t ${SIDECAR_IMG} -f frr-exporter.Dockerfile .
+
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
 	docker push ${IMG}
+
+.PHONY: docker-push-sidecar
+docker-push-sidecar: ## Push docker image with the manager.
+	docker push ${SIDECAR_IMG}
+
 
 ##@ Release
 
@@ -108,9 +119,17 @@ endif
 install: manifests kustomize ## Install CRDs into the K8s cluster specified in ~/.kube/config.
 	$(KUSTOMIZE) build config/crd | kubectl apply -f -
 
+.PHONY: install-certs
+install-certs: manifests kustomize ## Install certs
+	$(KUSTOMIZE) build config/certmanager | kubectl apply -f -
+
 .PHONY: uninstall
 uninstall: manifests kustomize ## Uninstall CRDs from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
 	$(KUSTOMIZE) build config/crd | kubectl delete --ignore-not-found=$(ignore-not-found) -f -
+
+.PHONY: uninstall-certs
+uninstall-certs: manifests kustomize ## Uninstall certs
+	$(KUSTOMIZE) build config/certmanager | kubectl delete --ignore-not-found=$(ignore-not-found) -f -
 
 .PHONY: deploy
 deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.

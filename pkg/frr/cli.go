@@ -30,7 +30,7 @@ func getVRFInfo(vrf string) (name string, isMulti bool) {
 	return vrf, false
 }
 
-func (frr *Cli) executeWithJSON(args []string) []byte {
+func (frr *Cli) ExecuteWithJSON(args []string) []byte {
 	// Ensure JSON is always appended
 	args = append(args, "json")
 	return frr.execute(args)
@@ -51,7 +51,7 @@ func (frr *Cli) execute(args []string) []byte {
 
 func (frr *Cli) ShowEVPNVNIDetail() (EVPNVniDetail, error) {
 	evpnInfo := EVPNVniDetail{}
-	data := frr.executeWithJSON([]string{
+	data := frr.ExecuteWithJSON([]string{
 		"show",
 		"evpn",
 		"vni",
@@ -66,7 +66,7 @@ func (frr *Cli) ShowEVPNVNIDetail() (EVPNVniDetail, error) {
 
 func (frr *Cli) ShowBGPSummary(vrf string) (BGPVrfSummary, error) {
 	vrfName, multiVRF := getVRFInfo(vrf)
-	data := frr.executeWithJSON([]string{
+	data := frr.ExecuteWithJSON([]string{
 		"show",
 		"bgp",
 		"vrf",
@@ -93,7 +93,7 @@ func (frr *Cli) ShowBGPSummary(vrf string) (BGPVrfSummary, error) {
 
 func (frr *Cli) showVRFVnis() (VrfVni, error) {
 	vrfInfo := VrfVni{}
-	vrfVniData := frr.executeWithJSON([]string{
+	vrfVniData := frr.ExecuteWithJSON([]string{
 		"show",
 		"vrf",
 		"vni",
@@ -204,7 +204,7 @@ func (frr *Cli) ShowVRFs(vrfName string) (VrfVni, error) {
 }
 
 func (frr *Cli) getDualStackRouteSummaries(vrf string) (routeSummariesV4, routeSummariesV6 RouteSummaries, err error) {
-	dataV4 := frr.executeWithJSON([]string{
+	dataV4 := frr.ExecuteWithJSON([]string{
 		"show",
 		"ip",
 		"route",
@@ -212,7 +212,7 @@ func (frr *Cli) getDualStackRouteSummaries(vrf string) (routeSummariesV4, routeS
 		vrf,
 		"summary",
 	})
-	dataV6 := frr.executeWithJSON([]string{
+	dataV6 := frr.ExecuteWithJSON([]string{
 		"show",
 		"ipv6",
 		"route",
