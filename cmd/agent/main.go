@@ -34,6 +34,7 @@ import (
 	"github.com/telekom/das-schiff-network-operator/pkg/anycast"
 	"github.com/telekom/das-schiff-network-operator/pkg/bpf"
 	"github.com/telekom/das-schiff-network-operator/pkg/config"
+	"github.com/telekom/das-schiff-network-operator/pkg/frr"
 	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
 	"github.com/telekom/das-schiff-network-operator/pkg/macvlan"
 	"github.com/telekom/das-schiff-network-operator/pkg/managerconfig"
@@ -92,6 +93,7 @@ func main() {
 	var onlyBPFMode bool
 	var configFile string
 	var interfacePrefix string
+	var nodeNetworkConfigPath string
 	flag.StringVar(&configFile, "config", "",
 		"The controller will load its initial configuration from this file. "+
 			"Omit this flag to use the default configuration values. "+
@@ -100,6 +102,8 @@ func main() {
 		"Only attach BPF to specified interfaces in config. This will not start any reconciliation. Perfect for masters.")
 	flag.StringVar(&interfacePrefix, "macvlan-interface-prefix", "",
 		"Interface prefix for bridge devices for MACVlan sync")
+	flag.StringVar(&nodeNetworkConfigPath, "nodenetworkconfig-path", reconciler.DefaultNodeNetworkConfigPath,
+		"Path to store working node configuration.")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -107,27 +111,14 @@ func main() {
 	flag.Parse()
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
-	var err error
-	var options manager.Options
-	if configFile != "" {
-		options, err = managerconfig.Load(configFile, scheme)
-		if err != nil {
-			setupLog.Error(err, "unable to load the config file")
-			os.Exit(1)
-		}
-	} else {
-		options = ctrl.Options{Scheme: scheme}
-	}
-	if options.MetricsBindAddress != "0" && options.MetricsBindAddress != "" {
-		err = initCollectors()
-		if err != nil {
-			setupLog.Error(err, "unable to initialize metrics collectors")
-			os.Exit(1)
-		}
+	options, err := setManagerOptions(configFile)
+	if err != nil {
+		setupLog.Error(err, "unable to configure manager's options")
+		os.Exit(1)
 	}
 
 	clientConfig := ctrl.GetConfigOrDie()
-	mgr, err := ctrl.NewManager(clientConfig, options)
+	mgr, err := ctrl.NewManager(clientConfig, *options)
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
 		os.Exit(1)
@@ -146,7 +137,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := initComponents(mgr, anycastTracker, cfg, clientConfig, onlyBPFMode); err != nil {
+	if err := initComponents(mgr, anycastTracker, cfg, clientConfig, onlyBPFMode, nodeNetworkConfigPath); err != nil {
 		setupLog.Error(err, "unable to initialize components")
 		os.Exit(1)
 	}
@@ -163,10 +154,32 @@ func main() {
 	}
 }
 
-func initComponents(mgr manager.Manager, anycastTracker *anycast.Tracker, cfg *config.Config, clientConfig *rest.Config, onlyBPFMode bool) error {
+func setManagerOptions(configFile string) (*manager.Options, error) {
+	var err error
+	var options manager.Options
+	if configFile != "" {
+		options, err = managerconfig.Load(configFile, scheme)
+		if err != nil {
+			return nil, fmt.Errorf("unable to load the config file: %w", err)
+		}
+	} else {
+		options = ctrl.Options{Scheme: scheme}
+	}
+
+	if options.MetricsBindAddress != "0" && options.MetricsBindAddress != "" {
+		err = initCollectors()
+		if err != nil {
+			return nil, fmt.Errorf("unable to initialize metrics collectors: %w", err)
+		}
+	}
+
+	return &options, nil
+}
+
+func initComponents(mgr manager.Manager, anycastTracker *anycast.Tracker, cfg *config.Config, clientConfig *rest.Config, onlyBPFMode bool, nodeConfigPath string) error {
 	// Start VRFRouteConfigurationReconciler when we are not running in only BPF mode.
 	if !onlyBPFMode {
-		if err := setupReconcilers(mgr, anycastTracker); err != nil {
+		if err := setupReconcilers(mgr, anycastTracker, nodeConfigPath); err != nil {
 			return fmt.Errorf("unable to setup reconcilers: %w", err)
 		}
 	}
@@ -225,34 +238,19 @@ func initComponents(mgr manager.Manager, anycastTracker *anycast.Tracker, cfg *c
 	return nil
 }
 
-func setupReconcilers(mgr manager.Manager, anycastTracker *anycast.Tracker) error {
-	r, err := reconciler.NewReconciler(mgr.GetClient(), anycastTracker, mgr.GetLogger())
+func setupReconcilers(mgr manager.Manager, anycastTracker *anycast.Tracker, nodeConfigPath string) error {
+	r, err := reconciler.NewNodeNetworkConfigReconciler(mgr.GetClient(), anycastTracker, mgr.GetLogger(),
+		nodeConfigPath, frr.NewFRRManager(), nl.NewManager(&nl.Toolkit{}))
 	if err != nil {
 		return fmt.Errorf("unable to create debounced reconciler: %w", err)
 	}
 
-	if err = (&controllers.VRFRouteConfigurationReconciler{
+	if err = (&controllers.NodeNetworkConfigReconciler{
 		Client:     mgr.GetClient(),
 		Scheme:     mgr.GetScheme(),
 		Reconciler: r,
 	}).SetupWithManager(mgr); err != nil {
-		return fmt.Errorf("unable to create VRFRouteConfiguration controller: %w", err)
-	}
-
-	if err = (&controllers.Layer2NetworkConfigurationReconciler{
-		Client:     mgr.GetClient(),
-		Scheme:     mgr.GetScheme(),
-		Reconciler: r,
-	}).SetupWithManager(mgr); err != nil {
-		return fmt.Errorf("unable to create Layer2NetworkConfiguration controller: %w", err)
-	}
-
-	if err = (&controllers.RoutingTableReconciler{
-		Client:     mgr.GetClient(),
-		Scheme:     mgr.GetScheme(),
-		Reconciler: r,
-	}).SetupWithManager(mgr); err != nil {
-		return fmt.Errorf("unable to create RoutingTable controller: %w", err)
+		return fmt.Errorf("unable to create NodeConfig controller: %w", err)
 	}
 
 	return nil

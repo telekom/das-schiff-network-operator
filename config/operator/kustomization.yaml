@@ -1,0 +1,12 @@
+resources:
+- operator.yaml
+
+generatorOptions:
+  disableNameSuffixHash: true
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+images:
+- name: operator
+  newName: ghcr.io/telekom/das-schiff-network-opeator
+  newTag: latest
