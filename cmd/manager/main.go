@@ -231,28 +231,12 @@ func setupReconcilers(mgr manager.Manager, anycastTracker *anycast.Tracker) erro
 		return fmt.Errorf("unable to create debounced reconciler: %w", err)
 	}
 
-	if err = (&controllers.VRFRouteConfigurationReconciler{
+	if err = (&controllers.NodeConfigReconciler{
 		Client:     mgr.GetClient(),
 		Scheme:     mgr.GetScheme(),
 		Reconciler: r,
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("unable to create VRFRouteConfiguration controller: %w", err)
-	}
-
-	if err = (&controllers.Layer2NetworkConfigurationReconciler{
-		Client:     mgr.GetClient(),
-		Scheme:     mgr.GetScheme(),
-		Reconciler: r,
-	}).SetupWithManager(mgr); err != nil {
-		return fmt.Errorf("unable to create Layer2NetworkConfiguration controller: %w", err)
-	}
-
-	if err = (&controllers.RoutingTableReconciler{
-		Client:     mgr.GetClient(),
-		Scheme:     mgr.GetScheme(),
-		Reconciler: r,
-	}).SetupWithManager(mgr); err != nil {
-		return fmt.Errorf("unable to create RoutingTable controller: %w", err)
 	}
 
 	return nil

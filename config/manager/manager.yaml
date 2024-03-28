@@ -49,18 +49,6 @@ spec:
         securityContext:
           privileged: true
           runAsUser: 0
-        livenessProbe:
-          httpGet:
-            path: /healthz
-            port: 7081
-          initialDelaySeconds: 15
-          periodSeconds: 20
-        readinessProbe:
-          httpGet:
-            path: /readyz
-            port: 7081
-          initialDelaySeconds: 5
-          periodSeconds: 10
         # TODO(user): Configure the resources accordingly based on the project requirements.
         # More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
         resources:
@@ -76,8 +64,6 @@ spec:
           subPath: config.yaml
         - mountPath: /etc/frr
           name: frr-config
-        - mountPath: /var/run/dbus/system_bus_socket
-          name: dbus-socket
       - command:
         - /frr-exporter
         env:
@@ -113,10 +99,6 @@ spec:
         hostPath:
           path: /var/run/frr
           type: Directory
-      - name: dbus-socket
-        hostPath:
-          path: /var/run/dbus/system_bus_socket
-          type: Socket
       - configMap:
           name: network-operator-config
         name: network-config

@@ -1,5 +1,5 @@
 /*
-Copyright 2022.
+Copyright 2024.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -29,23 +29,23 @@ import (
 )
 
 // RoutingTableReconciler reconciles a RoutingTable object.
-type RoutingTableReconciler struct {
+type NodeConfigReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 
-	Reconciler *reconciler.ConfigReconciler
+	Reconciler *reconciler.Reconciler
 }
 
-//+kubebuilder:rbac:groups=network.schiff.telekom.de,resources=routingtables,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=network.schiff.telekom.de,resources=routingtables/status,verbs=get;update;patch
-//+kubebuilder:rbac:groups=network.schiff.telekom.de,resources=routingtables/finalizers,verbs=update
+//+kubebuilder:rbac:groups=network.schiff.telekom.de,resources=nodeconfigs,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=network.schiff.telekom.de,resources=nodeconfigs/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=network.schiff.telekom.de,resources=nodeconfigs/finalizers,verbs=update
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
 //
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.14.4/pkg/reconcile
-func (r *RoutingTableReconciler) Reconcile(ctx context.Context, _ ctrl.Request) (ctrl.Result, error) {
+func (r *NodeConfigReconciler) Reconcile(ctx context.Context, _ ctrl.Request) (ctrl.Result, error) {
 	_ = log.FromContext(ctx)
 
 	// Run ReconcileDebounced through debouncer
@@ -55,9 +55,9 @@ func (r *RoutingTableReconciler) Reconcile(ctx context.Context, _ ctrl.Request) 
 }
 
 // SetupWithManager sets up the controller with the Manager.
-func (r *RoutingTableReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *NodeConfigReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	err := ctrl.NewControllerManagedBy(mgr).
-		For(&networkv1alpha1.RoutingTable{}).
+		For(&networkv1alpha1.NodeConfig{}).
 		Complete(r)
 	if err != nil {
 		return fmt.Errorf("error creating controller: %w", err)

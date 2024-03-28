@@ -43,8 +43,9 @@ resources:
 - ../crd
 - ../rbac
 - ../manager
-- ../webhook
-- ../prometheus
+- ../configurator
+# - ../webhook
+# - ../prometheus
 labels:
 - includeSelectors: true
   pairs:

@@ -45,7 +45,7 @@ type Layer2NetworkConfigurationReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 
-	Reconciler *reconciler.Reconciler
+	Reconciler *reconciler.ConfigReconciler
 }
 
 //+kubebuilder:rbac:groups=core,resources=nodes,verbs=get;list;update;watch

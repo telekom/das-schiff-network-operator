@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: configurator
+  namespace: system
+  labels:
+    app.kubernetes.io/component: configurator
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: configurator
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/default-container: configurator
+      labels:
+        app.kubernetes.io/component: configurator
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-role.kubernetes.io/control-plane
+                    operator: DoesNotExist
+      tolerations:
+      - effect: NoSchedule
+        key: node.schiff.telekom.de/uninitialized
+        operator: Exists
+      - key: node.cloudprovider.kubernetes.io/uninitialized
+        value: "true"
+        effect: NoSchedule
+      - key: node.kubernetes.io/not-ready
+        effect: NoSchedule
+        operator: Exists
+      hostNetwork: true
+      hostPID: true
+      containers:
+      - command:
+        - /configurator
+        args: []
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        image: configurator:latest
+        name: configurator
+        resources:
+          limits:
+            cpu: 500m
+            memory: 128Mi
+          requests:
+            cpu: 10m
+            memory: 64Mi
+        volumeMounts:
+        - mountPath: /var/state
+          name: state
+      serviceAccountName: controller-manager
+      terminationGracePeriodSeconds: 10
+      volumes:
+      - name: state
+        hostPath:
+          path: /var/state
+          type: DirectoryOrCreate
