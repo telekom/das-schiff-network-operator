@@ -4,7 +4,8 @@ metadata:
   name: status
   namespace: system
 spec:
-  type: NodePort
+  type: ClusterIP
+  clusterIP: none
   selector:
     app.kubernetes.io/component: worker
     app.kubernetes.io/name: network-operator
@@ -12,4 +13,3 @@ spec:
     - protocol: TCP
       port: 7082
       targetPort: 7082
-      nodePort: 30082

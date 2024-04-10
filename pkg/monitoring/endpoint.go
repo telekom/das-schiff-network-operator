@@ -206,7 +206,6 @@ func (e *Endpoint) ShowEVPN(w http.ResponseWriter, r *http.Request) {
 	writeResponse(result, w)
 }
 
-//+kubebuilder:rbac:groups=core,resources=pods,verbs=list
 //+kubebuilder:rbac:groups=core,resources=services,verbs=get
 
 // PassRequest - when called, will pass the request to all nodes and return their responses.
@@ -214,7 +213,7 @@ func (e *Endpoint) PassRequest(w http.ResponseWriter, r *http.Request) {
 	service := &corev1.Service{}
 	err := e.c.Get(r.Context(), client.ObjectKey{Name: e.statusSvcName, Namespace: e.statusSvcNamespace}, service)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("error listing pods: %s", err.Error()), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("error getting service: %s", err.Error()), http.StatusInternalServerError)
 		return
 	}
 
@@ -318,6 +317,8 @@ func passRequest(r *http.Request, addr, query string, results chan []byte, error
 
 	results <- data
 }
+
+//+kubebuilder:rbac:groups=core,resources=pods,verbs=list
 
 func (e *Endpoint) getAddresses(ctx context.Context, svc *corev1.Service) ([]string, error) {
 	var serviceLabels labels.Set = svc.Spec.Selector
