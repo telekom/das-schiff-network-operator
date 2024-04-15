@@ -92,6 +92,7 @@ func main() {
 	var onlyBPFMode bool
 	var configFile string
 	var interfacePrefix string
+	var useNetconf bool
 	flag.StringVar(&configFile, "config", "",
 		"The controller will load its initial configuration from this file. "+
 			"Omit this flag to use the default configuration values. "+
@@ -100,6 +101,8 @@ func main() {
 		"Only attach BPF to specified interfaces in config. This will not start any reconciliation. Perfect for masters.")
 	flag.StringVar(&interfacePrefix, "macvlan-interface-prefix", "",
 		"Interface prefix for bridge devices for MACVlan sync")
+	flag.BoolVar(&useNetconf, "use-netconf", false,
+		"Use NETCONF interface to configure hosts instead of Netlink and FRR.")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -146,7 +149,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := initComponents(mgr, anycastTracker, cfg, clientConfig, onlyBPFMode); err != nil {
+	if err := initComponents(mgr, anycastTracker, cfg, clientConfig, onlyBPFMode, useNetconf); err != nil {
 		setupLog.Error(err, "unable to initialize components")
 		os.Exit(1)
 	}
@@ -163,10 +166,22 @@ func main() {
 	}
 }
 
-func initComponents(mgr manager.Manager, anycastTracker *anycast.Tracker, cfg *config.Config, clientConfig *rest.Config, onlyBPFMode bool) error {
+func initComponents(mgr manager.Manager, anycastTracker *anycast.Tracker, cfg *config.Config,
+	clientConfig *rest.Config, onlyBPFMode bool, useNetconf bool) error {
+	var adapter reconciler.Adapter
+	var err error
+	if useNetconf {
+		adapter, err = reconciler.NewNetconfReconciler()
+	} else {
+		adapter, err = reconciler.NewLegacyReconciler(mgr.GetClient(), anycastTracker, mgr.GetLogger())
+	}
+
+	if err != nil {
+		return fmt.Errorf("unable to create reconciler: %w", err)
+	}
 	// Start VRFRouteConfigurationReconciler when we are not running in only BPF mode.
 	if !onlyBPFMode {
-		if err := setupReconcilers(mgr, anycastTracker); err != nil {
+		if err := setupReconcilers(mgr, anycastTracker, adapter); err != nil {
 			return fmt.Errorf("unable to setup reconcilers: %w", err)
 		}
 	}
@@ -179,6 +194,53 @@ func initComponents(mgr manager.Manager, anycastTracker *anycast.Tracker, cfg *c
 		return fmt.Errorf("unable to set up ready check: %w", err)
 	}
 
+	if err := setupBPF(cfg); err != nil {
+		return fmt.Errorf("uneable to set up BPF: %w", err)
+	}
+
+	setupLog.Info("start anycast sync")
+	anycastTracker.RunAnycastSync()
+
+	setupLog.Info("start notrack sync")
+	if err := notrack.RunIPTablesSync(); err != nil {
+		setupLog.Error(err, "error starting IPTables sync")
+	}
+
+	if onlyBPFMode {
+		if err := runBPFOnlyMode(clientConfig); err != nil {
+			return fmt.Errorf("error running BPF only mode: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func runBPFOnlyMode(clientConfig *rest.Config) error {
+	clusterClient, err := client.New(clientConfig, client.Options{})
+	if err != nil {
+		return fmt.Errorf("error creating controller-runtime client: %w", err)
+	}
+
+	nc, err := healthcheck.LoadConfig(healthcheck.NetHealthcheckFile)
+	if err != nil {
+		return fmt.Errorf("error loading network healthcheck config: %w", err)
+	}
+
+	tcpDialer := healthcheck.NewTCPDialer(nc.Timeout)
+	hc, err := healthcheck.NewHealthChecker(clusterClient,
+		healthcheck.NewDefaultHealthcheckToolkit(nil, tcpDialer),
+		nc)
+	if err != nil {
+		return fmt.Errorf("error initializing healthchecker: %w", err)
+	}
+	if err = performNetworkingHealthcheck(hc); err != nil {
+		return fmt.Errorf("error performing healthcheck: %w", err)
+	}
+
+	return nil
+}
+
+func setupBPF(cfg *config.Config) error {
 	setupLog.Info("load bpf program into Kernel")
 	if err := bpf.InitBPFRouter(); err != nil {
 		return fmt.Errorf("unable to init BPF router: %w", err)
@@ -191,42 +253,11 @@ func initComponents(mgr manager.Manager, anycastTracker *anycast.Tracker, cfg *c
 	setupLog.Info("start bpf interface check")
 	bpf.RunInterfaceCheck()
 
-	setupLog.Info("start anycast sync")
-	anycastTracker.RunAnycastSync()
-
-	setupLog.Info("start notrack sync")
-	if err := notrack.RunIPTablesSync(); err != nil {
-		setupLog.Error(err, "error starting IPTables sync")
-	}
-
-	if onlyBPFMode {
-		clusterClient, err := client.New(clientConfig, client.Options{})
-		if err != nil {
-			return fmt.Errorf("error creating controller-runtime client: %w", err)
-		}
-
-		nc, err := healthcheck.LoadConfig(healthcheck.NetHealthcheckFile)
-		if err != nil {
-			return fmt.Errorf("error loading network healthcheck config: %w", err)
-		}
-
-		tcpDialer := healthcheck.NewTCPDialer(nc.Timeout)
-		hc, err := healthcheck.NewHealthChecker(clusterClient,
-			healthcheck.NewDefaultHealthcheckToolkit(nil, tcpDialer),
-			nc)
-		if err != nil {
-			return fmt.Errorf("error initializing healthchecker: %w", err)
-		}
-		if err = performNetworkingHealthcheck(hc); err != nil {
-			return fmt.Errorf("error performing healthcheck: %w", err)
-		}
-	}
-
 	return nil
 }
 
-func setupReconcilers(mgr manager.Manager, anycastTracker *anycast.Tracker) error {
-	r, err := reconciler.NewReconciler(mgr.GetClient(), anycastTracker, mgr.GetLogger())
+func setupReconcilers(mgr manager.Manager, anycastTracker *anycast.Tracker, adapter reconciler.Adapter) error {
+	r, err := reconciler.NewReconciler(mgr.GetClient(), anycastTracker, mgr.GetLogger(), adapter)
 	if err != nil {
 		return fmt.Errorf("unable to create debounced reconciler: %w", err)
 	}

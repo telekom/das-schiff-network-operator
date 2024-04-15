@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/pkg/anycast"
 	"github.com/telekom/das-schiff-network-operator/pkg/config"
 	"github.com/telekom/das-schiff-network-operator/pkg/debounce"
@@ -18,6 +19,13 @@ import (
 
 const defaultDebounceTime = 20 * time.Second
 
+type Adapter interface {
+	reconcileLayer3([]networkv1alpha1.VRFRouteConfiguration, []networkv1alpha1.RoutingTable) error
+	reconcileLayer2([]networkv1alpha1.Layer2NetworkConfiguration) error
+	checkHealth(context.Context) error
+	getConfig() *config.Config
+}
+
 type Reconciler struct {
 	client         client.Client
 	netlinkManager *nl.Manager
@@ -25,11 +33,10 @@ type Reconciler struct {
 	anycastTracker *anycast.Tracker
 	config         *config.Config
 	logger         logr.Logger
+	adapter        Adapter
 	healthChecker  *healthcheck.HealthChecker
 
 	debouncer *debounce.Debouncer
-
-	dirtyFRRConfig bool
 }
 
 type reconcile struct {
@@ -37,13 +44,14 @@ type reconcile struct {
 	logr.Logger
 }
 
-func NewReconciler(clusterClient client.Client, anycastTracker *anycast.Tracker, logger logr.Logger) (*Reconciler, error) {
+func NewReconciler(clusterClient client.Client, anycastTracker *anycast.Tracker, logger logr.Logger, adapter Adapter) (*Reconciler, error) {
 	reconciler := &Reconciler{
 		client:         clusterClient,
 		netlinkManager: nl.NewManager(&nl.Toolkit{}),
 		frrManager:     frr.NewFRRManager(),
 		anycastTracker: anycastTracker,
 		logger:         logger,
+		adapter:        adapter,
 	}
 
 	reconciler.debouncer = debounce.NewDebouncer(reconciler.reconcileDebounced, defaultDebounceTime, logger)
@@ -77,55 +85,43 @@ func NewReconciler(clusterClient client.Client, anycastTracker *anycast.Tracker,
 	return reconciler, nil
 }
 
-func (reconciler *Reconciler) Reconcile(ctx context.Context) {
-	reconciler.debouncer.Debounce(ctx)
+func (r *Reconciler) Reconcile(ctx context.Context) {
+	r.debouncer.Debounce(ctx)
 }
 
-func (reconciler *Reconciler) reconcileDebounced(ctx context.Context) error {
-	r := &reconcile{
-		Reconciler: reconciler,
-		Logger:     reconciler.logger,
+func (r *Reconciler) reconcileDebounced(ctx context.Context) error {
+	reconciler := &reconcile{
+		Reconciler: r,
+		Logger:     r.logger,
 	}
 
-	r.Logger.Info("Reloading config")
-	if err := r.config.ReloadConfig(); err != nil {
+	reconciler.Logger.Info("Reloading config")
+	if err := reconciler.adapter.getConfig().ReloadConfig(); err != nil {
 		return fmt.Errorf("error reloading network-operator config: %w", err)
 	}
 
-	l3vnis, err := r.fetchLayer3(ctx)
+	l3vnis, err := reconciler.fetchLayer3(ctx)
 	if err != nil {
 		return err
 	}
-	l2vnis, err := r.fetchLayer2(ctx)
+	l2vnis, err := reconciler.fetchLayer2(ctx)
 	if err != nil {
 		return err
 	}
-	taas, err := r.fetchTaas(ctx)
+	taas, err := reconciler.fetchTaas(ctx)
 	if err != nil {
 		return err
 	}
 
-	if err := r.reconcileLayer3(l3vnis, taas); err != nil {
-		return err
+	if err := reconciler.adapter.reconcileLayer3(l3vnis, taas); err != nil {
+		return fmt.Errorf("error while configuring Layer3: %w", err)
 	}
-	if err := r.reconcileLayer2(l2vnis); err != nil {
-		return err
+	if err := reconciler.adapter.reconcileLayer2(l2vnis); err != nil {
+		return fmt.Errorf("error while configuring Layer2: %w", err)
 	}
 
-	if !reconciler.healthChecker.IsNetworkingHealthy() {
-		_, err := reconciler.healthChecker.IsFRRActive()
-		if err != nil {
-			return fmt.Errorf("error checking FRR status: %w", err)
-		}
-		if err = reconciler.healthChecker.CheckInterfaces(); err != nil {
-			return fmt.Errorf("error checking network interfaces: %w", err)
-		}
-		if err = reconciler.healthChecker.CheckReachability(); err != nil {
-			return fmt.Errorf("error checking network reachability: %w", err)
-		}
-		if err = reconciler.healthChecker.RemoveTaints(ctx); err != nil {
-			return fmt.Errorf("error removing taint from the node: %w", err)
-		}
+	if err := reconciler.adapter.checkHealth(ctx); err != nil {
+		return fmt.Errorf("healthcheck error: %w", err)
 	}
 
 	return nil
