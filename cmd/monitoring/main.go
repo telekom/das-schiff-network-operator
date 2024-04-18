@@ -19,6 +19,7 @@ const (
 )
 
 func main() {
+	setupLog := ctrl.Log.WithName("setup")
 	var addr string
 	flag.StringVar(&addr, "listen-address", ":7083", "The address to listen on for HTTP requests.")
 	opts := zap.Options{
@@ -34,10 +35,13 @@ func main() {
 		log.Fatal(fmt.Errorf("error creating controller-runtime client: %w", err))
 	}
 
+	setupLog.Info("loaded kubernetes config")
+
 	svcName, svcNamespace, err := monitoring.GetStatusServiceConfig()
 	if err != nil {
 		log.Fatal(fmt.Errorf("error getting status service info: %w", err))
 	}
+	setupLog.Info("loaded status service config")
 
 	endpoint := monitoring.NewEndpoint(c, frr.NewCli(), svcName, svcNamespace)
 
@@ -47,6 +51,10 @@ func main() {
 		ReadTimeout:       time.Minute,
 		Handler:           endpoint.CreateMux(),
 	}
+
+	setupLog.Info("created server, starting...", "Addr", server.Addr,
+		"ReadHeaderTimeout", server.ReadHeaderTimeout, "ReadTimeout", server.ReadTimeout)
+
 	err = server.ListenAndServe()
 	// Run server
 	if err != nil {

@@ -12,10 +12,12 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/go-logr/logr"
 	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 const (
@@ -39,11 +41,18 @@ type Endpoint struct {
 
 	statusSvcName      string
 	statusSvcNamespace string
+	logr.Logger
 }
 
 // NewEndpoint creates new endpoint object.
 func NewEndpoint(k8sClient client.Client, frrcli FRRClient, svcName, svcNamespace string) *Endpoint {
-	return &Endpoint{cli: frrcli, c: k8sClient, statusSvcName: svcName, statusSvcNamespace: svcNamespace}
+	return &Endpoint{
+		cli:                frrcli,
+		c:                  k8sClient,
+		statusSvcName:      svcName,
+		statusSvcNamespace: svcNamespace,
+		Logger:             log.Log.WithName("monitoring"),
+	}
 }
 
 // CreateMux configures HTTP handlers.
@@ -55,12 +64,15 @@ func (e *Endpoint) CreateMux() *http.ServeMux {
 	sm.HandleFunc("/all/show/route", e.QueryAll)
 	sm.HandleFunc("/all/show/bgp", e.QueryAll)
 	sm.HandleFunc("/all/show/evpn", e.QueryAll)
+	e.Logger.Info("created ServeMux")
 	return sm
 }
 
 // ShowRoute returns result of show ip/ipv6 route command.
 // show ip/ipv6 route (vrf <vrf>) <input> (longer-prefixes).
 func (e *Endpoint) ShowRoute(w http.ResponseWriter, r *http.Request) {
+	e.Logger.Info("got ShowRoute request", "request", r)
+
 	vrf := r.URL.Query().Get("vrf")
 	if vrf == "" {
 		vrf = all
@@ -70,6 +82,7 @@ func (e *Endpoint) ShowRoute(w http.ResponseWriter, r *http.Request) {
 	if protocol == "" {
 		protocol = protocolIP
 	} else if protocol != protocolIP && protocol != protocolIPv6 {
+		e.Logger.Error(fmt.Errorf("protocol '%s' is not supported", protocol), "protocol not supported")
 		http.Error(w, fmt.Sprintf("protocol '%s' is not supported", protocol), http.StatusBadRequest)
 		return
 	}
@@ -83,30 +96,36 @@ func (e *Endpoint) ShowRoute(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := setInput(r, &command); err != nil {
+		e.Logger.Error(err, "unable to set input")
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	if err := setLongerPrefixes(r, &command); err != nil {
+		e.Logger.Error(err, "unable to set longer prefixes")
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+
+	e.Logger.Info("command to be executed", "command", command)
 
 	data := e.cli.ExecuteWithJSON(command)
 
 	result, err := withNodename(&data)
 	if err != nil {
+		e.Logger.Error(err, "unable to add nodename")
 		http.Error(w, fmt.Sprintf("error adding nodename: %s", err.Error()), http.StatusBadRequest)
 		return
 	}
 
-	writeResponse(result, w)
+	e.writeResponse(result, w)
 }
 
 // ShowBGP returns a result of show bgp command.
 // show bgp (vrf <vrf>) ipv4/ipv6 unicast <input> (longer-prefixes).
 // show bgp vrf <all|vrf> summary.
 func (e *Endpoint) ShowBGP(w http.ResponseWriter, r *http.Request) {
+	e.Logger.Info("got ShowBGP request", "request", r)
 	vrf := r.URL.Query().Get("vrf")
 	if vrf == "" {
 		vrf = all
@@ -116,22 +135,24 @@ func (e *Endpoint) ShowBGP(w http.ResponseWriter, r *http.Request) {
 	requestType := r.URL.Query().Get("type")
 	switch requestType {
 	case "summary":
-		data = e.cli.ExecuteWithJSON([]string{
+		command := []string{
 			"show",
 			"bgp",
 			"vrf",
 			vrf,
 			"summary",
-		})
+		}
+		e.Logger.Info("command to be executed", "command", command)
+		data = e.cli.ExecuteWithJSON(command)
 	case "":
 		protocol := r.URL.Query().Get("protocol")
 		if protocol == "" || protocol == protocolIP {
 			protocol = protocolIPv4
 		} else if protocol != protocolIPv4 && protocol != protocolIPv6 {
+			e.Logger.Error(fmt.Errorf("protocol '%s' is not supported", protocol), "protocol not supported")
 			http.Error(w, fmt.Sprintf("protocol '%s' is not supported", protocol), http.StatusBadRequest)
 			return
 		}
-
 		command := []string{
 			"show",
 			"bgp",
@@ -142,28 +163,33 @@ func (e *Endpoint) ShowBGP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if err := setInput(r, &command); err != nil {
+			e.Logger.Error(err, "unable to set input")
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 
 		if err := setLongerPrefixes(r, &command); err != nil {
+			e.Logger.Error(err, "unable to set longer prefixes")
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 
+		e.Logger.Info("command to be executed", "command", command)
 		data = e.cli.ExecuteWithJSON(command)
 	default:
+		e.Logger.Error(fmt.Errorf("request of type '%s' is not supported", requestType), "request type not supported")
 		http.Error(w, fmt.Sprintf("request of type '%s' is not supported", requestType), http.StatusBadRequest)
 		return
 	}
 
 	result, err := withNodename(&data)
 	if err != nil {
+		e.Logger.Error(err, "error adding nodename")
 		http.Error(w, fmt.Sprintf("error adding nodename: %s", err.Error()), http.StatusBadRequest)
 		return
 	}
 
-	writeResponse(result, w)
+	e.writeResponse(result, w)
 }
 
 // ShowEVPN returns result of show evpn command.
@@ -172,79 +198,99 @@ func (e *Endpoint) ShowBGP(w http.ResponseWriter, r *http.Request) {
 // show evpn mac vni <all|vrf>.
 // show evpn next-hops vni <all|vrf> json.
 func (e *Endpoint) ShowEVPN(w http.ResponseWriter, r *http.Request) {
+	e.Logger.Info("got ShowEVPN request", "request", r)
 	var data []byte
 	requestType := r.URL.Query().Get("type")
 	switch requestType {
 	case "":
-		data = e.cli.ExecuteWithJSON([]string{
+		command := []string{
 			"show",
 			"evpn",
 			"vni",
-		})
+		}
+		e.Logger.Info("command to be executed", "command", command)
+		data = e.cli.ExecuteWithJSON(command)
 	case "rmac", "mac", "next-hops":
 		vni := r.URL.Query().Get("vni")
 		if vni == "" {
 			vni = all
 		}
 
-		data = e.cli.ExecuteWithJSON([]string{
+		command := []string{
 			"show",
 			"evpn",
 			requestType,
 			"vni",
 			vni,
-		})
+		}
+		e.Logger.Info("command to be executed", "command", command)
+		data = e.cli.ExecuteWithJSON(command)
 	default:
+		e.Logger.Error(fmt.Errorf("request of type '%s' is not supported", requestType), "request type not supported")
 		http.Error(w, fmt.Sprintf("request of type '%s' is not supported", requestType), http.StatusBadRequest)
 		return
 	}
 
 	result, err := withNodename(&data)
 	if err != nil {
+		e.Logger.Error(err, "error adding nodename")
 		http.Error(w, fmt.Sprintf("error adding nodename: %s", err.Error()), http.StatusBadRequest)
 		return
 	}
 
-	writeResponse(result, w)
+	e.writeResponse(result, w)
 }
 
 //+kubebuilder:rbac:groups=core,resources=services,verbs=get
 
 // QueryAll - when called, will pass the request to all nodes and return their responses.
 func (e *Endpoint) QueryAll(w http.ResponseWriter, r *http.Request) {
+	e.Logger.Info("got QueryAll request", "request", r)
 	service := &corev1.Service{}
 	err := e.c.Get(r.Context(), client.ObjectKey{Name: e.statusSvcName, Namespace: e.statusSvcNamespace}, service)
 	if err != nil {
+		e.Logger.Error(err, "error getting service")
 		http.Error(w, fmt.Sprintf("error getting service: %s", err.Error()), http.StatusInternalServerError)
 		return
 	}
 
 	addr, err := e.getAddresses(r.Context(), service)
 	if err != nil {
+		e.Logger.Error(err, "error getting addresses")
 		http.Error(w, fmt.Sprintf("error getting addresses: %s", err.Error()), http.StatusInternalServerError)
 		return
 	}
 
 	if len(addr) == 0 {
+		e.Logger.Error(fmt.Errorf("addr slice length: %d", len(addr)), "error listing addresses: no addresses found")
 		http.Error(w, "error listing addresses: no addresses found", http.StatusInternalServerError)
 		return
 	}
 
-	response, err := queryEndpoints(r, addr)
-	if err != nil {
-		http.Error(w, "error querying endpoints: "+err.Error(), http.StatusInternalServerError)
+	e.Logger.Info("will querry endpoints", "endpoints", addr)
+	response, errs := queryEndpoints(r, addr)
+	if len(errs) > 0 {
+		for _, err := range errs {
+			e.Logger.Error(err, "error querying endpoint")
+		}
+		if len(errs) == 1 {
+			http.Error(w, fmt.Sprintf("error querying endpoints - %s", errs[0].Error()), http.StatusInternalServerError)
+			return
+		}
+		http.Error(w, "multiple errors occurred while querying endpoints - please check logs for the details", http.StatusInternalServerError)
 		return
 	}
 
-	writeResponse(&response, w)
+	e.writeResponse(&response, w)
 }
 
-func writeResponse(data *[]byte, w http.ResponseWriter) {
+func (e *Endpoint) writeResponse(data *[]byte, w http.ResponseWriter) {
 	_, err := w.Write(*data)
 	if err != nil {
 		http.Error(w, "failed to write response: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	e.Logger.Info("response written", "data", *data)
 }
 
 func setLongerPrefixes(r *http.Request, command *[]string) error {
@@ -289,9 +335,7 @@ func withNodename(data *[]byte) (*[]byte, error) {
 	return result, nil
 }
 
-func passRequest(r *http.Request, addr, query string, results chan []byte, errors chan error, wg *sync.WaitGroup) {
-	defer wg.Done()
-
+func passRequest(r *http.Request, addr, query string, results chan []byte, errors chan error) {
 	s := strings.Split(r.Host, ":")
 	port := ""
 	if len(s) > 1 {
@@ -340,28 +384,32 @@ func (e *Endpoint) getAddresses(ctx context.Context, svc *corev1.Service) ([]str
 	return addresses, nil
 }
 
-func queryEndpoints(r *http.Request, addr []string) ([]byte, error) {
+func queryEndpoints(r *http.Request, addr []string) ([]byte, []error) {
 	query := strings.ReplaceAll(r.URL.RequestURI(), "all/", "")
 	responses := []json.RawMessage{}
 
 	var wg sync.WaitGroup
 	results := make(chan []byte, len(addr))
-	errors := make(chan error, len(addr))
+	requestErrors := make(chan error, len(addr))
 
 	for i := range addr {
 		wg.Add(1)
-		go func() {
-		  passRequest(r, addr[i], query, results, errors, &wg)
-		  wg.Done()
-		}()
+		go func(i int) {
+			defer wg.Done()
+			passRequest(r, addr[i], query, results, requestErrors)
+		}(i)
 	}
 
 	wg.Wait()
 	close(results)
-	close(errors)
+	close(requestErrors)
 
-	for err := range errors {
-		return nil, fmt.Errorf("error occurred: %w", err)
+	if len(requestErrors) > 0 {
+		err := []error{}
+		for e := range requestErrors {
+			err = append(err, e)
+		}
+		return nil, err
 	}
 
 	for result := range results {
@@ -370,7 +418,7 @@ func queryEndpoints(r *http.Request, addr []string) ([]byte, error) {
 
 	jsn, err := json.MarshalIndent(responses, "", "\t")
 	if err != nil {
-		return nil, fmt.Errorf("error marshaling data: %w", err)
+		return nil, []error{fmt.Errorf("error marshaling data: %w", err)}
 	}
 
 	return jsn, nil
