@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -29,6 +30,8 @@ const (
 	StatusSvcNameEnv      = "STATUS_SVC_NAME"
 	StatusSvcNamespaceEnv = "STATUS_SVC_NAMESPACE"
 )
+
+var validation = regexp.MustCompile("^[a-zA-Z0-9_]")
 
 //go:generate mockgen -destination ./mock/mock_endpoint.go . FRRClient
 type FRRClient interface {
@@ -76,6 +79,12 @@ func (e *Endpoint) ShowRoute(w http.ResponseWriter, r *http.Request) {
 	vrf := r.URL.Query().Get("vrf")
 	if vrf == "" {
 		vrf = all
+	}
+
+	if !validation.MatchString(vrf) {
+		e.Logger.Error(fmt.Errorf("invalid VRF value"), "error validating value")
+		http.Error(w, "invalid VRF value", http.StatusBadRequest)
+		return
 	}
 
 	protocol := r.URL.Query().Get("protocol")
@@ -131,56 +140,21 @@ func (e *Endpoint) ShowBGP(w http.ResponseWriter, r *http.Request) {
 		vrf = all
 	}
 
-	var data []byte
-	requestType := r.URL.Query().Get("type")
-	switch requestType {
-	case "summary":
-		command := []string{
-			"show",
-			"bgp",
-			"vrf",
-			vrf,
-			"summary",
-		}
-		e.Logger.Info("command to be executed", "command", command)
-		data = e.cli.ExecuteWithJSON(command)
-	case "":
-		protocol := r.URL.Query().Get("protocol")
-		if protocol == "" || protocol == protocolIP {
-			protocol = protocolIPv4
-		} else if protocol != protocolIPv4 && protocol != protocolIPv6 {
-			e.Logger.Error(fmt.Errorf("protocol '%s' is not supported", protocol), "protocol not supported")
-			http.Error(w, fmt.Sprintf("protocol '%s' is not supported", protocol), http.StatusBadRequest)
-			return
-		}
-		command := []string{
-			"show",
-			"bgp",
-			"vrf",
-			vrf,
-			protocol,
-			"unicast",
-		}
-
-		if err := setInput(r, &command); err != nil {
-			e.Logger.Error(err, "unable to set input")
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		if err := setLongerPrefixes(r, &command); err != nil {
-			e.Logger.Error(err, "unable to set longer prefixes")
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		e.Logger.Info("command to be executed", "command", command)
-		data = e.cli.ExecuteWithJSON(command)
-	default:
-		e.Logger.Error(fmt.Errorf("request of type '%s' is not supported", requestType), "request type not supported")
-		http.Error(w, fmt.Sprintf("request of type '%s' is not supported", requestType), http.StatusBadRequest)
+	if !validation.MatchString(vrf) {
+		e.Logger.Error(fmt.Errorf("invalid VRF value"), "error validating value")
+		http.Error(w, "invalid VRF value", http.StatusBadRequest)
 		return
 	}
+
+	command, err := prepareBGPCommand(r, vrf)
+	if err != nil {
+		e.Logger.Error(err, "error preparing ShowBGP command")
+		http.Error(w, "error preparing ShowBGP command: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	e.Logger.Info("command to be executed", "command", command)
+	data := e.cli.ExecuteWithJSON(command)
 
 	result, err := withNodename(&data)
 	if err != nil {
@@ -192,6 +166,48 @@ func (e *Endpoint) ShowBGP(w http.ResponseWriter, r *http.Request) {
 	e.writeResponse(result, w)
 }
 
+func prepareBGPCommand(r *http.Request, vrf string) ([]string, error) {
+	var command []string
+	requestType := r.URL.Query().Get("type")
+	switch requestType {
+	case "summary":
+		command = []string{
+			"show",
+			"bgp",
+			"vrf",
+			vrf,
+			"summary",
+		}
+	case "":
+		protocol := r.URL.Query().Get("protocol")
+		if protocol == "" || protocol == protocolIP {
+			protocol = protocolIPv4
+		} else if protocol != protocolIPv4 && protocol != protocolIPv6 {
+			return nil, fmt.Errorf("protocol %s is not supported", protocol)
+		}
+		command = []string{
+			"show",
+			"bgp",
+			"vrf",
+			vrf,
+			protocol,
+			"unicast",
+		}
+
+		if err := setInput(r, &command); err != nil {
+			return nil, fmt.Errorf("unable to set input: %w", err)
+		}
+
+		if err := setLongerPrefixes(r, &command); err != nil {
+			return nil, fmt.Errorf("unable to set longer prefixes: %w", err)
+		}
+	default:
+		return nil, fmt.Errorf("request of type '%s' is not supported", requestType)
+	}
+
+	return command, nil
+}
+
 // ShowEVPN returns result of show evpn command.
 // show evpn vni json.
 // show evpn rmac vni <all|vrf>.
@@ -199,37 +215,42 @@ func (e *Endpoint) ShowBGP(w http.ResponseWriter, r *http.Request) {
 // show evpn next-hops vni <all|vrf> json.
 func (e *Endpoint) ShowEVPN(w http.ResponseWriter, r *http.Request) {
 	e.Logger.Info("got ShowEVPN request", "request", r)
-	var data []byte
+	var command []string
 	requestType := r.URL.Query().Get("type")
 	switch requestType {
 	case "":
-		command := []string{
+		command = []string{
 			"show",
 			"evpn",
 			"vni",
 		}
-		e.Logger.Info("command to be executed", "command", command)
-		data = e.cli.ExecuteWithJSON(command)
 	case "rmac", "mac", "next-hops":
 		vni := r.URL.Query().Get("vni")
 		if vni == "" {
 			vni = all
 		}
 
-		command := []string{
+		if !validation.MatchString(vni) {
+			e.Logger.Error(fmt.Errorf("invalid VNI value"), "error validating value")
+			http.Error(w, "invalid VNI value", http.StatusBadRequest)
+			return
+		}
+
+		command = []string{
 			"show",
 			"evpn",
 			requestType,
 			"vni",
 			vni,
 		}
-		e.Logger.Info("command to be executed", "command", command)
-		data = e.cli.ExecuteWithJSON(command)
 	default:
 		e.Logger.Error(fmt.Errorf("request of type '%s' is not supported", requestType), "request type not supported")
 		http.Error(w, fmt.Sprintf("request of type '%s' is not supported", requestType), http.StatusBadRequest)
 		return
 	}
+
+	e.Logger.Info("command to be executed", "command", command)
+	data := e.cli.ExecuteWithJSON(command)
 
 	result, err := withNodename(&data)
 	if err != nil {
@@ -298,7 +319,7 @@ func setLongerPrefixes(r *http.Request, command *[]string) error {
 	if longerPrefixes != "" {
 		useLongerPrefixes, err := strconv.ParseBool(longerPrefixes)
 		if err != nil {
-			return fmt.Errorf("longer_prefixes value '%s' is not valid: %w", longerPrefixes, err)
+			return fmt.Errorf("longer_prefixes value is not valid: %w", err)
 		}
 		if useLongerPrefixes {
 			*command = append(*command, "longer-prefixes")
@@ -311,7 +332,7 @@ func setInput(r *http.Request, command *[]string) error {
 	input := r.URL.Query().Get("input")
 	if input != "" {
 		if _, _, err := net.ParseCIDR(input); err != nil {
-			return fmt.Errorf("input '%s' is not valid: %w", input, err)
+			return fmt.Errorf("input value is not valid: %w", err)
 		}
 		*command = append(*command, input)
 	}
