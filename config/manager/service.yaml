@@ -5,11 +5,11 @@ metadata:
   namespace: system
 spec:
   type: ClusterIP
-  clusterIP: none
+  clusterIP: None
   selector:
     app.kubernetes.io/component: worker
     app.kubernetes.io/name: network-operator
   ports:
     - protocol: TCP
-      port: 7082
-      targetPort: 7082
+      port: 7083
+      targetPort: 7083

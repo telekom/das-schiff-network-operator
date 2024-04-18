@@ -74,7 +74,7 @@ func (e *Endpoint) CreateMux() *http.ServeMux {
 // ShowRoute returns result of show ip/ipv6 route command.
 // show ip/ipv6 route (vrf <vrf>) <input> (longer-prefixes).
 func (e *Endpoint) ShowRoute(w http.ResponseWriter, r *http.Request) {
-	e.Logger.Info("got ShowRoute request", "request", r)
+	e.Logger.Info("got ShowRoute request")
 
 	vrf := r.URL.Query().Get("vrf")
 	if vrf == "" {
@@ -127,14 +127,14 @@ func (e *Endpoint) ShowRoute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	e.writeResponse(result, w)
+	e.writeResponse(result, w, "ShowRoute")
 }
 
 // ShowBGP returns a result of show bgp command.
 // show bgp (vrf <vrf>) ipv4/ipv6 unicast <input> (longer-prefixes).
 // show bgp vrf <all|vrf> summary.
 func (e *Endpoint) ShowBGP(w http.ResponseWriter, r *http.Request) {
-	e.Logger.Info("got ShowBGP request", "request", r)
+	e.Logger.Info("got ShowBGP request")
 	vrf := r.URL.Query().Get("vrf")
 	if vrf == "" {
 		vrf = all
@@ -163,7 +163,7 @@ func (e *Endpoint) ShowBGP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	e.writeResponse(result, w)
+	e.writeResponse(result, w, "ShowBGP")
 }
 
 func prepareBGPCommand(r *http.Request, vrf string) ([]string, error) {
@@ -214,7 +214,7 @@ func prepareBGPCommand(r *http.Request, vrf string) ([]string, error) {
 // show evpn mac vni <all|vrf>.
 // show evpn next-hops vni <all|vrf> json.
 func (e *Endpoint) ShowEVPN(w http.ResponseWriter, r *http.Request) {
-	e.Logger.Info("got ShowEVPN request", "request", r)
+	e.Logger.Info("got ShowEVPN request")
 	var command []string
 	requestType := r.URL.Query().Get("type")
 	switch requestType {
@@ -259,14 +259,14 @@ func (e *Endpoint) ShowEVPN(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	e.writeResponse(result, w)
+	e.writeResponse(result, w, "ShowEVPN")
 }
 
 //+kubebuilder:rbac:groups=core,resources=services,verbs=get
 
 // QueryAll - when called, will pass the request to all nodes and return their responses.
 func (e *Endpoint) QueryAll(w http.ResponseWriter, r *http.Request) {
-	e.Logger.Info("got QueryAll request", "request", r)
+	e.Logger.Info("got QueryAll request")
 	service := &corev1.Service{}
 	err := e.c.Get(r.Context(), client.ObjectKey{Name: e.statusSvcName, Namespace: e.statusSvcNamespace}, service)
 	if err != nil {
@@ -302,16 +302,16 @@ func (e *Endpoint) QueryAll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	e.writeResponse(&response, w)
+	e.writeResponse(&response, w, "QueryAll")
 }
 
-func (e *Endpoint) writeResponse(data *[]byte, w http.ResponseWriter) {
+func (e *Endpoint) writeResponse(data *[]byte, w http.ResponseWriter, requestType string) {
 	_, err := w.Write(*data)
 	if err != nil {
 		http.Error(w, "failed to write response: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	e.Logger.Info("response written", "data", *data)
+	e.Logger.Info("response written", "type", requestType)
 }
 
 func setLongerPrefixes(r *http.Request, command *[]string) error {
