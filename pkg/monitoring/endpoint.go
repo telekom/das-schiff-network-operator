@@ -46,14 +46,16 @@ func NewEndpoint(k8sClient client.Client, frrcli FRRClient, svcName, svcNamespac
 	return &Endpoint{cli: frrcli, c: k8sClient, statusSvcName: svcName, statusSvcNamespace: svcNamespace}
 }
 
-// SetHandlers configures HTTP handlers.
-func (e *Endpoint) SetHandlers() {
-	http.HandleFunc("/show/route", e.ShowRoute)
-	http.HandleFunc("/show/bgp", e.ShowBGP)
-	http.HandleFunc("/show/evpn", e.ShowEVPN)
-	http.HandleFunc("/all/show/route", e.PassRequest)
-	http.HandleFunc("/all/show/bgp", e.PassRequest)
-	http.HandleFunc("/all/show/evpn", e.PassRequest)
+// CreateMux configures HTTP handlers.
+func (e *Endpoint) CreateMux() *http.ServeMux {
+	sm := http.NewServeMux()
+	sm.HandleFunc("/show/route", e.ShowRoute)
+	sm.HandleFunc("/show/bgp", e.ShowBGP)
+	sm.HandleFunc("/show/evpn", e.ShowEVPN)
+	sm.HandleFunc("/all/show/route", e.PassRequest)
+	sm.HandleFunc("/all/show/bgp", e.PassRequest)
+	sm.HandleFunc("/all/show/evpn", e.PassRequest)
+	return sm
 }
 
 // ShowRoute returns result of show ip/ipv6 route command.

@@ -122,7 +122,7 @@ var _ = Describe("Endpoint", func() {
 	fcm := monmock.NewMockFRRClient(mockCtrl)
 	c := fake.NewClientBuilder().Build()
 	e := NewEndpoint(c, fcm, "test-service", "test-namespace")
-	e.SetHandlers()
+	e.CreateMux()
 
 	Context("ShowRoute() should", func() {
 		It("return no error", func() {

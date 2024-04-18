@@ -10,10 +10,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/telekom/das-schiff-network-operator/pkg/frr"
 	"github.com/telekom/das-schiff-network-operator/pkg/monitoring"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
 
@@ -48,24 +46,9 @@ func main() {
 	}
 	reg.MustRegister(collector)
 
-	clientConfig := ctrl.GetConfigOrDie()
-	c, err := client.New(clientConfig, client.Options{})
-	if err != nil {
-		log.Fatal(fmt.Errorf("error creating controller-runtime client: %w", err))
-	}
-
-	frrCli := frr.NewCli()
-
-	svcName, svcNamespace, err := monitoring.GetStatusServiceConfig()
-	if err != nil {
-		log.Fatal(fmt.Errorf("error getting status service info: %w", err))
-	}
-
-	endpoint := monitoring.NewEndpoint(c, frrCli, svcName, svcNamespace)
-	endpoint.SetHandlers()
-
 	// Expose the registered metrics via HTTP.
-	http.Handle("/metrics", promhttp.HandlerFor(
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", promhttp.HandlerFor(
 		reg,
 		promhttp.HandlerOpts{
 			// Opt into OpenMetrics to support exemplars.
@@ -73,10 +56,12 @@ func main() {
 			Timeout:           time.Minute,
 		},
 	))
+
 	server := http.Server{
 		Addr:              addr,
 		ReadHeaderTimeout: twenty * time.Second,
 		ReadTimeout:       time.Minute,
+		Handler:           mux,
 	}
 	err = server.ListenAndServe()
 	// Run server
