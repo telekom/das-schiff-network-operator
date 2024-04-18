@@ -260,7 +260,7 @@ var _ = Describe("Endpoint", func() {
 			e := NewEndpoint(c, fcm, "test-service-no-endpoints", "test-namespace")
 			req := httptest.NewRequest(http.MethodGet, "/all/show/route", http.NoBody)
 			res := httptest.NewRecorder()
-			e.PassRequest(res, req)
+			e.QueryAll(res, req)
 			Expect(res.Code).To(Equal(http.StatusInternalServerError))
 		})
 
@@ -269,7 +269,7 @@ var _ = Describe("Endpoint", func() {
 			e := NewEndpoint(c, fcm, "test-service", "test-namespace")
 			req := httptest.NewRequest(http.MethodGet, "/all/show/route", http.NoBody)
 			res := httptest.NewRecorder()
-			e.PassRequest(res, req)
+			e.QueryAll(res, req)
 			Expect(res.Code).To(Equal(http.StatusInternalServerError))
 		})
 		It("return error if request was properly passed to the endpoint but the response is malformed", func() {
@@ -283,7 +283,7 @@ var _ = Describe("Endpoint", func() {
 			req := httptest.NewRequest(http.MethodGet, svr.URL, http.NoBody)
 			res := httptest.NewRecorder()
 
-			e.PassRequest(res, req)
+			e.QueryAll(res, req)
 			Expect(res.Code).To(Equal(http.StatusInternalServerError))
 		})
 		It("return no error if request was properly passed to the endpoint", func() {
@@ -297,7 +297,7 @@ var _ = Describe("Endpoint", func() {
 			req := httptest.NewRequest(http.MethodGet, svr.URL+"?service=test-service&namespace=test-namespace", http.NoBody)
 			res := httptest.NewRecorder()
 
-			e.PassRequest(res, req)
+			e.QueryAll(res, req)
 			Expect(res.Code).To(Equal(http.StatusOK))
 		})
 	})

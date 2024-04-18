@@ -52,9 +52,9 @@ func (e *Endpoint) CreateMux() *http.ServeMux {
 	sm.HandleFunc("/show/route", e.ShowRoute)
 	sm.HandleFunc("/show/bgp", e.ShowBGP)
 	sm.HandleFunc("/show/evpn", e.ShowEVPN)
-	sm.HandleFunc("/all/show/route", e.PassRequest)
-	sm.HandleFunc("/all/show/bgp", e.PassRequest)
-	sm.HandleFunc("/all/show/evpn", e.PassRequest)
+	sm.HandleFunc("/all/show/route", e.QueryAll)
+	sm.HandleFunc("/all/show/bgp", e.QueryAll)
+	sm.HandleFunc("/all/show/evpn", e.QueryAll)
 	return sm
 }
 
@@ -210,8 +210,8 @@ func (e *Endpoint) ShowEVPN(w http.ResponseWriter, r *http.Request) {
 
 //+kubebuilder:rbac:groups=core,resources=services,verbs=get
 
-// PassRequest - when called, will pass the request to all nodes and return their responses.
-func (e *Endpoint) PassRequest(w http.ResponseWriter, r *http.Request) {
+// QueryAll - when called, will pass the request to all nodes and return their responses.
+func (e *Endpoint) QueryAll(w http.ResponseWriter, r *http.Request) {
 	service := &corev1.Service{}
 	err := e.c.Get(r.Context(), client.ObjectKey{Name: e.statusSvcName, Namespace: e.statusSvcNamespace}, service)
 	if err != nil {
