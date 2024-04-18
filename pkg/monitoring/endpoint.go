@@ -348,7 +348,10 @@ func queryEndpoints(r *http.Request, addr []string) ([]byte, error) {
 
 	for i := range addr {
 		wg.Add(1)
-		go passRequest(r, addr[i], query, results, errors, &wg)
+		go func() {
+		  passRequest(r, addr[i], query, results, errors, &wg)
+		  wg.Done()
+		}()
 	}
 
 	wg.Wait()
