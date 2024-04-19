@@ -3,8 +3,6 @@
 IMG ?= ghcr.io/telekom/das-schiff-network-operator:latest
 # Sidecar image URL to use all building/pushing image targets
 SIDECAR_IMG ?= ghcr.io/telekom/frr-exporter:latest
-# Monitoring image URL to use all building/pushing image targets
-MONITORING_IMG ?= ghcr.io/telekom/monitoring:latest
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 ENVTEST_K8S_VERSION = 1.25
 
@@ -73,13 +71,9 @@ test: manifests generate fmt vet envtest ## Run tests.
 build: generate fmt vet ## Build manager binary.
 	go build -o bin/manager cmd/manager/main.go
 
-.PHONY: build
+.PHONY: sidecar-build
 sidecar-build: build
 	go build -o bin/frr-exporter cmd/frr-exporter/main.go
-
-.PHONY: build
-monitoring-build: build
-	go build -o bin/monitoring cmd/monitoring/main.go
 
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
@@ -93,10 +87,6 @@ docker-build: test ## Build docker image with the manager.
 docker-build-sidecar: test ## Build docker image with the manager.
 	docker build -t ${SIDECAR_IMG} -f frr-exporter.Dockerfile .
 
-.PHONY: docker-build-monitoring
-docker-build-monitoring: test ## Build docker image with the manager.
-	docker build -t ${MONITORING_IMG} -f monitoring.Dockerfile .
-
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
 	docker push ${IMG}
@@ -104,10 +94,6 @@ docker-push: ## Push docker image with the manager.
 .PHONY: docker-push-sidecar
 docker-push-sidecar: ## Push docker image with the manager.
 	docker push ${SIDECAR_IMG}
-
-.PHONY: docker-push-monitoring
-docker-push-monitoring: ## Push docker image with the manager.
-	docker push ${MONITORING_IMG}
 
 
 ##@ Release
@@ -149,7 +135,6 @@ uninstall-certs: manifests kustomize ## Uninstall certs
 deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
 	cd config/manager && $(KUSTOMIZE) edit set image frr-exporter=${SIDECAR_IMG}
-	cd config/manager && $(KUSTOMIZE) edit set image monitoring=${MONITORING_IMG}
 	$(KUSTOMIZE) build config/default | kubectl apply -f -
 
 .PHONY: undeploy

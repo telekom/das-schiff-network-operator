@@ -23,6 +23,3 @@ images:
 - name: frr-exporter
   newName: ghcr.io/telekom/frr-exporter
   newTag: latest
-- name: monitoring
-  newName: ghcr.io/telekom/monitoring
-  newTag: latest
