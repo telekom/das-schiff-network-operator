@@ -83,7 +83,7 @@ func (c *netlinkCollector) updateNeighbors(ch chan<- prometheus.Metric, neighbor
 	}
 }
 
-func (c *netlinkCollector) update(neighbors []nl.NeighborInformation, routes []route.Information) {
+func (c *netlinkCollector) updateChannels(neighbors []nl.NeighborInformation, routes []route.Information) {
 	for _, ch := range c.channels {
 		c.updateNeighbors(ch, neighbors)
 		c.updateRoutes(ch, routes)
@@ -99,7 +99,7 @@ func (c *netlinkCollector) Update(ch chan<- prometheus.Metric) error {
 			neighbors := c.getNeighbors()
 			c.mu.Lock()
 			defer c.mu.Unlock()
-			c.update(neighbors, routes)
+			c.updateChannels(neighbors, routes)
 			c.clearChannels()
 			close(c.done)
 			c.done = make(chan struct{})

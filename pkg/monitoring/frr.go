@@ -238,7 +238,7 @@ func (c *frrCollector) updateBGPNeighbors(ch chan<- prometheus.Metric, bgpNeighb
 		}
 	}
 }
-func (c *frrCollector) update(vrfs []frr.VrfVniSpec, routes []route.Information, neighbors frr.BGPVrfSummary) {
+func (c *frrCollector) updateChannels(vrfs []frr.VrfVniSpec, routes []route.Information, neighbors frr.BGPVrfSummary) {
 	for _, ch := range c.channels {
 		c.updateVrfs(ch, vrfs)
 		c.updateRoutes(ch, routes)
@@ -256,7 +256,7 @@ func (c *frrCollector) Update(ch chan<- prometheus.Metric) error {
 			routes := c.getRoutes()
 			c.mu.Lock()
 			defer c.mu.Unlock()
-			c.update(vrfs, routes, neighbors)
+			c.updateChannels(vrfs, routes, neighbors)
 			c.clearChannels()
 			close(c.done)
 			c.done = make(chan struct{})
