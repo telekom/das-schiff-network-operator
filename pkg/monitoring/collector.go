@@ -109,8 +109,8 @@ func (n DasSchiffNetworkOperatorCollector) Collect(ch chan<- prometheus.Metric) 
 	for name, c := range n.Collectors {
 		wg.Add(1)
 		go func(name string, c Collector) {
-			execute(name, c, ch)
 			defer wg.Done()
+			execute(name, c, ch)
 		}(name, c)
 	}
 	wg.Wait()
