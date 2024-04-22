@@ -13,7 +13,8 @@ import (
 // Config holds internal config that is used to create manger.Options struct.
 type Config struct {
 	Health         HealthCfg         `yaml:"health"`
-	Metrics        MetricsCfg        `yaml:"metrics"`
+	Metrics        ServerConfig      `yaml:"metrics"`
+	Pprof          ServerConfig      `yaml:"pprof"`
 	Webhook        WebhookCfg        `yaml:"webhook"`
 	LeaderElection LeaderElectionCfg `yaml:"leaderElection"`
 }
@@ -24,7 +25,7 @@ type HealthCfg struct {
 }
 
 // MetricsCfg holds internal config for metrics options of manger.Options struct.
-type MetricsCfg struct {
+type ServerConfig struct {
 	BindAddress string `yaml:"bindAddress"`
 }
 
@@ -68,6 +69,7 @@ func prepareManagerOptions(cfg *Config, scheme *runtime.Scheme) manager.Options 
 		Scheme:                 scheme,
 		HealthProbeBindAddress: cfg.Health.HealthProbeBindAddress,
 		MetricsBindAddress:     cfg.Metrics.BindAddress,
+		PprofBindAddress:       cfg.Pprof.BindAddress,
 		WebhookServer: &webhook.DefaultServer{
 			Options: webhook.Options{
 				Port: cfg.Webhook.Port,
