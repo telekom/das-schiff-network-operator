@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-logr/logr"
 	"github.com/prometheus/client_golang/prometheus"
 	ctrl "sigs.k8s.io/controller-runtime"
 )
@@ -44,6 +45,20 @@ type typedFactoryDesc struct {
 	valueType prometheus.ValueType
 }
 
+type basicCollector struct {
+	name     string
+	mu       sync.Mutex
+	done     chan struct{}
+	channels []chan<- prometheus.Metric
+	logger   logr.Logger
+}
+
+func (c *basicCollector) clearChannels() {
+	c.channels = []chan<- prometheus.Metric{}
+}
+func (c *basicCollector) waitUntilDone() {
+	<-c.done
+}
 func (d *typedFactoryDesc) mustNewConstMetric(value float64, labels ...string) prometheus.Metric {
 	return prometheus.MustNewConstMetric(d.desc, d.valueType, value, labels...)
 }
@@ -94,11 +109,11 @@ func (DasSchiffNetworkOperatorCollector) Describe(ch chan<- *prometheus.Desc) {
 // Collect implements the prometheus.Collector interface.
 func (n DasSchiffNetworkOperatorCollector) Collect(ch chan<- prometheus.Metric) {
 	wg := sync.WaitGroup{}
-	wg.Add(len(n.Collectors))
 	for name, c := range n.Collectors {
+		wg.Add(1)
 		go func(name string, c Collector) {
 			execute(name, c, ch)
-			wg.Done()
+			defer wg.Done()
 		}(name, c)
 	}
 	wg.Wait()
