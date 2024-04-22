@@ -458,7 +458,9 @@ func (n *NetlinkManager) ListNeighborInformation() ([]NeighborInformation, error
 	for index := range netlinkNeighbors {
 		linkInfo, err := netlink.LinkByIndex(netlinkNeighbors[index].LinkIndex)
 		if err != nil {
-			return nil, fmt.Errorf("error getting link by index: %w", err)
+			// we don't care if a link is not available
+			continue
+			// return nil, fmt.Errorf("error getting link by index: %w", err)
 		}
 		interfaceName := linkInfo.Attrs().Name
 		// This ensures that only neighbors of secondary interfaces are imported
