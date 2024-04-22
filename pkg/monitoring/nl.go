@@ -53,8 +53,6 @@ func NewNetlinkCollector() (Collector, error) {
 }
 
 func (c *netlinkCollector) getRoutes() []route.Information {
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	routes, err := c.netlink.ListRouteInformation()
 	if err != nil {
 		c.logger.Error(err, "cannot get routes from netlink")
@@ -69,8 +67,6 @@ func (c *netlinkCollector) updateRoutes(ch chan<- prometheus.Metric, routeSummar
 }
 
 func (c *netlinkCollector) getNeighbors() []nl.NeighborInformation {
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	neighbors, err := c.netlink.ListNeighborInformation()
 	if err != nil {
 		c.logger.Error(err, "Cannot get neighbors from netlink")
