@@ -3,6 +3,7 @@ package monitoring
 import (
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/telekom/das-schiff-network-operator/pkg/frr"
@@ -250,7 +251,10 @@ func (c *frrCollector) Update(ch chan<- prometheus.Metric) error {
 	c.mu.Lock()
 	c.channels = append(c.channels, ch)
 	if len(c.channels) == 1 {
+		c.wg = sync.WaitGroup{}
+		c.wg.Add(1)
 		go func() {
+			defer c.wg.Done()
 			vrfs := c.getVrfs()
 			neighbors := c.getBGPNeighbors()
 			routes := c.getRoutes()
@@ -258,11 +262,9 @@ func (c *frrCollector) Update(ch chan<- prometheus.Metric) error {
 			defer c.mu.Unlock()
 			c.updateChannels(vrfs, routes, neighbors)
 			c.clearChannels()
-			close(c.done)
-			c.done = make(chan struct{})
 		}()
 	}
 	c.mu.Unlock()
-	c.waitUntilDone()
+	c.wg.Wait()
 	return nil
 }

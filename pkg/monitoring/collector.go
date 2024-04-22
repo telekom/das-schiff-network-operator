@@ -48,16 +48,13 @@ type typedFactoryDesc struct {
 type basicCollector struct {
 	name     string
 	mu       sync.Mutex
-	done     chan struct{}
+	wg       sync.WaitGroup
 	channels []chan<- prometheus.Metric
 	logger   logr.Logger
 }
 
 func (c *basicCollector) clearChannels() {
 	c.channels = []chan<- prometheus.Metric{}
-}
-func (c *basicCollector) waitUntilDone() {
-	<-c.done
 }
 func (d *typedFactoryDesc) mustNewConstMetric(value float64, labels ...string) prometheus.Metric {
 	return prometheus.MustNewConstMetric(d.desc, d.valueType, value, labels...)
