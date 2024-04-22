@@ -61,9 +61,9 @@ func (c *netlinkCollector) getRoutes() []route.Information {
 	return routes
 }
 
-func (c *netlinkCollector) updateRoutes(ch chan<- prometheus.Metric, routes []route.Information) {
-	for _, route := range routes {
-		ch <- c.routesFibDesc.mustNewConstMetric(float64(route.Fib), fmt.Sprint(route.TableID), route.VrfName, nl.GetProtocolName(route.RouteProtocol), route.AddressFamily)
+func (c *netlinkCollector) updateRoutes(ch chan<- prometheus.Metric, routeSummaries []route.Information) {
+	for _, routeSummary := range routeSummaries {
+		ch <- c.routesFibDesc.mustNewConstMetric(float64(routeSummary.Fib), fmt.Sprint(routeSummary.TableID), routeSummary.VrfName, nl.GetProtocolName(routeSummary.RouteProtocol), routeSummary.AddressFamily)
 	}
 }
 
