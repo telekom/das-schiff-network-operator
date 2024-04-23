@@ -46,10 +46,18 @@ type typedFactoryDesc struct {
 }
 
 type basicCollector struct {
-	name   string
-	logger logr.Logger
+	name     string
+	mu       sync.Mutex
+	wg       sync.WaitGroup
+	channels []chan<- prometheus.Metric
+	logger   logr.Logger
 }
 
+// only use with Lock called before.
+func (c *basicCollector) clearChannels() {
+	defer c.mu.Unlock()
+	c.channels = []chan<- prometheus.Metric{}
+}
 func (d *typedFactoryDesc) mustNewConstMetric(value float64, labels ...string) prometheus.Metric {
 	return prometheus.MustNewConstMetric(d.desc, d.valueType, value, labels...)
 }
