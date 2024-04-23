@@ -35,7 +35,7 @@ func (*NetlinkManager) listNeighbors() ([]netlink.Neigh, error) {
 	return neighbors, nil
 }
 
-func (*NetlinkManager) ListVRFInterfaces() (*map[int]VRFInformation, error) {
+func (*NetlinkManager) ListVRFInterfaces() (map[int]VRFInformation, error) {
 	// TODO: find a way to merge this with ListL3
 	infos := map[int]VRFInformation{}
 	links, err := netlink.LinkList()
@@ -59,10 +59,10 @@ func (*NetlinkManager) ListVRFInterfaces() (*map[int]VRFInformation, error) {
 		infos[info.table] = info
 	}
 
-	return &infos, nil
+	return infos, nil
 }
 
-func (*NetlinkManager) ListNeighborInterfaces() (*map[int]netlink.Link, error) {
+func (*NetlinkManager) ListNeighborInterfaces() (map[int]netlink.Link, error) {
 	links, err := netlink.LinkList()
 	neighborLinks := map[int]netlink.Link{}
 	if err != nil {
@@ -77,7 +77,7 @@ func (*NetlinkManager) ListNeighborInterfaces() (*map[int]netlink.Link, error) {
 			neighborLinks[link.Attrs().Index] = link
 		}
 	}
-	return &neighborLinks, nil
+	return neighborLinks, nil
 }
 
 func (n *NetlinkManager) ListL3() ([]VRFInformation, error) {

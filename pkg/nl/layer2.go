@@ -459,7 +459,7 @@ func (n *NetlinkManager) ListNeighborInformation() ([]NeighborInformation, error
 	netlinkNeighbors = append(netlinkNeighbors, fdbTable...)
 	neighbors := map[NeighborKey]NeighborInformation{}
 	for index := range netlinkNeighbors {
-		linkInfo, ok := (*neighborLinks)[netlinkNeighbors[index].LinkIndex]
+		linkInfo, ok := neighborLinks[netlinkNeighbors[index].LinkIndex]
 		if !ok {
 			// we don't care if a link is not available
 			// as it could be removed between our LinkByIndex and arp lookup
