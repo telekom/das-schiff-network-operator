@@ -53,7 +53,9 @@ type basicCollector struct {
 	logger   logr.Logger
 }
 
+// only use with Lock called before
 func (c *basicCollector) clearChannels() {
+	defer c.mu.Unlock()
 	c.channels = []chan<- prometheus.Metric{}
 }
 func (d *typedFactoryDesc) mustNewConstMetric(value float64, labels ...string) prometheus.Metric {
