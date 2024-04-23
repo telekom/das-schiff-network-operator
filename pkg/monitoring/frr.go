@@ -253,14 +253,14 @@ func (c *frrCollector) Update(ch chan<- prometheus.Metric) error {
 	if len(c.channels) == 1 {
 		c.wg = sync.WaitGroup{}
 		c.wg.Add(1)
-		// Ensure all other function calls will wait
+		// Ensure all other function calls will wait.
 		c.mu.Unlock()
 		routes, neighbors, vrfs := func() ([]route.Information, frr.BGPVrfSummary, []frr.VrfVniSpec) {
 			return c.getRoutes(), c.getBGPNeighbors(), c.getVrfs()
 		}()
 		go func(routes []route.Information, neighbors frr.BGPVrfSummary, vrfs []frr.VrfVniSpec) {
 			c.mu.Lock()
-			// unlock is done after return using defer
+			// unlock is done after return using defer.
 			defer c.wg.Done()
 			c.updateChannels(vrfs, routes, neighbors)
 		}(routes, neighbors, vrfs)

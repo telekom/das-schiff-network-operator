@@ -93,14 +93,14 @@ func (c *netlinkCollector) Update(ch chan<- prometheus.Metric) error {
 	if len(c.channels) == 1 {
 		c.wg = sync.WaitGroup{}
 		c.wg.Add(1)
-		// Ensure all other function calls will wait
+		// Ensure all other function calls will wait.
 		c.mu.Unlock()
 		routes, neighbors := func() ([]route.Information, []nl.NeighborInformation) {
 			return c.getRoutes(), c.getNeighbors()
 		}()
 		go func(routes []route.Information, neighbors []nl.NeighborInformation) {
 			c.mu.Lock()
-			// unlock is done after return using defer
+			// unlock is done after return using defer.
 			defer c.wg.Done()
 			c.updateChannels(neighbors, routes)
 		}(routes, neighbors)
