@@ -3,7 +3,6 @@ package monitoring
 import (
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/telekom/das-schiff-network-operator/pkg/frr"
@@ -239,36 +238,10 @@ func (c *frrCollector) updateBGPNeighbors(ch chan<- prometheus.Metric, bgpNeighb
 		}
 	}
 }
-func (c *frrCollector) updateChannels(vrfs []frr.VrfVniSpec, routes []route.Information, neighbors frr.BGPVrfSummary) {
-	for _, ch := range c.channels {
-		c.updateVrfs(ch, vrfs)
-		c.updateRoutes(ch, routes)
-		c.updateBGPNeighbors(ch, neighbors)
-	}
-}
 
 func (c *frrCollector) Update(ch chan<- prometheus.Metric) error {
-	c.mu.Lock()
-	c.channels = append(c.channels, ch)
-	if len(c.channels) == 1 {
-		c.wg = sync.WaitGroup{}
-		c.wg.Add(1)
-		// Ensure all other function calls will wait.
-		c.mu.Unlock()
-		routes, neighbors, vrfs := func() ([]route.Information, frr.BGPVrfSummary, []frr.VrfVniSpec) {
-			return c.getRoutes(), c.getBGPNeighbors(), c.getVrfs()
-		}()
-		go func(routes []route.Information, neighbors frr.BGPVrfSummary, vrfs []frr.VrfVniSpec) {
-			c.mu.Lock()
-			// unlock is done after return using defer.
-			defer c.wg.Done()
-			c.updateChannels(vrfs, routes, neighbors)
-		}(routes, neighbors, vrfs)
-		// unlock is done in this function.
-		defer c.clearChannels()
-	} else {
-		c.mu.Unlock()
-	}
-	c.wg.Wait()
+	c.updateVrfs(ch, c.getVrfs())
+	c.updateRoutes(ch, c.getRoutes())
+	c.updateBGPNeighbors(ch, c.getBGPNeighbors())
 	return nil
 }

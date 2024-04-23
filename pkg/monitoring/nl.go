@@ -2,7 +2,6 @@ package monitoring
 
 import (
 	"fmt"
-	"sync"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
@@ -80,35 +79,8 @@ func (c *netlinkCollector) updateNeighbors(ch chan<- prometheus.Metric, neighbor
 	}
 }
 
-func (c *netlinkCollector) updateChannels(neighbors []nl.NeighborInformation, routes []route.Information) {
-	for _, ch := range c.channels {
-		c.updateNeighbors(ch, neighbors)
-		c.updateRoutes(ch, routes)
-	}
-}
-
 func (c *netlinkCollector) Update(ch chan<- prometheus.Metric) error {
-	c.mu.Lock()
-	c.channels = append(c.channels, ch)
-	if len(c.channels) == 1 {
-		c.wg = sync.WaitGroup{}
-		c.wg.Add(1)
-		// Ensure all other function calls will wait.
-		c.mu.Unlock()
-		routes, neighbors := func() ([]route.Information, []nl.NeighborInformation) {
-			return c.getRoutes(), c.getNeighbors()
-		}()
-		go func(routes []route.Information, neighbors []nl.NeighborInformation) {
-			c.mu.Lock()
-			// unlock is done after return using defer.
-			defer c.wg.Done()
-			c.updateChannels(neighbors, routes)
-		}(routes, neighbors)
-		// unlock is done in this function.
-		defer c.clearChannels()
-	} else {
-		c.mu.Unlock()
-	}
-	c.wg.Wait()
+	c.updateNeighbors(ch, c.getNeighbors())
+	c.updateRoutes(ch, c.getRoutes())
 	return nil
 }
