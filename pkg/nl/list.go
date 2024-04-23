@@ -35,9 +35,9 @@ func (*NetlinkManager) listNeighbors() ([]netlink.Neigh, error) {
 	return neighbors, nil
 }
 
-func (*NetlinkManager) ListVRFInterfaces() ([]VRFInformation, error) {
-	infos := []VRFInformation{}
-
+func (*NetlinkManager) ListVRFInterfaces() (map[int]VRFInformation, error) {
+	// TODO: find a way to merge this with ListL3
+	infos := map[int]VRFInformation{}
 	links, err := netlink.LinkList()
 	if err != nil {
 		return nil, fmt.Errorf("error listing links: %w", err)
@@ -56,10 +56,28 @@ func (*NetlinkManager) ListVRFInterfaces() ([]VRFInformation, error) {
 		info.table = int(vrf.Table)
 		info.Name = link.Attrs().Name
 		info.vrfID = vrf.Attrs().Index
-		infos = append(infos, info)
+		infos[info.table] = info
 	}
 
 	return infos, nil
+}
+
+func (*NetlinkManager) ListNeighborInterfaces() (map[int]netlink.Link, error) {
+	links, err := netlink.LinkList()
+	neighborLinks := map[int]netlink.Link{}
+	if err != nil {
+		return nil, fmt.Errorf("error listing links: %w", err)
+	}
+
+	for _, link := range links {
+		if strings.HasPrefix(link.Attrs().Name, vethL2Prefix) ||
+			strings.HasPrefix(link.Attrs().Name, macvlanPrefix) ||
+			strings.HasPrefix(link.Attrs().Name, layer2Prefix) ||
+			link.Attrs().Vfs != nil {
+			neighborLinks[link.Attrs().Index] = link
+		}
+	}
+	return neighborLinks, nil
 }
 
 func (n *NetlinkManager) ListL3() ([]VRFInformation, error) {

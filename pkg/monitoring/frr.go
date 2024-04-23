@@ -3,18 +3,21 @@ package monitoring
 import (
 	"strconv"
 	"strings"
+	"sync"
 
-	"github.com/go-logr/logr"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/telekom/das-schiff-network-operator/pkg/frr"
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
+	"github.com/telekom/das-schiff-network-operator/pkg/route"
 	"golang.org/x/sys/unix"
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
 const secondToMillisecond = 1000
+const frrCollectorName = "frr"
 
 type frrCollector struct {
+	basicCollector
 	routesFibDesc              typedFactoryDesc
 	routesRibDesc              typedFactoryDesc
 	vrfVniDesc                 typedFactoryDesc
@@ -26,13 +29,12 @@ type frrCollector struct {
 	bgpMessagesReceivedDesc    typedFactoryDesc
 	bgpMessagesTransmittedDesc typedFactoryDesc
 	frr                        *frr.Manager
-	logger                     logr.Logger
 }
 
 // as we do not want to have frr collector registered within network operator
 // it is commented here.
 func init() {
-	registerCollector("frr", defaultDisabled, NewFRRCollector)
+	registerCollector(frrCollectorName, defaultDisabled, NewFRRCollector)
 }
 
 func convertToStateFloat(state string) float64 {
@@ -58,7 +60,7 @@ func NewFRRCollector() (Collector, error) {
 	collector := frrCollector{
 		routesFibDesc: typedFactoryDesc{
 			desc: prometheus.NewDesc(
-				prometheus.BuildFQName(namespace, "frr", "routes_fib"),
+				prometheus.BuildFQName(namespace, frrCollectorName, "routes_fib"),
 				"The number of routes currently in the frr Controlplane.",
 				[]string{"table", "vrf", "protocol", "address_family"},
 				nil,
@@ -67,7 +69,7 @@ func NewFRRCollector() (Collector, error) {
 		},
 		routesRibDesc: typedFactoryDesc{
 			desc: prometheus.NewDesc(
-				prometheus.BuildFQName(namespace, "frr", "routes_rib"),
+				prometheus.BuildFQName(namespace, frrCollectorName, "routes_rib"),
 				"The number of routes currently in the frr Controlplane.",
 				[]string{"table", "vrf", "protocol", "address_family"},
 				nil,
@@ -76,7 +78,7 @@ func NewFRRCollector() (Collector, error) {
 		},
 		vrfVniDesc: typedFactoryDesc{
 			desc: prometheus.NewDesc(
-				prometheus.BuildFQName(namespace, "frr", "vni_state"),
+				prometheus.BuildFQName(namespace, frrCollectorName, "vni_state"),
 				"The state of the vrf interface in frr",
 				[]string{
 					"table", "vrf", "svi", "vtep",
@@ -87,7 +89,7 @@ func NewFRRCollector() (Collector, error) {
 		},
 		evpnVniDesc: typedFactoryDesc{
 			desc: prometheus.NewDesc(
-				prometheus.BuildFQName(namespace, "frr", "vni_state"),
+				prometheus.BuildFQName(namespace, frrCollectorName, "vni_state"),
 				"The state of the Evpn vni interface",
 				[]string{
 					"table", "vrf", "svi", "vtep",
@@ -98,7 +100,7 @@ func NewFRRCollector() (Collector, error) {
 		},
 		bgpUptimeDesc: typedFactoryDesc{
 			desc: prometheus.NewDesc(
-				prometheus.BuildFQName(namespace, "frr", "bgp_uptime_seconds_total"),
+				prometheus.BuildFQName(namespace, frrCollectorName, "bgp_uptime_seconds_total"),
 				"Uptime of the session with the other BGP Peer",
 				bgpLabels,
 				nil,
@@ -107,7 +109,7 @@ func NewFRRCollector() (Collector, error) {
 		},
 		bgpStatusDesc: typedFactoryDesc{
 			desc: prometheus.NewDesc(
-				prometheus.BuildFQName(namespace, "frr", "bgp_status"),
+				prometheus.BuildFQName(namespace, frrCollectorName, "bgp_status"),
 				"The Session Status to the other BGP Peer",
 				bgpLabels,
 				nil,
@@ -116,7 +118,7 @@ func NewFRRCollector() (Collector, error) {
 		},
 		bgpPrefixesReceivedDesc: typedFactoryDesc{
 			desc: prometheus.NewDesc(
-				prometheus.BuildFQName(namespace, "frr", "bgp_prefixes_received_total"),
+				prometheus.BuildFQName(namespace, frrCollectorName, "bgp_prefixes_received_total"),
 				"The Prefixes Received from the other peer.",
 				bgpLabels,
 				nil,
@@ -125,7 +127,7 @@ func NewFRRCollector() (Collector, error) {
 		},
 		bgpPrefixesTransmittedDesc: typedFactoryDesc{
 			desc: prometheus.NewDesc(
-				prometheus.BuildFQName(namespace, "frr", "bgp_prefixes_transmitted_total"),
+				prometheus.BuildFQName(namespace, frrCollectorName, "bgp_prefixes_transmitted_total"),
 				"The Prefixes Transmitted to the other peer.",
 				bgpLabels,
 				nil,
@@ -134,7 +136,7 @@ func NewFRRCollector() (Collector, error) {
 		},
 		bgpMessagesReceivedDesc: typedFactoryDesc{
 			desc: prometheus.NewDesc(
-				prometheus.BuildFQName(namespace, "frr", "bgp_messages_received_total"),
+				prometheus.BuildFQName(namespace, frrCollectorName, "bgp_messages_received_total"),
 				"The messages Received to the other peer.",
 				bgpLabels,
 				nil,
@@ -143,25 +145,30 @@ func NewFRRCollector() (Collector, error) {
 		},
 		bgpMessagesTransmittedDesc: typedFactoryDesc{
 			desc: prometheus.NewDesc(
-				prometheus.BuildFQName(namespace, "frr", "bgp_messages_transmitted_total"),
+				prometheus.BuildFQName(namespace, frrCollectorName, "bgp_messages_transmitted_total"),
 				"The messages Transmitted to the other peer.",
 				bgpLabels,
 				nil,
 			),
 			valueType: prometheus.CounterValue,
 		},
-		frr:    frr.NewFRRManager(),
-		logger: ctrl.Log.WithName("frr.collector"),
+		frr: frr.NewFRRManager(),
 	}
+
+	collector.name = frrCollectorName
+	collector.logger = ctrl.Log.WithName("frr.collector")
 
 	return &collector, nil
 }
-
-func (c *frrCollector) UpdateVrfs(ch chan<- prometheus.Metric) {
+func (c *frrCollector) getVrfs() []frr.VrfVniSpec {
 	vrfs, err := c.frr.ListVrfs()
 	if err != nil {
 		c.logger.Error(err, "can't get vrfs from frr")
 	}
+	return vrfs
+}
+
+func (c *frrCollector) updateVrfs(ch chan<- prometheus.Metric, vrfs []frr.VrfVniSpec) {
 	for _, vrf := range vrfs {
 		// hotfix for default as it is called
 		// main in netlink/kernel
@@ -173,12 +180,15 @@ func (c *frrCollector) UpdateVrfs(ch chan<- prometheus.Metric) {
 		ch <- c.vrfVniDesc.mustNewConstMetric(state, vrf.Table, vrf.Vrf, vrf.SviIntf, vrf.VxlanIntf)
 	}
 }
-
-func (c *frrCollector) UpdateRoutes(ch chan<- prometheus.Metric) {
+func (c *frrCollector) getRoutes() []route.Information {
 	routeSummaries, err := c.frr.ListRouteSummary("")
 	if err != nil {
 		c.logger.Error(err, "can't get routes from frr")
 	}
+	return routeSummaries
+}
+
+func (c *frrCollector) updateRoutes(ch chan<- prometheus.Metric, routeSummaries []route.Information) {
 	for _, routeSummary := range routeSummaries {
 		if routeSummary.VrfName == "default" {
 			routeSummary.VrfName = "main"
@@ -189,12 +199,15 @@ func (c *frrCollector) UpdateRoutes(ch chan<- prometheus.Metric) {
 	}
 }
 
-func (c *frrCollector) UpdateBGPNeighbors(ch chan<- prometheus.Metric) {
+func (c *frrCollector) getBGPNeighbors() frr.BGPVrfSummary {
 	bgpNeighbors, err := c.frr.ListBGPNeighbors("")
 	if err != nil {
 		c.logger.Error(err, "can't get bgpNeighbors from frr: %w")
 	}
+	return bgpNeighbors
+}
 
+func (c *frrCollector) updateBGPNeighbors(ch chan<- prometheus.Metric, bgpNeighbors frr.BGPVrfSummary) {
 	for _, families := range bgpNeighbors {
 		for _, family := range frr.BGPAddressFamilyValues() {
 			neighbor, ok := families[family.String()]
@@ -226,10 +239,34 @@ func (c *frrCollector) UpdateBGPNeighbors(ch chan<- prometheus.Metric) {
 		}
 	}
 }
+func (c *frrCollector) updateChannels(vrfs []frr.VrfVniSpec, routes []route.Information, neighbors frr.BGPVrfSummary) {
+	for _, ch := range c.channels {
+		c.updateVrfs(ch, vrfs)
+		c.updateRoutes(ch, routes)
+		c.updateBGPNeighbors(ch, neighbors)
+	}
+}
 
 func (c *frrCollector) Update(ch chan<- prometheus.Metric) error {
-	c.UpdateVrfs(ch)
-	c.UpdateRoutes(ch)
-	c.UpdateBGPNeighbors(ch)
+	c.mu.Lock()
+	c.channels = append(c.channels, ch)
+	if len(c.channels) == 1 {
+		c.wg = sync.WaitGroup{}
+		c.wg.Add(1)
+		c.mu.Unlock()
+
+		routes := c.getRoutes()
+		vrfs := c.getVrfs()
+		neighbors := c.getBGPNeighbors()
+
+		c.mu.Lock()
+		c.updateChannels(vrfs, routes, neighbors)
+		c.clearChannels()
+		c.wg.Done()
+		c.mu.Unlock()
+	} else {
+		c.mu.Unlock()
+		c.wg.Wait()
+	}
 	return nil
 }
