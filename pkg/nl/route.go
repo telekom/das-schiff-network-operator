@@ -138,7 +138,7 @@ func GetAddressFamily(addressFamily int) (string, error) {
 	}
 }
 
-func (n *NetlinkManager) getVRFName(tableID int, vrfInterfaces map[int]VRFInformation) (string, error) {
+func (*NetlinkManager) getVRFName(tableID int, vrfInterfaces map[int]VRFInformation) (string, error) {
 	if tableID < 0 || tableID > 255 {
 		return "", fmt.Errorf("table id %d out of range [0-255]", tableID)
 	}
