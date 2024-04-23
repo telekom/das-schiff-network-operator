@@ -69,7 +69,7 @@ func (c *netlinkCollector) updateRoutes(ch chan<- prometheus.Metric, routeSummar
 func (c *netlinkCollector) getNeighbors() []nl.NeighborInformation {
 	neighbors, err := c.netlink.ListNeighborInformation()
 	if err != nil {
-		c.logger.Error(err, "Cannot get neighbors from netlink")
+		c.logger.Error(err, "cannot get neighbors from netlink")
 	}
 	return neighbors
 }

@@ -138,20 +138,7 @@ func GetAddressFamily(addressFamily int) (string, error) {
 	}
 }
 
-func (n *NetlinkManager) getVRFNameByInterface(tableID int) (string, error) {
-	links, err := n.ListVRFInterfaces()
-	if err != nil {
-		return "", fmt.Errorf("error getting vrf interfaces: %w", err)
-	}
-	for _, link := range links {
-		if tableID == link.table {
-			return link.Name, nil
-		}
-	}
-	return "", nil
-}
-
-func (n *NetlinkManager) getVRFName(tableID int) (string, error) {
+func (n *NetlinkManager) getVRFName(tableID int, vrfInterfaces *map[int]VRFInformation) (string, error) {
 	if tableID < 0 || tableID > 255 {
 		return "", fmt.Errorf("table id %d out of range [0-255]", tableID)
 	}
@@ -165,7 +152,11 @@ func (n *NetlinkManager) getVRFName(tableID int) (string, error) {
 	case unspecifiedTableID:
 		return "unspecified", nil
 	default:
-		return n.getVRFNameByInterface(tableID)
+		link, ok := (*vrfInterfaces)[tableID]
+		if !ok {
+			return "", nil
+		}
+		return link.Name, nil
 	}
 }
 
@@ -174,8 +165,11 @@ func (n *NetlinkManager) ListRouteInformation() ([]route.Information, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error listing routes: %w", err)
 	}
+	vrfInterfaces, err := n.ListVRFInterfaces()
+	if err != nil {
+		return nil, fmt.Errorf("error getting vrf interfaces: %w", err)
+	}
 	routes := map[route.Key]route.Information{}
-
 	for index := range netlinkRoutes {
 		routeKey := route.Key{TableID: netlinkRoutes[index].Table, RouteProtocol: int(netlinkRoutes[index].Protocol), AddressFamily: netlinkRoutes[index].Family}
 		routeInformation, ok := routes[routeKey]
@@ -190,7 +184,7 @@ func (n *NetlinkManager) ListRouteInformation() ([]route.Information, error) {
 			if err != nil {
 				return nil, fmt.Errorf("error converting addressFamily [%d]: %w", netlinkRoutes[index].Family, err)
 			}
-			vrfName, err := n.getVRFName(netlinkRoutes[index].Table)
+			vrfName, err := n.getVRFName(netlinkRoutes[index].Table, vrfInterfaces)
 			if err != nil {
 				return nil, fmt.Errorf("error getting vrfName for table id %d: %w", netlinkRoutes[index].Table, err)
 			}

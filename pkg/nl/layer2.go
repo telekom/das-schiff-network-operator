@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"strings"
 	"time"
 
 	schiff_unix "github.com/telekom/das-schiff-network-operator/pkg/unix"
@@ -453,11 +452,15 @@ func (n *NetlinkManager) ListNeighborInformation() ([]NeighborInformation, error
 	if err != nil {
 		return nil, err
 	}
+	neighborLinks, err := n.ListNeighborInterfaces()
+	if err != nil {
+		return nil, err
+	}
 	netlinkNeighbors = append(netlinkNeighbors, fdbTable...)
 	neighbors := map[NeighborKey]NeighborInformation{}
 	for index := range netlinkNeighbors {
-		linkInfo, err := netlink.LinkByIndex(netlinkNeighbors[index].LinkIndex)
-		if err != nil {
+		linkInfo, ok := (*neighborLinks)[netlinkNeighbors[index].LinkIndex]
+		if !ok {
 			// we don't care if a link is not available
 			// as it could be removed between our LinkByIndex and arp lookup
 			continue
@@ -465,35 +468,31 @@ func (n *NetlinkManager) ListNeighborInformation() ([]NeighborInformation, error
 		interfaceName := linkInfo.Attrs().Name
 		// This ensures that only neighbors of secondary interfaces are imported
 		// or hardware interfaces which support VFs
-		if strings.HasPrefix(interfaceName, vethL2Prefix) ||
-			strings.HasPrefix(interfaceName, macvlanPrefix) ||
-			strings.HasPrefix(interfaceName, layer2Prefix) ||
-			linkInfo.Attrs().Vfs != nil {
-			neighborKey := NeighborKey{InterfaceIndex: netlinkNeighbors[index].LinkIndex, State: netlinkNeighbors[index].State, Flags: netlinkNeighbors[index].Flags, Family: netlinkNeighbors[index].Family}
-			neighborInformation, ok := neighbors[neighborKey]
-			if ok {
-				neighborInformation.Quantity++
-				neighbors[neighborKey] = neighborInformation
-			} else {
-				family, err := GetAddressFamily(netlinkNeighbors[index].Family)
-				if err != nil {
-					return nil, fmt.Errorf("error converting addressFamily: %w", err)
-				}
-				state, err := getNeighborState(netlinkNeighbors[index].State)
-				if err != nil {
-					return nil, fmt.Errorf("error converting neighborState: %w", err)
-				}
-				flag, err := getFlags(netlinkNeighbors[index].Flags)
-				if err != nil {
-					return nil, fmt.Errorf("error converting flag: %w", err)
-				}
-				neighbors[neighborKey] = NeighborInformation{
-					Family:    family,
-					State:     state,
-					Interface: interfaceName,
-					Flag:      flag,
-					Quantity:  1,
-				}
+
+		neighborKey := NeighborKey{InterfaceIndex: netlinkNeighbors[index].LinkIndex, State: netlinkNeighbors[index].State, Flags: netlinkNeighbors[index].Flags, Family: netlinkNeighbors[index].Family}
+		neighborInformation, ok := neighbors[neighborKey]
+		if ok {
+			neighborInformation.Quantity++
+			neighbors[neighborKey] = neighborInformation
+		} else {
+			family, err := GetAddressFamily(netlinkNeighbors[index].Family)
+			if err != nil {
+				return nil, fmt.Errorf("error converting addressFamily: %w", err)
+			}
+			state, err := getNeighborState(netlinkNeighbors[index].State)
+			if err != nil {
+				return nil, fmt.Errorf("error converting neighborState: %w", err)
+			}
+			flag, err := getFlags(netlinkNeighbors[index].Flags)
+			if err != nil {
+				return nil, fmt.Errorf("error converting flag: %w", err)
+			}
+			neighbors[neighborKey] = NeighborInformation{
+				Family:    family,
+				State:     state,
+				Interface: interfaceName,
+				Flag:      flag,
+				Quantity:  1,
 			}
 		}
 	}
