@@ -53,7 +53,6 @@ type basicCollector struct {
 	logger   logr.Logger
 }
 
-// only use with Lock called before.
 func (c *basicCollector) clearChannels() {
 	c.channels = []chan<- prometheus.Metric{}
 }
