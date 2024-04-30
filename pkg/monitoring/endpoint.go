@@ -31,7 +31,10 @@ const (
 	StatusSvcNamespaceEnv = "STATUS_SVC_NAMESPACE"
 )
 
-var validation = regexp.MustCompile("^[a-zA-Z0-9_]")
+var (
+	validVRF = regexp.MustCompile("^[a-zA-Z0-9-_.]+$")
+	validVNI = regexp.MustCompile("^[0-9]{0,8}$")
+)
 
 //go:generate mockgen -destination ./mock/mock_endpoint.go . FRRClient
 type FRRClient interface {
@@ -81,7 +84,7 @@ func (e *Endpoint) ShowRoute(w http.ResponseWriter, r *http.Request) {
 		vrf = all
 	}
 
-	if !validation.MatchString(vrf) {
+	if !validVRF.MatchString(vrf) {
 		e.Logger.Error(fmt.Errorf("invalid VRF value"), "error validating value")
 		http.Error(w, "invalid VRF value", http.StatusBadRequest)
 		return
@@ -140,7 +143,7 @@ func (e *Endpoint) ShowBGP(w http.ResponseWriter, r *http.Request) {
 		vrf = all
 	}
 
-	if !validation.MatchString(vrf) {
+	if !validVRF.MatchString(vrf) {
 		e.Logger.Error(fmt.Errorf("invalid VRF value"), "error validating value")
 		http.Error(w, "invalid VRF value", http.StatusBadRequest)
 		return
@@ -228,10 +231,8 @@ func (e *Endpoint) ShowEVPN(w http.ResponseWriter, r *http.Request) {
 		vni := r.URL.Query().Get("vni")
 		if vni == "" {
 			vni = all
-		}
-
-		if !validation.MatchString(vni) {
-			e.Logger.Error(fmt.Errorf("invalid VNI value"), "error validating value")
+		} else if err := validateVNI(vni); err != nil {
+			e.Logger.Error(fmt.Errorf("invalid VNI value: %w", err), "error validating value")
 			http.Error(w, "invalid VNI value", http.StatusBadRequest)
 			return
 		}
@@ -260,6 +261,22 @@ func (e *Endpoint) ShowEVPN(w http.ResponseWriter, r *http.Request) {
 	}
 
 	e.writeResponse(result, w, "ShowEVPN")
+}
+
+func validateVNI(vni string) error {
+	if !validVNI.MatchString(vni) {
+		return fmt.Errorf("VNI does not match regular expression")
+	}
+	value, err := strconv.Atoi(vni)
+	if err != nil {
+		return fmt.Errorf("VNI cannot be paresd to int: %w", err)
+	}
+
+	if uint(value) > uint(1<<24) {
+		return fmt.Errorf("VNI is not a valid 24-bit number")
+	}
+
+	return nil
 }
 
 //+kubebuilder:rbac:groups=core,resources=services,verbs=get

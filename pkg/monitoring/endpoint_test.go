@@ -18,6 +18,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
+const (
+	testSvcName      = "svcName"
+	testSvcNamespace = "svcNamespace"
+)
+
 var (
 	fakePodsJSON = `{
 		"items": [
@@ -114,8 +119,10 @@ func TestHealthCheck(t *testing.T) {
 	RegisterFailHandler(Fail)
 	mockCtrl = gomock.NewController(t)
 	defer mockCtrl.Finish()
+	t.Setenv(StatusSvcNameEnv, testSvcName)
+	t.Setenv(StatusSvcNamespaceEnv, testSvcNamespace)
 	RunSpecs(t,
-		"HealthCheck Suite")
+		"Endpoint Suite")
 }
 
 var _ = Describe("Endpoint", func() {
@@ -124,40 +131,46 @@ var _ = Describe("Endpoint", func() {
 	e := NewEndpoint(c, fcm, "test-service", "test-namespace")
 	e.CreateMux()
 
-	Context("ShowRoute() should", func() {
-		It("return no error", func() {
+	Context("ShowRoute()", func() {
+		It("returns no error", func() {
 			req := httptest.NewRequest(http.MethodGet, "/show/route", http.NoBody)
 			res := httptest.NewRecorder()
 			fcm.EXPECT().ExecuteWithJSON(gomock.Any()).Return([]byte{'{', '}'})
 			e.ShowRoute(res, req)
 			Expect(res.Code).To(Equal(http.StatusOK))
 		})
-		It("return error if protocol is invalid", func() {
+		It("returns error if protocol is invalid", func() {
 			req := httptest.NewRequest(http.MethodGet, "/show/route?protocol=ipv42", http.NoBody)
 			res := httptest.NewRecorder()
 			e.ShowRoute(res, req)
 			Expect(res.Code).To(Equal(http.StatusBadRequest))
 		})
-		It("return error if input CIDR is invalid", func() {
+		It("returns error if input CIDR is invalid", func() {
 			req := httptest.NewRequest(http.MethodGet, "/show/route?protocol=ipv6&input=192.168.1.1/42", http.NoBody)
 			res := httptest.NewRecorder()
 			e.ShowRoute(res, req)
 			Expect(res.Code).To(Equal(http.StatusBadRequest))
 		})
-		It("return error if longer_prefixes value is invalid", func() {
+		It("returns error if longer_prefixes value is invalid", func() {
 			req := httptest.NewRequest(http.MethodGet, "/show/route?protocol=ipv6&input=192.168.1.1/32&longer_prefixes=notABool", http.NoBody)
 			res := httptest.NewRecorder()
 			e.ShowRoute(res, req)
 			Expect(res.Code).To(Equal(http.StatusBadRequest))
 		})
-		It("return no error", func() {
+		It("returns error if VRF is invalid", func() {
+			req := httptest.NewRequest(http.MethodGet, "/show/route?protocol=ipv6&input=192.168.1.1/32&longer_prefixes=true&vrf=invalid$vrf", http.NoBody)
+			res := httptest.NewRecorder()
+			e.ShowRoute(res, req)
+			Expect(res.Code).To(Equal(http.StatusBadRequest))
+		})
+		It("returns no error", func() {
 			req := httptest.NewRequest(http.MethodGet, "/show/route?protocol=ipv6&input=192.168.1.1/32&longer_prefixes=true", http.NoBody)
 			res := httptest.NewRecorder()
 			fcm.EXPECT().ExecuteWithJSON(gomock.Any()).Return([]byte{'{', '}'})
 			e.ShowRoute(res, req)
 			Expect(res.Code).To(Equal(http.StatusOK))
 		})
-		It("return no error and add node name to the response if "+healthcheck.NodenameEnv+" env is set", func() {
+		It("returns no error and add node name to the response if "+healthcheck.NodenameEnv+" env is set", func() {
 			testNodename := "test-nodename"
 			err := os.Setenv(healthcheck.NodenameEnv, testNodename)
 			Expect(err).ToNot(HaveOccurred())
@@ -177,85 +190,110 @@ var _ = Describe("Endpoint", func() {
 		})
 	})
 
-	Context("ShowBGP() should", func() {
-		It("return no error if type is not specified (default)", func() {
+	Context("ShowBGP()", func() {
+		It("returns no error if type is not specified (default)", func() {
 			req := httptest.NewRequest(http.MethodGet, "/show/bgp", http.NoBody)
 			res := httptest.NewRecorder()
 			fcm.EXPECT().ExecuteWithJSON(gomock.Any()).Return([]byte{'{', '}'})
 			e.ShowBGP(res, req)
 			Expect(res.Code).To(Equal(http.StatusOK))
 		})
-		It("return no error if type is summary", func() {
+		It("returns no error if type is summary", func() {
 			req := httptest.NewRequest(http.MethodGet, "/show/bgp?type=summary", http.NoBody)
 			res := httptest.NewRecorder()
 			fcm.EXPECT().ExecuteWithJSON(gomock.Any()).Return([]byte{'{', '}'})
 			e.ShowBGP(res, req)
 			Expect(res.Code).To(Equal(http.StatusOK))
 		})
-		It("return error if type is invalid", func() {
+		It("returns error if type is invalid", func() {
 			req := httptest.NewRequest(http.MethodGet, "/show/bgp?type=ivalidType", http.NoBody)
 			res := httptest.NewRecorder()
 			e.ShowBGP(res, req)
 			Expect(res.Code).To(Equal(http.StatusBadRequest))
 		})
-		It("return error if protocol is invalid", func() {
+		It("returns error if protocol is invalid", func() {
 			req := httptest.NewRequest(http.MethodGet, "/show/bgp?protocol=ipv42", http.NoBody)
 			res := httptest.NewRecorder()
 			e.ShowBGP(res, req)
 			Expect(res.Code).To(Equal(http.StatusBadRequest))
 		})
-		It("return error if input CIDR is invalid", func() {
+		It("returns error if input CIDR is invalid", func() {
 			req := httptest.NewRequest(http.MethodGet, "/show/bgp?protocol=ipv4&input=192.168.1.1/42", http.NoBody)
 			res := httptest.NewRecorder()
 			e.ShowBGP(res, req)
 			Expect(res.Code).To(Equal(http.StatusBadRequest))
 		})
-		It("return error if longer_prefixes value is invalid", func() {
+		It("returns error if longer_prefixes value is invalid", func() {
 			req := httptest.NewRequest(http.MethodGet, "/show/bgp?protocol=ipv4&input=192.168.1.1/32&longer_prefixes=notABool", http.NoBody)
+			res := httptest.NewRecorder()
+			e.ShowBGP(res, req)
+			Expect(res.Code).To(Equal(http.StatusBadRequest))
+		})
+		It("returns error if VRF is invalid", func() {
+			req := httptest.NewRequest(http.MethodGet, "/show/bgp?vrf=invalid$VRF", http.NoBody)
 			res := httptest.NewRecorder()
 			e.ShowBGP(res, req)
 			Expect(res.Code).To(Equal(http.StatusBadRequest))
 		})
 	})
 
-	Context("ShowEVPN() should", func() {
-		It("return no error if type is not specified (default)", func() {
+	Context("ShowEVPN()", func() {
+		It("returns no error if type is not specified (default)", func() {
 			req := httptest.NewRequest(http.MethodGet, "/show/evpn", http.NoBody)
 			res := httptest.NewRecorder()
 			fcm.EXPECT().ExecuteWithJSON(gomock.Any()).Return([]byte{'{', '}'})
 			e.ShowEVPN(res, req)
 			Expect(res.Code).To(Equal(http.StatusOK))
 		})
-		It("return no error if type is rmac", func() {
+		It("returns no error if type is rmac", func() {
 			req := httptest.NewRequest(http.MethodGet, "/show/evpn?type=rmac", http.NoBody)
 			res := httptest.NewRecorder()
 			fcm.EXPECT().ExecuteWithJSON(gomock.Any()).Return([]byte{'{', '}'})
 			e.ShowEVPN(res, req)
 			Expect(res.Code).To(Equal(http.StatusOK))
 		})
-		It("return no error if type is mac", func() {
+		It("returns no error if type is mac", func() {
 			req := httptest.NewRequest(http.MethodGet, "/show/evpn?type=mac", http.NoBody)
 			res := httptest.NewRecorder()
 			fcm.EXPECT().ExecuteWithJSON(gomock.Any()).Return([]byte{'{', '}'})
 			e.ShowEVPN(res, req)
 			Expect(res.Code).To(Equal(http.StatusOK))
 		})
-		It("return no error if type is next-hops", func() {
+		It("returns no error if type is next-hops", func() {
 			req := httptest.NewRequest(http.MethodGet, "/show/evpn?type=next-hops", http.NoBody)
 			res := httptest.NewRecorder()
 			fcm.EXPECT().ExecuteWithJSON(gomock.Any()).Return([]byte{'{', '}'})
 			e.ShowEVPN(res, req)
 			Expect(res.Code).To(Equal(http.StatusOK))
 		})
-		It("return error if type is invalid", func() {
+		It("returns error if type is invalid", func() {
 			req := httptest.NewRequest(http.MethodGet, "/show/evpn?type=invalidType", http.NoBody)
 			res := httptest.NewRecorder()
 			e.ShowEVPN(res, req)
 			Expect(res.Code).To(Equal(http.StatusBadRequest))
 		})
+		It("returns error if VNI is invalid", func() {
+			req := httptest.NewRequest(http.MethodGet, "/show/evpn?type=rmac&vni=invalidVNI", http.NoBody)
+			res := httptest.NewRecorder()
+			e.ShowEVPN(res, req)
+			Expect(res.Code).To(Equal(http.StatusBadRequest))
+		})
+		It("returns error if VNI value is bigger than 24bit uint", func() {
+			req := httptest.NewRequest(http.MethodGet, "/show/evpn?type=rmac&vni=96777215", http.NoBody)
+			res := httptest.NewRecorder()
+			e.ShowEVPN(res, req)
+			Expect(res.Code).To(Equal(http.StatusBadRequest))
+		})
+		It("returns error no error if VNI is valid", func() {
+			req := httptest.NewRequest(http.MethodGet, "/show/evpn?type=rmac&vni=42", http.NoBody)
+			res := httptest.NewRecorder()
+			fcm.EXPECT().ExecuteWithJSON(gomock.Any()).Return([]byte{'{', '}'})
+			e.ShowEVPN(res, req)
+			Expect(res.Code).To(Equal(http.StatusOK))
+		})
 	})
-	Context("PassRequest() should", func() {
-		It("return error if there are no instances to query", func() {
+	Context("PassRequest()", func() {
+		It("returns error if there are no instances to query", func() {
 			c := fake.NewClientBuilder().WithRuntimeObjects(fakePods, fakeServices).Build()
 			e := NewEndpoint(c, fcm, "test-service-no-endpoints", "test-namespace")
 			req := httptest.NewRequest(http.MethodGet, "/all/show/route", http.NoBody)
@@ -264,7 +302,7 @@ var _ = Describe("Endpoint", func() {
 			Expect(res.Code).To(Equal(http.StatusInternalServerError))
 		})
 
-		It("return error if cannot get data from the endpoint", func() {
+		It("returns error if cannot get data from the endpoint", func() {
 			c := fake.NewClientBuilder().WithRuntimeObjects(fakePods, fakeServices).Build()
 			e := NewEndpoint(c, fcm, "test-service", "test-namespace")
 			req := httptest.NewRequest(http.MethodGet, "/all/show/route", http.NoBody)
@@ -272,7 +310,7 @@ var _ = Describe("Endpoint", func() {
 			e.QueryAll(res, req)
 			Expect(res.Code).To(Equal(http.StatusInternalServerError))
 		})
-		It("return error if request was properly passed to the endpoint but the response is malformed", func() {
+		It("returns error if request was properly passed to the endpoint but the response is malformed", func() {
 			svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				fmt.Fprintf(w, "invalidJson")
 			}))
@@ -286,7 +324,7 @@ var _ = Describe("Endpoint", func() {
 			e.QueryAll(res, req)
 			Expect(res.Code).To(Equal(http.StatusInternalServerError))
 		})
-		It("return no error if request was properly passed to the endpoint", func() {
+		It("returns no error if request was properly passed to the endpoint", func() {
 			svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				fmt.Fprintf(w, "{}")
 			}))
@@ -299,6 +337,14 @@ var _ = Describe("Endpoint", func() {
 
 			e.QueryAll(res, req)
 			Expect(res.Code).To(Equal(http.StatusOK))
+		})
+	})
+	Context("GetStatusServiceConfig()", func() {
+		It("returns no error if envs are set", func() {
+			name, namespace, err := GetStatusServiceConfig()
+			Expect(err).ToNot(HaveOccurred())
+			Expect(name).To(Equal(testSvcName))
+			Expect(namespace).To(Equal(testSvcNamespace))
 		})
 	})
 })
