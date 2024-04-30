@@ -29,6 +29,8 @@ const (
 
 	StatusSvcNameEnv      = "STATUS_SVC_NAME"
 	StatusSvcNamespaceEnv = "STATUS_SVC_NAMESPACE"
+
+	vniBitLength = 24
 )
 
 var (
@@ -272,7 +274,7 @@ func validateVNI(vni string) error {
 		return fmt.Errorf("VNI cannot be paresd to int: %w", err)
 	}
 
-	if uint(value) > uint(1<<24) {
+	if uint(value) > uint(1<<vniBitLength) {
 		return fmt.Errorf("VNI is not a valid 24-bit number")
 	}
 
