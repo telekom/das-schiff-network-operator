@@ -35,7 +35,7 @@ func (n *Manager) listNeighbors() ([]netlink.Neigh, error) {
 	return neighbors, nil
 }
 
-func (*Manager) ListVRFInterfaces() (map[int]VRFInformation, error) {
+func (n *Manager) ListVRFInterfaces() (map[int]VRFInformation, error) {
 	// TODO: find a way to merge this with ListL3
 	infos := map[int]VRFInformation{}
 	links, err := n.toolkit.LinkList()
@@ -47,8 +47,6 @@ func (*Manager) ListVRFInterfaces() (map[int]VRFInformation, error) {
 		if link.Type() != "vrf" {
 			continue
 		}
-		vrf := link.(*netlink.Vrf)
-
 		vrf, ok := link.(*netlink.Vrf)
 		if !ok {
 			return nil, fmt.Errorf("error casting link %v as netlink.Vrf", link)

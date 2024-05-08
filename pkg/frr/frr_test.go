@@ -18,6 +18,10 @@ import (
 	"go.uber.org/mock/gomock"
 )
 
+const (
+	frrConf = "frr.conf"
+)
+
 var (
 	mockctrl *gomock.Controller
 	tmpDir   string
@@ -28,7 +32,7 @@ var _ = BeforeSuite(func() {
 	tmpDir, err = os.MkdirTemp(".", "testdata")
 	Expect(err).ToNot(HaveOccurred())
 
-	f, err := os.Create(tmpDir + "/frr.conf")
+	f, err := os.Create(tmpDir + "/" + frrConf)
 	Expect(err).ToNot(HaveOccurred())
 	err = f.Close()
 	Expect(err).ToNot(HaveOccurred())
@@ -61,13 +65,13 @@ var _ = Describe("frr", func() {
 			Expect(err).To(HaveOccurred())
 		})
 		It("return error if cannot write template config file", func() {
-			m := &Manager{ConfigPath: "testdata/frr.conf"}
+			m := &Manager{ConfigPath: "testdata/" + frrConf}
 			err := m.Init()
 			Expect(err).To(HaveOccurred())
 		})
 		It("return no error", func() {
 			m := &Manager{
-				ConfigPath:   tmpDir + "/frr.conf",
+				ConfigPath:   tmpDir + "/" + frrConf,
 				TemplatePath: tmpDir + "/frr.tpl.conf",
 			}
 			err := m.Init()

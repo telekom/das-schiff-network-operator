@@ -143,20 +143,20 @@ func (n *Manager) GetL3ByName(name string) (*VRFInformation, error) {
 	return nil, fmt.Errorf("no VRF with name %s", name)
 }
 
-func (m *Manager) EnsureBPFProgram(info VRFInformation) error {
-	if link, err := m.toolkit.LinkByName(bridgePrefix + info.Name); err != nil {
+func (n *Manager) EnsureBPFProgram(info VRFInformation) error {
+	if link, err := n.toolkit.LinkByName(bridgePrefix + info.Name); err != nil {
 		return fmt.Errorf("error getting bridge interface of vrf %s: %w", info.Name, err)
 	} else if err := bpf.AttachToInterface(link); err != nil {
 		return fmt.Errorf("error attaching bpf program to bridge interface of vrf %s: %w", info.Name, err)
 	}
 
-	if link, err := m.toolkit.LinkByName(vrfToDefaultPrefix + info.Name); err != nil {
+	if link, err := n.toolkit.LinkByName(vrfToDefaultPrefix + info.Name); err != nil {
 		return fmt.Errorf("error getting vrf2default interface of vrf %s: %w", info.Name, err)
 	} else if err := bpf.AttachToInterface(link); err != nil {
 		return fmt.Errorf("error attaching bpf program to vrf2default interface of vrf %s: %w", info.Name, err)
 	}
 
-	if link, err := m.toolkit.LinkByName(vxlanPrefix + info.Name); err != nil {
+	if link, err := n.toolkit.LinkByName(vxlanPrefix + info.Name); err != nil {
 		return fmt.Errorf("error getting vxlan interface of vrf %s: %w", info.Name, err)
 	} else if err := bpf.AttachToInterface(link); err != nil {
 		return fmt.Errorf("error attaching bpf program to vxlan interface of vrf %s: %w", info.Name, err)
@@ -172,23 +172,23 @@ func (info VRFInformation) linkMTU() int {
 	return info.MTU
 }
 
-func (m *Manager) EnsureMTU(info VRFInformation) error {
-	link, err := m.toolkit.LinkByName(vrfToDefaultPrefix + info.Name)
+func (n *Manager) EnsureMTU(info VRFInformation) error {
+	link, err := n.toolkit.LinkByName(vrfToDefaultPrefix + info.Name)
 	if err != nil {
 		return fmt.Errorf("error getting vrf2default interface of vrf %s: %w", info.Name, err)
 	}
 	if link.Attrs().MTU != info.linkMTU() {
-		if err := m.toolkit.LinkSetMTU(link, info.MTU); err != nil {
+		if err := n.toolkit.LinkSetMTU(link, info.MTU); err != nil {
 			return fmt.Errorf("error setting MTU of vrf2default interface of vrf %s: %w", info.Name, err)
 		}
 	}
 
-	link, err = m.toolkit.LinkByName(defaultToVrfPrefix + info.Name)
+	link, err = n.toolkit.LinkByName(defaultToVrfPrefix + info.Name)
 	if err != nil {
 		return fmt.Errorf("error getting default2vrf interface of vrf %s: %w", info.Name, err)
 	}
 	if link.Attrs().MTU != info.linkMTU() {
-		if err := m.toolkit.LinkSetMTU(link, info.MTU); err != nil {
+		if err := n.toolkit.LinkSetMTU(link, info.MTU); err != nil {
 			return fmt.Errorf("error setting MTU of default2vrw interface of vrf %s: %w", info.Name, err)
 		}
 	}
