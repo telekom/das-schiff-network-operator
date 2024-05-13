@@ -21,7 +21,7 @@ jobs:
       - name: run code generators
         run: make generate
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v5.0.0
+        uses: golangci/golangci-lint-action@v6.0.1
         with:
           version: v1.56.2
           args: --timeout=10m
