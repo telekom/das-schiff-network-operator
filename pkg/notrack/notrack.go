@@ -88,14 +88,14 @@ func RunIPTablesSync() error {
 		return fmt.Errorf("error connecting to ip6tables for notrack: %w", err)
 	}
 
-	netlinkManager := &nl.NetlinkManager{}
+	netlinkManager := nl.NewManager(&nl.Toolkit{})
 
 	go syncIPTTables(netlinkManager, ipt4, ipt6)
 
 	return nil
 }
 
-func syncIPTTables(netlinkManager *nl.NetlinkManager, ipt4, ipt6 *iptables.IPTables) {
+func syncIPTTables(netlinkManager *nl.Manager, ipt4, ipt6 *iptables.IPTables) {
 	for {
 		links, err := netlink.LinkList()
 		if err != nil {

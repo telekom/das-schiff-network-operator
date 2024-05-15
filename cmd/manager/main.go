@@ -38,6 +38,7 @@ import (
 	"github.com/telekom/das-schiff-network-operator/pkg/macvlan"
 	"github.com/telekom/das-schiff-network-operator/pkg/managerconfig"
 	"github.com/telekom/das-schiff-network-operator/pkg/monitoring"
+	"github.com/telekom/das-schiff-network-operator/pkg/nl"
 	"github.com/telekom/das-schiff-network-operator/pkg/notrack"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler"
 
@@ -138,7 +139,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	anycastTracker := &anycast.Tracker{}
+	anycastTracker := anycast.NewTracker(&nl.Toolkit{})
 
 	if err = (&networkv1alpha1.VRFRouteConfiguration{}).SetupWebhookWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create webhook", "webhook", "VRFRouteConfiguration")

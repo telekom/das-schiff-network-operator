@@ -78,7 +78,14 @@ func (r *reconcile) reconcileLayer3(l3vnis []networkv1alpha1.VRFRouteConfigurati
 	// We wait here for two seconds to let FRR settle after updating netlink devices
 	time.Sleep(defaultSleep)
 
+<<<<<<< HEAD
 	err = r.configureFRR(allConfigs, reloadTwice)
+=======
+	changed, err := r.frrManager.Configure(frr.Configuration{
+		VRFs: vrfConfigs,
+		ASN:  r.config.ServerASN,
+	}, r.netlinkManager)
+>>>>>>> 9c7cb71 (Added unit tests)
 	if err != nil {
 		return err
 	}
@@ -98,7 +105,7 @@ func (r *reconcile) configureFRR(vrfConfigs []frr.VRFConfiguration, reloadTwice 
 	changed, err := r.frrManager.Configure(frr.Configuration{
 		VRFs: vrfConfigs,
 		ASN:  r.config.ServerASN,
-	}, r.netlinkManager)
+	})
 	if err != nil {
 		r.Logger.Error(err, "error updating FRR configuration")
 		return fmt.Errorf("error updating FRR configuration: %w", err)
@@ -162,12 +169,6 @@ func (r *reconcile) createVrfConfigMap(l3vnis []networkv1alpha1.VRFRouteConfigur
 		} else {
 			err := fmt.Errorf("vrf not in vrf vni map")
 			r.Logger.Error(err, "VRF does not exist in VRF VNI config, ignoring", "vrf", spec.VRF, "name", l3vnis[i].ObjectMeta.Name, "namespace", l3vnis[i].ObjectMeta.Namespace)
-			continue
-		}
-
-		if vni == 0 && vni > 16777215 {
-			err := fmt.Errorf("VNI can not be set to 0")
-			r.Logger.Error(err, "VNI can not be set to 0, ignoring", "vrf", spec.VRF, "name", l3vnis[i].ObjectMeta.Name, "namespace", l3vnis[i].ObjectMeta.Namespace)
 			continue
 		}
 

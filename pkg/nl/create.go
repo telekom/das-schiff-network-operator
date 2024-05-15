@@ -15,7 +15,7 @@ const (
 	hwAddrByteSize          = 6
 )
 
-func (n *NetlinkManager) createVRF(vrfName string, table int) (*netlink.Vrf, error) {
+func (n *Manager) createVRF(vrfName string, table int) (*netlink.Vrf, error) {
 	netlinkVrf := netlink.Vrf{
 		LinkAttrs: netlink.LinkAttrs{
 			Name: vrfName,
@@ -23,20 +23,20 @@ func (n *NetlinkManager) createVRF(vrfName string, table int) (*netlink.Vrf, err
 		Table: uint32(table),
 	}
 
-	if err := netlink.LinkAdd(&netlinkVrf); err != nil {
+	if err := n.toolkit.LinkAdd(&netlinkVrf); err != nil {
 		return nil, fmt.Errorf("error adding link: %w", err)
 	}
 	if err := n.disableEUIAutogeneration(vrfName); err != nil {
 		return nil, err
 	}
-	if err := netlink.LinkSetUp(&netlinkVrf); err != nil {
+	if err := n.toolkit.LinkSetUp(&netlinkVrf); err != nil {
 		return nil, fmt.Errorf("error setting link up: %w", err)
 	}
 
 	return &netlinkVrf, nil
 }
 
-func (n *NetlinkManager) createBridge(bridgeName string, macAddress *net.HardwareAddr, masterIdx, mtu int, underlayRMAC bool) (*netlink.Bridge, error) {
+func (n *Manager) createBridge(bridgeName string, macAddress *net.HardwareAddr, masterIdx, mtu int, underlayRMAC bool) (*netlink.Bridge, error) {
 	netlinkBridge := netlink.Bridge{
 		LinkAttrs: netlink.LinkAttrs{
 			Name: bridgeName,
@@ -49,7 +49,7 @@ func (n *NetlinkManager) createBridge(bridgeName string, macAddress *net.Hardwar
 	if macAddress != nil {
 		netlinkBridge.LinkAttrs.HardwareAddr = *macAddress
 	} else if underlayRMAC {
-		_, vxlanIP, err := getUnderlayInterfaceAndIP()
+		_, vxlanIP, err := n.getUnderlayInterfaceAndIP()
 		if err != nil {
 			return nil, err
 		}
@@ -61,7 +61,7 @@ func (n *NetlinkManager) createBridge(bridgeName string, macAddress *net.Hardwar
 		netlinkBridge.LinkAttrs.HardwareAddr = generatedMac
 	}
 
-	if err := netlink.LinkAdd(&netlinkBridge); err != nil {
+	if err := n.toolkit.LinkAdd(&netlinkBridge); err != nil {
 		return nil, fmt.Errorf("error adding link: %w", err)
 	}
 	if err := n.disableEUIAutogeneration(bridgeName); err != nil {
@@ -71,8 +71,8 @@ func (n *NetlinkManager) createBridge(bridgeName string, macAddress *net.Hardwar
 	return &netlinkBridge, nil
 }
 
-func (n *NetlinkManager) createVXLAN(vxlanName string, bridgeIdx, vni, mtu int, hairpin, neighSuppression bool) (*netlink.Vxlan, error) {
-	vxlanIf, vxlanIP, err := getUnderlayInterfaceAndIP()
+func (n *Manager) createVXLAN(vxlanName string, bridgeIdx, vni, mtu int, hairpin, neighSuppression bool) (*netlink.Vxlan, error) {
+	vxlanIf, vxlanIP, err := n.getUnderlayInterfaceAndIP()
 	if err != nil {
 		return nil, err
 	}
@@ -95,17 +95,17 @@ func (n *NetlinkManager) createVXLAN(vxlanName string, bridgeIdx, vni, mtu int, 
 		Learning:     false,
 		Port:         vxlanPort,
 	}
-	if err := netlink.LinkAdd(&netlinkVXLAN); err != nil {
+	if err := n.toolkit.LinkAdd(&netlinkVXLAN); err != nil {
 		return nil, fmt.Errorf("error adding link: %w", err)
 	}
-	if err := netlink.LinkSetLearning(&netlinkVXLAN, false); err != nil {
+	if err := n.toolkit.LinkSetLearning(&netlinkVXLAN, false); err != nil {
 		return nil, fmt.Errorf("error disabling link learning: %w", err)
 	}
-	if err := setNeighSuppression(&netlinkVXLAN, neighSuppression); err != nil {
+	if err := n.setNeighSuppression(&netlinkVXLAN, neighSuppression); err != nil {
 		return nil, err
 	}
 	if hairpin {
-		if err := netlink.LinkSetHairpin(&netlinkVXLAN, true); err != nil {
+		if err := n.toolkit.LinkSetHairpin(&netlinkVXLAN, true); err != nil {
 			return nil, fmt.Errorf("error setting link's hairpin mode: %w", err)
 		}
 	}
@@ -116,8 +116,8 @@ func (n *NetlinkManager) createVXLAN(vxlanName string, bridgeIdx, vni, mtu int, 
 	return &netlinkVXLAN, nil
 }
 
-func (*NetlinkManager) disableEUIAutogeneration(intfName string) error {
-	fileName := fmt.Sprintf("/proc/sys/net/ipv6/conf/%s/addr_gen_mode", intfName)
+func (*Manager) disableEUIAutogeneration(intfName string) error {
+	fileName := fmt.Sprintf("%s/ipv6/conf/%s/addr_gen_mode", procSysNetPath, intfName)
 	file, err := os.OpenFile(fileName, os.O_WRONLY, 0)
 	if err != nil {
 		return fmt.Errorf("error opening file: %w", err)
@@ -129,7 +129,7 @@ func (*NetlinkManager) disableEUIAutogeneration(intfName string) error {
 	return nil
 }
 
-func (n *NetlinkManager) createLink(vethName, peerName string, masterIdx, mtu int, generateEUI bool) (*netlink.Veth, error) {
+func (n *Manager) createLink(vethName, peerName string, masterIdx, mtu int, generateEUI bool) (*netlink.Veth, error) {
 	netlinkVeth := netlink.Veth{
 		LinkAttrs: netlink.LinkAttrs{
 			Name:        vethName,
@@ -138,7 +138,7 @@ func (n *NetlinkManager) createLink(vethName, peerName string, masterIdx, mtu in
 		},
 		PeerName: peerName,
 	}
-	if err := netlink.LinkAdd(&netlinkVeth); err != nil {
+	if err := n.toolkit.LinkAdd(&netlinkVeth); err != nil {
 		return nil, fmt.Errorf("error adding link: %w", err)
 	}
 
@@ -154,19 +154,19 @@ func (n *NetlinkManager) createLink(vethName, peerName string, masterIdx, mtu in
 	return &netlinkVeth, nil
 }
 
-func (*NetlinkManager) setUp(intfName string) error {
-	link, err := netlink.LinkByName(intfName)
+func (n *Manager) setUp(intfName string) error {
+	link, err := n.toolkit.LinkByName(intfName)
 	if err != nil {
 		return fmt.Errorf("error getting link by name: %w", err)
 	}
-	if err := netlink.LinkSetUp(link); err != nil {
+	if err := n.toolkit.LinkSetUp(link); err != nil {
 		return fmt.Errorf("error setting link up: %w", err)
 	}
 	return nil
 }
 
-func generateUnderlayMAC() (net.HardwareAddr, error) {
-	_, vxlanIP, err := getUnderlayInterfaceAndIP()
+func (n *Manager) generateUnderlayMAC() (net.HardwareAddr, error) {
+	_, vxlanIP, err := n.getUnderlayInterfaceAndIP()
 	if err != nil {
 		return nil, err
 	}
@@ -178,10 +178,10 @@ func generateUnderlayMAC() (net.HardwareAddr, error) {
 	return generatedMac, nil
 }
 
-func getUnderlayInterfaceAndIP() (int, net.IP, error) {
+func (n *Manager) getUnderlayInterfaceAndIP() (int, net.IP, error) {
 	dummy := netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: underlayLoopback}}
 
-	addresses, err := netlink.AddrList(&dummy, netlink.FAMILY_V4)
+	addresses, err := n.toolkit.AddrList(&dummy, netlink.FAMILY_V4)
 	if err != nil {
 		return -1, nil, fmt.Errorf("error listing link's addresses: %w", err)
 	}
@@ -202,7 +202,7 @@ func generateMAC(ip net.IP) (net.HardwareAddr, error) {
 	return hwaddr, nil
 }
 
-func setNeighSuppression(link netlink.Link, mode bool) error {
+func (n *Manager) setNeighSuppression(link netlink.Link, mode bool) error {
 	req := nl.NewNetlinkRequest(unix.RTM_SETLINK, unix.NLM_F_ACK)
 
 	msg := nl.NewIfInfomsg(unix.AF_BRIDGE)
@@ -212,7 +212,7 @@ func setNeighSuppression(link netlink.Link, mode bool) error {
 	br := nl.NewRtAttr(unix.IFLA_PROTINFO|unix.NLA_F_NESTED, nil)
 	br.AddRtAttr(iflaBrPortNeighSuppress, boolToByte(mode))
 	req.AddData(br)
-	_, err := req.Execute(unix.NETLINK_ROUTE, 0)
+	_, err := n.toolkit.ExecuteNetlinkRequest(req, unix.NETLINK_ROUTE, 0)
 	if err != nil {
 		return fmt.Errorf("error executing request: %w", err)
 	}

@@ -26,10 +26,15 @@ const (
 
 var macPrefix = []byte("\x02\x54")
 
-type NetlinkManager struct {
+type Manager struct {
+	toolkit ToolkitInterface
 }
 
-func (*NetlinkManager) GetUnderlayIP() (net.IP, error) {
-	_, ip, err := getUnderlayInterfaceAndIP()
+func NewManager(toolkit ToolkitInterface) *Manager {
+	return &Manager{toolkit: toolkit}
+}
+
+func (n *Manager) GetUnderlayIP() (net.IP, error) {
+	_, ip, err := n.getUnderlayInterfaceAndIP()
 	return ip, err
 }
