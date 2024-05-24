@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: status
+  namespace: system
+spec:
+  type: ClusterIP
+  clusterIP: None
+  selector:
+    app.kubernetes.io/component: worker
+    app.kubernetes.io/name: network-operator
+  ports:
+    - protocol: TCP
+      port: 7083
+      targetPort: 7083

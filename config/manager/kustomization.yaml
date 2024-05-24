@@ -1,6 +1,7 @@
 resources:
 - manager.yaml
 - manager_master.yaml
+- service.yaml
 # - namespace.yaml
 
 generatorOptions:
