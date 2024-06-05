@@ -8,14 +8,10 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
-var _ = BeforeSuite(func() {
-
-})
-
-func TestHealthCheck(t *testing.T) {
+func TestManagerConfig(t *testing.T) {
 	RegisterFailHandler(Fail)
 	RunSpecs(t,
-		"HealthCheck Suite")
+		"ManagerConfig Suite")
 }
 
 var _ = Describe("Load()", func() {

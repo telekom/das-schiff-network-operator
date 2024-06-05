@@ -29,10 +29,12 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 
-	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
+	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/controllers"
+	"github.com/telekom/das-schiff-network-operator/pkg/agent"
 	"github.com/telekom/das-schiff-network-operator/pkg/anycast"
 	"github.com/telekom/das-schiff-network-operator/pkg/bpf"
+	grpcclient "github.com/telekom/das-schiff-network-operator/pkg/clients/grpc"
 	"github.com/telekom/das-schiff-network-operator/pkg/config"
 	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
 	"github.com/telekom/das-schiff-network-operator/pkg/macvlan"
@@ -63,7 +65,7 @@ var (
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
-	utilruntime.Must(networkv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(v1alpha1.AddToScheme(scheme))
 	//+kubebuilder:scaffold:scheme
 }
 
@@ -92,6 +94,10 @@ func main() {
 	var onlyBPFMode bool
 	var configFile string
 	var interfacePrefix string
+	var nodeConfigPath string
+	var agentType string
+	var agentPort int
+	var agentAddr string
 	flag.StringVar(&configFile, "config", "",
 		"The controller will load its initial configuration from this file. "+
 			"Omit this flag to use the default configuration values. "+
@@ -100,6 +106,11 @@ func main() {
 		"Only attach BPF to specified interfaces in config. This will not start any reconciliation. Perfect for masters.")
 	flag.StringVar(&interfacePrefix, "macvlan-interface-prefix", "",
 		"Interface prefix for bridge devices for MACVlan sync")
+	flag.StringVar(&nodeConfigPath, "nodeconfig-path", reconciler.DefaultNodeConfigPath,
+		"Path to store working node configuration.")
+	flag.StringVar(&agentType, "agent", "vrf-igbp", "Use selected agent type (default: vrf-igbp).")
+	flag.StringVar(&agentAddr, "agentAddr", "", "Agent's address (default: '').")
+	flag.IntVar(&agentPort, "agentPort", agent.DefaultPort, fmt.Sprintf("Agent's port (default: %d).", agent.DefaultPort))
 	opts := zap.Options{
 		Development: true,
 	}
@@ -126,29 +137,46 @@ func main() {
 		}
 	}
 
-	clientConfig := ctrl.GetConfigOrDie()
-	mgr, err := ctrl.NewManager(clientConfig, options)
-	if err != nil {
-		setupLog.Error(err, "unable to start manager")
+	var agentClient agent.Client
+	switch agentType {
+	case "vrf-igbp":
+		agentClient, err = grpcclient.NewClient(fmt.Sprintf("%s:%d", agentAddr, agentPort))
+	default:
+		setupLog.Error(fmt.Errorf("agent %s is currently not supported", agentType), "unsupported error")
 		os.Exit(1)
+	}
+
+	if err != nil {
+		setupLog.Error(err, "error creating agent's client")
+		os.Exit(1)
+	}
+
+	if err := start(&options, onlyBPFMode, nodeConfigPath, interfacePrefix, agentClient); err != nil {
+		setupLog.Error(err, "error running manager")
+		os.Exit(1)
+	}
+}
+
+func start(options *manager.Options, onlyBPFMode bool, nodeConfigPath, interfacePrefix string, agentClient agent.Client) error {
+	clientConfig := ctrl.GetConfigOrDie()
+	mgr, err := ctrl.NewManager(clientConfig, *options)
+	if err != nil {
+		return fmt.Errorf("unable to create manager: %w", err)
 	}
 
 	cfg, err := config.LoadConfig()
 	if err != nil {
-		setupLog.Error(err, "unable to load config")
-		os.Exit(1)
+		return fmt.Errorf("unable to load config: %w", err)
 	}
 
 	anycastTracker := anycast.NewTracker(&nl.Toolkit{})
 
-	if err = (&networkv1alpha1.VRFRouteConfiguration{}).SetupWebhookWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create webhook", "webhook", "VRFRouteConfiguration")
-		os.Exit(1)
+	if err := (&v1alpha1.VRFRouteConfiguration{}).SetupWebhookWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to create webhook VRFRouteConfiguration: %w", err)
 	}
 
-	if err := initComponents(mgr, anycastTracker, cfg, clientConfig, onlyBPFMode); err != nil {
-		setupLog.Error(err, "unable to initialize components")
-		os.Exit(1)
+	if err := initComponents(mgr, anycastTracker, cfg, clientConfig, onlyBPFMode, nodeConfigPath, agentClient); err != nil {
+		return fmt.Errorf("unable to initialize components: %w", err)
 	}
 
 	if interfacePrefix != "" {
@@ -158,15 +186,16 @@ func main() {
 
 	setupLog.Info("starting manager")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
-		setupLog.Error(err, "problem running manager")
-		os.Exit(1)
+		return fmt.Errorf("error running manager: %w", err)
 	}
+
+	return nil
 }
 
-func initComponents(mgr manager.Manager, anycastTracker *anycast.Tracker, cfg *config.Config, clientConfig *rest.Config, onlyBPFMode bool) error {
+func initComponents(mgr manager.Manager, anycastTracker *anycast.Tracker, cfg *config.Config, clientConfig *rest.Config, onlyBPFMode bool, nodeConfigPath string, agentClient agent.Client) error {
 	// Start VRFRouteConfigurationReconciler when we are not running in only BPF mode.
 	if !onlyBPFMode {
-		if err := setupReconcilers(mgr, anycastTracker); err != nil {
+		if err := setupReconcilers(mgr, nodeConfigPath, agentClient); err != nil {
 			return fmt.Errorf("unable to setup reconcilers: %w", err)
 		}
 	}
@@ -179,6 +208,53 @@ func initComponents(mgr manager.Manager, anycastTracker *anycast.Tracker, cfg *c
 		return fmt.Errorf("unable to set up ready check: %w", err)
 	}
 
+	if err := setupBPF(cfg); err != nil {
+		return fmt.Errorf("uneable to set up BPF: %w", err)
+	}
+
+	setupLog.Info("start anycast sync")
+	anycastTracker.RunAnycastSync()
+
+	setupLog.Info("start notrack sync")
+	if err := notrack.RunIPTablesSync(); err != nil {
+		setupLog.Error(err, "error starting IPTables sync")
+	}
+
+	if onlyBPFMode {
+		if err := runBPFOnlyMode(clientConfig); err != nil {
+			return fmt.Errorf("error running BPF only mode: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func runBPFOnlyMode(clientConfig *rest.Config) error {
+	clusterClient, err := client.New(clientConfig, client.Options{})
+	if err != nil {
+		return fmt.Errorf("error creating controller-runtime client: %w", err)
+	}
+
+	nc, err := healthcheck.LoadConfig(healthcheck.NetHealthcheckFile)
+	if err != nil {
+		return fmt.Errorf("error loading network healthcheck config: %w", err)
+	}
+
+	tcpDialer := healthcheck.NewTCPDialer(nc.Timeout)
+	hc, err := healthcheck.NewHealthChecker(clusterClient,
+		healthcheck.NewDefaultHealthcheckToolkit(nil, tcpDialer),
+		nc)
+	if err != nil {
+		return fmt.Errorf("error initializing healthchecker: %w", err)
+	}
+	if err = performNetworkingHealthcheck(hc); err != nil {
+		return fmt.Errorf("error performing healthcheck: %w", err)
+	}
+
+	return nil
+}
+
+func setupBPF(cfg *config.Config) error {
 	setupLog.Info("load bpf program into Kernel")
 	if err := bpf.InitBPFRouter(); err != nil {
 		return fmt.Errorf("unable to init BPF router: %w", err)
@@ -191,68 +267,21 @@ func initComponents(mgr manager.Manager, anycastTracker *anycast.Tracker, cfg *c
 	setupLog.Info("start bpf interface check")
 	bpf.RunInterfaceCheck()
 
-	setupLog.Info("start anycast sync")
-	anycastTracker.RunAnycastSync()
-
-	setupLog.Info("start notrack sync")
-	if err := notrack.RunIPTablesSync(); err != nil {
-		setupLog.Error(err, "error starting IPTables sync")
-	}
-
-	if onlyBPFMode {
-		clusterClient, err := client.New(clientConfig, client.Options{})
-		if err != nil {
-			return fmt.Errorf("error creating controller-runtime client: %w", err)
-		}
-
-		nc, err := healthcheck.LoadConfig(healthcheck.NetHealthcheckFile)
-		if err != nil {
-			return fmt.Errorf("error loading network healthcheck config: %w", err)
-		}
-
-		tcpDialer := healthcheck.NewTCPDialer(nc.Timeout)
-		hc, err := healthcheck.NewHealthChecker(clusterClient,
-			healthcheck.NewDefaultHealthcheckToolkit(nil, tcpDialer),
-			nc)
-		if err != nil {
-			return fmt.Errorf("error initializing healthchecker: %w", err)
-		}
-		if err = performNetworkingHealthcheck(hc); err != nil {
-			return fmt.Errorf("error performing healthcheck: %w", err)
-		}
-	}
-
 	return nil
 }
 
-func setupReconcilers(mgr manager.Manager, anycastTracker *anycast.Tracker) error {
-	r, err := reconciler.NewReconciler(mgr.GetClient(), anycastTracker, mgr.GetLogger())
+func setupReconcilers(mgr manager.Manager, nodeConfigPath string, agentClient agent.Client) error {
+	r, err := reconciler.NewReconciler(mgr.GetClient(), mgr.GetLogger(), nodeConfigPath, agentClient)
 	if err != nil {
 		return fmt.Errorf("unable to create debounced reconciler: %w", err)
 	}
 
-	if err = (&controllers.VRFRouteConfigurationReconciler{
+	if err = (&controllers.NodeConfigReconciler{
 		Client:     mgr.GetClient(),
 		Scheme:     mgr.GetScheme(),
 		Reconciler: r,
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("unable to create VRFRouteConfiguration controller: %w", err)
-	}
-
-	if err = (&controllers.Layer2NetworkConfigurationReconciler{
-		Client:     mgr.GetClient(),
-		Scheme:     mgr.GetScheme(),
-		Reconciler: r,
-	}).SetupWithManager(mgr); err != nil {
-		return fmt.Errorf("unable to create Layer2NetworkConfiguration controller: %w", err)
-	}
-
-	if err = (&controllers.RoutingTableReconciler{
-		Client:     mgr.GetClient(),
-		Scheme:     mgr.GetScheme(),
-		Reconciler: r,
-	}).SetupWithManager(mgr); err != nil {
-		return fmt.Errorf("unable to create RoutingTable controller: %w", err)
 	}
 
 	return nil

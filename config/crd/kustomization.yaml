@@ -5,6 +5,8 @@ resources:
 - bases/network.schiff.telekom.de_vrfrouteconfigurations.yaml
 - bases/network.schiff.telekom.de_layer2networkconfigurations.yaml
 - bases/network.schiff.telekom.de_routingtables.yaml
+- bases/network.schiff.telekom.de_nodeconfigs.yaml
+- bases/network.schiff.telekom.de_nodeconfigprocesses.yaml
 #+kubebuilder:scaffold:crdkustomizeresource
 
 # [WEBHOOK] To enable webhook, uncomment all the sections with [WEBHOOK] prefix.

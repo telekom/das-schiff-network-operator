@@ -3,6 +3,10 @@
 IMG ?= ghcr.io/telekom/das-schiff-network-operator:latest
 # Sidecar image URL to use all building/pushing image targets
 SIDECAR_IMG ?= ghcr.io/telekom/frr-exporter:latest
+# Sidecar image URL to use all building/pushing image targets
+CONFIGURATOR_IMG ?= ghcr.io/telekom/configurator:latest
+# Agent image URL to use all building/pushing image targets
+AGENT_IMG ?= ghcr.io/telekom/agent:latest
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 ENVTEST_K8S_VERSION = 1.25
 
@@ -50,8 +54,13 @@ manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and Cust
 	$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
 
 .PHONY: generate
-generate: controller-gen bpf-generate ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
+generate: controller-gen bpf-generate ## Generate code containing DeepCopy, DeepCopyInto and DeepCopyObject method implementations.
 	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./..."
+	PATH=$(PATH):$(shell pwd)/bin $(PROTOC) --go_out=. --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=paths=source_relative pkg/agent/pb/agent.proto
+
+.PHONY: generate-protobuff
+generate-protobuff: protoc ## Generate code containing DeepCopy, DeepCopyInto and DeepCopyObject method implementations.
+	PATH=$(PATH):$(shell pwd)/bin $(PROTOC) --go_out=. --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=paths=source_relative pkg/agent/pb/agent.proto
 
 .PHONY: fmt
 fmt: ## Run go fmt against code.
@@ -71,9 +80,17 @@ test: manifests generate fmt vet envtest ## Run tests.
 build: generate fmt vet ## Build manager binary.
 	go build -o bin/manager cmd/manager/main.go
 
-.PHONY: sidecar-build
-sidecar-build: build
+.PHONY: sidecar-build ## Build sidecar binary.
+sidecar-build: generate fmt vet
 	go build -o bin/frr-exporter cmd/frr-exporter/main.go
+
+.PHONY: configurator-build ## Build configurator binary.
+configurator-build: generate fmt vet
+	go build -o bin/configurator cmd/configurator/main.go
+
+.PHONY: agent-build ## Build agent binary.
+agent-build: generate fmt vet
+	go build -o bin/agent cmd/agent/main.go
 
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
@@ -87,14 +104,29 @@ docker-build: test ## Build docker image with the manager.
 docker-build-sidecar: test ## Build docker image with the manager.
 	docker build -t ${SIDECAR_IMG} -f frr-exporter.Dockerfile .
 
+.PHONY: docker-build-configurator
+docker-build-configurator: test ## Build docker image with the manager.
+	docker build -t ${CONFIGURATOR_IMG} -f configurator.Dockerfile .
+
+.PHONY: docker-build-agent
+docker-build-agent: test ## Build docker image with the manager.
+	docker build -t ${AGENT_IMG} -f agent.Dockerfile .
+
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
 	docker push ${IMG}
 
 .PHONY: docker-push-sidecar
-docker-push-sidecar: ## Push docker image with the manager.
+docker-push-sidecar: ## Push docker image with the sidcar.
 	docker push ${SIDECAR_IMG}
 
+.PHONY: docker-push-configurator
+docker-push-configurator: ## Push docker image with the configurator.
+	docker push ${CONFIGURATOR_IMG}
+
+.PHONY: docker-push-agent
+docker-push-agent: ## Push docker image with the agent.
+	docker push ${AGENT_IMG}
 
 ##@ Release
 
@@ -135,11 +167,20 @@ uninstall-certs: manifests kustomize ## Uninstall certs
 deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
 	cd config/manager && $(KUSTOMIZE) edit set image frr-exporter=${SIDECAR_IMG}
+	cd config/configurator && $(KUSTOMIZE) edit set image configurator=${CONFIGURATOR_IMG}
+	cd config/agent && $(KUSTOMIZE) edit set image agent=${AGENT_IMG}
 	$(KUSTOMIZE) build config/default | kubectl apply -f -
 
 .PHONY: undeploy
 undeploy: ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
 	$(KUSTOMIZE) build config/default | kubectl delete --ignore-not-found=$(ignore-not-found) -f -
+
+PROTOC_DIR = $(shell pwd)/bin/protoc
+PROTOC = $(shell pwd)/bin/protoc/bin/protoc
+.PHONY: protoc
+protoc: ## Download controller-gen locally if necessary.
+	mkdir -p $(PROTOC_DIR) && cd $(PROTOC_DIR) && wget -nc https://github.com/protocolbuffers/protobuf/releases/download/v27.0/protoc-27.0-linux-x86_64.zip 2> /dev/null && unzip -nqq protoc-27.0-linux-x86_64.zip
+	$(call go-get-tool,$(PROTOC_DIR),google.golang.org/protobuf/cmd/protoc-gen-go@v1.33.0)
 
 CONTROLLER_GEN = $(shell pwd)/bin/controller-gen
 .PHONY: controller-gen
