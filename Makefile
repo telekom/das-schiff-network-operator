@@ -3,6 +3,8 @@
 IMG ?= ghcr.io/telekom/das-schiff-network-operator:latest
 # Sidecar image URL to use all building/pushing image targets
 SIDECAR_IMG ?= ghcr.io/telekom/frr-exporter:latest
+# Sidecar image URL to use all building/pushing image targets
+CONFIGURATOR_IMG ?= ghcr.io/telekom/configurator:latest
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 ENVTEST_K8S_VERSION = 1.25
 
@@ -87,6 +89,10 @@ docker-build: test ## Build docker image with the manager.
 docker-build-sidecar: test ## Build docker image with the manager.
 	docker build -t ${SIDECAR_IMG} -f frr-exporter.Dockerfile .
 
+.PHONY: docker-build-configurator
+docker-build-configurator: test ## Build docker image with the manager.
+	docker build -t ${CONFIGURATOR_IMG} -f configurator.Dockerfile .
+
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
 	docker push ${IMG}
@@ -95,6 +101,9 @@ docker-push: ## Push docker image with the manager.
 docker-push-sidecar: ## Push docker image with the manager.
 	docker push ${SIDECAR_IMG}
 
+.PHONY: docker-push-configurator
+docker-push-configurator: ## Push docker image with the manager.
+	docker push ${CONFIGURATOR_IMG}
 
 ##@ Release
 
@@ -135,6 +144,7 @@ uninstall-certs: manifests kustomize ## Uninstall certs
 deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
 	cd config/manager && $(KUSTOMIZE) edit set image frr-exporter=${SIDECAR_IMG}
+	cd config/configurator && $(KUSTOMIZE) edit set image configurator=${CONFIGURATOR_IMG}
 	$(KUSTOMIZE) build config/default | kubectl apply -f -
 
 .PHONY: undeploy

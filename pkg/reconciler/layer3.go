@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
 	"sort"
 	"strconv"
 	"time"
@@ -11,35 +12,24 @@ import (
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/pkg/config"
 	"github.com/telekom/das-schiff-network-operator/pkg/frr"
+	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 const defaultSleep = 2 * time.Second
 
-func (r *reconcile) fetchLayer3(ctx context.Context) ([]networkv1alpha1.VRFRouteConfiguration, error) {
-	vrfs := &networkv1alpha1.VRFRouteConfigurationList{}
-	err := r.client.List(ctx, vrfs)
+func (r *reconcile) fetchNodeConfig(ctx context.Context) (*networkv1alpha1.NodeConfig, error) {
+	cfg := &networkv1alpha1.NodeConfig{}
+	err := r.client.Get(ctx, types.NamespacedName{Name: os.Getenv(healthcheck.NodenameEnv)}, cfg)
 	if err != nil {
-		r.Logger.Error(err, "error getting list of VRFs from Kubernetes")
-		return nil, fmt.Errorf("error getting list of VRFs from Kubernetes: %w", err)
+		return nil, fmt.Errorf("error getting NodeConfig: %w", err)
 	}
-
-	return vrfs.Items, nil
-}
-
-func (r *reconcile) fetchTaas(ctx context.Context) ([]networkv1alpha1.RoutingTable, error) {
-	tables := &networkv1alpha1.RoutingTableList{}
-	err := r.client.List(ctx, tables)
-	if err != nil {
-		r.Logger.Error(err, "error getting list of TaaS from Kubernetes")
-		return nil, fmt.Errorf("error getting list of TaaS from Kubernetes: %w", err)
-	}
-
-	return tables.Items, nil
+	return cfg, nil
 }
 
 // nolint: contextcheck // context is not relevant
-func (r *reconcile) reconcileLayer3(l3vnis []networkv1alpha1.VRFRouteConfiguration, taas []networkv1alpha1.RoutingTable) error {
+func (r *reconcile) reconcileLayer3(l3vnis []networkv1alpha1.VRFRouteConfigurationSpec, taas []networkv1alpha1.RoutingTableSpec) error {
 	vrfConfigMap, err := r.createVrfConfigMap(l3vnis)
 	if err != nil {
 		return err
@@ -141,11 +131,11 @@ func (r *reconcile) reloadFRR() error {
 	return nil
 }
 
-func (r *reconcile) createVrfConfigMap(l3vnis []networkv1alpha1.VRFRouteConfiguration) (map[string]frr.VRFConfiguration, error) {
+func (r *reconcile) createVrfConfigMap(l3vnis []networkv1alpha1.VRFRouteConfigurationSpec) (map[string]frr.VRFConfiguration, error) {
 	vrfConfigMap := map[string]frr.VRFConfiguration{}
 	for i := range l3vnis {
-		spec := l3vnis[i].Spec
-		logger := r.Logger.WithValues("name", l3vnis[i].ObjectMeta.Name, "namespace", l3vnis[i].ObjectMeta.Namespace, "vrf", spec.VRF)
+		spec := l3vnis[i]
+		logger := r.Logger.WithValues("vrf", spec.VRF)
 
 		var vni int
 		var rt string
@@ -161,13 +151,13 @@ func (r *reconcile) createVrfConfigMap(l3vnis []networkv1alpha1.VRFRouteConfigur
 			vni = config.SkipVrfTemplateVni
 		} else {
 			err := fmt.Errorf("vrf not in vrf vni map")
-			r.Logger.Error(err, "VRF does not exist in VRF VNI config, ignoring", "vrf", spec.VRF, "name", l3vnis[i].ObjectMeta.Name, "namespace", l3vnis[i].ObjectMeta.Namespace)
+			r.Logger.Error(err, "VRF does not exist in VRF VNI config, ignoring", "vrf", spec.VRF)
 			continue
 		}
 
 		if vni == 0 && vni > 16777215 {
 			err := fmt.Errorf("VNI can not be set to 0")
-			r.Logger.Error(err, "VNI can not be set to 0, ignoring", "vrf", spec.VRF, "name", l3vnis[i].ObjectMeta.Name, "namespace", l3vnis[i].ObjectMeta.Namespace)
+			r.Logger.Error(err, "VNI can not be set to 0, ignoring", "vrf", spec.VRF, "name")
 			continue
 		}
 
@@ -181,11 +171,11 @@ func (r *reconcile) createVrfConfigMap(l3vnis []networkv1alpha1.VRFRouteConfigur
 	return vrfConfigMap, nil
 }
 
-func createVrfFromTaaS(taas []networkv1alpha1.RoutingTable) map[string]frr.VRFConfiguration {
+func createVrfFromTaaS(taas []networkv1alpha1.RoutingTableSpec) map[string]frr.VRFConfiguration {
 	vrfConfigMap := map[string]frr.VRFConfiguration{}
 
 	for i := range taas {
-		spec := taas[i].Spec
+		spec := taas[i]
 
 		name := fmt.Sprintf("taas.%d", spec.TableID)
 
@@ -417,4 +407,26 @@ func copyPrefixItemToFRRItem(n int, item networkv1alpha1.VrfRouteConfigurationPr
 		GE:     item.GE,
 		LE:     item.LE,
 	}, nil
+}
+
+func (r *reconcileConfig) fetchLayer3(ctx context.Context) ([]networkv1alpha1.VRFRouteConfiguration, error) {
+	vrfs := &networkv1alpha1.VRFRouteConfigurationList{}
+	err := r.client.List(ctx, vrfs)
+	if err != nil {
+		r.Logger.Error(err, "error getting list of VRFs from Kubernetes")
+		return nil, fmt.Errorf("error getting list of VRFs from Kubernetes: %w", err)
+	}
+
+	return vrfs.Items, nil
+}
+
+func (r *reconcileConfig) fetchTaas(ctx context.Context) ([]networkv1alpha1.RoutingTable, error) {
+	tables := &networkv1alpha1.RoutingTableList{}
+	err := r.client.List(ctx, tables)
+	if err != nil {
+		r.Logger.Error(err, "error getting list of TaaS from Kubernetes")
+		return nil, fmt.Errorf("error getting list of TaaS from Kubernetes: %w", err)
+	}
+
+	return tables.Items, nil
 }

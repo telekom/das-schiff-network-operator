@@ -92,6 +92,7 @@ func main() {
 	var onlyBPFMode bool
 	var configFile string
 	var interfacePrefix string
+	var nodeConfigPath string
 	flag.StringVar(&configFile, "config", "",
 		"The controller will load its initial configuration from this file. "+
 			"Omit this flag to use the default configuration values. "+
@@ -100,6 +101,8 @@ func main() {
 		"Only attach BPF to specified interfaces in config. This will not start any reconciliation. Perfect for masters.")
 	flag.StringVar(&interfacePrefix, "macvlan-interface-prefix", "",
 		"Interface prefix for bridge devices for MACVlan sync")
+	flag.StringVar(&nodeConfigPath, "nodeconfig-path", reconciler.DefaultNodeConfigPath,
+		"Path to store working node configuration.")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -146,7 +149,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := initComponents(mgr, anycastTracker, cfg, clientConfig, onlyBPFMode); err != nil {
+	if err := initComponents(mgr, anycastTracker, cfg, clientConfig, onlyBPFMode, nodeConfigPath); err != nil {
 		setupLog.Error(err, "unable to initialize components")
 		os.Exit(1)
 	}
@@ -163,10 +166,10 @@ func main() {
 	}
 }
 
-func initComponents(mgr manager.Manager, anycastTracker *anycast.Tracker, cfg *config.Config, clientConfig *rest.Config, onlyBPFMode bool) error {
+func initComponents(mgr manager.Manager, anycastTracker *anycast.Tracker, cfg *config.Config, clientConfig *rest.Config, onlyBPFMode bool, nodeConfigPath string) error {
 	// Start VRFRouteConfigurationReconciler when we are not running in only BPF mode.
 	if !onlyBPFMode {
-		if err := setupReconcilers(mgr, anycastTracker); err != nil {
+		if err := setupReconcilers(mgr, anycastTracker, nodeConfigPath); err != nil {
 			return fmt.Errorf("unable to setup reconcilers: %w", err)
 		}
 	}
@@ -225,34 +228,18 @@ func initComponents(mgr manager.Manager, anycastTracker *anycast.Tracker, cfg *c
 	return nil
 }
 
-func setupReconcilers(mgr manager.Manager, anycastTracker *anycast.Tracker) error {
-	r, err := reconciler.NewReconciler(mgr.GetClient(), anycastTracker, mgr.GetLogger())
+func setupReconcilers(mgr manager.Manager, anycastTracker *anycast.Tracker, nodeConfigPath string) error {
+	r, err := reconciler.NewReconciler(mgr.GetClient(), anycastTracker, mgr.GetLogger(), nodeConfigPath)
 	if err != nil {
 		return fmt.Errorf("unable to create debounced reconciler: %w", err)
 	}
 
-	if err = (&controllers.VRFRouteConfigurationReconciler{
+	if err = (&controllers.NodeConfigReconciler{
 		Client:     mgr.GetClient(),
 		Scheme:     mgr.GetScheme(),
 		Reconciler: r,
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("unable to create VRFRouteConfiguration controller: %w", err)
-	}
-
-	if err = (&controllers.Layer2NetworkConfigurationReconciler{
-		Client:     mgr.GetClient(),
-		Scheme:     mgr.GetScheme(),
-		Reconciler: r,
-	}).SetupWithManager(mgr); err != nil {
-		return fmt.Errorf("unable to create Layer2NetworkConfiguration controller: %w", err)
-	}
-
-	if err = (&controllers.RoutingTableReconciler{
-		Client:     mgr.GetClient(),
-		Scheme:     mgr.GetScheme(),
-		Reconciler: r,
-	}).SetupWithManager(mgr); err != nil {
-		return fmt.Errorf("unable to create RoutingTable controller: %w", err)
 	}
 
 	return nil

@@ -19,7 +19,7 @@ kind: Kustomization
 images:
 - name: controller
   newName: ghcr.io/telekom/das-schiff-network-operator
-  newTag: latest
+  newTag: v301
 - name: frr-exporter
   newName: ghcr.io/telekom/frr-exporter
-  newTag: latest
+  newTag: v301

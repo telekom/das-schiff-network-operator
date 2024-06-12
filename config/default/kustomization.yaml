@@ -43,6 +43,7 @@ resources:
 - ../crd
 - ../rbac
 - ../manager
+- ../configurator
 - ../webhook
 - ../prometheus
 labels:
