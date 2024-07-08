@@ -65,7 +65,7 @@ jobs:
           images: ghcr.io/telekom/das-schiff-network-operator
 
       - name: Build and Push Docker Image
-        uses: docker/build-push-action@v5.2.0
+        uses: docker/build-push-action@v6.3.0
         with:
           context: .
           push: true
@@ -79,7 +79,7 @@ jobs:
           images: ghcr.io/telekom/frr-exporter
 
       - name: Build and Push Docker Image
-        uses: docker/build-push-action@v5.2.0
+        uses: docker/build-push-action@v6.3.0
         with:
           context: .
           push: true
