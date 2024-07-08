@@ -44,7 +44,7 @@ func NewNetlinkCollector() (Collector, error) {
 			),
 			valueType: prometheus.GaugeValue,
 		},
-		netlink: &nl.Manager{},
+		netlink: nl.NewManager(&nl.Toolkit{}),
 	}
 	collector.name = nlCollectorName
 	collector.logger = ctrl.Log.WithName("netlink.collector")
