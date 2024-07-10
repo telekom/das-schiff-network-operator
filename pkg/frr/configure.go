@@ -134,7 +134,7 @@ func fixRouteTargetReload(config []byte) []byte {
 		}
 		rtLine, targets := string(parts[1]), string(parts[2])
 		routeTargets := rtRe.FindAllString(targets, -1)
-		if len(routeTargets) < 2 {
+		if len(routeTargets) <= 1 {
 			return s
 		}
 		lines := ""
