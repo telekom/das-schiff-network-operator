@@ -23,6 +23,7 @@ import (
 
 const (
 	all          = "all"
+	defaultVrf   = "default"
 	protocolIP   = "ip"
 	protocolIPv4 = "ipv4"
 	protocolIPv6 = "ipv6"
@@ -68,9 +69,11 @@ func (e *Endpoint) CreateMux() *http.ServeMux {
 	sm := http.NewServeMux()
 	sm.HandleFunc("/show/route", e.ShowRoute)
 	sm.HandleFunc("/show/bgp", e.ShowBGP)
+	sm.HandleFunc("/show/bgp/summary", e.ShowBGPSummary)
 	sm.HandleFunc("/show/evpn", e.ShowEVPN)
 	sm.HandleFunc("/all/show/route", e.QueryAll)
 	sm.HandleFunc("/all/show/bgp", e.QueryAll)
+	sm.HandleFunc("/all/show/bgp/summary", e.QueryAll)
 	sm.HandleFunc("/all/show/evpn", e.QueryAll)
 	e.Logger.Info("created ServeMux")
 	return sm
@@ -83,7 +86,12 @@ func (e *Endpoint) ShowRoute(w http.ResponseWriter, r *http.Request) {
 
 	vrf := r.URL.Query().Get("vrf")
 	if vrf == "" {
-		vrf = all
+		vrf = defaultVrf
+	}
+	if vrf == all {
+		e.Logger.Error(fmt.Errorf("VRF value cannot be 'all'"), "error validating value")
+		http.Error(w, "VRF value cannot be 'all'", http.StatusBadRequest)
+		return
 	}
 
 	if !validVRF.MatchString(vrf) {
@@ -142,7 +150,12 @@ func (e *Endpoint) ShowBGP(w http.ResponseWriter, r *http.Request) {
 	e.Logger.Info("got ShowBGP request")
 	vrf := r.URL.Query().Get("vrf")
 	if vrf == "" {
-		vrf = all
+		vrf = defaultVrf
+	}
+	if vrf == all {
+		e.Logger.Error(fmt.Errorf("VRF value cannot be 'all'"), "error validating value")
+		http.Error(w, "VRF value cannot be 'all'", http.StatusBadRequest)
+		return
 	}
 
 	if !validVRF.MatchString(vrf) {
@@ -211,6 +224,41 @@ func prepareBGPCommand(r *http.Request, vrf string) ([]string, error) {
 	}
 
 	return command, nil
+}
+
+// ShowBGPSummary returns result of show bgp vrf <all|vrf> summary command.
+func (e *Endpoint) ShowBGPSummary(w http.ResponseWriter, r *http.Request) {
+	e.Logger.Info("got ShowBGPSummary request")
+	vrf := r.URL.Query().Get("vrf")
+	if vrf == "" {
+		vrf = all
+	}
+
+	if !validVRF.MatchString(vrf) {
+		e.Logger.Error(fmt.Errorf("invalid VRF value"), "error validating value")
+		http.Error(w, "invalid VRF value", http.StatusBadRequest)
+		return
+	}
+
+	command := []string{
+		"show",
+		"bgp",
+		"vrf",
+		vrf,
+		"summary",
+	}
+
+	e.Logger.Info("command to be executed", "command", command)
+	data := e.cli.ExecuteWithJSON(command)
+
+	result, err := withNodename(&data)
+	if err != nil {
+		e.Logger.Error(err, "error adding nodename")
+		http.Error(w, fmt.Sprintf("error adding nodename: %s", err.Error()), http.StatusBadRequest)
+		return
+	}
+
+	e.writeResponse(result, w, "ShowBGPSummary")
 }
 
 // ShowEVPN returns result of show evpn command.
@@ -350,8 +398,10 @@ func setLongerPrefixes(r *http.Request, command *[]string) error {
 func setInput(r *http.Request, command *[]string) error {
 	input := r.URL.Query().Get("input")
 	if input != "" {
-		if _, _, err := net.ParseCIDR(input); err != nil {
-			return fmt.Errorf("input value is not valid: %w", err)
+		if ip := net.ParseIP(input); ip == nil {
+			if _, _, err := net.ParseCIDR(input); err != nil {
+				return fmt.Errorf("input value is not valid: %w", err)
+			}
 		}
 		*command = append(*command, input)
 	}
