@@ -57,7 +57,7 @@ func NewReconciler(clusterClient client.Client, anycastTracker *anycast.Tracker,
 	if val := os.Getenv("FRR_CONFIG_FILE"); val != "" {
 		reconciler.frrManager.ConfigPath = val
 	}
-	if err := reconciler.frrManager.Init(cfg); err != nil {
+	if err := reconciler.frrManager.Init(cfg.SkipVRFConfig[0]); err != nil {
 		return nil, fmt.Errorf("error trying to init FRR Manager: %w", err)
 	}
 

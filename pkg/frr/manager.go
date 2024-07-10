@@ -27,10 +27,10 @@ type Manager struct {
 	ipv6MgmtRouteMapIn *string
 	mgmtVrf            string
 
-	ConfigPath     string
-	TemplatePath   string
-	Cli            *Cli
-	dbusToolkit    dbus.System
+	ConfigPath   string
+	TemplatePath string
+	Cli          *Cli
+	dbusToolkit  dbus.System
 }
 
 type PrefixList struct {
@@ -74,7 +74,7 @@ func NewFRRManager() *Manager {
 	}
 }
 
-func (m *Manager) Init(cfg *config.Config) error {
+func (m *Manager) Init(mgmtVrf string) error {
 	if _, err := os.Stat(m.TemplatePath); errors.Is(err, os.ErrNotExist) {
 		err = generateTemplateConfig(m.TemplatePath, m.ConfigPath)
 		if err != nil {
@@ -92,7 +92,7 @@ func (m *Manager) Init(cfg *config.Config) error {
 	}
 	m.configTemplate = tpl
 
-	m.mgmtVrf = cfg.SkipVRFConfig[0]
+	m.mgmtVrf = mgmtVrf
 	routeMap, err := getRouteMapName(m.ConfigPath, "ipv4", m.mgmtVrf)
 	if err != nil {
 		return fmt.Errorf("error getting v4 mgmt route-map from FRR config: %w", err)

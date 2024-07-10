@@ -20,6 +20,7 @@ import (
 
 const (
 	frrConf = "frr.conf"
+	mgmtVrf = "mgmt"
 )
 
 var (
@@ -61,12 +62,12 @@ var _ = Describe("frr", func() {
 	Context("Init() should", func() {
 		It("return error if cannot read template config", func() {
 			m := &Manager{}
-			err := m.Init()
+			err := m.Init(mgmtVrf)
 			Expect(err).To(HaveOccurred())
 		})
 		It("return error if cannot write template config file", func() {
 			m := &Manager{ConfigPath: "testdata/" + frrConf}
-			err := m.Init()
+			err := m.Init(mgmtVrf)
 			Expect(err).To(HaveOccurred())
 		})
 		It("return no error", func() {
@@ -74,7 +75,7 @@ var _ = Describe("frr", func() {
 				ConfigPath:   tmpDir + "/" + frrConf,
 				TemplatePath: tmpDir + "/frr.tpl.conf",
 			}
-			err := m.Init()
+			err := m.Init(mgmtVrf)
 			Expect(err).ToNot(HaveOccurred())
 		})
 	})
