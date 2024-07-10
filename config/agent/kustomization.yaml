@@ -1,0 +1,12 @@
+resources:
+- agent.yaml
+
+generatorOptions:
+  disableNameSuffixHash: true
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+images:
+- name: agent
+  newName: ghcr.io/telekom/agent
+  newTag: v1

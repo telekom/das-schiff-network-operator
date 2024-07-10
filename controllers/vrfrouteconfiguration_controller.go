@@ -20,7 +20,7 @@ import (
 	"context"
 	"fmt"
 
-	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
+	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -32,7 +32,7 @@ type VRFRouteConfigurationReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 
-	Reconciler *reconciler.Reconciler
+	Reconciler *reconciler.ConfigReconciler
 }
 
 //+kubebuilder:rbac:groups=network.schiff.telekom.de,resources=vrfrouteconfigurations,verbs=get;list;watch;create;update;patch;delete
@@ -54,7 +54,7 @@ func (r *VRFRouteConfigurationReconciler) Reconcile(ctx context.Context, _ ctrl.
 // SetupWithManager sets up the controller with the Manager.
 func (r *VRFRouteConfigurationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	err := ctrl.NewControllerManagedBy(mgr).
-		For(&networkv1alpha1.VRFRouteConfiguration{}).
+		For(&v1alpha1.VRFRouteConfiguration{}).
 		Complete(r)
 	if err != nil {
 		return fmt.Errorf("error creating controller: %w", err)

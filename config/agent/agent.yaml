@@ -1,20 +1,20 @@
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
-  name: worker
+  name: agent
   namespace: system
   labels:
-    app.kubernetes.io/component: worker
+    app.kubernetes.io/component: agent
 spec:
   selector:
     matchLabels:
-      app.kubernetes.io/component: worker
+      app.kubernetes.io/component: agent
   template:
     metadata:
       annotations:
-        kubectl.kubernetes.io/default-container: manager
+        kubectl.kubernetes.io/default-container: agent
       labels:
-        app.kubernetes.io/component: worker
+        app.kubernetes.io/component: agent
     spec:
       affinity:
         nodeAffinity:
@@ -37,30 +37,18 @@ spec:
       hostPID: true
       containers:
       - command:
-        - /manager
+        - /agent
         args: []
         env:
         - name: NODE_NAME
           valueFrom:
             fieldRef:
               fieldPath: spec.nodeName
-        image: controller:latest
-        name: manager
+        image: agent:latest
+        name: agent
         securityContext:
           privileged: true
           runAsUser: 0
-        livenessProbe:
-          httpGet:
-            path: /healthz
-            port: 7081
-          initialDelaySeconds: 15
-          periodSeconds: 20
-        readinessProbe:
-          httpGet:
-            path: /readyz
-            port: 7081
-          initialDelaySeconds: 5
-          periodSeconds: 10
         # TODO(user): Configure the resources accordingly based on the project requirements.
         # More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
         resources:
@@ -74,36 +62,10 @@ spec:
         - mountPath: /opt/network-operator/config.yaml
           name: network-config
           subPath: config.yaml
-      - command:
-        - /frr-exporter
-        env:
-        - name: NODE_NAME
-          valueFrom:
-            fieldRef:
-              fieldPath: spec.nodeName
-        - name: STATUS_SVC_NAME
-          value: network-operator-status
-        - name: STATUS_SVC_NAMESPACE
-          valueFrom:
-            fieldRef:
-              fieldPath: metadata.namespace
-        image: frr-exporter:latest
-        name: frr-exporter
-        securityContext:
-          privileged: true
-          runAsUser: 0
-        resources:
-          limits:
-            cpu: 100m
-            memory: 64Mi
-          requests:
-            cpu: 10m
-            memory: 64Mi
-        volumeMounts:
         - mountPath: /etc/frr
           name: frr-config
-        - mountPath: /var/run/frr
-          name: frr-run
+        - mountPath: /var/run/dbus/system_bus_socket
+          name: dbus-socket
       serviceAccountName: controller-manager
       terminationGracePeriodSeconds: 10
       volumes:
@@ -111,10 +73,10 @@ spec:
         hostPath:
           path: /etc/frr
           type: Directory
-      - name: frr-run
+      - name: dbus-socket
         hostPath:
-          path: /var/run/frr
-          type: Directory
+          path: /var/run/dbus/system_bus_socket
+          type: Socket
       - configMap:
           name: network-operator-config
         name: network-config
