@@ -52,19 +52,7 @@ func (r *reconcile) reconcileLayer3(l3vnis []networkv1alpha1.VRFRouteConfigurati
 	taasConfigs := []frr.VRFConfiguration{}
 	for key := range vrfConfigMap {
 		vrfConfig := vrfConfigMap[key]
-		// Sort all lists in VRFConfigurations that are fetched from Kubernetes and might be in random order
-		sort.SliceStable(vrfConfig.Export, func(i, j int) bool {
-			return vrfConfig.Export[i].Seq < vrfConfig.Export[j].Seq
-		})
-		sort.SliceStable(vrfConfig.Import, func(i, j int) bool {
-			return vrfConfig.Import[i].Seq < vrfConfig.Import[j].Seq
-		})
-		sort.SliceStable(vrfConfig.AggregateIPv4, func(i, j int) bool {
-			return vrfConfig.AggregateIPv4[i] < vrfConfig.AggregateIPv4[j]
-		})
-		sort.SliceStable(vrfConfig.AggregateIPv6, func(i, j int) bool {
-			return vrfConfig.AggregateIPv6[i] < vrfConfig.AggregateIPv6[j]
-		})
+		stableSortVRFConfiguration(&vrfConfig)
 		allConfigs = append(allConfigs, vrfConfig)
 		l3Configs = append(l3Configs, vrfConfig)
 	}
@@ -431,4 +419,20 @@ func copyPrefixItemToFRRItem(n int, item networkv1alpha1.VrfRouteConfigurationPr
 		GE:     item.GE,
 		LE:     item.LE,
 	}, nil
+}
+
+func stableSortVRFConfiguration(vrfConfig *frr.VRFConfiguration) {
+	// Sort all lists in VRFConfigurations that are fetched from Kubernetes and might be in random order
+	sort.SliceStable(vrfConfig.Export, func(i, j int) bool {
+		return vrfConfig.Export[i].Seq < vrfConfig.Export[j].Seq
+	})
+	sort.SliceStable(vrfConfig.Import, func(i, j int) bool {
+		return vrfConfig.Import[i].Seq < vrfConfig.Import[j].Seq
+	})
+	sort.SliceStable(vrfConfig.AggregateIPv4, func(i, j int) bool {
+		return vrfConfig.AggregateIPv4[i] < vrfConfig.AggregateIPv4[j]
+	})
+	sort.SliceStable(vrfConfig.AggregateIPv6, func(i, j int) bool {
+		return vrfConfig.AggregateIPv6[i] < vrfConfig.AggregateIPv6[j]
+	})
 }
