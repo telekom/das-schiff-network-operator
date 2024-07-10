@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"regexp"
 
 	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
@@ -11,6 +12,11 @@ import (
 
 var (
 	vrfAsnConfig = 4200065169
+
+	// Regular expressions for parsing route-target lines.
+	rtLinesRe = regexp.MustCompile(`(?m)^\s*route-target.*`)
+	rtPartsRe = regexp.MustCompile(`(?m)^(\s*route-target\s*(?:import|export)\s*)(.*)`)
+	rtRe      = regexp.MustCompile(`(?m)(\S+)`)
 )
 
 type templateConfig struct {
@@ -42,6 +48,8 @@ func (m *Manager) Configure(in Configuration, nm *nl.Manager) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+
+	targetConfig = fixRouteTargetReload(targetConfig)
 
 	if !bytes.Equal(currentConfig, targetConfig) {
 		err = os.WriteFile(m.ConfigPath, targetConfig, frrPermissions)
@@ -114,4 +122,25 @@ func renderSubtemplates(in Configuration, nlManager *nl.Manager) (*templateConfi
 		UnderlayRouterID: vrfRouterID.String(),
 		Hostname:         hostname,
 	}, nil
+}
+
+// fixRouteTargetReload is a workaround for FRR's inability to reload route-targets if they are configured in a single line.
+// This function splits such lines into multiple lines, each containing a single route-target.
+func fixRouteTargetReload(config []byte) []byte {
+	return rtLinesRe.ReplaceAllFunc(config, func(s []byte) []byte {
+		parts := rtPartsRe.FindSubmatch(s)
+		if parts == nil {
+			return s
+		}
+		rtLine, targets := string(parts[1]), string(parts[2])
+		routeTargets := rtRe.FindAllString(targets, -1)
+		if len(routeTargets) < 2 {
+			return s
+		}
+		lines := ""
+		for _, rt := range routeTargets {
+			lines += rtLine + rt + "\n"
+		}
+		return []byte(lines[:len(lines)-1])
+	})
 }
