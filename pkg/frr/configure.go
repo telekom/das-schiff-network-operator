@@ -28,12 +28,15 @@ type templateConfig struct {
 }
 
 func (m *Manager) Configure(in Configuration, nm *nl.Manager) (bool, error) {
-	// Remove permit from VRF and only allow deny rules
+	// Remove permit from VRF and only allow deny rules for mgmt VRFs
 	for i := range in.VRFs {
+		if in.VRFs[i].Name != m.mgmtVrf {
+			continue
+		}
 		for j := range in.VRFs[i].Import {
 			for k := range in.VRFs[i].Import[j].Items {
 				if in.VRFs[i].Import[j].Items[k].Action != "deny" {
-					continue
+					return false, fmt.Errorf("only deny rules are allowed in import prefix-lists of mgmt VRFs")
 				}
 				// Swap deny to permit, this will be a prefix-list called from a deny route-map
 				in.VRFs[i].Import[j].Items[k].Action = "permit"
