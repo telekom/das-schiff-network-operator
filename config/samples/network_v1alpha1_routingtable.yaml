@@ -9,4 +9,4 @@ metadata:
     app.kubernetes.io/created-by: network-operator
   name: routingtable-sample
 spec:
-  # TODO(user): Add fields here
+  tableId: 202

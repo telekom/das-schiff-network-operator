@@ -7,7 +7,7 @@ import (
 	"github.com/coreos/go-systemd/v22/dbus"
 )
 
-//go:generate mockgen -destination ./mock/mock_frr.go . System,Connection
+//go:generate mockgen -destination ./mock/mock_dbus.go . System,Connection
 type System interface {
 	NewConn(ctx context.Context) (Connection, error)
 }

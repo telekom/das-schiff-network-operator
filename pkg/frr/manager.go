@@ -11,6 +11,7 @@ import (
 
 	"github.com/telekom/das-schiff-network-operator/pkg/config"
 	"github.com/telekom/das-schiff-network-operator/pkg/frr/dbus"
+	"github.com/telekom/das-schiff-network-operator/pkg/nl"
 )
 
 const defaultPermissions = 0o640
@@ -19,6 +20,16 @@ var (
 	frrUnit        = "frr.service"
 	frrPermissions = fs.FileMode(defaultPermissions)
 )
+
+//go:generate mockgen -destination ./mock/mock_frr.go . ManagerInterface
+type ManagerInterface interface {
+	Init() error
+	ReloadFRR() error
+	RestartFRR() error
+	GetStatusFRR() (activeState, subState string, err error)
+	Configure(in Configuration, nm *nl.Manager) (bool, error)
+	SetConfigPath(path string)
+}
 
 type Manager struct {
 	configTemplate *template.Template
@@ -146,6 +157,10 @@ func (m *Manager) GetStatusFRR() (activeState, subState string, err error) {
 		return activeState, "", fmt.Errorf("error casting property %v [\"SubState\"] as string", prop)
 	}
 	return activeState, subState, nil
+}
+
+func (m *Manager) SetConfigPath(path string) {
+	m.ConfigPath = path
 }
 
 func (v *VRFConfiguration) ShouldTemplateVRF() bool {

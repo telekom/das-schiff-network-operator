@@ -7,7 +7,6 @@ require (
 	github.com/coreos/go-iptables v0.6.0
 	github.com/coreos/go-systemd/v22 v22.4.0
 	github.com/go-logr/logr v1.2.4
-	github.com/google/go-cmp v0.5.9
 	github.com/onsi/ginkgo v1.16.4
 	github.com/onsi/gomega v1.27.10
 	github.com/prometheus/client_golang v1.15.1
@@ -22,6 +21,8 @@ require (
 	k8s.io/utils v0.0.0-20230209194617-a36077c30491
 	sigs.k8s.io/controller-runtime v0.15.1
 )
+
+require github.com/google/go-cmp v0.5.9 // indirect
 
 require (
 	github.com/beorn7/perks v1.0.1 // indirect

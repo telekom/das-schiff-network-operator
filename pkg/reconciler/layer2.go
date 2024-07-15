@@ -4,19 +4,12 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"os"
-	"strings"
 
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
-	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/selection"
-	"k8s.io/apimachinery/pkg/types"
 )
 
-func (r *reconcile) fetchLayer2(ctx context.Context) ([]networkv1alpha1.Layer2NetworkConfiguration, error) {
+func (r *reconcileConfig) fetchLayer2(ctx context.Context) ([]networkv1alpha1.Layer2NetworkConfiguration, error) {
 	layer2List := &networkv1alpha1.Layer2NetworkConfigurationList{}
 	err := r.client.List(ctx, layer2List)
 	if err != nil {
@@ -24,59 +17,17 @@ func (r *reconcile) fetchLayer2(ctx context.Context) ([]networkv1alpha1.Layer2Ne
 		return nil, fmt.Errorf("error getting list of Layer2s from Kubernetes: %w", err)
 	}
 
-	nodeName := os.Getenv(healthcheck.NodenameEnv)
-	node := &corev1.Node{}
-	err = r.client.Get(ctx, types.NamespacedName{Name: nodeName}, node)
-	if err != nil {
-		r.Logger.Error(err, "error getting local node name")
-		return nil, fmt.Errorf("error getting local node name: %w", err)
-	}
-
 	l2vnis := []networkv1alpha1.Layer2NetworkConfiguration{}
-	for i := range layer2List.Items {
-		item := &layer2List.Items[i]
-		logger := r.Logger.WithValues("name", item.ObjectMeta.Name, "namespace", item.ObjectMeta.Namespace, "vlan", item.Spec.ID, "vni", item.Spec.VNI)
-		if item.Spec.NodeSelector != nil {
-			selector := labels.NewSelector()
-			var reqs labels.Requirements
+	l2vnis = append(l2vnis, layer2List.Items...)
 
-			for key, value := range item.Spec.NodeSelector.MatchLabels {
-				requirement, err := labels.NewRequirement(key, selection.Equals, []string{value})
-				if err != nil {
-					logger.Error(err, "error creating MatchLabel requirement")
-					return nil, fmt.Errorf("error creating MatchLabel requirement: %w", err)
-				}
-				reqs = append(reqs, *requirement)
-			}
-
-			for _, req := range item.Spec.NodeSelector.MatchExpressions {
-				lowercaseOperator := selection.Operator(strings.ToLower(string(req.Operator)))
-				requirement, err := labels.NewRequirement(req.Key, lowercaseOperator, req.Values)
-				if err != nil {
-					logger.Error(err, "error creating MatchExpression requirement")
-					return nil, fmt.Errorf("error creating MatchExpression requirement: %w", err)
-				}
-				reqs = append(reqs, *requirement)
-			}
-			selector = selector.Add(reqs...)
-
-			if !selector.Matches(labels.Set(node.ObjectMeta.Labels)) {
-				logger.Info("local node does not match nodeSelector of layer2", "node", nodeName)
-				continue
-			}
-		}
-
-		l2vnis = append(l2vnis, *item)
-	}
-
-	if err := r.checkL2Duplicates(l2vnis); err != nil {
+	if err := checkL2Duplicates(l2vnis); err != nil {
 		return nil, err
 	}
 
 	return l2vnis, nil
 }
 
-func (r *reconcile) reconcileLayer2(l2vnis []networkv1alpha1.Layer2NetworkConfiguration) error {
+func (r *reconcileNodeNetworkConfig) reconcileLayer2(l2vnis []networkv1alpha1.Layer2NetworkConfigurationSpec) error {
 	desired, err := r.getDesired(l2vnis)
 	if err != nil {
 		return err
@@ -129,7 +80,7 @@ func (r *reconcile) reconcileLayer2(l2vnis []networkv1alpha1.Layer2NetworkConfig
 	return nil
 }
 
-func (r *reconcile) createL2(info *nl.Layer2Information, anycastTrackerInterfaces *[]int) error {
+func (r *reconcileNodeNetworkConfig) createL2(info *nl.Layer2Information, anycastTrackerInterfaces *[]int) error {
 	r.Logger.Info("Creating Layer2", "vlan", info.VlanID, "vni", info.VNI)
 	err := r.netlinkManager.CreateL2(info)
 	if err != nil {
@@ -145,7 +96,7 @@ func (r *reconcile) createL2(info *nl.Layer2Information, anycastTrackerInterface
 	return nil
 }
 
-func (r *reconcile) getDesired(l2vnis []networkv1alpha1.Layer2NetworkConfiguration) ([]nl.Layer2Information, error) {
+func (r *reconcileNodeNetworkConfig) getDesired(l2vnis []networkv1alpha1.Layer2NetworkConfigurationSpec) ([]nl.Layer2Information, error) {
 	availableVrfs, err := r.netlinkManager.ListL3()
 	if err != nil {
 		return nil, fmt.Errorf("error loading available VRFs: %w", err)
@@ -153,7 +104,7 @@ func (r *reconcile) getDesired(l2vnis []networkv1alpha1.Layer2NetworkConfigurati
 
 	desired := []nl.Layer2Information{}
 	for i := range l2vnis {
-		spec := l2vnis[i].Spec
+		spec := l2vnis[i]
 
 		var anycastMAC *net.HardwareAddr
 		if mac, err := net.ParseMAC(spec.AnycastMac); err == nil {
@@ -162,7 +113,7 @@ func (r *reconcile) getDesired(l2vnis []networkv1alpha1.Layer2NetworkConfigurati
 
 		anycastGateways, err := r.netlinkManager.ParseIPAddresses(spec.AnycastGateways)
 		if err != nil {
-			r.Logger.Error(err, "error parsing anycast gateways", "layer", l2vnis[i].ObjectMeta.Name, "gw", spec.AnycastGateways)
+			r.Logger.Error(err, "error parsing anycast gateways", "gw", spec.AnycastGateways)
 			return nil, fmt.Errorf("error parsing anycast gateways: %w", err)
 		}
 
@@ -175,7 +126,7 @@ func (r *reconcile) getDesired(l2vnis []networkv1alpha1.Layer2NetworkConfigurati
 				}
 			}
 			if !vrfAvailable {
-				r.Logger.Error(err, "VRF of Layer2 not found on node", "layer", l2vnis[i].ObjectMeta.Name, "vrf", spec.VRF)
+				r.Logger.Error(err, "VRF of Layer2 not found on node", "vrf", spec.VRF)
 				continue
 			}
 		}
@@ -213,7 +164,7 @@ func determineToBeDeleted(existing, desired []nl.Layer2Information) []nl.Layer2I
 	return toDelete
 }
 
-func (r *reconcile) reconcileExistingLayer(desired, currentConfig *nl.Layer2Information, anycastTrackerInterfaces *[]int) error {
+func (r *reconcileNodeNetworkConfig) reconcileExistingLayer(desired, currentConfig *nl.Layer2Information, anycastTrackerInterfaces *[]int) error {
 	r.Logger.Info("Reconciling existing Layer2", "vlan", desired.VlanID, "vni", desired.VNI)
 	err := r.netlinkManager.ReconcileL2(currentConfig, desired)
 	if err != nil {
@@ -229,7 +180,7 @@ func (r *reconcile) reconcileExistingLayer(desired, currentConfig *nl.Layer2Info
 	return nil
 }
 
-func (*reconcile) checkL2Duplicates(configs []networkv1alpha1.Layer2NetworkConfiguration) error {
+func checkL2Duplicates(configs []networkv1alpha1.Layer2NetworkConfiguration) error {
 	for i := range configs {
 		for j := i + 1; j < len(configs); j++ {
 			if configs[i].Spec.ID == configs[j].Spec.ID {

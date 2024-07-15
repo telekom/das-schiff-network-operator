@@ -18,7 +18,9 @@ rules:
   resources:
   - pods
   verbs:
+  - get
   - list
+  - watch
 - apiGroups:
   - ""
   resources:
@@ -47,6 +49,58 @@ rules:
   - network.schiff.telekom.de
   resources:
   - layer2networkconfigurations/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - network.schiff.telekom.de
+  resources:
+  - networkconfigrevisions
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - network.schiff.telekom.de
+  resources:
+  - networkconfigrevisions/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - network.schiff.telekom.de
+  resources:
+  - networkconfigrevisions/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - network.schiff.telekom.de
+  resources:
+  - nodenetworkconfigs
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - network.schiff.telekom.de
+  resources:
+  - nodenetworkconfigs/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - network.schiff.telekom.de
+  resources:
+  - nodenetworkconfigs/status
   verbs:
   - get
   - patch

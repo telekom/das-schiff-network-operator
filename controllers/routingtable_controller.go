@@ -33,7 +33,7 @@ type RoutingTableReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 
-	Reconciler *reconciler.Reconciler
+	Reconciler *reconciler.ConfigReconciler
 }
 
 //+kubebuilder:rbac:groups=network.schiff.telekom.de,resources=routingtables,verbs=get;list;watch;create;update;patch;delete
