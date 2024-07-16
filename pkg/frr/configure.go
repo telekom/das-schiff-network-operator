@@ -34,7 +34,23 @@ type templateConfig struct {
 }
 
 func (m *Manager) Configure(in Configuration, nm *nl.Manager) (bool, error) {
-	config, err := renderSubtemplates(in, nm)
+	// Remove permit from VRF and only allow deny rules for mgmt VRFs
+	for i := range in.VRFs {
+		if in.VRFs[i].Name != m.mgmtVrf {
+			continue
+		}
+		for j := range in.VRFs[i].Import {
+			for k := range in.VRFs[i].Import[j].Items {
+				if in.VRFs[i].Import[j].Items[k].Action != "deny" {
+					return false, fmt.Errorf("only deny rules are allowed in import prefix-lists of mgmt VRFs")
+				}
+				// Swap deny to permit, this will be a prefix-list called from a deny route-map
+				in.VRFs[i].Import[j].Items[k].Action = "permit"
+			}
+		}
+	}
+
+	config, err := m.renderSubtemplates(in, nm)
 	if err != nil {
 		return false, err
 	}
@@ -62,7 +78,15 @@ func (m *Manager) Configure(in Configuration, nm *nl.Manager) (bool, error) {
 	return false, nil
 }
 
-func renderSubtemplates(in Configuration, nlManager *nl.Manager) (*templateConfig, error) {
+func (m *Manager) renderRouteMapMgmtIn() ([]byte, error) {
+	return render(routeMapMgmtInTpl, mgmtImportConfig{
+		IPv4MgmtRouteMapIn: m.ipv4MgmtRouteMapIn,
+		IPv6MgmtRouteMapIn: m.ipv6MgmtRouteMapIn,
+		MgmtVrfName:        m.mgmtVrf,
+	})
+}
+
+func (m *Manager) renderSubtemplates(in Configuration, nlManager *nl.Manager) (*templateConfig, error) {
 	vrfRouterID, err := nlManager.GetUnderlayIP()
 	if err != nil {
 		return nil, fmt.Errorf("error getting underlay IP: %w", err)
@@ -97,6 +121,10 @@ func renderSubtemplates(in Configuration, nlManager *nl.Manager) (*templateConfi
 	if err != nil {
 		return nil, err
 	}
+	routemapMgmtIn, err := m.renderRouteMapMgmtIn()
+	if err != nil {
+		return nil, err
+	}
 	asn := in.ASN
 	if asn == 0 {
 		asn = vrfAsnConfig
@@ -118,7 +146,7 @@ func renderSubtemplates(in Configuration, nlManager *nl.Manager) (*templateConfi
 		NeighborsV6:      string(neighborsV6),
 		BGP:              string(bgp),
 		PrefixLists:      string(prefixlists),
-		RouteMaps:        string(routemaps),
+		RouteMaps:        string(routemaps) + "\n" + string(routemapMgmtIn),
 		UnderlayRouterID: vrfRouterID.String(),
 		Hostname:         hostname,
 	}, nil
