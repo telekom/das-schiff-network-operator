@@ -17,6 +17,22 @@ var (
 	rtLinesRe = regexp.MustCompile(`(?m)^\s*route-target.*`)
 	rtPartsRe = regexp.MustCompile(`(?m)^(\s*route-target\s*(?:import|export)\s*)(.*)`)
 	rtRe      = regexp.MustCompile(`(?m)(\S+)`)
+
+	tagInOriginal = []byte(`route-map TAG-FABRIC-IN permit 10
+  set local-preference 90
+  set tag 20000
+exit`)
+	tagInReplacement = []byte(`route-map TAG-FABRIC-IN permit 10
+  set local-preference 90
+  set community 65169:200 additive
+exit`)
+	denyOutOriginal = []byte(`route-map DENY-TAG-FABRIC-OUT deny 10
+  match tag 20000
+exit`)
+	denyOutReplacement = []byte(`bgp community-list standard cm-received-fabric permit 65169:200
+route-map DENY-TAG-FABRIC-OUT deny 10
+  match community cm-received-fabric
+exit`)
 )
 
 type templateConfig struct {
@@ -66,6 +82,7 @@ func (m *Manager) Configure(in Configuration, nm *nl.Manager) (bool, error) {
 	}
 
 	targetConfig = fixRouteTargetReload(targetConfig)
+	targetConfig = fixTagFabric(targetConfig)
 
 	if !bytes.Equal(currentConfig, targetConfig) {
 		err = os.WriteFile(m.ConfigPath, targetConfig, frrPermissions)
@@ -171,4 +188,10 @@ func fixRouteTargetReload(config []byte) []byte {
 		}
 		return []byte(lines[:len(lines)-1])
 	})
+}
+
+func fixTagFabric(config []byte) []byte {
+	config = bytes.ReplaceAll(config, tagInOriginal, tagInReplacement)
+	config = bytes.ReplaceAll(config, denyOutOriginal, denyOutReplacement)
+	return config
 }
