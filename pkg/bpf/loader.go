@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"time"
 
 	"github.com/cilium/ebpf"
@@ -21,6 +22,7 @@ const (
 )
 
 var (
+	loaderLog               = ctrl.Log.WithName("bpf-loader")
 	router                  routerObjects
 	trackedInterfaceIndices []int
 	qdiscHandle             = netlink.MakeHandle(majorNumber, minorNumebr)
@@ -49,7 +51,8 @@ func AttachInterfaces(intfs []string) error {
 	for _, name := range intfs {
 		intf, err := netlink.LinkByName(name)
 		if err != nil {
-			return fmt.Errorf("error getting link %s by name: %w", name, err)
+			loaderLog.Error(err, "error getting link by name", "name", name)
+			continue
 		}
 		if err := AttachToInterface(intf); err != nil {
 			return err
