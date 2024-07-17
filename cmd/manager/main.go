@@ -184,7 +184,7 @@ func initComponents(mgr manager.Manager, anycastTracker *anycast.Tracker, cfg *c
 		return fmt.Errorf("unable to init BPF router: %w", err)
 	}
 	setupLog.Info("attach bpf to interfaces specified in config")
-	if err := bpf.AttachInterfaces(cfg.BPFInterfaces); err != nil {
+	if err := bpf.AttachInterfaces(cfg.BPFInterfaces, cfg.IgnoreMissingInterfaces); err != nil {
 		return fmt.Errorf("unable to attach bpf to interfaces: %w", err)
 	}
 

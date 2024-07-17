@@ -13,11 +13,12 @@ const (
 )
 
 type Config struct {
-	VRFToVNI      map[string]int       `yaml:"vnimap"`
-	VRFConfig     map[string]VRFConfig `yaml:"vrfConfig"`
-	BPFInterfaces []string             `yaml:"bpfInterfaces"`
-	SkipVRFConfig []string             `yaml:"skipVRFConfig"`
-	ServerASN     int                  `yaml:"serverASN"`
+	VRFToVNI                map[string]int       `yaml:"vnimap"`
+	VRFConfig               map[string]VRFConfig `yaml:"vrfConfig"`
+	BPFInterfaces           []string             `yaml:"bpfInterfaces"`
+	SkipVRFConfig           []string             `yaml:"skipVRFConfig"`
+	ServerASN               int                  `yaml:"serverASN"`
+	IgnoreMissingInterfaces bool                 `yaml:"ignoreMissingInterfaces"`
 }
 
 type VRFConfig struct {

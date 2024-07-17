@@ -47,12 +47,14 @@ func AttachToInterface(intf netlink.Link) error {
 	return nil
 }
 
-func AttachInterfaces(intfs []string) error {
+func AttachInterfaces(intfs []string, ignoreMissingInterfaces bool) error {
 	for _, name := range intfs {
 		intf, err := netlink.LinkByName(name)
-		if err != nil {
+		if err != nil && ignoreMissingInterfaces {
 			loaderLog.Error(err, "error getting link by name", "name", name)
 			continue
+		} else if err != nil {
+			return fmt.Errorf("error getting link %s by name: %w", name, err)
 		}
 		if err := AttachToInterface(intf); err != nil {
 			return err
