@@ -16,11 +16,11 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
-func (r *reconcile) fetchLayer2(ctx context.Context) ([]networkv1alpha1.Layer2NetworkConfiguration, error) {
+func (r *Reconciler) fetchLayer2(ctx context.Context) ([]networkv1alpha1.Layer2NetworkConfiguration, error) {
 	layer2List := &networkv1alpha1.Layer2NetworkConfigurationList{}
 	err := r.client.List(ctx, layer2List)
 	if err != nil {
-		r.Logger.Error(err, "error getting list of Layer2s from Kubernetes")
+		r.logger.Error(err, "error getting list of Layer2s from Kubernetes")
 		return nil, fmt.Errorf("error getting list of Layer2s from Kubernetes: %w", err)
 	}
 
@@ -28,14 +28,14 @@ func (r *reconcile) fetchLayer2(ctx context.Context) ([]networkv1alpha1.Layer2Ne
 	node := &corev1.Node{}
 	err = r.client.Get(ctx, types.NamespacedName{Name: nodeName}, node)
 	if err != nil {
-		r.Logger.Error(err, "error getting local node name")
+		r.logger.Error(err, "error getting local node name")
 		return nil, fmt.Errorf("error getting local node name: %w", err)
 	}
 
 	l2vnis := []networkv1alpha1.Layer2NetworkConfiguration{}
 	for i := range layer2List.Items {
 		item := &layer2List.Items[i]
-		logger := r.Logger.WithValues("name", item.ObjectMeta.Name, "namespace", item.ObjectMeta.Namespace, "vlan", item.Spec.ID, "vni", item.Spec.VNI)
+		logger := r.logger.WithValues("name", item.ObjectMeta.Name, "namespace", item.ObjectMeta.Namespace, "vlan", item.Spec.ID, "vni", item.Spec.VNI)
 		if item.Spec.NodeSelector != nil {
 			selector := labels.NewSelector()
 			var reqs labels.Requirements
@@ -76,7 +76,7 @@ func (r *reconcile) fetchLayer2(ctx context.Context) ([]networkv1alpha1.Layer2Ne
 	return l2vnis, nil
 }
 
-func (r *reconcile) reconcileLayer2(l2vnis []networkv1alpha1.Layer2NetworkConfiguration) error {
+func (r *LegacyReconciler) reconcileLayer2(l2vnis []networkv1alpha1.Layer2NetworkConfiguration) error {
 	desired, err := r.getDesired(l2vnis)
 	if err != nil {
 		return err
@@ -111,10 +111,10 @@ func (r *reconcile) reconcileLayer2(l2vnis []networkv1alpha1.Layer2NetworkConfig
 	}
 
 	for i := range toDelete {
-		r.Logger.Info("Deleting Layer2 because it is no longer configured", "vlan", toDelete[i].VlanID, "vni", toDelete[i].VNI)
+		r.logger.Info("Deleting Layer2 because it is no longer configured", "vlan", toDelete[i].VlanID, "vni", toDelete[i].VNI)
 		errs := r.netlinkManager.CleanupL2(&toDelete[i])
 		for _, err := range errs {
-			r.Logger.Error(err, "Error deleting Layer2", "vlan", toDelete[i].VlanID, "vni", toDelete[i].VNI)
+			r.logger.Error(err, "Error deleting Layer2", "vlan", toDelete[i].VlanID, "vni", toDelete[i].VNI)
 		}
 	}
 
@@ -129,8 +129,8 @@ func (r *reconcile) reconcileLayer2(l2vnis []networkv1alpha1.Layer2NetworkConfig
 	return nil
 }
 
-func (r *reconcile) createL2(info *nl.Layer2Information, anycastTrackerInterfaces *[]int) error {
-	r.Logger.Info("Creating Layer2", "vlan", info.VlanID, "vni", info.VNI)
+func (r *LegacyReconciler) createL2(info *nl.Layer2Information, anycastTrackerInterfaces *[]int) error {
+	r.logger.Info("Creating Layer2", "vlan", info.VlanID, "vni", info.VNI)
 	err := r.netlinkManager.CreateL2(info)
 	if err != nil {
 		return fmt.Errorf("error creating layer2 vlan %d vni %d: %w", info.VlanID, info.VNI, err)
@@ -145,7 +145,7 @@ func (r *reconcile) createL2(info *nl.Layer2Information, anycastTrackerInterface
 	return nil
 }
 
-func (r *reconcile) getDesired(l2vnis []networkv1alpha1.Layer2NetworkConfiguration) ([]nl.Layer2Information, error) {
+func (r *LegacyReconciler) getDesired(l2vnis []networkv1alpha1.Layer2NetworkConfiguration) ([]nl.Layer2Information, error) {
 	availableVrfs, err := r.netlinkManager.ListL3()
 	if err != nil {
 		return nil, fmt.Errorf("error loading available VRFs: %w", err)
@@ -162,7 +162,7 @@ func (r *reconcile) getDesired(l2vnis []networkv1alpha1.Layer2NetworkConfigurati
 
 		anycastGateways, err := r.netlinkManager.ParseIPAddresses(spec.AnycastGateways)
 		if err != nil {
-			r.Logger.Error(err, "error parsing anycast gateways", "layer", l2vnis[i].ObjectMeta.Name, "gw", spec.AnycastGateways)
+			r.logger.Error(err, "error parsing anycast gateways", "layer", l2vnis[i].ObjectMeta.Name, "gw", spec.AnycastGateways)
 			return nil, fmt.Errorf("error parsing anycast gateways: %w", err)
 		}
 
@@ -175,7 +175,7 @@ func (r *reconcile) getDesired(l2vnis []networkv1alpha1.Layer2NetworkConfigurati
 				}
 			}
 			if !vrfAvailable {
-				r.Logger.Error(err, "VRF of Layer2 not found on node", "layer", l2vnis[i].ObjectMeta.Name, "vrf", spec.VRF)
+				r.logger.Error(err, "VRF of Layer2 not found on node", "layer", l2vnis[i].ObjectMeta.Name, "vrf", spec.VRF)
 				continue
 			}
 		}
@@ -213,8 +213,8 @@ func determineToBeDeleted(existing, desired []nl.Layer2Information) []nl.Layer2I
 	return toDelete
 }
 
-func (r *reconcile) reconcileExistingLayer(desired, currentConfig *nl.Layer2Information, anycastTrackerInterfaces *[]int) error {
-	r.Logger.Info("Reconciling existing Layer2", "vlan", desired.VlanID, "vni", desired.VNI)
+func (r *LegacyReconciler) reconcileExistingLayer(desired, currentConfig *nl.Layer2Information, anycastTrackerInterfaces *[]int) error {
+	r.logger.Info("Reconciling existing Layer2", "vlan", desired.VlanID, "vni", desired.VNI)
 	err := r.netlinkManager.ReconcileL2(currentConfig, desired)
 	if err != nil {
 		return fmt.Errorf("error reconciling layer2 vlan %d vni %d: %w", desired.VlanID, desired.VNI, err)
@@ -229,7 +229,7 @@ func (r *reconcile) reconcileExistingLayer(desired, currentConfig *nl.Layer2Info
 	return nil
 }
 
-func (*reconcile) checkL2Duplicates(configs []networkv1alpha1.Layer2NetworkConfiguration) error {
+func (*Reconciler) checkL2Duplicates(configs []networkv1alpha1.Layer2NetworkConfiguration) error {
 	for i := range configs {
 		for j := i + 1; j < len(configs); j++ {
 			if configs[i].Spec.ID == configs[j].Spec.ID {
