@@ -28,13 +28,13 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push Docker image
-        uses: docker/build-push-action@v5.3.0
+        uses: docker/build-push-action@v6.5.0
         with:
           context: .
           push: true
           tags: ghcr.io/telekom/das-schiff-network-operator:main
       - name: Build and push sidecar Docker image
-        uses: docker/build-push-action@v5.3.0
+        uses: docker/build-push-action@v6.5.0
         with:
           context: .
           file: frr-exporter.Dockerfile
