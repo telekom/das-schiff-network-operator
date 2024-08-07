@@ -1,4 +1,4 @@
-ARG FRR_VERSION="9.1.0"
+ARG FRR_VERSION="10.1.0"
 ARG REGISTRY="quay.io"
 # Build the manager binary
 FROM docker.io/library/golang:1.21-alpine as builder
