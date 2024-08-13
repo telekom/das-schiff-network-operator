@@ -71,6 +71,7 @@ type VRFRouteConfigurationSpec struct {
 	// Sequence of the generated route-map, maximum of 65534 because we sometimes have to set an explicit default-deny
 	Seq int `json:"seq"`
 
+	// +kubebuilder:validation:Optional
 	// +kubebuilder:default=9000
 	// The MTU of the VRF
 	MTU int `json:"mtu"`

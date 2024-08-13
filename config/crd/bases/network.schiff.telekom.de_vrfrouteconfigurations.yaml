@@ -139,7 +139,6 @@ spec:
             required:
             - export
             - import
-            - mtu
             - seq
             type: object
           status:
