@@ -188,7 +188,7 @@ func (n *Manager) EnsureMTU(info VRFInformation) error {
 		return fmt.Errorf("error getting default2vrf interface of vrf %s: %w", info.Name, err)
 	}
 	if link.Attrs().MTU != info.linkMTU() {
-		if err := n.toolkit.LinkSetMTU(link, info.MTU); err != nil {
+		if err := n.toolkit.LinkSetMTU(link, info.linkMTU()); err != nil {
 			return fmt.Errorf("error setting MTU of default2vrw interface of vrf %s: %w", info.Name, err)
 		}
 	}
