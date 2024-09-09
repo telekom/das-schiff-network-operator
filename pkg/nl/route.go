@@ -97,6 +97,8 @@ func GetProtocolNumber(protocol string, frr bool) int {
 		return unix.RTPROT_ZEBRA
 	// this is a hack as there is no direct representation in Linux for
 	// directly connected routes but normally they are installed by kernel
+	case "local":
+		return unix.RTPROT_KERNEL
 	case "connected":
 		return unix.RTPROT_KERNEL
 	//
