@@ -34,7 +34,7 @@ type templateConfig struct {
 	HostRouterID     string
 }
 
-func (m *Manager) Configure(in Configuration, nm *nl.Manager, nwopCfg config.Config) (bool, error) {
+func (m *Manager) Configure(in Configuration, nm *nl.Manager, nwopCfg *config.Config) (bool, error) {
 	// Remove permit from VRF and only allow deny rules for mgmt VRFs
 	for i := range in.VRFs {
 		if in.VRFs[i].Name != m.mgmtVrf {
@@ -51,7 +51,7 @@ func (m *Manager) Configure(in Configuration, nm *nl.Manager, nwopCfg config.Con
 		}
 	}
 
-	config, err := m.renderSubtemplates(in, nm)
+	frrConfig, err := m.renderSubtemplates(in, nm)
 	if err != nil {
 		return false, err
 	}
@@ -61,7 +61,7 @@ func (m *Manager) Configure(in Configuration, nm *nl.Manager, nwopCfg config.Con
 		return false, fmt.Errorf("error reading configuration file: %w", err)
 	}
 
-	targetConfig, err := render(m.configTemplate, config)
+	targetConfig, err := render(m.configTemplate, frrConfig)
 	if err != nil {
 		return false, err
 	}
