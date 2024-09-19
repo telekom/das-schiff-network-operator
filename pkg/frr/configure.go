@@ -3,10 +3,10 @@ package frr
 import (
 	"bytes"
 	"fmt"
-	"github.com/telekom/das-schiff-network-operator/pkg/config"
 	"os"
 	"regexp"
 
+	"github.com/telekom/das-schiff-network-operator/pkg/config"
 	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
 )
