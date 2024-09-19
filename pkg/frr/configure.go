@@ -156,8 +156,8 @@ func (m *Manager) renderSubtemplates(in Configuration, nlManager *nl.Manager) (*
 
 // fixRouteTargetReload is a workaround for FRR's inability to reload route-targets if they are configured in a single line.
 // This function splits such lines into multiple lines, each containing a single route-target.
-func fixRouteTargetReload(config []byte) []byte {
-	return rtLinesRe.ReplaceAllFunc(config, func(s []byte) []byte {
+func fixRouteTargetReload(frrConfig []byte) []byte {
+	return rtLinesRe.ReplaceAllFunc(frrConfig, func(s []byte) []byte {
 		parts := rtPartsRe.FindSubmatch(s)
 		if parts == nil {
 			return s
