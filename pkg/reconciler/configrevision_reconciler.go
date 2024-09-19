@@ -31,6 +31,7 @@ const (
 	controlPlaneLabel = "node-role.kubernetes.io/control-plane"
 	numOfRefs         = 2
 	configTimeout     = time.Minute * 2
+	preconfigTimeout  = time.Minute * 10
 
 	numOfDeploymentRetries = 3
 )
@@ -157,20 +158,25 @@ func getRevisionCounters(configs []v1alpha1.NodeNetworkConfig, revision *v1alpha
 	invalid = 0
 	for i := range configs {
 		if configs[i].Spec.Revision == revision.Spec.Revision {
+			timeout := configTimeout
 			switch configs[i].Status.ConfigStatus {
-			case StatusInvalid:
-				// Increase 'invalid' counter so we know that there the revision results in invalid configs.
-				invalid++
-			case StatusProvisioning, "":
-				// Update ongoing counter
-				ongoing++
-				if wasConfigTimeoutReached(&configs[i]) {
-					// If timout was reached revision is invalid (but still counts as ongoing).
-					invalid++
-				}
 			case StatusProvisioned:
 				// Update ready counter
 				ready++
+			case StatusInvalid:
+				// Increase 'invalid' counter so we know that the revision results in invalid configs
+				invalid++
+			case "":
+				// Set longer timeout if status was not yet updated
+				timeout = preconfigTimeout
+				fallthrough
+			case StatusProvisioning:
+				// Update ongoing counter
+				ongoing++
+				if wasConfigTimeoutReached(&configs[i], timeout) {
+					// If timout was reached revision is invalid (but still counts as ongoing).
+					invalid++
+				}
 			}
 		}
 	}
@@ -203,8 +209,11 @@ func (crr *ConfigRevisionReconciler) invalidateRevision(ctx context.Context, rev
 	return nil
 }
 
-func wasConfigTimeoutReached(cfg *v1alpha1.NodeNetworkConfig) bool {
-	return time.Now().After(cfg.Status.LastUpdate.Add(configTimeout))
+func wasConfigTimeoutReached(cfg *v1alpha1.NodeNetworkConfig, timeout time.Duration) bool {
+	if cfg.Status.LastUpdate.IsZero() {
+		return false
+	}
+	return time.Now().After(cfg.Status.LastUpdate.Add(timeout))
 }
 
 func getOutdatedNodes(nodes map[string]*corev1.Node, configs []v1alpha1.NodeNetworkConfig, revision *v1alpha1.NetworkConfigRevision) []*corev1.Node {
