@@ -100,7 +100,7 @@ func (r *reconcile) configureFRR(vrfConfigs []frr.VRFConfiguration, reloadTwice 
 	changed, err := r.frrManager.Configure(frr.Configuration{
 		VRFs: vrfConfigs,
 		ASN:  r.config.ServerASN,
-	}, r.netlinkManager)
+	}, r.netlinkManager, *r.config)
 	if err != nil {
 		r.Logger.Error(err, "error updating FRR configuration")
 		return fmt.Errorf("error updating FRR configuration: %w", err)

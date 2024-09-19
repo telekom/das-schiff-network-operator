@@ -3,6 +3,7 @@ package frr
 import (
 	"bytes"
 	"fmt"
+	"github.com/telekom/das-schiff-network-operator/pkg/config"
 	"os"
 	"regexp"
 
@@ -33,7 +34,7 @@ type templateConfig struct {
 	HostRouterID     string
 }
 
-func (m *Manager) Configure(in Configuration, nm *nl.Manager) (bool, error) {
+func (m *Manager) Configure(in Configuration, nm *nl.Manager, nwopCfg config.Config) (bool, error) {
 	// Remove permit from VRF and only allow deny rules for mgmt VRFs
 	for i := range in.VRFs {
 		if in.VRFs[i].Name != m.mgmtVrf {
@@ -66,6 +67,7 @@ func (m *Manager) Configure(in Configuration, nm *nl.Manager) (bool, error) {
 	}
 
 	targetConfig = fixRouteTargetReload(targetConfig)
+	targetConfig = fixCfgReplacements(targetConfig, nwopCfg.Replacements)
 
 	if !bytes.Equal(currentConfig, targetConfig) {
 		err = os.WriteFile(m.ConfigPath, targetConfig, frrPermissions)
@@ -171,4 +173,12 @@ func fixRouteTargetReload(config []byte) []byte {
 		}
 		return []byte(lines[:len(lines)-1])
 	})
+}
+
+// fixCfgReplacements replaces placeholders in the configuration with the actual values.
+func fixCfgReplacements(config []byte, replacements []config.Replacement) []byte {
+	for _, replacement := range replacements {
+		config = bytes.ReplaceAll(config, []byte(replacement.Old), []byte(replacement.New))
+	}
+	return config
 }
