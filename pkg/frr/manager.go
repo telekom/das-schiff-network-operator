@@ -27,7 +27,7 @@ type ManagerInterface interface {
 	ReloadFRR() error
 	RestartFRR() error
 	GetStatusFRR() (activeState, subState string, err error)
-	Configure(in Configuration, nm *nl.Manager) (bool, error)
+	Configure(in Configuration, nm *nl.Manager, nwopCfg *config.Config) (bool, error)
 	SetConfigPath(path string)
 }
 

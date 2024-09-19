@@ -7,6 +7,7 @@ package mock_frr
 import (
 	reflect "reflect"
 
+	config "github.com/telekom/das-schiff-network-operator/pkg/config"
 	frr "github.com/telekom/das-schiff-network-operator/pkg/frr"
 	nl "github.com/telekom/das-schiff-network-operator/pkg/nl"
 	gomock "go.uber.org/mock/gomock"
@@ -36,18 +37,18 @@ func (m *MockManagerInterface) EXPECT() *MockManagerInterfaceMockRecorder {
 }
 
 // Configure mocks base method.
-func (m *MockManagerInterface) Configure(arg0 frr.Configuration, arg1 *nl.Manager) (bool, error) {
+func (m *MockManagerInterface) Configure(arg0 frr.Configuration, arg1 *nl.Manager, arg2 *config.Config) (bool, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Configure", arg0, arg1)
+	ret := m.ctrl.Call(m, "Configure", arg0, arg1, arg2)
 	ret0, _ := ret[0].(bool)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // Configure indicates an expected call of Configure.
-func (mr *MockManagerInterfaceMockRecorder) Configure(arg0, arg1 interface{}) *gomock.Call {
+func (mr *MockManagerInterfaceMockRecorder) Configure(arg0, arg1, arg2 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Configure", reflect.TypeOf((*MockManagerInterface)(nil).Configure), arg0, arg1)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Configure", reflect.TypeOf((*MockManagerInterface)(nil).Configure), arg0, arg1, arg2)
 }
 
 // GetStatusFRR mocks base method.

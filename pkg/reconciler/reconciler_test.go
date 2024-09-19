@@ -208,7 +208,7 @@ var _ = Describe("NodeConfigReconciler", func() {
 	Context("NewNodeConfigReconciler() should", func() {
 		It("return new node config reconciler", func() {
 			c := createClient()
-			r, err := NewNodeConfigReconciler(c, logr.New(nil), time.Millisecond*100, runtime.NewScheme(), 1)
+			r, err := NewNodeConfigReconciler(c, logr.New(nil), time.Millisecond*100, time.Millisecond*100, time.Millisecond*100, runtime.NewScheme(), 1)
 			Expect(r).ToNot(BeNil())
 			Expect(err).ToNot(HaveOccurred())
 		})
@@ -216,7 +216,7 @@ var _ = Describe("NodeConfigReconciler", func() {
 	Context("reconcileDebaunced() should", func() {
 		It("return no error if there is nothing to deploy", func() {
 			c := createClient()
-			r, err := NewNodeConfigReconciler(c, logr.New(nil), time.Millisecond*100, runtime.NewScheme(), 1)
+			r, err := NewNodeConfigReconciler(c, logr.New(nil), time.Millisecond*100, time.Millisecond*100, time.Millisecond*100, runtime.NewScheme(), 1)
 			Expect(r).ToNot(BeNil())
 			Expect(err).ToNot(HaveOccurred())
 			err = r.reconcileDebounced(context.TODO())
@@ -227,7 +227,7 @@ var _ = Describe("NodeConfigReconciler", func() {
 			err := json.Unmarshal([]byte(fakeNCRJSON), fakeNCR)
 			Expect(err).ShouldNot(HaveOccurred())
 			c := createClient(fakeNCR)
-			r, err := NewNodeConfigReconciler(c, logr.New(nil), time.Millisecond*100, runtime.NewScheme(), 1)
+			r, err := NewNodeConfigReconciler(c, logr.New(nil), time.Millisecond*100, time.Millisecond*100, time.Millisecond*100, runtime.NewScheme(), 1)
 			Expect(r).ToNot(BeNil())
 			Expect(err).ToNot(HaveOccurred())
 			err = r.reconcileDebounced(context.TODO())
@@ -235,7 +235,7 @@ var _ = Describe("NodeConfigReconciler", func() {
 		})
 		It("no error if NodeConfigRevision deployed successfully", func() {
 			c := createFullClient()
-			r, err := NewNodeConfigReconciler(c, logr.New(nil), time.Millisecond*100, runtime.NewScheme(), 1)
+			r, err := NewNodeConfigReconciler(c, logr.New(nil), time.Millisecond*100, time.Millisecond*100, time.Millisecond*100, runtime.NewScheme(), 1)
 			Expect(r).ToNot(BeNil())
 			Expect(err).ToNot(HaveOccurred())
 			err = r.reconcileDebounced(context.TODO())
@@ -253,7 +253,7 @@ var _ = Describe("NodeConfigReconciler", func() {
 			Expect(err).ShouldNot(HaveOccurred())
 
 			c := createClientWithStatus(&fakeNCR.Items[0], &fakeNNC.Items[0], fakeNCR, fakeNNC, fakeNodes)
-			r, err := NewNodeConfigReconciler(c, logr.New(nil), time.Millisecond*100, runtime.NewScheme(), 1)
+			r, err := NewNodeConfigReconciler(c, logr.New(nil), time.Millisecond*100, time.Millisecond*100, time.Millisecond*100, runtime.NewScheme(), 1)
 			Expect(r).ToNot(BeNil())
 			Expect(err).ToNot(HaveOccurred())
 			err = r.reconcileDebounced(context.TODO())
@@ -315,7 +315,7 @@ var _ = Describe("NodeNetworkConfigReconciler", func() {
 
 			frrManagerMock.EXPECT().Init(gomock.Any()).Return(nil)
 			frrManagerMock.EXPECT().Configure(gomock.Any(),
-				gomock.Any()).Return(false, fmt.Errorf("configuration error"))
+				gomock.Any(), gomock.Any()).Return(false, fmt.Errorf("configuration error"))
 			r, err := NewNodeNetworkConfigReconciler(c, nil, logr.New(nil), "",
 				frrManagerMock, nl.NewManager(netlinkMock))
 			Expect(err).ToNot(HaveOccurred())
@@ -330,7 +330,7 @@ var _ = Describe("NodeNetworkConfigReconciler", func() {
 
 			c := createFullClient()
 			frrManagerMock.EXPECT().Init(gomock.Any()).Return(nil)
-			frrManagerMock.EXPECT().Configure(gomock.Any(), gomock.Any()).Return(true, nil)
+			frrManagerMock.EXPECT().Configure(gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil)
 			frrManagerMock.EXPECT().ReloadFRR().Return(fmt.Errorf("error reloading FRR"))
 			frrManagerMock.EXPECT().RestartFRR().Return(fmt.Errorf("error restarting FRR"))
 			r, err := NewNodeNetworkConfigReconciler(c, nil, logr.New(nil), "",
@@ -348,7 +348,7 @@ var _ = Describe("NodeNetworkConfigReconciler", func() {
 
 			c := createFullClient()
 			frrManagerMock.EXPECT().Init(gomock.Any()).Return(nil)
-			frrManagerMock.EXPECT().Configure(gomock.Any(), gomock.Any()).Return(true, nil)
+			frrManagerMock.EXPECT().Configure(gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil)
 			frrManagerMock.EXPECT().ReloadFRR().Return(nil)
 			r, err := NewNodeNetworkConfigReconciler(c, nil, logr.New(nil), "",
 				frrManagerMock, nl.NewManager(netlinkMock))

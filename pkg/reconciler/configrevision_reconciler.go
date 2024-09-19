@@ -28,22 +28,25 @@ const (
 	StatusProvisioning = "provisioning"
 	StatusProvisioned  = "provisioned"
 
+	DefaultConfigTimeout   = "2m"
+	DefaultPreconfigTimout = "10m"
+
 	controlPlaneLabel = "node-role.kubernetes.io/control-plane"
 	numOfRefs         = 2
-	configTimeout     = time.Minute * 2
-	preconfigTimeout  = time.Minute * 10
 
 	numOfDeploymentRetries = 3
 )
 
 // ConfigRevisionReconciler is responsible for creating NodeConfig objects.
 type ConfigRevisionReconciler struct {
-	logger      logr.Logger
-	debouncer   *debounce.Debouncer
-	client      client.Client
-	timeout     time.Duration
-	scheme      *runtime.Scheme
-	maxUpdating int
+	logger           logr.Logger
+	debouncer        *debounce.Debouncer
+	client           client.Client
+	apiTimeout       time.Duration
+	configTimeout    time.Duration
+	preconfigTimeout time.Duration
+	scheme           *runtime.Scheme
+	maxUpdating      int
 }
 
 // Reconcile starts reconciliation.
@@ -52,13 +55,15 @@ func (crr *ConfigRevisionReconciler) Reconcile(ctx context.Context) {
 }
 
 // // NewNodeConfigReconciler creates new reconciler that creates NodeConfig objects.
-func NewNodeConfigReconciler(clusterClient client.Client, logger logr.Logger, timeout time.Duration, s *runtime.Scheme, maxUpdating int) (*ConfigRevisionReconciler, error) {
+func NewNodeConfigReconciler(clusterClient client.Client, logger logr.Logger, apiTimeout, configTimeout, preconfigTimeout time.Duration, s *runtime.Scheme, maxUpdating int) (*ConfigRevisionReconciler, error) {
 	reconciler := &ConfigRevisionReconciler{
-		logger:      logger,
-		timeout:     timeout,
-		client:      clusterClient,
-		scheme:      s,
-		maxUpdating: maxUpdating,
+		logger:           logger,
+		apiTimeout:       apiTimeout,
+		configTimeout:    configTimeout,
+		preconfigTimeout: preconfigTimeout,
+		client:           clusterClient,
+		scheme:           s,
+		maxUpdating:      maxUpdating,
 	}
 
 	reconciler.debouncer = debounce.NewDebouncer(reconciler.reconcileDebounced, defaultDebounceTime, logger)
@@ -140,7 +145,7 @@ func (crr *ConfigRevisionReconciler) processConfigsForRevision(ctx context.Conte
 	if err != nil {
 		return nil, fmt.Errorf("failed to remove redundant configs: %w", err)
 	}
-	ready, ongoing, invalid := getRevisionCounters(configs, revision)
+	ready, ongoing, invalid := crr.getRevisionCounters(configs, revision)
 	cnt := &counters{ready: ready, ongoing: ongoing, invalid: invalid}
 
 	if invalid > 0 {
@@ -152,13 +157,13 @@ func (crr *ConfigRevisionReconciler) processConfigsForRevision(ctx context.Conte
 	return cnt, nil
 }
 
-func getRevisionCounters(configs []v1alpha1.NodeNetworkConfig, revision *v1alpha1.NetworkConfigRevision) (ready, ongoing, invalid int) {
+func (crr *ConfigRevisionReconciler) getRevisionCounters(configs []v1alpha1.NodeNetworkConfig, revision *v1alpha1.NetworkConfigRevision) (ready, ongoing, invalid int) {
 	ready = 0
 	ongoing = 0
 	invalid = 0
 	for i := range configs {
 		if configs[i].Spec.Revision == revision.Spec.Revision {
-			timeout := configTimeout
+			timeout := crr.configTimeout
 			switch configs[i].Status.ConfigStatus {
 			case StatusProvisioned:
 				// Update ready counter
@@ -168,7 +173,7 @@ func getRevisionCounters(configs []v1alpha1.NodeNetworkConfig, revision *v1alpha
 				invalid++
 			case "":
 				// Set longer timeout if status was not yet updated
-				timeout = preconfigTimeout
+				timeout = crr.preconfigTimeout
 				fallthrough
 			case StatusProvisioning:
 				// Update ongoing counter
@@ -415,7 +420,7 @@ func convertSelector(matchLabels map[string]string, matchExpressions []metav1.La
 }
 
 func (crr *ConfigRevisionReconciler) deployConfig(ctx context.Context, newConfig, currentConfig *v1alpha1.NodeNetworkConfig, node *corev1.Node) error {
-	deploymentCtx, deploymentCtxCancel := context.WithTimeout(ctx, crr.timeout)
+	deploymentCtx, deploymentCtxCancel := context.WithTimeout(ctx, crr.apiTimeout)
 	defer deploymentCtxCancel()
 	var cfg *v1alpha1.NodeNetworkConfig
 	if currentConfig != nil {

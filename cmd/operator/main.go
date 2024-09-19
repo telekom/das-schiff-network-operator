@@ -57,14 +57,18 @@ func init() {
 
 func main() {
 	var configFile string
-	var timeout string
+	var apiTimeout string
+	var configTimeout string
+	var preconfigTimeout string
 	var maxUpdating int
 	flag.StringVar(&configFile, "config", "",
 		"The controller will load its initial configuration from this file. "+
 			"Omit this flag to use the default configuration values. "+
 			"Command-line flags override configuration from this file.")
-	flag.StringVar(&timeout, "timeout", reconciler.DefaultTimeout,
+	flag.StringVar(&apiTimeout, "api-timeout", reconciler.DefaultTimeout,
 		"Timeout for Kubernetes API connections (default: 60s).")
+	flag.StringVar(&preconfigTimeout, "preconfig-timeout", reconciler.DefaultPreconfigTimout, "Timoeut for NodeConfig reconciliation process, when agent DID NOT picked the work yet")
+	flag.StringVar(&configTimeout, "config-timeout", reconciler.DefaultConfigTimeout, "Timoeut for NodeConfig reconciliation process, when agent picked the work")
 	flag.IntVar(&maxUpdating, "max-updating", 1, "Configures how many nodes can be updated simultaneously when rolling update is performed.")
 	opts := zap.Options{
 		Development: true,
@@ -86,7 +90,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	err = setupReconcilers(mgr, timeout, maxUpdating)
+	err = setupReconcilers(mgr, apiTimeout, configTimeout, preconfigTimeout, maxUpdating)
 	if err != nil {
 		setupLog.Error(err, "unable to setup reconcilers")
 		os.Exit(1)
@@ -99,18 +103,28 @@ func main() {
 	}
 }
 
-func setupReconcilers(mgr manager.Manager, timeout string, maxUpdating int) error {
-	timoutVal, err := time.ParseDuration(timeout)
+func setupReconcilers(mgr manager.Manager, apiTimeout, configTimeout, preconfigTimeout string, maxUpdating int) error {
+	apiTimoutVal, err := time.ParseDuration(apiTimeout)
 	if err != nil {
-		return fmt.Errorf("error parsing timeout value %s: %w", timeout, err)
+		return fmt.Errorf("error parsing API timeout value %s: %w", apiTimeout, err)
 	}
 
-	cr, err := reconciler.NewConfigReconciler(mgr.GetClient(), mgr.GetLogger().WithName("ConfigReconciler"), timoutVal)
+	configTimeoutVal, err := time.ParseDuration(configTimeout)
+	if err != nil {
+		return fmt.Errorf("error parsing config timeout value %s: %w", configTimeout, err)
+	}
+
+	preconfigTimeoutVal, err := time.ParseDuration(preconfigTimeout)
+	if err != nil {
+		return fmt.Errorf("error parsing preconfig timeout value %s: %w", preconfigTimeout, err)
+	}
+
+	cr, err := reconciler.NewConfigReconciler(mgr.GetClient(), mgr.GetLogger().WithName("ConfigReconciler"), apiTimoutVal)
 	if err != nil {
 		return fmt.Errorf("unable to create config reconciler reconciler: %w", err)
 	}
 
-	ncr, err := reconciler.NewNodeConfigReconciler(mgr.GetClient(), mgr.GetLogger().WithName("NodeConfigReconciler"), timoutVal, mgr.GetScheme(), maxUpdating)
+	ncr, err := reconciler.NewNodeConfigReconciler(mgr.GetClient(), mgr.GetLogger().WithName("NodeConfigReconciler"), apiTimoutVal, configTimeoutVal, preconfigTimeoutVal, mgr.GetScheme(), maxUpdating)
 	if err != nil {
 		return fmt.Errorf("unable to create node reconciler: %w", err)
 	}
