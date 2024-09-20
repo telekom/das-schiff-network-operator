@@ -67,7 +67,7 @@ func (m *Manager) Configure(in Configuration, nm *nl.Manager, nwopCfg *config.Co
 	}
 
 	targetConfig = fixRouteTargetReload(targetConfig)
-	targetConfig = fixCfgReplacements(targetConfig, nwopCfg.Replacements)
+	targetConfig = applyCfgReplacements(targetConfig, nwopCfg.Replacements)
 
 	if !bytes.Equal(currentConfig, targetConfig) {
 		err = os.WriteFile(m.ConfigPath, targetConfig, frrPermissions)
@@ -175,8 +175,8 @@ func fixRouteTargetReload(frrConfig []byte) []byte {
 	})
 }
 
-// fixCfgReplacements replaces placeholders in the configuration with the actual values.
-func fixCfgReplacements(frrConfig []byte, replacements []config.Replacement) []byte {
+// applyCfgReplacements replaces placeholders in the configuration with the actual values.
+func applyCfgReplacements(frrConfig []byte, replacements []config.Replacement) []byte {
 	for _, replacement := range replacements {
 		if !replacement.Regex {
 			frrConfig = bytes.ReplaceAll(frrConfig, []byte(replacement.Old), []byte(replacement.New))
