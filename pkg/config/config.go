@@ -18,11 +18,19 @@ type Config struct {
 	BPFInterfaces []string             `yaml:"bpfInterfaces"`
 	SkipVRFConfig []string             `yaml:"skipVRFConfig"`
 	ServerASN     int                  `yaml:"serverASN"`
+
+	Replacements []Replacement `yaml:"replacements"`
 }
 
 type VRFConfig struct {
 	VNI int    `yaml:"vni"`
 	RT  string `yaml:"rt"`
+}
+
+type Replacement struct {
+	Old   string `yaml:"old"`
+	New   string `yaml:"new"`
+	Regex bool   `yaml:"regex"`
 }
 
 func LoadConfig() (*Config, error) {

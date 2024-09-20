@@ -6,6 +6,7 @@ import (
 	"os"
 	"regexp"
 
+	"github.com/telekom/das-schiff-network-operator/pkg/config"
 	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
 )
@@ -33,7 +34,7 @@ type templateConfig struct {
 	HostRouterID     string
 }
 
-func (m *Manager) Configure(in Configuration, nm *nl.Manager) (bool, error) {
+func (m *Manager) Configure(in Configuration, nm *nl.Manager, nwopCfg *config.Config) (bool, error) {
 	// Remove permit from VRF and only allow deny rules for mgmt VRFs
 	for i := range in.VRFs {
 		if in.VRFs[i].Name != m.mgmtVrf {
@@ -50,7 +51,7 @@ func (m *Manager) Configure(in Configuration, nm *nl.Manager) (bool, error) {
 		}
 	}
 
-	config, err := m.renderSubtemplates(in, nm)
+	frrConfig, err := m.renderSubtemplates(in, nm)
 	if err != nil {
 		return false, err
 	}
@@ -60,12 +61,13 @@ func (m *Manager) Configure(in Configuration, nm *nl.Manager) (bool, error) {
 		return false, fmt.Errorf("error reading configuration file: %w", err)
 	}
 
-	targetConfig, err := render(m.configTemplate, config)
+	targetConfig, err := render(m.configTemplate, frrConfig)
 	if err != nil {
 		return false, err
 	}
 
 	targetConfig = fixRouteTargetReload(targetConfig)
+	targetConfig = applyCfgReplacements(targetConfig, nwopCfg.Replacements)
 
 	if !bytes.Equal(currentConfig, targetConfig) {
 		err = os.WriteFile(m.ConfigPath, targetConfig, frrPermissions)
@@ -154,8 +156,8 @@ func (m *Manager) renderSubtemplates(in Configuration, nlManager *nl.Manager) (*
 
 // fixRouteTargetReload is a workaround for FRR's inability to reload route-targets if they are configured in a single line.
 // This function splits such lines into multiple lines, each containing a single route-target.
-func fixRouteTargetReload(config []byte) []byte {
-	return rtLinesRe.ReplaceAllFunc(config, func(s []byte) []byte {
+func fixRouteTargetReload(frrConfig []byte) []byte {
+	return rtLinesRe.ReplaceAllFunc(frrConfig, func(s []byte) []byte {
 		parts := rtPartsRe.FindSubmatch(s)
 		if parts == nil {
 			return s
@@ -171,4 +173,17 @@ func fixRouteTargetReload(config []byte) []byte {
 		}
 		return []byte(lines[:len(lines)-1])
 	})
+}
+
+// applyCfgReplacements replaces placeholders in the configuration with the actual values.
+func applyCfgReplacements(frrConfig []byte, replacements []config.Replacement) []byte {
+	for _, replacement := range replacements {
+		if !replacement.Regex {
+			frrConfig = bytes.ReplaceAll(frrConfig, []byte(replacement.Old), []byte(replacement.New))
+		} else {
+			re := regexp.MustCompile(replacement.Old)
+			frrConfig = re.ReplaceAll(frrConfig, []byte(replacement.New))
+		}
+	}
+	return frrConfig
 }

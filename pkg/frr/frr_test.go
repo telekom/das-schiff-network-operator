@@ -134,7 +134,7 @@ var _ = Describe("frr", func() {
 		It("return error if cannot get underlay IP", func() {
 			m := &Manager{}
 			nlMock.EXPECT().AddrList(gomock.Any(), gomock.Any()).Return(nil, errors.New("error listing addresses"))
-			_, err := m.Configure(Configuration{}, nl.NewManager(nlMock))
+			_, err := m.Configure(Configuration{}, nl.NewManager(nlMock), &config.Config{})
 			Expect(err).To(HaveOccurred())
 		})
 		It("return error if cannot node's name", func() {
@@ -148,7 +148,7 @@ var _ = Describe("frr", func() {
 			nlMock.EXPECT().AddrList(gomock.Any(), gomock.Any()).Return([]netlink.Addr{
 				{IPNet: netlink.NewIPNet(net.IPv4(0, 0, 0, 0))},
 			}, nil)
-			_, err := m.Configure(Configuration{}, nl.NewManager(nlMock))
+			_, err := m.Configure(Configuration{}, nl.NewManager(nlMock), &config.Config{})
 			Expect(err).To(HaveOccurred())
 
 			if isSet {
@@ -165,7 +165,7 @@ var _ = Describe("frr", func() {
 			nlMock.EXPECT().AddrList(gomock.Any(), gomock.Any()).Return([]netlink.Addr{
 				{IPNet: netlink.NewIPNet(net.IPv4(0, 0, 0, 0))},
 			}, nil)
-			_, err = m.Configure(Configuration{}, nl.NewManager(nlMock))
+			_, err = m.Configure(Configuration{}, nl.NewManager(nlMock), &config.Config{})
 			Expect(err).To(HaveOccurred())
 
 			if isSet {
@@ -189,7 +189,7 @@ var _ = Describe("frr", func() {
 			nlMock.EXPECT().AddrList(gomock.Any(), gomock.Any()).Return([]netlink.Addr{
 				{IPNet: netlink.NewIPNet(net.IPv4(0, 0, 0, 0))},
 			}, nil)
-			_, err = m.Configure(Configuration{}, nl.NewManager(nlMock))
+			_, err = m.Configure(Configuration{}, nl.NewManager(nlMock), &config.Config{})
 			Expect(err).To(HaveOccurred())
 
 			if isSet {
