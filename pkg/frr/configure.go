@@ -178,7 +178,12 @@ func fixRouteTargetReload(frrConfig []byte) []byte {
 // fixCfgReplacements replaces placeholders in the configuration with the actual values.
 func fixCfgReplacements(frrConfig []byte, replacements []config.Replacement) []byte {
 	for _, replacement := range replacements {
-		frrConfig = bytes.ReplaceAll(frrConfig, []byte(replacement.Old), []byte(replacement.New))
+		if !replacement.Regex {
+			frrConfig = bytes.ReplaceAll(frrConfig, []byte(replacement.Old), []byte(replacement.New))
+		} else {
+			re := regexp.MustCompile(replacement.Old)
+			frrConfig = re.ReplaceAll(frrConfig, []byte(replacement.New))
+		}
 	}
 	return frrConfig
 }

@@ -28,8 +28,9 @@ type VRFConfig struct {
 }
 
 type Replacement struct {
-	Old string `yaml:"old"`
-	New string `yaml:"new"`
+	Old   string `yaml:"old"`
+	New   string `yaml:"new"`
+	Regex bool   `yaml:"regex"`
 }
 
 func LoadConfig() (*Config, error) {
