@@ -1,5 +1,5 @@
 # Build the manager binary
-FROM docker.io/library/golang:1.21-alpine as builder
+FROM docker.io/library/golang:1.21-alpine AS builder
 
 
 WORKDIR /workspace
@@ -10,28 +10,19 @@ COPY go.sum go.sum
 # and so that source changes don't invalidate our downloaded layer
 RUN go mod download
 
-# Build router
-RUN apk add llvm clang linux-headers libbpf-dev musl-dev
-
 # Copy the go source
-COPY cmd/manager/main.go main.go
+COPY cmd/operator/main.go main.go
 COPY api/ api/
 COPY controllers/ controllers/
 COPY pkg/ pkg/
 
-# Build router
-COPY bpf/ bpf/
-RUN cd pkg/bpf/ && go generate
-
 # Build
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -o manager main.go
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -o operator main.go
 
 FROM alpine:latest
 
-RUN apk add --no-cache iptables ip6tables
-
 WORKDIR /
-COPY --from=builder /workspace/manager .
+COPY --from=builder /workspace/operator .
 USER 65532:65532
 
-ENTRYPOINT ["/manager"]
+ENTRYPOINT ["/operator"]

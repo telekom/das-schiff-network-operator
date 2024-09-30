@@ -1,8 +1,10 @@
 
-# Image URL to use all building/pushing image targets
-IMG ?= ghcr.io/telekom/das-schiff-network-operator:latest
+# Agent image URL to use all building/pushing image targets
+AGENT_IMG ?= ghcr.io/telekom/das-schiff-network-operator-agent:latest
 # Sidecar image URL to use all building/pushing image targets
 SIDECAR_IMG ?= ghcr.io/telekom/frr-exporter:latest
+# Operator image URL to use all building/pushing image targets
+OPERATOR_IMG ?= ghcr.io/telekom/das-schiff-network-opeator:latest
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 ENVTEST_K8S_VERSION = 1.25
 
@@ -68,8 +70,18 @@ test: manifests generate fmt vet envtest ## Run tests.
 ##@ Build
 
 .PHONY: build
-build: generate fmt vet ## Build manager binary.
-	go build -o bin/manager cmd/manager/main.go
+build: generate fmt vet ## Build agent binary.
+	go build -o bin/operator cmd/operator/main.go
+	go build -o bin/agent cmd/agent/main.go
+	go build -o bin/frr-exporter cmd/frr-exporter/main.go
+
+.PHONY: operator-build
+operator-build: generate fmt vet ## Build agent binary.
+	go build -o bin/operator cmd/operator/main.go
+
+.PHONY: agent-build
+agent-build: generate fmt vet ## Build agent binary.
+	go build -o bin/agent cmd/agent/main.go
 
 .PHONY: sidecar-build
 sidecar-build: build
@@ -77,24 +89,40 @@ sidecar-build: build
 
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
-	go run ./cmd/manager/main.go
+	go run ./cmd/agent/main.go
 
 .PHONY: docker-build
 docker-build: test ## Build docker image with the manager.
-	docker build -t ${IMG} .
+	docker build -t ${OPERATOR_IMG} .
+	docker build -t ${AGENT_IMG} -f agent.Dockerfile .
+	docker build -t ${SIDECAR_IMG} -f frr-exporter.Dockerfile .
+
+.PHONY: docker-build-agent
+docker-build-agent: test ## Build docker image with the manager.
+	docker build -t ${AGENT_IMG} -f agent.Dockerfile .
 
 .PHONY: docker-build-sidecar
 docker-build-sidecar: test ## Build docker image with the manager.
 	docker build -t ${SIDECAR_IMG} -f frr-exporter.Dockerfile .
 
+.PHONY: docker-build-operator
+docker-build-operator: test ## Build docker image with the manager.
+	docker build -t ${OPERATOR_IMG} .
+
 .PHONY: docker-push
-docker-push: ## Push docker image with the manager.
-	docker push ${IMG}
+docker-push: docker-push-agent docker-push-sidecar docker-push-operator
+
+.PHONY: docker-push-agent
+docker-push-agent: ## Push docker image with the manager.
+	docker push ${AGENT_IMG}
 
 .PHONY: docker-push-sidecar
 docker-push-sidecar: ## Push docker image with the manager.
 	docker push ${SIDECAR_IMG}
 
+.PHONY: docker-push-operator
+docker-push-operator: ## Push docker image with the manager.
+	docker push ${OPERATOR_IMG}
 
 ##@ Release
 
@@ -133,8 +161,9 @@ uninstall-certs: manifests kustomize ## Uninstall certs
 
 .PHONY: deploy
 deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
-	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
-	cd config/manager && $(KUSTOMIZE) edit set image frr-exporter=${SIDECAR_IMG}
+	cd config/agent && $(KUSTOMIZE) edit set image agent=${AGENT_IMG}
+	cd config/agent && $(KUSTOMIZE) edit set image frr-exporter=${SIDECAR_IMG}
+	cd config/operator && $(KUSTOMIZE) edit set image operator=${OPERATOR_IMG}
 	$(KUSTOMIZE) build config/default | kubectl apply -f -
 
 .PHONY: undeploy
