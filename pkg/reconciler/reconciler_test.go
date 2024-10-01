@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -13,11 +14,9 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/pkg/config"
-	mock_frr "github.com/telekom/das-schiff-network-operator/pkg/frr/mock"
 	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
-	"github.com/telekom/das-schiff-network-operator/pkg/nl"
-	mock_nl "github.com/telekom/das-schiff-network-operator/pkg/nl/mock"
-	"github.com/vishvananda/netlink"
+	mock_hc "github.com/telekom/das-schiff-network-operator/pkg/healthcheck/mock"
+	mock_worker "github.com/telekom/das-schiff-network-operator/pkg/worker/mock"
 	"go.uber.org/mock/gomock"
 	"gopkg.in/yaml.v2"
 	corev1 "k8s.io/api/core/v1"
@@ -264,98 +263,57 @@ var _ = Describe("NodeConfigReconciler", func() {
 
 var _ = Describe("NodeNetworkConfigReconciler", func() {
 	Context("NewNodeNetworkConfigReconciler() should", func() {
-		It("return error if cannot init FRR Manager", func() {
-			frrManagerMock := mock_frr.NewMockManagerInterface(mockctrl)
-			c := createClient()
-			frrManagerMock.EXPECT().Init(gomock.Any()).Return(fmt.Errorf("init error"))
-			r, err := NewNodeNetworkConfigReconciler(c, nil, logr.New(nil), "",
-				frrManagerMock, nl.NewManager(mock_nl.NewMockToolkitInterface(mockctrl)))
-			Expect(err).To(HaveOccurred())
-			Expect(r).To(BeNil())
-		})
 		It("create new reconciler", func() {
-			frrManagerMock := mock_frr.NewMockManagerInterface(mockctrl)
 			c := createClient()
-			frrManagerMock.EXPECT().Init(gomock.Any()).Return(nil)
-			r, err := NewNodeNetworkConfigReconciler(c, nil, logr.New(nil), "",
-				frrManagerMock, nl.NewManager(mock_nl.NewMockToolkitInterface(mockctrl)))
+			r, err := NewNodeNetworkConfigReconciler(c, logr.New(nil), "", nil, nil)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(r).ToNot(BeNil())
 		})
 	})
 	Context("Reconcile() should", func() {
 		It("return no error if there is no config to reconcile", func() {
-			frrManagerMock := mock_frr.NewMockManagerInterface(mockctrl)
 			c := createClient()
-			frrManagerMock.EXPECT().Init(gomock.Any()).Return(nil)
-			r, err := NewNodeNetworkConfigReconciler(c, nil, logr.New(nil), "",
-				frrManagerMock, nl.NewManager(mock_nl.NewMockToolkitInterface(mockctrl)))
+			r, err := NewNodeNetworkConfigReconciler(c, logr.New(nil), "", nil, nil)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(r).ToNot(BeNil())
 			err = r.Reconcile(context.TODO())
 			Expect(err).ToNot(HaveOccurred())
 		})
-		It("return no error if there is no config to reconcile", func() {
-			frrManagerMock := mock_frr.NewMockManagerInterface(mockctrl)
-			c := createClient()
-			frrManagerMock.EXPECT().Init(gomock.Any()).Return(nil)
-			r, err := NewNodeNetworkConfigReconciler(c, nil, logr.New(nil), "",
-				frrManagerMock, nl.NewManager(mock_nl.NewMockToolkitInterface(mockctrl)))
-			Expect(err).ToNot(HaveOccurred())
-			Expect(r).ToNot(BeNil())
-			err = r.Reconcile(context.TODO())
-			Expect(err).ToNot(HaveOccurred())
-		})
-		It("return error if cannot configure FRR", func() {
-			frrManagerMock := mock_frr.NewMockManagerInterface(mockctrl)
-			netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-			netlinkMock.EXPECT().LinkList().Return([]netlink.Link{}, nil)
-
+		It("return error if worker fails to configure networking", func() {
 			c := createFullClient()
-
-			frrManagerMock.EXPECT().Init(gomock.Any()).Return(nil)
-			frrManagerMock.EXPECT().Configure(gomock.Any(),
-				gomock.Any(), gomock.Any()).Return(false, fmt.Errorf("configuration error"))
-			r, err := NewNodeNetworkConfigReconciler(c, nil, logr.New(nil), "",
-				frrManagerMock, nl.NewManager(netlinkMock))
+			wc := mock_worker.NewMockClient(mockctrl)
+			wc.EXPECT().SendConfig(gomock.Any(), gomock.Any()).Return(fmt.Errorf("error"))
+			r, err := NewNodeNetworkConfigReconciler(c, logr.New(nil), "", wc, nil)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(r).ToNot(BeNil())
 			err = r.Reconcile(context.TODO())
 			Expect(err).To(HaveOccurred())
 		})
-		It("return error if failed to reload FRR", func() {
-			frrManagerMock := mock_frr.NewMockManagerInterface(mockctrl)
-			netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-			netlinkMock.EXPECT().LinkList().Return([]netlink.Link{}, nil)
-
+		It("return error if healthcheck failed", func() {
 			c := createFullClient()
-			frrManagerMock.EXPECT().Init(gomock.Any()).Return(nil)
-			frrManagerMock.EXPECT().Configure(gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil)
-			frrManagerMock.EXPECT().ReloadFRR().Return(fmt.Errorf("error reloading FRR"))
-			frrManagerMock.EXPECT().RestartFRR().Return(fmt.Errorf("error restarting FRR"))
-			r, err := NewNodeNetworkConfigReconciler(c, nil, logr.New(nil), "",
-				frrManagerMock, nl.NewManager(netlinkMock))
+			wc := mock_worker.NewMockClient(mockctrl)
+			hc := mock_hc.NewMockAdapter(mockctrl)
+			wc.EXPECT().SendConfig(gomock.Any(), gomock.Any()).Return(nil)
+			r, err := NewNodeNetworkConfigReconciler(c, logr.New(nil), "", wc, hc)
+			hc.EXPECT().CheckReachability().Return(fmt.Errorf("error"))
 			Expect(err).ToNot(HaveOccurred())
 			Expect(r).ToNot(BeNil())
 			err = r.Reconcile(context.TODO())
 			Expect(err).To(HaveOccurred())
 		})
-		It("return error if cannot configure networking", func() {
-			frrManagerMock := mock_frr.NewMockManagerInterface(mockctrl)
-			netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-			netlinkMock.EXPECT().LinkList().Return([]netlink.Link{}, nil).Times(3)
-			netlinkMock.EXPECT().LinkAdd(gomock.Any()).Return(fmt.Errorf("link add error"))
-
+		It("return no error", func() {
 			c := createFullClient()
-			frrManagerMock.EXPECT().Init(gomock.Any()).Return(nil)
-			frrManagerMock.EXPECT().Configure(gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil)
-			frrManagerMock.EXPECT().ReloadFRR().Return(nil)
-			r, err := NewNodeNetworkConfigReconciler(c, nil, logr.New(nil), "",
-				frrManagerMock, nl.NewManager(netlinkMock))
+			wc := mock_worker.NewMockClient(mockctrl)
+			hc := mock_hc.NewMockAdapter(mockctrl)
+			wc.EXPECT().SendConfig(gomock.Any(), gomock.Any()).Return(nil)
+			r, err := NewNodeNetworkConfigReconciler(c, logr.New(nil), filepath.Join(tmpDir, "node.yaml"), wc, hc)
+			hc.EXPECT().CheckReachability().Return(nil)
+			hc.EXPECT().CheckAPIServer(gomock.Any()).Return(nil)
+			hc.EXPECT().TaintsRemoved().Return(true)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(r).ToNot(BeNil())
 			err = r.Reconcile(context.TODO())
-			Expect(err).To(HaveOccurred())
+			Expect(err).ToNot(HaveOccurred())
 		})
 	})
 })

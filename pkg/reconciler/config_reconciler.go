@@ -179,6 +179,46 @@ func (r *reconcileConfig) fetchConfigData(ctx context.Context) (*v1alpha1.NodeNe
 	return config, nil
 }
 
+func (r *reconcileConfig) fetchLayer2(ctx context.Context) ([]v1alpha1.Layer2NetworkConfiguration, error) {
+	layer2List := &v1alpha1.Layer2NetworkConfigurationList{}
+	err := r.client.List(ctx, layer2List)
+	if err != nil {
+		r.Logger.Error(err, "error getting list of Layer2s from Kubernetes")
+		return nil, fmt.Errorf("error getting list of Layer2s from Kubernetes: %w", err)
+	}
+
+	l2vnis := []v1alpha1.Layer2NetworkConfiguration{}
+	l2vnis = append(l2vnis, layer2List.Items...)
+
+	if err := checkL2Duplicates(l2vnis); err != nil {
+		return nil, err
+	}
+
+	return l2vnis, nil
+}
+
+func (r *reconcileConfig) fetchLayer3(ctx context.Context) ([]v1alpha1.VRFRouteConfiguration, error) {
+	vrfs := &v1alpha1.VRFRouteConfigurationList{}
+	err := r.client.List(ctx, vrfs)
+	if err != nil {
+		r.Logger.Error(err, "error getting list of VRFs from Kubernetes")
+		return nil, fmt.Errorf("error getting list of VRFs from Kubernetes: %w", err)
+	}
+
+	return vrfs.Items, nil
+}
+
+func (r *reconcileConfig) fetchTaas(ctx context.Context) ([]v1alpha1.RoutingTable, error) {
+	tables := &v1alpha1.RoutingTableList{}
+	err := r.client.List(ctx, tables)
+	if err != nil {
+		r.Logger.Error(err, "error getting list of TaaS from Kubernetes")
+		return nil, fmt.Errorf("error getting list of TaaS from Kubernetes: %w", err)
+	}
+
+	return tables.Items, nil
+}
+
 func listRevisions(ctx context.Context, c client.Client) (*v1alpha1.NetworkConfigRevisionList, error) {
 	revisions := &v1alpha1.NetworkConfigRevisionList{}
 	if err := c.List(ctx, revisions); err != nil {
@@ -193,4 +233,18 @@ func listRevisions(ctx context.Context, c client.Client) (*v1alpha1.NetworkConfi
 	}
 
 	return revisions, nil
+}
+
+func checkL2Duplicates(configs []v1alpha1.Layer2NetworkConfiguration) error {
+	for i := range configs {
+		for j := i + 1; j < len(configs); j++ {
+			if configs[i].Spec.ID == configs[j].Spec.ID {
+				return fmt.Errorf("dupliate Layer2 ID found: %s %s", configs[i].ObjectMeta.Name, configs[j].ObjectMeta.Name)
+			}
+			if configs[i].Spec.VNI == configs[j].Spec.VNI {
+				return fmt.Errorf("dupliate Layer2 VNI found: %s %s", configs[i].ObjectMeta.Name, configs[j].ObjectMeta.Name)
+			}
+		}
+	}
+	return nil
 }

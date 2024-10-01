@@ -5,6 +5,8 @@ AGENT_IMG ?= ghcr.io/telekom/das-schiff-network-operator-agent:latest
 SIDECAR_IMG ?= ghcr.io/telekom/frr-exporter:latest
 # Operator image URL to use all building/pushing image targets
 OPERATOR_IMG ?= ghcr.io/telekom/das-schiff-network-opeator:latest
+# Worker image URL to use all building/pushing image targets
+WORKER_IMG ?= ghcr.io/telekom/worker:latest
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 ENVTEST_K8S_VERSION = 1.25
 
@@ -52,8 +54,13 @@ manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and Cust
 	$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
 
 .PHONY: generate
-generate: controller-gen bpf-generate ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
+generate: controller-gen bpf-generate ## Generate code containing DeepCopy, DeepCopyInto and DeepCopyObject method implementations and GRPC code.
 	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./..."
+	PATH=$(PATH):$(shell pwd)/bin $(PROTOC) --go_out=. --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=paths=source_relative pkg/worker/pb/worker.proto
+
+.PHONY: generate-protobuff
+generate-protobuff: protoc ## Generate code containing DeepCopy, DeepCopyInto and DeepCopyObject method implementations.
+	PATH=$(PATH):$(shell pwd)/bin $(PROTOC) --go_out=. --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=paths=source_relative pkg/worker/pb/worker.proto
 
 .PHONY: fmt
 fmt: ## Run go fmt against code.
@@ -83,9 +90,13 @@ operator-build: generate fmt vet ## Build agent binary.
 agent-build: generate fmt vet ## Build agent binary.
 	go build -o bin/agent cmd/agent/main.go
 
-.PHONY: sidecar-build
+.PHONY: sidecar-build ## Build sidecar (frr-exporter) binary.
 sidecar-build: build
 	go build -o bin/frr-exporter cmd/frr-exporter/main.go
+
+.PHONY: worker-build ## Build worker binary.
+agent-build: generate fmt vet
+	go build -o bin/worker cmd/worker/main.go
 
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
@@ -96,6 +107,7 @@ docker-build: test ## Build docker image with the manager.
 	docker build -t ${OPERATOR_IMG} .
 	docker build -t ${AGENT_IMG} -f agent.Dockerfile .
 	docker build -t ${SIDECAR_IMG} -f frr-exporter.Dockerfile .
+	docker build -t ${WORKER_IMG} -f worker.Dockerfile .
 
 .PHONY: docker-build-agent
 docker-build-agent: test ## Build docker image with the manager.
@@ -108,6 +120,10 @@ docker-build-sidecar: test ## Build docker image with the manager.
 .PHONY: docker-build-operator
 docker-build-operator: test ## Build docker image with the manager.
 	docker build -t ${OPERATOR_IMG} .
+
+.PHONY: docker-build-worker
+docker-build-worker: test ## Build docker image with the manager.
+	docker build -t ${WORKER_IMG} -f worker.Dockerfile .
 
 .PHONY: docker-push
 docker-push: docker-push-agent docker-push-sidecar docker-push-operator
@@ -123,6 +139,10 @@ docker-push-sidecar: ## Push docker image with the manager.
 .PHONY: docker-push-operator
 docker-push-operator: ## Push docker image with the manager.
 	docker push ${OPERATOR_IMG}
+
+.PHONY: docker-push-worker
+docker-push-worker: ## Push docker image with the manager.
+	docker push ${WORKER_IMG}
 
 ##@ Release
 
@@ -164,6 +184,7 @@ deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in
 	cd config/agent && $(KUSTOMIZE) edit set image agent=${AGENT_IMG}
 	cd config/agent && $(KUSTOMIZE) edit set image frr-exporter=${SIDECAR_IMG}
 	cd config/operator && $(KUSTOMIZE) edit set image operator=${OPERATOR_IMG}
+	cd config/worker && $(KUSTOMIZE) edit set image worker=${WORKER_IMG}
 	$(KUSTOMIZE) build config/default | kubectl apply -f -
 
 .PHONY: undeploy
@@ -203,3 +224,10 @@ GOBIN=$(PROJECT_DIR)/bin go install $(2) ;\
 rm -rf $$TMP_DIR ;\
 }
 endef
+
+PROTOC_DIR = $(shell pwd)/bin/protoc
+PROTOC = $(shell pwd)/bin/protoc/bin/protoc
+.PHONY: protoc
+protoc: ## Download controller-gen locally if necessary.
+	mkdir -p $(PROTOC_DIR) && cd $(PROTOC_DIR) && wget -nc https://github.com/protocolbuffers/protobuf/releases/download/v27.0/protoc-27.0-linux-x86_64.zip 2> /dev/null && unzip -nqq protoc-27.0-linux-x86_64.zip
+	$(call go-get-tool,$(PROTOC_DIR),google.golang.org/protobuf/cmd/protoc-gen-go@v1.33.0)

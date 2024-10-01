@@ -41,14 +41,24 @@ var (
 	}
 )
 
+//go:generate mockgen -destination ./mock/mock_healthcheck.go . Adapter,FRRInterface,TCPDialerInterface
+type Adapter interface {
+	CheckAPIServer(ctx context.Context) error
+	CheckInterfaces() error
+	CheckReachability() error
+	IsFRRActive() (bool, error)
+	RemoveTaints(ctx context.Context) error
+	TaintsRemoved() bool
+}
+
 // HealthChecker is a struct that holds data required for networking healthcheck.
 type HealthChecker struct {
 	client        client.Client
 	taintsRemoved bool
-	logr.Logger
-	netConfig *NetHealthcheckConfig
-	toolkit   *Toolkit
-	retries   int
+	logger        logr.Logger
+	netConfig     *NetHealthcheckConfig
+	toolkit       *Toolkit
+	retries       int
 }
 
 // NewHealthChecker creates new HealthChecker.
@@ -63,14 +73,14 @@ func NewHealthChecker(clusterClient client.Client, toolkit *Toolkit, netconf *Ne
 	return &HealthChecker{
 		client:        clusterClient,
 		taintsRemoved: false,
-		Logger:        log.Log.WithName("HealthCheck"),
+		logger:        log.Log.WithName("HealthCheck"),
 		netConfig:     netconf,
 		toolkit:       toolkit,
 		retries:       retries,
 	}, nil
 }
 
-// TaintsRemoved returns value of isNetworkingHealthly bool.
+// TaintsRemoved returns value of taintsRemoved bool.
 func (hc *HealthChecker) TaintsRemoved() bool {
 	return hc.taintsRemoved
 }
@@ -81,7 +91,7 @@ func (hc *HealthChecker) RemoveTaints(ctx context.Context) error {
 	err := hc.client.Get(ctx,
 		types.NamespacedName{Name: os.Getenv(NodenameEnv)}, node)
 	if err != nil {
-		hc.Logger.Error(err, "error while getting node's info")
+		hc.logger.Error(err, "error while getting node's info")
 		return fmt.Errorf("error while getting node's info: %w", err)
 	}
 
@@ -97,7 +107,7 @@ func (hc *HealthChecker) RemoveTaints(ctx context.Context) error {
 	}
 	if updateNode {
 		if err := hc.client.Update(ctx, node, &client.UpdateOptions{}); err != nil {
-			hc.Logger.Error(err, "")
+			hc.logger.Error(err, "")
 			return fmt.Errorf("error while updating node: %w", err)
 		}
 	}
@@ -126,7 +136,7 @@ func (hc *HealthChecker) CheckInterfaces() error {
 	issuesFound := false
 	for _, i := range hc.netConfig.Interfaces {
 		if err := hc.checkInterface(i); err != nil {
-			hc.Logger.Error(err, "problem with network interface "+i)
+			hc.logger.Error(err, "problem with network interface "+i)
 			issuesFound = true
 		}
 	}
@@ -281,7 +291,6 @@ func NewDefaultHealthcheckToolkit(frr FRRInterface, tcpDialer TCPDialerInterface
 	return NewHealthCheckToolkit(frr, netlink.LinkByName, tcpDialer)
 }
 
-//go:generate mockgen -destination ./mock/mock_healthcheck.go . FRRInterface,TCPDialerInterface
 type FRRInterface interface {
 	GetStatusFRR() (string, string, error)
 }

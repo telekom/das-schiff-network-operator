@@ -10,13 +10,12 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
-	"github.com/telekom/das-schiff-network-operator/pkg/anycast"
 	"github.com/telekom/das-schiff-network-operator/pkg/config"
-	"github.com/telekom/das-schiff-network-operator/pkg/frr"
 	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
-	"github.com/telekom/das-schiff-network-operator/pkg/nl"
+	"github.com/telekom/das-schiff-network-operator/pkg/worker"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -29,15 +28,12 @@ const (
 
 type NodeNetworkConfigReconciler struct {
 	client                client.Client
-	netlinkManager        *nl.Manager
-	frrManager            frr.ManagerInterface
-	anycastTracker        *anycast.Tracker
 	config                *config.Config
 	logger                logr.Logger
-	healthChecker         *healthcheck.HealthChecker
-	NodeNetworkConfig     *v1alpha1.NodeNetworkConfig
-	NodeNetworkConfigPath string
-	dirtyFRRConfig        bool
+	healthchecker         healthcheck.Adapter
+	nodeNetworkConfig     *v1alpha1.NodeNetworkConfig
+	nodeNetworkConfigPath string
+	workerClient          worker.Client
 }
 
 type reconcileNodeNetworkConfig struct {
@@ -45,14 +41,13 @@ type reconcileNodeNetworkConfig struct {
 	logr.Logger
 }
 
-func NewNodeNetworkConfigReconciler(clusterClient client.Client, anycastTracker *anycast.Tracker, logger logr.Logger, nodeNetworkConfigPath string, frrManager frr.ManagerInterface, netlinkManager *nl.Manager) (*NodeNetworkConfigReconciler, error) {
+func NewNodeNetworkConfigReconciler(clusterClient client.Client, logger logr.Logger, nodeNetworkConfigPath string, workerClient worker.Client, healtchecker healthcheck.Adapter) (*NodeNetworkConfigReconciler, error) {
 	reconciler := &NodeNetworkConfigReconciler{
 		client:                clusterClient,
-		netlinkManager:        netlinkManager,
-		frrManager:            frrManager,
-		anycastTracker:        anycastTracker,
 		logger:                logger,
-		NodeNetworkConfigPath: nodeNetworkConfigPath,
+		nodeNetworkConfigPath: nodeNetworkConfigPath,
+		workerClient:          workerClient,
+		healthchecker:         healtchecker,
 	}
 
 	cfg, err := config.LoadConfig()
@@ -61,28 +56,7 @@ func NewNodeNetworkConfigReconciler(clusterClient client.Client, anycastTracker 
 	}
 	reconciler.config = cfg
 
-	if val := os.Getenv("FRR_CONFIG_FILE"); val != "" {
-		reconciler.frrManager.SetConfigPath(val)
-	}
-
-	if err := reconciler.frrManager.Init(cfg.SkipVRFConfig[0]); err != nil {
-		return nil, fmt.Errorf("error trying to init FRR Manager: %w", err)
-	}
-
-	nc, err := healthcheck.LoadConfig(healthcheck.NetHealthcheckFile)
-	if err != nil {
-		return nil, fmt.Errorf("error loading networking healthcheck config: %w", err)
-	}
-
-	tcpDialer := healthcheck.NewTCPDialer(nc.Timeout)
-	reconciler.healthChecker, err = healthcheck.NewHealthChecker(reconciler.client,
-		healthcheck.NewDefaultHealthcheckToolkit(reconciler.frrManager, tcpDialer),
-		nc)
-	if err != nil {
-		return nil, fmt.Errorf("error creating networking healthchecker: %w", err)
-	}
-
-	reconciler.NodeNetworkConfig, err = readNodeNetworkConfig(reconciler.NodeNetworkConfigPath)
+	reconciler.nodeNetworkConfig, err = readNodeNetworkConfig(reconciler.nodeNetworkConfigPath)
 	if !errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("error reading NodeNetworkConfig from disk: %w", err)
 	}
@@ -110,9 +84,9 @@ func (reconciler *NodeNetworkConfigReconciler) Reconcile(ctx context.Context) er
 		return err
 	}
 
-	if r.NodeNetworkConfig != nil && r.NodeNetworkConfig.Spec.Revision == cfg.Spec.Revision {
+	if r.nodeNetworkConfig != nil && r.nodeNetworkConfig.Spec.Revision == cfg.Spec.Revision {
 		// replace in-memory working NodeNetworkConfig and store it on the disk
-		if err := reconciler.storeConfig(cfg, reconciler.NodeNetworkConfigPath); err != nil {
+		if err := reconciler.storeConfig(cfg, reconciler.nodeNetworkConfigPath); err != nil {
 			return fmt.Errorf("error saving NodeNetworkConfig status: %w", err)
 		}
 
@@ -136,11 +110,20 @@ func (reconciler *NodeNetworkConfigReconciler) Reconcile(ctx context.Context) er
 	}
 
 	// replace in-memory working NodeNetworkConfig and store it on the disk
-	if err := reconciler.storeConfig(cfg, reconciler.NodeNetworkConfigPath); err != nil {
+	if err := reconciler.storeConfig(cfg, reconciler.nodeNetworkConfigPath); err != nil {
 		return fmt.Errorf("error saving NodeNetworkConfig status: %w", err)
 	}
 
 	return nil
+}
+
+func (r *reconcileNodeNetworkConfig) fetchNodeConfig(ctx context.Context) (*v1alpha1.NodeNetworkConfig, error) {
+	cfg := &v1alpha1.NodeNetworkConfig{}
+	err := r.client.Get(ctx, types.NamespacedName{Name: os.Getenv(healthcheck.NodenameEnv)}, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("error getting NodeConfig: %w", err)
+	}
+	return cfg, nil
 }
 
 func (r *reconcileNodeNetworkConfig) processConfig(ctx context.Context, cfg *v1alpha1.NodeNetworkConfig) error {
@@ -150,7 +133,7 @@ func (r *reconcileNodeNetworkConfig) processConfig(ctx context.Context, cfg *v1a
 	}
 
 	// reconcile NodeNetworkConfig
-	if err := doReconciliation(r, cfg); err != nil {
+	if err := r.doReconciliation(ctx, cfg); err != nil {
 		// if reconciliation failed set NodeNetworkConfig's status as invalid and restore last known working NodeNetworkConfig
 		if err := r.invalidateAndRestore(ctx, cfg, "reconciliation failed"); err != nil {
 			return fmt.Errorf("reconciler restoring NodeNetworkConfig: %w", err)
@@ -195,34 +178,27 @@ func (r *reconcileNodeNetworkConfig) invalidateAndRestore(ctx context.Context, c
 
 	// try to restore previously known good NodeNetworkConfig
 	r.logger.Info("restoring previous NodeNetworkConfig")
-	if err := r.restoreNodeNetworkConfig(); err != nil {
+	if err := r.restoreNodeNetworkConfig(ctx); err != nil {
 		return fmt.Errorf("error restoring NodeNetworkConfig: %w", err)
 	}
 
 	return nil
 }
 
-func doReconciliation(r *reconcileNodeNetworkConfig, nodeCfg *v1alpha1.NodeNetworkConfig) error {
+func (r *reconcileNodeNetworkConfig) doReconciliation(ctx context.Context, nodeCfg *v1alpha1.NodeNetworkConfig) error {
 	r.logger.Info("config to reconcile", "NodeNetworkConfig", *nodeCfg)
-	l3vnis := nodeCfg.Spec.Vrf
-	l2vnis := nodeCfg.Spec.Layer2
-	taas := nodeCfg.Spec.RoutingTable
-
-	if err := r.reconcileLayer3(l3vnis, taas); err != nil {
-		return err
-	}
-	if err := r.reconcileLayer2(l2vnis); err != nil {
-		return err
+	if err := r.workerClient.SendConfig(ctx, nodeCfg); err != nil {
+		return fmt.Errorf("failed to reconcile config: %w", err)
 	}
 
 	return nil
 }
 
-func (r *reconcileNodeNetworkConfig) restoreNodeNetworkConfig() error {
-	if r.NodeNetworkConfig == nil {
+func (r *reconcileNodeNetworkConfig) restoreNodeNetworkConfig(ctx context.Context) error {
+	if r.nodeNetworkConfig == nil {
 		return nil
 	}
-	if err := doReconciliation(r, r.NodeNetworkConfig); err != nil {
+	if err := r.doReconciliation(ctx, r.nodeNetworkConfig); err != nil {
 		return fmt.Errorf("error restoring NodeNetworkConfig: %w", err)
 	}
 
@@ -246,9 +222,9 @@ func readNodeNetworkConfig(path string) (*v1alpha1.NodeNetworkConfig, error) {
 }
 
 func (reconciler *NodeNetworkConfigReconciler) storeConfig(cfg *v1alpha1.NodeNetworkConfig, path string) error {
-	reconciler.NodeNetworkConfig = cfg
+	reconciler.nodeNetworkConfig = cfg
 	// save working NodeNetworkConfig
-	c, err := json.MarshalIndent(*reconciler.NodeNetworkConfig, "", " ")
+	c, err := json.MarshalIndent(*reconciler.nodeNetworkConfig, "", " ")
 	if err != nil {
 		panic(err)
 	}
@@ -261,21 +237,14 @@ func (reconciler *NodeNetworkConfigReconciler) storeConfig(cfg *v1alpha1.NodeNet
 }
 
 func (reconciler *NodeNetworkConfigReconciler) checkHealth(ctx context.Context) error {
-	_, err := reconciler.healthChecker.IsFRRActive()
-	if err != nil {
-		return fmt.Errorf("error checking FRR status: %w", err)
-	}
-	if err := reconciler.healthChecker.CheckInterfaces(); err != nil {
-		return fmt.Errorf("error checking network interfaces: %w", err)
-	}
-	if err := reconciler.healthChecker.CheckReachability(); err != nil {
+	if err := reconciler.healthchecker.CheckReachability(); err != nil {
 		return fmt.Errorf("error checking network reachability: %w", err)
 	}
-	if err := reconciler.healthChecker.CheckAPIServer(ctx); err != nil {
+	if err := reconciler.healthchecker.CheckAPIServer(ctx); err != nil {
 		return fmt.Errorf("error checking API Server reachability: %w", err)
 	}
-	if !reconciler.healthChecker.TaintsRemoved() {
-		if err := reconciler.healthChecker.RemoveTaints(ctx); err != nil {
+	if !reconciler.healthchecker.TaintsRemoved() {
+		if err := reconciler.healthchecker.RemoveTaints(ctx); err != nil {
 			return fmt.Errorf("error removing taint from the node: %w", err)
 		}
 	}
