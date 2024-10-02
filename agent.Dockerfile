@@ -1,7 +1,6 @@
-ARG FRR_VERSION="10.1.0"
-ARG REGISTRY="quay.io"
 # Build the manager binary
 FROM docker.io/library/golang:1.21-alpine AS builder
+
 
 WORKDIR /workspace
 # Copy the Go Modules manifests
@@ -15,7 +14,9 @@ RUN go mod download
 RUN apk add llvm clang linux-headers libbpf-dev musl-dev
 
 # Copy the go source
-COPY cmd/frr-exporter/main.go main.go
+COPY cmd/agent/main.go main.go
+COPY api/ api/
+COPY controllers/ controllers/
 COPY pkg/ pkg/
 
 # Build router
@@ -23,18 +24,14 @@ COPY bpf/ bpf/
 RUN cd pkg/bpf/ && go generate
 
 # Build
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -o frr-exporter main.go
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -o agent main.go
 
+FROM alpine:latest
 
-FROM ${REGISTRY}/frrouting/frr:${FRR_VERSION}
-
-RUN apk add --no-cache frr
+RUN apk add --no-cache iptables ip6tables
 
 WORKDIR /
-COPY --from=builder /workspace/frr-exporter .
-## Needs to run as root
-##  vtysh is required to have extended rights 
-## to be able to connect to vty sockets on the host
-# USER 65532:65532
+COPY --from=builder /workspace/agent .
+USER 65532:65532
 
-ENTRYPOINT ["/frr-exporter"]
+ENTRYPOINT ["/agent"]

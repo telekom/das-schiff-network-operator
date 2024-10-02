@@ -138,6 +138,9 @@ linters-settings:
         disabled: true
   funlen:
     lines: 65
+  gosec:
+    excludes:
+      - G115
 
 issues:
   exclude-rules:

@@ -1,0 +1,12 @@
+resources:
+- worker.yaml
+
+generatorOptions:
+  disableNameSuffixHash: true
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+images:
+- name: worker
+  newName: ghcr.io/telekom/worker
+  newTag: latest

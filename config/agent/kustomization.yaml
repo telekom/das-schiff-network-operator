@@ -1,6 +1,6 @@
 resources:
-- manager.yaml
-- manager_master.yaml
+- agent.yaml
+- agent_master.yaml
 - service.yaml
 # - namespace.yaml
 
@@ -9,16 +9,16 @@ generatorOptions:
 
 configMapGenerator:
 - files:
-  - controller_manager_config.yaml
-  name: manager-config
+  - controller_agent_config.yaml
+  name: agent-config
 - files:
   - config.yaml
   name: config
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 images:
-- name: controller
-  newName: ghcr.io/telekom/das-schiff-network-operator
+- name: agent
+  newName: ghcr.io/telekom/das-schiff-network-operator-agent
   newTag: latest
 - name: frr-exporter
   newName: ghcr.io/telekom/frr-exporter

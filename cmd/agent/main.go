@@ -31,6 +31,8 @@ import (
 
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/controllers"
+	adnetns "github.com/telekom/das-schiff-network-operator/pkg/adapters/netns"
+	advrfigbp "github.com/telekom/das-schiff-network-operator/pkg/adapters/vrf_igbp"
 	"github.com/telekom/das-schiff-network-operator/pkg/anycast"
 	"github.com/telekom/das-schiff-network-operator/pkg/bpf"
 	"github.com/telekom/das-schiff-network-operator/pkg/config"
@@ -41,6 +43,7 @@ import (
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
 	"github.com/telekom/das-schiff-network-operator/pkg/notrack"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler"
+	"github.com/telekom/das-schiff-network-operator/pkg/worker"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.) //nolint:gci
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -88,46 +91,52 @@ func initCollectors() error {
 	return nil
 }
 
-func main() {
-	var onlyBPFMode bool
-	var configFile string
-	var interfacePrefix string
-	flag.StringVar(&configFile, "config", "",
+type flags struct {
+	onlyBPFMode           bool
+	configFile            string
+	interfacePrefix       string
+	nodeNetworkConfigPath string
+	workerType            string
+	workerPort            int
+	workerAddr            string
+}
+
+func getFlags() *flags {
+	f := flags{}
+	flag.StringVar(&f.configFile, "config", "",
 		"The controller will load its initial configuration from this file. "+
 			"Omit this flag to use the default configuration values. "+
 			"Command-line flags override configuration from this file.")
-	flag.BoolVar(&onlyBPFMode, "only-attach-bpf", false,
+	flag.BoolVar(&f.onlyBPFMode, "only-attach-bpf", false,
 		"Only attach BPF to specified interfaces in config. This will not start any reconciliation. Perfect for masters.")
-	flag.StringVar(&interfacePrefix, "macvlan-interface-prefix", "",
+	flag.StringVar(&f.interfacePrefix, "macvlan-interface-prefix", "",
 		"Interface prefix for bridge devices for MACVlan sync")
+	flag.StringVar(&f.nodeNetworkConfigPath, "nodenetworkconfig-path", reconciler.DefaultNodeNetworkConfigPath,
+		"Path to store working node configuration.")
+	flag.StringVar(&f.workerType, "agent", "vrf-igbp", "Use selected worker type (default: vrf-igbp).")
+	flag.StringVar(&f.workerAddr, "agentAddr", "", "Worker's address (default: '').")
+	flag.IntVar(&f.workerPort, "agentPort", worker.DefaultPort, fmt.Sprintf("Worker's port (default: %d).", worker.DefaultPort))
+	flag.Parse()
+	return &f
+}
+
+func main() {
+	f := getFlags()
 	opts := zap.Options{
 		Development: true,
 	}
+
 	opts.BindFlags(flag.CommandLine)
-	flag.Parse()
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
-	var err error
-	var options manager.Options
-	if configFile != "" {
-		options, err = managerconfig.Load(configFile, scheme)
-		if err != nil {
-			setupLog.Error(err, "unable to load the config file")
-			os.Exit(1)
-		}
-	} else {
-		options = ctrl.Options{Scheme: scheme}
-	}
-	if options.MetricsBindAddress != "0" && options.MetricsBindAddress != "" {
-		err = initCollectors()
-		if err != nil {
-			setupLog.Error(err, "unable to initialize metrics collectors")
-			os.Exit(1)
-		}
+	options, err := setManagerOptions(f.configFile)
+	if err != nil {
+		setupLog.Error(err, "unable to configure manager's options")
+		os.Exit(1)
 	}
 
 	clientConfig := ctrl.GetConfigOrDie()
-	mgr, err := ctrl.NewManager(clientConfig, options)
+	mgr, err := ctrl.NewManager(clientConfig, *options)
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
 		os.Exit(1)
@@ -146,14 +155,26 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := initComponents(mgr, anycastTracker, cfg, clientConfig, onlyBPFMode); err != nil {
+	var workerClient worker.Client
+	if f.workerType == "vrf-igbp" {
+		workerClient, err = advrfigbp.NewClient(fmt.Sprintf("%s:%d", f.workerAddr, f.workerPort))
+	} else {
+		workerClient, err = adnetns.NewClient()
+	}
+
+	if err != nil {
+		setupLog.Error(err, "failed to create adapter")
+		os.Exit(1)
+	}
+
+	if err := initComponents(mgr, anycastTracker, cfg, clientConfig, f.onlyBPFMode, f.nodeNetworkConfigPath, workerClient); err != nil {
 		setupLog.Error(err, "unable to initialize components")
 		os.Exit(1)
 	}
 
-	if interfacePrefix != "" {
+	if f.interfacePrefix != "" {
 		setupLog.Info("start macvlan sync")
-		macvlan.RunMACSync(interfacePrefix)
+		macvlan.RunMACSync(f.interfacePrefix)
 	}
 
 	setupLog.Info("starting manager")
@@ -163,10 +184,32 @@ func main() {
 	}
 }
 
-func initComponents(mgr manager.Manager, anycastTracker *anycast.Tracker, cfg *config.Config, clientConfig *rest.Config, onlyBPFMode bool) error {
+func setManagerOptions(configFile string) (*manager.Options, error) {
+	var err error
+	var options manager.Options
+	if configFile != "" {
+		options, err = managerconfig.Load(configFile, scheme)
+		if err != nil {
+			return nil, fmt.Errorf("unable to load the config file: %w", err)
+		}
+	} else {
+		options = ctrl.Options{Scheme: scheme}
+	}
+
+	if options.MetricsBindAddress != "0" && options.MetricsBindAddress != "" {
+		err = initCollectors()
+		if err != nil {
+			return nil, fmt.Errorf("unable to initialize metrics collectors: %w", err)
+		}
+	}
+
+	return &options, nil
+}
+
+func initComponents(mgr manager.Manager, anycastTracker *anycast.Tracker, cfg *config.Config, clientConfig *rest.Config, onlyBPFMode bool, nodeConfigPath string, workerClient worker.Client) error {
 	// Start VRFRouteConfigurationReconciler when we are not running in only BPF mode.
 	if !onlyBPFMode {
-		if err := setupReconcilers(mgr, anycastTracker); err != nil {
+		if err := setupReconcilers(mgr, nodeConfigPath, workerClient); err != nil {
 			return fmt.Errorf("unable to setup reconcilers: %w", err)
 		}
 	}
@@ -225,34 +268,31 @@ func initComponents(mgr manager.Manager, anycastTracker *anycast.Tracker, cfg *c
 	return nil
 }
 
-func setupReconcilers(mgr manager.Manager, anycastTracker *anycast.Tracker) error {
-	r, err := reconciler.NewReconciler(mgr.GetClient(), anycastTracker, mgr.GetLogger())
+func setupReconcilers(mgr manager.Manager, nodeConfigPath string, workerClient worker.Client) error {
+	nc, err := healthcheck.LoadConfig(healthcheck.NetHealthcheckFile)
+	if err != nil {
+		return fmt.Errorf("error loading networking healthcheck config: %w", err)
+	}
+
+	tcpDialer := healthcheck.NewTCPDialer(nc.Timeout)
+	healthchecker, err := healthcheck.NewHealthChecker(mgr.GetClient(),
+		healthcheck.NewDefaultHealthcheckToolkit(nil, tcpDialer), nc)
+	if err != nil {
+		return fmt.Errorf("error creating networking healthchecker: %w", err)
+	}
+
+	r, err := reconciler.NewNodeNetworkConfigReconciler(mgr.GetClient(), mgr.GetLogger(),
+		nodeConfigPath, workerClient, healthchecker)
 	if err != nil {
 		return fmt.Errorf("unable to create debounced reconciler: %w", err)
 	}
 
-	if err = (&controllers.VRFRouteConfigurationReconciler{
+	if err = (&controllers.NodeNetworkConfigReconciler{
 		Client:     mgr.GetClient(),
 		Scheme:     mgr.GetScheme(),
 		Reconciler: r,
 	}).SetupWithManager(mgr); err != nil {
-		return fmt.Errorf("unable to create VRFRouteConfiguration controller: %w", err)
-	}
-
-	if err = (&controllers.Layer2NetworkConfigurationReconciler{
-		Client:     mgr.GetClient(),
-		Scheme:     mgr.GetScheme(),
-		Reconciler: r,
-	}).SetupWithManager(mgr); err != nil {
-		return fmt.Errorf("unable to create Layer2NetworkConfiguration controller: %w", err)
-	}
-
-	if err = (&controllers.RoutingTableReconciler{
-		Client:     mgr.GetClient(),
-		Scheme:     mgr.GetScheme(),
-		Reconciler: r,
-	}).SetupWithManager(mgr); err != nil {
-		return fmt.Errorf("unable to create RoutingTable controller: %w", err)
+		return fmt.Errorf("unable to create NodeConfig controller: %w", err)
 	}
 
 	return nil

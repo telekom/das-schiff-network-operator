@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: worker
+  namespace: system
+  labels:
+    app.kubernetes.io/component: worker
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: worker
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/default-container: worker
+      labels:
+        app.kubernetes.io/component: worker
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-role.kubernetes.io/control-plane
+                    operator: DoesNotExist
+      tolerations:
+      - effect: NoSchedule
+        key: node.schiff.telekom.de/uninitialized
+        operator: Exists
+      - key: node.cloudprovider.kubernetes.io/uninitialized
+        value: "true"
+        effect: NoSchedule
+      - key: node.kubernetes.io/not-ready
+        effect: NoSchedule
+        operator: Exists
+      hostNetwork: true
+      hostPID: true
+      containers:
+      - command:
+        - /worker
+        args: []
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        image: worker:latest
+        name: worker
+        securityContext:
+          privileged: true
+          runAsUser: 0
+        # TODO(user): Configure the resources accordingly based on the project requirements.
+        # More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+        resources:
+          limits:
+            cpu: 500m
+            memory: 128Mi
+          requests:
+            cpu: 10m
+            memory: 64Mi
+        volumeMounts:
+        - mountPath: /opt/network-operator/config.yaml
+          name: network-config
+          subPath: config.yaml
+        - mountPath: /etc/frr
+          name: frr-config
+        - mountPath: /var/run/dbus/system_bus_socket
+          name: dbus-socket
+      serviceAccountName: controller-manager
+      terminationGracePeriodSeconds: 10
+      volumes:
+      - name: frr-config
+        hostPath:
+          path: /etc/frr
+          type: Directory
+      - name: dbus-socket
+        hostPath:
+          path: /var/run/dbus/system_bus_socket
+          type: Socket
+      - configMap:
+          name: network-operator-config
+        name: network-config

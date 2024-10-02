@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+option go_package = "github.com/telekom/das-schiff-network-operator/pkg/agent";
+
+import "google/protobuf/empty.proto";
+
+package agent;
+
+service Agent {
+  rpc SetConfiguration(NetworkConfiguration) returns (google.protobuf.Empty) {}
+}
+
+message NetworkConfiguration {
+  bytes data = 1;
+}
+
+message Response {
+  bool configured = 1;
+}

@@ -12,7 +12,7 @@ spec:
   template:
     metadata:
       annotations:
-        kubectl.kubernetes.io/default-container: manager
+        kubectl.kubernetes.io/default-container: agent
       labels:
         app.kubernetes.io/component: master
     spec:
@@ -40,7 +40,7 @@ spec:
       hostPID: true
       containers:
       - command:
-        - /manager
+        - /agent
         args:
           - -only-attach-bpf
         env:
@@ -48,8 +48,8 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: spec.nodeName
-        image: controller:latest
-        name: manager
+        image: agent:latest
+        name: agent
         securityContext:
           privileged: true
           runAsUser: 0
