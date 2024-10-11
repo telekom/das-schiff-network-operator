@@ -3,6 +3,7 @@ package nl
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 
 	"github.com/telekom/das-schiff-network-operator/pkg/route"
@@ -141,8 +142,8 @@ func GetAddressFamily(addressFamily int) (string, error) {
 }
 
 func (*Manager) getVRFName(tableID int, vrfInterfaces map[int]VRFInformation) (string, error) {
-	if tableID < 0 || tableID > 255 {
-		return "", fmt.Errorf("table id %d out of range [0-255]", tableID)
+	if tableID < 0 || tableID > math.MaxInt {
+		return "", fmt.Errorf("table id %d out of range [0-%d]", tableID, math.MaxInt)
 	}
 	switch tableID {
 	case localTableID:
