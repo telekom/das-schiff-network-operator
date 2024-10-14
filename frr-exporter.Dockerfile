@@ -22,9 +22,10 @@ COPY pkg/ pkg/
 COPY bpf/ bpf/
 RUN cd pkg/bpf/ && go generate
 
-# Build
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -o frr-exporter main.go
+ARG ldflags
 
+# Build
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "${ldflags}" -a -o frr-exporter main.go
 
 FROM ${REGISTRY}/frrouting/frr:${FRR_VERSION}
 
