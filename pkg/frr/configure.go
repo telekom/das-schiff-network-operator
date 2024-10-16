@@ -43,7 +43,7 @@ func (m *Manager) Configure(in Configuration, nm *nl.Manager, nwopCfg *config.Co
 		for j := range in.VRFs[i].Import {
 			for k := range in.VRFs[i].Import[j].Items {
 				if in.VRFs[i].Import[j].Items[k].Action != "deny" {
-					return false, fmt.Errorf("only deny rules are allowed in import prefix-lists of mgmt VRFs")
+					return false, &ConfigurationError{fmt.Errorf("only deny rules are allowed in import prefix-lists of mgmt VRFs")}
 				}
 				// Swap deny to permit, this will be a prefix-list called from a deny route-map
 				in.VRFs[i].Import[j].Items[k].Action = "permit"
@@ -58,7 +58,7 @@ func (m *Manager) Configure(in Configuration, nm *nl.Manager, nwopCfg *config.Co
 
 	currentConfig, err := os.ReadFile(m.ConfigPath)
 	if err != nil {
-		return false, fmt.Errorf("error reading configuration file: %w", err)
+		return false, &ConfigurationError{fmt.Errorf("error reading configuration file: %w", err)}
 	}
 
 	targetConfig, err := render(m.configTemplate, frrConfig)
@@ -72,7 +72,7 @@ func (m *Manager) Configure(in Configuration, nm *nl.Manager, nwopCfg *config.Co
 	if !bytes.Equal(currentConfig, targetConfig) {
 		err = os.WriteFile(m.ConfigPath, targetConfig, frrPermissions)
 		if err != nil {
-			return false, fmt.Errorf("error writing configuration file: %w", err)
+			return false, &ConfigurationError{fmt.Errorf("error writing configuration file: %w", err)}
 		}
 
 		return true, nil
@@ -186,4 +186,12 @@ func applyCfgReplacements(frrConfig []byte, replacements []config.Replacement) [
 		}
 	}
 	return frrConfig
+}
+
+type ConfigurationError struct {
+	err error
+}
+
+func (r *ConfigurationError) Error() string {
+	return fmt.Sprintf("FRR configuration error: %s", r.err.Error())
 }
