@@ -28,8 +28,6 @@ type Reconciler struct {
 	healthChecker  *healthcheck.HealthChecker
 
 	debouncer *debounce.Debouncer
-
-	dirtyFRRConfig bool
 }
 
 type reconcile struct {

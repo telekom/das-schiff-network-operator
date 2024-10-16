@@ -2,6 +2,7 @@ package reconciler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"sort"
@@ -65,6 +66,15 @@ func (r *reconcile) reconcileLayer3(l3vnis []networkv1alpha1.VRFRouteConfigurati
 		return allConfigs[i].VNI < allConfigs[j].VNI
 	})
 
+	// Create FRR configuration and reload it
+	err = r.configureFRR(allConfigs)
+	if err != nil {
+		if !errors.Is(err, &frr.ConfigurationError{}) {
+			return err
+		}
+		r.Logger.Error(err, "failed to configure FRR")
+	}
+
 	created, deletedVRF, err := r.reconcileL3Netlink(l3Configs)
 	if err != nil {
 		r.Logger.Error(err, "error reconciling Netlink")
@@ -75,54 +85,40 @@ func (r *reconcile) reconcileLayer3(l3vnis []networkv1alpha1.VRFRouteConfigurati
 	if err != nil {
 		return err
 	}
-	reloadTwice := deletedVRF || deletedTaas
+
+	// When a BGP VRF is deleted there is a leftover running configuration after reload
+	// A second reload fixes this.
+	if deletedVRF || deletedTaas {
+		if err := r.reloadFRR(); err != nil {
+			return fmt.Errorf("failed to reload FRR: %w", err)
+		}
+	}
 
 	// We wait here for two seconds to let FRR settle after updating netlink devices
 	time.Sleep(defaultSleep)
 
-	err = r.configureFRR(allConfigs, reloadTwice)
-	if err != nil {
-		return err
-	}
-
-	// Make sure that all created netlink VRFs are up after FRR reload
-	time.Sleep(defaultSleep)
 	for _, info := range created {
 		if err := r.netlinkManager.UpL3(info); err != nil {
-			r.Logger.Error(err, "error setting L3 to state UP")
-			return fmt.Errorf("error setting L3 to state UP: %w", err)
+			r.Logger.Error(err, "error setting L3 to state UP", "interface", info)
 		}
 	}
 	return nil
 }
 
-func (r *reconcile) configureFRR(vrfConfigs []frr.VRFConfiguration, reloadTwice bool) error {
+func (r *reconcile) configureFRR(vrfConfigs []frr.VRFConfiguration) error {
 	changed, err := r.frrManager.Configure(frr.Configuration{
 		VRFs: vrfConfigs,
 		ASN:  r.config.ServerASN,
 	}, r.netlinkManager, r.config)
 	if err != nil {
-		r.Logger.Error(err, "error updating FRR configuration")
 		return fmt.Errorf("error updating FRR configuration: %w", err)
 	}
 
-	if changed || r.dirtyFRRConfig {
+	if changed {
 		err := r.reloadFRR()
 		if err != nil {
-			r.dirtyFRRConfig = true
 			return err
 		}
-
-		// When a BGP VRF is deleted there is a leftover running configuration after reload
-		// A second reload fixes this.
-		if reloadTwice {
-			err := r.reloadFRR()
-			if err != nil {
-				r.dirtyFRRConfig = true
-				return err
-			}
-		}
-		r.dirtyFRRConfig = false
 	}
 	return nil
 }
@@ -249,20 +245,12 @@ func (r *reconcile) reconcileL3Netlink(vrfConfigs []frr.VRFConfiguration) ([]nl.
 	}
 
 	// Check for VRFs that are configured on the host but no longer in Kubernetes
-	toDelete := []nl.VRFInformation{}
-	for i := range existing {
-		stillExists := false
-		for j := range vrfConfigs {
-			if vrfConfigs[j].Name == existing[i].Name && vrfConfigs[j].VNI == existing[i].VNI {
-				stillExists = true
-				existing[i].MTU = vrfConfigs[j].MTU
-				break
-			}
-		}
-		if !stillExists || existing[i].MarkForDelete {
-			toDelete = append(toDelete, existing[i])
-		} else if err := r.reconcileExisting(existing[i]); err != nil {
-			r.Logger.Error(err, "error reconciling existing VRF", "vrf", existing[i].Name, "vni", strconv.Itoa(existing[i].VNI))
+	preexisting, toDelete := r.gatherInterfacesInfo(vrfConfigs, existing)
+
+	// Make sure that all previously configured L3 interfaces are up
+	for _, info := range preexisting {
+		if err := r.netlinkManager.UpL3(info); err != nil {
+			r.Logger.Error(err, "failed to set L3 up", "interface", info.Name)
 		}
 	}
 
@@ -287,6 +275,30 @@ func (r *reconcile) reconcileL3Netlink(vrfConfigs []frr.VRFConfiguration) ([]nl.
 	}
 
 	return toCreate, len(toDelete) > 0, nil
+}
+
+func (r *reconcile) gatherInterfacesInfo(vrfConfigs []frr.VRFConfiguration, existing []nl.VRFInformation) (preexisting, toDelete []nl.VRFInformation) {
+	// Check for VRFs that are configured on the host but no longer in Kubernetes
+	for i := range existing {
+		stillExists := false
+		for j := range vrfConfigs {
+			if vrfConfigs[j].Name == existing[i].Name && vrfConfigs[j].VNI == existing[i].VNI {
+				stillExists = true
+				existing[i].MTU = vrfConfigs[j].MTU
+				if !existing[i].MarkForDelete {
+					preexisting = append(preexisting, existing[i])
+				}
+				break
+			}
+		}
+		if !stillExists || existing[i].MarkForDelete {
+			toDelete = append(toDelete, existing[i])
+		} else if err := r.reconcileExisting(existing[i]); err != nil {
+			r.Logger.Error(err, "error reconciling existing VRF", "vrf", existing[i].Name, "vni", strconv.Itoa(existing[i].VNI))
+		}
+	}
+
+	return preexisting, toDelete
 }
 
 func (r *reconcile) reconcileTaasNetlink(vrfConfigs []frr.VRFConfiguration) (bool, error) {
