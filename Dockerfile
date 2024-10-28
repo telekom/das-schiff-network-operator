@@ -23,8 +23,9 @@ COPY pkg/ pkg/
 COPY bpf/ bpf/
 RUN cd pkg/bpf/ && go generate
 
+ARG ldflags
 # Build
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -o manager main.go
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "${ldflags}" -a -o manager main.go
 
 FROM alpine:latest
 

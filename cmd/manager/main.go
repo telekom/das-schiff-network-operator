@@ -41,6 +41,7 @@ import (
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
 	"github.com/telekom/das-schiff-network-operator/pkg/notrack"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler"
+	"github.com/telekom/das-schiff-network-operator/pkg/version"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.) //nolint:gci
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -89,6 +90,8 @@ func initCollectors() error {
 }
 
 func main() {
+	version.Get().Print(os.Args[0])
+
 	var onlyBPFMode bool
 	var configFile string
 	var interfacePrefix string

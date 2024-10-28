@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -12,6 +13,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/telekom/das-schiff-network-operator/pkg/frr"
 	"github.com/telekom/das-schiff-network-operator/pkg/monitoring"
+	"github.com/telekom/das-schiff-network-operator/pkg/version"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -26,6 +28,7 @@ var (
 )
 
 func main() {
+	version.Get().Print(os.Args[0])
 	var addr string
 	flag.StringVar(&addr, "listen-address", ":7082", "The address to listen on for HTTP requests.")
 	opts := zap.Options{
