@@ -28,6 +28,32 @@ rules:
 - apiGroups:
   - network.schiff.telekom.de
   resources:
+  - bgppeerings
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - network.schiff.telekom.de
+  resources:
+  - bgppeerings/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - network.schiff.telekom.de
+  resources:
+  - bgppeerings/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - network.schiff.telekom.de
+  resources:
   - layer2networkconfigurations
   verbs:
   - create

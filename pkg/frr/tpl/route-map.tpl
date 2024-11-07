@@ -1,4 +1,4 @@
-{{range $vrf := .}}
+{{range $vrf := .VRFs}}
 {{if not $vrf.IsTaaS}}
 {{range $i, $pl := $vrf.Import}}
 route-map rm_{{$vrf.Name}}_import {{if $vrf.ShouldTemplateVRF}}permit{{else}}deny{{end}} {{$pl.Seq}}

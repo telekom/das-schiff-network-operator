@@ -61,9 +61,10 @@ var (
 )
 
 type bgpInstanceConfig struct {
-	VRFs     []VRFConfiguration
-	RouterID string
-	ASN      int
+	VRFs                  []VRFConfiguration
+	DefaultVRFBGPPeerings []BGPPeering
+	RouterID              string
+	ASN                   int
 }
 
 type mgmtImportConfig struct {
@@ -80,9 +81,9 @@ func mustParse(name, rawtpl string) *template.Template {
 	return tpl
 }
 
-func render(tpl *template.Template, vrfs interface{}) ([]byte, error) {
+func render(tpl *template.Template, data interface{}) ([]byte, error) {
 	buf := bytes.Buffer{}
-	err := tpl.Execute(&buf, vrfs)
+	err := tpl.Execute(&buf, data)
 	if err != nil {
 		return []byte{}, fmt.Errorf("error executing template: %w", err)
 	}

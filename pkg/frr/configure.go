@@ -99,27 +99,38 @@ func (m *Manager) renderSubtemplates(in Configuration, nlManager *nl.Manager) (*
 		return nil, fmt.Errorf("error getting node's name")
 	}
 
-	vrfs, err := render(vrfTpl, in.VRFs)
+	asn := in.ASN
+	if asn == 0 {
+		asn = vrfAsnConfig
+	}
+	data := bgpInstanceConfig{
+		VRFs:                  in.VRFs,
+		DefaultVRFBGPPeerings: in.DefaultVRFBGPPeerings,
+		RouterID:              vrfRouterID.String(),
+		ASN:                   asn,
+	}
+
+	vrfs, err := render(vrfTpl, data)
 	if err != nil {
 		return nil, err
 	}
-	neighbors, err := render(neighborTpl, in.VRFs)
+	neighbors, err := render(neighborTpl, data)
 	if err != nil {
 		return nil, err
 	}
-	neighborsV4, err := render(neighborV4Tpl, in.VRFs)
+	neighborsV4, err := render(neighborV4Tpl, data)
 	if err != nil {
 		return nil, err
 	}
-	neighborsV6, err := render(neighborV6Tpl, in.VRFs)
+	neighborsV6, err := render(neighborV6Tpl, data)
 	if err != nil {
 		return nil, err
 	}
-	prefixlists, err := render(prefixListTpl, in.VRFs)
+	prefixlists, err := render(prefixListTpl, data)
 	if err != nil {
 		return nil, err
 	}
-	routemaps, err := render(routeMapTpl, in.VRFs)
+	routemaps, err := render(routeMapTpl, data)
 	if err != nil {
 		return nil, err
 	}
@@ -127,16 +138,7 @@ func (m *Manager) renderSubtemplates(in Configuration, nlManager *nl.Manager) (*
 	if err != nil {
 		return nil, err
 	}
-	asn := in.ASN
-	if asn == 0 {
-		asn = vrfAsnConfig
-	}
-	// Special handling for BGP instance rendering (we need ASN and Router ID)
-	bgp, err := render(bgpInstanceTpl, bgpInstanceConfig{
-		VRFs:     in.VRFs,
-		RouterID: vrfRouterID.String(),
-		ASN:      asn,
-	})
+	bgp, err := render(bgpInstanceTpl, data)
 	if err != nil {
 		return nil, err
 	}

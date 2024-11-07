@@ -1,0 +1,152 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.14.0
+  name: bgppeerings.network.schiff.telekom.de
+spec:
+  group: network.schiff.telekom.de
+  names:
+    kind: BGPPeering
+    listKind: BGPPeeringList
+    plural: bgppeerings
+    singular: bgppeering
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.peeringVlan.name
+      name: VLAN
+      type: integer
+    - jsonPath: .spec.remoteASN
+      name: ASN
+      type: string
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: BGPPeering is the Schema for the bgppeerings API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: BGPPeeringSpec defines the desired state of BGPPeering.
+            properties:
+              enableBFD:
+                description: EnableBFD is the flag to enable BFD for the BGP peering
+                type: boolean
+              export:
+                description: Routes exported to the BGP peer
+                items:
+                  description: VRFRouteConfigurationPrefixItem defines a prefix item.
+                  properties:
+                    action:
+                      enum:
+                      - permit
+                      - deny
+                      type: string
+                    cidr:
+                      description: CIDR of the leaked network
+                      type: string
+                    ge:
+                      description: Minimum prefix length to be matched
+                      type: integer
+                    le:
+                      description: Maximum prefix length to be matched
+                      type: integer
+                    seq:
+                      description: Sequence in the generated prefix-list, if omitted
+                        will be list index
+                      maximum: 4294967295
+                      minimum: 1
+                      type: integer
+                  required:
+                  - action
+                  type: object
+                maxItems: 4294967295
+                type: array
+              holdTime:
+                type: string
+              import:
+                description: Routes imported from the BGP peer
+                items:
+                  description: VRFRouteConfigurationPrefixItem defines a prefix item.
+                  properties:
+                    action:
+                      enum:
+                      - permit
+                      - deny
+                      type: string
+                    cidr:
+                      description: CIDR of the leaked network
+                      type: string
+                    ge:
+                      description: Minimum prefix length to be matched
+                      type: integer
+                    le:
+                      description: Maximum prefix length to be matched
+                      type: integer
+                    seq:
+                      description: Sequence in the generated prefix-list, if omitted
+                        will be list index
+                      maximum: 4294967295
+                      minimum: 1
+                      type: integer
+                  required:
+                  - action
+                  type: object
+                maxItems: 4294967295
+                type: array
+              keepaliveTime:
+                type: string
+              maximumPrefixes:
+                description: MaximumPrefixes is the maximum number of received prefixes
+                  allowed
+                format: int32
+                type: integer
+              password:
+                description: Password is the password used for the BGP peering
+                type: string
+              peeringVlan:
+                description: PeeringVlan is the VLAN used for the BGP peering
+                properties:
+                  name:
+                    description: Name is the name of the Layer2NetworkConfiguration
+                      resource
+                    type: string
+                required:
+                - name
+                type: object
+              remoteASN:
+                description: RemoteASN is the ASN of the remote BGP peer
+                format: int32
+                type: integer
+            required:
+            - enableBFD
+            - export
+            - import
+            - peeringVlan
+            - remoteASN
+            type: object
+          status:
+            description: BGPPeeringStatus defines the observed state of BGPPeering.
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
