@@ -21,7 +21,7 @@ router bgp {{$.ASN}} vrf vr.{{$vrf.Name}}
   neighbor {{$peering.Name}}{{$peering.AddressFamily}} peer-group
   neighbor {{$peering.Name}}{{$peering.AddressFamily}} remote-as {{$peering.RemoteASN}}
   neighbor {{$peering.Name}}{{$peering.AddressFamily}} timers {{$peering.KeepaliveTime}} {{$peering.HoldTime}}
-  neighbor {{$peering.Name}}{{$peering.AddressFamily}} maximum-prefix {{$peering.MaximumPrefixes}}
+  neighbor {{$peering.Name}}{{$peering.AddressFamily}} update-source {{$peering.UpdateSource}}
   bgp listen range {{$peering.NeighborRange}} peer-group {{$peering.Name}}{{$peering.AddressFamily}}
 {{if $peering.EnableBFD}}
   neighbor {{$peering.Name}}{{$peering.AddressFamily}} bfd
@@ -41,6 +41,8 @@ router bgp {{$.ASN}} vrf vr.{{$vrf.Name}}
 {{range $peering := $vrf.Peerings}}
 {{if eq $peering.AddressFamily 4}}
   neighbor {{$peering.Name}}{{$peering.AddressFamily}} activate
+  neighbor {{$peering.Name}}{{$peering.AddressFamily}} soft-reconfiguration inbound
+  neighbor {{$peering.Name}}{{$peering.AddressFamily}} maximum-prefix {{$peering.MaximumPrefixes}}
   neighbor {{$peering.Name}}{{$peering.AddressFamily}} prefix-list bgpaas-{{$peering.Name}}{{$peering.AddressFamily}}-in in
   neighbor {{$peering.Name}}{{$peering.AddressFamily}} prefix-list bgpaas-{{$peering.Name}}{{$peering.AddressFamily}}-out out
 {{ else }}
@@ -62,6 +64,8 @@ router bgp {{$.ASN}} vrf vr.{{$vrf.Name}}
 {{range $peering := $vrf.Peerings}}
 {{if eq $peering.AddressFamily 6}}
   neighbor {{$peering.Name}}{{$peering.AddressFamily}} activate
+  neighbor {{$peering.Name}}{{$peering.AddressFamily}} soft-reconfiguration inbound
+  neighbor {{$peering.Name}}{{$peering.AddressFamily}} maximum-prefix {{$peering.MaximumPrefixes}}
   neighbor {{$peering.Name}}{{$peering.AddressFamily}} prefix-list bgpaas-{{$peering.Name}}{{$peering.AddressFamily}}-in in
   neighbor {{$peering.Name}}{{$peering.AddressFamily}} prefix-list bgpaas-{{$peering.Name}}{{$peering.AddressFamily}}-out out
 {{ else }}

@@ -7,7 +7,7 @@
  neighbor {{$peering.Name}}{{$peering.AddressFamily}} peer-group
  neighbor {{$peering.Name}}{{$peering.AddressFamily}} remote-as {{$peering.RemoteASN}}
  neighbor {{$peering.Name}}{{$peering.AddressFamily}} timers {{$peering.KeepaliveTime}} {{$peering.HoldTime}}
- neighbor {{$peering.Name}}{{$peering.AddressFamily}} maximum-prefix {{$peering.MaximumPrefixes}}
+ neighbor {{$peering.Name}}{{$peering.AddressFamily}} update-source {{$peering.UpdateSource}}
  bgp listen range {{$peering.NeighborRange}} peer-group {{$peering.Name}}{{$peering.AddressFamily}}
 {{if $peering.EnableBFD}}
  neighbor {{$peering.Name}}{{$peering.AddressFamily}} bfd

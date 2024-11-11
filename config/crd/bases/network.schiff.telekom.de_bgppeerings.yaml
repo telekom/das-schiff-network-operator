@@ -118,9 +118,6 @@ spec:
                   allowed
                 format: int32
                 type: integer
-              password:
-                description: Password is the password used for the BGP peering
-                type: string
               peeringVlan:
                 description: PeeringVlan is the VLAN used for the BGP peering
                 properties:

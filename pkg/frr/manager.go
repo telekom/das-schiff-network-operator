@@ -65,8 +65,8 @@ type BGPPeering struct {
 	Name            string
 	AddressFamily   int
 	NeighborRange   string
+	UpdateSource    string
 	RemoteASN       uint32
-	Password        *string
 	EnableBFD       bool
 	MaximumPrefixes *uint32
 	HoldTime        uint

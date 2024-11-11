@@ -35,8 +35,6 @@ type BGPPeeringSpec struct {
 
 	// RemoteASN is the ASN of the remote BGP peer
 	RemoteASN uint32 `json:"remoteASN"`
-	// Password is the password used for the BGP peering
-	Password *string `json:"password,omitempty"`
 	// EnableBFD is the flag to enable BFD for the BGP peering
 	EnableBFD bool `json:"enableBFD"`
 

@@ -525,10 +525,11 @@ func createBGPPeering(peering *networkv1alpha1.BGPPeering, layer2 *networkv1alph
 			addressFamily = 6
 		}
 		frrPeerings = append(frrPeerings, frr.BGPPeering{
+			Name:            peering.Name,
 			AddressFamily:   addressFamily,
 			NeighborRange:   network.String(),
+			UpdateSource:    gateway.String(),
 			RemoteASN:       spec.RemoteASN,
-			Password:        spec.Password,
 			EnableBFD:       spec.EnableBFD,
 			MaximumPrefixes: spec.MaximumPrefixes,
 			HoldTime:        uint(spec.HoldTime.Seconds()),
