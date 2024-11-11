@@ -26,7 +26,7 @@ func (n *Manager) createVRF(vrfName string, table int) (*netlink.Vrf, error) {
 	if err := n.toolkit.LinkAdd(&netlinkVrf); err != nil {
 		return nil, fmt.Errorf("error adding link: %w", err)
 	}
-	if err := n.disableEUIAutogeneration(vrfName); err != nil {
+	if err := n.setEUIAutogeneration(vrfName, false); err != nil {
 		return nil, err
 	}
 	if err := n.toolkit.LinkSetUp(&netlinkVrf); err != nil {
@@ -36,7 +36,7 @@ func (n *Manager) createVRF(vrfName string, table int) (*netlink.Vrf, error) {
 	return &netlinkVrf, nil
 }
 
-func (n *Manager) createBridge(bridgeName string, macAddress *net.HardwareAddr, masterIdx, mtu int, underlayRMAC bool) (*netlink.Bridge, error) {
+func (n *Manager) createBridge(bridgeName string, macAddress *net.HardwareAddr, masterIdx, mtu int, underlayRMAC bool, assignEUI bool) (*netlink.Bridge, error) {
 	netlinkBridge := netlink.Bridge{
 		LinkAttrs: netlink.LinkAttrs{
 			Name: bridgeName,
@@ -64,7 +64,7 @@ func (n *Manager) createBridge(bridgeName string, macAddress *net.HardwareAddr, 
 	if err := n.toolkit.LinkAdd(&netlinkBridge); err != nil {
 		return nil, fmt.Errorf("error adding link: %w", err)
 	}
-	if err := n.disableEUIAutogeneration(bridgeName); err != nil {
+	if err := n.setEUIAutogeneration(bridgeName, assignEUI); err != nil {
 		return nil, fmt.Errorf("error disabling EUI autogeneration: %w", err)
 	}
 
@@ -109,21 +109,25 @@ func (n *Manager) createVXLAN(vxlanName string, bridgeIdx, vni, mtu int, hairpin
 			return nil, fmt.Errorf("error setting link's hairpin mode: %w", err)
 		}
 	}
-	if err := n.disableEUIAutogeneration(vxlanName); err != nil {
+	if err := n.setEUIAutogeneration(vxlanName, false); err != nil {
 		return nil, err
 	}
 
 	return &netlinkVXLAN, nil
 }
 
-func (*Manager) disableEUIAutogeneration(intfName string) error {
+func (*Manager) setEUIAutogeneration(intfName string, generateEUI bool) error {
 	fileName := fmt.Sprintf("%s/ipv6/conf/%s/addr_gen_mode", procSysNetPath, intfName)
 	file, err := os.OpenFile(fileName, os.O_WRONLY, 0)
 	if err != nil {
 		return fmt.Errorf("error opening file: %w", err)
 	}
 	defer file.Close()
-	if _, err := file.WriteString("1\n"); err != nil {
+	value := "1"
+	if generateEUI {
+		value = "0"
+	}
+	if _, err := file.WriteString(fmt.Sprintf("%s\n", value)); err != nil {
 		return fmt.Errorf("error writing to file: %w", err)
 	}
 	return nil
@@ -142,13 +146,11 @@ func (n *Manager) createLink(vethName, peerName string, masterIdx, mtu int, gene
 		return nil, fmt.Errorf("error adding link: %w", err)
 	}
 
-	if !generateEUI {
-		if err := n.disableEUIAutogeneration(vethName); err != nil {
-			return nil, err
-		}
-		if err := n.disableEUIAutogeneration(peerName); err != nil {
-			return nil, err
-		}
+	if err := n.setEUIAutogeneration(vethName, generateEUI); err != nil {
+		return nil, err
+	}
+	if err := n.setEUIAutogeneration(peerName, generateEUI); err != nil {
+		return nil, err
 	}
 
 	return &netlinkVeth, nil

@@ -130,7 +130,7 @@ func (n *Manager) CreateL2(info *Layer2Information) error {
 }
 
 func (n *Manager) setupBridge(info *Layer2Information, masterIdx int) (*netlink.Bridge, error) {
-	bridge, err := n.createBridge(fmt.Sprintf("%s%d", layer2Prefix, info.VlanID), info.AnycastMAC, masterIdx, info.MTU, false)
+	bridge, err := n.createBridge(fmt.Sprintf("%s%d", layer2Prefix, info.VlanID), info.AnycastMAC, masterIdx, info.MTU, false, len(info.AnycastGateways) > 0)
 	if err != nil {
 		return nil, err
 	}
@@ -241,6 +241,23 @@ func (n *Manager) reconcileIPAddresses(intf netlink.Link, current, desired []*ne
 		if !containsNetlinkAddress(desired, addr) {
 			if err := n.toolkit.AddrDel(intf, addr); err != nil {
 				return fmt.Errorf("error removing IP address: %w", err)
+			}
+		}
+	}
+	enableEUI := len(desired) > 0
+	if err := n.setEUIAutogeneration(intf.Attrs().Name, enableEUI); err != nil {
+		return fmt.Errorf("error setting EUI autogeneration: %w", err)
+	}
+	if !enableEUI {
+		addresses, err := n.toolkit.AddrList(intf, unix.AF_INET6)
+		if err != nil {
+			return fmt.Errorf("error listing link's IPv6 addresses: %w", err)
+		}
+		for _, addr := range addresses {
+			if addr.IP.IsLinkLocalUnicast() {
+				if err := n.toolkit.AddrDel(intf, &addr); err != nil {
+					return fmt.Errorf("error removing link local IPv6 address: %w", err)
+				}
 			}
 		}
 	}
