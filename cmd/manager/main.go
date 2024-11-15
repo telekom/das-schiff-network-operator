@@ -167,12 +167,6 @@ func main() {
 }
 
 func initComponents(mgr manager.Manager, anycastTracker *anycast.Tracker, cfg *config.Config, clientConfig *rest.Config, onlyBPFMode bool) error {
-	// Start VRFRouteConfigurationReconciler when we are not running in only BPF mode.
-	if !onlyBPFMode {
-		if err := setupReconcilers(mgr, anycastTracker); err != nil {
-			return fmt.Errorf("unable to setup reconcilers: %w", err)
-		}
-	}
 	//+kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
@@ -223,18 +217,25 @@ func initComponents(mgr manager.Manager, anycastTracker *anycast.Tracker, cfg *c
 		if err = performNetworkingHealthcheck(hc); err != nil {
 			return fmt.Errorf("error performing healthcheck: %w", err)
 		}
+	} else {
+		// Start VRFRouteConfigurationReconciler when we are not running in only BPF mode.
+		r, err := reconciler.NewReconciler(mgr.GetClient(), anycastTracker, mgr.GetLogger())
+		if err != nil {
+			return fmt.Errorf("unable to create debounced reconciler: %w", err)
+		}
+		if err := setupReconcilers(r, mgr, anycastTracker); err != nil {
+			return fmt.Errorf("unable to setup reconcilers: %w", err)
+		}
+
+		// Trigger initial reconciliation.
+		r.Reconcile(context.Background())
 	}
 
 	return nil
 }
 
-func setupReconcilers(mgr manager.Manager, anycastTracker *anycast.Tracker) error {
-	r, err := reconciler.NewReconciler(mgr.GetClient(), anycastTracker, mgr.GetLogger())
-	if err != nil {
-		return fmt.Errorf("unable to create debounced reconciler: %w", err)
-	}
-
-	if err = (&controllers.VRFRouteConfigurationReconciler{
+func setupReconcilers(r *reconciler.Reconciler, mgr manager.Manager, anycastTracker *anycast.Tracker) error {
+	if err := (&controllers.VRFRouteConfigurationReconciler{
 		Client:     mgr.GetClient(),
 		Scheme:     mgr.GetScheme(),
 		Reconciler: r,
@@ -242,7 +243,7 @@ func setupReconcilers(mgr manager.Manager, anycastTracker *anycast.Tracker) erro
 		return fmt.Errorf("unable to create VRFRouteConfiguration controller: %w", err)
 	}
 
-	if err = (&controllers.Layer2NetworkConfigurationReconciler{
+	if err := (&controllers.Layer2NetworkConfigurationReconciler{
 		Client:     mgr.GetClient(),
 		Scheme:     mgr.GetScheme(),
 		Reconciler: r,
@@ -250,7 +251,7 @@ func setupReconcilers(mgr manager.Manager, anycastTracker *anycast.Tracker) erro
 		return fmt.Errorf("unable to create Layer2NetworkConfiguration controller: %w", err)
 	}
 
-	if err = (&controllers.RoutingTableReconciler{
+	if err := (&controllers.RoutingTableReconciler{
 		Client:     mgr.GetClient(),
 		Scheme:     mgr.GetScheme(),
 		Reconciler: r,
