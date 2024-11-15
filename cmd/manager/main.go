@@ -223,7 +223,7 @@ func initComponents(mgr manager.Manager, anycastTracker *anycast.Tracker, cfg *c
 		if err != nil {
 			return fmt.Errorf("unable to create debounced reconciler: %w", err)
 		}
-		if err := setupReconcilers(r, mgr, anycastTracker); err != nil {
+		if err := setupReconcilers(r, mgr); err != nil {
 			return fmt.Errorf("unable to setup reconcilers: %w", err)
 		}
 
@@ -234,7 +234,7 @@ func initComponents(mgr manager.Manager, anycastTracker *anycast.Tracker, cfg *c
 	return nil
 }
 
-func setupReconcilers(r *reconciler.Reconciler, mgr manager.Manager, anycastTracker *anycast.Tracker) error {
+func setupReconcilers(r *reconciler.Reconciler, mgr manager.Manager) error {
 	if err := (&controllers.VRFRouteConfigurationReconciler{
 		Client:     mgr.GetClient(),
 		Scheme:     mgr.GetScheme(),
