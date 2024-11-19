@@ -130,7 +130,7 @@ func (n *Manager) CreateL2(info *Layer2Information) error {
 }
 
 func (n *Manager) setupBridge(info *Layer2Information, masterIdx int) (*netlink.Bridge, error) {
-	bridge, err := n.createBridge(fmt.Sprintf("%s%d", layer2Prefix, info.VlanID), info.AnycastMAC, masterIdx, info.MTU, false)
+	bridge, err := n.createBridge(fmt.Sprintf("%s%d", layer2Prefix, info.VlanID), info.AnycastMAC, masterIdx, info.MTU, false, len(info.AnycastGateways) > 0)
 	if err != nil {
 		return nil, err
 	}
@@ -247,7 +247,29 @@ func (n *Manager) reconcileIPAddresses(intf netlink.Link, current, desired []*ne
 	return nil
 }
 
+func (n *Manager) reconcileEUIAutogeneration(intfName string, intf netlink.Link, desired []*netlink.Addr) error {
+	enableEUI := len(desired) > 0
+	if err := n.setEUIAutogeneration(intfName, enableEUI); err != nil {
+		return fmt.Errorf("error setting EUI autogeneration: %w", err)
+	}
+	if !enableEUI {
+		addresses, err := n.toolkit.AddrList(intf, unix.AF_INET6)
+		if err != nil {
+			return fmt.Errorf("error listing link's IPv6 addresses: %w", err)
+		}
+		for i := range addresses {
+			if addresses[i].IP.IsLinkLocalUnicast() {
+				if err := n.toolkit.AddrDel(intf, &addresses[i]); err != nil {
+					return fmt.Errorf("error removing link local IPv6 address: %w", err)
+				}
+			}
+		}
+	}
+	return nil
+}
+
 func (n *Manager) ReconcileL2(current, desired *Layer2Information) error {
+	bridgeName := fmt.Sprintf("%s%d", layer2Prefix, current.VlanID)
 	if len(desired.AnycastGateways) > 0 && desired.AnycastMAC == nil {
 		return fmt.Errorf("anycastGateways require anycastMAC to be set")
 	}
@@ -282,7 +304,7 @@ func (n *Manager) ReconcileL2(current, desired *Layer2Information) error {
 		return err
 	}
 
-	if err := n.configureBridge(fmt.Sprintf("%s%d", layer2Prefix, current.VlanID)); err != nil {
+	if err := n.configureBridge(bridgeName); err != nil {
 		return err
 	}
 
@@ -291,7 +313,12 @@ func (n *Manager) ReconcileL2(current, desired *Layer2Information) error {
 	}
 
 	// Add/Remove anycast gateways
-	return n.reconcileIPAddresses(current.bridge, current.AnycastGateways, desired.AnycastGateways)
+	if err := n.reconcileIPAddresses(current.bridge, current.AnycastGateways, desired.AnycastGateways); err != nil {
+		return err
+	}
+
+	// Reconcile EUI Autogeneration
+	return n.reconcileEUIAutogeneration(bridgeName, current.bridge, desired.AnycastGateways)
 }
 
 func (n *Manager) setMTU(current, desired *Layer2Information) error {
