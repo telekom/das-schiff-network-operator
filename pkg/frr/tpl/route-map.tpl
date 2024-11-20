@@ -1,3 +1,4 @@
+{{$root .= .}}
 {{range $vrf := .VRFs}}
 {{if not $vrf.IsTaaS}}
 {{range $i, $pl := $vrf.Import}}
@@ -10,7 +11,7 @@ exit
 {{- end}}
 
 route-map rm_{{$vrf.Name}}_export deny 1
-{{if .HasCommunityDrop}}
+{{if $.HasCommunityDrop}}
   match community cm-received-fabric
 {{else}}
   match tag 20000
@@ -18,7 +19,7 @@ route-map rm_{{$vrf.Name}}_export deny 1
 exit
 
 route-map rm6_{{$vrf.Name}}_export deny 1
-{{if .HasCommunityDrop}}
+{{if $.HasCommunityDrop}}
   match community cm-received-fabric
 {{else}}
   match tag 20000
