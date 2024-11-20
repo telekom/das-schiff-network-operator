@@ -1,4 +1,3 @@
-{{$root .= .}}
 {{range $vrf := .VRFs}}
 {{if not $vrf.IsTaaS}}
 {{range $i, $pl := $vrf.Import}}
