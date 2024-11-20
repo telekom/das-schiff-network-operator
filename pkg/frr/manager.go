@@ -26,6 +26,7 @@ type Manager struct {
 	ipv4MgmtRouteMapIn *string
 	ipv6MgmtRouteMapIn *string
 	mgmtVrf            string
+	hasCommunityDrop   bool
 
 	ConfigPath   string
 	TemplatePath string
@@ -61,8 +62,9 @@ type VRFConfiguration struct {
 }
 
 type Configuration struct {
-	ASN  int
-	VRFs []VRFConfiguration
+	ASN              int
+	VRFs             []VRFConfiguration
+	HasCommunityDrop bool
 }
 
 func NewFRRManager() *Manager {
@@ -104,6 +106,12 @@ func (m *Manager) Init(mgmtVrf string) error {
 		return fmt.Errorf("error getting v6 mgmt route-map from FRR config: %w", err)
 	}
 	m.ipv6MgmtRouteMapIn = routeMap
+
+	communityDrop, err := hasCommunityDrop(m.ConfigPath)
+	if err != nil {
+		return fmt.Errorf("error checking for community drop in FRR config: %w", err)
+	}
+	m.hasCommunityDrop = communityDrop
 
 	return nil
 }

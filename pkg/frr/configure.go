@@ -69,6 +69,8 @@ func (m *Manager) Configure(in Configuration, nm *nl.Manager, nwopCfg *config.Co
 	targetConfig = fixRouteTargetReload(targetConfig)
 	targetConfig = applyCfgReplacements(targetConfig, nwopCfg.Replacements)
 
+	in.HasCommunityDrop = m.hasCommunityDrop
+
 	if !bytes.Equal(currentConfig, targetConfig) {
 		err = os.WriteFile(m.ConfigPath, targetConfig, frrPermissions)
 		if err != nil {
@@ -99,27 +101,27 @@ func (m *Manager) renderSubtemplates(in Configuration, nlManager *nl.Manager) (*
 		return nil, fmt.Errorf("error getting node's name")
 	}
 
-	vrfs, err := render(vrfTpl, in.VRFs)
+	vrfs, err := render(vrfTpl, in)
 	if err != nil {
 		return nil, err
 	}
-	neighbors, err := render(neighborTpl, in.VRFs)
+	neighbors, err := render(neighborTpl, in)
 	if err != nil {
 		return nil, err
 	}
-	neighborsV4, err := render(neighborV4Tpl, in.VRFs)
+	neighborsV4, err := render(neighborV4Tpl, in)
 	if err != nil {
 		return nil, err
 	}
-	neighborsV6, err := render(neighborV6Tpl, in.VRFs)
+	neighborsV6, err := render(neighborV6Tpl, in)
 	if err != nil {
 		return nil, err
 	}
-	prefixlists, err := render(prefixListTpl, in.VRFs)
+	prefixlists, err := render(prefixListTpl, in)
 	if err != nil {
 		return nil, err
 	}
-	routemaps, err := render(routeMapTpl, in.VRFs)
+	routemaps, err := render(routeMapTpl, in)
 	if err != nil {
 		return nil, err
 	}

@@ -1,4 +1,4 @@
-{{range $vrf := .}}
+{{range $vrf := .VRFs}}
 {{if not $vrf.IsTaaS}}
 {{range $i, $pl := $vrf.Import}}
 {{range $item := $pl.Items}}

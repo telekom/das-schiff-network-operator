@@ -1,4 +1,4 @@
-{{range $vrf := .}}
+{{range $vrf := .VRFs}}
 {{if and $vrf.ShouldTemplateVRF (not $vrf.IsTaaS)}}
   neighbor dv.{{$vrf.Name}} activate
   neighbor dv.{{$vrf.Name}} allowas-in origin
