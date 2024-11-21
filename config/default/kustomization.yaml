@@ -42,7 +42,8 @@ kind: Kustomization
 resources:
 - ../crd
 - ../rbac
-- ../manager
+- ../agent
+- ../operator
 - ../webhook
 - ../prometheus
 labels:
