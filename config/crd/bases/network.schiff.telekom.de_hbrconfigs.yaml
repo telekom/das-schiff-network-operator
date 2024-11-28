@@ -659,9 +659,6 @@ spec:
                               description: DstPrefix is the destination prefix to
                                 match.
                               type: string
-                            layer2:
-                              description: Layer2 is the Layer2 to match.
-                              type: string
                             protocol:
                               description: Protocol is the protocol to match.
                               type: string
@@ -704,9 +701,6 @@ spec:
                             dstPrefix:
                               description: DstPrefix is the destination prefix to
                                 match.
-                              type: string
-                            layer2:
-                              description: Layer2 is the Layer2 to match.
                               type: string
                             protocol:
                               description: Protocol is the protocol to match.
@@ -1506,9 +1500,6 @@ spec:
                                 description: DstPrefix is the destination prefix to
                                   match.
                                 type: string
-                              layer2:
-                                description: Layer2 is the Layer2 to match.
-                                type: string
                               protocol:
                                 description: Protocol is the protocol to match.
                                 type: string
@@ -1551,9 +1542,6 @@ spec:
                               dstPrefix:
                                 description: DstPrefix is the destination prefix to
                                   match.
-                                type: string
-                              layer2:
-                                description: Layer2 is the Layer2 to match.
                                 type: string
                               protocol:
                                 description: Protocol is the protocol to match.
@@ -1745,7 +1733,7 @@ spec:
                           type: array
                         macAddress:
                           description: MACAddress is the MAC address for the IRB.
-                          format: byte
+                          pattern: (?:[[:xdigit:]]{2}:){5}[[:xdigit:]]{2}
                           type: string
                         vrf:
                           description: VRF is the Virtual Routing and Forwarding instance.
@@ -1755,8 +1743,57 @@ spec:
                       - macAddress
                       - vrf
                       type: object
+                    mirrorAcls:
+                      description: MirrorACLs is a list of mirror ACLs.
+                      items:
+                        description: MirrorACL represents a mirror ACL configuration.
+                        properties:
+                          destinationAddress:
+                            description: DestinationAddress is the destination address
+                              for the mirrored traffic.
+                            type: string
+                          destinationVrf:
+                            description: DestinationVrf is the destination VRF for
+                              the mirrored traffic.
+                            type: string
+                          encapsulationType:
+                            description: EncapsulationType is the encapsulation type
+                              for the mirrored traffic.
+                            enum:
+                            - gre
+                            type: string
+                          trafficMatch:
+                            description: TrafficMatch is the traffic match for the
+                              mirror ACL.
+                            properties:
+                              dstPort:
+                                description: DstPort is the destination port to match.
+                                type: integer
+                              dstPrefix:
+                                description: DstPrefix is the destination prefix to
+                                  match.
+                                type: string
+                              protocol:
+                                description: Protocol is the protocol to match.
+                                type: string
+                              srcPort:
+                                description: SrcPort is the source port to match.
+                                type: integer
+                              srcPrefix:
+                                description: SrcPrefix is the source prefix to match.
+                                type: string
+                            type: object
+                        required:
+                        - destinationAddress
+                        - destinationVrf
+                        - encapsulationType
+                        - trafficMatch
+                        type: object
+                      type: array
                     mtu:
                       description: MTU is the Maximum Transmission Unit size.
+                      maximum: 9000
+                      minimum: 1000
                       type: integer
                     routeTarget:
                       description: RouteTarget is the route target for the Layer 2
@@ -1764,10 +1801,14 @@ spec:
                       type: string
                     vlan:
                       description: VLAN is the VLAN ID.
+                      maximum: 4096
+                      minimum: 1
                       type: integer
                     vni:
                       description: VNI is the Virtual Network Identifier.
                       format: int32
+                      maximum: 16777215
+                      minimum: 1
                       type: integer
                   required:
                   - mtu
@@ -2296,9 +2337,6 @@ spec:
                                 description: DstPrefix is the destination prefix to
                                   match.
                                 type: string
-                              layer2:
-                                description: Layer2 is the Layer2 to match.
-                                type: string
                               protocol:
                                 description: Protocol is the protocol to match.
                                 type: string
@@ -2341,9 +2379,6 @@ spec:
                               dstPrefix:
                                 description: DstPrefix is the destination prefix to
                                   match.
-                                type: string
-                              layer2:
-                                description: Layer2 is the Layer2 to match.
                                 type: string
                               protocol:
                                 description: Protocol is the protocol to match.

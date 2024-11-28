@@ -18,7 +18,6 @@ package v1alpha1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"net"
 )
 
 // HBRConfigSpec defines the desired state of HBRConfig
@@ -64,7 +63,7 @@ type IRB struct {
 	VRF string `json:"vrf"`
 	// +kubebuilder:validation:Pattern=`(?:[[:xdigit:]]{2}:){5}[[:xdigit:]]{2}`
 	// MACAddress is the MAC address for the IRB.
-	MACAddress net.HardwareAddr `json:"macAddress"`
+	MACAddress string `json:"macAddress"`
 	// IPAddresses is a list of IP addresses for the IRB.
 	// +kubebuilder:validation:MinItems=1
 	IPAddresses []string `json:"ipAddresses"`
