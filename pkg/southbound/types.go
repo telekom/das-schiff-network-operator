@@ -19,6 +19,8 @@ type Layer2 struct {
 	Name string `json:"name"`
 	// VNI is the Virtual Network Identifier.
 	VNI uint32 `json:"vni"`
+	// VLAN is the VLAN ID.
+	VLAN uint16 `json:"vlan"`
 	// RouteTarget is the route target for the Layer 2 network.
 	RouteTarget string `json:"routeTarget"`
 	// MTU is the Maximum Transmission Unit size.
@@ -121,6 +123,8 @@ type AddressFamily struct {
 	ExportFilter *Filter `json:"exportFilter"`
 	// ImportFilter is the import filter for the address family.
 	ImportFilter *Filter `json:"importFilter"`
+	// MaxPrefixes is the maximum number of prefixes for the address family.
+	MaxPrefixes *uint32 `json:"maxPrefixes"`
 }
 
 // Filter represents a filter configuration.
@@ -211,6 +215,8 @@ type TrafficMatch struct {
 	DstPort *uint16 `json:"dstPort"`
 	// Protocol is the protocol to match.
 	Protocol *string `json:"protocol"`
+	// Layer2 is the Layer2 to match.
+	Layer2 string `json:"layer2"`
 }
 
 // PolicyRoute represents a policy-based route configuration.
