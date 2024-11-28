@@ -37,22 +37,32 @@ type HBRConfigSpec struct {
 
 // Layer2 represents a Layer 2 network configuration.
 type Layer2 struct {
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=16777215
 	// VNI is the Virtual Network Identifier.
 	VNI uint32 `json:"vni"`
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=4096
 	// VLAN is the VLAN ID.
 	VLAN uint16 `json:"vlan"`
 	// RouteTarget is the route target for the Layer 2 network.
 	RouteTarget string `json:"routeTarget"`
+	// +kubebuilder:validation:Minimum=1000
+	// +kubebuilder:validation:Maximum=9000
+	// +kubebuilder:validation:ExclusiveMaximum=false
 	// MTU is the Maximum Transmission Unit size.
 	MTU uint16 `json:"mtu"`
 	// IRB is the Integrated Routing and Bridging configuration.
 	IRB *IRB `json:"irb,omitempty"`
+	// MirrorACLs is a list of mirror ACLs.
+	MirrorACLs []MirrorACL `json:"mirrorAcls,omitempty"`
 }
 
 // IRB represents the Integrated Routing and Bridging configuration.
 type IRB struct {
 	// VRF is the Virtual Routing and Forwarding instance.
 	VRF string `json:"vrf"`
+	// +kubebuilder:validation:Pattern=`(?:[[:xdigit:]]{2}:){5}[[:xdigit:]]{2}`
 	// MACAddress is the MAC address for the IRB.
 	MACAddress net.HardwareAddr `json:"macAddress"`
 	// IPAddresses is a list of IP addresses for the IRB.
@@ -229,8 +239,6 @@ type TrafficMatch struct {
 	DstPort *uint16 `json:"dstPort,omitempty"`
 	// Protocol is the protocol to match.
 	Protocol *string `json:"protocol,omitempty"`
-	// Layer2 is the Layer2 to match.
-	Layer2 *string `json:"layer2,omitempty"`
 }
 
 // PolicyRoute represents a policy-based route configuration.
