@@ -9,8 +9,13 @@ import (
 type HBRConfig struct {
 	// Layer2s is a list of Layer2 configurations.
 	Layer2s []Layer2 `json:"layer2s"`
-	// VRFs is a list of VRF configurations.
-	VRFs []VRF `json:"vrfs"`
+
+	// DefaultVRF is the default VRF configuration used for the default route of HBR.
+	DefaultVRF FabricVRF `json:"defaultVRF"`
+	// FabricVRFs is a list of fabric VRF configurations.
+	FabricVRFs []FabricVRF `json:"fabricVRFs"`
+	// LocalVRFs is a list of local VRF configurations.
+	LocalVRFs []VRF `json:"localVRFs"`
 }
 
 // Layer2 represents a Layer 2 network configuration.
@@ -68,11 +73,6 @@ type FabricVRF struct {
 	EVPNExportRouteTargets []string `json:"evpnExportRouteTargets"`
 	// EVPNExportFilter is the export filter for EVPN.
 	EVPNExportFilter *Filter `json:"evpnExportFilter"`
-}
-
-// LocalVRF represents a local VRF configuration.
-type LocalVRF struct {
-	VRF
 }
 
 // Loopback represents a loopback interface.
