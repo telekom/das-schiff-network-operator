@@ -38,4 +38,12 @@ resources:
   kind: RoutingTable
   path: github.com/telekom/das-schiff-network-operator/api/v1alpha1
   version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  domain: schiff.telekom.de
+  group: network
+  kind: HBRConfig
+  path: github.com/telekom/das-schiff-network-operator/api/v1alpha1
+  version: v1alpha1
 version: "3"

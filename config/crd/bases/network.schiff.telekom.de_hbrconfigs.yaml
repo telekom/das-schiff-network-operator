@@ -1,0 +1,2517 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.14.0
+  name: hbrconfigs.network.schiff.telekom.de
+spec:
+  group: network.schiff.telekom.de
+  names:
+    kind: HBRConfig
+    listKind: HBRConfigList
+    plural: hbrconfigs
+    shortNames:
+    - hbrconfig
+    singular: hbrconfig
+  scope: Cluster
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: HBRConfig is the Schema for the hbrconfigs API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: HBRConfigSpec defines the desired state of HBRConfig
+            properties:
+              defaultVRF:
+                description: DefaultVRF is the default VRF configuration used for
+                  the default route of HBR.
+                properties:
+                  bgpPeers:
+                    description: BGPPeers is a list of BGP peers.
+                    items:
+                      description: BGPPeer represents a BGP peer configuration.
+                      properties:
+                        address:
+                          description: Address is the address of the BGP peer.
+                          type: string
+                        bfdProfile:
+                          description: BFDProfile is the BFD profile for the BGP peer.
+                          properties:
+                            minInterval:
+                              description: MinInterval is the minimum interval for
+                                BFD.
+                              format: int32
+                              type: integer
+                          required:
+                          - minInterval
+                          type: object
+                        holdTime:
+                          description: HoldTime is the hold time for the BGP session,
+                            default is 90s.
+                          type: string
+                        ipv4:
+                          description: IPv4 is the IPv4 address family configuration.
+                          properties:
+                            exportFilter:
+                              description: ExportFilter is the export filter for the
+                                address family.
+                              properties:
+                                defaultAction:
+                                  description: DefaultAction is the default action
+                                    for the filter.
+                                  properties:
+                                    modifyRoute:
+                                      description: ModifyRoute is the modify route
+                                        action.
+                                      properties:
+                                        addCommunity:
+                                          description: AddCommunity is the community
+                                            to add to the route.
+                                          type: string
+                                      required:
+                                      - addCommunity
+                                      type: object
+                                    type:
+                                      description: Type is the type of action.
+                                      enum:
+                                      - accept
+                                      - reject
+                                      - next
+                                      type: string
+                                  required:
+                                  - type
+                                  type: object
+                                items:
+                                  description: Items is a list of filter items.
+                                  items:
+                                    description: FilterItem represents a filter item.
+                                    properties:
+                                      action:
+                                        description: Action is the action for the
+                                          filter item.
+                                        properties:
+                                          modifyRoute:
+                                            description: ModifyRoute is the modify
+                                              route action.
+                                            properties:
+                                              addCommunity:
+                                                description: AddCommunity is the community
+                                                  to add to the route.
+                                                type: string
+                                            required:
+                                            - addCommunity
+                                            type: object
+                                          type:
+                                            description: Type is the type of action.
+                                            enum:
+                                            - accept
+                                            - reject
+                                            - next
+                                            type: string
+                                        required:
+                                        - type
+                                        type: object
+                                      matcher:
+                                        description: Matcher is the matcher for the
+                                          filter item.
+                                        properties:
+                                          bgpCommunity:
+                                            description: BGPCommunity is the BGP community
+                                              matcher.
+                                            properties:
+                                              community:
+                                                description: Community is the BGP
+                                                  community to match.
+                                                type: string
+                                            required:
+                                            - community
+                                            type: object
+                                          prefix:
+                                            description: Prefix is the prefix matcher.
+                                            properties:
+                                              ge:
+                                                description: Ge is the minimum prefix
+                                                  length to match.
+                                                type: integer
+                                              le:
+                                                description: Le is the maximum prefix
+                                                  length to match.
+                                                type: integer
+                                              prefix:
+                                                description: Prefix is the prefix
+                                                  to match.
+                                                type: string
+                                            required:
+                                            - prefix
+                                            type: object
+                                        type: object
+                                    required:
+                                    - action
+                                    - matcher
+                                    type: object
+                                  type: array
+                              required:
+                              - defaultAction
+                              type: object
+                            importFilter:
+                              description: ImportFilter is the import filter for the
+                                address family.
+                              properties:
+                                defaultAction:
+                                  description: DefaultAction is the default action
+                                    for the filter.
+                                  properties:
+                                    modifyRoute:
+                                      description: ModifyRoute is the modify route
+                                        action.
+                                      properties:
+                                        addCommunity:
+                                          description: AddCommunity is the community
+                                            to add to the route.
+                                          type: string
+                                      required:
+                                      - addCommunity
+                                      type: object
+                                    type:
+                                      description: Type is the type of action.
+                                      enum:
+                                      - accept
+                                      - reject
+                                      - next
+                                      type: string
+                                  required:
+                                  - type
+                                  type: object
+                                items:
+                                  description: Items is a list of filter items.
+                                  items:
+                                    description: FilterItem represents a filter item.
+                                    properties:
+                                      action:
+                                        description: Action is the action for the
+                                          filter item.
+                                        properties:
+                                          modifyRoute:
+                                            description: ModifyRoute is the modify
+                                              route action.
+                                            properties:
+                                              addCommunity:
+                                                description: AddCommunity is the community
+                                                  to add to the route.
+                                                type: string
+                                            required:
+                                            - addCommunity
+                                            type: object
+                                          type:
+                                            description: Type is the type of action.
+                                            enum:
+                                            - accept
+                                            - reject
+                                            - next
+                                            type: string
+                                        required:
+                                        - type
+                                        type: object
+                                      matcher:
+                                        description: Matcher is the matcher for the
+                                          filter item.
+                                        properties:
+                                          bgpCommunity:
+                                            description: BGPCommunity is the BGP community
+                                              matcher.
+                                            properties:
+                                              community:
+                                                description: Community is the BGP
+                                                  community to match.
+                                                type: string
+                                            required:
+                                            - community
+                                            type: object
+                                          prefix:
+                                            description: Prefix is the prefix matcher.
+                                            properties:
+                                              ge:
+                                                description: Ge is the minimum prefix
+                                                  length to match.
+                                                type: integer
+                                              le:
+                                                description: Le is the maximum prefix
+                                                  length to match.
+                                                type: integer
+                                              prefix:
+                                                description: Prefix is the prefix
+                                                  to match.
+                                                type: string
+                                            required:
+                                            - prefix
+                                            type: object
+                                        type: object
+                                    required:
+                                    - action
+                                    - matcher
+                                    type: object
+                                  type: array
+                              required:
+                              - defaultAction
+                              type: object
+                            maxPrefixes:
+                              description: MaxPrefixes is the maximum number of prefixes
+                                for the address family.
+                              format: int32
+                              type: integer
+                          type: object
+                        ipv6:
+                          description: IPv6 is the IPv6 address family configuration.
+                          properties:
+                            exportFilter:
+                              description: ExportFilter is the export filter for the
+                                address family.
+                              properties:
+                                defaultAction:
+                                  description: DefaultAction is the default action
+                                    for the filter.
+                                  properties:
+                                    modifyRoute:
+                                      description: ModifyRoute is the modify route
+                                        action.
+                                      properties:
+                                        addCommunity:
+                                          description: AddCommunity is the community
+                                            to add to the route.
+                                          type: string
+                                      required:
+                                      - addCommunity
+                                      type: object
+                                    type:
+                                      description: Type is the type of action.
+                                      enum:
+                                      - accept
+                                      - reject
+                                      - next
+                                      type: string
+                                  required:
+                                  - type
+                                  type: object
+                                items:
+                                  description: Items is a list of filter items.
+                                  items:
+                                    description: FilterItem represents a filter item.
+                                    properties:
+                                      action:
+                                        description: Action is the action for the
+                                          filter item.
+                                        properties:
+                                          modifyRoute:
+                                            description: ModifyRoute is the modify
+                                              route action.
+                                            properties:
+                                              addCommunity:
+                                                description: AddCommunity is the community
+                                                  to add to the route.
+                                                type: string
+                                            required:
+                                            - addCommunity
+                                            type: object
+                                          type:
+                                            description: Type is the type of action.
+                                            enum:
+                                            - accept
+                                            - reject
+                                            - next
+                                            type: string
+                                        required:
+                                        - type
+                                        type: object
+                                      matcher:
+                                        description: Matcher is the matcher for the
+                                          filter item.
+                                        properties:
+                                          bgpCommunity:
+                                            description: BGPCommunity is the BGP community
+                                              matcher.
+                                            properties:
+                                              community:
+                                                description: Community is the BGP
+                                                  community to match.
+                                                type: string
+                                            required:
+                                            - community
+                                            type: object
+                                          prefix:
+                                            description: Prefix is the prefix matcher.
+                                            properties:
+                                              ge:
+                                                description: Ge is the minimum prefix
+                                                  length to match.
+                                                type: integer
+                                              le:
+                                                description: Le is the maximum prefix
+                                                  length to match.
+                                                type: integer
+                                              prefix:
+                                                description: Prefix is the prefix
+                                                  to match.
+                                                type: string
+                                            required:
+                                            - prefix
+                                            type: object
+                                        type: object
+                                    required:
+                                    - action
+                                    - matcher
+                                    type: object
+                                  type: array
+                              required:
+                              - defaultAction
+                              type: object
+                            importFilter:
+                              description: ImportFilter is the import filter for the
+                                address family.
+                              properties:
+                                defaultAction:
+                                  description: DefaultAction is the default action
+                                    for the filter.
+                                  properties:
+                                    modifyRoute:
+                                      description: ModifyRoute is the modify route
+                                        action.
+                                      properties:
+                                        addCommunity:
+                                          description: AddCommunity is the community
+                                            to add to the route.
+                                          type: string
+                                      required:
+                                      - addCommunity
+                                      type: object
+                                    type:
+                                      description: Type is the type of action.
+                                      enum:
+                                      - accept
+                                      - reject
+                                      - next
+                                      type: string
+                                  required:
+                                  - type
+                                  type: object
+                                items:
+                                  description: Items is a list of filter items.
+                                  items:
+                                    description: FilterItem represents a filter item.
+                                    properties:
+                                      action:
+                                        description: Action is the action for the
+                                          filter item.
+                                        properties:
+                                          modifyRoute:
+                                            description: ModifyRoute is the modify
+                                              route action.
+                                            properties:
+                                              addCommunity:
+                                                description: AddCommunity is the community
+                                                  to add to the route.
+                                                type: string
+                                            required:
+                                            - addCommunity
+                                            type: object
+                                          type:
+                                            description: Type is the type of action.
+                                            enum:
+                                            - accept
+                                            - reject
+                                            - next
+                                            type: string
+                                        required:
+                                        - type
+                                        type: object
+                                      matcher:
+                                        description: Matcher is the matcher for the
+                                          filter item.
+                                        properties:
+                                          bgpCommunity:
+                                            description: BGPCommunity is the BGP community
+                                              matcher.
+                                            properties:
+                                              community:
+                                                description: Community is the BGP
+                                                  community to match.
+                                                type: string
+                                            required:
+                                            - community
+                                            type: object
+                                          prefix:
+                                            description: Prefix is the prefix matcher.
+                                            properties:
+                                              ge:
+                                                description: Ge is the minimum prefix
+                                                  length to match.
+                                                type: integer
+                                              le:
+                                                description: Le is the maximum prefix
+                                                  length to match.
+                                                type: integer
+                                              prefix:
+                                                description: Prefix is the prefix
+                                                  to match.
+                                                type: string
+                                            required:
+                                            - prefix
+                                            type: object
+                                        type: object
+                                    required:
+                                    - action
+                                    - matcher
+                                    type: object
+                                  type: array
+                              required:
+                              - defaultAction
+                              type: object
+                            maxPrefixes:
+                              description: MaxPrefixes is the maximum number of prefixes
+                                for the address family.
+                              format: int32
+                              type: integer
+                          type: object
+                        keepaliveTime:
+                          description: KeepaliveTime is the keepalive time for the
+                            BGP session, default is 30s.
+                          type: string
+                        listenRange:
+                          description: ListenRange is the listen range for the BGP
+                            peer.
+                          type: string
+                        remoteAsn:
+                          description: RemoteASN is the remote Autonomous System Number.
+                          format: int32
+                          type: integer
+                      required:
+                      - address
+                      - listenRange
+                      - remoteAsn
+                      type: object
+                    type: array
+                  evpnExportFilter:
+                    description: EVPNExportFilter is the export filter for EVPN.
+                    properties:
+                      defaultAction:
+                        description: DefaultAction is the default action for the filter.
+                        properties:
+                          modifyRoute:
+                            description: ModifyRoute is the modify route action.
+                            properties:
+                              addCommunity:
+                                description: AddCommunity is the community to add
+                                  to the route.
+                                type: string
+                            required:
+                            - addCommunity
+                            type: object
+                          type:
+                            description: Type is the type of action.
+                            enum:
+                            - accept
+                            - reject
+                            - next
+                            type: string
+                        required:
+                        - type
+                        type: object
+                      items:
+                        description: Items is a list of filter items.
+                        items:
+                          description: FilterItem represents a filter item.
+                          properties:
+                            action:
+                              description: Action is the action for the filter item.
+                              properties:
+                                modifyRoute:
+                                  description: ModifyRoute is the modify route action.
+                                  properties:
+                                    addCommunity:
+                                      description: AddCommunity is the community to
+                                        add to the route.
+                                      type: string
+                                  required:
+                                  - addCommunity
+                                  type: object
+                                type:
+                                  description: Type is the type of action.
+                                  enum:
+                                  - accept
+                                  - reject
+                                  - next
+                                  type: string
+                              required:
+                              - type
+                              type: object
+                            matcher:
+                              description: Matcher is the matcher for the filter item.
+                              properties:
+                                bgpCommunity:
+                                  description: BGPCommunity is the BGP community matcher.
+                                  properties:
+                                    community:
+                                      description: Community is the BGP community
+                                        to match.
+                                      type: string
+                                  required:
+                                  - community
+                                  type: object
+                                prefix:
+                                  description: Prefix is the prefix matcher.
+                                  properties:
+                                    ge:
+                                      description: Ge is the minimum prefix length
+                                        to match.
+                                      type: integer
+                                    le:
+                                      description: Le is the maximum prefix length
+                                        to match.
+                                      type: integer
+                                    prefix:
+                                      description: Prefix is the prefix to match.
+                                      type: string
+                                  required:
+                                  - prefix
+                                  type: object
+                              type: object
+                          required:
+                          - action
+                          - matcher
+                          type: object
+                        type: array
+                    required:
+                    - defaultAction
+                    type: object
+                  evpnExportRouteTargets:
+                    description: EVPNExportRouteTargets is a list of EVPN export route
+                      targets.
+                    items:
+                      type: string
+                    type: array
+                  evpnImportRouteTargets:
+                    description: EVPNImportRouteTargets is a list of EVPN import route
+                      targets.
+                    items:
+                      type: string
+                    type: array
+                  loopbacks:
+                    additionalProperties:
+                      description: Loopback represents a loopback interface.
+                      properties:
+                        ipAddresses:
+                          description: IPAddresses is a list of IP addresses for the
+                            loopback interface.
+                          items:
+                            type: string
+                          type: array
+                      required:
+                      - ipAddresses
+                      type: object
+                    description: Loopbacks is a list of loopback interfaces.
+                    type: object
+                  mirrorAcls:
+                    description: MirrorACLs is a list of mirror ACLs.
+                    items:
+                      description: MirrorACL represents a mirror ACL configuration.
+                      properties:
+                        destinationAddress:
+                          description: DestinationAddress is the destination address
+                            for the mirrored traffic.
+                          type: string
+                        destinationVrf:
+                          description: DestinationVrf is the destination VRF for the
+                            mirrored traffic.
+                          type: string
+                        encapsulationType:
+                          description: EncapsulationType is the encapsulation type
+                            for the mirrored traffic.
+                          enum:
+                          - gre
+                          type: string
+                        trafficMatch:
+                          description: TrafficMatch is the traffic match for the mirror
+                            ACL.
+                          properties:
+                            dstPort:
+                              description: DstPort is the destination port to match.
+                              type: integer
+                            dstPrefix:
+                              description: DstPrefix is the destination prefix to
+                                match.
+                              type: string
+                            layer2:
+                              description: Layer2 is the Layer2 to match.
+                              type: string
+                            protocol:
+                              description: Protocol is the protocol to match.
+                              type: string
+                            srcPort:
+                              description: SrcPort is the source port to match.
+                              type: integer
+                            srcPrefix:
+                              description: SrcPrefix is the source prefix to match.
+                              type: string
+                          type: object
+                      required:
+                      - destinationAddress
+                      - destinationVrf
+                      - encapsulationType
+                      - trafficMatch
+                      type: object
+                    type: array
+                  policyRoutes:
+                    description: PolicyRoutes is a list of policy-based routes.
+                    items:
+                      description: PolicyRoute represents a policy-based route configuration.
+                      properties:
+                        nextHop:
+                          description: NextHop is the next hop for the policy route.
+                          properties:
+                            address:
+                              description: Address is the address of the next hop.
+                              type: string
+                            vrf:
+                              description: Vrf is the VRF of the next hop.
+                              type: string
+                          type: object
+                        trafficMatch:
+                          description: TrafficMatch is the traffic match for the policy
+                            route.
+                          properties:
+                            dstPort:
+                              description: DstPort is the destination port to match.
+                              type: integer
+                            dstPrefix:
+                              description: DstPrefix is the destination prefix to
+                                match.
+                              type: string
+                            layer2:
+                              description: Layer2 is the Layer2 to match.
+                              type: string
+                            protocol:
+                              description: Protocol is the protocol to match.
+                              type: string
+                            srcPort:
+                              description: SrcPort is the source port to match.
+                              type: integer
+                            srcPrefix:
+                              description: SrcPrefix is the source prefix to match.
+                              type: string
+                          type: object
+                      required:
+                      - nextHop
+                      - trafficMatch
+                      type: object
+                    type: array
+                  staticRoutes:
+                    description: StaticRoutes is a list of static routes.
+                    items:
+                      description: StaticRoute represents a static route configuration.
+                      properties:
+                        bfdProfile:
+                          description: BFDProfile is the BFD profile for the static
+                            route.
+                          properties:
+                            minInterval:
+                              description: MinInterval is the minimum interval for
+                                BFD.
+                              format: int32
+                              type: integer
+                          required:
+                          - minInterval
+                          type: object
+                        nextHop:
+                          description: NextHop is the next hop for the static route.
+                          properties:
+                            address:
+                              description: Address is the address of the next hop.
+                              type: string
+                            vrf:
+                              description: Vrf is the VRF of the next hop.
+                              type: string
+                          type: object
+                        prefix:
+                          description: Prefix is the prefix for the static route.
+                          type: string
+                      required:
+                      - nextHop
+                      - prefix
+                      type: object
+                    type: array
+                  vni:
+                    description: VNI is the Virtual Network Identifier.
+                    format: int32
+                    type: integer
+                  vrfImports:
+                    description: VRFImports is a list of VRF import configurations.
+                    items:
+                      description: VRFImport represents a VRF import configuration.
+                      properties:
+                        filter:
+                          description: Filter is the filter applied to the import.
+                          properties:
+                            defaultAction:
+                              description: DefaultAction is the default action for
+                                the filter.
+                              properties:
+                                modifyRoute:
+                                  description: ModifyRoute is the modify route action.
+                                  properties:
+                                    addCommunity:
+                                      description: AddCommunity is the community to
+                                        add to the route.
+                                      type: string
+                                  required:
+                                  - addCommunity
+                                  type: object
+                                type:
+                                  description: Type is the type of action.
+                                  enum:
+                                  - accept
+                                  - reject
+                                  - next
+                                  type: string
+                              required:
+                              - type
+                              type: object
+                            items:
+                              description: Items is a list of filter items.
+                              items:
+                                description: FilterItem represents a filter item.
+                                properties:
+                                  action:
+                                    description: Action is the action for the filter
+                                      item.
+                                    properties:
+                                      modifyRoute:
+                                        description: ModifyRoute is the modify route
+                                          action.
+                                        properties:
+                                          addCommunity:
+                                            description: AddCommunity is the community
+                                              to add to the route.
+                                            type: string
+                                        required:
+                                        - addCommunity
+                                        type: object
+                                      type:
+                                        description: Type is the type of action.
+                                        enum:
+                                        - accept
+                                        - reject
+                                        - next
+                                        type: string
+                                    required:
+                                    - type
+                                    type: object
+                                  matcher:
+                                    description: Matcher is the matcher for the filter
+                                      item.
+                                    properties:
+                                      bgpCommunity:
+                                        description: BGPCommunity is the BGP community
+                                          matcher.
+                                        properties:
+                                          community:
+                                            description: Community is the BGP community
+                                              to match.
+                                            type: string
+                                        required:
+                                        - community
+                                        type: object
+                                      prefix:
+                                        description: Prefix is the prefix matcher.
+                                        properties:
+                                          ge:
+                                            description: Ge is the minimum prefix
+                                              length to match.
+                                            type: integer
+                                          le:
+                                            description: Le is the maximum prefix
+                                              length to match.
+                                            type: integer
+                                          prefix:
+                                            description: Prefix is the prefix to match.
+                                            type: string
+                                        required:
+                                        - prefix
+                                        type: object
+                                    type: object
+                                required:
+                                - action
+                                - matcher
+                                type: object
+                              type: array
+                          required:
+                          - defaultAction
+                          type: object
+                        fromVrf:
+                          description: FromVRF is the source VRF for the import.
+                          type: string
+                      required:
+                      - filter
+                      - fromVrf
+                      type: object
+                    type: array
+                required:
+                - evpnExportFilter
+                - evpnExportRouteTargets
+                - evpnImportRouteTargets
+                - vni
+                type: object
+              fabricVRFs:
+                additionalProperties:
+                  description: FabricVRF represents a fabric VRF configuration.
+                  properties:
+                    bgpPeers:
+                      description: BGPPeers is a list of BGP peers.
+                      items:
+                        description: BGPPeer represents a BGP peer configuration.
+                        properties:
+                          address:
+                            description: Address is the address of the BGP peer.
+                            type: string
+                          bfdProfile:
+                            description: BFDProfile is the BFD profile for the BGP
+                              peer.
+                            properties:
+                              minInterval:
+                                description: MinInterval is the minimum interval for
+                                  BFD.
+                                format: int32
+                                type: integer
+                            required:
+                            - minInterval
+                            type: object
+                          holdTime:
+                            description: HoldTime is the hold time for the BGP session,
+                              default is 90s.
+                            type: string
+                          ipv4:
+                            description: IPv4 is the IPv4 address family configuration.
+                            properties:
+                              exportFilter:
+                                description: ExportFilter is the export filter for
+                                  the address family.
+                                properties:
+                                  defaultAction:
+                                    description: DefaultAction is the default action
+                                      for the filter.
+                                    properties:
+                                      modifyRoute:
+                                        description: ModifyRoute is the modify route
+                                          action.
+                                        properties:
+                                          addCommunity:
+                                            description: AddCommunity is the community
+                                              to add to the route.
+                                            type: string
+                                        required:
+                                        - addCommunity
+                                        type: object
+                                      type:
+                                        description: Type is the type of action.
+                                        enum:
+                                        - accept
+                                        - reject
+                                        - next
+                                        type: string
+                                    required:
+                                    - type
+                                    type: object
+                                  items:
+                                    description: Items is a list of filter items.
+                                    items:
+                                      description: FilterItem represents a filter
+                                        item.
+                                      properties:
+                                        action:
+                                          description: Action is the action for the
+                                            filter item.
+                                          properties:
+                                            modifyRoute:
+                                              description: ModifyRoute is the modify
+                                                route action.
+                                              properties:
+                                                addCommunity:
+                                                  description: AddCommunity is the
+                                                    community to add to the route.
+                                                  type: string
+                                              required:
+                                              - addCommunity
+                                              type: object
+                                            type:
+                                              description: Type is the type of action.
+                                              enum:
+                                              - accept
+                                              - reject
+                                              - next
+                                              type: string
+                                          required:
+                                          - type
+                                          type: object
+                                        matcher:
+                                          description: Matcher is the matcher for
+                                            the filter item.
+                                          properties:
+                                            bgpCommunity:
+                                              description: BGPCommunity is the BGP
+                                                community matcher.
+                                              properties:
+                                                community:
+                                                  description: Community is the BGP
+                                                    community to match.
+                                                  type: string
+                                              required:
+                                              - community
+                                              type: object
+                                            prefix:
+                                              description: Prefix is the prefix matcher.
+                                              properties:
+                                                ge:
+                                                  description: Ge is the minimum prefix
+                                                    length to match.
+                                                  type: integer
+                                                le:
+                                                  description: Le is the maximum prefix
+                                                    length to match.
+                                                  type: integer
+                                                prefix:
+                                                  description: Prefix is the prefix
+                                                    to match.
+                                                  type: string
+                                              required:
+                                              - prefix
+                                              type: object
+                                          type: object
+                                      required:
+                                      - action
+                                      - matcher
+                                      type: object
+                                    type: array
+                                required:
+                                - defaultAction
+                                type: object
+                              importFilter:
+                                description: ImportFilter is the import filter for
+                                  the address family.
+                                properties:
+                                  defaultAction:
+                                    description: DefaultAction is the default action
+                                      for the filter.
+                                    properties:
+                                      modifyRoute:
+                                        description: ModifyRoute is the modify route
+                                          action.
+                                        properties:
+                                          addCommunity:
+                                            description: AddCommunity is the community
+                                              to add to the route.
+                                            type: string
+                                        required:
+                                        - addCommunity
+                                        type: object
+                                      type:
+                                        description: Type is the type of action.
+                                        enum:
+                                        - accept
+                                        - reject
+                                        - next
+                                        type: string
+                                    required:
+                                    - type
+                                    type: object
+                                  items:
+                                    description: Items is a list of filter items.
+                                    items:
+                                      description: FilterItem represents a filter
+                                        item.
+                                      properties:
+                                        action:
+                                          description: Action is the action for the
+                                            filter item.
+                                          properties:
+                                            modifyRoute:
+                                              description: ModifyRoute is the modify
+                                                route action.
+                                              properties:
+                                                addCommunity:
+                                                  description: AddCommunity is the
+                                                    community to add to the route.
+                                                  type: string
+                                              required:
+                                              - addCommunity
+                                              type: object
+                                            type:
+                                              description: Type is the type of action.
+                                              enum:
+                                              - accept
+                                              - reject
+                                              - next
+                                              type: string
+                                          required:
+                                          - type
+                                          type: object
+                                        matcher:
+                                          description: Matcher is the matcher for
+                                            the filter item.
+                                          properties:
+                                            bgpCommunity:
+                                              description: BGPCommunity is the BGP
+                                                community matcher.
+                                              properties:
+                                                community:
+                                                  description: Community is the BGP
+                                                    community to match.
+                                                  type: string
+                                              required:
+                                              - community
+                                              type: object
+                                            prefix:
+                                              description: Prefix is the prefix matcher.
+                                              properties:
+                                                ge:
+                                                  description: Ge is the minimum prefix
+                                                    length to match.
+                                                  type: integer
+                                                le:
+                                                  description: Le is the maximum prefix
+                                                    length to match.
+                                                  type: integer
+                                                prefix:
+                                                  description: Prefix is the prefix
+                                                    to match.
+                                                  type: string
+                                              required:
+                                              - prefix
+                                              type: object
+                                          type: object
+                                      required:
+                                      - action
+                                      - matcher
+                                      type: object
+                                    type: array
+                                required:
+                                - defaultAction
+                                type: object
+                              maxPrefixes:
+                                description: MaxPrefixes is the maximum number of
+                                  prefixes for the address family.
+                                format: int32
+                                type: integer
+                            type: object
+                          ipv6:
+                            description: IPv6 is the IPv6 address family configuration.
+                            properties:
+                              exportFilter:
+                                description: ExportFilter is the export filter for
+                                  the address family.
+                                properties:
+                                  defaultAction:
+                                    description: DefaultAction is the default action
+                                      for the filter.
+                                    properties:
+                                      modifyRoute:
+                                        description: ModifyRoute is the modify route
+                                          action.
+                                        properties:
+                                          addCommunity:
+                                            description: AddCommunity is the community
+                                              to add to the route.
+                                            type: string
+                                        required:
+                                        - addCommunity
+                                        type: object
+                                      type:
+                                        description: Type is the type of action.
+                                        enum:
+                                        - accept
+                                        - reject
+                                        - next
+                                        type: string
+                                    required:
+                                    - type
+                                    type: object
+                                  items:
+                                    description: Items is a list of filter items.
+                                    items:
+                                      description: FilterItem represents a filter
+                                        item.
+                                      properties:
+                                        action:
+                                          description: Action is the action for the
+                                            filter item.
+                                          properties:
+                                            modifyRoute:
+                                              description: ModifyRoute is the modify
+                                                route action.
+                                              properties:
+                                                addCommunity:
+                                                  description: AddCommunity is the
+                                                    community to add to the route.
+                                                  type: string
+                                              required:
+                                              - addCommunity
+                                              type: object
+                                            type:
+                                              description: Type is the type of action.
+                                              enum:
+                                              - accept
+                                              - reject
+                                              - next
+                                              type: string
+                                          required:
+                                          - type
+                                          type: object
+                                        matcher:
+                                          description: Matcher is the matcher for
+                                            the filter item.
+                                          properties:
+                                            bgpCommunity:
+                                              description: BGPCommunity is the BGP
+                                                community matcher.
+                                              properties:
+                                                community:
+                                                  description: Community is the BGP
+                                                    community to match.
+                                                  type: string
+                                              required:
+                                              - community
+                                              type: object
+                                            prefix:
+                                              description: Prefix is the prefix matcher.
+                                              properties:
+                                                ge:
+                                                  description: Ge is the minimum prefix
+                                                    length to match.
+                                                  type: integer
+                                                le:
+                                                  description: Le is the maximum prefix
+                                                    length to match.
+                                                  type: integer
+                                                prefix:
+                                                  description: Prefix is the prefix
+                                                    to match.
+                                                  type: string
+                                              required:
+                                              - prefix
+                                              type: object
+                                          type: object
+                                      required:
+                                      - action
+                                      - matcher
+                                      type: object
+                                    type: array
+                                required:
+                                - defaultAction
+                                type: object
+                              importFilter:
+                                description: ImportFilter is the import filter for
+                                  the address family.
+                                properties:
+                                  defaultAction:
+                                    description: DefaultAction is the default action
+                                      for the filter.
+                                    properties:
+                                      modifyRoute:
+                                        description: ModifyRoute is the modify route
+                                          action.
+                                        properties:
+                                          addCommunity:
+                                            description: AddCommunity is the community
+                                              to add to the route.
+                                            type: string
+                                        required:
+                                        - addCommunity
+                                        type: object
+                                      type:
+                                        description: Type is the type of action.
+                                        enum:
+                                        - accept
+                                        - reject
+                                        - next
+                                        type: string
+                                    required:
+                                    - type
+                                    type: object
+                                  items:
+                                    description: Items is a list of filter items.
+                                    items:
+                                      description: FilterItem represents a filter
+                                        item.
+                                      properties:
+                                        action:
+                                          description: Action is the action for the
+                                            filter item.
+                                          properties:
+                                            modifyRoute:
+                                              description: ModifyRoute is the modify
+                                                route action.
+                                              properties:
+                                                addCommunity:
+                                                  description: AddCommunity is the
+                                                    community to add to the route.
+                                                  type: string
+                                              required:
+                                              - addCommunity
+                                              type: object
+                                            type:
+                                              description: Type is the type of action.
+                                              enum:
+                                              - accept
+                                              - reject
+                                              - next
+                                              type: string
+                                          required:
+                                          - type
+                                          type: object
+                                        matcher:
+                                          description: Matcher is the matcher for
+                                            the filter item.
+                                          properties:
+                                            bgpCommunity:
+                                              description: BGPCommunity is the BGP
+                                                community matcher.
+                                              properties:
+                                                community:
+                                                  description: Community is the BGP
+                                                    community to match.
+                                                  type: string
+                                              required:
+                                              - community
+                                              type: object
+                                            prefix:
+                                              description: Prefix is the prefix matcher.
+                                              properties:
+                                                ge:
+                                                  description: Ge is the minimum prefix
+                                                    length to match.
+                                                  type: integer
+                                                le:
+                                                  description: Le is the maximum prefix
+                                                    length to match.
+                                                  type: integer
+                                                prefix:
+                                                  description: Prefix is the prefix
+                                                    to match.
+                                                  type: string
+                                              required:
+                                              - prefix
+                                              type: object
+                                          type: object
+                                      required:
+                                      - action
+                                      - matcher
+                                      type: object
+                                    type: array
+                                required:
+                                - defaultAction
+                                type: object
+                              maxPrefixes:
+                                description: MaxPrefixes is the maximum number of
+                                  prefixes for the address family.
+                                format: int32
+                                type: integer
+                            type: object
+                          keepaliveTime:
+                            description: KeepaliveTime is the keepalive time for the
+                              BGP session, default is 30s.
+                            type: string
+                          listenRange:
+                            description: ListenRange is the listen range for the BGP
+                              peer.
+                            type: string
+                          remoteAsn:
+                            description: RemoteASN is the remote Autonomous System
+                              Number.
+                            format: int32
+                            type: integer
+                        required:
+                        - address
+                        - listenRange
+                        - remoteAsn
+                        type: object
+                      type: array
+                    evpnExportFilter:
+                      description: EVPNExportFilter is the export filter for EVPN.
+                      properties:
+                        defaultAction:
+                          description: DefaultAction is the default action for the
+                            filter.
+                          properties:
+                            modifyRoute:
+                              description: ModifyRoute is the modify route action.
+                              properties:
+                                addCommunity:
+                                  description: AddCommunity is the community to add
+                                    to the route.
+                                  type: string
+                              required:
+                              - addCommunity
+                              type: object
+                            type:
+                              description: Type is the type of action.
+                              enum:
+                              - accept
+                              - reject
+                              - next
+                              type: string
+                          required:
+                          - type
+                          type: object
+                        items:
+                          description: Items is a list of filter items.
+                          items:
+                            description: FilterItem represents a filter item.
+                            properties:
+                              action:
+                                description: Action is the action for the filter item.
+                                properties:
+                                  modifyRoute:
+                                    description: ModifyRoute is the modify route action.
+                                    properties:
+                                      addCommunity:
+                                        description: AddCommunity is the community
+                                          to add to the route.
+                                        type: string
+                                    required:
+                                    - addCommunity
+                                    type: object
+                                  type:
+                                    description: Type is the type of action.
+                                    enum:
+                                    - accept
+                                    - reject
+                                    - next
+                                    type: string
+                                required:
+                                - type
+                                type: object
+                              matcher:
+                                description: Matcher is the matcher for the filter
+                                  item.
+                                properties:
+                                  bgpCommunity:
+                                    description: BGPCommunity is the BGP community
+                                      matcher.
+                                    properties:
+                                      community:
+                                        description: Community is the BGP community
+                                          to match.
+                                        type: string
+                                    required:
+                                    - community
+                                    type: object
+                                  prefix:
+                                    description: Prefix is the prefix matcher.
+                                    properties:
+                                      ge:
+                                        description: Ge is the minimum prefix length
+                                          to match.
+                                        type: integer
+                                      le:
+                                        description: Le is the maximum prefix length
+                                          to match.
+                                        type: integer
+                                      prefix:
+                                        description: Prefix is the prefix to match.
+                                        type: string
+                                    required:
+                                    - prefix
+                                    type: object
+                                type: object
+                            required:
+                            - action
+                            - matcher
+                            type: object
+                          type: array
+                      required:
+                      - defaultAction
+                      type: object
+                    evpnExportRouteTargets:
+                      description: EVPNExportRouteTargets is a list of EVPN export
+                        route targets.
+                      items:
+                        type: string
+                      type: array
+                    evpnImportRouteTargets:
+                      description: EVPNImportRouteTargets is a list of EVPN import
+                        route targets.
+                      items:
+                        type: string
+                      type: array
+                    loopbacks:
+                      additionalProperties:
+                        description: Loopback represents a loopback interface.
+                        properties:
+                          ipAddresses:
+                            description: IPAddresses is a list of IP addresses for
+                              the loopback interface.
+                            items:
+                              type: string
+                            type: array
+                        required:
+                        - ipAddresses
+                        type: object
+                      description: Loopbacks is a list of loopback interfaces.
+                      type: object
+                    mirrorAcls:
+                      description: MirrorACLs is a list of mirror ACLs.
+                      items:
+                        description: MirrorACL represents a mirror ACL configuration.
+                        properties:
+                          destinationAddress:
+                            description: DestinationAddress is the destination address
+                              for the mirrored traffic.
+                            type: string
+                          destinationVrf:
+                            description: DestinationVrf is the destination VRF for
+                              the mirrored traffic.
+                            type: string
+                          encapsulationType:
+                            description: EncapsulationType is the encapsulation type
+                              for the mirrored traffic.
+                            enum:
+                            - gre
+                            type: string
+                          trafficMatch:
+                            description: TrafficMatch is the traffic match for the
+                              mirror ACL.
+                            properties:
+                              dstPort:
+                                description: DstPort is the destination port to match.
+                                type: integer
+                              dstPrefix:
+                                description: DstPrefix is the destination prefix to
+                                  match.
+                                type: string
+                              layer2:
+                                description: Layer2 is the Layer2 to match.
+                                type: string
+                              protocol:
+                                description: Protocol is the protocol to match.
+                                type: string
+                              srcPort:
+                                description: SrcPort is the source port to match.
+                                type: integer
+                              srcPrefix:
+                                description: SrcPrefix is the source prefix to match.
+                                type: string
+                            type: object
+                        required:
+                        - destinationAddress
+                        - destinationVrf
+                        - encapsulationType
+                        - trafficMatch
+                        type: object
+                      type: array
+                    policyRoutes:
+                      description: PolicyRoutes is a list of policy-based routes.
+                      items:
+                        description: PolicyRoute represents a policy-based route configuration.
+                        properties:
+                          nextHop:
+                            description: NextHop is the next hop for the policy route.
+                            properties:
+                              address:
+                                description: Address is the address of the next hop.
+                                type: string
+                              vrf:
+                                description: Vrf is the VRF of the next hop.
+                                type: string
+                            type: object
+                          trafficMatch:
+                            description: TrafficMatch is the traffic match for the
+                              policy route.
+                            properties:
+                              dstPort:
+                                description: DstPort is the destination port to match.
+                                type: integer
+                              dstPrefix:
+                                description: DstPrefix is the destination prefix to
+                                  match.
+                                type: string
+                              layer2:
+                                description: Layer2 is the Layer2 to match.
+                                type: string
+                              protocol:
+                                description: Protocol is the protocol to match.
+                                type: string
+                              srcPort:
+                                description: SrcPort is the source port to match.
+                                type: integer
+                              srcPrefix:
+                                description: SrcPrefix is the source prefix to match.
+                                type: string
+                            type: object
+                        required:
+                        - nextHop
+                        - trafficMatch
+                        type: object
+                      type: array
+                    staticRoutes:
+                      description: StaticRoutes is a list of static routes.
+                      items:
+                        description: StaticRoute represents a static route configuration.
+                        properties:
+                          bfdProfile:
+                            description: BFDProfile is the BFD profile for the static
+                              route.
+                            properties:
+                              minInterval:
+                                description: MinInterval is the minimum interval for
+                                  BFD.
+                                format: int32
+                                type: integer
+                            required:
+                            - minInterval
+                            type: object
+                          nextHop:
+                            description: NextHop is the next hop for the static route.
+                            properties:
+                              address:
+                                description: Address is the address of the next hop.
+                                type: string
+                              vrf:
+                                description: Vrf is the VRF of the next hop.
+                                type: string
+                            type: object
+                          prefix:
+                            description: Prefix is the prefix for the static route.
+                            type: string
+                        required:
+                        - nextHop
+                        - prefix
+                        type: object
+                      type: array
+                    vni:
+                      description: VNI is the Virtual Network Identifier.
+                      format: int32
+                      type: integer
+                    vrfImports:
+                      description: VRFImports is a list of VRF import configurations.
+                      items:
+                        description: VRFImport represents a VRF import configuration.
+                        properties:
+                          filter:
+                            description: Filter is the filter applied to the import.
+                            properties:
+                              defaultAction:
+                                description: DefaultAction is the default action for
+                                  the filter.
+                                properties:
+                                  modifyRoute:
+                                    description: ModifyRoute is the modify route action.
+                                    properties:
+                                      addCommunity:
+                                        description: AddCommunity is the community
+                                          to add to the route.
+                                        type: string
+                                    required:
+                                    - addCommunity
+                                    type: object
+                                  type:
+                                    description: Type is the type of action.
+                                    enum:
+                                    - accept
+                                    - reject
+                                    - next
+                                    type: string
+                                required:
+                                - type
+                                type: object
+                              items:
+                                description: Items is a list of filter items.
+                                items:
+                                  description: FilterItem represents a filter item.
+                                  properties:
+                                    action:
+                                      description: Action is the action for the filter
+                                        item.
+                                      properties:
+                                        modifyRoute:
+                                          description: ModifyRoute is the modify route
+                                            action.
+                                          properties:
+                                            addCommunity:
+                                              description: AddCommunity is the community
+                                                to add to the route.
+                                              type: string
+                                          required:
+                                          - addCommunity
+                                          type: object
+                                        type:
+                                          description: Type is the type of action.
+                                          enum:
+                                          - accept
+                                          - reject
+                                          - next
+                                          type: string
+                                      required:
+                                      - type
+                                      type: object
+                                    matcher:
+                                      description: Matcher is the matcher for the
+                                        filter item.
+                                      properties:
+                                        bgpCommunity:
+                                          description: BGPCommunity is the BGP community
+                                            matcher.
+                                          properties:
+                                            community:
+                                              description: Community is the BGP community
+                                                to match.
+                                              type: string
+                                          required:
+                                          - community
+                                          type: object
+                                        prefix:
+                                          description: Prefix is the prefix matcher.
+                                          properties:
+                                            ge:
+                                              description: Ge is the minimum prefix
+                                                length to match.
+                                              type: integer
+                                            le:
+                                              description: Le is the maximum prefix
+                                                length to match.
+                                              type: integer
+                                            prefix:
+                                              description: Prefix is the prefix to
+                                                match.
+                                              type: string
+                                          required:
+                                          - prefix
+                                          type: object
+                                      type: object
+                                  required:
+                                  - action
+                                  - matcher
+                                  type: object
+                                type: array
+                            required:
+                            - defaultAction
+                            type: object
+                          fromVrf:
+                            description: FromVRF is the source VRF for the import.
+                            type: string
+                        required:
+                        - filter
+                        - fromVrf
+                        type: object
+                      type: array
+                  required:
+                  - evpnExportFilter
+                  - evpnExportRouteTargets
+                  - evpnImportRouteTargets
+                  - vni
+                  type: object
+                description: FabricVRFs is a map of fabric VRF configurations.
+                type: object
+              layer2s:
+                additionalProperties:
+                  description: Layer2 represents a Layer 2 network configuration.
+                  properties:
+                    irb:
+                      description: IRB is the Integrated Routing and Bridging configuration.
+                      properties:
+                        ipAddresses:
+                          description: IPAddresses is a list of IP addresses for the
+                            IRB.
+                          items:
+                            type: string
+                          type: array
+                        macAddress:
+                          description: MACAddress is the MAC address for the IRB.
+                          format: byte
+                          type: string
+                        vrf:
+                          description: VRF is the Virtual Routing and Forwarding instance.
+                          type: string
+                      required:
+                      - ipAddresses
+                      - macAddress
+                      - vrf
+                      type: object
+                    mtu:
+                      description: MTU is the Maximum Transmission Unit size.
+                      type: integer
+                    routeTarget:
+                      description: RouteTarget is the route target for the Layer 2
+                        network.
+                      type: string
+                    vlan:
+                      description: VLAN is the VLAN ID.
+                      type: integer
+                    vni:
+                      description: VNI is the Virtual Network Identifier.
+                      format: int32
+                      type: integer
+                  required:
+                  - mtu
+                  - routeTarget
+                  - vlan
+                  - vni
+                  type: object
+                description: Layer2s is a map of Layer2 configurations.
+                type: object
+              localVRFs:
+                additionalProperties:
+                  description: VRF represents a Virtual Routing and Forwarding instance.
+                  properties:
+                    bgpPeers:
+                      description: BGPPeers is a list of BGP peers.
+                      items:
+                        description: BGPPeer represents a BGP peer configuration.
+                        properties:
+                          address:
+                            description: Address is the address of the BGP peer.
+                            type: string
+                          bfdProfile:
+                            description: BFDProfile is the BFD profile for the BGP
+                              peer.
+                            properties:
+                              minInterval:
+                                description: MinInterval is the minimum interval for
+                                  BFD.
+                                format: int32
+                                type: integer
+                            required:
+                            - minInterval
+                            type: object
+                          holdTime:
+                            description: HoldTime is the hold time for the BGP session,
+                              default is 90s.
+                            type: string
+                          ipv4:
+                            description: IPv4 is the IPv4 address family configuration.
+                            properties:
+                              exportFilter:
+                                description: ExportFilter is the export filter for
+                                  the address family.
+                                properties:
+                                  defaultAction:
+                                    description: DefaultAction is the default action
+                                      for the filter.
+                                    properties:
+                                      modifyRoute:
+                                        description: ModifyRoute is the modify route
+                                          action.
+                                        properties:
+                                          addCommunity:
+                                            description: AddCommunity is the community
+                                              to add to the route.
+                                            type: string
+                                        required:
+                                        - addCommunity
+                                        type: object
+                                      type:
+                                        description: Type is the type of action.
+                                        enum:
+                                        - accept
+                                        - reject
+                                        - next
+                                        type: string
+                                    required:
+                                    - type
+                                    type: object
+                                  items:
+                                    description: Items is a list of filter items.
+                                    items:
+                                      description: FilterItem represents a filter
+                                        item.
+                                      properties:
+                                        action:
+                                          description: Action is the action for the
+                                            filter item.
+                                          properties:
+                                            modifyRoute:
+                                              description: ModifyRoute is the modify
+                                                route action.
+                                              properties:
+                                                addCommunity:
+                                                  description: AddCommunity is the
+                                                    community to add to the route.
+                                                  type: string
+                                              required:
+                                              - addCommunity
+                                              type: object
+                                            type:
+                                              description: Type is the type of action.
+                                              enum:
+                                              - accept
+                                              - reject
+                                              - next
+                                              type: string
+                                          required:
+                                          - type
+                                          type: object
+                                        matcher:
+                                          description: Matcher is the matcher for
+                                            the filter item.
+                                          properties:
+                                            bgpCommunity:
+                                              description: BGPCommunity is the BGP
+                                                community matcher.
+                                              properties:
+                                                community:
+                                                  description: Community is the BGP
+                                                    community to match.
+                                                  type: string
+                                              required:
+                                              - community
+                                              type: object
+                                            prefix:
+                                              description: Prefix is the prefix matcher.
+                                              properties:
+                                                ge:
+                                                  description: Ge is the minimum prefix
+                                                    length to match.
+                                                  type: integer
+                                                le:
+                                                  description: Le is the maximum prefix
+                                                    length to match.
+                                                  type: integer
+                                                prefix:
+                                                  description: Prefix is the prefix
+                                                    to match.
+                                                  type: string
+                                              required:
+                                              - prefix
+                                              type: object
+                                          type: object
+                                      required:
+                                      - action
+                                      - matcher
+                                      type: object
+                                    type: array
+                                required:
+                                - defaultAction
+                                type: object
+                              importFilter:
+                                description: ImportFilter is the import filter for
+                                  the address family.
+                                properties:
+                                  defaultAction:
+                                    description: DefaultAction is the default action
+                                      for the filter.
+                                    properties:
+                                      modifyRoute:
+                                        description: ModifyRoute is the modify route
+                                          action.
+                                        properties:
+                                          addCommunity:
+                                            description: AddCommunity is the community
+                                              to add to the route.
+                                            type: string
+                                        required:
+                                        - addCommunity
+                                        type: object
+                                      type:
+                                        description: Type is the type of action.
+                                        enum:
+                                        - accept
+                                        - reject
+                                        - next
+                                        type: string
+                                    required:
+                                    - type
+                                    type: object
+                                  items:
+                                    description: Items is a list of filter items.
+                                    items:
+                                      description: FilterItem represents a filter
+                                        item.
+                                      properties:
+                                        action:
+                                          description: Action is the action for the
+                                            filter item.
+                                          properties:
+                                            modifyRoute:
+                                              description: ModifyRoute is the modify
+                                                route action.
+                                              properties:
+                                                addCommunity:
+                                                  description: AddCommunity is the
+                                                    community to add to the route.
+                                                  type: string
+                                              required:
+                                              - addCommunity
+                                              type: object
+                                            type:
+                                              description: Type is the type of action.
+                                              enum:
+                                              - accept
+                                              - reject
+                                              - next
+                                              type: string
+                                          required:
+                                          - type
+                                          type: object
+                                        matcher:
+                                          description: Matcher is the matcher for
+                                            the filter item.
+                                          properties:
+                                            bgpCommunity:
+                                              description: BGPCommunity is the BGP
+                                                community matcher.
+                                              properties:
+                                                community:
+                                                  description: Community is the BGP
+                                                    community to match.
+                                                  type: string
+                                              required:
+                                              - community
+                                              type: object
+                                            prefix:
+                                              description: Prefix is the prefix matcher.
+                                              properties:
+                                                ge:
+                                                  description: Ge is the minimum prefix
+                                                    length to match.
+                                                  type: integer
+                                                le:
+                                                  description: Le is the maximum prefix
+                                                    length to match.
+                                                  type: integer
+                                                prefix:
+                                                  description: Prefix is the prefix
+                                                    to match.
+                                                  type: string
+                                              required:
+                                              - prefix
+                                              type: object
+                                          type: object
+                                      required:
+                                      - action
+                                      - matcher
+                                      type: object
+                                    type: array
+                                required:
+                                - defaultAction
+                                type: object
+                              maxPrefixes:
+                                description: MaxPrefixes is the maximum number of
+                                  prefixes for the address family.
+                                format: int32
+                                type: integer
+                            type: object
+                          ipv6:
+                            description: IPv6 is the IPv6 address family configuration.
+                            properties:
+                              exportFilter:
+                                description: ExportFilter is the export filter for
+                                  the address family.
+                                properties:
+                                  defaultAction:
+                                    description: DefaultAction is the default action
+                                      for the filter.
+                                    properties:
+                                      modifyRoute:
+                                        description: ModifyRoute is the modify route
+                                          action.
+                                        properties:
+                                          addCommunity:
+                                            description: AddCommunity is the community
+                                              to add to the route.
+                                            type: string
+                                        required:
+                                        - addCommunity
+                                        type: object
+                                      type:
+                                        description: Type is the type of action.
+                                        enum:
+                                        - accept
+                                        - reject
+                                        - next
+                                        type: string
+                                    required:
+                                    - type
+                                    type: object
+                                  items:
+                                    description: Items is a list of filter items.
+                                    items:
+                                      description: FilterItem represents a filter
+                                        item.
+                                      properties:
+                                        action:
+                                          description: Action is the action for the
+                                            filter item.
+                                          properties:
+                                            modifyRoute:
+                                              description: ModifyRoute is the modify
+                                                route action.
+                                              properties:
+                                                addCommunity:
+                                                  description: AddCommunity is the
+                                                    community to add to the route.
+                                                  type: string
+                                              required:
+                                              - addCommunity
+                                              type: object
+                                            type:
+                                              description: Type is the type of action.
+                                              enum:
+                                              - accept
+                                              - reject
+                                              - next
+                                              type: string
+                                          required:
+                                          - type
+                                          type: object
+                                        matcher:
+                                          description: Matcher is the matcher for
+                                            the filter item.
+                                          properties:
+                                            bgpCommunity:
+                                              description: BGPCommunity is the BGP
+                                                community matcher.
+                                              properties:
+                                                community:
+                                                  description: Community is the BGP
+                                                    community to match.
+                                                  type: string
+                                              required:
+                                              - community
+                                              type: object
+                                            prefix:
+                                              description: Prefix is the prefix matcher.
+                                              properties:
+                                                ge:
+                                                  description: Ge is the minimum prefix
+                                                    length to match.
+                                                  type: integer
+                                                le:
+                                                  description: Le is the maximum prefix
+                                                    length to match.
+                                                  type: integer
+                                                prefix:
+                                                  description: Prefix is the prefix
+                                                    to match.
+                                                  type: string
+                                              required:
+                                              - prefix
+                                              type: object
+                                          type: object
+                                      required:
+                                      - action
+                                      - matcher
+                                      type: object
+                                    type: array
+                                required:
+                                - defaultAction
+                                type: object
+                              importFilter:
+                                description: ImportFilter is the import filter for
+                                  the address family.
+                                properties:
+                                  defaultAction:
+                                    description: DefaultAction is the default action
+                                      for the filter.
+                                    properties:
+                                      modifyRoute:
+                                        description: ModifyRoute is the modify route
+                                          action.
+                                        properties:
+                                          addCommunity:
+                                            description: AddCommunity is the community
+                                              to add to the route.
+                                            type: string
+                                        required:
+                                        - addCommunity
+                                        type: object
+                                      type:
+                                        description: Type is the type of action.
+                                        enum:
+                                        - accept
+                                        - reject
+                                        - next
+                                        type: string
+                                    required:
+                                    - type
+                                    type: object
+                                  items:
+                                    description: Items is a list of filter items.
+                                    items:
+                                      description: FilterItem represents a filter
+                                        item.
+                                      properties:
+                                        action:
+                                          description: Action is the action for the
+                                            filter item.
+                                          properties:
+                                            modifyRoute:
+                                              description: ModifyRoute is the modify
+                                                route action.
+                                              properties:
+                                                addCommunity:
+                                                  description: AddCommunity is the
+                                                    community to add to the route.
+                                                  type: string
+                                              required:
+                                              - addCommunity
+                                              type: object
+                                            type:
+                                              description: Type is the type of action.
+                                              enum:
+                                              - accept
+                                              - reject
+                                              - next
+                                              type: string
+                                          required:
+                                          - type
+                                          type: object
+                                        matcher:
+                                          description: Matcher is the matcher for
+                                            the filter item.
+                                          properties:
+                                            bgpCommunity:
+                                              description: BGPCommunity is the BGP
+                                                community matcher.
+                                              properties:
+                                                community:
+                                                  description: Community is the BGP
+                                                    community to match.
+                                                  type: string
+                                              required:
+                                              - community
+                                              type: object
+                                            prefix:
+                                              description: Prefix is the prefix matcher.
+                                              properties:
+                                                ge:
+                                                  description: Ge is the minimum prefix
+                                                    length to match.
+                                                  type: integer
+                                                le:
+                                                  description: Le is the maximum prefix
+                                                    length to match.
+                                                  type: integer
+                                                prefix:
+                                                  description: Prefix is the prefix
+                                                    to match.
+                                                  type: string
+                                              required:
+                                              - prefix
+                                              type: object
+                                          type: object
+                                      required:
+                                      - action
+                                      - matcher
+                                      type: object
+                                    type: array
+                                required:
+                                - defaultAction
+                                type: object
+                              maxPrefixes:
+                                description: MaxPrefixes is the maximum number of
+                                  prefixes for the address family.
+                                format: int32
+                                type: integer
+                            type: object
+                          keepaliveTime:
+                            description: KeepaliveTime is the keepalive time for the
+                              BGP session, default is 30s.
+                            type: string
+                          listenRange:
+                            description: ListenRange is the listen range for the BGP
+                              peer.
+                            type: string
+                          remoteAsn:
+                            description: RemoteASN is the remote Autonomous System
+                              Number.
+                            format: int32
+                            type: integer
+                        required:
+                        - address
+                        - listenRange
+                        - remoteAsn
+                        type: object
+                      type: array
+                    loopbacks:
+                      additionalProperties:
+                        description: Loopback represents a loopback interface.
+                        properties:
+                          ipAddresses:
+                            description: IPAddresses is a list of IP addresses for
+                              the loopback interface.
+                            items:
+                              type: string
+                            type: array
+                        required:
+                        - ipAddresses
+                        type: object
+                      description: Loopbacks is a list of loopback interfaces.
+                      type: object
+                    mirrorAcls:
+                      description: MirrorACLs is a list of mirror ACLs.
+                      items:
+                        description: MirrorACL represents a mirror ACL configuration.
+                        properties:
+                          destinationAddress:
+                            description: DestinationAddress is the destination address
+                              for the mirrored traffic.
+                            type: string
+                          destinationVrf:
+                            description: DestinationVrf is the destination VRF for
+                              the mirrored traffic.
+                            type: string
+                          encapsulationType:
+                            description: EncapsulationType is the encapsulation type
+                              for the mirrored traffic.
+                            enum:
+                            - gre
+                            type: string
+                          trafficMatch:
+                            description: TrafficMatch is the traffic match for the
+                              mirror ACL.
+                            properties:
+                              dstPort:
+                                description: DstPort is the destination port to match.
+                                type: integer
+                              dstPrefix:
+                                description: DstPrefix is the destination prefix to
+                                  match.
+                                type: string
+                              layer2:
+                                description: Layer2 is the Layer2 to match.
+                                type: string
+                              protocol:
+                                description: Protocol is the protocol to match.
+                                type: string
+                              srcPort:
+                                description: SrcPort is the source port to match.
+                                type: integer
+                              srcPrefix:
+                                description: SrcPrefix is the source prefix to match.
+                                type: string
+                            type: object
+                        required:
+                        - destinationAddress
+                        - destinationVrf
+                        - encapsulationType
+                        - trafficMatch
+                        type: object
+                      type: array
+                    policyRoutes:
+                      description: PolicyRoutes is a list of policy-based routes.
+                      items:
+                        description: PolicyRoute represents a policy-based route configuration.
+                        properties:
+                          nextHop:
+                            description: NextHop is the next hop for the policy route.
+                            properties:
+                              address:
+                                description: Address is the address of the next hop.
+                                type: string
+                              vrf:
+                                description: Vrf is the VRF of the next hop.
+                                type: string
+                            type: object
+                          trafficMatch:
+                            description: TrafficMatch is the traffic match for the
+                              policy route.
+                            properties:
+                              dstPort:
+                                description: DstPort is the destination port to match.
+                                type: integer
+                              dstPrefix:
+                                description: DstPrefix is the destination prefix to
+                                  match.
+                                type: string
+                              layer2:
+                                description: Layer2 is the Layer2 to match.
+                                type: string
+                              protocol:
+                                description: Protocol is the protocol to match.
+                                type: string
+                              srcPort:
+                                description: SrcPort is the source port to match.
+                                type: integer
+                              srcPrefix:
+                                description: SrcPrefix is the source prefix to match.
+                                type: string
+                            type: object
+                        required:
+                        - nextHop
+                        - trafficMatch
+                        type: object
+                      type: array
+                    staticRoutes:
+                      description: StaticRoutes is a list of static routes.
+                      items:
+                        description: StaticRoute represents a static route configuration.
+                        properties:
+                          bfdProfile:
+                            description: BFDProfile is the BFD profile for the static
+                              route.
+                            properties:
+                              minInterval:
+                                description: MinInterval is the minimum interval for
+                                  BFD.
+                                format: int32
+                                type: integer
+                            required:
+                            - minInterval
+                            type: object
+                          nextHop:
+                            description: NextHop is the next hop for the static route.
+                            properties:
+                              address:
+                                description: Address is the address of the next hop.
+                                type: string
+                              vrf:
+                                description: Vrf is the VRF of the next hop.
+                                type: string
+                            type: object
+                          prefix:
+                            description: Prefix is the prefix for the static route.
+                            type: string
+                        required:
+                        - nextHop
+                        - prefix
+                        type: object
+                      type: array
+                    vrfImports:
+                      description: VRFImports is a list of VRF import configurations.
+                      items:
+                        description: VRFImport represents a VRF import configuration.
+                        properties:
+                          filter:
+                            description: Filter is the filter applied to the import.
+                            properties:
+                              defaultAction:
+                                description: DefaultAction is the default action for
+                                  the filter.
+                                properties:
+                                  modifyRoute:
+                                    description: ModifyRoute is the modify route action.
+                                    properties:
+                                      addCommunity:
+                                        description: AddCommunity is the community
+                                          to add to the route.
+                                        type: string
+                                    required:
+                                    - addCommunity
+                                    type: object
+                                  type:
+                                    description: Type is the type of action.
+                                    enum:
+                                    - accept
+                                    - reject
+                                    - next
+                                    type: string
+                                required:
+                                - type
+                                type: object
+                              items:
+                                description: Items is a list of filter items.
+                                items:
+                                  description: FilterItem represents a filter item.
+                                  properties:
+                                    action:
+                                      description: Action is the action for the filter
+                                        item.
+                                      properties:
+                                        modifyRoute:
+                                          description: ModifyRoute is the modify route
+                                            action.
+                                          properties:
+                                            addCommunity:
+                                              description: AddCommunity is the community
+                                                to add to the route.
+                                              type: string
+                                          required:
+                                          - addCommunity
+                                          type: object
+                                        type:
+                                          description: Type is the type of action.
+                                          enum:
+                                          - accept
+                                          - reject
+                                          - next
+                                          type: string
+                                      required:
+                                      - type
+                                      type: object
+                                    matcher:
+                                      description: Matcher is the matcher for the
+                                        filter item.
+                                      properties:
+                                        bgpCommunity:
+                                          description: BGPCommunity is the BGP community
+                                            matcher.
+                                          properties:
+                                            community:
+                                              description: Community is the BGP community
+                                                to match.
+                                              type: string
+                                          required:
+                                          - community
+                                          type: object
+                                        prefix:
+                                          description: Prefix is the prefix matcher.
+                                          properties:
+                                            ge:
+                                              description: Ge is the minimum prefix
+                                                length to match.
+                                              type: integer
+                                            le:
+                                              description: Le is the maximum prefix
+                                                length to match.
+                                              type: integer
+                                            prefix:
+                                              description: Prefix is the prefix to
+                                                match.
+                                              type: string
+                                          required:
+                                          - prefix
+                                          type: object
+                                      type: object
+                                  required:
+                                  - action
+                                  - matcher
+                                  type: object
+                                type: array
+                            required:
+                            - defaultAction
+                            type: object
+                          fromVrf:
+                            description: FromVRF is the source VRF for the import.
+                            type: string
+                        required:
+                        - filter
+                        - fromVrf
+                        type: object
+                      type: array
+                  type: object
+                description: LocalVRFs is a map of local VRF configurations.
+                type: object
+            type: object
+          status:
+            description: HBRConfigStatus defines the observed state of HBRConfig
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
