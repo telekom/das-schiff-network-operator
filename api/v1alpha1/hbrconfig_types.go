@@ -31,6 +31,8 @@ type HBRConfigSpec struct {
 	FabricVRFs map[string]FabricVRF `json:"fabricVRFs,omitempty"`
 	// LocalVRFs is a map of local VRF configurations.
 	LocalVRFs map[string]VRF `json:"localVRFs,omitempty"`
+	// NodeSelector matches nodes to apply the configuration to.
+	NodeSelector *metav1.LabelSelector `json:"nodeSelector,omitempty"`
 }
 
 // Layer2 represents a Layer 2 network configuration.
