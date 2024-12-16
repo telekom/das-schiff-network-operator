@@ -1,0 +1,283 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.14.0
+  name: nodenetworkconfigs.network.schiff.telekom.de
+spec:
+  group: network.schiff.telekom.de
+  names:
+    kind: NodeNetworkConfig
+    listKind: NodeNetworkConfigList
+    plural: nodenetworkconfigs
+    shortNames:
+    - nnc
+    singular: nodenetworkconfig
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.configStatus
+      name: Status
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: NodeNetworkConfig is the Schema for the node configuration.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: NodeNetworkConfigSpec defines the desired state of NodeConfig.
+            properties:
+              layer2:
+                items:
+                  description: Layer2NetworkConfigurationSpec defines the desired
+                    state of Layer2NetworkConfiguration.
+                  properties:
+                    advertiseNeighbors:
+                      description: If desired network-operator advertises host routes
+                        for local neighbors
+                      type: boolean
+                    anycastGateways:
+                      description: Anycast Gateway to configure on bridge
+                      items:
+                        type: string
+                      type: array
+                    anycastMac:
+                      description: If anycast is desired, specify anycast gateway
+                        MAC address
+                      pattern: (?:[[:xdigit:]]{2}:){5}[[:xdigit:]]{2}
+                      type: string
+                    createMacVLANInterface:
+                      description: Create MACVLAN attach interface
+                      type: boolean
+                    id:
+                      description: VLAN Id of the layer 2 network
+                      type: integer
+                    mtu:
+                      description: Network interface MTU
+                      maximum: 9000
+                      minimum: 1000
+                      type: integer
+                    neighSuppression:
+                      description: Enable ARP / ND suppression
+                      type: boolean
+                    nodeSelector:
+                      description: Select nodes to create Layer2 network on
+                      properties:
+                        matchExpressions:
+                          description: matchExpressions is a list of label selector
+                            requirements. The requirements are ANDed.
+                          items:
+                            description: |-
+                              A label selector requirement is a selector that contains values, a key, and an operator that
+                              relates the key and values.
+                            properties:
+                              key:
+                                description: key is the label key that the selector
+                                  applies to.
+                                type: string
+                              operator:
+                                description: |-
+                                  operator represents a key's relationship to a set of values.
+                                  Valid operators are In, NotIn, Exists and DoesNotExist.
+                                type: string
+                              values:
+                                description: |-
+                                  values is an array of string values. If the operator is In or NotIn,
+                                  the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                                  the values array must be empty. This array is replaced during a strategic
+                                  merge patch.
+                                items:
+                                  type: string
+                                type: array
+                            required:
+                            - key
+                            - operator
+                            type: object
+                          type: array
+                        matchLabels:
+                          additionalProperties:
+                            type: string
+                          description: |-
+                            matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                            map is equivalent to an element of matchExpressions, whose key field is "key", the
+                            operator is "In", and the values array contains only "value". The requirements are ANDed.
+                          type: object
+                      type: object
+                      x-kubernetes-map-type: atomic
+                    vni:
+                      description: VXLAN VNI Id for the layer 2 network
+                      maximum: 16777215
+                      minimum: 1
+                      type: integer
+                    vrf:
+                      description: VRF to attach Layer2 network to, default if not
+                        set
+                      type: string
+                  required:
+                  - id
+                  - mtu
+                  - vni
+                  type: object
+                type: array
+              revision:
+                description: Revision stores hash of the NodeConfigRevision that was
+                  used to create the NodeNetworkConfig object.
+                type: string
+              routingTable:
+                items:
+                  description: RoutingTableSpec defines the desired state of RoutingTable.
+                  properties:
+                    tableId:
+                      description: TableID is the host table that can be used to export
+                        routes
+                      type: integer
+                  required:
+                  - tableId
+                  type: object
+                type: array
+              vrf:
+                items:
+                  description: VRFRouteConfigurationSpec defines the desired state
+                    of VRFRouteConfiguration.
+                  properties:
+                    aggregate:
+                      description: Aggregate Routes that should be announced
+                      items:
+                        type: string
+                      type: array
+                    community:
+                      description: Community for export, if omitted no community will
+                        be set
+                      type: string
+                    export:
+                      description: Routes exported from the cluster VRF into the specified
+                        VRF
+                      items:
+                        description: VRFRouteConfigurationPrefixItem defines a prefix
+                          item.
+                        properties:
+                          action:
+                            enum:
+                            - permit
+                            - deny
+                            type: string
+                          cidr:
+                            description: CIDR of the leaked network
+                            type: string
+                          ge:
+                            description: Minimum prefix length to be matched
+                            type: integer
+                          le:
+                            description: Maximum prefix length to be matched
+                            type: integer
+                          seq:
+                            description: Sequence in the generated prefix-list, if
+                              omitted will be list index
+                            maximum: 4294967295
+                            minimum: 1
+                            type: integer
+                        required:
+                        - action
+                        type: object
+                      maxItems: 4294967295
+                      type: array
+                    import:
+                      description: Routes imported from this VRF into the cluster
+                        VRF
+                      items:
+                        description: VRFRouteConfigurationPrefixItem defines a prefix
+                          item.
+                        properties:
+                          action:
+                            enum:
+                            - permit
+                            - deny
+                            type: string
+                          cidr:
+                            description: CIDR of the leaked network
+                            type: string
+                          ge:
+                            description: Minimum prefix length to be matched
+                            type: integer
+                          le:
+                            description: Maximum prefix length to be matched
+                            type: integer
+                          seq:
+                            description: Sequence in the generated prefix-list, if
+                              omitted will be list index
+                            maximum: 4294967295
+                            minimum: 1
+                            type: integer
+                        required:
+                        - action
+                        type: object
+                      maxItems: 4294967295
+                      type: array
+                    mtu:
+                      default: 9000
+                      description: The MTU of the VRF
+                      type: integer
+                    seq:
+                      description: Sequence of the generated route-map, maximum of
+                        65534 because we sometimes have to set an explicit default-deny
+                      maximum: 65534
+                      minimum: 1
+                      type: integer
+                    vrf:
+                      description: VRF this configuration refers to
+                      maxLength: 12
+                      type: string
+                  required:
+                  - export
+                  - import
+                  - seq
+                  type: object
+                type: array
+            required:
+            - layer2
+            - revision
+            - routingTable
+            - vrf
+            type: object
+          status:
+            description: NodeNetworkConfigStatus defines the observed state of NodeConfig.
+            properties:
+              configStatus:
+                description: ConfigStatus describes provisioning state od the NodeConfig.
+                  Can be either 'provisioning' or 'provisioned'.
+                type: string
+              lastUpdate:
+                description: LastUpdate determines when last update (change) of the
+                  ConfigStatus field took place.
+                format: date-time
+                type: string
+            required:
+            - configStatus
+            - lastUpdate
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
