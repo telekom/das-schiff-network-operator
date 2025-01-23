@@ -19,6 +19,7 @@ import (
 
 const (
 	arpAccept           = "arp_accept"
+	acceptUntrackedNA   = "accept_untracked_na"
 	baseReachableTimeMs = "base_reachable_time"
 	addrGenMode         = "addr_gen_mode"
 )
@@ -1086,8 +1087,8 @@ var _ = Describe("ReconcileL2()", func() {
 		arpAcceptIPv4 := fmt.Sprintf("%s/ipv4/conf/%s", procSysNetPath, vlanName)
 		createInterfaceFile(arpAcceptIPv4 + "/" + arpAccept)
 
-		arpAcceptIPv6 := fmt.Sprintf("%s/ipv6/conf/%s", procSysNetPath, vlanName)
-		createInterfaceFile(arpAcceptIPv6 + "/" + arpAccept)
+		acceptUntrackedNAIPv6 := fmt.Sprintf("%s/ipv6/conf/%s", procSysNetPath, vlanName)
+		createInterfaceFile(acceptUntrackedNAIPv6 + "/" + acceptUntrackedNA)
 
 		err := nm.ReconcileL2(current, desired)
 		Expect(err).To(HaveOccurred())

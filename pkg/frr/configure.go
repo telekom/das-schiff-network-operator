@@ -69,6 +69,8 @@ func (m *Manager) Configure(in Configuration, nm *nl.Manager, nwopCfg *config.Co
 	targetConfig = fixRouteTargetReload(targetConfig)
 	targetConfig = applyCfgReplacements(targetConfig, nwopCfg.Replacements)
 
+	in.HasCommunityDrop = m.hasCommunityDrop
+
 	if !bytes.Equal(currentConfig, targetConfig) {
 		err = os.WriteFile(m.ConfigPath, targetConfig, frrPermissions)
 		if err != nil {
@@ -104,10 +106,11 @@ func (m *Manager) renderSubtemplates(in Configuration, nlManager *nl.Manager) (*
 		asn = vrfAsnConfig
 	}
 	data := bgpInstanceConfig{
-		VRFs:                  in.VRFs,
-		DefaultVRFBGPPeerings: in.DefaultVRFBGPPeerings,
 		RouterID:              vrfRouterID.String(),
 		ASN:                   asn,
+		VRFs:                  in.VRFs,
+		DefaultVRFBGPPeerings: in.DefaultVRFBGPPeerings,
+		HasCommunityDrop:      false,
 	}
 
 	vrfs, err := render(vrfTpl, data)

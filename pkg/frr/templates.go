@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strings"
 	"text/template"
 )
 
@@ -61,10 +62,11 @@ var (
 )
 
 type bgpInstanceConfig struct {
-	VRFs                  []VRFConfiguration
-	DefaultVRFBGPPeerings []BGPPeering
 	RouterID              string
 	ASN                   int
+	VRFs                  []VRFConfiguration
+	DefaultVRFBGPPeerings []BGPPeering
+	HasCommunityDrop      bool
 }
 
 type mgmtImportConfig struct {
@@ -102,6 +104,15 @@ func getRouteMapName(file, addressFamily, mgmtVrfName string) (*string, error) {
 		return nil, nil
 	}
 	return &matches[1], nil
+}
+
+func hasCommunityDrop(file string) (bool, error) {
+	fileContent, err := os.ReadFile(file)
+	if err != nil {
+		return false, fmt.Errorf("error reading frr config file %s: %w", file, err)
+	}
+	content := string(fileContent)
+	return strings.Contains(content, "cm-received-fabric"), nil
 }
 
 func generateTemplateConfig(tplFile, original string) error {

@@ -39,7 +39,7 @@ func (n *Manager) CreateL3(info VRFInformation) error {
 		return err
 	}
 
-	bridge, err := n.createBridge(bridgePrefix+info.Name, nil, vrf.Attrs().Index, defaultMtu, true)
+	bridge, err := n.createBridge(bridgePrefix+info.Name, nil, vrf.Attrs().Index, defaultMtu, true, false)
 	if err != nil {
 		return err
 	}

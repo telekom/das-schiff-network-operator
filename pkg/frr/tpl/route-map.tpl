@@ -10,11 +10,19 @@ exit
 {{- end}}
 
 route-map rm_{{$vrf.Name}}_export deny 1
+{{if $.HasCommunityDrop}}
+  match community cm-received-fabric
+{{else}}
   match tag 20000
+{{- end}}
 exit
 
 route-map rm6_{{$vrf.Name}}_export deny 1
+{{if $.HasCommunityDrop}}
+  match community cm-received-fabric
+{{else}}
   match tag 20000
+{{- end}}
 exit
 
 {{range $i, $pl := $vrf.Export}}
