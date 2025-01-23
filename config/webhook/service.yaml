@@ -11,3 +11,4 @@ spec:
       targetPort: 7443
   selector:
     app.kubernetes.io/name: network-operator
+    app.kubernetes.io/component: operator

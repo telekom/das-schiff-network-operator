@@ -24,7 +24,7 @@ func (n *Manager) createVRF(vrfName string, table int) (*netlink.Vrf, error) {
 	}
 
 	if err := n.toolkit.LinkAdd(&netlinkVrf); err != nil {
-		return nil, fmt.Errorf("error adding link: %w", err)
+		return nil, fmt.Errorf("error adding vrf link: %w", err)
 	}
 	if err := n.setEUIAutogeneration(vrfName, false); err != nil {
 		return nil, err
@@ -62,7 +62,7 @@ func (n *Manager) createBridge(bridgeName string, macAddress *net.HardwareAddr, 
 	}
 
 	if err := n.toolkit.LinkAdd(&netlinkBridge); err != nil {
-		return nil, fmt.Errorf("error adding link: %w", err)
+		return nil, fmt.Errorf("error adding bridge link: %w", err)
 	}
 	if err := n.setEUIAutogeneration(bridgeName, assignEUI); err != nil {
 		return nil, fmt.Errorf("error disabling EUI autogeneration: %w", err)
@@ -96,7 +96,7 @@ func (n *Manager) createVXLAN(vxlanName string, bridgeIdx, vni, mtu int, hairpin
 		Port:         vxlanPort,
 	}
 	if err := n.toolkit.LinkAdd(&netlinkVXLAN); err != nil {
-		return nil, fmt.Errorf("error adding link: %w", err)
+		return nil, fmt.Errorf("error adding vxlan link: %w", err)
 	}
 	if err := n.toolkit.LinkSetLearning(&netlinkVXLAN, false); err != nil {
 		return nil, fmt.Errorf("error disabling link learning: %w", err)
@@ -133,27 +133,33 @@ func (*Manager) setEUIAutogeneration(intfName string, generateEUI bool) error {
 	return nil
 }
 
-func (n *Manager) createLink(vethName, peerName string, masterIdx, mtu int, generateEUI bool) (*netlink.Veth, error) {
-	netlinkVeth := netlink.Veth{
+func (n *Manager) createVLAN(vlanId int, masterIdx, mtu int) (*netlink.Vlan, error) {
+	hbrInterface, err := n.toolkit.LinkByName(n.baseConfig.TrunkInterfaceName)
+	if err != nil {
+		return nil, fmt.Errorf("error getting link by name: %w", err)
+	}
+
+	vlanName := fmt.Sprintf("%s%d", vlanPrefix, vlanId)
+
+	netlinkVLAN := netlink.Vlan{
 		LinkAttrs: netlink.LinkAttrs{
-			Name:        vethName,
+			Name:        vlanName,
 			MasterIndex: masterIdx,
+			ParentIndex: hbrInterface.Attrs().Index,
 			MTU:         mtu,
 		},
-		PeerName: peerName,
+		VlanId: vlanId,
 	}
-	if err := n.toolkit.LinkAdd(&netlinkVeth); err != nil {
+
+	if err := n.toolkit.LinkAdd(&netlinkVLAN); err != nil {
 		return nil, fmt.Errorf("error adding link: %w", err)
 	}
 
-	if err := n.setEUIAutogeneration(vethName, generateEUI); err != nil {
-		return nil, err
-	}
-	if err := n.setEUIAutogeneration(peerName, generateEUI); err != nil {
+	if err := n.setEUIAutogeneration(vlanName, false); err != nil {
 		return nil, err
 	}
 
-	return &netlinkVeth, nil
+	return &netlinkVLAN, nil
 }
 
 func (n *Manager) setUp(intfName string) error {
@@ -181,17 +187,13 @@ func (n *Manager) generateUnderlayMAC() (net.HardwareAddr, error) {
 }
 
 func (n *Manager) getUnderlayInterfaceAndIP() (int, net.IP, error) {
-	dummy := netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: underlayLoopback}}
-
-	addresses, err := n.toolkit.AddrList(&dummy, netlink.FAMILY_V4)
+	dummy, err := n.toolkit.LinkByName(underlayInterfaceName)
 	if err != nil {
-		return -1, nil, fmt.Errorf("error listing link's addresses: %w", err)
+		return -1, nil, fmt.Errorf("error getting link by name: %w", err)
 	}
-	if len(addresses) != 1 {
-		return -1, nil, fmt.Errorf("count of v4 addresses on %s do not exactly match 1", dummy.Attrs().Name)
-	}
+	address := net.ParseIP(n.baseConfig.VTEPLoopbackIP)
 
-	return dummy.Attrs().Index, addresses[0].IP, nil
+	return dummy.Attrs().Index, address, nil
 }
 
 func generateMAC(ip net.IP) (net.HardwareAddr, error) {

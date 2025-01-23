@@ -32,3 +32,5 @@ pkg/*/testdata*
 
 # Compiler output
 pkg/bpf/*.o
+
+vendor/

@@ -1,0 +1,78 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: agent-netplan
+  namespace: system
+  labels:
+    app.kubernetes.io/component: agent-netplan
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: agent-netplan
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/default-container: agent-netplan
+      labels:
+        app.kubernetes.io/component: agent-netplan
+    spec:
+      tolerations:
+        - effect: NoSchedule
+          key: node-role.kubernetes.io/control-plane
+          operator: Exists
+        - effect: NoSchedule
+          key: node.schiff.telekom.de/uninitialized
+          operator: Exists
+        - key: node.cloudprovider.kubernetes.io/uninitialized
+          value: "true"
+          effect: NoSchedule
+        - key: node.kubernetes.io/not-ready
+          effect: NoSchedule
+          operator: Exists
+      hostNetwork: true
+      hostPID: true
+      containers:
+        - command:
+            - /agent
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          image: agent-netplan:latest
+          imagePullPolicy: IfNotPresent
+          name: agent-netplan
+          securityContext:
+            privileged: true
+            runAsUser: 0
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 7083
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 7083
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          # TODO(user): Configure the resources accordingly based on the project requirements.
+          # More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+          resources:
+            limits:
+              cpu: 500m
+              memory: 128Mi
+            requests:
+              cpu: 10m
+              memory: 64Mi
+          volumeMounts:
+            - mountPath: /var/run/dbus/system_bus_socket
+              name: dbus-socket
+      terminationGracePeriodSeconds: 10
+      serviceAccountName: controller-manager
+      volumes:
+        - hostPath:
+            path: /var/run/dbus/system_bus_socket
+            type: Socket
+          name: dbus-socket

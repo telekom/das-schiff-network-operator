@@ -53,6 +53,10 @@ type VRFRouteConfigurationSpec struct {
 	// VRF this configuration refers to
 	VRF string `json:"vrf,omitempty"`
 
+	RouteTarget *string `json:"routeTarget,omitempty"`
+
+	VNI *int `json:"vni,omitempty"`
+
 	// +kubebuilder:validation:MaxItems=4294967295
 	// Routes imported from this VRF into the cluster VRF
 	Import []VrfRouteConfigurationPrefixItem `json:"import"`
@@ -70,11 +74,6 @@ type VRFRouteConfigurationSpec struct {
 	// +kubebuilder:validation:ExclusiveMaximum=false
 	// Sequence of the generated route-map, maximum of 65534 because we sometimes have to set an explicit default-deny
 	Seq int `json:"seq"`
-
-	// +kubebuilder:validation:Optional
-	// +kubebuilder:default=9000
-	// The MTU of the VRF
-	MTU int `json:"mtu"`
 
 	// Community for export, if omitted no community will be set
 	Community *string `json:"community,omitempty"`

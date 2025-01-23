@@ -42,7 +42,9 @@ kind: Kustomization
 resources:
 - ../crd
 - ../rbac
-- ../manager
+- ../agent-cra-frr
+- ../agent-netplan
+- ../operator
 - ../webhook
 - ../prometheus
 labels:
@@ -50,9 +52,7 @@ labels:
   pairs:
     app.kubernetes.io/name: network-operator
 patches:
-- path: manager_metrics_patch.yaml
-- path: manager_master_metrics_patch.yaml
-- path: manager_config_patch.yaml
-- path: manager_master_config_patch.yaml
+- path: agent_cra_frr_config_patch.yaml
+- path: agent_netplan_config_patch.yaml
+- path: operator_config_patch.yaml
 - path: manager_webhook_patch.yaml
-- path: manager_master_webhook_patch.yaml

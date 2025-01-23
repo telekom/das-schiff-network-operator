@@ -122,15 +122,15 @@ spec:
                   type: object
                 maxItems: 4294967295
                 type: array
-              mtu:
-                default: 9000
-                description: The MTU of the VRF
-                type: integer
+              routeTarget:
+                type: string
               seq:
                 description: Sequence of the generated route-map, maximum of 65534
                   because we sometimes have to set an explicit default-deny
                 maximum: 65534
                 minimum: 1
+                type: integer
+              vni:
                 type: integer
               vrf:
                 description: VRF this configuration refers to
