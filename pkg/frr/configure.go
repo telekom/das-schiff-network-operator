@@ -86,28 +86,8 @@ func (m *Manager) renderRouteMapMgmtIn() ([]byte, error) {
 	})
 }
 
-func (m *Manager) buildBgpInstanceConfig(in Configuration, nlManager *nl.Manager) (*bgpInstanceConfig, error) {
-	vrfRouterID, err := nlManager.GetUnderlayIP()
-	if err != nil {
-		return nil, fmt.Errorf("error getting underlay IP: %w", err)
-	}
-
-	asn := in.ASN
-	if asn == 0 {
-		asn = vrfAsnConfig
-	}
-	data := bgpInstanceConfig{
-		RouterID:              vrfRouterID.String(),
-		ASN:                   asn,
-		VRFs:                  in.VRFs,
-		DefaultVRFBGPPeerings: in.DefaultVRFBGPPeerings,
-		HasCommunityDrop:      false,
-	}
-	return &data, nil
-}
-
 func (m *Manager) renderSubtemplates(in Configuration, nlManager *nl.Manager) (*templateConfig, error) {
-	data, err := m.buildBgpInstanceConfig(in, nlManager)
+	data, err := buildBgpInstanceConfig(in, nlManager)
 	if err != nil {
 		return nil, err
 	}
@@ -193,6 +173,26 @@ func applyCfgReplacements(frrConfig []byte, replacements []config.Replacement) [
 		}
 	}
 	return frrConfig
+}
+
+func buildBgpInstanceConfig(in Configuration, nlManager *nl.Manager) (*bgpInstanceConfig, error) {
+	vrfRouterID, err := nlManager.GetUnderlayIP()
+	if err != nil {
+		return nil, fmt.Errorf("error getting underlay IP: %w", err)
+	}
+
+	asn := in.ASN
+	if asn == 0 {
+		asn = vrfAsnConfig
+	}
+	data := bgpInstanceConfig{
+		RouterID:              vrfRouterID.String(),
+		ASN:                   asn,
+		VRFs:                  in.VRFs,
+		DefaultVRFBGPPeerings: in.DefaultVRFBGPPeerings,
+		HasCommunityDrop:      false,
+	}
+	return &data, nil
 }
 
 type ConfigurationError struct {
