@@ -28,10 +28,6 @@ type templateConfig struct {
 	BGP         string
 	PrefixLists string
 	RouteMaps   string
-
-	Hostname         string
-	UnderlayRouterID string
-	HostRouterID     string
 }
 
 func (m *Manager) Configure(in Configuration, nm *nl.Manager, nwopCfg *config.Config) (bool, error) {
@@ -90,15 +86,10 @@ func (m *Manager) renderRouteMapMgmtIn() ([]byte, error) {
 	})
 }
 
-func (m *Manager) renderSubtemplates(in Configuration, nlManager *nl.Manager) (*templateConfig, error) {
+func (m *Manager) buildBgpInstanceConfig(in Configuration, nlManager *nl.Manager) (*bgpInstanceConfig, error) {
 	vrfRouterID, err := nlManager.GetUnderlayIP()
 	if err != nil {
 		return nil, fmt.Errorf("error getting underlay IP: %w", err)
-	}
-
-	hostname := os.Getenv(healthcheck.NodenameEnv)
-	if hostname == "" {
-		return nil, fmt.Errorf("error getting node's name")
 	}
 
 	asn := in.ASN
@@ -111,6 +102,19 @@ func (m *Manager) renderSubtemplates(in Configuration, nlManager *nl.Manager) (*
 		VRFs:                  in.VRFs,
 		DefaultVRFBGPPeerings: in.DefaultVRFBGPPeerings,
 		HasCommunityDrop:      false,
+	}
+	return &data, nil
+}
+
+func (m *Manager) renderSubtemplates(in Configuration, nlManager *nl.Manager) (*templateConfig, error) {
+	data, err := m.buildBgpInstanceConfig(in, nlManager)
+	if err != nil {
+		return nil, err
+	}
+
+	hostname := os.Getenv(healthcheck.NodenameEnv)
+	if hostname == "" {
+		return nil, fmt.Errorf("error getting node's name")
 	}
 
 	vrfs, err := render(vrfTpl, data)
@@ -147,15 +151,13 @@ func (m *Manager) renderSubtemplates(in Configuration, nlManager *nl.Manager) (*
 	}
 
 	return &templateConfig{
-		VRFs:             string(vrfs),
-		Neighbors:        string(neighbors),
-		NeighborsV4:      string(neighborsV4),
-		NeighborsV6:      string(neighborsV6),
-		BGP:              string(bgp),
-		PrefixLists:      string(prefixlists),
-		RouteMaps:        string(routemaps) + "\n" + string(routemapMgmtIn),
-		UnderlayRouterID: vrfRouterID.String(),
-		Hostname:         hostname,
+		VRFs:        string(vrfs),
+		Neighbors:   string(neighbors),
+		NeighborsV4: string(neighborsV4),
+		NeighborsV6: string(neighborsV6),
+		BGP:         string(bgp),
+		PrefixLists: string(prefixlists),
+		RouteMaps:   string(routemaps) + "\n" + string(routemapMgmtIn),
 	}, nil
 }
 

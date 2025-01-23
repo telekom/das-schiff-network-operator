@@ -77,10 +77,10 @@ type BGPPeering struct {
 }
 
 type Configuration struct {
-	ASN              	  int
-	VRFs             	  []VRFConfiguration
+	ASN                   int
+	HasCommunityDrop      bool
+	VRFs                  []VRFConfiguration
 	DefaultVRFBGPPeerings []BGPPeering
-	HasCommunityDrop 	  bool
 }
 
 func NewFRRManager() *Manager {
