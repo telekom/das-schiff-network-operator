@@ -88,11 +88,6 @@ func (in *BGPPeeringList) DeepCopyObject() runtime.Object {
 func (in *BGPPeeringSpec) DeepCopyInto(out *BGPPeeringSpec) {
 	*out = *in
 	out.PeeringVlan = in.PeeringVlan
-	if in.Password != nil {
-		in, out := &in.Password, &out.Password
-		*out = new(string)
-		**out = **in
-	}
 	if in.MaximumPrefixes != nil {
 		in, out := &in.MaximumPrefixes, &out.MaximumPrefixes
 		*out = new(uint32)
