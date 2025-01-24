@@ -1,8 +1,6 @@
 
 # Image URL to use all building/pushing image targets
 IMG ?= ghcr.io/telekom/das-schiff-network-operator:latest
-# Sidecar image URL to use all building/pushing image targets
-SIDECAR_IMG ?= ghcr.io/telekom/frr-exporter:latest
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 ENVTEST_K8S_VERSION = 1.25
 
@@ -67,15 +65,11 @@ test: manifests generate fmt vet envtest ## Run tests.
 
 .PHONY: build
 build: generate fmt vet ## Build manager binary.
-	go build -ldflags "$(LDFLAGS)" -o bin/manager cmd/manager/main.go
-
-.PHONY: sidecar-build
-sidecar-build: build
-	go build -ldflags "$(LDFLAGS)" -o bin/frr-exporter cmd/frr-exporter/main.go
+	go build -ldflags "$(LDFLAGS)" -o bin/manager cmd/operator/main.go
 
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
-	go run -ldflags "$(LDFLAGS)" ./cmd/manager/main.go
+	go run -ldflags "$(LDFLAGS)" ./cmd/operator/main.go
 
 .PHONY: docker-build
 docker-build: #test ## Build docker image with the manager.
@@ -128,7 +122,6 @@ uninstall-certs: manifests kustomize ## Uninstall certs
 .PHONY: deploy
 deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
-	cd config/manager && $(KUSTOMIZE) edit set image frr-exporter=${SIDECAR_IMG}
 	$(KUSTOMIZE) build config/default | kubectl apply -f -
 
 .PHONY: undeploy
