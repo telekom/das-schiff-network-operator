@@ -38,6 +38,9 @@ jobs:
   release_image:
     name: Build and Push Release Image
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        image: ["das-schiff-network-operator", "frr-exporter", "das-schiff-cra-frr", "das-schiff-nwop-agent-cra-frr", "das-schiff-nwop-agent-netplan"]
     steps:
       - name: Check out the repo
         uses: actions/checkout@v4
@@ -62,7 +65,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5.5.1
         with:
-          images: ghcr.io/telekom/das-schiff-network-operator
+          images: ghcr.io/telekom/${{ matrix.image }}
 
       - name: Build and Push Docker Image
         uses: docker/build-push-action@v5.2.0
@@ -71,18 +74,4 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-
-      - name: Extract Metadata (tags, labels) for Docker
-        id: exporter
-        uses: docker/metadata-action@v5.5.1
-        with:
-          images: ghcr.io/telekom/frr-exporter
-
-      - name: Build and Push Docker Image
-        uses: docker/build-push-action@v5.2.0
-        with:
-          context: .
-          push: true
-          file: frr-exporter.Dockerfile
-          tags: ${{ steps.exporter.outputs.tags }}
-          labels: ${{ steps.exporter.outputs.labels }}
+          file: ${{ matrix.image }}.Dockerfile

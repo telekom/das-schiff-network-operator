@@ -9,6 +9,9 @@ jobs:
   main-image:
     name: build "main" image
     runs-on: "ubuntu-latest"
+    strategy:
+      matrix:
+        image: ["das-schiff-network-operator", "frr-exporter", "das-schiff-cra-frr", "das-schiff-nwop-agent-cra-frr", "das-schiff-nwop-agent-netplan"]
     steps:
       - uses: actions/checkout@v4
 
@@ -32,11 +35,5 @@ jobs:
         with:
           context: .
           push: true
-          tags: ghcr.io/telekom/das-schiff-network-operator:main
-      - name: Build and push sidecar Docker image
-        uses: docker/build-push-action@v5.3.0
-        with:
-          context: .
-          file: frr-exporter.Dockerfile
-          push: true
-          tags: ghcr.io/telekom/frr-exporter:main
+          tags: ghcr.io/telekom/${{ matrix.image }}:main
+          file: ${{ matrix.image }}.Dockerfile
