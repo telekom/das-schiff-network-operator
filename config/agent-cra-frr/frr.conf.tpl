@@ -243,12 +243,20 @@ router bgp {{ $.Config.LocalASN }} vrf {{ $name }}
     redistribute connected
     redistribute static
     redistribute kernel
+    {{ range $vrfImport := $vrf.VRFImports }}
+    import vrf {{ $vrfImport.FromVRF }}
+    {{ end }}
+	  import vrf route-map rm_{{ $name }}_import
   exit-address-family
 
   address-family ipv6 unicast
     redistribute connected
     redistribute static
     redistribute kernel
+    {{ range $vrfImport := $vrf.VRFImports }}
+    import vrf {{ $vrfImport.FromVRF }}
+    {{ end }}
+    import vrf route-map rm_{{ $name }}_import
   exit-address-family
 
   address-family l2vpn evpn
