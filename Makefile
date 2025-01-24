@@ -79,11 +79,7 @@ run: manifests generate fmt vet ## Run a controller from your host.
 
 .PHONY: docker-build
 docker-build: #test ## Build docker image with the manager.
-	docker build --build-arg ldflags="$(LDFLAGS)" -t ${IMG} .
-
-.PHONY: docker-build-sidecar
-docker-build-sidecar: test ## Build docker image with the manager.
-	docker build --build-arg ldflags="$(LDFLAGS)" -t ${SIDECAR_IMG} -f frr-exporter.Dockerfile .
+	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-network-operator.Dockerfile -t ${IMG} .
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
