@@ -21,7 +21,7 @@ spec:
     spec:
       tolerations:
       - effect: NoSchedule
-        key: node.schiff.telekom.de/uninitialized
+        key: node.t-caas.telekom.com/uninitialized
         operator: Exists
       - key: node.cloudprovider.kubernetes.io/uninitialized
         value: "true"

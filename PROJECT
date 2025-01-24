@@ -2,7 +2,7 @@
 # This file is used to track the info used to scaffold your project
 # and allow the plugins properly work.
 # More info: https://book.kubebuilder.io/reference/project-config.html
-domain: schiff.telekom.de
+domain: t-caas.telekom.com
 layout:
 - go.kubebuilder.io/v3
 projectName: network-operator
@@ -12,7 +12,7 @@ resources:
     crdVersion: v1
     namespaced: true
   controller: true
-  domain: schiff.telekom.de
+  domain: t-caas.telekom.com
   group: network
   kind: VRFRouteConfiguration
   path: github.com/telekom/das-schiff-network-operator/api/v1alpha1
@@ -24,7 +24,7 @@ resources:
     crdVersion: v1
     namespaced: true
   controller: true
-  domain: schiff.telekom.de
+  domain: t-caas.telekom.com
   group: network
   kind: Layer2NetworkConfiguration
   path: github.com/telekom/das-schiff-network-operator/api/v1alpha1
@@ -33,7 +33,7 @@ resources:
     crdVersion: v1
     namespaced: true
   controller: true
-  domain: schiff.telekom.de
+  domain: t-caas.telekom.com
   group: network
   kind: RoutingTable
   path: github.com/telekom/das-schiff-network-operator/api/v1alpha1
@@ -41,7 +41,7 @@ resources:
 - api:
     crdVersion: v1
     namespaced: true
-  domain: schiff.telekom.de
+  domain: t-caas.telekom.com
   group: network
   kind: HBRConfig
   path: github.com/telekom/das-schiff-network-operator/api/v1alpha1

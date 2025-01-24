@@ -4,9 +4,9 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.14.0
-  name: vrfrouteconfigurations.network.schiff.telekom.de
+  name: vrfrouteconfigurations.network.t-caas.telekom.com
 spec:
-  group: network.schiff.telekom.de
+  group: network.t-caas.telekom.com
   names:
     kind: VRFRouteConfiguration
     listKind: VRFRouteConfigurationList

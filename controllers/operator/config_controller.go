@@ -41,13 +41,13 @@ type ConfigReconciler struct {
 	Reconciler *operator.ConfigReconciler
 }
 
-//+kubebuilder:rbac:groups=network.schiff.telekom.de,resources=layer2networkconfigurations,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=network.schiff.telekom.de,resources=layer2networkconfigurations/status,verbs=get;update;patch
-//+kubebuilder:rbac:groups=network.schiff.telekom.de,resources=layer2networkconfigurations/finalizers,verbs=update
+//+kubebuilder:rbac:groups=network.t-caas.telekom.com,resources=layer2networkconfigurations,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=network.t-caas.telekom.com,resources=layer2networkconfigurations/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=network.t-caas.telekom.com,resources=layer2networkconfigurations/finalizers,verbs=update
 
-//+kubebuilder:rbac:groups=network.schiff.telekom.de,resources=vrfrouteconfigurations,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=network.schiff.telekom.de,resources=vrfrouteconfigurations/status,verbs=get;update;patch
-//+kubebuilder:rbac:groups=network.schiff.telekom.de,resources=vrfrouteconfigurations/finalizers,verbs=update
+//+kubebuilder:rbac:groups=network.t-caas.telekom.com,resources=vrfrouteconfigurations,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=network.t-caas.telekom.com,resources=vrfrouteconfigurations/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=network.t-caas.telekom.com,resources=vrfrouteconfigurations/finalizers,verbs=update
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.

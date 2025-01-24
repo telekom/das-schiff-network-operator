@@ -42,7 +42,7 @@ func (r *VRFRouteConfiguration) SetupWebhookWithManager(mgr ctrl.Manager) error 
 // TODO(user): EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 
 // TODO(user): change verbs to "verbs=create;update;delete" if you want to enable deletion validation.
-//+kubebuilder:webhook:path=/validate-network-schiff-telekom-de-v1alpha1-vrfrouteconfiguration,mutating=false,failurePolicy=fail,sideEffects=None,groups=network.schiff.telekom.de,resources=vrfrouteconfigurations,verbs=create;update,versions=v1alpha1,name=vvrfrouteconfiguration.kb.io,admissionReviewVersions=v1
+//+kubebuilder:webhook:path=/validate-network-schiff-telekom-de-v1alpha1-vrfrouteconfiguration,mutating=false,failurePolicy=fail,sideEffects=None,groups=network.t-caas.telekom.com,resources=vrfrouteconfigurations,verbs=create;update,versions=v1alpha1,name=vvrfrouteconfiguration.kb.io,admissionReviewVersions=v1
 
 var _ webhook.Validator = &VRFRouteConfiguration{}
 

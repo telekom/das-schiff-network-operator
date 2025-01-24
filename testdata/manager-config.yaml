@@ -9,4 +9,4 @@ webhook:
   port: 7443
 leaderElection:
   leaderElect: false
-  resourceName: 186580d0-dev.schiff.telekom.de
+  resourceName: 186580d0-dev.t-caas.telekom.com

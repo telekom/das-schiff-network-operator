@@ -36,7 +36,7 @@ var (
 	// InitTaints is a list of taints that are applied during initialisation of a node
 	// to prevent workloads being scheduled before the network stack is initialised.
 	InitTaints = []string{
-		"node.schiff.telekom.de/uninitialized",
+		"node.t-caas.telekom.com/uninitialized",
 		"node.cloudprovider.kubernetes.io/uninitialized",
 	}
 )

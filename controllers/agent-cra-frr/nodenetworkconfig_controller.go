@@ -45,9 +45,9 @@ type NodeNetworkConfigReconciler struct {
 	Reconciler *agent_cra_frr.NodeNetworkConfigReconciler
 }
 
-//+kubebuilder:rbac:groups=network.schiff.telekom.de,resources=nodenetworkconfigs,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=network.schiff.telekom.de,resources=nodenetworkconfigs/status,verbs=get;update;patch
-//+kubebuilder:rbac:groups=network.schiff.telekom.de,resources=nodenetworkconfigs/finalizers,verbs=update
+//+kubebuilder:rbac:groups=network.t-caas.telekom.com,resources=nodenetworkconfigs,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=network.t-caas.telekom.com,resources=nodenetworkconfigs/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=network.t-caas.telekom.com,resources=nodenetworkconfigs/finalizers,verbs=update
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
