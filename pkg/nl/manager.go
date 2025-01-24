@@ -59,15 +59,19 @@ func (n *Manager) reconcileLayer2(config NetlinkConfiguration) error {
 	var toDelete []Layer2Information
 
 	for i := range config.Layer2s {
-		alreadyExists := false
+		var currentConfig *Layer2Information = nil
 		for j := range existing {
 			if existing[j].VlanID == config.Layer2s[i].VlanID {
-				alreadyExists = true
+				currentConfig = &existing[j]
 				break
 			}
 		}
-		if !alreadyExists {
+		if currentConfig == nil {
 			toCreate = append(toCreate, config.Layer2s[i])
+		} else {
+			if err := n.ReconcileL2(currentConfig, &config.Layer2s[i]); err != nil {
+				return fmt.Errorf("error reconciling L2 (VLAN: %d): %w", config.Layer2s[i].VlanID, err)
+			}
 		}
 	}
 
@@ -81,10 +85,6 @@ func (n *Manager) reconcileLayer2(config NetlinkConfiguration) error {
 		}
 		if needsDeletion {
 			toDelete = append(toDelete, existing[i])
-		} else {
-			if err := n.ReconcileL2(&config.Layer2s[i], &existing[i]); err != nil {
-				return fmt.Errorf("error reconciling L2 (VLAN: %d): %w", config.Layer2s[i].VlanID, err)
-			}
 		}
 	}
 
