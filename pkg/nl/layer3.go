@@ -19,7 +19,7 @@ type VRFInformation struct {
 	bridgeID int
 	vrfID    int
 
-	markForDelete bool
+	MarkForDelete bool
 }
 
 type Loopback struct {

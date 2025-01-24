@@ -117,13 +117,13 @@ func (n *Manager) updateL3Indices(info *VRFInformation) {
 	if err == nil {
 		info.bridgeID = bridgeLink.Attrs().Index
 	} else {
-		info.markForDelete = true
+		info.MarkForDelete = true
 	}
 	vxlanLink, err := n.toolkit.LinkByName(vxlanPrefix + info.Name)
 	if err == nil {
 		info.VNI = vxlanLink.(*netlink.Vxlan).VxlanId
 	} else {
-		info.markForDelete = true
+		info.MarkForDelete = true
 	}
 }
 

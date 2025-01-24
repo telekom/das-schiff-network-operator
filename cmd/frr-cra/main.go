@@ -10,7 +10,6 @@ import (
 	"encoding/pem"
 	"flag"
 	"fmt"
-	"github.com/telekom/das-schiff-network-operator/pkg/config"
 	"io"
 	"log"
 	"math/big"
@@ -20,6 +19,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/telekom/das-schiff-network-operator/pkg/config"
+	"github.com/telekom/das-schiff-network-operator/pkg/cra"
 	"github.com/telekom/das-schiff-network-operator/pkg/frr"
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
 )
@@ -31,6 +32,8 @@ const (
 	frrConfigPath = "/etc/frr/frr.conf"
 
 	baseConfigPath = "/etc/cra/base-config.yaml"
+
+	defaultSleep = 2 * time.Second
 )
 
 var (
@@ -38,13 +41,158 @@ var (
 	nlManager  *nl.Manager
 )
 
-func applyNetlink(w http.ResponseWriter, r *http.Request) {
+func reconcileLayer2(config nl.NetlinkConfiguration) error {
+	existing, err := nlManager.ListL2()
+	if err != nil {
+		return fmt.Errorf("error listing L2: %w", err)
+	}
+
+	var toCreate []nl.Layer2Information
+	var toDelete []nl.Layer2Information
+
+	for i := range config.Layer2s {
+		var currentConfig *nl.Layer2Information = nil
+		for j := range existing {
+			if existing[j].VlanID == config.Layer2s[i].VlanID {
+				currentConfig = &existing[j]
+				break
+			}
+		}
+		if currentConfig == nil {
+			toCreate = append(toCreate, config.Layer2s[i])
+		} else {
+			if err := nlManager.ReconcileL2(currentConfig, &config.Layer2s[i]); err != nil {
+				return fmt.Errorf("error reconciling L2 (VLAN: %d): %w", config.Layer2s[i].VlanID, err)
+			}
+		}
+	}
+
+	for i := range existing {
+		needsDeletion := true
+		for j := range config.Layer2s {
+			if existing[i].VlanID == config.Layer2s[j].VlanID {
+				needsDeletion = false
+				break
+			}
+		}
+		if needsDeletion {
+			toDelete = append(toDelete, existing[i])
+		}
+	}
+
+	for i := range toDelete {
+		if err := nlManager.CleanupL2(&toDelete[i]); len(err) > 0 {
+			return fmt.Errorf("error deleting L2 (VLAN: %d): %v", toDelete[i].VlanID, err)
+		}
+	}
+
+	for i := range toCreate {
+		if err := nlManager.CreateL2(&toCreate[i]); err != nil {
+			return fmt.Errorf("error creating L2 (VLAN: %d): %w", toCreate[i].VlanID, err)
+		}
+	}
+
+	return nil
+}
+
+func updateL3Netlink(config nl.NetlinkConfiguration) ([]nl.VRFInformation, bool, error) {
+	existing, err := nlManager.ListL3()
+	if err != nil {
+		return nil, false, fmt.Errorf("error listing L3 VRF information: %w", err)
+	}
+
+	var toCreate []nl.VRFInformation
+	var toDelete []nl.VRFInformation
+
+	for i := range existing {
+		needsDeletion := true
+		for j := range config.VRFs {
+			if config.VRFs[j].Name == existing[i].Name && config.VRFs[j].VNI == existing[i].VNI {
+				needsDeletion = false
+				break
+			}
+		}
+		if needsDeletion || existing[i].MarkForDelete {
+			toDelete = append(toDelete, existing[i])
+		}
+	}
+
+	for i := range config.VRFs {
+		alreadyExists := false
+		for j := range existing {
+			if existing[j].Name == config.VRFs[i].Name && existing[j].VNI == config.VRFs[i].VNI && !existing[j].MarkForDelete {
+				alreadyExists = true
+				break
+			}
+		}
+		if !alreadyExists {
+			toCreate = append(toCreate, config.VRFs[i])
+		}
+	}
+
+	for i := range toDelete {
+		errors := nlManager.CleanupL3(toDelete[i].Name)
+		if len(errors) > 0 {
+			return nil, false, fmt.Errorf("error cleaning up L3 (VRF: %s): %v", toDelete[i].Name, errors)
+		}
+	}
+
+	for i := range toCreate {
+		log.Println("Creating VRF", toCreate[i].Name)
+		if err := nlManager.CreateL3(toCreate[i]); err != nil {
+			return nil, false, fmt.Errorf("error creating L3 (VRF: %s): %w", toCreate[i].Name, err)
+		}
+	}
+
+	return toCreate, len(toDelete) > 0, nil
+}
+
+func reconcileLayer3(config nl.NetlinkConfiguration) error {
+	created, deletedVRF, err := updateL3Netlink(config)
+	if err != nil {
+		return fmt.Errorf("error updating L3: %w", err)
+	}
+
+	if deletedVRF {
+		err := reloadFRR()
+		if err != nil {
+			return fmt.Errorf("error reloading FRR: %w", err)
+		}
+	}
+
+	time.Sleep(defaultSleep)
+
+	for i := range created {
+		if err := nlManager.UpL3(created[i]); err != nil {
+			return fmt.Errorf("error setting up L3 (VRF: %s): %w", created[i].Name, err)
+		}
+	}
+
+	return nil
+}
+
+func reloadFRR() error {
+	err := frrManager.ReloadFRR()
+	if err != nil {
+		log.Println("Failed to reload FRR, trying to restart", err)
+
+		err = frrManager.RestartFRR()
+		if err != nil {
+			log.Println("Failed to restart FRR", err)
+			return fmt.Errorf("error reloading / restarting FRR systemd unit: %w", err)
+		}
+	}
+	log.Println("Reloaded FRR config")
+	return nil
+}
+
+func applyConfig(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	// Parse Body into NetlinkConfiguration
-	var netlinkConfiguration nl.NetlinkConfiguration
+	var craConfiguration cra.CRAConfiguration
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		log.Println("Failed to read request body", err)
@@ -53,29 +201,14 @@ func applyNetlink(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	err = json.Unmarshal(body, &netlinkConfiguration)
+	err = json.Unmarshal(body, &craConfiguration)
 	if err != nil {
 		log.Println("Failed to unmarshal request body", err)
 		http.Error(w, "Failed to unmarshal request body", http.StatusInternalServerError)
 		return
 	}
 
-	err = nlManager.ReconcileNetlinkConfiguration(netlinkConfiguration)
-	if err != nil {
-		log.Println("Failed to reconcile Netlink configuration", err)
-		http.Error(w, fmt.Sprintf("Failed to reconcile Netlink configuration: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
-}
-
-func applyFrr(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
+	// Write FRR config
 	file, err := os.OpenFile(frrConfigPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		log.Println("Failed to open FRR config file", err)
@@ -83,24 +216,35 @@ func applyFrr(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer file.Close()
-
-	_, err = io.Copy(file, r.Body)
+	_, err = io.Copy(file, strings.NewReader(craConfiguration.FRRConfiguration))
 	if err != nil {
 		log.Println("Failed to write FRR config", err)
 		http.Error(w, "Failed to write FRR config", http.StatusInternalServerError)
 		return
 	}
 
-	err = frrManager.ReloadFRR()
+	// Reload FRR
+	err = reloadFRR()
 	if err != nil {
-		log.Println("Failed to reload FRR, trying to restart", err)
+		log.Println("Failed to reload FRR", err)
+		http.Error(w, fmt.Sprintf("Failed to reload FRR: %v", err), http.StatusInternalServerError)
+		return
+	}
 
-		err = frrManager.RestartFRR()
-		if err != nil {
-			log.Println("Failed to restart FRR", err)
-			http.Error(w, "Failed to restart FRR", http.StatusInternalServerError)
-			return
-		}
+	// Reconcile Layer2
+	err = reconcileLayer2(craConfiguration.NetlinkConfiguration)
+	if err != nil {
+		log.Println("Failed to reconcile Layer2", err)
+		http.Error(w, fmt.Sprintf("Failed to reconcile Layer2: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Reconcile Layer3
+	err = reconcileLayer3(craConfiguration.NetlinkConfiguration)
+	if err != nil {
+		log.Println("Failed to reconcile Layer3", err)
+		http.Error(w, fmt.Sprintf("Failed to reconcile Layer3: %v", err), http.StatusInternalServerError)
+		return
 	}
 
 	w.WriteHeader(http.StatusOK)
@@ -201,8 +345,7 @@ func main() {
 	frrManager = frr.NewFRRManager()
 	nlManager = nl.NewManager(&nl.Toolkit{}, *baseConfig)
 
-	http.HandleFunc("/netlink/config", applyNetlink)
-	http.HandleFunc("/frr/config", applyFrr)
+	http.HandleFunc("/config", applyConfig)
 	http.HandleFunc("/frr/execute", executeFrr)
 
 	// Check if the server certificate and key exist

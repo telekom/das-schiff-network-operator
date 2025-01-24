@@ -72,16 +72,15 @@ func (m Manager) postRequest(path string, body []byte) error {
 	return nil
 }
 
-func (m Manager) ApplyNetlinkConfiguration(configuration *nl.NetlinkConfiguration) error {
-	jsonBody, err := json.Marshal(configuration)
+func (m Manager) ApplyConfiguration(netlinkConfig *nl.NetlinkConfiguration, frrConfig string) error {
+	craConfig := CRAConfiguration{
+		NetlinkConfiguration: *netlinkConfig,
+		FRRConfiguration:     frrConfig,
+	}
+	jsonBody, err := json.Marshal(craConfig)
 	if err != nil {
 		return fmt.Errorf("error marshalling netlink configuration: %w", err)
 	}
-	fmt.Printf("Configuration: %s\n", jsonBody)
 
-	return m.postRequest("/netlink/config", jsonBody)
-}
-
-func (m Manager) ApplyFrrConfiguration(config string) error {
-	return m.postRequest("/frr/config", []byte(config))
+	return m.postRequest("/config", jsonBody)
 }

@@ -206,16 +206,13 @@ func (r *reconcileNodeNetworkConfig) doReconciliation(nodeCfg *v1alpha1.NodeNetw
 
 	netlinkConfig := ConvertNodeConfigToNetlink(nodeCfg)
 
-	if err := r.craManager.ApplyNetlinkConfiguration(&netlinkConfig); err != nil {
-		return fmt.Errorf("error applying netlink configuration: %w", err)
-	}
-
 	frrConfig, err := r.frrTemplate.TemplateFRR(*r.baseConfig, nodeCfg.Spec)
 	if err != nil {
 		return fmt.Errorf("error templating FRR configuration: %w", err)
 	}
-	if err := r.craManager.ApplyFrrConfiguration(frrConfig); err != nil {
-		return fmt.Errorf("error applying FRR configuration: %w", err)
+
+	if err := r.craManager.ApplyConfiguration(&netlinkConfig, frrConfig); err != nil {
+		return fmt.Errorf("error applying cra configuration: %w", err)
 	}
 
 	return nil
