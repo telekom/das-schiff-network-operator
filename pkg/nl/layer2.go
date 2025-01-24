@@ -445,6 +445,15 @@ func (*Manager) configureBridge(intfName string) error {
 		return fmt.Errorf("error setting arp_accept = 1 for interface: %w", err)
 	}
 
+	// Ensure we can receive unsolicited and solicited but untracked NA
+	if _, err := os.Stat(fmt.Sprintf("%s/ipv6/conf/%s/accept_untracked_na", procSysNetPath, intfName)); err == nil {
+		if err := os.WriteFile(fmt.Sprintf("%s/ipv6/conf/%s/accept_untracked_na", procSysNetPath, intfName), []byte("2"), neighFilePermissions); err != nil {
+			return fmt.Errorf("error setting accept_untracked_na = 2 for interface: %w", err)
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("error checking if accept_untracked_na exists: %w", err)
+	}
+
 	baseTimer := os.Getenv("NWOP_NEIGH_BASE_REACHABLE_TIME")
 	if baseTimer == "" {
 		baseTimer = "30000"
