@@ -69,42 +69,6 @@ var _ = Describe("LoadConfig()", func() {
 		Expect(conf).ToNot(BeNil())
 	})
 })
-var _ = Describe("IsFRRActive()", func() {
-	frm := mock_healthcheck.NewMockFRRInterface(ctrl)
-	It("returns error if FRR Manager returns error", func() {
-		c := fake.NewClientBuilder().Build()
-		frm.EXPECT().GetStatusFRR().Return("", "", errors.New("fake error"))
-		nc := &NetHealthcheckConfig{}
-		hc, err := NewHealthChecker(c, NewDefaultHealthcheckToolkit(frm, NewTCPDialer("")), nc)
-		Expect(err).ToNot(HaveOccurred())
-		Expect(hc).ToNot(BeNil())
-		result, err := hc.IsFRRActive()
-		Expect(err).To(HaveOccurred())
-		Expect(result).To(BeFalse())
-	})
-	It("returns error if FRR is inactive", func() {
-		c := fake.NewClientBuilder().Build()
-		frm.EXPECT().GetStatusFRR().Return("inactive", "stopped", nil)
-		nc := &NetHealthcheckConfig{}
-		hc, err := NewHealthChecker(c, NewDefaultHealthcheckToolkit(frm, NewTCPDialer("")), nc)
-		Expect(err).ToNot(HaveOccurred())
-		Expect(hc).ToNot(BeNil())
-		result, err := hc.IsFRRActive()
-		Expect(err).To(HaveOccurred())
-		Expect(result).To(BeFalse())
-	})
-	It("returns no error if FRR is active", func() {
-		c := fake.NewClientBuilder().Build()
-		frm.EXPECT().GetStatusFRR().Return("active", "running", nil)
-		nc := &NetHealthcheckConfig{}
-		hc, err := NewHealthChecker(c, NewDefaultHealthcheckToolkit(frm, NewTCPDialer("")), nc)
-		Expect(err).ToNot(HaveOccurred())
-		Expect(hc).ToNot(BeNil())
-		result, err := hc.IsFRRActive()
-		Expect(err).ToNot(HaveOccurred())
-		Expect(result).To(BeTrue())
-	})
-})
 var _ = Describe("RemoveTaints()", func() {
 	It("returns error about no nodes", func() {
 		c := fake.NewClientBuilder().Build()
@@ -144,7 +108,7 @@ var _ = Describe("CheckInterfaces()", func() {
 	It("returns error if interface is not present", func() {
 		c := fake.NewClientBuilder().Build()
 		nc := &NetHealthcheckConfig{Interfaces: []string{"A", "B"}}
-		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(nil, fakeErrorGetByName, &net.Dialer{Timeout: time.Duration(3)}), nc)
+		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(fakeErrorGetByName, &net.Dialer{Timeout: time.Duration(3)}), nc)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(hc).ToNot(BeNil())
 		Expect(hc.TaintsRemoved()).To(BeFalse())
@@ -155,7 +119,7 @@ var _ = Describe("CheckInterfaces()", func() {
 	It("returns error if interface is not up", func() {
 		c := fake.NewClientBuilder().Build()
 		nc := &NetHealthcheckConfig{Interfaces: []string{"A", "B"}}
-		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(nil, fakeDownGetByName, &net.Dialer{Timeout: time.Duration(3)}), nc)
+		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(fakeDownGetByName, &net.Dialer{Timeout: time.Duration(3)}), nc)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(hc).ToNot(BeNil())
 		Expect(hc.TaintsRemoved()).To(BeFalse())
@@ -166,7 +130,7 @@ var _ = Describe("CheckInterfaces()", func() {
 	It("returns error if all links are up", func() {
 		c := fake.NewClientBuilder().Build()
 		nc := &NetHealthcheckConfig{Interfaces: []string{"A", "B"}}
-		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(nil, fakeUpGetByName, NewTCPDialer("")), nc)
+		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(fakeUpGetByName, NewTCPDialer("")), nc)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(hc).ToNot(BeNil())
 		Expect(hc.TaintsRemoved()).To(BeFalse())
@@ -178,7 +142,7 @@ var _ = Describe("CheckInterfaces()", func() {
 var _ = Describe("NewTcpDialer()", func() {
 	It("should use dialer with 3s timeout", func() {
 		c := fake.NewClientBuilder().Build()
-		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(nil, fakeUpGetByName, NewTCPDialer("")), &NetHealthcheckConfig{})
+		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(fakeUpGetByName, NewTCPDialer("")), &NetHealthcheckConfig{})
 		Expect(err).ToNot(HaveOccurred())
 		Expect(hc).ToNot(BeNil())
 		Expect(hc.TaintsRemoved()).To(BeFalse())
@@ -187,7 +151,7 @@ var _ = Describe("NewTcpDialer()", func() {
 	})
 	It("should use dialer with 5s timeout", func() {
 		c := fake.NewClientBuilder().Build()
-		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(nil, fakeUpGetByName, NewTCPDialer("5")), &NetHealthcheckConfig{})
+		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(fakeUpGetByName, NewTCPDialer("5")), &NetHealthcheckConfig{})
 		Expect(err).ToNot(HaveOccurred())
 		Expect(hc).ToNot(BeNil())
 		Expect(hc.TaintsRemoved()).To(BeFalse())
@@ -196,7 +160,7 @@ var _ = Describe("NewTcpDialer()", func() {
 	})
 	It("should use dialer with 500ms timeout", func() {
 		c := fake.NewClientBuilder().Build()
-		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(nil, fakeUpGetByName, NewTCPDialer("500ms")), &NetHealthcheckConfig{})
+		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(fakeUpGetByName, NewTCPDialer("500ms")), &NetHealthcheckConfig{})
 		Expect(err).ToNot(HaveOccurred())
 		Expect(hc).ToNot(BeNil())
 		Expect(hc.TaintsRemoved()).To(BeFalse())
@@ -213,7 +177,7 @@ var _ = Describe("CheckReachability()", func() {
 			Reachability: []netReachabilityItem{{Host: "someHost", Port: 42}},
 		}
 		dialerMock.EXPECT().Dial("tcp", "someHost:42").Return(nil, errors.New("fake error")).Times(defaultRetries)
-		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(nil, fakeUpGetByName, dialerMock), nc)
+		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(fakeUpGetByName, dialerMock), nc)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(hc).ToNot(BeNil())
 		Expect(hc.TaintsRemoved()).To(BeFalse())
@@ -226,7 +190,7 @@ var _ = Describe("CheckReachability()", func() {
 			Reachability: []netReachabilityItem{{Host: "someHost", Port: 42}},
 		}
 		dialerMock.EXPECT().Dial("tcp", "someHost:42").Return(&fakeConn{}, nil).Times(1)
-		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(nil, fakeUpGetByName, dialerMock), nc)
+		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(fakeUpGetByName, dialerMock), nc)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(hc).ToNot(BeNil())
 		Expect(hc.TaintsRemoved()).To(BeFalse())
@@ -239,7 +203,7 @@ var _ = Describe("CheckReachability()", func() {
 			Reachability: []netReachabilityItem{{Host: "someHost", Port: 42}},
 		}
 		dialerMock.EXPECT().Dial("tcp", "someHost:42").Return(nil, errors.New("connect: connection refused")).Times(1)
-		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(nil, fakeUpGetByName, dialerMock), nc)
+		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(fakeUpGetByName, dialerMock), nc)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(hc).ToNot(BeNil())
 		Expect(hc.TaintsRemoved()).To(BeFalse())
@@ -253,7 +217,7 @@ var _ = Describe("CheckReachability()", func() {
 			Retries:      1,
 		}
 		dialerMock.EXPECT().Dial("tcp", "someHost:42").Return(&fakeConnCloseError{}, nil).Times(1)
-		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(nil, fakeUpGetByName, dialerMock), nc)
+		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(fakeUpGetByName, dialerMock), nc)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(hc).ToNot(BeNil())
 		Expect(hc.TaintsRemoved()).To(BeFalse())
@@ -264,7 +228,7 @@ var _ = Describe("CheckReachability()", func() {
 var _ = Describe("CheckAPIServer()", func() {
 	It("should return no error", func() {
 		c := fake.NewClientBuilder().Build()
-		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(nil, nil, nil), &NetHealthcheckConfig{})
+		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(nil, nil), &NetHealthcheckConfig{})
 		Expect(err).ToNot(HaveOccurred())
 		Expect(hc).ToNot(BeNil())
 		err = hc.CheckAPIServer(context.TODO())

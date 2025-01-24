@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
-	"text/template"
 
 	"github.com/telekom/das-schiff-network-operator/pkg/frr/dbus"
 )
@@ -18,7 +17,6 @@ var (
 
 //go:generate mockgen -destination ./mock/mock_frr.go . ManagerInterface
 type ManagerInterface interface {
-	Init(mgmtVrf string) error
 	ReloadFRR() error
 	RestartFRR() error
 	GetStatusFRR() (activeState, subState string, err error)
@@ -26,8 +24,6 @@ type ManagerInterface interface {
 }
 
 type Manager struct {
-	configTemplate *template.Template
-
 	Cli         *Cli
 	dbusToolkit dbus.System
 }

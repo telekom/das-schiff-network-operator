@@ -90,7 +90,7 @@ func (n *Manager) reconcileLayer2(config NetlinkConfiguration) error {
 
 	for i := range toDelete {
 		if err := n.CleanupL2(&toDelete[i]); len(err) > 0 {
-			return fmt.Errorf("error deleting L2 (VLAN: %d): %w", toDelete[i].VlanID, err)
+			return fmt.Errorf("error deleting L2 (VLAN: %d): %v", toDelete[i].VlanID, err)
 		}
 	}
 
@@ -141,7 +141,7 @@ func (n *Manager) reconcileLayer3(config NetlinkConfiguration) error {
 	for i := range toDelete {
 		errors := n.CleanupL3(toDelete[i].Name)
 		if len(errors) > 0 {
-			return fmt.Errorf("error cleaning up L3 (VRF: %s): %w", toDelete[i].Name, errors)
+			return fmt.Errorf("error cleaning up L3 (VRF: %s): %v", toDelete[i].Name, errors)
 		}
 	}
 
