@@ -168,6 +168,7 @@ neighbor {{ $peerIdentifier }} local-as {{ $peer.LocalASN }} no-prepend replace-
 neighbor {{ $peerIdentifier }} timers {{ $peer.KeepaliveTime }} {{ $peer.HoldTime }}
 {{ if $peer.UpdateSource }}
 neighbor {{ $peerIdentifier }} update-source {{ $peer.UpdateSource }}
+neighbor {{ $peerIdentifier }} disable-connected-check
 {{ end }}
 {{ if $peer.IPv4 }}
 address-family ipv4 unicast
