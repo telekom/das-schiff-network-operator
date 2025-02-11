@@ -3,19 +3,20 @@ package nl
 import (
 	"errors"
 	"fmt"
-	"github.com/telekom/das-schiff-network-operator/pkg/config"
 	"net"
 	"os"
 	"path/filepath"
 	"strconv"
 	"testing"
 
+	"github.com/telekom/das-schiff-network-operator/pkg/config"
+	"golang.org/x/sys/unix"
+
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	mock_nl "github.com/telekom/das-schiff-network-operator/pkg/nl/mock"
 	"github.com/vishvananda/netlink"
 	"go.uber.org/mock/gomock"
-	"golang.org/x/sys/unix"
 )
 
 const (
@@ -165,30 +166,6 @@ var _ = Describe("ListL2()", func() {
 		_, err := nm.ListL2()
 		Expect(err).To(HaveOccurred())
 	})
-	It("returns error if failed get veth peer index during update", func() {
-		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
-		netlinkMock.EXPECT().LinkList().Return([]netlink.Link{
-			&netlink.Bridge{LinkAttrs: netlink.LinkAttrs{Name: layer2SVI + "33", MasterIndex: 3, Index: 3}},
-			&netlink.Vlan{LinkAttrs: netlink.LinkAttrs{Name: vlanPrefix + "33", MasterIndex: 3, Index: 3}},
-		}, nil)
-		netlinkMock.EXPECT().LinkByIndex(3).Return(&netlink.Vxlan{LinkAttrs: netlink.LinkAttrs{Name: vxlanPrefix + dummyIntf, Index: 3}}, nil)
-		_, err := nm.ListL2()
-		Expect(err).To(HaveOccurred())
-	})
-	It("returns error if failed to get link by index of veth peer", func() {
-		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
-		netlinkMock.EXPECT().LinkList().Return([]netlink.Link{
-			&netlink.Bridge{LinkAttrs: netlink.LinkAttrs{Name: layer2SVI + "33", MasterIndex: 3, Index: 3}},
-			&netlink.Vlan{LinkAttrs: netlink.LinkAttrs{Name: vlanPrefix + "33", MasterIndex: 3, Index: 3}},
-		}, nil)
-		netlinkMock.EXPECT().LinkByIndex(3).Return(&netlink.Vxlan{LinkAttrs: netlink.LinkAttrs{Name: vxlanPrefix + dummyIntf, Index: 3}}, nil)
-		netlinkMock.EXPECT().VethPeerIndex(gomock.Any()).Return(0, nil)
-		netlinkMock.EXPECT().LinkByIndex(0).Return(nil, errors.New("link not found"))
-		_, err := nm.ListL2()
-		Expect(err).To(HaveOccurred())
-	})
 	It("returns error if update succeeded but cannot list IPv4 addresses", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
 		nm := NewManager(netlinkMock, config.BaseConfig{})
@@ -197,10 +174,6 @@ var _ = Describe("ListL2()", func() {
 			&netlink.Vlan{LinkAttrs: netlink.LinkAttrs{Name: vlanPrefix + "33", MasterIndex: 3, Index: 3}},
 		}, nil)
 		netlinkMock.EXPECT().LinkByIndex(3).Return(&netlink.Vxlan{LinkAttrs: netlink.LinkAttrs{Name: vxlanPrefix + dummyIntf, Index: 3}}, nil)
-		netlinkMock.EXPECT().VethPeerIndex(gomock.Any()).Return(0, nil)
-		netlinkMock.EXPECT().LinkByIndex(0).Return(
-			&netlink.Vlan{LinkAttrs: netlink.LinkAttrs{Name: vlanPrefix + "33", MasterIndex: 3, Index: 3}}, nil,
-		)
 		netlinkMock.EXPECT().AddrList(gomock.Any(), gomock.Any()).Return(nil, errors.New("failed to list addresses"))
 		_, err := nm.ListL2()
 		Expect(err).To(HaveOccurred())
@@ -213,10 +186,6 @@ var _ = Describe("ListL2()", func() {
 			&netlink.Vlan{LinkAttrs: netlink.LinkAttrs{Name: vlanPrefix + "33", MasterIndex: 3, Index: 3}},
 		}, nil)
 		netlinkMock.EXPECT().LinkByIndex(3).Return(&netlink.Vxlan{LinkAttrs: netlink.LinkAttrs{Name: vxlanPrefix + dummyIntf, Index: 3}}, nil)
-		netlinkMock.EXPECT().VethPeerIndex(gomock.Any()).Return(0, nil)
-		netlinkMock.EXPECT().LinkByIndex(0).Return(
-			&netlink.Vlan{LinkAttrs: netlink.LinkAttrs{Name: vlanPrefix + "33", MasterIndex: 3, Index: 3}}, nil,
-		)
 		netlinkMock.EXPECT().AddrList(gomock.Any(), gomock.Any()).Return([]netlink.Addr{}, nil)
 		netlinkMock.EXPECT().AddrList(gomock.Any(), gomock.Any()).Return(nil, errors.New("failed to list addresses"))
 		_, err := nm.ListL2()
@@ -230,10 +199,6 @@ var _ = Describe("ListL2()", func() {
 			&netlink.Vlan{LinkAttrs: netlink.LinkAttrs{Name: vlanPrefix + "33", MasterIndex: 3, Index: 3}},
 		}, nil)
 		netlinkMock.EXPECT().LinkByIndex(3).Return(&netlink.Vxlan{LinkAttrs: netlink.LinkAttrs{Name: vxlanPrefix + dummyIntf, Index: 3}}, nil)
-		netlinkMock.EXPECT().VethPeerIndex(gomock.Any()).Return(0, nil)
-		netlinkMock.EXPECT().LinkByIndex(0).Return(
-			&netlink.Vlan{LinkAttrs: netlink.LinkAttrs{Name: vlanPrefix + "33", MasterIndex: 3, Index: 3}}, nil,
-		)
 		netlinkMock.EXPECT().AddrList(gomock.Any(), gomock.Any()).Return([]netlink.Addr{
 			{Scope: unix.RT_SCOPE_UNIVERSE},
 			{Scope: unix.RT_SCOPE_HOST},
@@ -260,18 +225,25 @@ var _ = Describe("ParseIPAddresses()", func() {
 	})
 })
 
-var _ = Describe("GetL3ByName()", func() {
+var _ = Describe("GetVRFInterfaceIdxByName()", func() {
+	It("returns error if cannot find cluster or management VRF", func() {
+		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
+		nm := NewManager(netlinkMock, config.BaseConfig{ManagementVRF: config.BaseVRF{Name: "name"}})
+		netlinkMock.EXPECT().LinkByName("name").Return(nil, fmt.Errorf(""))
+		_, err := nm.GetVRFInterfaceIdxByName("name")
+		Expect(err).To(HaveOccurred())
+	})
+	It("returns no error if cluster or management VRF was found", func() {
+		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
+		nm := NewManager(netlinkMock, config.BaseConfig{ManagementVRF: config.BaseVRF{Name: "name"}})
+		netlinkMock.EXPECT().LinkByName("name").Return(&netlink.Vrf{}, nil)
+		_, err := nm.GetVRFInterfaceIdxByName("name")
+		Expect(err).ToNot(HaveOccurred())
+	})
 	It("returns error if cannot list L3", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
 		nm := NewManager(netlinkMock, config.BaseConfig{})
 		netlinkMock.EXPECT().LinkList().Return(nil, errors.New("error listing links"))
-		_, err := nm.GetVRFInterfaceIdxByName("name")
-		Expect(err).To(HaveOccurred())
-	})
-	It("returns error if L3 was not found", func() {
-		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
-		netlinkMock.EXPECT().LinkList().Return([]netlink.Link{&netlink.Vrf{LinkAttrs: netlink.LinkAttrs{Name: dummyIntf}}}, nil)
 		_, err := nm.GetVRFInterfaceIdxByName("name")
 		Expect(err).To(HaveOccurred())
 	})
@@ -331,8 +303,8 @@ var _ = Describe("UpL3()", func() {
 	It("returns error no error", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
 		nm := NewManager(netlinkMock, config.BaseConfig{})
-		netlinkMock.EXPECT().LinkByName(gomock.Any()).Return(&netlink.Vrf{}, nil).Times(3)
-		netlinkMock.EXPECT().LinkSetUp(gomock.Any()).Return(nil).Times(3)
+		netlinkMock.EXPECT().LinkByName(gomock.Any()).Return(&netlink.Vrf{}, nil).Times(2)
+		netlinkMock.EXPECT().LinkSetUp(gomock.Any()).Return(nil).Times(2)
 		err := nm.UpL3(VRFInformation{Name: dummyIntf})
 		Expect(err).ToNot(HaveOccurred())
 	})
@@ -488,7 +460,7 @@ var _ = Describe("ReconcileL2()", func() {
 		err := nm.ReconcileL2(current, desired)
 		Expect(err).To(HaveOccurred())
 	})
-	It("returns error if unable to set link down to change MAC address", func() {
+	It("returns error if unable to generate MACs", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
 		nm := NewManager(netlinkMock, config.BaseConfig{})
 		current := &Layer2Information{
@@ -504,6 +476,26 @@ var _ = Describe("ReconcileL2()", func() {
 
 		netlinkMock.EXPECT().LinkByName(underlayInterfaceName).Return(&netlink.Dummy{}, nil)
 		netlinkMock.EXPECT().LinkSetMTU(gomock.Any(), gomock.Any()).Return(nil).Times(3)
+
+		err := nm.ReconcileL2(current, desired)
+		Expect(err).To(HaveOccurred())
+	})
+	It("returns error if unable to set link down to change MAC address", func() {
+		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
+		nm := NewManager(netlinkMock, config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
+		current := &Layer2Information{
+			bridge:        &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
+			vxlan:         &netlink.Vxlan{},
+			vlanInterface: &netlink.Vlan{},
+		}
+		desired := &Layer2Information{
+			AnycastGateways: []string{},
+			AnycastMAC:      &mac,
+			MTU:             1399,
+		}
+
+		netlinkMock.EXPECT().LinkByName(underlayInterfaceName).Return(&netlink.Dummy{}, nil)
+		netlinkMock.EXPECT().LinkSetMTU(gomock.Any(), gomock.Any()).Return(nil).Times(3)
 		netlinkMock.EXPECT().LinkSetDown(gomock.Any()).Return(errors.New("unable to set link down"))
 
 		err := nm.ReconcileL2(current, desired)
@@ -511,7 +503,7 @@ var _ = Describe("ReconcileL2()", func() {
 	})
 	It("returns error if unable to change MAC address", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
+		nm := NewManager(netlinkMock, config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
 		current := &Layer2Information{
 			bridge:        &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
 			vxlan:         &netlink.Vxlan{},
@@ -523,8 +515,8 @@ var _ = Describe("ReconcileL2()", func() {
 			MTU:             1399,
 		}
 
-		netlinkMock.EXPECT().LinkSetMTU(gomock.Any(), gomock.Any()).Return(nil).Times(4)
-		netlinkMock.EXPECT().AddrList(gomock.Any(), gomock.Any()).Return([]netlink.Addr{{IPNet: netlink.NewIPNet(net.IPv4(0, 0, 0, 0))}}, nil)
+		netlinkMock.EXPECT().LinkSetMTU(gomock.Any(), gomock.Any()).Return(nil).Times(3)
+		netlinkMock.EXPECT().LinkByName(underlayInterfaceName).Return(&netlink.Dummy{}, nil)
 		netlinkMock.EXPECT().LinkSetDown(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetHardwareAddr(gomock.Any(), gomock.Any()).Return(errors.New("unable to change MAC address"))
 
@@ -533,7 +525,7 @@ var _ = Describe("ReconcileL2()", func() {
 	})
 	It("returns error if unable set link up after changing MAC address", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
+		nm := NewManager(netlinkMock, config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
 		current := &Layer2Information{
 			bridge:        &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
 			vxlan:         &netlink.Vxlan{},
@@ -545,8 +537,8 @@ var _ = Describe("ReconcileL2()", func() {
 			MTU:             1399,
 		}
 
-		netlinkMock.EXPECT().LinkSetMTU(gomock.Any(), gomock.Any()).Return(nil).Times(4)
-		netlinkMock.EXPECT().AddrList(gomock.Any(), gomock.Any()).Return([]netlink.Addr{{IPNet: netlink.NewIPNet(net.IPv4(0, 0, 0, 0))}}, nil)
+		netlinkMock.EXPECT().LinkSetMTU(gomock.Any(), gomock.Any()).Return(nil).Times(3)
+		netlinkMock.EXPECT().LinkByName(underlayInterfaceName).Return(&netlink.Dummy{}, nil)
 		netlinkMock.EXPECT().LinkSetDown(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetHardwareAddr(gomock.Any(), gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetUp(gomock.Any()).Return(errors.New("unable to set link up"))
@@ -556,7 +548,7 @@ var _ = Describe("ReconcileL2()", func() {
 	})
 	It("returns error if unable set vxlan MAC address", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
+		nm := NewManager(netlinkMock, config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
 		current := &Layer2Information{
 			bridge:        &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
 			vxlan:         &netlink.Vxlan{},
@@ -568,8 +560,8 @@ var _ = Describe("ReconcileL2()", func() {
 			MTU:             1399,
 		}
 
-		netlinkMock.EXPECT().LinkSetMTU(gomock.Any(), gomock.Any()).Return(nil).Times(4)
-		netlinkMock.EXPECT().AddrList(gomock.Any(), gomock.Any()).Return([]netlink.Addr{{IPNet: netlink.NewIPNet(net.IPv4(0, 0, 0, 0))}}, nil)
+		netlinkMock.EXPECT().LinkSetMTU(gomock.Any(), gomock.Any()).Return(nil).Times(3)
+		netlinkMock.EXPECT().LinkByName(underlayInterfaceName).Return(&netlink.Dummy{}, nil)
 		netlinkMock.EXPECT().LinkSetDown(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetHardwareAddr(gomock.Any(), gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetUp(gomock.Any()).Return(nil)
@@ -578,345 +570,175 @@ var _ = Describe("ReconcileL2()", func() {
 		err := nm.ReconcileL2(current, desired)
 		Expect(err).To(HaveOccurred())
 	})
-	It("returns error if cannot get L3", func() {
+	It("returns error if cannot get link prot info", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
+		nm := NewManager(netlinkMock, config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
 		current := &Layer2Information{
 			bridge:        &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
 			vxlan:         &netlink.Vxlan{},
 			vlanInterface: &netlink.Vlan{},
-			VRF:           "current",
 		}
 		desired := &Layer2Information{
 			AnycastGateways: []string{""},
 			AnycastMAC:      &mac,
 			MTU:             1399,
-			VRF:             "desired",
 		}
 
-		netlinkMock.EXPECT().LinkSetMTU(gomock.Any(), gomock.Any()).Return(nil).Times(4)
-		netlinkMock.EXPECT().AddrList(gomock.Any(), gomock.Any()).Return([]netlink.Addr{{IPNet: netlink.NewIPNet(net.IPv4(0, 0, 0, 0))}}, nil)
+		netlinkMock.EXPECT().LinkSetMTU(gomock.Any(), gomock.Any()).Return(nil).Times(3)
+		netlinkMock.EXPECT().LinkByName(underlayInterfaceName).Return(&netlink.Dummy{}, nil)
 		netlinkMock.EXPECT().LinkSetDown(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetHardwareAddr(gomock.Any(), gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetUp(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetHardwareAddr(gomock.Any(), gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkList().Return(nil, errors.New("error listing links"))
-
-		err := nm.ReconcileL2(current, desired)
-		Expect(err).To(HaveOccurred())
-	})
-	It("returns error if cannot set master by index and desired VRF", func() {
-		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
-		current := &Layer2Information{
-			bridge:        &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
-			vxlan:         &netlink.Vxlan{},
-			vlanInterface: &netlink.Vlan{},
-			VRF:           "current",
-		}
-		desired := &Layer2Information{
-			AnycastGateways: []string{""},
-			AnycastMAC:      &mac,
-			MTU:             1399,
-			VRF:             "desired",
-		}
-
-		netlinkMock.EXPECT().LinkSetMTU(gomock.Any(), gomock.Any()).Return(nil).Times(4)
-		netlinkMock.EXPECT().AddrList(gomock.Any(), gomock.Any()).Return([]netlink.Addr{{IPNet: netlink.NewIPNet(net.IPv4(0, 0, 0, 0))}}, nil)
-		netlinkMock.EXPECT().LinkSetDown(gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkSetHardwareAddr(gomock.Any(), gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkSetUp(gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkSetHardwareAddr(gomock.Any(), gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkList().Return([]netlink.Link{&netlink.Vrf{LinkAttrs: netlink.LinkAttrs{Name: desired.VRF}}}, nil)
-		netlinkMock.EXPECT().LinkByName(gomock.Any()).Return(&netlink.Bridge{}, nil)
-		netlinkMock.EXPECT().LinkByName(gomock.Any()).Return(&netlink.Vxlan{}, nil)
-		netlinkMock.EXPECT().LinkByName(gomock.Any()).Return(&netlink.Vrf{}, nil)
-		netlinkMock.EXPECT().LinkSetMasterByIndex(gomock.Any(), gomock.Any()).Return(errors.New("error setting master by index"))
-
-		err := nm.ReconcileL2(current, desired)
-		Expect(err).To(HaveOccurred())
-	})
-	It("returns error if cannot set no master", func() {
-		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
-		current := &Layer2Information{
-			bridge:        &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
-			vxlan:         &netlink.Vxlan{},
-			vlanInterface: &netlink.Vlan{},
-			VRF:           "current",
-		}
-		desired := &Layer2Information{
-			AnycastGateways: []string{""},
-			AnycastMAC:      &mac,
-			MTU:             1399,
-			VRF:             "",
-		}
-
-		netlinkMock.EXPECT().LinkSetMTU(gomock.Any(), gomock.Any()).Return(nil).Times(4)
-		netlinkMock.EXPECT().AddrList(gomock.Any(), gomock.Any()).Return([]netlink.Addr{{IPNet: netlink.NewIPNet(net.IPv4(0, 0, 0, 0))}}, nil)
-		netlinkMock.EXPECT().LinkSetDown(gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkSetHardwareAddr(gomock.Any(), gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkSetUp(gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkSetHardwareAddr(gomock.Any(), gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkSetNoMaster(gomock.Any()).Return(errors.New("error setting no master"))
-
-		err := nm.ReconcileL2(current, desired)
-		Expect(err).To(HaveOccurred())
-	})
-	It("returns error if cannot get bridge prot info", func() {
-		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
-		current := &Layer2Information{
-			bridge:        &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
-			vxlan:         &netlink.Vxlan{},
-			vlanInterface: &netlink.Vlan{},
-			VRF:           "current",
-		}
-		desired := &Layer2Information{
-			AnycastGateways: []string{""},
-			AnycastMAC:      &mac,
-			MTU:             1399,
-			VRF:             "",
-		}
-
-		netlinkMock.EXPECT().LinkSetMTU(gomock.Any(), gomock.Any()).Return(nil).Times(4)
-		netlinkMock.EXPECT().AddrList(gomock.Any(), gomock.Any()).Return([]netlink.Addr{{IPNet: netlink.NewIPNet(net.IPv4(0, 0, 0, 0))}}, nil)
-		netlinkMock.EXPECT().LinkSetDown(gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkSetHardwareAddr(gomock.Any(), gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkSetUp(gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkSetHardwareAddr(gomock.Any(), gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkSetNoMaster(gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkGetProtinfo(gomock.Any()).Return(netlink.Protinfo{}, errors.New("error getting prot info"))
+		netlinkMock.EXPECT().LinkGetProtinfo(gomock.Any()).Return(netlink.Protinfo{}, fmt.Errorf("prot info error"))
 
 		err := nm.ReconcileL2(current, desired)
 		Expect(err).To(HaveOccurred())
 	})
 	It("returns error if cannot reattach L2VNI - cannot set link down", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
+		nm := NewManager(netlinkMock, config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
 		current := &Layer2Information{
 			bridge:        &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
 			vxlan:         &netlink.Vxlan{},
 			vlanInterface: &netlink.Vlan{},
-			VRF:           "current",
 		}
 		desired := &Layer2Information{
 			AnycastGateways: []string{""},
 			AnycastMAC:      &mac,
 			MTU:             1399,
-			VRF:             "",
 		}
 
-		netlinkMock.EXPECT().LinkSetMTU(gomock.Any(), gomock.Any()).Return(nil).Times(4)
-		netlinkMock.EXPECT().AddrList(gomock.Any(), gomock.Any()).Return([]netlink.Addr{{IPNet: netlink.NewIPNet(net.IPv4(0, 0, 0, 0))}}, nil)
+		netlinkMock.EXPECT().LinkSetMTU(gomock.Any(), gomock.Any()).Return(nil).Times(3)
+		netlinkMock.EXPECT().LinkByName(underlayInterfaceName).Return(&netlink.Dummy{}, nil)
 		netlinkMock.EXPECT().LinkSetDown(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetHardwareAddr(gomock.Any(), gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetUp(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetHardwareAddr(gomock.Any(), gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkSetNoMaster(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkGetProtinfo(gomock.Any()).Return(netlink.Protinfo{Learning: true}, nil)
-		netlinkMock.EXPECT().LinkSetDown(gomock.Any()).Return(errors.New("cannot set link down"))
+		netlinkMock.EXPECT().LinkSetDown(gomock.Any()).Return(fmt.Errorf("error setting link down"))
 
 		err := nm.ReconcileL2(current, desired)
 		Expect(err).To(HaveOccurred())
 	})
-	It("returns error if cannot reattach L2VNI - cannot set link no master", func() {
+	It("returns error if cannot reattach L2VNI - cannot set no master", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
+		nm := NewManager(netlinkMock, config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
 		current := &Layer2Information{
 			bridge:        &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
 			vxlan:         &netlink.Vxlan{},
 			vlanInterface: &netlink.Vlan{},
-			VRF:           "current",
 		}
 		desired := &Layer2Information{
 			AnycastGateways: []string{""},
 			AnycastMAC:      &mac,
 			MTU:             1399,
-			VRF:             "",
 		}
 
-		netlinkMock.EXPECT().LinkSetMTU(gomock.Any(), gomock.Any()).Return(nil).Times(4)
-		netlinkMock.EXPECT().AddrList(gomock.Any(), gomock.Any()).Return([]netlink.Addr{{IPNet: netlink.NewIPNet(net.IPv4(0, 0, 0, 0))}}, nil)
+		netlinkMock.EXPECT().LinkSetMTU(gomock.Any(), gomock.Any()).Return(nil).Times(3)
+		netlinkMock.EXPECT().LinkByName(underlayInterfaceName).Return(&netlink.Dummy{}, nil)
 		netlinkMock.EXPECT().LinkSetDown(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetHardwareAddr(gomock.Any(), gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetUp(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetHardwareAddr(gomock.Any(), gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkSetNoMaster(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkGetProtinfo(gomock.Any()).Return(netlink.Protinfo{Learning: true}, nil)
 		netlinkMock.EXPECT().LinkSetDown(gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkSetNoMaster(gomock.Any()).Return(errors.New("cannot set link no master"))
+		netlinkMock.EXPECT().LinkSetNoMaster(gomock.Any()).Return(fmt.Errorf("failed to set no master"))
 
 		err := nm.ReconcileL2(current, desired)
 		Expect(err).To(HaveOccurred())
 	})
-	It("returns error if cannot reattach L2VNI - cannot set link master", func() {
+	It("returns error if cannot reattach L2VNI - cannot set master", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
+		nm := NewManager(netlinkMock, config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
 		current := &Layer2Information{
 			bridge:        &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
 			vxlan:         &netlink.Vxlan{},
 			vlanInterface: &netlink.Vlan{},
-			VRF:           "current",
 		}
 		desired := &Layer2Information{
 			AnycastGateways: []string{""},
 			AnycastMAC:      &mac,
 			MTU:             1399,
-			VRF:             "",
 		}
 
-		netlinkMock.EXPECT().LinkSetMTU(gomock.Any(), gomock.Any()).Return(nil).Times(4)
-		netlinkMock.EXPECT().AddrList(gomock.Any(), gomock.Any()).Return([]netlink.Addr{{IPNet: netlink.NewIPNet(net.IPv4(0, 0, 0, 0))}}, nil)
+		netlinkMock.EXPECT().LinkSetMTU(gomock.Any(), gomock.Any()).Return(nil).Times(3)
+		netlinkMock.EXPECT().LinkByName(underlayInterfaceName).Return(&netlink.Dummy{}, nil)
 		netlinkMock.EXPECT().LinkSetDown(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetHardwareAddr(gomock.Any(), gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetUp(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetHardwareAddr(gomock.Any(), gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkSetNoMaster(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkGetProtinfo(gomock.Any()).Return(netlink.Protinfo{Learning: true}, nil)
 		netlinkMock.EXPECT().LinkSetDown(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetNoMaster(gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkSetMaster(gomock.Any(), gomock.Any()).Return(errors.New("cannot set link master"))
+		netlinkMock.EXPECT().LinkSetMaster(gomock.Any(), gomock.Any()).Return(fmt.Errorf("failed to set master"))
 
 		err := nm.ReconcileL2(current, desired)
 		Expect(err).To(HaveOccurred())
 	})
-	It("returns error if cannot reattach L2VNI - cannot set link master", func() {
+	It("returns error if cannot reattach L2VNI - cannot set learning", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
+		nm := NewManager(netlinkMock, config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
 		current := &Layer2Information{
 			bridge:        &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
 			vxlan:         &netlink.Vxlan{},
 			vlanInterface: &netlink.Vlan{},
-			VRF:           "current",
 		}
 		desired := &Layer2Information{
 			AnycastGateways: []string{""},
 			AnycastMAC:      &mac,
 			MTU:             1399,
-			VRF:             "",
 		}
 
-		netlinkMock.EXPECT().LinkSetMTU(gomock.Any(), gomock.Any()).Return(nil).Times(4)
-		netlinkMock.EXPECT().AddrList(gomock.Any(), gomock.Any()).Return([]netlink.Addr{{IPNet: netlink.NewIPNet(net.IPv4(0, 0, 0, 0))}}, nil)
+		netlinkMock.EXPECT().LinkSetMTU(gomock.Any(), gomock.Any()).Return(nil).Times(3)
+		netlinkMock.EXPECT().LinkByName(underlayInterfaceName).Return(&netlink.Dummy{}, nil)
 		netlinkMock.EXPECT().LinkSetDown(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetHardwareAddr(gomock.Any(), gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetUp(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetHardwareAddr(gomock.Any(), gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkSetNoMaster(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkGetProtinfo(gomock.Any()).Return(netlink.Protinfo{Learning: true}, nil)
 		netlinkMock.EXPECT().LinkSetDown(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetNoMaster(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetMaster(gomock.Any(), gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkSetLearning(gomock.Any(), gomock.Any()).Return(errors.New("cannot set link learning"))
+		netlinkMock.EXPECT().LinkSetLearning(gomock.Any(), gomock.Any()).Return(fmt.Errorf("failed to set learning"))
 
 		err := nm.ReconcileL2(current, desired)
 		Expect(err).To(HaveOccurred())
 	})
 	It("returns error if cannot reattach L2VNI - cannot set link up", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
+		nm := NewManager(netlinkMock, config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
 		current := &Layer2Information{
 			bridge:        &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
 			vxlan:         &netlink.Vxlan{},
 			vlanInterface: &netlink.Vlan{},
-			VRF:           "current",
 		}
 		desired := &Layer2Information{
 			AnycastGateways: []string{""},
 			AnycastMAC:      &mac,
 			MTU:             1399,
-			VRF:             "",
 		}
 
-		netlinkMock.EXPECT().LinkSetMTU(gomock.Any(), gomock.Any()).Return(nil).Times(4)
-		netlinkMock.EXPECT().AddrList(gomock.Any(), gomock.Any()).Return([]netlink.Addr{{IPNet: netlink.NewIPNet(net.IPv4(0, 0, 0, 0))}}, nil)
+		netlinkMock.EXPECT().LinkSetMTU(gomock.Any(), gomock.Any()).Return(nil).Times(3)
+		netlinkMock.EXPECT().LinkByName(underlayInterfaceName).Return(&netlink.Dummy{}, nil)
 		netlinkMock.EXPECT().LinkSetDown(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetHardwareAddr(gomock.Any(), gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetUp(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetHardwareAddr(gomock.Any(), gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkSetNoMaster(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkGetProtinfo(gomock.Any()).Return(netlink.Protinfo{Learning: true}, nil)
 		netlinkMock.EXPECT().LinkSetDown(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetNoMaster(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetMaster(gomock.Any(), gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetLearning(gomock.Any(), gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkSetUp(gomock.Any()).Return(errors.New("cannot set link up"))
+		netlinkMock.EXPECT().LinkSetUp(gomock.Any()).Return(fmt.Errorf("failed to set link up"))
 
 		err := nm.ReconcileL2(current, desired)
 		Expect(err).To(HaveOccurred())
 	})
-	It("returns error if cannot setup macvlan interface - error deleting interface", func() {
+
+	It("returns error if cannot reconcile IPs - cannot set neighbor suppression", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
-		current := &Layer2Information{
-			bridge:        &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
-			vxlan:         &netlink.Vxlan{},
-			vlanInterface: &netlink.Vlan{},
-			VRF:           "current",
-		}
-		desired := &Layer2Information{
-			AnycastGateways: []string{""},
-			AnycastMAC:      &mac,
-			MTU:             1399,
-			VRF:             "",
-		}
-
-		netlinkMock.EXPECT().LinkSetMTU(gomock.Any(), gomock.Any()).Return(nil).Times(4)
-		netlinkMock.EXPECT().AddrList(gomock.Any(), gomock.Any()).Return([]netlink.Addr{{IPNet: netlink.NewIPNet(net.IPv4(0, 0, 0, 0))}}, nil)
-		netlinkMock.EXPECT().LinkSetDown(gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkSetHardwareAddr(gomock.Any(), gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkSetUp(gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkSetHardwareAddr(gomock.Any(), gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkSetNoMaster(gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkGetProtinfo(gomock.Any()).Return(netlink.Protinfo{Learning: true}, nil)
-		netlinkMock.EXPECT().LinkSetDown(gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkSetNoMaster(gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkSetMaster(gomock.Any(), gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkSetLearning(gomock.Any(), gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkSetUp(gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkDel(gomock.Any()).Return(errors.New("cannot delete interface"))
-
-		err := nm.ReconcileL2(current, desired)
-		Expect(err).To(HaveOccurred())
-	})
-	It("returns error if cannot setup macvlan interface - error creating macvlan interface", func() {
-		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
-		current := &Layer2Information{
-			bridge:        &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
-			vxlan:         &netlink.Vxlan{},
-			vlanInterface: &netlink.Vlan{},
-			VRF:           "current",
-		}
-		desired := &Layer2Information{
-			AnycastGateways: []string{""},
-			AnycastMAC:      &mac,
-			MTU:             1399,
-			VRF:             "",
-		}
-
-		netlinkMock.EXPECT().LinkSetMTU(gomock.Any(), gomock.Any()).Return(nil).Times(2)
-		netlinkMock.EXPECT().AddrList(gomock.Any(), gomock.Any()).Return([]netlink.Addr{{IPNet: netlink.NewIPNet(net.IPv4(0, 0, 0, 0))}}, nil)
-		netlinkMock.EXPECT().LinkSetDown(gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkSetHardwareAddr(gomock.Any(), gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkSetUp(gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkSetHardwareAddr(gomock.Any(), gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkSetNoMaster(gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkGetProtinfo(gomock.Any()).Return(netlink.Protinfo{Learning: true}, nil)
-		netlinkMock.EXPECT().LinkSetDown(gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkSetNoMaster(gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkSetMaster(gomock.Any(), gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkSetLearning(gomock.Any(), gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkSetUp(gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkAdd(gomock.Any()).Return(errors.New("cannot add link"))
-
-		err := nm.ReconcileL2(current, desired)
-		Expect(err).To(HaveOccurred())
-	})
-	It("returns error if cannot reconcile IPs - cannot add address", func() {
-		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
+		nm := NewManager(netlinkMock, config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
 		oldProcSysNetPath := procSysNetPath
 
 		procSysNetPath = tmpDir
@@ -933,22 +755,146 @@ var _ = Describe("ReconcileL2()", func() {
 			VRF:             "",
 		}
 
-		netlinkMock.EXPECT().LinkSetMTU(gomock.Any(), gomock.Any()).Return(nil).Times(2)
-		netlinkMock.EXPECT().AddrList(gomock.Any(), gomock.Any()).Return([]netlink.Addr{{IPNet: netlink.NewIPNet(net.IPv4(0, 0, 0, 0))}}, nil)
+		netlinkMock.EXPECT().LinkSetMTU(gomock.Any(), gomock.Any()).Return(nil).Times(3)
+		netlinkMock.EXPECT().LinkByName(underlayInterfaceName).Return(&netlink.Dummy{}, nil)
 		netlinkMock.EXPECT().LinkSetDown(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetHardwareAddr(gomock.Any(), gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetUp(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetHardwareAddr(gomock.Any(), gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkSetNoMaster(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkGetProtinfo(gomock.Any()).Return(netlink.Protinfo{Learning: true}, nil)
 		netlinkMock.EXPECT().LinkSetDown(gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkSetNoMaster(gomock.Any()).Return(nil)
+		netlinkMock.EXPECT().LinkSetNoMaster(gomock.Any()).Return(nil).Times(2)
 		netlinkMock.EXPECT().LinkSetMaster(gomock.Any(), gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetLearning(gomock.Any(), gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetUp(gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkAdd(gomock.Any()).Return(nil)
+		netlinkMock.EXPECT().ExecuteNetlinkRequest(gomock.Any(), gomock.Any(), gomock.Any()).Return([][]byte{}, fmt.Errorf("failed request"))
+
+		sviName := fmt.Sprintf("%s%d", layer2SVI, current.VlanID)
+		vlanName := fmt.Sprintf("%s%d", vlanPrefix, current.VlanID)
+
+		addrGenModePathIPv6 := fmt.Sprintf("%s/ipv6/conf/%s", procSysNetPath, vlanName)
+		createInterfaceFile(addrGenModePathIPv6 + "/" + addrGenMode)
+
+		neighPathIPv4 := fmt.Sprintf("%s/ipv4/neigh/%s", procSysNetPath, vlanName)
+		createInterfaceFile(neighPathIPv4 + "/" + baseReachableTimeMs)
+
+		neighPathIPv6 := fmt.Sprintf("%s/ipv6/neigh/%s", procSysNetPath, vlanName)
+		createInterfaceFile(neighPathIPv6 + "/" + baseReachableTimeMs)
+
+		neighPathIPv4 = fmt.Sprintf("%s/ipv4/neigh/%s", procSysNetPath, sviName)
+		createInterfaceFile(neighPathIPv4 + "/" + baseReachableTimeMs)
+
+		neighPathIPv6 = fmt.Sprintf("%s/ipv6/neigh/%s", procSysNetPath, sviName)
+		createInterfaceFile(neighPathIPv6 + "/" + baseReachableTimeMs)
+
+		arpAcceptIPv4 := fmt.Sprintf("%s/ipv4/conf/%s", procSysNetPath, sviName)
+		createInterfaceFile(arpAcceptIPv4 + "/" + arpAccept)
+
+		acceptUntrackedNAIPv6 := fmt.Sprintf("%s/ipv6/conf/%s", procSysNetPath, vlanName)
+		createInterfaceFile(acceptUntrackedNAIPv6 + "/" + acceptUntrackedNA)
+
+		err := nm.ReconcileL2(current, desired)
+		Expect(err).To(HaveOccurred())
+
+		procSysNetPath = oldProcSysNetPath
+	})
+	It("returns error if cannot reconcile IPs - cannot parse address", func() {
+		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
+		nm := NewManager(netlinkMock, config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
+		oldProcSysNetPath := procSysNetPath
+
+		procSysNetPath = tmpDir
+		current := &Layer2Information{
+			bridge:        &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
+			vxlan:         &netlink.Vxlan{},
+			vlanInterface: &netlink.Vlan{},
+			VRF:           "current",
+		}
+		desired := &Layer2Information{
+			AnycastGateways: []string{""},
+			AnycastMAC:      &mac,
+			MTU:             1399,
+			VRF:             "",
+		}
+
+		netlinkMock.EXPECT().LinkSetMTU(gomock.Any(), gomock.Any()).Return(nil).Times(3)
+		netlinkMock.EXPECT().LinkByName(underlayInterfaceName).Return(&netlink.Dummy{}, nil)
+		netlinkMock.EXPECT().LinkSetDown(gomock.Any()).Return(nil)
+		netlinkMock.EXPECT().LinkSetHardwareAddr(gomock.Any(), gomock.Any()).Return(nil)
+		netlinkMock.EXPECT().LinkSetUp(gomock.Any()).Return(nil)
+		netlinkMock.EXPECT().LinkSetHardwareAddr(gomock.Any(), gomock.Any()).Return(nil)
+		netlinkMock.EXPECT().LinkGetProtinfo(gomock.Any()).Return(netlink.Protinfo{Learning: true}, nil)
+		netlinkMock.EXPECT().LinkSetDown(gomock.Any()).Return(nil)
+		netlinkMock.EXPECT().LinkSetNoMaster(gomock.Any()).Return(nil).Times(2)
+		netlinkMock.EXPECT().LinkSetMaster(gomock.Any(), gomock.Any()).Return(nil)
+		netlinkMock.EXPECT().LinkSetLearning(gomock.Any(), gomock.Any()).Return(nil)
+		netlinkMock.EXPECT().LinkSetUp(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().ExecuteNetlinkRequest(gomock.Any(), gomock.Any(), gomock.Any()).Return([][]byte{}, nil)
-		netlinkMock.EXPECT().AddrAdd(gomock.Any(), gomock.Any()).Return(errors.New("cannot add address"))
+		netlinkMock.EXPECT().ParseAddr(gomock.Any()).Return(nil, fmt.Errorf("unalble to parse address"))
+
+		sviName := fmt.Sprintf("%s%d", layer2SVI, current.VlanID)
+		vlanName := fmt.Sprintf("%s%d", vlanPrefix, current.VlanID)
+
+		addrGenModePathIPv6 := fmt.Sprintf("%s/ipv6/conf/%s", procSysNetPath, vlanName)
+		createInterfaceFile(addrGenModePathIPv6 + "/" + addrGenMode)
+
+		neighPathIPv4 := fmt.Sprintf("%s/ipv4/neigh/%s", procSysNetPath, vlanName)
+		createInterfaceFile(neighPathIPv4 + "/" + baseReachableTimeMs)
+
+		neighPathIPv6 := fmt.Sprintf("%s/ipv6/neigh/%s", procSysNetPath, vlanName)
+		createInterfaceFile(neighPathIPv6 + "/" + baseReachableTimeMs)
+
+		neighPathIPv4 = fmt.Sprintf("%s/ipv4/neigh/%s", procSysNetPath, sviName)
+		createInterfaceFile(neighPathIPv4 + "/" + baseReachableTimeMs)
+
+		neighPathIPv6 = fmt.Sprintf("%s/ipv6/neigh/%s", procSysNetPath, sviName)
+		createInterfaceFile(neighPathIPv6 + "/" + baseReachableTimeMs)
+
+		arpAcceptIPv4 := fmt.Sprintf("%s/ipv4/conf/%s", procSysNetPath, sviName)
+		createInterfaceFile(arpAcceptIPv4 + "/" + arpAccept)
+
+		acceptUntrackedNAIPv6 := fmt.Sprintf("%s/ipv6/conf/%s", procSysNetPath, vlanName)
+		createInterfaceFile(acceptUntrackedNAIPv6 + "/" + acceptUntrackedNA)
+
+		err := nm.ReconcileL2(current, desired)
+		Expect(err).To(HaveOccurred())
+
+		procSysNetPath = oldProcSysNetPath
+	})
+	It("returns error if cannot reconcile IPs - cannot add address", func() {
+		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
+		nm := NewManager(netlinkMock, config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
+		oldProcSysNetPath := procSysNetPath
+
+		procSysNetPath = tmpDir
+		current := &Layer2Information{
+			bridge:        &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
+			vxlan:         &netlink.Vxlan{},
+			vlanInterface: &netlink.Vlan{},
+			VRF:           "current",
+		}
+		desired := &Layer2Information{
+			AnycastGateways: []string{""},
+			AnycastMAC:      &mac,
+			MTU:             1399,
+			VRF:             "",
+		}
+
+		netlinkMock.EXPECT().LinkSetMTU(gomock.Any(), gomock.Any()).Return(nil).Times(3)
+		netlinkMock.EXPECT().LinkByName(underlayInterfaceName).Return(&netlink.Dummy{}, nil)
+		netlinkMock.EXPECT().LinkSetDown(gomock.Any()).Return(nil)
+		netlinkMock.EXPECT().LinkSetHardwareAddr(gomock.Any(), gomock.Any()).Return(nil)
+		netlinkMock.EXPECT().LinkSetUp(gomock.Any()).Return(nil)
+		netlinkMock.EXPECT().LinkSetHardwareAddr(gomock.Any(), gomock.Any()).Return(nil)
+		netlinkMock.EXPECT().LinkGetProtinfo(gomock.Any()).Return(netlink.Protinfo{Learning: true}, nil)
+		netlinkMock.EXPECT().LinkSetDown(gomock.Any()).Return(nil)
+		netlinkMock.EXPECT().LinkSetNoMaster(gomock.Any()).Return(nil).Times(2)
+		netlinkMock.EXPECT().LinkSetMaster(gomock.Any(), gomock.Any()).Return(nil)
+		netlinkMock.EXPECT().LinkSetLearning(gomock.Any(), gomock.Any()).Return(nil)
+		netlinkMock.EXPECT().LinkSetUp(gomock.Any()).Return(nil)
+		netlinkMock.EXPECT().ExecuteNetlinkRequest(gomock.Any(), gomock.Any(), gomock.Any()).Return([][]byte{}, nil)
+		netlinkMock.EXPECT().ParseAddr(gomock.Any()).Return(&netlink.Addr{}, nil)
+		netlinkMock.EXPECT().AddrAdd(gomock.Any(), gomock.Any()).Return(fmt.Errorf("failed to add address"))
 
 		sviName := fmt.Sprintf("%s%d", layer2SVI, current.VlanID)
 		vlanName := fmt.Sprintf("%s%d", vlanPrefix, current.VlanID)
@@ -981,7 +927,7 @@ var _ = Describe("ReconcileL2()", func() {
 	})
 	It("returns error if cannot reconcile IPs - cannot delete address", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
+		nm := NewManager(netlinkMock, config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
 		oldProcSysNetPath := procSysNetPath
 
 		procSysNetPath = tmpDir
@@ -999,31 +945,29 @@ var _ = Describe("ReconcileL2()", func() {
 			VRF:             "",
 		}
 
-		netlinkMock.EXPECT().LinkSetMTU(gomock.Any(), gomock.Any()).Return(nil).Times(2)
-		netlinkMock.EXPECT().AddrList(gomock.Any(), gomock.Any()).Return([]netlink.Addr{{IPNet: netlink.NewIPNet(net.IPv4(0, 0, 0, 0))}}, nil)
+		netlinkMock.EXPECT().LinkSetMTU(gomock.Any(), gomock.Any()).Return(nil).Times(3)
+		netlinkMock.EXPECT().LinkByName(underlayInterfaceName).Return(&netlink.Dummy{}, nil)
 		netlinkMock.EXPECT().LinkSetDown(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetHardwareAddr(gomock.Any(), gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetUp(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetHardwareAddr(gomock.Any(), gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkSetNoMaster(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkGetProtinfo(gomock.Any()).Return(netlink.Protinfo{Learning: true}, nil)
 		netlinkMock.EXPECT().LinkSetDown(gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkSetNoMaster(gomock.Any()).Return(nil)
+		netlinkMock.EXPECT().LinkSetNoMaster(gomock.Any()).Return(nil).Times(2)
 		netlinkMock.EXPECT().LinkSetMaster(gomock.Any(), gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetLearning(gomock.Any(), gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetUp(gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkAdd(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().ExecuteNetlinkRequest(gomock.Any(), gomock.Any(), gomock.Any()).Return([][]byte{}, nil)
-		netlinkMock.EXPECT().AddrAdd(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
-		netlinkMock.EXPECT().AddrDel(gomock.Any(), gomock.Any()).Return(errors.New("cannot delete address"))
-
-		vlanName := fmt.Sprintf("%s%d", vlanPrefix, current.VlanID)
-		addrGenModePathIPv6 := fmt.Sprintf("%s/ipv6/conf/%s", procSysNetPath, vlanName)
-		createInterfaceFile(addrGenModePathIPv6 + "/" + addrGenMode)
+		netlinkMock.EXPECT().ParseAddr(gomock.Any()).Return(&netlink.Addr{IPNet: &net.IPNet{IP: net.IPv4(1, 1, 1, 1)}}, nil)
+		netlinkMock.EXPECT().ParseAddr(gomock.Any()).Return(&netlink.Addr{IPNet: &net.IPNet{IP: net.IPv4(2, 2, 2, 2)}}, nil)
+		netlinkMock.EXPECT().AddrAdd(gomock.Any(), gomock.Any()).Return(nil)
+		netlinkMock.EXPECT().AddrDel(gomock.Any(), gomock.Any()).Return(fmt.Errorf("failed to delete address"))
 
 		sviName := fmt.Sprintf("%s%d", layer2SVI, current.VlanID)
-		addrGenModePathvlanIPv6 := fmt.Sprintf("%s/ipv6/conf/%s", procSysNetPath, sviName)
-		createInterfaceFile(addrGenModePathvlanIPv6 + "/" + addrGenMode)
+		vlanName := fmt.Sprintf("%s%d", vlanPrefix, current.VlanID)
+
+		addrGenModePathIPv6 := fmt.Sprintf("%s/ipv6/conf/%s", procSysNetPath, vlanName)
+		createInterfaceFile(addrGenModePathIPv6 + "/" + addrGenMode)
 
 		neighPathIPv4 := fmt.Sprintf("%s/ipv4/neigh/%s", procSysNetPath, vlanName)
 		createInterfaceFile(neighPathIPv4 + "/" + baseReachableTimeMs)
@@ -1037,14 +981,21 @@ var _ = Describe("ReconcileL2()", func() {
 		neighPathIPv6 = fmt.Sprintf("%s/ipv6/neigh/%s", procSysNetPath, sviName)
 		createInterfaceFile(neighPathIPv6 + "/" + baseReachableTimeMs)
 
+		arpAcceptIPv4 := fmt.Sprintf("%s/ipv4/conf/%s", procSysNetPath, sviName)
+		createInterfaceFile(arpAcceptIPv4 + "/" + arpAccept)
+
+		acceptUntrackedNAIPv6 := fmt.Sprintf("%s/ipv6/conf/%s", procSysNetPath, vlanName)
+		createInterfaceFile(acceptUntrackedNAIPv6 + "/" + acceptUntrackedNA)
+
 		err := nm.ReconcileL2(current, desired)
 		Expect(err).To(HaveOccurred())
 
 		procSysNetPath = oldProcSysNetPath
 	})
+
 	It("returns no error", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
+		nm := NewManager(netlinkMock, config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
 		oldProcSysNetPath := procSysNetPath
 
 		procSysNetPath = tmpDir
@@ -1062,33 +1013,47 @@ var _ = Describe("ReconcileL2()", func() {
 			VRF:             "",
 		}
 
-		netlinkMock.EXPECT().LinkSetMTU(gomock.Any(), gomock.Any()).Return(nil).Times(2)
-		netlinkMock.EXPECT().AddrList(gomock.Any(), gomock.Any()).Return([]netlink.Addr{{IPNet: netlink.NewIPNet(net.IPv4(0, 0, 0, 0))}}, nil)
+		netlinkMock.EXPECT().LinkSetMTU(gomock.Any(), gomock.Any()).Return(nil).Times(3)
+		netlinkMock.EXPECT().LinkByName(underlayInterfaceName).Return(&netlink.Dummy{}, nil)
 		netlinkMock.EXPECT().LinkSetDown(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetHardwareAddr(gomock.Any(), gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetUp(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetHardwareAddr(gomock.Any(), gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkSetNoMaster(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkGetProtinfo(gomock.Any()).Return(netlink.Protinfo{Learning: true}, nil)
 		netlinkMock.EXPECT().LinkSetDown(gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkSetNoMaster(gomock.Any()).Return(nil)
+		netlinkMock.EXPECT().LinkSetNoMaster(gomock.Any()).Return(nil).Times(2)
 		netlinkMock.EXPECT().LinkSetMaster(gomock.Any(), gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetLearning(gomock.Any(), gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetUp(gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkAdd(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().ExecuteNetlinkRequest(gomock.Any(), gomock.Any(), gomock.Any()).Return([][]byte{}, nil)
+		netlinkMock.EXPECT().ParseAddr(gomock.Any()).Return(&netlink.Addr{IPNet: &net.IPNet{IP: net.IPv4(1, 1, 1, 1)}}, nil)
+		netlinkMock.EXPECT().ParseAddr(gomock.Any()).Return(&netlink.Addr{IPNet: &net.IPNet{IP: net.IPv4(2, 2, 2, 2)}}, nil)
 		netlinkMock.EXPECT().AddrAdd(gomock.Any(), gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().AddrDel(gomock.Any(), gomock.Any()).Return(nil)
 
+		sviName := fmt.Sprintf("%s%d", layer2SVI, current.VlanID)
 		vlanName := fmt.Sprintf("%s%d", vlanPrefix, current.VlanID)
-		addrGenModePathIPv6 := fmt.Sprintf("%s/ipv6/conf/%s", procSysNetPath, vlanName)
+
+		addrGenModePathIPv6 := fmt.Sprintf("%s/ipv6/conf/%s", procSysNetPath, sviName)
 		createInterfaceFile(addrGenModePathIPv6 + "/" + addrGenMode)
 
-		sviName := fmt.Sprintf("%s%d", layer2SVI, current.VlanID)
-		addrGenModePathvlanIPv6 := fmt.Sprintf("%s/ipv6/conf/%s", procSysNetPath, sviName)
-		createInterfaceFile(addrGenModePathvlanIPv6 + "/" + addrGenMode)
-		addrGenModePathvlanIPv4 := fmt.Sprintf("%s/ipv4/conf/%s", procSysNetPath, sviName)
-		createInterfaceFile(addrGenModePathvlanIPv4 + "/" + arpAccept)
+		neighPathIPv4 := fmt.Sprintf("%s/ipv4/neigh/%s", procSysNetPath, vlanName)
+		createInterfaceFile(neighPathIPv4 + "/" + baseReachableTimeMs)
+
+		neighPathIPv6 := fmt.Sprintf("%s/ipv6/neigh/%s", procSysNetPath, vlanName)
+		createInterfaceFile(neighPathIPv6 + "/" + baseReachableTimeMs)
+
+		neighPathIPv4 = fmt.Sprintf("%s/ipv4/neigh/%s", procSysNetPath, sviName)
+		createInterfaceFile(neighPathIPv4 + "/" + baseReachableTimeMs)
+
+		neighPathIPv6 = fmt.Sprintf("%s/ipv6/neigh/%s", procSysNetPath, sviName)
+		createInterfaceFile(neighPathIPv6 + "/" + baseReachableTimeMs)
+
+		arpAcceptIPv4 := fmt.Sprintf("%s/ipv4/conf/%s", procSysNetPath, sviName)
+		createInterfaceFile(arpAcceptIPv4 + "/" + arpAccept)
+
+		acceptUntrackedNAIPv6 := fmt.Sprintf("%s/ipv6/conf/%s", procSysNetPath, vlanName)
+		createInterfaceFile(acceptUntrackedNAIPv6 + "/" + acceptUntrackedNA)
 
 		err := nm.ReconcileL2(current, desired)
 		Expect(err).ToNot(HaveOccurred())
@@ -1098,18 +1063,18 @@ var _ = Describe("ReconcileL2()", func() {
 })
 
 var _ = Describe("CreateL3()", func() {
-	It("returns error if VRF name is longer than 15 characters", func() {
+	It("returns error if VRF name is longer than 12 characters", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
+		nm := NewManager(netlinkMock, config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
 		vrfInfo := VRFInformation{
-			Name: "reallyLongTestNameOver15Chars",
+			Name: "reallyLongTestNameOver12Chars",
 		}
 		err := nm.CreateL3(vrfInfo)
 		Expect(err).To(HaveOccurred())
 	})
 	It("returns error if cannot find free table ID", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
+		nm := NewManager(netlinkMock, config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
 		vrfInfo := VRFInformation{
 			Name: dummyIntf,
 		}
@@ -1121,7 +1086,7 @@ var _ = Describe("CreateL3()", func() {
 	})
 	It("returns error if cannot create VRF - failed to add link", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
+		nm := NewManager(netlinkMock, config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
 		vrfInfo := VRFInformation{
 			Name: dummyIntf,
 		}
@@ -1129,7 +1094,6 @@ var _ = Describe("CreateL3()", func() {
 		netlinkMock.EXPECT().LinkList().Return([]netlink.Link{&netlink.Vrf{LinkAttrs: netlink.LinkAttrs{Name: dummyIntf}}}, nil)
 		netlinkMock.EXPECT().LinkByName(gomock.Any()).Return(&netlink.Bridge{}, nil)
 		netlinkMock.EXPECT().LinkByName(gomock.Any()).Return(&netlink.Vxlan{}, nil)
-		netlinkMock.EXPECT().LinkByName(underlayInterfaceName).Return(&netlink.Dummy{}, nil)
 		netlinkMock.EXPECT().LinkAdd(gomock.Any()).Return(errors.New("failed to add link"))
 
 		err := nm.CreateL3(vrfInfo)
@@ -1137,7 +1101,7 @@ var _ = Describe("CreateL3()", func() {
 	})
 	It("returns error if cannot create VRF - failed to disable EUI generation", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
+		nm := NewManager(netlinkMock, config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
 		vrfInfo := VRFInformation{
 			Name: dummyIntf,
 		}
@@ -1145,7 +1109,6 @@ var _ = Describe("CreateL3()", func() {
 		netlinkMock.EXPECT().LinkList().Return([]netlink.Link{&netlink.Vrf{LinkAttrs: netlink.LinkAttrs{Name: dummyIntf}}}, nil)
 		netlinkMock.EXPECT().LinkByName(gomock.Any()).Return(&netlink.Bridge{}, nil)
 		netlinkMock.EXPECT().LinkByName(gomock.Any()).Return(&netlink.Vxlan{}, nil)
-		netlinkMock.EXPECT().LinkByName(underlayInterfaceName).Return(&netlink.Dummy{}, nil)
 		netlinkMock.EXPECT().LinkAdd(gomock.Any()).Return(nil)
 
 		err := nm.CreateL3(vrfInfo)
@@ -1153,19 +1116,18 @@ var _ = Describe("CreateL3()", func() {
 	})
 	It("returns error if cannot create VRF - failed to set link up", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
+		nm := NewManager(netlinkMock, config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
 		oldProcSysNetPath := procSysNetPath
 		procSysNetPath = tmpDir
 		vrfInfo := VRFInformation{
 			Name: dummyIntf,
 		}
 
-		vrfName := fmt.Sprintf("%s", dummyIntf)
+		vrfName := dummyIntf
 
 		netlinkMock.EXPECT().LinkList().Return([]netlink.Link{&netlink.Vrf{LinkAttrs: netlink.LinkAttrs{Name: dummyIntf}}}, nil)
 		netlinkMock.EXPECT().LinkByName(gomock.Any()).Return(&netlink.Bridge{}, nil)
 		netlinkMock.EXPECT().LinkByName(gomock.Any()).Return(&netlink.Vxlan{}, nil)
-		netlinkMock.EXPECT().LinkByName(underlayInterfaceName).Return(&netlink.Dummy{}, nil)
 		netlinkMock.EXPECT().LinkAdd(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetUp(gomock.Any()).Return(errors.New("failed to set link up"))
 
@@ -1178,14 +1140,14 @@ var _ = Describe("CreateL3()", func() {
 	})
 	It("returns error if cannot create bridge - failed to add link", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
+		nm := NewManager(netlinkMock, config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
 		oldProcSysNetPath := procSysNetPath
 		procSysNetPath = tmpDir
 		vrfInfo := VRFInformation{
 			Name: dummyIntf,
 		}
 
-		vrfName := fmt.Sprintf("%s", dummyIntf)
+		vrfName := dummyIntf
 
 		netlinkMock.EXPECT().LinkList().Return([]netlink.Link{&netlink.Vrf{LinkAttrs: netlink.LinkAttrs{Name: dummyIntf}}}, nil)
 		netlinkMock.EXPECT().LinkByName(gomock.Any()).Return(&netlink.Bridge{}, nil)
@@ -1204,14 +1166,14 @@ var _ = Describe("CreateL3()", func() {
 	})
 	It("returns error if cannot create bridge - failed to disable EUI generation", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
+		nm := NewManager(netlinkMock, config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
 		oldProcSysNetPath := procSysNetPath
 		procSysNetPath = tmpDir
 		vrfInfo := VRFInformation{
 			Name: dummyIntf,
 		}
 
-		vrfName := fmt.Sprintf("%s", dummyIntf)
+		vrfName := dummyIntf
 
 		netlinkMock.EXPECT().LinkList().Return([]netlink.Link{&netlink.Vrf{LinkAttrs: netlink.LinkAttrs{Name: dummyIntf}}}, nil)
 		netlinkMock.EXPECT().LinkByName(gomock.Any()).Return(&netlink.Bridge{}, nil)
