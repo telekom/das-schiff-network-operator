@@ -19,17 +19,17 @@ const (
 	underlayInterfaceName = "dum.underlay"
 
 	vxlanPort  = 4789
-	defaultMtu = 9000
+	DefaultMtu = 9000
 )
 
 var macPrefix = []byte("\x02\x54")
 
 type Manager struct {
 	toolkit    ToolkitInterface
-	baseConfig config.BaseConfig
+	baseConfig *config.BaseConfig
 }
 
-func NewManager(toolkit ToolkitInterface, baseConfig config.BaseConfig) *Manager {
+func NewManager(toolkit ToolkitInterface, baseConfig *config.BaseConfig) *Manager {
 	return &Manager{toolkit: toolkit, baseConfig: baseConfig}
 }
 

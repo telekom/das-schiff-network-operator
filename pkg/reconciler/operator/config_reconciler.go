@@ -166,9 +166,9 @@ func (r *reconcileConfig) fetchLayer2(ctx context.Context) ([]v1alpha1.Layer2Net
 		return nil, err
 	}
 
-	var l2vnis []v1alpha1.Layer2NetworkConfigurationSpec
-	for _, l2 := range layer2List.Items {
-		l2vnis = append(l2vnis, l2.Spec)
+	l2vnis := make([]v1alpha1.Layer2NetworkConfigurationSpec, len(layer2List.Items))
+	for i := range layer2List.Items {
+		l2vnis[i] = layer2List.Items[i].Spec
 	}
 
 	return l2vnis, nil
@@ -182,9 +182,9 @@ func (r *reconcileConfig) fetchLayer3(ctx context.Context) ([]v1alpha1.VRFRouteC
 		return nil, fmt.Errorf("error getting list of VRFs from Kubernetes: %w", err)
 	}
 
-	var l3vnis []v1alpha1.VRFRouteConfigurationSpec
-	for _, l3 := range vrfs.Items {
-		l3vnis = append(l3vnis, l3.Spec)
+	l3vnis := make([]v1alpha1.VRFRouteConfigurationSpec, len(vrfs.Items))
+	for i := range vrfs.Items {
+		l3vnis[i] = vrfs.Items[i].Spec
 	}
 
 	return l3vnis, nil

@@ -3,16 +3,12 @@ package frr
 import (
 	"context"
 	"fmt"
-	"io/fs"
 
 	"github.com/telekom/das-schiff-network-operator/pkg/frr/dbus"
 )
 
-const defaultPermissions = 0o640
-
 var (
-	frrUnit        = "frr.service"
-	frrPermissions = fs.FileMode(defaultPermissions)
+	frrUnit = "frr.service"
 )
 
 //go:generate mockgen -destination ./mock/mock_frr.go . ManagerInterface

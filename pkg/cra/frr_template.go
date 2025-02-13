@@ -6,13 +6,18 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
-	"github.com/telekom/das-schiff-network-operator/pkg/config"
 	"net"
 	"os"
 	"reflect"
 	"strings"
 	"text/template"
+
+	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
+	"github.com/telekom/das-schiff-network-operator/pkg/config"
+)
+
+const (
+	recursionLimit = 1000
 )
 
 type FRRTemplate struct {
@@ -20,18 +25,18 @@ type FRRTemplate struct {
 }
 
 type frrTemplateData struct {
-	Config     config.BaseConfig
-	NodeConfig v1alpha1.NodeNetworkConfigSpec
+	Config     *config.BaseConfig
+	NodeConfig *v1alpha1.NodeNetworkConfigSpec
 }
 
-func (tpl FRRTemplate) TemplateFRR(config config.BaseConfig, nodeConfig v1alpha1.NodeNetworkConfigSpec) (string, error) {
+func (tpl FRRTemplate) TemplateFRR(cfg *config.BaseConfig, nodeConfig *v1alpha1.NodeNetworkConfigSpec) (string, error) {
 	frrTemplate, err := os.ReadFile(tpl.FRRTemplatePath)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to read file %s: %w", tpl.FRRTemplatePath, err)
 	}
 
 	data := frrTemplateData{
-		Config:     config,
+		Config:     cfg,
 		NodeConfig: nodeConfig,
 	}
 
@@ -68,7 +73,7 @@ func (tpl FRRTemplate) TemplateFRR(config config.BaseConfig, nodeConfig v1alpha1
 		"include": func(name string, data interface{}) (string, error) {
 			var buf strings.Builder
 			if v, ok := recursionMap[name]; ok {
-				if v > 1000 {
+				if v > recursionLimit {
 					return "", fmt.Errorf("recursion limit reached")
 				}
 				recursionMap[name]++
@@ -79,18 +84,20 @@ func (tpl FRRTemplate) TemplateFRR(config config.BaseConfig, nodeConfig v1alpha1
 			recursionMap[name]--
 			return buf.String(), err
 		},
-		"hash": func(s string) string {
+		"hash": func(s string) (string, error) {
 			hash := sha256.New()
-			hash.Write([]byte(s))
+			if _, err := hash.Write([]byte(s)); err != nil {
+				return "", fmt.Errorf("failed to write hash: %w", err)
+			}
 			hashBytes := hash.Sum(nil)
 			hashHex := hex.EncodeToString(hashBytes)
-			return hashHex[:8]
+			return hashHex[:8], nil
 		},
 		"dict": func(values ...interface{}) (map[string]interface{}, error) {
 			if len(values)%2 != 0 {
 				return nil, errors.New("invalid dict call")
 			}
-			dict := make(map[string]interface{}, len(values)/2)
+			dict := make(map[string]interface{}, len(values)/2) //nolint:mnd
 			for i := 0; i < len(values); i += 2 {
 				key, ok := values[i].(string)
 				if !ok {
@@ -106,12 +113,12 @@ func (tpl FRRTemplate) TemplateFRR(config config.BaseConfig, nodeConfig v1alpha1
 		"join": strings.Join,
 	}).Parse(string(frrTemplate))
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to parse template: %w", err)
 	}
 
 	var result bytes.Buffer
 	if err := tmpl.Execute(&result, data); err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to execute template: %w", err)
 	}
 	return result.String(), nil
 }

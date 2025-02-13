@@ -41,7 +41,7 @@ var (
 	nlManager  *nl.Manager
 )
 
-func reconcileLayer2(config nl.NetlinkConfiguration) error {
+func reconcileLayer2(cfg nl.NetlinkConfiguration) error {
 	existing, err := nlManager.ListL2()
 	if err != nil {
 		return fmt.Errorf("error listing L2: %w", err)
@@ -50,27 +50,28 @@ func reconcileLayer2(config nl.NetlinkConfiguration) error {
 	var toCreate []nl.Layer2Information
 	var toDelete []nl.Layer2Information
 
-	for i := range config.Layer2s {
-		var currentConfig *nl.Layer2Information = nil
+	var currentConfig *nl.Layer2Information
+	for i := range cfg.Layer2s {
+		currentConfig = nil
 		for j := range existing {
-			if existing[j].VlanID == config.Layer2s[i].VlanID {
+			if existing[j].VlanID == cfg.Layer2s[i].VlanID {
 				currentConfig = &existing[j]
 				break
 			}
 		}
 		if currentConfig == nil {
-			toCreate = append(toCreate, config.Layer2s[i])
+			toCreate = append(toCreate, cfg.Layer2s[i])
 		} else {
-			if err := nlManager.ReconcileL2(currentConfig, &config.Layer2s[i]); err != nil {
-				return fmt.Errorf("error reconciling L2 (VLAN: %d): %w", config.Layer2s[i].VlanID, err)
+			if err := nlManager.ReconcileL2(currentConfig, &cfg.Layer2s[i]); err != nil {
+				return fmt.Errorf("error reconciling L2 (VLAN: %d): %w", cfg.Layer2s[i].VlanID, err)
 			}
 		}
 	}
 
 	for i := range existing {
 		needsDeletion := true
-		for j := range config.Layer2s {
-			if existing[i].VlanID == config.Layer2s[j].VlanID {
+		for j := range cfg.Layer2s {
+			if existing[i].VlanID == cfg.Layer2s[j].VlanID {
 				needsDeletion = false
 				break
 			}
@@ -95,7 +96,7 @@ func reconcileLayer2(config nl.NetlinkConfiguration) error {
 	return nil
 }
 
-func updateL3Netlink(config nl.NetlinkConfiguration) ([]nl.VRFInformation, bool, error) {
+func updateL3Netlink(cfg nl.NetlinkConfiguration) ([]nl.VRFInformation, bool, error) {
 	existing, err := nlManager.ListL3()
 	if err != nil {
 		return nil, false, fmt.Errorf("error listing L3 VRF information: %w", err)
@@ -106,8 +107,8 @@ func updateL3Netlink(config nl.NetlinkConfiguration) ([]nl.VRFInformation, bool,
 
 	for i := range existing {
 		needsDeletion := true
-		for j := range config.VRFs {
-			if config.VRFs[j].Name == existing[i].Name && config.VRFs[j].VNI == existing[i].VNI {
+		for j := range cfg.VRFs {
+			if cfg.VRFs[j].Name == existing[i].Name && cfg.VRFs[j].VNI == existing[i].VNI {
 				needsDeletion = false
 				break
 			}
@@ -117,16 +118,16 @@ func updateL3Netlink(config nl.NetlinkConfiguration) ([]nl.VRFInformation, bool,
 		}
 	}
 
-	for i := range config.VRFs {
+	for i := range cfg.VRFs {
 		alreadyExists := false
 		for j := range existing {
-			if existing[j].Name == config.VRFs[i].Name && existing[j].VNI == config.VRFs[i].VNI && !existing[j].MarkForDelete {
+			if existing[j].Name == cfg.VRFs[i].Name && existing[j].VNI == cfg.VRFs[i].VNI && !existing[j].MarkForDelete {
 				alreadyExists = true
 				break
 			}
 		}
 		if !alreadyExists {
-			toCreate = append(toCreate, config.VRFs[i])
+			toCreate = append(toCreate, cfg.VRFs[i])
 		}
 	}
 
@@ -147,8 +148,8 @@ func updateL3Netlink(config nl.NetlinkConfiguration) ([]nl.VRFInformation, bool,
 	return toCreate, len(toDelete) > 0, nil
 }
 
-func reconcileLayer3(config nl.NetlinkConfiguration) error {
-	created, deletedVRF, err := updateL3Netlink(config)
+func reconcileLayer3(cfg nl.NetlinkConfiguration) error {
+	created, deletedVRF, err := updateL3Netlink(cfg)
 	if err != nil {
 		return fmt.Errorf("error updating L3: %w", err)
 	}
@@ -192,7 +193,7 @@ func applyConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Parse Body into NetlinkConfiguration
-	var craConfiguration cra.CRAConfiguration
+	var craConfiguration cra.Configuration
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		log.Println("Failed to read request body", err)
@@ -209,7 +210,7 @@ func applyConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Write FRR config
-	file, err := os.OpenFile(frrConfigPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600)
+	file, err := os.OpenFile(frrConfigPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600) //nolint:mnd
 	if err != nil {
 		log.Println("Failed to open FRR config file", err)
 		http.Error(w, "Failed to open FRR config file", http.StatusInternalServerError)
@@ -280,7 +281,7 @@ func executeFrr(w http.ResponseWriter, r *http.Request) {
 }
 
 func setupTLS(address net.IP) error {
-	certPrivKey, err := rsa.GenerateKey(rand.Reader, 4096)
+	certPrivKey, err := rsa.GenerateKey(rand.Reader, 4096) //nolint:mnd
 	if err != nil {
 		return fmt.Errorf("failed to generate private key: %w", err)
 	}
@@ -291,7 +292,7 @@ func setupTLS(address net.IP) error {
 			Organization: []string{"FRR-CRA"},
 		},
 		NotBefore:             time.Now(),
-		NotAfter:              time.Now().AddDate(10, 0, 0),
+		NotAfter:              time.Now().AddDate(10, 0, 0), //nolint:mnd
 		KeyUsage:              x509.KeyUsageKeyEncipherment,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
 		IPAddresses:           []net.IP{address},
@@ -329,7 +330,7 @@ func setupTLS(address net.IP) error {
 
 func main() {
 	ip := flag.String("ip", "169.254.1.0", "IP to listen on and generate certificate for")
-	port := flag.Int("port", 8443, "Port to listen on")
+	port := flag.Int("port", 8443, "Port to listen on") //nolint:mnd
 	flag.Parse()
 
 	parsedIP := net.ParseIP(*ip)
@@ -343,7 +344,7 @@ func main() {
 	}
 
 	frrManager = frr.NewFRRManager()
-	nlManager = nl.NewManager(&nl.Toolkit{}, *baseConfig)
+	nlManager = nl.NewManager(&nl.Toolkit{}, baseConfig)
 
 	http.HandleFunc("/config", applyConfig)
 	http.HandleFunc("/frr/execute", executeFrr)
@@ -369,11 +370,13 @@ func main() {
 	caCertPool := x509.NewCertPool()
 	caCertPool.AppendCertsFromPEM(caCert)
 
+	//nolint:gosec
 	tlsConfig := &tls.Config{
 		ClientCAs:  caCertPool,
 		ClientAuth: tls.RequireAndVerifyClientCert,
 	}
 
+	//nolint:gosec
 	server := &http.Server{
 		Addr:      fmt.Sprintf(":%d", *port),
 		TLSConfig: tlsConfig,

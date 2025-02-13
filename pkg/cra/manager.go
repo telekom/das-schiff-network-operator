@@ -7,18 +7,19 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
-	"github.com/telekom/das-schiff-network-operator/pkg/nl"
 	"io"
 	"net/http"
 	"os"
+
+	"github.com/telekom/das-schiff-network-operator/pkg/nl"
 )
 
 type Manager struct {
-	craUrl string
+	craURL string
 	client http.Client
 }
 
-func NewManager(craUrl, clientCert, clientKey string) (*Manager, error) {
+func NewManager(craURL, clientCert, clientKey string) (*Manager, error) {
 	clientCertData, err := os.ReadFile(clientCert)
 	if err != nil {
 		return nil, fmt.Errorf("error reading client cert file: %w", err)
@@ -33,21 +34,22 @@ func NewManager(craUrl, clientCert, clientKey string) (*Manager, error) {
 	}
 
 	return &Manager{
-		craUrl: craUrl,
+		craURL: craURL,
 		client: http.Client{
 			Transport: &http.Transport{
 				TLSClientConfig: &tls.Config{
 					RootCAs:      caCertPool,
 					Certificates: []tls.Certificate{cert},
+					MinVersion:   tls.VersionTLS12,
 				},
 			},
 		},
 	}, nil
 }
 
-func (m Manager) postRequest(path string, body []byte) error {
+func (m Manager) postRequest(ctx context.Context, path string, body []byte) error {
 	// Send configuration to CRA via HTTP
-	url := fmt.Sprintf("%s%s", m.craUrl, path)
+	url := fmt.Sprintf("%s%s", m.craURL, path)
 
 	bodyReader := bytes.NewReader(body)
 
@@ -55,7 +57,7 @@ func (m Manager) postRequest(path string, body []byte) error {
 	if err != nil {
 		return fmt.Errorf("error creating request: %w", err)
 	}
-	res, err := m.client.Do(req.WithContext(context.Background()))
+	res, err := m.client.Do(req.WithContext(ctx))
 	if err != nil {
 		return fmt.Errorf("error sending request: %w", err)
 	}
@@ -72,8 +74,8 @@ func (m Manager) postRequest(path string, body []byte) error {
 	return nil
 }
 
-func (m Manager) ApplyConfiguration(netlinkConfig *nl.NetlinkConfiguration, frrConfig string) error {
-	craConfig := CRAConfiguration{
+func (m Manager) ApplyConfiguration(ctx context.Context, netlinkConfig *nl.NetlinkConfiguration, frrConfig string) error {
+	craConfig := Configuration{
 		NetlinkConfiguration: *netlinkConfig,
 		FRRConfiguration:     frrConfig,
 	}
@@ -82,5 +84,5 @@ func (m Manager) ApplyConfiguration(netlinkConfig *nl.NetlinkConfiguration, frrC
 		return fmt.Errorf("error marshalling netlink configuration: %w", err)
 	}
 
-	return m.postRequest("/config", jsonBody)
+	return m.postRequest(ctx, "/config", jsonBody)
 }

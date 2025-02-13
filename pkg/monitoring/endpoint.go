@@ -438,7 +438,8 @@ func passRequest(r *http.Request, addr, query string, results chan []byte, error
 	}
 
 	url := fmt.Sprintf("%s://%s:%s%s", protocol, addr, port, query)
-	resp, err := http.Get(url) //nolint
+	//nolint:gosec
+	resp, err := http.Get(url) //nolint:noctx
 	if err != nil {
 		errors <- fmt.Errorf("error getting data from %s: %w", addr, err)
 		return

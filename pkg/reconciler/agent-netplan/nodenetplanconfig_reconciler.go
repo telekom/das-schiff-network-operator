@@ -1,8 +1,10 @@
-package agent_netplan
+package agent_netplan //nolint:revive
 
 import (
 	"context"
 	"fmt"
+	"os"
+
 	"github.com/go-logr/logr"
 	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
@@ -11,14 +13,12 @@ import (
 	"github.com/telekom/das-schiff-network-operator/pkg/network/netplan/client/dbus"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
-	"os"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 type NodeNetplanConfigReconciler struct {
-	client        client.Client
-	logger        logr.Logger
-	healthChecker *healthcheck.HealthChecker
+	client client.Client
+	logger logr.Logger
 
 	netplanClient netplanclient.Client
 }
@@ -44,11 +44,13 @@ func NewNodeNetplanConfigReconciler(clusterClient client.Client, logger logr.Log
 		},
 	}
 
-	if netplanClient, err := netplanclient.New("20-caas.network", netplanclient.ClientModeDBus, netplanOpts); err != nil {
+	var netplanClient netplanclient.Client
+	var err error
+	if netplanClient, err = netplanclient.New("20-caas.network", netplanclient.ClientModeDBus, &netplanOpts); err != nil {
 		return nil, fmt.Errorf("error creating netplan client: %w", err)
-	} else {
-		reconciler.netplanClient = netplanClient
 	}
+
+	reconciler.netplanClient = netplanClient
 
 	return reconciler, nil
 }

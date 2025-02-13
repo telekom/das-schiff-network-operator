@@ -4,7 +4,7 @@ import (
 	"testing"
 )
 
-// TestAreEqual calls AreEqual with various inputs
+// TestAreEqual calls AreEqual with various inputs.
 func TestAreEqual(t *testing.T) {
 	map1 := map[string]string{"abc": "def"}
 
@@ -39,7 +39,7 @@ func TestAreEqual(t *testing.T) {
 	}
 
 	// Compare two nil maps
-	var map3 map[string]string = nil
+	var map3 map[string]string
 	map2 = nil
 	if !AreEqual(map3, map2) {
 		t.Fatalf("maps %v and %v are both nil and should be equal", map1, map2)

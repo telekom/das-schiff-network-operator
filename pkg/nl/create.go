@@ -20,7 +20,7 @@ func (n *Manager) createVRF(vrfName string, table int) (*netlink.Vrf, error) {
 		LinkAttrs: netlink.LinkAttrs{
 			Name: vrfName,
 		},
-		Table: uint32(table),
+		Table: uint32(table), //nolint:gosec
 	}
 
 	if err := n.toolkit.LinkAdd(&netlinkVrf); err != nil {
@@ -133,13 +133,13 @@ func (*Manager) setEUIAutogeneration(intfName string, generateEUI bool) error {
 	return nil
 }
 
-func (n *Manager) createVLAN(vlanId int, masterIdx, mtu int) (*netlink.Vlan, error) {
+func (n *Manager) createVLAN(vlanID, masterIdx, mtu int) (*netlink.Vlan, error) {
 	hbrInterface, err := n.toolkit.LinkByName(n.baseConfig.TrunkInterfaceName)
 	if err != nil {
 		return nil, fmt.Errorf("error getting link by name: %w", err)
 	}
 
-	vlanName := fmt.Sprintf("%s%d", vlanPrefix, vlanId)
+	vlanName := fmt.Sprintf("%s%d", vlanPrefix, vlanID)
 
 	netlinkVLAN := netlink.Vlan{
 		LinkAttrs: netlink.LinkAttrs{
@@ -148,7 +148,7 @@ func (n *Manager) createVLAN(vlanId int, masterIdx, mtu int) (*netlink.Vlan, err
 			ParentIndex: hbrInterface.Attrs().Index,
 			MTU:         mtu,
 		},
-		VlanId: vlanId,
+		VlanId: vlanID,
 	}
 
 	if err := n.toolkit.LinkAdd(&netlinkVLAN); err != nil {
@@ -210,7 +210,7 @@ func (n *Manager) setNeighSuppression(link netlink.Link, mode bool) error {
 	req := nl.NewNetlinkRequest(unix.RTM_SETLINK, unix.NLM_F_ACK)
 
 	msg := nl.NewIfInfomsg(unix.AF_BRIDGE)
-	msg.Index = int32(link.Attrs().Index)
+	msg.Index = int32(link.Attrs().Index) //nolint:gosec
 	req.AddData(msg)
 
 	br := nl.NewRtAttr(unix.IFLA_PROTINFO|unix.NLA_F_NESTED, nil)

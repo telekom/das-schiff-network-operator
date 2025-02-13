@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/telekom/das-schiff-network-operator/pkg/config"
-	"github.com/telekom/das-schiff-network-operator/pkg/network/netplan"
 	"slices"
 	"sort"
 	"strings"
@@ -14,7 +12,9 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
+	"github.com/telekom/das-schiff-network-operator/pkg/config"
 	"github.com/telekom/das-schiff-network-operator/pkg/debounce"
+	"github.com/telekom/das-schiff-network-operator/pkg/network/netplan"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -343,6 +343,16 @@ func (crr *ConfigRevisionReconciler) deployNodeConfig(ctx context.Context, node 
 	}
 
 	// create netplan config
+	if err := crr.createOrUpdateConfig(ctx, node, revision); err != nil {
+		return fmt.Errorf("failed to deploy NodeNetworkConfig: %w", err)
+	}
+
+	crr.logger.Info("deployed NodeNetworkConfig", "name", newConfig.Name)
+
+	return nil
+}
+
+func (crr *ConfigRevisionReconciler) createOrUpdateConfig(ctx context.Context, node *corev1.Node, revision *v1alpha1.NetworkConfigRevision) error {
 	currentNetplanConfig := &v1alpha1.NodeNetplanConfig{}
 	if err := crr.client.Get(ctx, types.NamespacedName{Name: node.Name}, currentNetplanConfig); err != nil {
 		if !apierrors.IsNotFound(err) {
@@ -365,8 +375,6 @@ func (crr *ConfigRevisionReconciler) deployNodeConfig(ctx context.Context, node 
 		}
 	}
 
-	crr.logger.Info("deployed NodeNetworkConfig", "name", newConfig.Name)
-
 	return nil
 }
 
@@ -387,136 +395,19 @@ func (crr *ConfigRevisionReconciler) createConfigForNode(node *corev1.Node, revi
 		return vrfs[i].Seq < vrfs[j].Seq
 	})
 
-	var defaultImportMap map[string]v1alpha1.VRFImport
+	defaultImportMap := make(map[string]v1alpha1.VRFImport)
 
 	c.Spec.FabricVRFs = make(map[string]v1alpha1.FabricVRF)
 	c.Spec.Layer2s = make(map[string]v1alpha1.Layer2)
 
-	for _, vrf := range vrfs {
-		if _, ok := c.Spec.FabricVRFs[vrf.VRF]; !ok {
-			vni := uint32(0)
-			rt := ""
-			if vrf.RouteTarget != nil && vrf.VNI != nil {
-				vni = uint32(*vrf.VNI)
-				rt = *vrf.RouteTarget
-			} else if configVni, configRt, err := crr.vrfConfig.GetVNIAndRT(vrf.VRF); err == nil {
-				vni = uint32(configVni)
-				rt = configRt
-			} else {
-				return nil, fmt.Errorf("error getting VNI and RT for VRF %s: %w", vrf.VRF, err)
+	for i := range vrfs {
+		if _, ok := c.Spec.FabricVRFs[vrfs[i].VRF]; !ok {
+			fabricVrf, err := crr.createFabricVRF(c, &vrfs[i], defaultImportMap)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create fabric VRF definition: %w", err)
 			}
-
-			fabricVrf := v1alpha1.FabricVRF{
-				VRF: v1alpha1.VRF{
-					VRFImports: []v1alpha1.VRFImport{
-						{
-							FromVRF: "cluster",
-							Filter: v1alpha1.Filter{
-								DefaultAction: v1alpha1.Action{
-									Type: v1alpha1.Reject,
-								},
-							},
-						},
-					},
-				},
-				VNI:                    vni,
-				EVPNImportRouteTargets: []string{},
-				EVPNExportRouteTargets: []string{},
-				EVPNExportFilter: &v1alpha1.Filter{
-					DefaultAction: v1alpha1.Action{
-						Type: v1alpha1.Reject,
-					},
-				},
-			}
-			if rt != "" {
-				fabricVrf.EVPNImportRouteTargets = append(c.Spec.FabricVRFs[vrf.VRF].EVPNImportRouteTargets, rt)
-				fabricVrf.EVPNExportRouteTargets = append(c.Spec.FabricVRFs[vrf.VRF].EVPNExportRouteTargets, rt)
-			}
-			c.Spec.FabricVRFs[vrf.VRF] = fabricVrf
+			c.Spec.FabricVRFs[vrfs[i].VRF] = fabricVrf
 		}
-
-		fabricVrf := c.Spec.FabricVRFs[vrf.VRF]
-
-		for _, aggregate := range vrf.Aggregate {
-			fabricVrf.StaticRoutes = append(fabricVrf.StaticRoutes, v1alpha1.StaticRoute{
-				Prefix: aggregate,
-			})
-		}
-
-		sort.SliceStable(vrf.Export, func(i, j int) bool {
-			return vrf.Export[i].Seq < vrf.Export[j].Seq
-		})
-		sort.SliceStable(vrf.Import, func(i, j int) bool {
-			return vrf.Import[i].Seq < vrf.Import[j].Seq
-		})
-
-		for _, export := range vrf.Export {
-			filterItem := v1alpha1.FilterItem{
-				Matcher: v1alpha1.Matcher{
-					Prefix: &v1alpha1.PrefixMatcher{
-						Prefix: export.CIDR,
-						Ge:     export.GE,
-						Le:     export.LE,
-					},
-				},
-			}
-			filterItem.Action = v1alpha1.Action{
-				Type: v1alpha1.Reject,
-			}
-			if export.Action == "permit" {
-				filterItem.Action.Type = v1alpha1.Accept
-			}
-			fabricVrf.EVPNExportFilter.Items = append(fabricVrf.EVPNExportFilter.Items, filterItem)
-
-			vrfImportItem := filterItem.DeepCopy()
-			if vrf.Community != nil {
-				additive := true
-				vrfImportItem.Action.ModifyRoute = &v1alpha1.ModifyRouteAction{
-					AddCommunities:      []string{*vrf.Community},
-					AdditiveCommunities: &additive,
-				}
-			}
-			vrfImport := fabricVrf.VRFImports[0]
-			vrfImport.Filter.Items = append(fabricVrf.VRFImports[0].Filter.Items, *vrfImportItem)
-			fabricVrf.VRFImports[0] = vrfImport
-		}
-
-		for _, vrfImport := range vrf.Import {
-			if defaultImportMap == nil {
-				defaultImportMap = make(map[string]v1alpha1.VRFImport)
-			}
-			if _, ok := defaultImportMap[vrf.VRF]; !ok {
-				defaultImportMap[vrf.VRF] = v1alpha1.VRFImport{
-					FromVRF: vrf.VRF,
-					Filter: v1alpha1.Filter{
-						DefaultAction: v1alpha1.Action{
-							Type: v1alpha1.Reject,
-						},
-					},
-				}
-			}
-
-			filterItem := v1alpha1.FilterItem{
-				Matcher: v1alpha1.Matcher{
-					Prefix: &v1alpha1.PrefixMatcher{
-						Prefix: vrfImport.CIDR,
-						Ge:     vrfImport.GE,
-						Le:     vrfImport.LE,
-					},
-				},
-			}
-			filterItem.Action = v1alpha1.Action{
-				Type: v1alpha1.Reject,
-			}
-			if vrfImport.Action == "permit" {
-				filterItem.Action.Type = v1alpha1.Accept
-			}
-			vrfImport := defaultImportMap[vrf.VRF]
-			vrfImport.Filter.Items = append(vrfImport.Filter.Items, filterItem)
-			defaultImportMap[vrf.VRF] = vrfImport
-		}
-
-		c.Spec.FabricVRFs[vrf.VRF] = fabricVrf
 	}
 
 	c.Spec.DefaultVRF = &v1alpha1.VRF{}
@@ -535,9 +426,9 @@ func (crr *ConfigRevisionReconciler) createConfigForNode(node *corev1.Node, revi
 		}
 
 		nodeL2 := v1alpha1.Layer2{
-			VNI:  uint32(l2.VNI),
-			VLAN: uint16(l2.ID),
-			MTU:  uint16(l2.MTU),
+			VNI:  uint32(l2.VNI), //nolint:gosec
+			VLAN: uint16(l2.ID),  //nolint:gosec
+			MTU:  uint16(l2.MTU), //nolint:gosec
 		}
 		if len(l2.AnycastGateways) > 0 {
 			irb := v1alpha1.IRB{
@@ -566,6 +457,142 @@ func (crr *ConfigRevisionReconciler) createConfigForNode(node *corev1.Node, revi
 	return c, nil
 }
 
+func (crr *ConfigRevisionReconciler) createFabricVRF(c *v1alpha1.NodeNetworkConfig, vrf *v1alpha1.VRFRouteConfigurationSpec, defaultImportMap map[string]v1alpha1.VRFImport) (v1alpha1.FabricVRF, error) {
+	if _, ok := c.Spec.FabricVRFs[vrf.VRF]; !ok {
+		vni := uint32(0) //nolint:wastedassign
+		rt := ""         //nolint:wastedassign
+		if vrf.RouteTarget != nil && vrf.VNI != nil {
+			vni = uint32(*vrf.VNI) //nolint:gosec
+			rt = *vrf.RouteTarget
+		} else if configVni, configRt, err := crr.vrfConfig.GetVNIAndRT(vrf.VRF); err == nil {
+			vni = uint32(configVni) //nolint:gosec
+			rt = configRt
+		} else {
+			return v1alpha1.FabricVRF{}, fmt.Errorf("error getting VNI and RT for VRF %s: %w", vrf.VRF, err)
+		}
+
+		fabricVrf := v1alpha1.FabricVRF{
+			VRF: v1alpha1.VRF{
+				VRFImports: []v1alpha1.VRFImport{
+					{
+						FromVRF: "cluster",
+						Filter: v1alpha1.Filter{
+							DefaultAction: v1alpha1.Action{
+								Type: v1alpha1.Reject,
+							},
+						},
+					},
+				},
+			},
+			VNI:                    vni,
+			EVPNImportRouteTargets: []string{},
+			EVPNExportRouteTargets: []string{},
+			EVPNExportFilter: &v1alpha1.Filter{
+				DefaultAction: v1alpha1.Action{
+					Type: v1alpha1.Reject,
+				},
+			},
+		}
+		if rt != "" {
+			fabricVrf.EVPNImportRouteTargets = append(fabricVrf.EVPNImportRouteTargets, rt)
+			fabricVrf.EVPNExportRouteTargets = append(fabricVrf.EVPNExportRouteTargets, rt)
+		}
+		c.Spec.FabricVRFs[vrf.VRF] = fabricVrf
+	}
+
+	fabricVrf := c.Spec.FabricVRFs[vrf.VRF]
+
+	for _, aggregate := range vrf.Aggregate {
+		fabricVrf.StaticRoutes = append(fabricVrf.StaticRoutes, v1alpha1.StaticRoute{
+			Prefix: aggregate,
+		})
+	}
+
+	processExports(vrf, &fabricVrf)
+
+	processImports(vrf, defaultImportMap)
+
+	return fabricVrf, nil
+}
+
+func processExports(vrf *v1alpha1.VRFRouteConfigurationSpec, fabricVrf *v1alpha1.FabricVRF) {
+	sort.SliceStable(vrf.Export, func(i, j int) bool {
+		return vrf.Export[i].Seq < vrf.Export[j].Seq
+	})
+
+	for _, export := range vrf.Export {
+		filterItem := v1alpha1.FilterItem{
+			Matcher: v1alpha1.Matcher{
+				Prefix: &v1alpha1.PrefixMatcher{
+					Prefix: export.CIDR,
+					Ge:     export.GE,
+					Le:     export.LE,
+				},
+			},
+		}
+		filterItem.Action = v1alpha1.Action{
+			Type: v1alpha1.Reject,
+		}
+		if export.Action == "permit" {
+			filterItem.Action.Type = v1alpha1.Accept
+		}
+		fabricVrf.EVPNExportFilter.Items = append(fabricVrf.EVPNExportFilter.Items, filterItem)
+
+		vrfImportItem := filterItem.DeepCopy()
+		if vrf.Community != nil {
+			additive := true
+			vrfImportItem.Action.ModifyRoute = &v1alpha1.ModifyRouteAction{
+				AddCommunities:      []string{*vrf.Community},
+				AdditiveCommunities: &additive,
+			}
+		}
+		vrfImport := fabricVrf.VRFImports[0]
+		vrfImport.Filter.Items = append(vrfImport.Filter.Items, *vrfImportItem)
+		fabricVrf.VRFImports[0] = vrfImport
+	}
+}
+
+func processImports(vrf *v1alpha1.VRFRouteConfigurationSpec, defaultImportMap map[string]v1alpha1.VRFImport) {
+	sort.SliceStable(vrf.Import, func(i, j int) bool {
+		return vrf.Import[i].Seq < vrf.Import[j].Seq
+	})
+
+	for _, vrfImport := range vrf.Import {
+		if defaultImportMap == nil {
+			defaultImportMap = make(map[string]v1alpha1.VRFImport)
+		}
+		if _, ok := defaultImportMap[vrf.VRF]; !ok {
+			defaultImportMap[vrf.VRF] = v1alpha1.VRFImport{
+				FromVRF: vrf.VRF,
+				Filter: v1alpha1.Filter{
+					DefaultAction: v1alpha1.Action{
+						Type: v1alpha1.Reject,
+					},
+				},
+			}
+		}
+
+		filterItem := v1alpha1.FilterItem{
+			Matcher: v1alpha1.Matcher{
+				Prefix: &v1alpha1.PrefixMatcher{
+					Prefix: vrfImport.CIDR,
+					Ge:     vrfImport.GE,
+					Le:     vrfImport.LE,
+				},
+			},
+		}
+		filterItem.Action = v1alpha1.Action{
+			Type: v1alpha1.Reject,
+		}
+		if vrfImport.Action == "permit" {
+			filterItem.Action.Type = v1alpha1.Accept
+		}
+		vrfImport := defaultImportMap[vrf.VRF]
+		vrfImport.Filter.Items = append(vrfImport.Filter.Items, filterItem)
+		defaultImportMap[vrf.VRF] = vrfImport
+	}
+}
+
 func (crr *ConfigRevisionReconciler) createNodeNetplanConfig(node *corev1.Node, revision *v1alpha1.NetworkConfigRevision) (*v1alpha1.NodeNetplanConfig, error) {
 	c := &v1alpha1.NodeNetplanConfig{
 		ObjectMeta: metav1.ObjectMeta{
@@ -574,7 +601,7 @@ func (crr *ConfigRevisionReconciler) createNodeNetplanConfig(node *corev1.Node, 
 		Spec: v1alpha1.NodeNetplanConfigSpec{
 			DesiredState: netplan.State{
 				Network: netplan.NetworkState{
-					Version: 2,
+					Version: 2, //nolint:mnd
 					VLans:   make(map[string]netplan.Device),
 					Ethernets: map[string]netplan.Device{
 						"hbn": {
@@ -591,7 +618,6 @@ func (crr *ConfigRevisionReconciler) createNodeNetplanConfig(node *corev1.Node, 
 		return layer2[i].ID < layer2[j].ID
 	})
 	for _, l2 := range layer2 {
-
 		vlan := map[string]interface{}{
 			"id":   l2.ID,
 			"link": "hbn",
@@ -619,6 +645,7 @@ func (crr *ConfigRevisionReconciler) createNodeNetplanConfig(node *corev1.Node, 
 	return c, nil
 }
 
+//nolint:unused
 func convertSelector(matchLabels map[string]string, matchExpressions []metav1.LabelSelectorRequirement) (labels.Selector, error) {
 	selector := labels.NewSelector()
 	var reqs labels.Requirements

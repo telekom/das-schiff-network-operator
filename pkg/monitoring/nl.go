@@ -2,10 +2,10 @@ package monitoring
 
 import (
 	"fmt"
-	"github.com/telekom/das-schiff-network-operator/pkg/config"
 	"sync"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/telekom/das-schiff-network-operator/pkg/config"
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
 	"github.com/telekom/das-schiff-network-operator/pkg/route"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -45,7 +45,7 @@ func NewNetlinkCollector() (Collector, error) {
 			),
 			valueType: prometheus.GaugeValue,
 		},
-		netlink: nl.NewManager(&nl.Toolkit{}, config.BaseConfig{}),
+		netlink: nl.NewManager(&nl.Toolkit{}, &config.BaseConfig{}),
 	}
 	collector.name = nlCollectorName
 	collector.logger = ctrl.Log.WithName("netlink.collector")

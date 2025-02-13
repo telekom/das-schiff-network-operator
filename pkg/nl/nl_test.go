@@ -9,14 +9,13 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/telekom/das-schiff-network-operator/pkg/config"
-	"golang.org/x/sys/unix"
-
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+	"github.com/telekom/das-schiff-network-operator/pkg/config"
 	mock_nl "github.com/telekom/das-schiff-network-operator/pkg/nl/mock"
 	"github.com/vishvananda/netlink"
 	"go.uber.org/mock/gomock"
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -59,7 +58,7 @@ func TestNL(t *testing.T) {
 var _ = Describe("GetUnderlayIP()", func() {
 	It("returns nil if cannot parse addresses", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{
+		nm := NewManager(netlinkMock, &config.BaseConfig{
 			VTEPLoopbackIP: "abcd",
 		})
 		netlinkMock.EXPECT().LinkByName(underlayInterfaceName).Return(&netlink.Dummy{}, nil)
@@ -68,7 +67,7 @@ var _ = Describe("GetUnderlayIP()", func() {
 	})
 	It("returns no error", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{
+		nm := NewManager(netlinkMock, &config.BaseConfig{
 			VTEPLoopbackIP: "1.2.3.4",
 		})
 		netlinkMock.EXPECT().LinkByName(underlayInterfaceName).Return(&netlink.Dummy{}, nil)
@@ -81,14 +80,14 @@ var _ = Describe("GetUnderlayIP()", func() {
 var _ = Describe("ListL3()", func() {
 	It("returns error if cannot list links", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
+		nm := NewManager(netlinkMock, &config.BaseConfig{})
 		netlinkMock.EXPECT().LinkList().Return(nil, errors.New("error listing links"))
 		_, err := nm.ListL3()
 		Expect(err).To(HaveOccurred())
 	})
 	It("returns empty slice if there are no vrf interfaces", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
+		nm := NewManager(netlinkMock, &config.BaseConfig{})
 		netlinkMock.EXPECT().LinkList().Return([]netlink.Link{&netlink.Bridge{}}, nil)
 		result, err := nm.ListL3()
 		Expect(err).ToNot(HaveOccurred())
@@ -96,7 +95,7 @@ var _ = Describe("ListL3()", func() {
 	})
 	It("returns no error error if cannot get bridge, vxlan and vrf links by name", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
+		nm := NewManager(netlinkMock, &config.BaseConfig{})
 		netlinkMock.EXPECT().LinkList().Return([]netlink.Link{&netlink.Vrf{LinkAttrs: netlink.LinkAttrs{Name: dummyIntf}}}, nil)
 		netlinkMock.EXPECT().LinkByName(gomock.Any()).Return(nil, errors.New("link not found")).Times(2)
 
@@ -105,7 +104,7 @@ var _ = Describe("ListL3()", func() {
 	})
 	It("returns no error", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
+		nm := NewManager(netlinkMock, &config.BaseConfig{})
 		netlinkMock.EXPECT().LinkList().Return([]netlink.Link{&netlink.Vrf{LinkAttrs: netlink.LinkAttrs{Name: dummyIntf}}}, nil)
 		netlinkMock.EXPECT().LinkByName(bridgePrefix+dummyIntf).Return(&netlink.Bridge{}, nil)
 		netlinkMock.EXPECT().LinkByName(vxlanPrefix+dummyIntf).Return(&netlink.Vxlan{}, nil)
@@ -117,14 +116,14 @@ var _ = Describe("ListL3()", func() {
 var _ = Describe("ListL2()", func() {
 	It("returns error if cannot list links", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
+		nm := NewManager(netlinkMock, &config.BaseConfig{})
 		netlinkMock.EXPECT().LinkList().Return(nil, errors.New("error listing links"))
 		_, err := nm.ListL2()
 		Expect(err).To(HaveOccurred())
 	})
 	It("returns empty slice if there are no bridge interfaces", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
+		nm := NewManager(netlinkMock, &config.BaseConfig{})
 		netlinkMock.EXPECT().LinkList().Return([]netlink.Link{&netlink.Vrf{}}, nil)
 		result, err := nm.ListL2()
 		Expect(err).ToNot(HaveOccurred())
@@ -132,14 +131,14 @@ var _ = Describe("ListL2()", func() {
 	})
 	It("returns error if cannot get vlan ID as integer", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
+		nm := NewManager(netlinkMock, &config.BaseConfig{})
 		netlinkMock.EXPECT().LinkList().Return([]netlink.Link{&netlink.Bridge{LinkAttrs: netlink.LinkAttrs{Name: layer2SVI + dummyIntf}}}, nil)
 		_, err := nm.ListL2()
 		Expect(err).To(HaveOccurred())
 	})
 	It("returns error if cannot get bridge link by index", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
+		nm := NewManager(netlinkMock, &config.BaseConfig{})
 		netlinkMock.EXPECT().LinkList().Return([]netlink.Link{&netlink.Bridge{LinkAttrs: netlink.LinkAttrs{Name: layer2SVI + "33", MasterIndex: 3}}}, nil)
 		netlinkMock.EXPECT().LinkByIndex(3).Return(nil, errors.New("link not found"))
 		_, err := nm.ListL2()
@@ -147,7 +146,7 @@ var _ = Describe("ListL2()", func() {
 	})
 	It("returns error if cannot list addresses and not updating link", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
+		nm := NewManager(netlinkMock, &config.BaseConfig{})
 		netlinkMock.EXPECT().LinkList().Return([]netlink.Link{&netlink.Bridge{LinkAttrs: netlink.LinkAttrs{Name: layer2SVI + "33", MasterIndex: 3}}}, nil)
 		netlinkMock.EXPECT().LinkByIndex(3).Return(&netlink.Vrf{LinkAttrs: netlink.LinkAttrs{Name: dummyIntf, Index: 3}}, nil)
 		netlinkMock.EXPECT().AddrList(gomock.Any(), gomock.Any()).Return(nil, errors.New("failed to list addresses"))
@@ -156,7 +155,7 @@ var _ = Describe("ListL2()", func() {
 	})
 	It("returns error if failed to list addresses and the link is vxlan", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
+		nm := NewManager(netlinkMock, &config.BaseConfig{})
 		netlinkMock.EXPECT().LinkList().Return([]netlink.Link{
 			&netlink.Bridge{LinkAttrs: netlink.LinkAttrs{Name: layer2SVI + "33", MasterIndex: 3, Index: 3}},
 			&netlink.Vxlan{LinkAttrs: netlink.LinkAttrs{Name: vxlanPrefix + "33", MasterIndex: 3, Index: 3}},
@@ -168,7 +167,7 @@ var _ = Describe("ListL2()", func() {
 	})
 	It("returns error if update succeeded but cannot list IPv4 addresses", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
+		nm := NewManager(netlinkMock, &config.BaseConfig{})
 		netlinkMock.EXPECT().LinkList().Return([]netlink.Link{
 			&netlink.Bridge{LinkAttrs: netlink.LinkAttrs{Name: layer2SVI + "33", MasterIndex: 3, Index: 3}},
 			&netlink.Vlan{LinkAttrs: netlink.LinkAttrs{Name: vlanPrefix + "33", MasterIndex: 3, Index: 3}},
@@ -180,7 +179,7 @@ var _ = Describe("ListL2()", func() {
 	})
 	It("returns error if update succeeded but cannot list IPv6 addresses", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
+		nm := NewManager(netlinkMock, &config.BaseConfig{})
 		netlinkMock.EXPECT().LinkList().Return([]netlink.Link{
 			&netlink.Bridge{LinkAttrs: netlink.LinkAttrs{Name: layer2SVI + "33", MasterIndex: 3, Index: 3}},
 			&netlink.Vlan{LinkAttrs: netlink.LinkAttrs{Name: vlanPrefix + "33", MasterIndex: 3, Index: 3}},
@@ -193,7 +192,7 @@ var _ = Describe("ListL2()", func() {
 	})
 	It("returns no error", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
+		nm := NewManager(netlinkMock, &config.BaseConfig{})
 		netlinkMock.EXPECT().LinkList().Return([]netlink.Link{
 			&netlink.Bridge{LinkAttrs: netlink.LinkAttrs{Name: layer2SVI + "33", MasterIndex: 3, Index: 3}},
 			&netlink.Vlan{LinkAttrs: netlink.LinkAttrs{Name: vlanPrefix + "33", MasterIndex: 3, Index: 3}},
@@ -211,14 +210,14 @@ var _ = Describe("ListL2()", func() {
 var _ = Describe("ParseIPAddresses()", func() {
 	It("returns error if cannot parse address", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
+		nm := NewManager(netlinkMock, &config.BaseConfig{})
 		netlinkMock.EXPECT().ParseAddr("10.0.0.1").Return(nil, errors.New("error parsing address"))
 		_, err := nm.ParseIPAddresses([]string{"10.0.0.1"})
 		Expect(err).To(HaveOccurred())
 	})
 	It("returns no error", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
+		nm := NewManager(netlinkMock, &config.BaseConfig{})
 		netlinkMock.EXPECT().ParseAddr("10.0.0.1").Return(&netlink.Addr{}, nil)
 		_, err := nm.ParseIPAddresses([]string{"10.0.0.1"})
 		Expect(err).ToNot(HaveOccurred())
@@ -228,28 +227,28 @@ var _ = Describe("ParseIPAddresses()", func() {
 var _ = Describe("GetVRFInterfaceIdxByName()", func() {
 	It("returns error if cannot find cluster or management VRF", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{ManagementVRF: config.BaseVRF{Name: "name"}})
+		nm := NewManager(netlinkMock, &config.BaseConfig{ManagementVRF: config.BaseVRF{Name: "name"}})
 		netlinkMock.EXPECT().LinkByName("name").Return(nil, fmt.Errorf(""))
 		_, err := nm.GetVRFInterfaceIdxByName("name")
 		Expect(err).To(HaveOccurred())
 	})
 	It("returns no error if cluster or management VRF was found", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{ManagementVRF: config.BaseVRF{Name: "name"}})
+		nm := NewManager(netlinkMock, &config.BaseConfig{ManagementVRF: config.BaseVRF{Name: "name"}})
 		netlinkMock.EXPECT().LinkByName("name").Return(&netlink.Vrf{}, nil)
 		_, err := nm.GetVRFInterfaceIdxByName("name")
 		Expect(err).ToNot(HaveOccurred())
 	})
 	It("returns error if cannot list L3", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
+		nm := NewManager(netlinkMock, &config.BaseConfig{})
 		netlinkMock.EXPECT().LinkList().Return(nil, errors.New("error listing links"))
 		_, err := nm.GetVRFInterfaceIdxByName("name")
 		Expect(err).To(HaveOccurred())
 	})
 	It("returns no error", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
+		nm := NewManager(netlinkMock, &config.BaseConfig{})
 		netlinkMock.EXPECT().LinkList().Return([]netlink.Link{&netlink.Vrf{LinkAttrs: netlink.LinkAttrs{Name: dummyIntf}}}, nil)
 		netlinkMock.EXPECT().LinkByName(bridgePrefix+dummyIntf).Return(&netlink.Bridge{}, nil)
 		netlinkMock.EXPECT().LinkByName(vxlanPrefix+dummyIntf).Return(&netlink.Vxlan{}, nil)
@@ -261,14 +260,14 @@ var _ = Describe("GetVRFInterfaceIdxByName()", func() {
 var _ = Describe("CleanupL3()", func() {
 	It("returns non empty error slice if any errors occurred", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
+		nm := NewManager(netlinkMock, &config.BaseConfig{})
 		netlinkMock.EXPECT().LinkDel(gomock.Any()).Return(errors.New("error deleting link")).Times(3)
 		err := nm.CleanupL3("name")
 		Expect(err).ToNot(BeEmpty())
 	})
 	It("returns empty error slice if no errors occurred", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
+		nm := NewManager(netlinkMock, &config.BaseConfig{})
 		netlinkMock.EXPECT().LinkDel(gomock.Any()).Return(nil).Times(3)
 		err := nm.CleanupL3("name")
 		Expect(err).To(BeEmpty())
@@ -278,7 +277,7 @@ var _ = Describe("CleanupL3()", func() {
 var _ = Describe("UpL3()", func() {
 	It("returns error if cannot set link up", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
+		nm := NewManager(netlinkMock, &config.BaseConfig{})
 		netlinkMock.EXPECT().LinkByName(gomock.Any()).Return(&netlink.Vrf{}, nil)
 		netlinkMock.EXPECT().LinkSetUp(gomock.Any()).Return(errors.New("failed to set link up"))
 		err := nm.UpL3(VRFInformation{Name: dummyIntf})
@@ -286,14 +285,14 @@ var _ = Describe("UpL3()", func() {
 	})
 	It("returns error if cannot set up bridge", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
+		nm := NewManager(netlinkMock, &config.BaseConfig{})
 		netlinkMock.EXPECT().LinkByName(gomock.Any()).Return(nil, errors.New("link not found"))
 		err := nm.UpL3(VRFInformation{Name: dummyIntf})
 		Expect(err).To(HaveOccurred())
 	})
 	It("returns error if cannot set up VRF to Default", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
+		nm := NewManager(netlinkMock, &config.BaseConfig{})
 		netlinkMock.EXPECT().LinkByName(gomock.Any()).Return(&netlink.Vrf{}, nil)
 		netlinkMock.EXPECT().LinkSetUp(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkByName(gomock.Any()).Return(nil, errors.New("link not found"))
@@ -302,7 +301,7 @@ var _ = Describe("UpL3()", func() {
 	})
 	It("returns error no error", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
+		nm := NewManager(netlinkMock, &config.BaseConfig{})
 		netlinkMock.EXPECT().LinkByName(gomock.Any()).Return(&netlink.Vrf{}, nil).Times(2)
 		netlinkMock.EXPECT().LinkSetUp(gomock.Any()).Return(nil).Times(2)
 		err := nm.UpL3(VRFInformation{Name: dummyIntf})
@@ -313,7 +312,7 @@ var _ = Describe("UpL3()", func() {
 var _ = Describe("findFreeTableID()", func() {
 	It("returns error if cannot list L3", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
+		nm := NewManager(netlinkMock, &config.BaseConfig{})
 		netlinkMock.EXPECT().LinkList().Return(nil, errors.New("error"))
 		v, err := nm.findFreeTableID()
 		Expect(v).To(Equal(-1))
@@ -327,7 +326,7 @@ var _ = Describe("findFreeTableID()", func() {
 			netlinkMock.EXPECT().LinkByName(gomock.Any()).Return(&netlink.Bridge{}, nil)
 			netlinkMock.EXPECT().LinkByName(gomock.Any()).Return(&netlink.Vxlan{}, nil)
 		}
-		nm := NewManager(netlinkMock, config.BaseConfig{})
+		nm := NewManager(netlinkMock, &config.BaseConfig{})
 		netlinkMock.EXPECT().LinkList().Return(links, nil)
 
 		v, err := nm.findFreeTableID()
@@ -336,7 +335,7 @@ var _ = Describe("findFreeTableID()", func() {
 	})
 	It("returns no error", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
+		nm := NewManager(netlinkMock, &config.BaseConfig{})
 		netlinkMock.EXPECT().LinkList().Return([]netlink.Link{&netlink.Vrf{LinkAttrs: netlink.LinkAttrs{Name: dummyIntf}}}, nil)
 		netlinkMock.EXPECT().LinkByName(gomock.Any()).Return(&netlink.Bridge{}, nil)
 		netlinkMock.EXPECT().LinkByName(gomock.Any()).Return(&netlink.Vxlan{}, nil)
@@ -355,14 +354,14 @@ var _ = Describe("CleanupL2()", func() {
 	}
 	It("returns slice of 3 errors", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
+		nm := NewManager(netlinkMock, &config.BaseConfig{})
 		netlinkMock.EXPECT().LinkDel(gomock.Any()).Return(errors.New("cannot delete link")).Times(numOfInterfaces)
 		errors := nm.CleanupL2(info)
 		Expect(errors).To(HaveLen(numOfInterfaces))
 	})
 	It("returns empty slice", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
+		nm := NewManager(netlinkMock, &config.BaseConfig{})
 		netlinkMock.EXPECT().LinkDel(gomock.Any()).Return(nil).Times(numOfInterfaces)
 		errors := nm.CleanupL2(info)
 		Expect(errors).To(BeEmpty())
@@ -372,7 +371,7 @@ var _ = Describe("CleanupL2()", func() {
 var _ = Describe("ReconcileL2()", func() {
 	It("returns error if anycast gateway is used but anycast MAC is not set", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
+		nm := NewManager(netlinkMock, &config.BaseConfig{})
 		current := &Layer2Information{}
 		desired := &Layer2Information{
 			AnycastGateways: []string{""},
@@ -383,7 +382,7 @@ var _ = Describe("ReconcileL2()", func() {
 	})
 	It("returns error if unable to set MTU for bridge", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
+		nm := NewManager(netlinkMock, &config.BaseConfig{})
 		current := &Layer2Information{
 			bridge:        &netlink.Bridge{},
 			vxlan:         &netlink.Vxlan{},
@@ -402,7 +401,7 @@ var _ = Describe("ReconcileL2()", func() {
 	})
 	It("returns error if unable to set MTU for vxlan", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
+		nm := NewManager(netlinkMock, &config.BaseConfig{})
 		current := &Layer2Information{
 			bridge:        &netlink.Bridge{},
 			vxlan:         &netlink.Vxlan{},
@@ -422,7 +421,7 @@ var _ = Describe("ReconcileL2()", func() {
 	})
 	It("returns error if unable to set MTU for macvlanBridge", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
+		nm := NewManager(netlinkMock, &config.BaseConfig{})
 		current := &Layer2Information{
 			bridge:        &netlink.Bridge{},
 			vxlan:         &netlink.Vxlan{},
@@ -442,7 +441,7 @@ var _ = Describe("ReconcileL2()", func() {
 	})
 	It("returns error if unable to set MTU for vlan intf", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
+		nm := NewManager(netlinkMock, &config.BaseConfig{})
 		current := &Layer2Information{
 			bridge:        &netlink.Bridge{},
 			vxlan:         &netlink.Vxlan{},
@@ -462,7 +461,7 @@ var _ = Describe("ReconcileL2()", func() {
 	})
 	It("returns error if unable to generate MACs", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{})
+		nm := NewManager(netlinkMock, &config.BaseConfig{})
 		current := &Layer2Information{
 			bridge:        &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
 			vxlan:         &netlink.Vxlan{},
@@ -482,7 +481,7 @@ var _ = Describe("ReconcileL2()", func() {
 	})
 	It("returns error if unable to set link down to change MAC address", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
+		nm := NewManager(netlinkMock, &config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
 		current := &Layer2Information{
 			bridge:        &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
 			vxlan:         &netlink.Vxlan{},
@@ -503,7 +502,7 @@ var _ = Describe("ReconcileL2()", func() {
 	})
 	It("returns error if unable to change MAC address", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
+		nm := NewManager(netlinkMock, &config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
 		current := &Layer2Information{
 			bridge:        &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
 			vxlan:         &netlink.Vxlan{},
@@ -525,7 +524,7 @@ var _ = Describe("ReconcileL2()", func() {
 	})
 	It("returns error if unable set link up after changing MAC address", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
+		nm := NewManager(netlinkMock, &config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
 		current := &Layer2Information{
 			bridge:        &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
 			vxlan:         &netlink.Vxlan{},
@@ -548,7 +547,7 @@ var _ = Describe("ReconcileL2()", func() {
 	})
 	It("returns error if unable set vxlan MAC address", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
+		nm := NewManager(netlinkMock, &config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
 		current := &Layer2Information{
 			bridge:        &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
 			vxlan:         &netlink.Vxlan{},
@@ -572,7 +571,7 @@ var _ = Describe("ReconcileL2()", func() {
 	})
 	It("returns error if cannot get link prot info", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
+		nm := NewManager(netlinkMock, &config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
 		current := &Layer2Information{
 			bridge:        &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
 			vxlan:         &netlink.Vxlan{},
@@ -597,7 +596,7 @@ var _ = Describe("ReconcileL2()", func() {
 	})
 	It("returns error if cannot reattach L2VNI - cannot set link down", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
+		nm := NewManager(netlinkMock, &config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
 		current := &Layer2Information{
 			bridge:        &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
 			vxlan:         &netlink.Vxlan{},
@@ -623,7 +622,7 @@ var _ = Describe("ReconcileL2()", func() {
 	})
 	It("returns error if cannot reattach L2VNI - cannot set no master", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
+		nm := NewManager(netlinkMock, &config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
 		current := &Layer2Information{
 			bridge:        &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
 			vxlan:         &netlink.Vxlan{},
@@ -650,7 +649,7 @@ var _ = Describe("ReconcileL2()", func() {
 	})
 	It("returns error if cannot reattach L2VNI - cannot set master", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
+		nm := NewManager(netlinkMock, &config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
 		current := &Layer2Information{
 			bridge:        &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
 			vxlan:         &netlink.Vxlan{},
@@ -678,7 +677,7 @@ var _ = Describe("ReconcileL2()", func() {
 	})
 	It("returns error if cannot reattach L2VNI - cannot set learning", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
+		nm := NewManager(netlinkMock, &config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
 		current := &Layer2Information{
 			bridge:        &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
 			vxlan:         &netlink.Vxlan{},
@@ -707,7 +706,7 @@ var _ = Describe("ReconcileL2()", func() {
 	})
 	It("returns error if cannot reattach L2VNI - cannot set link up", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
+		nm := NewManager(netlinkMock, &config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
 		current := &Layer2Information{
 			bridge:        &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
 			vxlan:         &netlink.Vxlan{},
@@ -738,7 +737,7 @@ var _ = Describe("ReconcileL2()", func() {
 
 	It("returns error if cannot reconcile IPs - cannot set neighbor suppression", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
+		nm := NewManager(netlinkMock, &config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
 		oldProcSysNetPath := procSysNetPath
 
 		procSysNetPath = tmpDir
@@ -800,7 +799,7 @@ var _ = Describe("ReconcileL2()", func() {
 	})
 	It("returns error if cannot reconcile IPs - cannot parse address", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
+		nm := NewManager(netlinkMock, &config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
 		oldProcSysNetPath := procSysNetPath
 
 		procSysNetPath = tmpDir
@@ -863,7 +862,7 @@ var _ = Describe("ReconcileL2()", func() {
 	})
 	It("returns error if cannot reconcile IPs - cannot add address", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
+		nm := NewManager(netlinkMock, &config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
 		oldProcSysNetPath := procSysNetPath
 
 		procSysNetPath = tmpDir
@@ -927,7 +926,7 @@ var _ = Describe("ReconcileL2()", func() {
 	})
 	It("returns error if cannot reconcile IPs - cannot delete address", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
+		nm := NewManager(netlinkMock, &config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
 		oldProcSysNetPath := procSysNetPath
 
 		procSysNetPath = tmpDir
@@ -995,7 +994,7 @@ var _ = Describe("ReconcileL2()", func() {
 
 	It("returns no error", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
+		nm := NewManager(netlinkMock, &config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
 		oldProcSysNetPath := procSysNetPath
 
 		procSysNetPath = tmpDir
@@ -1065,7 +1064,7 @@ var _ = Describe("ReconcileL2()", func() {
 var _ = Describe("CreateL3()", func() {
 	It("returns error if VRF name is longer than 12 characters", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
+		nm := NewManager(netlinkMock, &config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
 		vrfInfo := VRFInformation{
 			Name: "reallyLongTestNameOver12Chars",
 		}
@@ -1074,7 +1073,7 @@ var _ = Describe("CreateL3()", func() {
 	})
 	It("returns error if cannot find free table ID", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
+		nm := NewManager(netlinkMock, &config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
 		vrfInfo := VRFInformation{
 			Name: dummyIntf,
 		}
@@ -1086,7 +1085,7 @@ var _ = Describe("CreateL3()", func() {
 	})
 	It("returns error if cannot create VRF - failed to add link", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
+		nm := NewManager(netlinkMock, &config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
 		vrfInfo := VRFInformation{
 			Name: dummyIntf,
 		}
@@ -1101,7 +1100,7 @@ var _ = Describe("CreateL3()", func() {
 	})
 	It("returns error if cannot create VRF - failed to disable EUI generation", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
+		nm := NewManager(netlinkMock, &config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
 		vrfInfo := VRFInformation{
 			Name: dummyIntf,
 		}
@@ -1116,7 +1115,7 @@ var _ = Describe("CreateL3()", func() {
 	})
 	It("returns error if cannot create VRF - failed to set link up", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
+		nm := NewManager(netlinkMock, &config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
 		oldProcSysNetPath := procSysNetPath
 		procSysNetPath = tmpDir
 		vrfInfo := VRFInformation{
@@ -1140,7 +1139,7 @@ var _ = Describe("CreateL3()", func() {
 	})
 	It("returns error if cannot create bridge - failed to add link", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
+		nm := NewManager(netlinkMock, &config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
 		oldProcSysNetPath := procSysNetPath
 		procSysNetPath = tmpDir
 		vrfInfo := VRFInformation{
@@ -1166,7 +1165,7 @@ var _ = Describe("CreateL3()", func() {
 	})
 	It("returns error if cannot create bridge - failed to disable EUI generation", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock, config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
+		nm := NewManager(netlinkMock, &config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
 		oldProcSysNetPath := procSysNetPath
 		procSysNetPath = tmpDir
 		vrfInfo := VRFInformation{

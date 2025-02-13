@@ -27,7 +27,7 @@ routes:
     via: 10.235.162.1
 `
 	d1Json, err := yaml.YAMLToJSON([]byte(d1Yaml))
-	g.Expect(err).To(BeNil())
+	g.Expect(err).ToNot(HaveOccurred())
 	d2Yaml := `
 addresses:
   - 10.235.162.17/25
@@ -44,10 +44,10 @@ routes:
     via: 10.235.162.1
 `
 	d2Json, err := yaml.YAMLToJSON([]byte(d2Yaml))
-	g.Expect(err).To(BeNil())
+	g.Expect(err).ToNot(HaveOccurred())
 
-	g.Expect(json.Unmarshal([]byte(d1Json), &d1)).Should(Succeed())
-	g.Expect(json.Unmarshal([]byte(d2Json), &d2)).Should(Succeed())
+	g.Expect(json.Unmarshal(d1Json, &d1)).Should(Succeed())
+	g.Expect(json.Unmarshal(d2Json, &d2)).Should(Succeed())
 
 	g.Expect(d1.EqualsIgnoringSorting(d2)).To(BeTrue())
 }
@@ -108,7 +108,7 @@ network:
           via: 100.107.13.254
 `
 	s1, err := NewState(s1Yaml)
-	g.Expect(err).To(BeNil())
+	g.Expect(err).ToNot(HaveOccurred())
 	s2Yaml := `
 network:
   bonds:
@@ -122,7 +122,7 @@ network:
           via: 128.0.0.7
 `
 	s2, err := NewState(s2Yaml)
-	g.Expect(err).To(BeNil())
+	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(s1.Merge(&s2)).Should(Succeed())
 
 	expectedBondDeviceYaml := `
@@ -145,8 +145,8 @@ routes:
 	var expectedVlanDevice Device
 	g.Expect(yaml.Unmarshal([]byte(expectedVlanDeviceYaml), &expectedVlanDevice)).Should(Succeed())
 	g.Expect(s1.Network.VLans["bond0.151"].EqualsIgnoringSorting(expectedVlanDevice)).To(BeTrue())
-
 }
+
 func TestMergeDeduplication(t *testing.T) {
 	g := NewWithT(t)
 
@@ -161,7 +161,7 @@ network:
           - 10.235.119.38
 `
 	s1, err := NewState(s1Yaml)
-	g.Expect(err).To(BeNil())
+	g.Expect(err).ToNot(HaveOccurred())
 	s2Yaml := `
 network:
   ethernets:
@@ -174,7 +174,7 @@ network:
         - 10.235.119.39
 `
 	s2, err := NewState(s2Yaml)
-	g.Expect(err).To(BeNil())
+	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(s1.Merge(&s2)).Should(Succeed())
 
 	expectedEthDeviceYaml := `

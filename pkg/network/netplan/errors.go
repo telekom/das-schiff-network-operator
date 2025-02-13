@@ -7,7 +7,7 @@ import (
 )
 
 var (
-	discardUnknownObjectRegex, _ = regexp.Compile(`^Unknown object '(.+)'$`)
+	discardUnknownObjectRegex = regexp.MustCompile(`^Unknown object '(.+)'$`)
 )
 
 type Error interface {
@@ -21,7 +21,7 @@ type UnknownError struct {
 func (e UnknownError) Error() string {
 	return e.Err.Error()
 }
-func (e UnknownError) ShouldRetry() bool {
+func (UnknownError) ShouldRetry() bool {
 	return true
 }
 
@@ -48,7 +48,7 @@ type OvsTimeoutError struct {
 func (e OvsTimeoutError) Error() string {
 	return fmt.Sprintf("ovs-vsctl timeout error: %v", e.Err)
 }
-func (e OvsTimeoutError) ShouldRetry() bool {
+func (OvsTimeoutError) ShouldRetry() bool {
 	return true
 }
 
@@ -75,7 +75,7 @@ type UnkownObjectError struct {
 func (e UnkownObjectError) Error() string {
 	return fmt.Sprintf("unknown object with path %s", e.Path)
 }
-func (e UnkownObjectError) ShouldRetry() bool {
+func (UnkownObjectError) ShouldRetry() bool {
 	return true
 }
 
@@ -86,13 +86,13 @@ type InvalidConfigurationError struct {
 func (e InvalidConfigurationError) Error() string {
 	return fmt.Sprintf("invalid netplan configuration. err: %s", e.Err)
 }
-func (e InvalidConfigurationError) ShouldRetry() bool {
+func (InvalidConfigurationError) ShouldRetry() bool {
 	return false
 }
 
 type ConfigurationInvalidatedError struct{}
 
-func (e ConfigurationInvalidatedError) ShouldRetry() bool {
+func (ConfigurationInvalidatedError) ShouldRetry() bool {
 	return true
 }
 
@@ -119,13 +119,13 @@ func ParseError(err error) Error {
 			result.Path = matches[1]
 		}
 		return result
-	case regexp.MustCompile("Job for netplan-ovs-.+.service failed because a timeout was exceeded").Match([]byte(msg)):
+	case regexp.MustCompile("Job for netplan-ovs-.+.service failed because a timeout was exceeded").MatchString(msg):
 		return OvsTimeoutError{Err: err}
 	}
 
 	return UnknownError{Err: err}
 }
-func (e ConfigurationInvalidatedError) Error() string {
+func (ConfigurationInvalidatedError) Error() string {
 	return "netplan configuration was invalidated"
 }
 func IsUnknownError(err Error) bool {

@@ -1,16 +1,19 @@
 package dbus
 
+//nolint:godot
 // import (
 // 	"fmt"
 // 	"testing"
 // 	"time"
 
+//nolint:godot
 // 	. "github.com/onsi/gomega"
 // 	"github.com/sirupsen/logrus"
 // 	"github.com/telekom/das-schiff-network-operator/pkg/network/netplan"
 // 	k8syaml "sigs.k8s.io/yaml"
 // )
 
+//nolint:godot
 // func init() {
 // 	logrus.SetLevel(logrus.DebugLevel)
 // }
@@ -23,6 +26,7 @@ package dbus
 // 	g.Expect(res).To(Not(BeEmpty()))
 // }
 
+//nolint:godot
 // func TestConfigApplySimpleValid(t *testing.T) {
 // 	g := NewGomegaWithT(t)
 // 	client, err := New()
@@ -40,6 +44,7 @@ package dbus
 // 	g.Expect(err).To(Equal(expectedErr))
 // }
 
+//nolint:godot
 // func TestConfigApplyInvalidIP(t *testing.T) {
 // 	g := NewGomegaWithT(t)
 // 	client, err := New()
@@ -62,6 +67,7 @@ package dbus
 // `)
 // 	g.Expect(err).NotTo(HaveOccurred())
 
+//nolint:godot
 // 	err = client.Apply("hint", state, time.Second, func() error { return nil })
 // 	g.Expect(err).To(Not(BeNil()))
 // 	g.Expect(err.Error()).Should(ContainSubstring("invalid IPv4"))
@@ -110,6 +116,7 @@ package dbus
 // 	g.Expect(res).To(Not(BeEmpty()))
 // }
 
+//nolint:godot
 // func TestConfigApply(t *testing.T) {
 // 	g := NewGomegaWithT(t)
 // 	client, err := New()
@@ -136,6 +143,7 @@ package dbus
 // 	}
 // 	raw, _ := k8syaml.Marshal(ethtest)
 
+//nolint:godot
 // 	newState.Network.Ethernets["ethtest"] = netplan.Device{
 // 		Raw: raw,
 // 	}
@@ -167,7 +175,7 @@ package dbus
 //       parameters:
 //           mode: balance-rr
 //           mii-monitor-interval: 1
-//           gratuitious-arp: 5
+//           gratuitous-arp: 5
 //           fail-over-mac-policy: active
 //           primary: ens33
 //   bridges:
@@ -185,6 +193,7 @@ package dbus
 // 	logrus.Infof("rollbacking changes using previous state")
 // 	g.Expect(client.Apply("bridge-br2", currentState, time.Second*15, probeFn)).NotTo(HaveOccurred())
 
+//nolint:godot
 // }
 // func TestConfigEthernetsApply(t *testing.T) {
 // 	g := NewGomegaWithT(t)
@@ -208,7 +217,7 @@ package dbus
 //       parameters:
 //           mode: balance-rr
 //           mii-monitor-interval: 1
-//           gratuitious-arp: 5
+//           gratuitous-arp: 5
 //           fail-over-mac-policy: active
 //           primary: ens33
 // `)
@@ -219,6 +228,7 @@ package dbus
 // 	g.Expect(client.Apply("eths", state, time.Second*15, probeFn)).NotTo(HaveOccurred())
 // 	logrus.Infof("rollbacking changes using previous state")
 
+//nolint:godot
 // 	undostate, err := netplan.NewState(`
 // network:
 //   version: 2
@@ -227,4 +237,5 @@ package dbus
 // 	g.Expect(err).NotTo(HaveOccurred())
 // 	g.Expect(client.Apply("eths", undostate, time.Second*15, probeFn)).NotTo(HaveOccurred())
 
+//nolint:godot
 // }

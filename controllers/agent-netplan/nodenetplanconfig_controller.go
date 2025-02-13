@@ -14,18 +14,18 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package agent_netplan
+package agent_netplan //nolint:revive
 
 import (
 	"context"
 	"fmt"
-	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/agent-netplan"
 	"os"
 	"strings"
 	"time"
 
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
+	agentnetplan "github.com/telekom/das-schiff-network-operator/pkg/reconciler/agent-netplan"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -42,7 +42,7 @@ type NodeNetplanConfigReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 
-	Reconciler *agent_netplan.NodeNetplanConfigReconciler
+	Reconciler *agentnetplan.NodeNetplanConfigReconciler
 }
 
 //+kubebuilder:rbac:groups=network.t-caas.telekom.com,resources=nodenetplanconfigs,verbs=get;list;watch;create;update;patch;delete

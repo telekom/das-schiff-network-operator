@@ -2,6 +2,7 @@ package merge
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 
@@ -14,7 +15,6 @@ type (
 	// they're represented like this.
 	mapping  = map[interface{}]interface{}
 	sequence = []interface{}
-	scalar   = interface{}
 )
 
 // YAML deep-merges any number of YAML sources, with later sources taking
@@ -44,12 +44,12 @@ func YAML(sources [][]byte, strict bool) (*bytes.Buffer, error) {
 		d.SetStrict(strict)
 
 		var contents interface{}
-		if err := d.Decode(&contents); err == io.EOF {
+		if err := d.Decode(&contents); errors.Is(err, io.EOF) {
 			// Skip empty and comment-only sources, which we should handle
 			// differently from explicit nils.
 			continue
 		} else if err != nil {
-			return nil, fmt.Errorf("couldn't decode source: %v", err)
+			return nil, fmt.Errorf("couldn't decode source: %w", err)
 		}
 
 		hasContent = true
@@ -68,7 +68,7 @@ func YAML(sources [][]byte, strict bool) (*bytes.Buffer, error) {
 	}
 	enc := yaml.NewEncoder(buf)
 	if err := enc.Encode(merged); err != nil {
-		return nil, fmt.Errorf("couldn't re-serialize merged YAML: %v", err)
+		return nil, fmt.Errorf("couldn't re-serialize merged YAML: %w", err)
 	}
 	return buf, nil
 }
@@ -89,7 +89,7 @@ func merge(into, from interface{}, strict bool) (interface{}, error) {
 		return from, nil
 	}
 	if IsSequence(into) && IsSequence(from) {
-		return mergeSequence(into.(sequence), from.(sequence), strict)
+		return mergeSequence(into.(sequence), from.(sequence)), nil
 	}
 	if IsMapping(into) && IsMapping(from) {
 		return mergeMapping(into.(mapping), from.(mapping), strict)
@@ -117,16 +117,14 @@ func mergeMapping(into, from mapping, strict bool) (mapping, error) {
 	}
 	return merged, nil
 }
-func mergeSequence(into, from sequence, strict bool) (sequence, error) {
+func mergeSequence(into, from sequence) sequence {
 	merged := make(sequence, len(into)+len(from))
-	for k, v := range into {
-		merged[k] = v
-	}
+	copy(merged, into)
 	for k := range from {
 		merged[k+len(into)] = from[k]
 	}
 
-	return slice.Deduplicate(merged), nil
+	return slice.Deduplicate(merged)
 }
 
 // IsMapping reports whether a type is a mapping in YAML, represented as a
