@@ -322,7 +322,7 @@ func validateVNI(vni string) error {
 		return fmt.Errorf("VNI cannot be paresd to int: %w", err)
 	}
 
-	if uint(value) > uint(1<<vniBitLength) {
+	if uint(value) > uint(1<<vniBitLength) { //nolint:gosec
 		return fmt.Errorf("VNI is not a valid 24-bit number")
 	}
 

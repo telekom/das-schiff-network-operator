@@ -46,19 +46,19 @@ type Opts struct {
 func New(hint string, mode Mode, opts *Opts) (Client, error) {
 	switch mode {
 	case ClientModeDBus:
-		if client, err := dbus.New(hint, opts.InitialHints, opts.DbusOpts); err != nil {
+		client, err := dbus.New(hint, opts.InitialHints, opts.DbusOpts)
+		if err != nil {
 			return nil, fmt.Errorf("failed to create new dbus client: %w", err)
-		} else {
-			return client, nil
 		}
+		return client, nil
 	// case ClientModeDirect:
 	// return direct.New(opts.DirectClientOpts), nil
 	case ClientModeDummy:
-		if client, err := dummy.New(hint, opts.InitialHints, opts.DummyOpts); err != nil {
+		client, err := dummy.New(hint, opts.InitialHints, opts.DummyOpts)
+		if err != nil {
 			return nil, fmt.Errorf("failed to create new dummy client: %w", err)
-		} else {
-			return client, nil
 		}
+		return client, nil
 	default:
 		return nil, nil
 	}

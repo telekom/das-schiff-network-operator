@@ -10,7 +10,6 @@ linters:
   - dogsled
   - errcheck
   - errorlint
-  - exportloopref
   - funlen
   - gci
   - ginkgolinter
@@ -20,7 +19,6 @@ linters:
   - gocyclo
   - godot
   - gofmt
-  - gomnd
   - goprintffuncname
   - gosec
   - gosimple
@@ -28,6 +26,7 @@ linters:
   - importas
   - ineffassign
   - misspell
+  - mnd
   - nakedret
   - nilerr
   - noctx
@@ -136,6 +135,8 @@ linters-settings:
         arguments:
           - "fmt.Printf"
       - name: use-any
+        disabled: true
+      - name: use-errors-new
         disabled: true
   funlen:
     lines: 100
