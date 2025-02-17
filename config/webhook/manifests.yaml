@@ -15,7 +15,7 @@ webhooks:
   name: vvrfrouteconfiguration.kb.io
   rules:
   - apiGroups:
-    - network.schiff.telekom.de
+    - network.t-caas.telekom.com
     apiVersions:
     - v1alpha1
     operations:

@@ -1,4 +1,4 @@
-apiVersion: network.schiff.telekom.de/v1alpha1
+apiVersion: network.t-caas.telekom.com/v1alpha1
 kind: RoutingTable
 metadata:
   labels:

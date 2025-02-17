@@ -2,9 +2,8 @@ package nl
 
 import (
 	"fmt"
+	"net"
 	"sort"
-
-	"github.com/telekom/das-schiff-network-operator/pkg/bpf"
 )
 
 const (
@@ -23,6 +22,11 @@ type VRFInformation struct {
 	MarkForDelete bool
 }
 
+type Loopback struct {
+	Name      string
+	Addresses []*net.IPNet
+}
+
 // Create will create a VRF and all interfaces necessary to operate the EVPN and leaking.
 func (n *Manager) CreateL3(info VRFInformation) error {
 	if len(info.Name) > maxVRFnameLen {
@@ -34,33 +38,18 @@ func (n *Manager) CreateL3(info VRFInformation) error {
 	}
 	info.table = freeTableID
 
-	vrf, err := n.createVRF(vrfPrefix+info.Name, info.table)
+	vrf, err := n.createVRF(info.Name, info.table)
 	if err != nil {
 		return err
 	}
 
-	bridge, err := n.createBridge(bridgePrefix+info.Name, nil, vrf.Attrs().Index, defaultMtu, true, false)
+	bridge, err := n.createBridge(bridgePrefix+info.Name, nil, vrf.Attrs().Index, DefaultMtu, true, false)
 	if err != nil {
 		return err
-	}
-	if err := bpf.AttachToInterface(bridge); err != nil {
-		return fmt.Errorf("error attaching BPF: %w", err)
 	}
 
-	veth, err := n.createLink(vrfToDefaultPrefix+info.Name, defaultToVrfPrefix+info.Name, vrf.Attrs().Index, info.linkMTU(), true)
-	if err != nil {
+	if _, err := n.createVXLAN(vxlanPrefix+info.Name, bridge.Attrs().Index, info.VNI, DefaultMtu, true, false); err != nil {
 		return err
-	}
-	if err := bpf.AttachToInterface(veth); err != nil {
-		return fmt.Errorf("error attaching BPF: %w", err)
-	}
-
-	vxlan, err := n.createVXLAN(vxlanPrefix+info.Name, bridge.Attrs().Index, info.VNI, defaultMtu, true, false)
-	if err != nil {
-		return err
-	}
-	if err := bpf.AttachToInterface(vxlan); err != nil {
-		return fmt.Errorf("error attaching BPF: %w", err)
 	}
 
 	return nil
@@ -71,12 +60,6 @@ func (n *Manager) UpL3(info VRFInformation) error {
 	if err := n.setUp(bridgePrefix + info.Name); err != nil {
 		return err
 	}
-	if err := n.setUp(vrfToDefaultPrefix + info.Name); err != nil {
-		return err
-	}
-	if err := n.setUp(defaultToVrfPrefix + info.Name); err != nil {
-		return err
-	}
 	if err := n.setUp(vxlanPrefix + info.Name); err != nil {
 		return err
 	}
@@ -85,6 +68,10 @@ func (n *Manager) UpL3(info VRFInformation) error {
 
 // Cleanup will try to delete all interfaces associated with this VRF and return a list of errors (for logging) as a slice.
 func (n *Manager) CleanupL3(name string) []error {
+	if n.baseConfig.ClusterVRF.Name == name || n.baseConfig.ManagementVRF.Name == name {
+		return []error{fmt.Errorf("can not delete cluster or management VRF %s", name)}
+	}
+
 	errors := []error{}
 	err := n.deleteLink(vxlanPrefix + name)
 	if err != nil {
@@ -94,11 +81,7 @@ func (n *Manager) CleanupL3(name string) []error {
 	if err != nil {
 		errors = append(errors, err)
 	}
-	err = n.deleteLink(vrfToDefaultPrefix + name)
-	if err != nil {
-		errors = append(errors, err)
-	}
-	err = n.deleteLink(vrfPrefix + name)
+	err = n.deleteLink(name)
 	if err != nil {
 		errors = append(errors, err)
 	}
@@ -130,67 +113,31 @@ func (n *Manager) findFreeTableID() (int, error) {
 	return freeTableID, nil
 }
 
-func (n *Manager) GetL3ByName(name string) (*VRFInformation, error) {
+func (n *Manager) GetVRFInterfaceIdxByName(name string) (int, error) {
+	if n.baseConfig.ClusterVRF.Name == name || n.baseConfig.ManagementVRF.Name == name {
+		intf, err := n.toolkit.LinkByName(name)
+		if err != nil {
+			return -1, fmt.Errorf("cluster or mangement VRF %s not found", name)
+		}
+		return intf.Attrs().Index, nil
+	}
+
 	list, err := n.ListL3()
 	if err != nil {
-		return nil, err
+		return -1, err
 	}
 	for _, info := range list {
 		if info.Name == name {
-			return &info, nil
+			return info.vrfID, nil
 		}
 	}
-	return nil, fmt.Errorf("no VRF with name %s", name)
+	return -1, fmt.Errorf("no VRF with name %s", name)
 }
 
-func (n *Manager) EnsureBPFProgram(info VRFInformation) error {
-	if link, err := n.toolkit.LinkByName(bridgePrefix + info.Name); err != nil {
-		return fmt.Errorf("error getting bridge interface of vrf %s: %w", info.Name, err)
-	} else if err := bpf.AttachToInterface(link); err != nil {
-		return fmt.Errorf("error attaching bpf program to bridge interface of vrf %s: %w", info.Name, err)
-	}
-
-	if link, err := n.toolkit.LinkByName(vrfToDefaultPrefix + info.Name); err != nil {
-		return fmt.Errorf("error getting vrf2default interface of vrf %s: %w", info.Name, err)
-	} else if err := bpf.AttachToInterface(link); err != nil {
-		return fmt.Errorf("error attaching bpf program to vrf2default interface of vrf %s: %w", info.Name, err)
-	}
-
-	if link, err := n.toolkit.LinkByName(vxlanPrefix + info.Name); err != nil {
-		return fmt.Errorf("error getting vxlan interface of vrf %s: %w", info.Name, err)
-	} else if err := bpf.AttachToInterface(link); err != nil {
-		return fmt.Errorf("error attaching bpf program to vxlan interface of vrf %s: %w", info.Name, err)
-	}
-
-	return nil
-}
-
+//nolint:unused
 func (info VRFInformation) linkMTU() int {
 	if info.MTU == 0 {
-		return defaultMtu
+		return DefaultMtu
 	}
 	return info.MTU
-}
-
-func (n *Manager) EnsureMTU(info VRFInformation) error {
-	link, err := n.toolkit.LinkByName(vrfToDefaultPrefix + info.Name)
-	if err != nil {
-		return fmt.Errorf("error getting vrf2default interface of vrf %s: %w", info.Name, err)
-	}
-	if link.Attrs().MTU != info.linkMTU() {
-		if err := n.toolkit.LinkSetMTU(link, info.MTU); err != nil {
-			return fmt.Errorf("error setting MTU of vrf2default interface of vrf %s: %w", info.Name, err)
-		}
-	}
-
-	link, err = n.toolkit.LinkByName(defaultToVrfPrefix + info.Name)
-	if err != nil {
-		return fmt.Errorf("error getting default2vrf interface of vrf %s: %w", info.Name, err)
-	}
-	if link.Attrs().MTU != info.linkMTU() {
-		if err := n.toolkit.LinkSetMTU(link, info.linkMTU()); err != nil {
-			return fmt.Errorf("error setting MTU of default2vrw interface of vrf %s: %w", info.Name, err)
-		}
-	}
-	return nil
 }

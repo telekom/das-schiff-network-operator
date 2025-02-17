@@ -69,9 +69,8 @@ func (n *Manager) ListNeighborInterfaces() (map[int]netlink.Link, error) {
 	}
 
 	for _, link := range links {
-		if strings.HasPrefix(link.Attrs().Name, vethL2Prefix) ||
-			strings.HasPrefix(link.Attrs().Name, macvlanPrefix) ||
-			strings.HasPrefix(link.Attrs().Name, layer2Prefix) ||
+		if strings.HasPrefix(link.Attrs().Name, vlanPrefix) ||
+			strings.HasPrefix(link.Attrs().Name, layer2SVI) ||
 			link.Attrs().Vfs != nil {
 			neighborLinks[link.Attrs().Index] = link
 		}
@@ -88,7 +87,12 @@ func (n *Manager) ListL3() ([]VRFInformation, error) {
 	}
 
 	for _, link := range links {
-		if !(link.Type() == "vrf" && strings.HasPrefix(link.Attrs().Name, vrfPrefix)) {
+		if !(link.Type() == "vrf") {
+			continue
+		}
+		name := link.Attrs().Name
+		// We do not want to list the cluster or management VRF
+		if n.baseConfig.ClusterVRF.Name == name || n.baseConfig.ManagementVRF.Name == name {
 			continue
 		}
 		vrf, ok := link.(*netlink.Vrf)
@@ -97,7 +101,7 @@ func (n *Manager) ListL3() ([]VRFInformation, error) {
 		}
 		info := VRFInformation{}
 		info.table = int(vrf.Table)
-		info.Name = link.Attrs().Name[3:]
+		info.Name = name
 		info.vrfID = vrf.Attrs().Index
 
 		n.updateL3Indices(&info)
@@ -118,12 +122,6 @@ func (n *Manager) updateL3Indices(info *VRFInformation) {
 	vxlanLink, err := n.toolkit.LinkByName(vxlanPrefix + info.Name)
 	if err == nil {
 		info.VNI = vxlanLink.(*netlink.Vxlan).VxlanId
-	} else {
-		info.MarkForDelete = true
-	}
-	vethLink, err := n.toolkit.LinkByName(vrfToDefaultPrefix + info.Name)
-	if err == nil {
-		info.MTU = vethLink.Attrs().MTU
 	} else {
 		info.MarkForDelete = true
 	}
@@ -154,18 +152,18 @@ func (n *Manager) updateL2Indices(info *Layer2Information, links []netlink.Link)
 		if addr.Scope != unix.RT_SCOPE_UNIVERSE {
 			continue
 		}
-		info.AnycastGateways = append(info.AnycastGateways, &currentV4[i])
+		info.AnycastGateways = append(info.AnycastGateways, currentV4[i].IPNet.String())
 	}
 	for i, addr := range currentV6 {
 		if addr.Scope != unix.RT_SCOPE_UNIVERSE {
 			continue
 		}
-		info.AnycastGateways = append(info.AnycastGateways, &currentV6[i])
+		info.AnycastGateways = append(info.AnycastGateways, currentV6[i].IPNet.String())
 	}
 	return nil
 }
 
-func (n *Manager) updateLink(info *Layer2Information, link netlink.Link) error {
+func (*Manager) updateLink(info *Layer2Information, link netlink.Link) error {
 	// If subinterface is VXLAN
 	if link.Type() == "vxlan" && strings.HasPrefix(link.Attrs().Name, vxlanPrefix) {
 		vxlan, ok := link.(*netlink.Vxlan)
@@ -176,27 +174,13 @@ func (n *Manager) updateLink(info *Layer2Information, link netlink.Link) error {
 		info.VNI = info.vxlan.VxlanId
 	}
 
-	// If subinterface is VETH
-	if link.Type() == "veth" && strings.HasPrefix(link.Attrs().Name, vethL2Prefix) {
-		macvlanBridge, ok := link.(*netlink.Veth)
+	// If subinterface is VLAN
+	if link.Type() == "vlan" && strings.HasPrefix(link.Attrs().Name, vlanPrefix) {
+		vlanInterface, ok := link.(*netlink.Vlan)
 		if !ok {
 			return fmt.Errorf("error casting link %v as netlink.Veth", link)
 		}
-		info.macvlanBridge = macvlanBridge
-		peerIdx, err := n.toolkit.VethPeerIndex(info.macvlanBridge)
-		if err != nil {
-			return fmt.Errorf("error getting veth perr by index: %w", err)
-		}
-		peerInterface, err := n.toolkit.LinkByIndex(peerIdx)
-		if err != nil {
-			return fmt.Errorf("error getting link by index: %w", err)
-		}
-		macvlanHost, ok := peerInterface.(*netlink.Veth)
-		if !ok {
-			return fmt.Errorf("error casting link %v as netlink.Veth", link)
-		}
-		info.macvlanHost = macvlanHost
-		info.CreateMACVLANInterface = true
+		info.vlanInterface = vlanInterface
 	}
 
 	return nil
@@ -211,7 +195,7 @@ func (n *Manager) ListL2() ([]Layer2Information, error) {
 	}
 
 	for _, link := range links {
-		if !(link.Type() == "bridge" && strings.HasPrefix(link.Attrs().Name, layer2Prefix)) {
+		if !(link.Type() == "bridge" && strings.HasPrefix(link.Attrs().Name, layer2SVI)) {
 			continue
 		}
 		info := Layer2Information{}
@@ -221,7 +205,8 @@ func (n *Manager) ListL2() ([]Layer2Information, error) {
 			return nil, fmt.Errorf("cannot cast link %v as netlink.Bridge", link)
 		}
 		info.bridge = bridge
-		info.AnycastMAC = &info.bridge.HardwareAddr
+		mac := info.bridge.HardwareAddr.String()
+		info.AnycastMAC = &mac
 		info.MTU = info.bridge.MTU
 		vlanID, err := strconv.Atoi(info.bridge.Name[3:])
 		if err != nil {
@@ -235,37 +220,13 @@ func (n *Manager) ListL2() ([]Layer2Information, error) {
 				return nil, fmt.Errorf("error getting link by index: %w", err)
 			}
 			if vrf.Type() == "vrf" {
-				info.VRF = vrf.Attrs().Name[3:]
+				info.VRF = vrf.Attrs().Name
 			}
 		}
 
 		err = n.updateL2Indices(&info, links)
 		if err != nil {
 			return nil, err
-		}
-
-		infos = append(infos, info)
-	}
-
-	return infos, nil
-}
-
-func (*Manager) ListTaas() ([]TaasInformation, error) {
-	infos := []TaasInformation{}
-
-	links, err := netlink.LinkList()
-	if err != nil {
-		return nil, fmt.Errorf("error listing links: %w", err)
-	}
-
-	for _, link := range links {
-		if !(link.Type() == "vrf" && strings.HasPrefix(link.Attrs().Name, taasVrfPrefix)) {
-			continue
-		}
-
-		info := TaasInformation{
-			Name:  link.Attrs().Name,
-			Table: int(link.(*netlink.Vrf).Table),
 		}
 
 		infos = append(infos, info)

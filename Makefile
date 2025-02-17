@@ -1,8 +1,6 @@
 
 # Image URL to use all building/pushing image targets
 IMG ?= ghcr.io/telekom/das-schiff-network-operator:latest
-# Sidecar image URL to use all building/pushing image targets
-SIDECAR_IMG ?= ghcr.io/telekom/frr-exporter:latest
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 ENVTEST_K8S_VERSION = 1.25
 
@@ -43,16 +41,12 @@ help: ## Display this help.
 
 ##@ DevelopmentLDFLAGS := $(shell hack/version.sh)
 
-.PHONY: bpf-generate
-bpf-generate: ## Run go generate for the BPF program (builds it as well)
-	cd pkg/bpf/ && go generate
-
 .PHONY: manifests
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
 	$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
 
 .PHONY: generate
-generate: controller-gen bpf-generate ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
+generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
 	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./..."
 
 .PHONY: fmt
@@ -71,23 +65,15 @@ test: manifests generate fmt vet envtest ## Run tests.
 
 .PHONY: build
 build: generate fmt vet ## Build manager binary.
-	go build -ldflags "$(LDFLAGS)" -o bin/manager cmd/manager/main.go
-
-.PHONY: sidecar-build
-sidecar-build: build
-	go build -ldflags "$(LDFLAGS)" -o bin/frr-exporter cmd/frr-exporter/main.go
+	go build -ldflags "$(LDFLAGS)" -o bin/manager cmd/operator/main.go
 
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
-	go run -ldflags "$(LDFLAGS)" ./cmd/manager/main.go
+	go run -ldflags "$(LDFLAGS)" ./cmd/operator/main.go
 
 .PHONY: docker-build
 docker-build: #test ## Build docker image with the manager.
-	docker build --build-arg ldflags="$(LDFLAGS)" -t ${IMG} .
-
-.PHONY: docker-build-sidecar
-docker-build-sidecar: test ## Build docker image with the manager.
-	docker build --build-arg ldflags="$(LDFLAGS)" -t ${SIDECAR_IMG} -f frr-exporter.Dockerfile .
+	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-network-operator.Dockerfile -t ${IMG} .
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
@@ -136,7 +122,6 @@ uninstall-certs: manifests kustomize ## Uninstall certs
 .PHONY: deploy
 deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
-	cd config/manager && $(KUSTOMIZE) edit set image frr-exporter=${SIDECAR_IMG}
 	$(KUSTOMIZE) build config/default | kubectl apply -f -
 
 .PHONY: undeploy

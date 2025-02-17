@@ -1,0 +1,12 @@
+apiVersion: network.t-caas.telekom.com/v1alpha1
+kind: HBRConfig
+metadata:
+  labels:
+    app.kubernetes.io/name: hbrconfig
+    app.kubernetes.io/instance: hbrconfig-sample
+    app.kubernetes.io/part-of: network-operator
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/created-by: network-operator
+  name: hbrconfig-sample
+spec:
+  # TODO(user): Add fields here

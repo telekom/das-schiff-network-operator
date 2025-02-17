@@ -1,0 +1,6 @@
+health:
+  healthProbeBindAddress: :7085
+metrics:
+  bindAddress: :7084
+webhook:
+  port: 7443
