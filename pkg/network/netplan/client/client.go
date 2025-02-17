@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"time"
 
+	dbusv5 "github.com/godbus/dbus/v5"
+	"github.com/sirupsen/logrus"
 	"github.com/telekom/das-schiff-network-operator/pkg/network/netplan"
 	"github.com/telekom/das-schiff-network-operator/pkg/network/netplan/client/dbus"
 	"github.com/telekom/das-schiff-network-operator/pkg/network/netplan/client/direct"
@@ -46,7 +48,13 @@ type Opts struct {
 func New(hint string, mode Mode, opts *Opts) (Client, error) {
 	switch mode {
 	case ClientModeDBus:
-		client, err := dbus.New(hint, opts.InitialHints, opts.DbusOpts)
+		logrus.Infof("dialing with dbus using address %s", opts.DbusOpts.SocketPath)
+		dbusConn, err := dbusv5.Dial(opts.DbusOpts.SocketPath)
+		if err != nil {
+			logrus.Errorf("error dialing connection with dbus using %s. err: %s", opts.DbusOpts.SocketPath, err)
+			return nil, fmt.Errorf("error dialing connection with dbus using %s. err: %w", opts.DbusOpts.SocketPath, err)
+		}
+		client, err := dbus.New(hint, opts.InitialHints, opts.DbusOpts, dbusConn)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create new dbus client: %w", err)
 		}

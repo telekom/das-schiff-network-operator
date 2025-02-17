@@ -24,27 +24,21 @@ const (
 type Client struct {
 	hint         string
 	initialHints []string
-	conn         *dbus.Conn
+	conn         IConn
 	netManager   net.Manager
 	logger       *logrus.Logger
 }
 
-func New(hint string, initialHints []string, opts Opts) (*Client, error) {
-	logrus.Infof("dialing with dbus using address %s", opts.SocketPath)
-	dbusConn, err := dbus.Dial(opts.SocketPath)
-	if err != nil {
-		logrus.Errorf("error dialing connection with dbus using %s. err: %s", opts.SocketPath, err)
-		return nil, fmt.Errorf("error dialing connection with dbus using %s. err: %w", opts.SocketPath, err)
-	}
+func New(hint string, initialHints []string, opts Opts, dbusConn IConn) (*Client, error) {
 	if err := dbusConn.Auth(nil); err != nil {
 		logrus.Errorf("error authenticating with dbus. err: %s", err)
-		dbusConn.Close()
+		_ = dbusConn.Close()
 		return nil, fmt.Errorf("error authenticating with dbus. err: %w", err)
 	}
 
 	if err := dbusConn.Hello(); err != nil {
 		logrus.Errorf("error sending Hello message to dbus. err: %s", err)
-		dbusConn.Close()
+		_ = dbusConn.Close()
 		return nil, fmt.Errorf("error sending Hello message to dbus. err: %w", err)
 	}
 	executionLog := logrus.New()
@@ -74,13 +68,15 @@ func New(hint string, initialHints []string, opts Opts) (*Client, error) {
 }
 
 func (client *Client) Close() {
-	client.conn.Close()
+	_ = client.conn.Close()
 	client.conn = nil
 }
+
 func (client *Client) config() (*Config, netplan.Error) {
 	dbusConfig, err := newConfig(client.hint, client.initialHints, client.conn, client.netManager, client.logger)
 	return &dbusConfig, netplan.ParseError(err)
 }
+
 func (client *Client) Initialize() (config.Config, netplan.Error) {
 	cfg, err := client.config()
 	if err != nil {
@@ -88,6 +84,7 @@ func (client *Client) Initialize() (config.Config, netplan.Error) {
 	}
 	return cfg, nil
 }
+
 func (client *Client) Get() (netplan.State, netplan.Error) {
 	tempConfig, err := client.config()
 	if err != nil {

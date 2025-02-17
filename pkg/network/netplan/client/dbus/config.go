@@ -27,14 +27,14 @@ type Config struct {
 	hint         string
 	initialHints []string
 	path         string
-	conn         *dbus.Conn
+	conn         IConn
 	initialState netplan.State
 	log          *logrus.Entry
 	netManager   net.Manager
 	executionLog *logrus.Logger
 }
 
-func newConfig(hint string, initialHints []string, conn *dbus.Conn, netManager net.Manager, executionLog *logrus.Logger) (Config, error) {
+func newConfig(hint string, initialHints []string, conn IConn, netManager net.Manager, executionLog *logrus.Logger) (Config, error) {
 	object := conn.Object(InterfacePath, ObjectPath)
 	executionLog.Infof("busctl --system call io.netplan.Netplan /io/netplan/Netplan io.netplan.Netplan Config")
 	call := object.Call(ConfigCall, 0)
@@ -167,6 +167,7 @@ func (config *Config) apply() netplan.Error {
 	}
 	return nil
 }
+
 func (config *Config) Set(state netplan.State) netplan.Error {
 	var errors []netplan.Error
 	successfullTotalOperations := 0
@@ -242,6 +243,7 @@ func (config *Config) IsSynced() bool {
 	newState, _ := config.Get()
 	return config.initialState.Equals(newState)
 }
+
 func (*Client) Generate() netplan.Error {
 	return nil
 }
