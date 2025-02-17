@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// TestContainsString calls ContainsString with various inputs
+// TestContainsString calls ContainsString with various inputs.
 func TestContainsString(t *testing.T) {
 	var stringSlice = []string{"hello", "my", "name", "is", "Joe", "H!4#fawP_4-?", ""}
 
@@ -37,7 +37,7 @@ func TestContainsString(t *testing.T) {
 	}
 }
 
-// TestRemoveString calls RemoveString with various inputs
+// TestRemoveString calls RemoveString with various inputs.
 func TestRemoveString(t *testing.T) {
 	var stringSlice = []string{"hello", "my", "name", "is", "Joe", "H!4#fawP_4-?", ""}
 

@@ -1,6 +1,7 @@
 package client
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/telekom/das-schiff-network-operator/pkg/network/netplan"
@@ -23,7 +24,7 @@ const (
 	defaultGwProbeTimeout = 120 * time.Second
 	apiServerProbeTimeout = 120 * time.Second
 	// DesiredStateConfigurationTimeout doubles the default gw ping probe and API server
-	// connectivity check timeout to ensure the Checkpoint is alive before rolling it back
+	// connectivity check timeout to ensure the Checkpoint is alive before rolling it back.
 	DesiredStateConfigurationTimeout = (defaultGwProbeTimeout + apiServerProbeTimeout) * 2
 )
 
@@ -42,22 +43,22 @@ type Opts struct {
 	DirectClientOpts direct.Opts
 }
 
-func New(hint string, mode Mode, opts Opts) (Client, error) {
+func New(hint string, mode Mode, opts *Opts) (Client, error) {
 	switch mode {
 	case ClientModeDBus:
-		if client, err := dbus.New(hint, opts.InitialHints, opts.DbusOpts); err != nil {
-			return nil, err
-		} else {
-			return client, nil
+		client, err := dbus.New(hint, opts.InitialHints, opts.DbusOpts)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create new dbus client: %w", err)
 		}
+		return client, nil
 	// case ClientModeDirect:
 	// return direct.New(opts.DirectClientOpts), nil
 	case ClientModeDummy:
-		if client, err := dummy.New(hint, opts.InitialHints, opts.DummyOpts); err != nil {
-			return nil, err
-		} else {
-			return client, nil
+		client, err := dummy.New(hint, opts.InitialHints, opts.DummyOpts)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create new dummy client: %w", err)
 		}
+		return client, nil
 	default:
 		return nil, nil
 	}

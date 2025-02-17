@@ -108,11 +108,11 @@ func (n *Manager) ParseIPAddresses(addresses []string) ([]*netlink.Addr, error) 
 func (n *Manager) CreateL2(info *Layer2Information) error {
 	masterIdx := -1
 	if info.VRF != "" {
-		vrfId, err := n.GetVRFInterfaceIdxByName(info.VRF)
+		vrfID, err := n.GetVRFInterfaceIdxByName(info.VRF)
 		if err != nil {
 			return err
 		}
-		masterIdx = vrfId
+		masterIdx = vrfID
 	}
 
 	if len(info.AnycastGateways) > 0 && info.AnycastMAC == nil {
@@ -155,6 +155,9 @@ func (n *Manager) setupBridge(info *Layer2Information, masterIdx int) (*netlink.
 	// Wait 500ms before configuring anycast gateways on newly added interface
 	time.Sleep(interfaceConfigTimeout)
 	anycastGateways, err := n.ParseIPAddresses(info.AnycastGateways)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse addresses: %w", err)
+	}
 	for _, addr := range anycastGateways {
 		err = n.toolkit.AddrAdd(bridge, addr)
 		if err != nil {
@@ -414,11 +417,11 @@ func (n *Manager) isL2VNIreattachRequired(current, desired *Layer2Information) (
 	if current.VRF != desired.VRF {
 		shouldReattachL2VNI = true
 		if desired.VRF != "" {
-			vrfId, err := n.GetVRFInterfaceIdxByName(desired.VRF)
+			vrfID, err := n.GetVRFInterfaceIdxByName(desired.VRF)
 			if err != nil {
 				return shouldReattachL2VNI, fmt.Errorf("error while getting L3 by name: %w", err)
 			}
-			if err := n.toolkit.LinkSetMasterByIndex(current.bridge, vrfId); err != nil {
+			if err := n.toolkit.LinkSetMasterByIndex(current.bridge, vrfID); err != nil {
 				return shouldReattachL2VNI, fmt.Errorf("error while setting master by index: %w", err)
 			}
 		} else {

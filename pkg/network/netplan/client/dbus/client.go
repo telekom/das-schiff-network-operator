@@ -1,6 +1,8 @@
 package dbus
 
 import (
+	"fmt"
+
 	"github.com/godbus/dbus/v5"
 	"github.com/sirupsen/logrus"
 	"github.com/telekom/das-schiff-network-operator/pkg/network/net"
@@ -32,18 +34,18 @@ func New(hint string, initialHints []string, opts Opts) (*Client, error) {
 	dbusConn, err := dbus.Dial(opts.SocketPath)
 	if err != nil {
 		logrus.Errorf("error dialing connection with dbus using %s. err: %s", opts.SocketPath, err)
-		return nil, err
+		return nil, fmt.Errorf("error dialing connection with dbus using %s. err: %w", opts.SocketPath, err)
 	}
 	if err := dbusConn.Auth(nil); err != nil {
 		logrus.Errorf("error authenticating with dbus. err: %s", err)
 		dbusConn.Close()
-		return nil, err
+		return nil, fmt.Errorf("error authenticating with dbus. err: %w", err)
 	}
 
 	if err := dbusConn.Hello(); err != nil {
 		logrus.Errorf("error sending Hello message to dbus. err: %s", err)
 		dbusConn.Close()
-		return nil, err
+		return nil, fmt.Errorf("error sending Hello message to dbus. err: %w", err)
 	}
 	executionLog := logrus.New()
 	executionLog.SetFormatter(&logrus.TextFormatter{DisableColors: true, DisableQuote: true})
@@ -57,13 +59,12 @@ func New(hint string, initialHints []string, opts Opts) (*Client, error) {
 	}
 
 	if opts.ExecutionLogPath != "" {
-
 		lumberjackLogger := &lumberjack.Logger{
 			// Log file abbsolute path, os agnostic
 			Filename:   opts.ExecutionLogPath,
-			MaxSize:    1, // MB
-			MaxBackups: 10,
-			MaxAge:     7,    // days
+			MaxSize:    1,    // MB //nolint:mnd
+			MaxBackups: 10,   //nolint:mnd
+			MaxAge:     7,    //nolint:mnd // days
 			Compress:   true, // disabled by default
 		}
 		client.logger.SetOutput(lumberjackLogger)
@@ -76,35 +77,40 @@ func (client *Client) Close() {
 	client.conn.Close()
 	client.conn = nil
 }
-func (client *Client) config() (*DBusConfig, netplan.Error) {
+func (client *Client) config() (*Config, netplan.Error) {
 	dbusConfig, err := newConfig(client.hint, client.initialHints, client.conn, client.netManager, client.logger)
 	return &dbusConfig, netplan.ParseError(err)
 }
 func (client *Client) Initialize() (config.Config, netplan.Error) {
-	if config, err := client.config(); err != nil {
-		return config, err
-	} else {
-		return config, nil
+	cfg, err := client.config()
+	if err != nil {
+		return cfg, err
 	}
+	return cfg, nil
 }
 func (client *Client) Get() (netplan.State, netplan.Error) {
-	if tempConfig, err := client.config(); err != nil {
+	tempConfig, err := client.config()
+	if err != nil {
 		return netplan.State{}, err
-	} else {
-		if err := tempConfig.Discard(); err != nil {
-			return netplan.State{}, err
-		}
-		return tempConfig.initialState, nil
 	}
+	if err := tempConfig.Discard(); err != nil {
+		return netplan.State{}, err
+	}
+	return tempConfig.initialState, nil
 }
 
 type featuresVariantType [][]interface{}
 
-func (fvt featuresVariantType) getFeatures() []string {
-	resultVariant := fvt[0][1].(dbus.Variant)
+func (fvt featuresVariantType) getFeatures() ([]string, error) {
+	resultVariant, ok := fvt[0][1].(dbus.Variant)
+	if !ok {
+		return nil, fmt.Errorf("failed to cast feature %v to dbus Variant", fvt[0][1])
+	}
 	var result []string
-	resultVariant.Store(&result)
-	return result
+	if err := resultVariant.Store(&result); err != nil {
+		return nil, fmt.Errorf("failed to store variant in the result: %w", err)
+	}
+	return result, nil
 }
 
 func (client *Client) Info() ([]string, netplan.Error) {
@@ -122,5 +128,9 @@ func (client *Client) Info() ([]string, netplan.Error) {
 	if err := result.Store(&featuresVariant); err != nil {
 		return nil, netplan.ParseError(err)
 	}
-	return featuresVariant.getFeatures(), nil
+	fv, err := featuresVariant.getFeatures()
+	if err != nil {
+		return nil, netplan.ParseError(err)
+	}
+	return fv, nil
 }

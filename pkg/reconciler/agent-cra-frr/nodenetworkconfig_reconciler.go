@@ -1,10 +1,12 @@
-package agent_cra_frr
+package agent_cra_frr //nolint:revive
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+
 	"github.com/go-logr/logr"
 	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/pkg/config"
@@ -15,7 +17,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"os"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -149,7 +150,7 @@ func (r *reconcileNodeNetworkConfig) processConfig(ctx context.Context, cfg *v1a
 	}
 
 	// reconcile NodeNetworkConfig
-	if err := r.doReconciliation(cfg); err != nil {
+	if err := r.doReconciliation(ctx, cfg); err != nil {
 		// if reconciliation failed set NodeNetworkConfig's status as invalid and restore last known working NodeNetworkConfig
 		if err := r.invalidateAndRestore(ctx, cfg, "reconciliation failed"); err != nil {
 			return fmt.Errorf("reconciler restoring NodeNetworkConfig: %w", err)
@@ -194,35 +195,35 @@ func (r *reconcileNodeNetworkConfig) invalidateAndRestore(ctx context.Context, c
 
 	// try to restore previously known good NodeNetworkConfig
 	r.logger.Info("restoring previous NodeNetworkConfig")
-	if err := r.restoreNodeNetworkConfig(); err != nil {
+	if err := r.restoreNodeNetworkConfig(ctx); err != nil {
 		return fmt.Errorf("error restoring NodeNetworkConfig: %w", err)
 	}
 
 	return nil
 }
 
-func (r *reconcileNodeNetworkConfig) doReconciliation(nodeCfg *v1alpha1.NodeNetworkConfig) error {
+func (r *reconcileNodeNetworkConfig) doReconciliation(ctx context.Context, nodeCfg *v1alpha1.NodeNetworkConfig) error {
 	r.logger.Info("config to reconcile", "NodeNetworkConfig", *nodeCfg)
 
 	netlinkConfig := ConvertNodeConfigToNetlink(nodeCfg)
 
-	frrConfig, err := r.frrTemplate.TemplateFRR(*r.baseConfig, nodeCfg.Spec)
+	frrConfig, err := r.frrTemplate.TemplateFRR(r.baseConfig, &nodeCfg.Spec)
 	if err != nil {
 		return fmt.Errorf("error templating FRR configuration: %w", err)
 	}
 
-	if err := r.craManager.ApplyConfiguration(&netlinkConfig, frrConfig); err != nil {
+	if err := r.craManager.ApplyConfiguration(ctx, &netlinkConfig, frrConfig); err != nil {
 		return fmt.Errorf("error applying cra configuration: %w", err)
 	}
 
 	return nil
 }
 
-func (r *reconcileNodeNetworkConfig) restoreNodeNetworkConfig() error {
+func (r *reconcileNodeNetworkConfig) restoreNodeNetworkConfig(ctx context.Context) error {
 	if r.NodeNetworkConfig == nil {
 		return nil
 	}
-	if err := r.doReconciliation(r.NodeNetworkConfig); err != nil {
+	if err := r.doReconciliation(ctx, r.NodeNetworkConfig); err != nil {
 		return fmt.Errorf("error restoring NodeNetworkConfig: %w", err)
 	}
 
@@ -287,22 +288,23 @@ func ConvertNodeConfigToNetlink(nodeCfg *v1alpha1.NodeNetworkConfig) (netlinkCon
 			MTU:              int(layer2.MTU),
 			VNI:              int(layer2.VNI),
 			NeighSuppression: &neighSuppression,
+			AnycastMAC:       new(string),
 		}
 
 		if layer2.IRB != nil {
 			nlLayer2.AnycastGateways = layer2.IRB.IPAddresses
-			nlLayer2.AnycastMAC = &layer2.IRB.MACAddress
+			*nlLayer2.AnycastMAC = layer2.IRB.MACAddress
 			nlLayer2.VRF = layer2.IRB.VRF
 		}
 
 		netlinkConfig.Layer2s = append(netlinkConfig.Layer2s, nlLayer2)
 	}
 
-	for name, vrf := range nodeCfg.Spec.FabricVRFs {
+	for name := range nodeCfg.Spec.FabricVRFs {
 		nlVrf := nl.VRFInformation{
 			Name: name,
-			VNI:  int(vrf.VNI),
-			MTU:  9000,
+			VNI:  int(nodeCfg.Spec.FabricVRFs[name].VNI),
+			MTU:  nl.DefaultMtu,
 		}
 
 		netlinkConfig.VRFs = append(netlinkConfig.VRFs, nlVrf)

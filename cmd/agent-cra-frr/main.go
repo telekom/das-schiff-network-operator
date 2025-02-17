@@ -21,10 +21,11 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	cra_frr_controller "github.com/telekom/das-schiff-network-operator/controllers/agent-cra-frr"
-	cra_frr_reconciler "github.com/telekom/das-schiff-network-operator/pkg/reconciler/agent-cra-frr"
 	"os"
 	"sort"
+
+	controllerfrr "github.com/telekom/das-schiff-network-operator/controllers/agent-cra-frr"
+	reconcilerfrr "github.com/telekom/das-schiff-network-operator/pkg/reconciler/agent-cra-frr"
 
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/pkg/managerconfig"
@@ -88,7 +89,7 @@ func main() {
 		"The controller will load its initial configuration from this file. "+
 			"Omit this flag to use the default configuration values. "+
 			"Command-line flags override configuration from this file.")
-	flag.StringVar(&nodeNetworkConfigPath, "nodenetworkconfig-path", cra_frr_reconciler.DefaultNodeNetworkConfigPath,
+	flag.StringVar(&nodeNetworkConfigPath, "nodenetworkconfig-path", reconcilerfrr.DefaultNodeNetworkConfigPath,
 		"Path to store working node configuration.")
 	opts := zap.Options{
 		Development: true,
@@ -167,13 +168,13 @@ func initComponents(mgr manager.Manager, nodeConfigPath string) error {
 	return nil
 }
 
-func setupReconcilers(mgr manager.Manager, nodeConfigPath string) (*cra_frr_reconciler.NodeNetworkConfigReconciler, error) {
-	r, err := cra_frr_reconciler.NewNodeNetworkConfigReconciler(mgr.GetClient(), mgr.GetLogger(), nodeConfigPath)
+func setupReconcilers(mgr manager.Manager, nodeConfigPath string) (*reconcilerfrr.NodeNetworkConfigReconciler, error) {
+	r, err := reconcilerfrr.NewNodeNetworkConfigReconciler(mgr.GetClient(), mgr.GetLogger(), nodeConfigPath)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create debounced reconciler: %w", err)
 	}
 
-	if err = (&cra_frr_controller.NodeNetworkConfigReconciler{
+	if err = (&controllerfrr.NodeNetworkConfigReconciler{
 		Client:     mgr.GetClient(),
 		Scheme:     mgr.GetScheme(),
 		Reconciler: r,

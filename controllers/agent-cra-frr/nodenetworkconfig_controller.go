@@ -14,18 +14,18 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package agent_cra_frr
+package agent_cra_frr //nolint:revive
 
 import (
 	"context"
 	"fmt"
-	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/agent-cra-frr"
 	"os"
 	"strings"
 	"time"
 
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
+	agentcrafrr "github.com/telekom/das-schiff-network-operator/pkg/reconciler/agent-cra-frr"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -42,7 +42,7 @@ type NodeNetworkConfigReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 
-	Reconciler *agent_cra_frr.NodeNetworkConfigReconciler
+	Reconciler *agentcrafrr.NodeNetworkConfigReconciler
 }
 
 //+kubebuilder:rbac:groups=network.t-caas.telekom.com,resources=nodenetworkconfigs,verbs=get;list;watch;create;update;patch;delete

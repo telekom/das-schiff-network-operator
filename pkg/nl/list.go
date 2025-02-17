@@ -163,7 +163,7 @@ func (n *Manager) updateL2Indices(info *Layer2Information, links []netlink.Link)
 	return nil
 }
 
-func (n *Manager) updateLink(info *Layer2Information, link netlink.Link) error {
+func (*Manager) updateLink(info *Layer2Information, link netlink.Link) error {
 	// If subinterface is VXLAN
 	if link.Type() == "vxlan" && strings.HasPrefix(link.Attrs().Name, vxlanPrefix) {
 		vxlan, ok := link.(*netlink.Vxlan)

@@ -1,6 +1,7 @@
 package netplan
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 
@@ -51,7 +52,7 @@ func NewEmptyState() State {
 			Tunnels:   make(map[string]Device),
 			VLans:     make(map[string]Device),
 			VRFs:      make(map[string]Device),
-			Version:   2,
+			Version:   2, //nolint:mnd
 		},
 	}
 }
@@ -119,14 +120,15 @@ func (di *StateDeviceIterator) Apply(i StateDeviceIteratorItem) {
 		di.state.Network.VLans[i.Name] = i.Device
 	case net.InterfaceTypeVRF:
 		di.state.Network.VRFs[i.Name] = i.Device
-
 	}
 }
 
 func NewState(raw string) (State, error) {
 	var state State
-	err := yaml.Unmarshal([]byte(raw), &state)
-	return state, err
+	if err := yaml.Unmarshal([]byte(raw), &state); err != nil {
+		return state, fmt.Errorf("failed to unmarshal YAML: %w", err)
+	}
+	return state, nil
 }
 func (s State) Clone() State {
 	result, _ := NewState(s.YAML())
@@ -137,7 +139,7 @@ func (s State) YAML() string {
 	return string(result)
 }
 
-// Simple stringer for State
+// Simple stringer for State.
 func (s State) String() string {
 	return s.YAML()
 }
@@ -162,75 +164,81 @@ func (d *Device) Clear() {
 
 // This overrides the State type [1] so we can do a custom marshaling of
 // netplan yaml without the need to have golang code representing the
-// netplan schema
+// netplan schema.
 
 // [1] https://github.com/kubernetes/kube-openapi/tree/master/pkg/generators
 func (Device) OpenAPISchemaType() []string { return []string{"object"} }
 
 // We are using behind the scenes the golang encode/json so we need to return
 // json here for golang to work well, the upper yaml parser will convert it
-// to yaml making nmstate yaml transparent to kubernetes-nmstate
+// to yaml making nmstate yaml transparent to kubernetes-nmstate.
 func (d Device) MarshalJSON() (output []byte, err error) {
-	return yaml.YAMLToJSON([]byte(d.Raw))
+	if output, err = yaml.YAMLToJSON([]byte(d.Raw)); err != nil {
+		err = fmt.Errorf("failed to convert YAML to JSON: %w", err)
+	}
+	return //nolint:revive
 }
 
 // Bypass State parsing and directly store it as yaml string to later on
-// pass it to namestatectl using it as transparet data at kubernetes-nmstate
+// pass it to namestatectl using it as transparet data at kubernetes-nmstate.
 func (d *Device) UnmarshalJSON(b []byte) error {
 	output, err := yaml.JSONToYAML(b)
 	if err != nil {
-		return err
+		return fmt.Errorf("faield to convert JSON to YAML: %w", err)
 	}
 	var outputMap map[string]interface{}
 	if err := yaml.Unmarshal(output, &outputMap); err != nil {
-		return err
-	} else {
-		// Hack: fix for https://github.com/canonical/netplan/pull/329 (not in all versions)
-		// Deduplicate call is needed because of netplan duplicating items in string arrays
-		if err := maps.Deduplicate(outputMap); err != nil {
-			return err
-		}
-		if output, err = yaml.Marshal(outputMap); err != nil {
-			return err
-		} else {
-			*d = Device{Raw: output}
-		}
+		return fmt.Errorf("failed to unmarshal YAML: %w", err)
 	}
+	// Hack: fix for https://github.com/canonical/netplan/pull/329 (not in all versions)
+	// Deduplicate call is needed because of netplan duplicating items in string arrays.
+	if err := maps.Deduplicate(outputMap); err != nil {
+		return fmt.Errorf("failed to depduplicate map: %w", err)
+	}
+	if output, err = yaml.Marshal(outputMap); err != nil {
+		return fmt.Errorf("failed to marshal YAML: %w", err)
+	}
+
+	*d = Device{Raw: output}
 
 	return nil
 }
 
-// Simple stringer for State
+// Simple stringer for State.
 func (d Device) String() string {
 	return string(d.Raw)
 }
 
-// EqualsIgnoringSorting compares 2 devices, not only by Raw string but also after unmarshal, ignoring string slice order. This is a hack to not detect differences in virtual devices where the interfaces may be in different order (netplan not always outputs the same order)
-func (d Device) EqualsIgnoringSorting(target Device) bool {
+// EqualsIgnoringSorting compares 2 devices, not only by Raw string but also after unmarshal, ignoring string slice order. This is a hack to not detect differences in virtual devices where the interfaces may be in different order (netplan not always outputs the same order).
+func (d Device) EqualsIgnoringSorting(target Device) (bool, error) {
 	if d.String() == target.String() {
-		return true
+		return true, nil
 	}
-	// Hack: fix for unpredictable order in netplan arrays
+	// Hack: fix for unpredictable order in netplan arrays.
 	var dMap, tMap interface{}
-	yaml.Unmarshal(d.Raw, &dMap)
-	yaml.Unmarshal(target.Raw, &tMap)
-	return cmp.Equal(dMap, tMap, cmpopts.SortSlices(less))
+	if err := yaml.Unmarshal(d.Raw, &dMap); err != nil {
+		return false, fmt.Errorf("failed to unmarshal destination YAML: %w", err)
+	}
+	if err := yaml.Unmarshal(target.Raw, &tMap); err != nil {
+		return false, fmt.Errorf("failed to unmarshal target YAML: %w", err)
+	}
+	return cmp.Equal(dMap, tMap, cmpopts.SortSlices(less)), nil
 }
 func less(a, b interface{}) bool {
-	switch aT := a.(type) {
-	case string:
-		bT := b.(string)
-		return aT < bT
+	if aT, ok := a.(string); ok {
+		if bT, ok := b.(string); ok {
+			return aT < bT
+		}
 	}
 	return false
 }
 func SanitizeDeviceName(name string) string {
-	return strings.Replace(name, ".", "\\.", -1)
+	return strings.ReplaceAll(name, ".", "\\.")
 }
 func GetChangedVirtualInterfaces(source, target State) ([]net.Interface, error) {
 	log := logrus.WithField("name", "netplan")
 	result := make([]net.Interface, 0)
-	compare := func(t net.InterfaceType, sourceMap, targetMap map[string]Device) []net.Interface {
+	compare := func(t net.InterfaceType, sourceMap, targetMap map[string]Device) ([]net.Interface, error) {
 		compareResult := make([]net.Interface, 0)
 		for sourceKey := range sourceMap {
 			if _, targetExists := targetMap[sourceKey]; !targetExists {
@@ -244,7 +252,11 @@ func GetChangedVirtualInterfaces(source, target State) ([]net.Interface, error) 
 		}
 		for targetKey, targetValue := range targetMap {
 			if sourceValue, sourceExists := sourceMap[targetKey]; sourceExists {
-				if !sourceValue.EqualsIgnoringSorting(targetValue) {
+				isEqual, err := sourceValue.EqualsIgnoringSorting(targetValue)
+				if err != nil {
+					return nil, fmt.Errorf("failed to compare YAMLs: %w", err)
+				}
+				if !isEqual {
 					log.Infof("virtual interface %s changed from %s to %s", targetKey, sourceValue, targetValue)
 					i := net.Interface{
 						Type: t,
@@ -254,32 +266,47 @@ func GetChangedVirtualInterfaces(source, target State) ([]net.Interface, error) 
 				}
 			}
 		}
-		return compareResult
+		return compareResult, nil
 	}
-	result = append(result, compare(net.InterfaceTypeVLan, source.Network.VLans, target.Network.VLans)...)
-	result = append(result, compare(net.InterfaceTypeBond, source.Network.Bonds, target.Network.Bonds)...)
-	result = append(result, compare(net.InterfaceTypeBridge, source.Network.Bridges, target.Network.Bridges)...)
+
+	vlans, err := compare(net.InterfaceTypeVLan, source.Network.VLans, target.Network.VLans)
+	if err != nil {
+		return nil, fmt.Errorf("failed to compare vlans: %w", err)
+	}
+	result = append(result, vlans...)
+
+	bonds, err := compare(net.InterfaceTypeBond, source.Network.Bonds, target.Network.Bonds)
+	if err != nil {
+		return nil, fmt.Errorf("failed to compare bonds: %w", err)
+	}
+	result = append(result, bonds...)
+
+	bridges, err := compare(net.InterfaceTypeBridge, source.Network.Bridges, target.Network.Bridges)
+	if err != nil {
+		return nil, fmt.Errorf("failed to compare bridges: %w", err)
+	}
+	result = append(result, bridges...)
 
 	return result, nil
 }
 
-func (d1 *Device) merge(d2 Device) error {
-	if newRaw, err := merge.YAML([][]byte{d1.Raw, d2.Raw}, true); err != nil {
-		return err
-	} else {
-		d1.Raw = newRaw.Bytes()
+func (d *Device) merge(d2 Device) error {
+	var newRaw *bytes.Buffer
+	var err error
+	if newRaw, err = merge.YAML([][]byte{d.Raw, d2.Raw}, true); err != nil {
+		return fmt.Errorf("failed to merge YAMLS: %w", err)
 	}
+	d.Raw = newRaw.Bytes()
 	return nil
 }
-func (s1 *State) Merge(s2 *State) error {
+func (s *State) Merge(s2 *State) error {
 	mergeDevices := func(sourceMap, targetMap map[string]Device) error {
 		for key, val := range targetMap {
 			if sourceVal, exist := sourceMap[key]; exist {
 				if err := sourceVal.merge(val); err != nil {
 					return err
-				} else {
-					sourceMap[key] = sourceVal
 				}
+				sourceMap[key] = sourceVal
 			} else {
 				sourceMap[key] = val
 			}
@@ -287,28 +314,28 @@ func (s1 *State) Merge(s2 *State) error {
 		return nil
 	}
 	var err error
-	err = mergeDevices(s1.Network.Ethernets, s2.Network.Ethernets)
+	err = mergeDevices(s.Network.Ethernets, s2.Network.Ethernets)
 	if err != nil {
 		return err
 	}
-	err = mergeDevices(s1.Network.VLans, s2.Network.VLans)
+	err = mergeDevices(s.Network.VLans, s2.Network.VLans)
 	if err != nil {
 		return err
 	}
-	err = mergeDevices(s1.Network.Bonds, s2.Network.Bonds)
+	err = mergeDevices(s.Network.Bonds, s2.Network.Bonds)
 	if err != nil {
 		return err
 	}
-	err = mergeDevices(s1.Network.Bridges, s2.Network.Bridges)
+	err = mergeDevices(s.Network.Bridges, s2.Network.Bridges)
 	if err != nil {
 		return err
 	}
 	return nil
 }
-func (s1 *State) FindOverrides(s2 *State) (string, error) {
-	if result, err := diff.FindYAMLOverrides([]byte(s1.YAML()), []byte(s2.YAML())); err != nil {
-		return "", err
-	} else {
-		return result.String(), nil
+func (s *State) FindOverrides(s2 *State) (string, error) {
+	result, err := diff.FindYAMLOverrides([]byte(s.YAML()), []byte(s2.YAML()))
+	if err != nil {
+		return "", fmt.Errorf("failed to find YAML overrides: %w", err)
 	}
+	return result.String(), nil
 }

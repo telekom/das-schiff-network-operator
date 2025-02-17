@@ -17,10 +17,10 @@ type netClassManager struct {
 	log  *logrus.Entry
 }
 
-func newNetClassManager(path string) netClassManager {
+func newNetClassManager(rootPath string) netClassManager {
 	return netClassManager{
-		path: path,
-		log:  logrus.WithField("name", "net-class-manager").WithField("root-dir", path),
+		path: rootPath,
+		log:  logrus.WithField("name", "net-class-manager").WithField("root-dir", rootPath),
 	}
 }
 func (n *netClassManager) bondsIndex() string {
@@ -32,7 +32,11 @@ func (n *netClassManager) Delete(i Interface) error {
 	case InterfaceTypeBond:
 		n.log.Infof("removing bond %s", i.Name)
 		data := fmt.Sprintf("-%s", i.Name)
-		return os.WriteFile(n.bondsIndex(), []byte(data), 0777)
+		err := os.WriteFile(n.bondsIndex(), []byte(data), 0o600) //nolint:mnd
+		if err != nil {
+			return fmt.Errorf("failed to write bond file: %w", err)
+		}
+		return nil
 	case InterfaceTypeBridge:
 		return fmt.Errorf("removing bridge is not supported using netclass")
 	}

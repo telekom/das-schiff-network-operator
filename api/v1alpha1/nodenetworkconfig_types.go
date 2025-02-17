@@ -255,7 +255,7 @@ type PolicyRoute struct {
 	NextHop NextHop `json:"nextHop"`
 }
 
-// EncapsulationType represents an encapsulation type
+// EncapsulationType represents an encapsulation type.
 type EncapsulationType string
 
 const (

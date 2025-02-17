@@ -6,6 +6,6 @@ const (
 	VersionProperty = "org.freedesktop.NetworkManager.Version"
 )
 
-func (client *Client) Version() (string, netplan.Error) {
+func (*Client) Version() (string, netplan.Error) {
 	return "", nil
 }

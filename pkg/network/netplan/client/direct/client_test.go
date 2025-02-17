@@ -101,16 +101,20 @@ func TestConfigSet(t *testing.T) {
 
 func TestConfigApply(t *testing.T) {
 	t.Skip("skipping integration tests as they may break host netplan configuration")
+
+	//nolint:gocritic
 	// 	g := NewGomegaWithT(t)
 	// 	client := New(Opts{NetPlanPath: "netplan"})
 	// 	stateYAML, err := client.Get()
 	// 	g.Expect(err).NotTo(HaveOccurred())
 	// 	logrus.Debugf("current netplan state yaml: %s", stateYAML)
 
+	//nolint:gocritic
 	// 	stateJSON, err := yaml.ToJSON([]byte(stateYAML))
 	// 	g.Expect(err).NotTo(HaveOccurred())
 	// 	state := gjson.ParseBytes(stateJSON)
 
+	//nolint:gocritic
 	// 	ethernets := state.Get("network.ethernets")
 	// 	newEthernetNamePrefix := "ethtest"
 	// 	newEthernetNameIndex := 0
@@ -123,6 +127,7 @@ func TestConfigApply(t *testing.T) {
 	// 		newEthernetNameIndex++
 	// 	}
 
+	//nolint:gocritic
 	// 	logrus.Debugf("new netplan ethernet name: %s", newEthernetName)
 	// 	newEthernet := `
 	// addresses:
@@ -143,8 +148,10 @@ func TestConfigApply(t *testing.T) {
 	// 	newStateYAML, err := k8syaml.JSONToYAML([]byte(newStateJSON))
 	// 	g.Expect(err).NotTo(HaveOccurred())
 
+	//nolint:gocritic
 	// 	logrus.Debugf("new netplan state: %s", newStateYAML)
 
+	//nolint:gocritic
 	// g.Expect(client.Apply("test-state", string(newStateYAML), time.Second, func() error { return nil })).ShouldNot(HaveOccurred())
 	// logrus.Infof("apply succeeded. rollbacking changes")
 	// g.Expect(client.Apply("test-state", stateYAML, time.Second, func() error { return nil })).ShouldNot(HaveOccurred())

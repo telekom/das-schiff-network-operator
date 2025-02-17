@@ -21,9 +21,10 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	netplan_controller "github.com/telekom/das-schiff-network-operator/controllers/agent-netplan"
-	netplan_reconciler "github.com/telekom/das-schiff-network-operator/pkg/reconciler/agent-netplan"
 	"os"
+
+	controllernetplan "github.com/telekom/das-schiff-network-operator/controllers/agent-netplan"
+	reconcilernetplan "github.com/telekom/das-schiff-network-operator/pkg/reconciler/agent-netplan"
 
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/pkg/managerconfig"
@@ -133,13 +134,13 @@ func initComponents(mgr manager.Manager) error {
 	return nil
 }
 
-func setupReconcilers(mgr manager.Manager) (*netplan_reconciler.NodeNetplanConfigReconciler, error) {
-	r, err := netplan_reconciler.NewNodeNetplanConfigReconciler(mgr.GetClient(), mgr.GetLogger())
+func setupReconcilers(mgr manager.Manager) (*reconcilernetplan.NodeNetplanConfigReconciler, error) {
+	r, err := reconcilernetplan.NewNodeNetplanConfigReconciler(mgr.GetClient(), mgr.GetLogger())
 	if err != nil {
 		return nil, fmt.Errorf("unable to create debounced reconciler: %w", err)
 	}
 
-	if err = (&netplan_controller.NodeNetplanConfigReconciler{
+	if err = (&controllernetplan.NodeNetplanConfigReconciler{
 		Client:     mgr.GetClient(),
 		Scheme:     mgr.GetScheme(),
 		Reconciler: r,

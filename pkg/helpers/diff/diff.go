@@ -2,6 +2,7 @@ package diff
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 
@@ -15,7 +16,6 @@ type (
 	// they're represented like this.
 	mapping  = map[interface{}]interface{}
 	sequence = []interface{}
-	scalar   = interface{}
 )
 
 // YAML deep-merges any number of YAML sources, with later sources taking
@@ -37,35 +37,33 @@ type (
 // value with the new.
 //
 // Enabling strict mode returns errors in both of the above cases.
-func FindYAMLOverrides(origin []byte, final []byte) (*bytes.Buffer, error) {
+func FindYAMLOverrides(origin, final []byte) (*bytes.Buffer, error) {
 	originDecoder := yaml.NewDecoder(bytes.NewReader(origin))
 	var originContents interface{}
-	if err := originDecoder.Decode(&originContents); err == io.EOF {
+	if err := originDecoder.Decode(&originContents); errors.Is(err, io.EOF) {
 		// Skip empty and comment-only sources, which we should handle
 		// differently from explicit nils.
-		return nil, err
+		return nil, fmt.Errorf("couldn't decode source: %w", err)
 	} else if err != nil {
-		return nil, fmt.Errorf("couldn't decode source: %v", err)
+		return nil, fmt.Errorf("couldn't decode source: %w", err)
 	}
 	finalDecoder := yaml.NewDecoder(bytes.NewReader(final))
 	var finalContents interface{}
-	if err := finalDecoder.Decode(&finalContents); err == io.EOF {
+	if err := finalDecoder.Decode(&finalContents); errors.Is(err, io.EOF) {
 		// Skip empty and comment-only sources, which we should handle
 		// differently from explicit nils.
-		return nil, err
+		return nil, fmt.Errorf("couldn't decode source: %w", err)
 	} else if err != nil {
-		return nil, fmt.Errorf("couldn't decode source: %v", err)
+		return nil, fmt.Errorf("couldn't decode source: %w", err)
 	}
 
 	buf := &bytes.Buffer{}
 	if result, err := findOverrides(originContents, finalContents); err != nil {
 		return nil, err
-	} else {
-		if result != nil {
-			enc := yaml.NewEncoder(buf)
-			if err := enc.Encode(result); err != nil {
-				return nil, fmt.Errorf("couldn't re-serialize final YAML: %v", err)
-			}
+	} else if result != nil {
+		enc := yaml.NewEncoder(buf)
+		if err := enc.Encode(result); err != nil {
+			return nil, fmt.Errorf("couldn't re-serialize final YAML: %w", err)
 		}
 	}
 	return buf, nil
@@ -100,7 +98,7 @@ func findOverrides(origin, final interface{}) (interface{}, error) {
 func findOverridesSequence(from, into sequence) (interface{}, error) {
 	result := make(sequence, 0)
 	for _, item := range from {
-		if !slice.Contains([]interface{}(into), item) {
+		if !slice.Contains(into, item) {
 			result = append(result, item)
 		}
 	}
@@ -115,10 +113,8 @@ func findOverridesMapping(from, into mapping) (interface{}, error) {
 		if replace, ok := into[k]; ok {
 			if override, err := findOverrides(v, replace); err != nil {
 				return nil, err
-			} else {
-				if override != nil {
-					result[k] = override
-				}
+			} else if override != nil {
+				result[k] = override
 			}
 		}
 	}
@@ -126,7 +122,6 @@ func findOverridesMapping(from, into mapping) (interface{}, error) {
 		return result, nil
 	}
 	return nil, nil
-
 }
 
 // IsMapping reports whether a type is a mapping in YAML, represented as a
@@ -148,6 +143,7 @@ func IsScalar(i interface{}) bool {
 	return !IsMapping(i) && !IsSequence(i)
 }
 
+//nolint:unused
 func describe(i interface{}) string {
 	if IsMapping(i) {
 		return "mapping"

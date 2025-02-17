@@ -2,12 +2,13 @@ package frr
 
 import (
 	"errors"
+	"os"
+	"testing"
+
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	mock_dbus "github.com/telekom/das-schiff-network-operator/pkg/frr/dbus/mock"
 	"go.uber.org/mock/gomock"
-	"os"
-	"testing"
 )
 
 const (

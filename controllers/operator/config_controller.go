@@ -19,10 +19,10 @@ package operator
 import (
 	"context"
 	"fmt"
-	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/operator"
 	"time"
 
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
+	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/operator"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"

@@ -1,6 +1,7 @@
 package dummy
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/sirupsen/logrus"
@@ -22,7 +23,6 @@ type Client struct {
 	hint         string
 	directory    string
 	initialHints []string
-	logger       *logrus.Logger
 	tempDir      bool
 }
 
@@ -35,7 +35,7 @@ func New(hint string, initialHints []string, opts Opts) (*Client, error) {
 	if opts.Directory == "" {
 		dir, err := os.MkdirTemp("", "caas-network-operator")
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to create temporary directory: %w", err)
 		}
 		client.directory = dir
 		client.tempDir = true
@@ -43,36 +43,40 @@ func New(hint string, initialHints []string, opts Opts) (*Client, error) {
 	logrus.Infof("creating dummy netplan client using directory %s", client.directory)
 	return &client, nil
 }
-func (client *Client) config() (*DummyConfig, netplan.Error) {
+
+func (client *Client) config() (*Config, netplan.Error) {
 	dummyConfig, err := newConfig(client.hint, client.initialHints, client.directory)
 	return &dummyConfig, netplan.ParseError(err)
 }
+
 func (client *Client) Close() {
 	if client.tempDir {
 		logrus.Infof("clearing temp dir used by dummy netplan client: %s", client.directory)
-		os.RemoveAll(client.directory)
-	}
-}
-func (client *Client) Initialize() (config.Config, netplan.Error) {
-	if config, err := client.config(); err != nil {
-		return config, err
-	} else {
-		return config, nil
-	}
-}
-func (client *Client) Get() (netplan.State, netplan.Error) {
-	if tempConfig, err := client.config(); err != nil {
-		return netplan.State{}, err
-	} else {
-		if err := tempConfig.Discard(); err != nil {
-			return netplan.State{}, err
+		if err := os.RemoveAll(client.directory); err != nil {
+			logrus.Warnf("failed to remove %s: %s", client.directory, err.Error())
 		}
-		return tempConfig.initialState, nil
 	}
 }
 
-type featuresVariantType [][]interface{}
+func (client *Client) Initialize() (config.Config, netplan.Error) {
+	cfg, err := client.config()
+	if err != nil {
+		return cfg, err
+	}
+	return cfg, nil
+}
 
-func (client *Client) Info() ([]string, netplan.Error) {
+func (client *Client) Get() (netplan.State, netplan.Error) {
+	tempConfig, err := client.config()
+	if err != nil {
+		return netplan.State{}, err
+	}
+	if err := tempConfig.Discard(); err != nil {
+		return netplan.State{}, err
+	}
+	return tempConfig.initialState, nil
+}
+
+func (*Client) Info() ([]string, netplan.Error) {
 	return nil, nil
 }

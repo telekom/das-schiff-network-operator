@@ -23,7 +23,7 @@ const (
 )
 const ApplyAttempts = 3
 
-type DBusConfig struct {
+type Config struct {
 	hint         string
 	initialHints []string
 	path         string
@@ -34,18 +34,18 @@ type DBusConfig struct {
 	executionLog *logrus.Logger
 }
 
-func newConfig(hint string, initialHints []string, conn *dbus.Conn, netManager net.Manager, executionLog *logrus.Logger) (DBusConfig, error) {
+func newConfig(hint string, initialHints []string, conn *dbus.Conn, netManager net.Manager, executionLog *logrus.Logger) (Config, error) {
 	object := conn.Object(InterfacePath, ObjectPath)
 	executionLog.Infof("busctl --system call io.netplan.Netplan /io/netplan/Netplan io.netplan.Netplan Config")
 	call := object.Call(ConfigCall, 0)
 	if call.Err != nil {
-		return DBusConfig{}, netplan.ParseError(call.Err)
+		return Config{}, netplan.ParseError(call.Err)
 	}
 	var path dbus.ObjectPath
 	if err := call.Store(&path); err != nil {
-		return DBusConfig{}, netplan.ParseError(err)
+		return Config{}, netplan.ParseError(err)
 	}
-	result := DBusConfig{
+	result := Config{
 		hint:         hint,
 		initialHints: initialHints,
 		path:         string(path),
@@ -54,18 +54,22 @@ func newConfig(hint string, initialHints []string, conn *dbus.Conn, netManager n
 		executionLog: executionLog,
 		netManager:   netManager,
 	}
-	if state, err := result.Get(); err != nil {
+	state, err := result.Get()
+	if err != nil {
 		return result, err
-	} else {
-		result.initialState = state
 	}
+	result.initialState = state
+
 	return result, nil
 }
-func (config *DBusConfig) Reset() netplan.Error {
+
+func (config *Config) Reset() netplan.Error {
 	config.log.Infof("cleaning existing configuration")
 	// Clearing first the default hint if necessary (ignore errors because they're not important in this case)
 	for _, hint := range config.initialHints {
-		config.setProperty(hint, "network", nil)
+		if err := config.setProperty(hint, "network", nil); err != nil {
+			return netplan.ParseError(err)
+		}
 	}
 	return netplan.ParseError(config.setProperty(config.hint, "network", nil))
 	// if current, err := config.Get(); err != nil {
@@ -82,9 +86,9 @@ func (config *DBusConfig) Reset() netplan.Error {
 
 	// 	return config.set(current, false)
 	// }
-
 }
-func (config *DBusConfig) Discard() netplan.Error {
+
+func (config *Config) Discard() netplan.Error {
 	configObject := config.conn.Object(InterfacePath, dbus.ObjectPath(config.path))
 	config.executionLog.Infof("busctl --system call io.netplan.Netplan %s io.netplan.Netplan.Config Cancel", config.path)
 	cancelCall := configObject.Call(ConfigCancelCall, 0)
@@ -94,7 +98,8 @@ func (config *DBusConfig) Discard() netplan.Error {
 	}
 	return nil
 }
-func (config *DBusConfig) setProperty(hint string, path string, value interface{}) error {
+
+func (config *Config) setProperty(hint, path string, value interface{}) error {
 	delta := path + "="
 	if value == nil {
 		delta += "NULL"
@@ -116,14 +121,16 @@ func (config *DBusConfig) setProperty(hint string, path string, value interface{
 	}
 	var setResult bool
 	if err := setCall.Store(&setResult); err != nil {
-		return err
+		return fmt.Errorf("failed to store dbus set reply: %w", err)
 	}
 	if !setResult {
 		return fmt.Errorf("configration is not valid")
 	}
 	return nil
 }
-func (config *DBusConfig) try(timeout time.Duration) error {
+
+//nolint:unused
+func (config *Config) try(timeout time.Duration) error {
 	configObject := config.conn.Object(InterfacePath, dbus.ObjectPath(config.path))
 	tryTimeout := uint32(timeout.Seconds())
 	config.log.Debugf("trying configuration for %d seconds", tryTimeout)
@@ -134,7 +141,7 @@ func (config *DBusConfig) try(timeout time.Duration) error {
 	}
 	var tryResult bool
 	if err := call.Store(&tryResult); err != nil {
-		return err
+		return fmt.Errorf("failed to store dbus try reply: %w", err)
 	}
 	if !tryResult {
 		return fmt.Errorf("failed to try configuration within %d seconds", tryTimeout)
@@ -142,7 +149,7 @@ func (config *DBusConfig) try(timeout time.Duration) error {
 	return nil
 }
 
-func (config *DBusConfig) apply() netplan.Error {
+func (config *Config) apply() netplan.Error {
 	config.log.Debugf("applying configuration")
 	configObject := config.conn.Object(InterfacePath, dbus.ObjectPath(config.path))
 	config.executionLog.Infof("busctl --system call io.netplan.Netplan %s io.netplan.Netplan.Config Apply", config.path)
@@ -160,10 +167,7 @@ func (config *DBusConfig) apply() netplan.Error {
 	}
 	return nil
 }
-func (config *DBusConfig) Set(state netplan.State) netplan.Error {
-	return config.set(state)
-}
-func (config *DBusConfig) set(state netplan.State) netplan.Error {
+func (config *Config) Set(state netplan.State) netplan.Error {
 	var errors []netplan.Error
 	successfullTotalOperations := 0
 
@@ -198,28 +202,29 @@ func (config *DBusConfig) set(state netplan.State) netplan.Error {
 	}
 	return nil
 }
-func (config *DBusConfig) canTry() (bool, error) {
-	if state, err := config.Get(); err != nil {
+
+//nolint:unused
+func (config *Config) canTry() (bool, error) {
+	state, err := config.Get()
+	if err != nil {
 		return false, err
-	} else {
-		return !state.ContainsVirtualInterfaces(), nil
 	}
+	return !state.ContainsVirtualInterfaces(), nil
 }
 
-func (config *DBusConfig) Apply() netplan.Error {
+//nolint:revive
+func (config *Config) Apply() netplan.Error {
 	source := config.initialState
 	if target, err := config.Get(); err != nil {
 		return err
 	} else {
 		if virtualInterfacesToRemove, err := netplan.GetChangedVirtualInterfaces(source, target); err != nil {
 			return netplan.ParseError(err)
-		} else {
-			if len(virtualInterfacesToRemove) > 0 {
-				config.log.Warnf("removing existing links for virtual interfaces before netplan apply")
-				for _, link := range virtualInterfacesToRemove {
-					if err := config.netManager.Delete(link); err != nil {
-						config.log.Warnf("error deleting %s link %s. err: %s", link.Type, link.Name, err)
-					}
+		} else if len(virtualInterfacesToRemove) > 0 {
+			config.log.Warnf("removing existing links for virtual interfaces before netplan apply")
+			for _, link := range virtualInterfacesToRemove {
+				if err := config.netManager.Delete(link); err != nil {
+					config.log.Warnf("error deleting %s link %s. err: %s", link.Type, link.Name, err)
 				}
 			}
 		}
@@ -233,15 +238,15 @@ func (config *DBusConfig) Apply() netplan.Error {
 	return nil
 }
 
-func (config *DBusConfig) IsSynced() bool {
+func (config *Config) IsSynced() bool {
 	newState, _ := config.Get()
 	return config.initialState.Equals(newState)
 }
-func (client *Client) Generate() netplan.Error {
+func (*Client) Generate() netplan.Error {
 	return nil
 }
 
-func (config *DBusConfig) Get() (netplan.State, netplan.Error) {
+func (config *Config) Get() (netplan.State, netplan.Error) {
 	configObject := config.conn.Object(InterfacePath, dbus.ObjectPath(config.path))
 	config.executionLog.Infof("busctl --system call io.netplan.Netplan %s io.netplan.Netplan.Config Get", config.path)
 	call := configObject.Call(ConfigGetCall, 0)
@@ -257,5 +262,4 @@ func (config *DBusConfig) Get() (netplan.State, netplan.Error) {
 		return netplan.State{}, netplan.ParseError(err)
 	}
 	return state, nil
-
 }

@@ -43,12 +43,12 @@ func (n *Manager) CreateL3(info VRFInformation) error {
 		return err
 	}
 
-	bridge, err := n.createBridge(bridgePrefix+info.Name, nil, vrf.Attrs().Index, defaultMtu, true, false)
+	bridge, err := n.createBridge(bridgePrefix+info.Name, nil, vrf.Attrs().Index, DefaultMtu, true, false)
 	if err != nil {
 		return err
 	}
 
-	if _, err := n.createVXLAN(vxlanPrefix+info.Name, bridge.Attrs().Index, info.VNI, defaultMtu, true, false); err != nil {
+	if _, err := n.createVXLAN(vxlanPrefix+info.Name, bridge.Attrs().Index, info.VNI, DefaultMtu, true, false); err != nil {
 		return err
 	}
 
@@ -134,9 +134,10 @@ func (n *Manager) GetVRFInterfaceIdxByName(name string) (int, error) {
 	return -1, fmt.Errorf("no VRF with name %s", name)
 }
 
+//nolint:unused
 func (info VRFInformation) linkMTU() int {
 	if info.MTU == 0 {
-		return defaultMtu
+		return DefaultMtu
 	}
 	return info.MTU
 }
