@@ -49,6 +49,9 @@ type ConfigReconciler struct {
 //+kubebuilder:rbac:groups=network.t-caas.telekom.com,resources=vrfrouteconfigurations/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=network.t-caas.telekom.com,resources=vrfrouteconfigurations/finalizers,verbs=update
 
+//+kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch;update
+//+kubebuilder:rbac:groups=admissionregistration.k8s.io,resources=mutatingwebhookconfigurations;validatingwebhookconfigurations,verbs=get;list;watch;update
+
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
 //
