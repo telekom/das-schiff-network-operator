@@ -18,6 +18,9 @@ var (
 	rtLinesRe = regexp.MustCompile(`(?m)^\s*route-target.*`)
 	rtPartsRe = regexp.MustCompile(`(?m)^(\s*route-target\s*(?:import|export)\s*)(.*)`)
 	rtRe      = regexp.MustCompile(`(?m)(\S+)`)
+
+	// Regular expression for searching for router bgp <asn> vrf default
+	defaultVrfRe = regexp.MustCompile(`(?m)^router bgp (\d+) vrf default`)
 )
 
 type templateConfig struct {
@@ -51,6 +54,8 @@ func (m *Manager) Configure(in Configuration, nm *nl.Manager, nwopCfg *config.Co
 		}
 	}
 
+	in.HasCommunityDrop = m.hasCommunityDrop
+
 	frrConfig, err := m.renderSubtemplates(in, nm)
 	if err != nil {
 		return false, err
@@ -67,9 +72,8 @@ func (m *Manager) Configure(in Configuration, nm *nl.Manager, nwopCfg *config.Co
 	}
 
 	targetConfig = fixRouteTargetReload(targetConfig)
+	targetConfig = fixDefaultVrf(targetConfig)
 	targetConfig = applyCfgReplacements(targetConfig, nwopCfg.Replacements)
-
-	in.HasCommunityDrop = m.hasCommunityDrop
 
 	if !bytes.Equal(currentConfig, targetConfig) {
 		err = os.WriteFile(m.ConfigPath, targetConfig, frrPermissions)
@@ -175,6 +179,12 @@ func fixRouteTargetReload(frrConfig []byte) []byte {
 		}
 		return []byte(lines[:len(lines)-1])
 	})
+}
+
+// fixDefaultVrf is a workaround for a change in FRR, that dropped the vrf default keyword.
+// This function removes the vrf default from the router bgp <asn> vrf default command.
+func fixDefaultVrf(frrConfig []byte) []byte {
+	return defaultVrfRe.ReplaceAll(frrConfig, []byte("router bgp $1"))
 }
 
 // applyCfgReplacements replaces placeholders in the configuration with the actual values.
