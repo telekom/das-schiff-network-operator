@@ -39,7 +39,7 @@ func (r *reconcile) fetchTaas(ctx context.Context) ([]networkv1alpha1.RoutingTab
 	return tables.Items, nil
 }
 
-// nolint: contextcheck,funclen // context is not relevant
+// nolint: contextcheck,funlen // context is not relevant
 func (r *reconcile) reconcileLayer3(l3vnis []networkv1alpha1.VRFRouteConfiguration, taas []networkv1alpha1.RoutingTable) error {
 	vrfConfigMap, err := r.createVrfConfigMap(l3vnis)
 	if err != nil {
