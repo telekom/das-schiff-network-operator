@@ -107,7 +107,7 @@ func (m *Manager) Init(mgmtVrf string) error {
 	}
 	m.ipv6MgmtRouteMapIn = routeMap
 
-	communityDrop, err := hasCommunityDrop(m.ConfigPath)
+	communityDrop, err := hasCommunityDrop(m.TemplatePath)
 	if err != nil {
 		return fmt.Errorf("error checking for community drop in FRR config: %w", err)
 	}
