@@ -13,4 +13,15 @@
 {{if $vrf.IsTaaS}}
   import vrf taas.{{$vrf.VNI}}
 {{- end }}
-{{- end -}}
+{{- end }}
+{{range $peering := .DefaultVRFBGPPeerings}}
+{{if eq $peering.AddressFamily 4}}
+neighbor {{$peering.Name}}{{$peering.AddressFamily}} activate
+neighbor {{$peering.Name}}{{$peering.AddressFamily}} soft-reconfiguration inbound
+neighbor {{$peering.Name}}{{$peering.AddressFamily}} maximum-prefix {{$peering.MaximumPrefixes}}
+neighbor {{$peering.Name}}{{$peering.AddressFamily}} prefix-list bgpaas-{{$peering.Name}}{{$peering.AddressFamily}}-in in
+neighbor {{$peering.Name}}{{$peering.AddressFamily}} prefix-list bgpaas-{{$peering.Name}}{{$peering.AddressFamily}}-out out
+{{ else }}
+no neighbor {{$peering.Name}}{{$peering.AddressFamily}} activate
+{{end}}
+{{end}}
