@@ -40,6 +40,7 @@ func (r *reconcile) fetchTaas(ctx context.Context) ([]networkv1alpha1.RoutingTab
 }
 
 // nolint: contextcheck // context is not relevant
+// nolint: funclen // it does not make sense to split this function
 func (r *reconcile) reconcileLayer3(l3vnis []networkv1alpha1.VRFRouteConfiguration, taas []networkv1alpha1.RoutingTable) error {
 	vrfConfigMap, err := r.createVrfConfigMap(l3vnis)
 	if err != nil {
@@ -66,6 +67,8 @@ func (r *reconcile) reconcileLayer3(l3vnis []networkv1alpha1.VRFRouteConfigurati
 		return allConfigs[i].VNI < allConfigs[j].VNI
 	})
 
+	time.Sleep(defaultSleep)
+
 	// Create FRR configuration and reload it
 	err = r.configureFRR(allConfigs)
 	if err != nil {
@@ -85,6 +88,8 @@ func (r *reconcile) reconcileLayer3(l3vnis []networkv1alpha1.VRFRouteConfigurati
 	if err != nil {
 		return err
 	}
+
+	time.Sleep(defaultSleep)
 
 	// When a BGP VRF is deleted there is a leftover running configuration after reload
 	// A second reload fixes this.
