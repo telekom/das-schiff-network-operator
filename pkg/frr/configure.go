@@ -19,7 +19,7 @@ var (
 	rtPartsRe = regexp.MustCompile(`(?m)^(\s*route-target\s*(?:import|export)\s*)(.*)`)
 	rtRe      = regexp.MustCompile(`(?m)(\S+)`)
 
-	// Regular expression for searching for router bgp <asn> vrf default
+	// Regular expression for searching for router bgp <asn> vrf default.
 	defaultVrfRe = regexp.MustCompile(`(?m)^router bgp (\d+) vrf default`)
 )
 
