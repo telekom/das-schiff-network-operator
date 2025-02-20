@@ -50,7 +50,7 @@ func (r *reconcile) fetchBGPPeerings(ctx context.Context) ([]networkv1alpha1.BGP
 	return peerings.Items, nil
 }
 
-// nolint: contextcheck // context is not relevant
+// nolint: contextcheck,funlen // context is not relevant
 func (r *reconcile) reconcileLayer3(data *reconcileData) error {
 	vrfConfigMap, err := r.createVrfConfigMap(data.l3vnis)
 	if err != nil {
@@ -79,6 +79,8 @@ func (r *reconcile) reconcileLayer3(data *reconcileData) error {
 		return allConfigs[i].VNI < allConfigs[j].VNI
 	})
 
+	time.Sleep(defaultSleep)
+
 	// Create FRR configuration and reload it
 	err = r.configureFRR(allConfigs, defaultVRFPeerings)
 	if err != nil {
@@ -98,6 +100,8 @@ func (r *reconcile) reconcileLayer3(data *reconcileData) error {
 	if err != nil {
 		return err
 	}
+
+	time.Sleep(defaultSleep)
 
 	// When a BGP VRF is deleted there is a leftover running configuration after reload
 	// A second reload fixes this.
