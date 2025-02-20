@@ -200,7 +200,7 @@ func buildBgpInstanceConfig(in Configuration, nlManager *nl.Manager) (*bgpInstan
 		ASN:                   asn,
 		VRFs:                  in.VRFs,
 		DefaultVRFBGPPeerings: in.DefaultVRFBGPPeerings,
-		HasCommunityDrop:      false,
+		HasCommunityDrop:      in.HasCommunityDrop,
 	}
 	return &data, nil
 }
