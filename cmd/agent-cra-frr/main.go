@@ -135,7 +135,7 @@ func setManagerOptions(configFile string) (*manager.Options, error) {
 		options = ctrl.Options{Scheme: scheme}
 	}
 
-	if options.MetricsBindAddress != "0" && options.MetricsBindAddress != "" {
+	if options.Metrics.BindAddress != "0" && options.Metrics.BindAddress != "" {
 		err = initCollectors()
 		if err != nil {
 			return nil, fmt.Errorf("unable to initialize metrics collectors: %w", err)

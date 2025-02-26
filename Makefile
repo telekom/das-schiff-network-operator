@@ -121,7 +121,7 @@ uninstall-certs: manifests kustomize ## Uninstall certs
 
 .PHONY: deploy
 deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
-	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
+	cd config/operator && $(KUSTOMIZE) edit set image operator=${IMG}
 	$(KUSTOMIZE) build config/default | kubectl apply -f -
 
 .PHONY: undeploy

@@ -10,6 +10,7 @@ spec:
         - name: operator
           args:
             - "--config=controller_agent_config.yaml"
+            # - "--disable-restart-on-cert-rotation=true"
           volumeMounts:
             - name: operator-config
               mountPath: /controller_agent_config.yaml

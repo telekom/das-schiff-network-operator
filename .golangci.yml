@@ -117,7 +117,7 @@ linters-settings:
       - name: function-length
         severity: error
         disabled: false
-        arguments: [50, 0]
+        arguments: [60, 0]
       - name: if-return
         disabled: true
       - name: line-length-limit
@@ -140,7 +140,7 @@ linters-settings:
         disabled: true
   funlen:
     lines: 100
-    statements: 50
+    statements: 60
   gocognit:
     min-complexity: 33
 

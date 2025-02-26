@@ -11,8 +11,8 @@ resources:
 
 # [WEBHOOK] To enable webhook, uncomment all the sections with [WEBHOOK] prefix.
 # patches here are for enabling the conversion webhook for each CRD
-#- patches/webhook_in_routingtables.yaml
-#- patches/webhook_in_hbrconfigs.yaml
+#- patches/webhook_in_layer2networkconfigurations.yaml
+#- patches/webhook_in_vrfrouteconfigurations.yaml
 #+kubebuilder:scaffold:crdkustomizewebhookpatch
 
 # [CERTMANAGER] To enable cert-manager, uncomment all the sections with [CERTMANAGER] prefix.
