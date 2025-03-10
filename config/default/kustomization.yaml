@@ -44,6 +44,8 @@ resources:
 - ../rbac
 - ../agent-cra-frr
 - ../agent-netplan
+# [CERTMANAGER] To enable cert-manager, please comment cert related line below.
+- ../cert
 - ../operator
 - ../webhook
 - ../prometheus

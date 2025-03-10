@@ -10,7 +10,7 @@ webhooks:
     service:
       name: webhook-service
       namespace: system
-      path: /validate-network-schiff-telekom-de-v1alpha1-vrfrouteconfiguration
+      path: /validate-network-t-caas-telekom-com-v1alpha1-vrfrouteconfiguration
   failurePolicy: Fail
   name: vvrfrouteconfiguration.kb.io
   rules:
