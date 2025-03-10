@@ -11,7 +11,7 @@ jobs:
     runs-on: "ubuntu-latest"
     strategy:
       matrix:
-        image: ["das-schiff-network-operator", "das-schiff-cra-frr", "das-schiff-nwop-agent-cra-frr", "das-schiff-nwop-agent-netplan"]
+        image: ["das-schiff-network-operator", "das-schiff-cra-frr", "das-schiff-nwop-agent-cra-frr", "das-schiff-nwop-agent-netplan", "das-schiff-nwop-agent-opi"]
     steps:
       - uses: actions/checkout@v4
 
