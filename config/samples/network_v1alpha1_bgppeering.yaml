@@ -1,0 +1,12 @@
+apiVersion: network.schiff.telekom.de/v1alpha1
+kind: BGPPeering
+metadata:
+  labels:
+    app.kubernetes.io/name: bgppeering
+    app.kubernetes.io/instance: bgppeering-sample
+    app.kubernetes.io/part-of: network-operator
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/created-by: network-operator
+  name: bgppeering-sample
+spec:
+  # TODO(user): Add fields here

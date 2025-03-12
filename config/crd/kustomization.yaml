@@ -5,11 +5,13 @@ resources:
 - bases/network.schiff.telekom.de_vrfrouteconfigurations.yaml
 - bases/network.schiff.telekom.de_layer2networkconfigurations.yaml
 - bases/network.schiff.telekom.de_routingtables.yaml
+- bases/network.schiff.telekom.de_bgppeerings.yaml
 #+kubebuilder:scaffold:crdkustomizeresource
 
 # [WEBHOOK] To enable webhook, uncomment all the sections with [WEBHOOK] prefix.
 # patches here are for enabling the conversion webhook for each CRD
 #- patches/webhook_in_routingtables.yaml
+#- patches/webhook_in_bgppeerings.yaml
 #+kubebuilder:scaffold:crdkustomizewebhookpatch
 
 # [CERTMANAGER] To enable cert-manager, uncomment all the sections with [CERTMANAGER] prefix.
@@ -17,6 +19,7 @@ resources:
 #- patches/cainjection_in_vrfrouteconfigurations.yaml
 #- patches/cainjection_in_layer2networkconfigurations.yaml
 #- patches/cainjection_in_routingtables.yaml
+#- patches/cainjection_in_bgppeerings.yaml
 #+kubebuilder:scaffold:crdkustomizecainjectionpatch
 
 # the following config is for teaching kustomize how to do kustomization for CRDs.
@@ -28,3 +31,4 @@ patches:
 - path: patches/webhook_in_vrfrouteconfigurations.yaml
 - path: patches/webhook_in_layer2networkconfigurations.yaml
 - path: patches/webhook_in_routingtables.yaml
+- path: patches/webhook_in_bgppeerings.yaml

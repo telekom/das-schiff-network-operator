@@ -1,0 +1,27 @@
+# permissions for end users to view bgppeerings.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: clusterrole
+    app.kubernetes.io/instance: bgppeering-viewer-role
+    app.kubernetes.io/component: rbac
+    app.kubernetes.io/created-by: network-operator
+    app.kubernetes.io/part-of: network-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: bgppeering-viewer-role
+rules:
+- apiGroups:
+  - network.schiff.telekom.de
+  resources:
+  - bgppeerings
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - network.schiff.telekom.de
+  resources:
+  - bgppeerings/status
+  verbs:
+  - get

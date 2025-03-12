@@ -59,12 +59,28 @@ type VRFConfiguration struct {
 	AggregateIPv6 []string
 	Import        []PrefixList
 	Export        []PrefixList
+	Peerings      []BGPPeering
+}
+
+type BGPPeering struct {
+	Name            string
+	AddressFamily   int
+	NeighborRange   string
+	UpdateSource    string
+	RemoteASN       uint32
+	EnableBFD       bool
+	MaximumPrefixes *uint32
+	HoldTime        uint
+	KeepaliveTime   uint
+	Import          []PrefixedRouteItem
+	Export          []PrefixedRouteItem
 }
 
 type Configuration struct {
-	ASN              int
-	VRFs             []VRFConfiguration
-	HasCommunityDrop bool
+	ASN                   int
+	HasCommunityDrop      bool
+	VRFs                  []VRFConfiguration
+	DefaultVRFBGPPeerings []BGPPeering
 }
 
 func NewFRRManager() *Manager {
