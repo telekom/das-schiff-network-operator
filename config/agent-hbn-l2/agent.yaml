@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: agent-hbn-l2
+  namespace: system
+  labels:
+    app.kubernetes.io/component: agent-hbn-l2
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: agent-hbn-l2
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/default-container: agent-hbn-l2
+      labels:
+        app.kubernetes.io/component: agent-hbn-l2
+    spec:
+      tolerations:
+        - effect: NoSchedule
+          key: node-role.kubernetes.io/control-plane
+          operator: Exists
+        - effect: NoSchedule
+          key: node.t-caas.telekom.com/uninitialized
+          operator: Exists
+        - key: node.cloudprovider.kubernetes.io/uninitialized
+          value: "true"
+          effect: NoSchedule
+        - key: node.kubernetes.io/not-ready
+          effect: NoSchedule
+          operator: Exists
+      hostNetwork: true
+      hostPID: true
+      containers:
+        - command:
+            - /agent
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          image: agent-hbn-l2:latest
+          imagePullPolicy: IfNotPresent
+          name: agent-hbn-l2
+          securityContext:
+            privileged: true
+            runAsUser: 0
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 7083
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 7083
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          # TODO(user): Configure the resources accordingly based on the project requirements.
+          # More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+          resources:
+            limits:
+              cpu: 500m
+              memory: 128Mi
+            requests:
+              cpu: 10m
+              memory: 64Mi
+      terminationGracePeriodSeconds: 10
+      serviceAccountName: controller-manager

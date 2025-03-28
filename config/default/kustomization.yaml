@@ -44,6 +44,7 @@ resources:
 - ../rbac
 - ../agent-cra-frr
 - ../agent-netplan
+- ../agent-hbn-l2
 # [CERTMANAGER] To enable cert-manager, please comment cert related line below.
 - ../cert
 - ../operator
@@ -56,5 +57,6 @@ labels:
 patches:
 - path: agent_cra_frr_config_patch.yaml
 - path: agent_netplan_config_patch.yaml
+- path: agent_hbn_l2_config_patch.yaml
 - path: operator_config_patch.yaml
 - path: manager_webhook_patch.yaml
