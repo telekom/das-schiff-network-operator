@@ -121,13 +121,17 @@ func (reconciler *NodeNetplanConfigReconciler) Reconcile(ctx context.Context) er
 					Name:        fmt.Sprintf("%s%d", vlanNamePrefix, vlanConfig.Id),
 					ParentIndex: masterInterface.Attrs().Index,
 					MTU:         vlanConfig.Mtu,
-					Alias:       fmt.Sprintf("%s%s", vlanAliasPrefix, name),
 				},
 				VlanId: vlanConfig.Id,
 			}
-			err := netlink.LinkAdd(&link)
-			if err != nil {
+			if err := netlink.LinkAdd(&link); err != nil {
 				return fmt.Errorf("error adding vlan %s: %w", name, err)
+			}
+			if err := netlink.LinkSetAlias(&link, fmt.Sprintf("%s%s", vlanAliasPrefix, name)); err != nil {
+				return fmt.Errorf("error setting alias for vlan %s: %w", name, err)
+			}
+			if err := netlink.LinkSetUp(&link); err != nil {
+				return fmt.Errorf("error setting up vlan %s: %w", name, err)
 			}
 		}
 	}
