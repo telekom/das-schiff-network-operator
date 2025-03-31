@@ -2,7 +2,6 @@ package agent_hbn_l2 //nolint:revive
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"github.com/vishvananda/netlink"
 	"os"
@@ -11,6 +10,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
+	"gopkg.in/yaml.v2"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -100,7 +100,7 @@ func (reconciler *NodeNetplanConfigReconciler) Reconcile(ctx context.Context) er
 
 	for name, vlan := range desiredVlans {
 		vlanConfig := netplanVlan{}
-		err := json.Unmarshal(vlan.Raw, &vlanConfig)
+		err := yaml.Unmarshal(vlan.Raw, &vlanConfig)
 		if err != nil {
 			return fmt.Errorf("error unmarshalling vlan config: %w", err)
 		}
