@@ -41,14 +41,48 @@ var (
 	nlManager  *nl.Manager
 )
 
-func reconcileLayer2(cfg nl.NetlinkConfiguration) error {
+func deleteLayer2(cfg nl.NetlinkConfiguration) error {
 	existing, err := nlManager.ListL2()
 	if err != nil {
 		return fmt.Errorf("error listing L2: %w", err)
 	}
 
-	var toCreate []nl.Layer2Information
 	var toDelete []nl.Layer2Information
+
+	vrfsToDelete, err := getVRFsToDelete(cfg)
+	if err != nil {
+		return fmt.Errorf("error getting VRFs to delete: %w", err)
+	}
+
+	for i := range existing {
+		needsDeletion := true
+		for j := range cfg.Layer2s {
+			if existing[i].VlanID == cfg.Layer2s[j].VlanID {
+				needsDeletion = false
+				break
+			}
+		}
+		for j := range vrfsToDelete {
+			if existing[i].VRF == vrfsToDelete[j].Name {
+				needsDeletion = true
+				break
+			}
+		}
+		if needsDeletion {
+			if err := nlManager.CleanupL2(&toDelete[i]); len(err) > 0 {
+				return fmt.Errorf("error deleting L2 (VLAN: %d): %v", toDelete[i].VlanID, err)
+			}
+		}
+	}
+
+	return nil
+}
+
+func createLayer2(cfg nl.NetlinkConfiguration) error {
+	existing, err := nlManager.ListL2()
+	if err != nil {
+		return fmt.Errorf("error listing L2: %w", err)
+	}
 
 	var currentConfig *nl.Layer2Information
 	for i := range cfg.Layer2s {
@@ -60,7 +94,9 @@ func reconcileLayer2(cfg nl.NetlinkConfiguration) error {
 			}
 		}
 		if currentConfig == nil {
-			toCreate = append(toCreate, cfg.Layer2s[i])
+			if err := nlManager.CreateL2(&cfg.Layer2s[i]); err != nil {
+				return fmt.Errorf("error creating L2 (VLAN: %d): %w", &cfg.Layer2s[i].VlanID, err)
+			}
 		} else {
 			if err := nlManager.ReconcileL2(currentConfig, &cfg.Layer2s[i]); err != nil {
 				return fmt.Errorf("error reconciling L2 (VLAN: %d): %w", cfg.Layer2s[i].VlanID, err)
@@ -68,41 +104,15 @@ func reconcileLayer2(cfg nl.NetlinkConfiguration) error {
 		}
 	}
 
-	for i := range existing {
-		needsDeletion := true
-		for j := range cfg.Layer2s {
-			if existing[i].VlanID == cfg.Layer2s[j].VlanID {
-				needsDeletion = false
-				break
-			}
-		}
-		if needsDeletion {
-			toDelete = append(toDelete, existing[i])
-		}
-	}
-
-	for i := range toDelete {
-		if err := nlManager.CleanupL2(&toDelete[i]); len(err) > 0 {
-			return fmt.Errorf("error deleting L2 (VLAN: %d): %v", toDelete[i].VlanID, err)
-		}
-	}
-
-	for i := range toCreate {
-		if err := nlManager.CreateL2(&toCreate[i]); err != nil {
-			return fmt.Errorf("error creating L2 (VLAN: %d): %w", toCreate[i].VlanID, err)
-		}
-	}
-
 	return nil
 }
 
-func updateL3Netlink(cfg nl.NetlinkConfiguration) ([]nl.VRFInformation, bool, error) {
+func getVRFsToDelete(cfg nl.NetlinkConfiguration) ([]nl.VRFInformation, error) {
 	existing, err := nlManager.ListL3()
 	if err != nil {
-		return nil, false, fmt.Errorf("error listing L3 VRF information: %w", err)
+		return nil, fmt.Errorf("error listing L3 VRF information: %w", err)
 	}
 
-	var toCreate []nl.VRFInformation
 	var toDelete []nl.VRFInformation
 
 	for i := range existing {
@@ -118,6 +128,15 @@ func updateL3Netlink(cfg nl.NetlinkConfiguration) ([]nl.VRFInformation, bool, er
 		}
 	}
 
+	return toDelete, nil
+}
+
+func createVRFs(cfg nl.NetlinkConfiguration) error {
+	existing, err := nlManager.ListL3()
+	if err != nil {
+		return fmt.Errorf("error listing L3 VRF information: %w", err)
+	}
+
 	for i := range cfg.VRFs {
 		alreadyExists := false
 		for j := range existing {
@@ -127,34 +146,33 @@ func updateL3Netlink(cfg nl.NetlinkConfiguration) ([]nl.VRFInformation, bool, er
 			}
 		}
 		if !alreadyExists {
-			toCreate = append(toCreate, cfg.VRFs[i])
+			log.Println("Creating VRF", cfg.VRFs[i].Name)
+			if err := nlManager.CreateL3(cfg.VRFs[i]); err != nil {
+				return fmt.Errorf("error creating L3 (VRF: %s): %w", cfg.VRFs[i].Name, err)
+			}
+			if err := nlManager.UpL3(cfg.VRFs[i]); err != nil {
+				return fmt.Errorf("error setting up L3 (VRF: %s): %w", cfg.VRFs[i].Name, err)
+			}
 		}
 	}
 
-	for i := range toDelete {
-		errors := nlManager.CleanupL3(toDelete[i].Name)
-		if len(errors) > 0 {
-			return nil, false, fmt.Errorf("error cleaning up L3 (VRF: %s): %v", toDelete[i].Name, errors)
-		}
-	}
-
-	for i := range toCreate {
-		log.Println("Creating VRF", toCreate[i].Name)
-		if err := nlManager.CreateL3(toCreate[i]); err != nil {
-			return nil, false, fmt.Errorf("error creating L3 (VRF: %s): %w", toCreate[i].Name, err)
-		}
-	}
-
-	return toCreate, len(toDelete) > 0, nil
+	return nil
 }
 
 func reconcileLayer3(cfg nl.NetlinkConfiguration) error {
-	created, deletedVRF, err := updateL3Netlink(cfg)
+	vrfsToDelete, err := getVRFsToDelete(cfg)
 	if err != nil {
-		return fmt.Errorf("error updating L3: %w", err)
+		return fmt.Errorf("error getting VRFs to delete: %w", err)
 	}
 
-	if deletedVRF {
+	for i := range vrfsToDelete {
+		errors := nlManager.CleanupL3(vrfsToDelete[i].Name)
+		if len(errors) > 0 {
+			return fmt.Errorf("error cleaning up L3 (VRF: %s): %v", vrfsToDelete[i].Name, errors)
+		}
+	}
+
+	if len(vrfsToDelete) > 0 {
 		err := reloadFRR()
 		if err != nil {
 			return fmt.Errorf("error reloading FRR: %w", err)
@@ -163,10 +181,8 @@ func reconcileLayer3(cfg nl.NetlinkConfiguration) error {
 
 	time.Sleep(defaultSleep)
 
-	for i := range created {
-		if err := nlManager.UpL3(created[i]); err != nil {
-			return fmt.Errorf("error setting up L3 (VRF: %s): %w", created[i].Name, err)
-		}
+	if err := createVRFs(cfg); err != nil {
+		return fmt.Errorf("error creating VRFs: %w", err)
 	}
 
 	return nil
@@ -232,8 +248,8 @@ func applyConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Reconcile Layer2
-	err = reconcileLayer2(craConfiguration.NetlinkConfiguration)
+	// Delete Layer2
+	err = deleteLayer2(craConfiguration.NetlinkConfiguration)
 	if err != nil {
 		log.Println("Failed to reconcile Layer2", err)
 		http.Error(w, fmt.Sprintf("Failed to reconcile Layer2: %v", err), http.StatusInternalServerError)
@@ -245,6 +261,14 @@ func applyConfig(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Println("Failed to reconcile Layer3", err)
 		http.Error(w, fmt.Sprintf("Failed to reconcile Layer3: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Recreate Layer2
+	err = createLayer2(craConfiguration.NetlinkConfiguration)
+	if err != nil {
+		log.Println("Failed to reconcile Layer2", err)
+		http.Error(w, fmt.Sprintf("Failed to reconcile Layer2: %v", err), http.StatusInternalServerError)
 		return
 	}
 
