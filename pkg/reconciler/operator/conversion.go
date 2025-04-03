@@ -2,9 +2,10 @@ package operator
 
 import (
 	"fmt"
-	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"net"
 	"sort"
+
+	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 )
 
 func (crr *ConfigRevisionReconciler) buildFilterItems(items []v1alpha1.VrfRouteConfigurationPrefixItem, family AddressFamily) ([]v1alpha1.FilterItem, error) {

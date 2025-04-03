@@ -4,11 +4,12 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"net"
+	"sort"
+
 	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/pkg/network/netplan"
 	corev1 "k8s.io/api/core/v1"
-	"net"
-	"sort"
 )
 
 func (crr *ConfigRevisionReconciler) buildBgpPeer(loopbackIP *string, listenRange *string, peer v1alpha1.BGPRevision) (*v1alpha1.BGPPeer, error) {

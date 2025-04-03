@@ -2,9 +2,10 @@ package operator
 
 import (
 	"fmt"
+	"sort"
+
 	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
-	"sort"
 )
 
 func (crr *ConfigRevisionReconciler) buildNodeVrf(node *corev1.Node, revision *v1alpha1.NetworkConfigRevision, c *v1alpha1.NodeNetworkConfig) error {

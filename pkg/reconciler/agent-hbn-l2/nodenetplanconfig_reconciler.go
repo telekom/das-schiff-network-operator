@@ -25,14 +25,18 @@ const (
 	aliasPrefix     = "hbn"
 )
 
-type netplanVlan struct {
-	Id        int      `json:"id"`
-	Mtu       int      `json:"mtu"`
+type addresses struct {
 	Addresses []string `json:"addresses"`
 }
 
+type netplanVlan struct {
+	addresses `json:",inline"`
+	Id        int `json:"id"`
+	Mtu       int `json:"mtu"`
+}
+
 type netplanDummy struct {
-	Addresses []string `json:"addresses"`
+	addresses `json:",inline"`
 }
 
 type NodeNetplanConfigReconciler struct {
@@ -95,7 +99,7 @@ func (reconciler *NodeNetplanConfigReconciler) reconcileVLANs(devices map[string
 					if err := setEUIAutogeneration(existingInterface.Attrs().Name, false); err != nil {
 						return fmt.Errorf("error setting EUI autogeneration: %w", err)
 					}
-					if err := reconciler.reconcileAddresses(existingInterface, devices[name].Addresses); err != nil {
+					if err := reconciler.reconcileAddresses(existingInterface, devices[name]); err != nil {
 						return fmt.Errorf("error reconciling addresses for vlan %s: %w", existingInterface.Attrs().Name, err)
 					}
 				}
@@ -104,9 +108,9 @@ func (reconciler *NodeNetplanConfigReconciler) reconcileVLANs(devices map[string
 	}
 
 	for name, vlan := range devices {
-		vlanConfig := netplanVlan{}
-		if err := yaml.Unmarshal(vlan.Raw, &vlanConfig); err != nil {
-			return fmt.Errorf("error unmarshalling vlan config: %w", err)
+		vlanConfig, err := parseVlan(vlan)
+		if err != nil {
+			return fmt.Errorf("error parsing vlan config: %w", err)
 		}
 
 		existing := false
@@ -140,6 +144,9 @@ func (reconciler *NodeNetplanConfigReconciler) reconcileVLANs(devices map[string
 			if err := netlink.LinkSetUp(&link); err != nil {
 				return fmt.Errorf("error setting up vlan %s: %w", name, err)
 			}
+			if err := reconciler.reconcileAddresses(&link, vlan); err != nil {
+				return fmt.Errorf("error reconciling addresses for vlan %s: %w", name, err)
+			}
 		}
 	}
 
@@ -169,8 +176,12 @@ func (reconciler *NodeNetplanConfigReconciler) removeNotExistingAddresses(link n
 	return nil
 }
 
-func (reconciler *NodeNetplanConfigReconciler) reconcileAddresses(link netlink.Link, addresses []string) error {
-	for _, address := range addresses {
+func (reconciler *NodeNetplanConfigReconciler) reconcileAddresses(link netlink.Link, device netplan.Device) error {
+	addressConfig, err := parseAddresses(device)
+	if err != nil {
+		return fmt.Errorf("error parsing addresses config: %w", err)
+	}
+	for _, address := range addressConfig.Addresses {
 		addr, err := netlink.ParseAddr(address)
 		if err != nil {
 			return fmt.Errorf("error parsing address %s: %w", address, err)
@@ -180,10 +191,10 @@ func (reconciler *NodeNetplanConfigReconciler) reconcileAddresses(link netlink.L
 		}
 	}
 
-	if err := reconciler.removeNotExistingAddresses(link, addresses, unix.AF_INET); err != nil {
+	if err := reconciler.removeNotExistingAddresses(link, addressConfig.Addresses, unix.AF_INET); err != nil {
 		return fmt.Errorf("error removing not existing IPv4 addresses: %w", err)
 	}
-	if err := reconciler.removeNotExistingAddresses(link, addresses, unix.AF_INET6); err != nil {
+	if err := reconciler.removeNotExistingAddresses(link, addressConfig.Addresses, unix.AF_INET6); err != nil {
 		return fmt.Errorf("error removing not existing IPv6 addresses: %w", err)
 	}
 
@@ -212,17 +223,15 @@ func (reconciler *NodeNetplanConfigReconciler) reconcileLoopbacks(devices map[st
 					if err := setEUIAutogeneration(existingInterface.Attrs().Name, false); err != nil {
 						return fmt.Errorf("error setting EUI autogeneration: %w", err)
 					}
+					if err := reconciler.reconcileAddresses(existingInterface, devices[name]); err != nil {
+						return fmt.Errorf("error reconciling addresses for dummy %s: %w", existingInterface.Attrs().Name, err)
+					}
 				}
 			}
 		}
 	}
 
 	for name, dummy := range devices {
-		dummyConfig := netplanDummy{}
-		if err := yaml.Unmarshal(dummy.Raw, &dummyConfig); err != nil {
-			return fmt.Errorf("error unmarshalling dummy config: %w", err)
-		}
-
 		existing := false
 		for _, existingInterface := range allInterfaces {
 			if existingInterface.Type() == "dummy" {
@@ -250,6 +259,9 @@ func (reconciler *NodeNetplanConfigReconciler) reconcileLoopbacks(devices map[st
 			}
 			if err := netlink.LinkSetUp(&link); err != nil {
 				return fmt.Errorf("error setting up vlan %s: %w", name, err)
+			}
+			if err := reconciler.reconcileAddresses(&link, dummy); err != nil {
+				return fmt.Errorf("error reconciling addresses for dummy %s: %w", name, err)
 			}
 		}
 	}
@@ -294,4 +306,28 @@ func setEUIAutogeneration(intfName string, generateEUI bool) error {
 		return fmt.Errorf("error writing to file: %w", err)
 	}
 	return nil
+}
+
+func parseVlan(device netplan.Device) (*netplanVlan, error) {
+	vlan := &netplanVlan{}
+	if err := yaml.Unmarshal(device.Raw, vlan); err != nil {
+		return nil, fmt.Errorf("error unmarshalling vlan config: %w", err)
+	}
+	return vlan, nil
+}
+
+func parseDummy(device netplan.Device) (*netplanDummy, error) {
+	dummy := &netplanDummy{}
+	if err := yaml.Unmarshal(device.Raw, dummy); err != nil {
+		return nil, fmt.Errorf("error unmarshalling dummy config: %w", err)
+	}
+	return dummy, nil
+}
+
+func parseAddresses(device netplan.Device) (*addresses, error) {
+	addr := &addresses{}
+	if err := yaml.Unmarshal(device.Raw, addr); err != nil {
+		return nil, fmt.Errorf("error unmarshalling address config: %w", err)
+	}
+	return addr, nil
 }
