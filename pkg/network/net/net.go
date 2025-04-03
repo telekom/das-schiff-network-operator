@@ -11,6 +11,7 @@ const (
 	InterfaceTypeTunnel
 	InterfaceTypeVLan
 	InterfaceTypeVRF
+	InterfaceTypeDummy
 )
 
 func (i InterfaceType) String() string {
@@ -31,6 +32,8 @@ func (i InterfaceType) String() string {
 		return "vlan"
 	case InterfaceTypeVRF:
 		return "vrf"
+	case InterfaceTypeDummy:
+		return "dummy"
 	}
 	return ""
 }

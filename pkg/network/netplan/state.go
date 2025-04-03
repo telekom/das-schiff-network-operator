@@ -39,6 +39,7 @@ type NetworkState struct {
 	Tunnels   map[string]Device `json:"tunnels,omitempty"`
 	VLans     map[string]Device `json:"vlans,omitempty"`
 	VRFs      map[string]Device `json:"vrfs,omitempty"`
+	Dummies   map[string]Device `json:"dummy-devices,omitempty"`
 }
 
 func NewEmptyState() State {
@@ -52,6 +53,7 @@ func NewEmptyState() State {
 			Tunnels:   make(map[string]Device),
 			VLans:     make(map[string]Device),
 			VRFs:      make(map[string]Device),
+			Dummies:   make(map[string]Device),
 			Version:   2, //nolint:mnd
 		},
 	}
@@ -88,6 +90,7 @@ func (s State) DeviceIterator() StateDeviceIterator {
 	maps.ForEach(s.Network.Tunnels, func(name string, device Device) { add(net.InterfaceTypeTunnel, name, device) })
 	maps.ForEach(s.Network.VLans, func(name string, device Device) { add(net.InterfaceTypeVLan, name, device) })
 	maps.ForEach(s.Network.VRFs, func(name string, device Device) { add(net.InterfaceTypeVRF, name, device) })
+	maps.ForEach(s.Network.Dummies, func(name string, device Device) { add(net.InterfaceTypeDummy, name, device) })
 
 	return StateDeviceIterator{
 		state:       &s,
@@ -120,6 +123,8 @@ func (di *StateDeviceIterator) Apply(i StateDeviceIteratorItem) {
 		di.state.Network.VLans[i.Name] = i.Device
 	case net.InterfaceTypeVRF:
 		di.state.Network.VRFs[i.Name] = i.Device
+	case net.InterfaceTypeDummy:
+		di.state.Network.Dummies[i.Name] = i.Device
 	}
 }
 

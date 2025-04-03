@@ -60,10 +60,168 @@ spec:
           spec:
             description: NetworkConfigSpec defines the desired state of NetworkConfig.
             properties:
+              bgp:
+                items:
+                  properties:
+                    enableBFD:
+                      description: EnableBFD is the flag to enable BFD for the BGP
+                        peering
+                      type: boolean
+                    export:
+                      description: Routes exported to the BGP peer
+                      items:
+                        description: VRFRouteConfigurationPrefixItem defines a prefix
+                          item.
+                        properties:
+                          action:
+                            enum:
+                            - permit
+                            - deny
+                            type: string
+                          cidr:
+                            description: CIDR of the leaked network
+                            type: string
+                          ge:
+                            description: Minimum prefix length to be matched
+                            type: integer
+                          le:
+                            description: Maximum prefix length to be matched
+                            type: integer
+                          seq:
+                            description: Sequence in the generated prefix-list, if
+                              omitted will be list index
+                            maximum: 4294967295
+                            minimum: 1
+                            type: integer
+                        required:
+                        - action
+                        type: object
+                      maxItems: 4294967295
+                      type: array
+                    holdTime:
+                      type: string
+                    import:
+                      description: Routes imported from the BGP peer
+                      items:
+                        description: VRFRouteConfigurationPrefixItem defines a prefix
+                          item.
+                        properties:
+                          action:
+                            enum:
+                            - permit
+                            - deny
+                            type: string
+                          cidr:
+                            description: CIDR of the leaked network
+                            type: string
+                          ge:
+                            description: Minimum prefix length to be matched
+                            type: integer
+                          le:
+                            description: Maximum prefix length to be matched
+                            type: integer
+                          seq:
+                            description: Sequence in the generated prefix-list, if
+                              omitted will be list index
+                            maximum: 4294967295
+                            minimum: 1
+                            type: integer
+                        required:
+                        - action
+                        type: object
+                      maxItems: 4294967295
+                      type: array
+                    keepaliveTime:
+                      type: string
+                    loopbackPeer:
+                      description: Loopback is the loopback interface used for the
+                        BGP peering
+                      properties:
+                        ips:
+                          description: IPAddresses are the IP addresses of the loopback
+                            interface, one for IPv4 and/or one for IPv6
+                          items:
+                            type: string
+                          type: array
+                      required:
+                      - ips
+                      type: object
+                    maximumPrefixes:
+                      description: MaximumPrefixes is the maximum number of received
+                        prefixes allowed
+                      format: int32
+                      type: integer
+                    name:
+                      type: string
+                    nodeSelector:
+                      description: Select nodes to create BGPPeering on
+                      properties:
+                        matchExpressions:
+                          description: matchExpressions is a list of label selector
+                            requirements. The requirements are ANDed.
+                          items:
+                            description: |-
+                              A label selector requirement is a selector that contains values, a key, and an operator that
+                              relates the key and values.
+                            properties:
+                              key:
+                                description: key is the label key that the selector
+                                  applies to.
+                                type: string
+                              operator:
+                                description: |-
+                                  operator represents a key's relationship to a set of values.
+                                  Valid operators are In, NotIn, Exists and DoesNotExist.
+                                type: string
+                              values:
+                                description: |-
+                                  values is an array of string values. If the operator is In or NotIn,
+                                  the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                                  the values array must be empty. This array is replaced during a strategic
+                                  merge patch.
+                                items:
+                                  type: string
+                                type: array
+                                x-kubernetes-list-type: atomic
+                            required:
+                            - key
+                            - operator
+                            type: object
+                          type: array
+                          x-kubernetes-list-type: atomic
+                        matchLabels:
+                          additionalProperties:
+                            type: string
+                          description: |-
+                            matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                            map is equivalent to an element of matchExpressions, whose key field is "key", the
+                            operator is "In", and the values array contains only "value". The requirements are ANDed.
+                          type: object
+                      type: object
+                      x-kubernetes-map-type: atomic
+                    peeringVlan:
+                      description: PeeringVlan is the VLAN used for the BGP peering
+                      properties:
+                        name:
+                          description: Name is the name of the Layer2NetworkConfiguration
+                            resource
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    remoteASN:
+                      description: RemoteASN is the ASN of the remote BGP peer
+                      format: int32
+                      type: integer
+                  required:
+                  - enableBFD
+                  - export
+                  - import
+                  - remoteASN
+                  type: object
+                type: array
               layer2:
                 items:
-                  description: Layer2NetworkConfigurationSpec defines the desired
-                    state of Layer2NetworkConfiguration.
                   properties:
                     advertiseNeighbors:
                       description: If desired network-operator advertises host routes
@@ -90,6 +248,8 @@ spec:
                       maximum: 9000
                       minimum: 1000
                       type: integer
+                    name:
+                      type: string
                     neighSuppression:
                       description: Enable ARP / ND suppression
                       type: boolean
@@ -160,8 +320,6 @@ spec:
                 type: string
               vrf:
                 items:
-                  description: VRFRouteConfigurationSpec defines the desired state
-                    of VRFRouteConfiguration.
                   properties:
                     aggregate:
                       description: Aggregate Routes that should be announced
@@ -236,6 +394,54 @@ spec:
                         type: object
                       maxItems: 4294967295
                       type: array
+                    name:
+                      type: string
+                    nodeSelector:
+                      description: Select nodes to create VRF on
+                      properties:
+                        matchExpressions:
+                          description: matchExpressions is a list of label selector
+                            requirements. The requirements are ANDed.
+                          items:
+                            description: |-
+                              A label selector requirement is a selector that contains values, a key, and an operator that
+                              relates the key and values.
+                            properties:
+                              key:
+                                description: key is the label key that the selector
+                                  applies to.
+                                type: string
+                              operator:
+                                description: |-
+                                  operator represents a key's relationship to a set of values.
+                                  Valid operators are In, NotIn, Exists and DoesNotExist.
+                                type: string
+                              values:
+                                description: |-
+                                  values is an array of string values. If the operator is In or NotIn,
+                                  the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                                  the values array must be empty. This array is replaced during a strategic
+                                  merge patch.
+                                items:
+                                  type: string
+                                type: array
+                                x-kubernetes-list-type: atomic
+                            required:
+                            - key
+                            - operator
+                            type: object
+                          type: array
+                          x-kubernetes-list-type: atomic
+                        matchLabels:
+                          additionalProperties:
+                            type: string
+                          description: |-
+                            matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                            map is equivalent to an element of matchExpressions, whose key field is "key", the
+                            operator is "In", and the values array contains only "value". The requirements are ANDed.
+                          type: object
+                      type: object
+                      x-kubernetes-map-type: atomic
                     routeTarget:
                       type: string
                     seq:

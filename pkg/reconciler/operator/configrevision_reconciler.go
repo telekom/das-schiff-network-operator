@@ -2,11 +2,9 @@ package operator
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
-	"sort"
 	"strings"
 	"time"
 
@@ -38,6 +36,14 @@ const (
 	numOfRefs = 2
 
 	numOfDeploymentRetries = 3
+)
+
+type AddressFamily int
+
+const (
+	Both AddressFamily = iota
+	IPv4
+	IPv6
 )
 
 // ConfigRevisionReconciler is responsible for creating NodeConfig objects.
@@ -327,13 +333,13 @@ func (crr *ConfigRevisionReconciler) deployNodeConfig(ctx context.Context, node 
 		return nil
 	}
 
-	newConfig, err := crr.createConfigForNode(node, revision)
+	newConfig, err := crr.createNodeNetworkConfig(node, revision)
 	if err != nil {
 		return fmt.Errorf("error preparing NodeNetworkConfig for node %s: %w", node.Name, err)
 	}
 
 	for i := 0; i < numOfDeploymentRetries; i++ {
-		if err := crr.deployConfig(ctx, newConfig, currentConfig, node); err != nil {
+		if err := crr.deployNodeNetworkConfig(ctx, newConfig, currentConfig, node); err != nil {
 			if errors.Is(err, context.DeadlineExceeded) {
 				continue
 			}
@@ -343,7 +349,7 @@ func (crr *ConfigRevisionReconciler) deployNodeConfig(ctx context.Context, node 
 	}
 
 	// create netplan config
-	if err := crr.createOrUpdateConfig(ctx, node, revision); err != nil {
+	if err := crr.createOrUpdateNetplanConfig(ctx, node, revision); err != nil {
 		return fmt.Errorf("failed to deploy NodeNetworkConfig: %w", err)
 	}
 
@@ -352,7 +358,94 @@ func (crr *ConfigRevisionReconciler) deployNodeConfig(ctx context.Context, node 
 	return nil
 }
 
-func (crr *ConfigRevisionReconciler) createOrUpdateConfig(ctx context.Context, node *corev1.Node, revision *v1alpha1.NetworkConfigRevision) error {
+func matchSelector(node *corev1.Node, selector *metav1.LabelSelector) bool {
+	if selector == nil {
+		return true
+	}
+
+	labelSelector, err := convertSelector(selector.MatchLabels, selector.MatchExpressions)
+	if err != nil {
+		return false
+	}
+
+	return labelSelector.Matches(labels.Set(node.ObjectMeta.Labels))
+}
+
+func (crr *ConfigRevisionReconciler) createNodeNetworkConfig(node *corev1.Node, revision *v1alpha1.NetworkConfigRevision) (*v1alpha1.NodeNetworkConfig, error) {
+	// create new config
+	c := &v1alpha1.NodeNetworkConfig{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: node.Name,
+		},
+	}
+
+	if err := crr.vrfConfig.ReloadConfig(); err != nil {
+		return nil, fmt.Errorf("error reloading config: %w", err)
+	}
+
+	if err := crr.buildNodeVrf(node, revision, c); err != nil {
+		return nil, fmt.Errorf("error building node VRFs: %w", err)
+	}
+	if err := crr.buildNodeLayer2(node, revision, c); err != nil {
+		return nil, fmt.Errorf("error building node Layer2: %w", err)
+	}
+	if err := crr.buildNodeBgpPeers(node, revision, c); err != nil {
+		return nil, fmt.Errorf("error building node Layer2: %w", err)
+	}
+
+	c.Spec.Revision = revision.Spec.Revision
+	c.Name = node.Name
+
+	if err := controllerutil.SetOwnerReference(node, c, scheme.Scheme); err != nil {
+		return nil, fmt.Errorf("error setting owner references (node): %w", err)
+	}
+
+	if err := controllerutil.SetOwnerReference(revision, c, crr.scheme); err != nil {
+		return nil, fmt.Errorf("error setting owner references (revision): %w", err)
+	}
+
+	// set config as next config for the node
+	return c, nil
+}
+
+func (crr *ConfigRevisionReconciler) createNodeNetplanConfig(node *corev1.Node, revision *v1alpha1.NetworkConfigRevision) (*v1alpha1.NodeNetplanConfig, error) {
+	c := &v1alpha1.NodeNetplanConfig{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: node.Name,
+		},
+		Spec: v1alpha1.NodeNetplanConfigSpec{
+			DesiredState: netplan.State{
+				Network: netplan.NetworkState{
+					Version: 2, //nolint:mnd
+				},
+			},
+		},
+	}
+
+	if vlans, err := crr.buildNetplanVLANs(node, revision); err != nil {
+		return nil, fmt.Errorf("error building netplan VLANs: %w", err)
+	} else {
+		c.Spec.DesiredState.Network.VLans = vlans
+	}
+
+	if dummies, err := crr.buildNetplanDummies(node, revision); err != nil {
+		return nil, fmt.Errorf("error building netplan dummies: %w", err)
+	} else {
+		c.Spec.DesiredState.Network.Dummies = dummies
+	}
+
+	if err := controllerutil.SetOwnerReference(node, c, scheme.Scheme); err != nil {
+		return nil, fmt.Errorf("error setting owner references (node): %w", err)
+	}
+
+	if err := controllerutil.SetOwnerReference(revision, c, crr.scheme); err != nil {
+		return nil, fmt.Errorf("error setting owner references (revision): %w", err)
+	}
+
+	return c, nil
+}
+
+func (crr *ConfigRevisionReconciler) createOrUpdateNetplanConfig(ctx context.Context, node *corev1.Node, revision *v1alpha1.NetworkConfigRevision) error {
 	currentNetplanConfig := &v1alpha1.NodeNetplanConfig{}
 	if err := crr.client.Get(ctx, types.NamespacedName{Name: node.Name}, currentNetplanConfig); err != nil {
 		if !apierrors.IsNotFound(err) {
@@ -378,274 +471,6 @@ func (crr *ConfigRevisionReconciler) createOrUpdateConfig(ctx context.Context, n
 	return nil
 }
 
-func (crr *ConfigRevisionReconciler) createConfigForNode(node *corev1.Node, revision *v1alpha1.NetworkConfigRevision) (*v1alpha1.NodeNetworkConfig, error) {
-	// create new config
-	c := &v1alpha1.NodeNetworkConfig{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: node.Name,
-		},
-	}
-
-	if err := crr.vrfConfig.ReloadConfig(); err != nil {
-		return nil, fmt.Errorf("error reloading config: %w", err)
-	}
-
-	vrfs := revision.Spec.Vrf
-	sort.SliceStable(vrfs, func(i, j int) bool {
-		return vrfs[i].Seq < vrfs[j].Seq
-	})
-
-	defaultImportMap := make(map[string]v1alpha1.VRFImport)
-
-	c.Spec.FabricVRFs = make(map[string]v1alpha1.FabricVRF)
-	c.Spec.Layer2s = make(map[string]v1alpha1.Layer2)
-
-	for i := range vrfs {
-		if _, ok := c.Spec.FabricVRFs[vrfs[i].VRF]; !ok {
-			fabricVrf, err := crr.createFabricVRF(c, &vrfs[i], defaultImportMap)
-			if err != nil {
-				return nil, fmt.Errorf("failed to create fabric VRF definition: %w", err)
-			}
-			c.Spec.FabricVRFs[vrfs[i].VRF] = fabricVrf
-		}
-	}
-
-	c.Spec.DefaultVRF = &v1alpha1.VRF{}
-	for _, vrfImport := range defaultImportMap {
-		c.Spec.DefaultVRF.VRFImports = append(c.Spec.DefaultVRF.VRFImports, vrfImport)
-	}
-
-	layer2 := revision.Spec.Layer2
-	sort.SliceStable(layer2, func(i, j int) bool {
-		return layer2[i].ID < layer2[j].ID
-	})
-
-	for _, l2 := range layer2 {
-		if _, ok := c.Spec.Layer2s[fmt.Sprintf("%d", l2.ID)]; ok {
-			return nil, fmt.Errorf("duplicate Layer2 ID found: %d", l2.ID)
-		}
-
-		nodeL2 := v1alpha1.Layer2{
-			VNI:  uint32(l2.VNI), //nolint:gosec
-			VLAN: uint16(l2.ID),  //nolint:gosec
-			MTU:  uint16(l2.MTU), //nolint:gosec
-		}
-		if len(l2.AnycastGateways) > 0 {
-			irb := v1alpha1.IRB{
-				VRF:         l2.VRF,
-				IPAddresses: l2.AnycastGateways,
-				MACAddress:  l2.AnycastMac,
-			}
-			nodeL2.IRB = &irb
-		}
-
-		c.Spec.Layer2s[fmt.Sprintf("%d", l2.ID)] = nodeL2
-	}
-
-	c.Spec.Revision = revision.Spec.Revision
-	c.Name = node.Name
-
-	if err := controllerutil.SetOwnerReference(node, c, scheme.Scheme); err != nil {
-		return nil, fmt.Errorf("error setting owner references (node): %w", err)
-	}
-
-	if err := controllerutil.SetOwnerReference(revision, c, crr.scheme); err != nil {
-		return nil, fmt.Errorf("error setting owner references (revision): %w", err)
-	}
-
-	// set config as next config for the node
-	return c, nil
-}
-
-func (crr *ConfigRevisionReconciler) createFabricVRF(c *v1alpha1.NodeNetworkConfig, vrf *v1alpha1.VRFRouteConfigurationSpec, defaultImportMap map[string]v1alpha1.VRFImport) (v1alpha1.FabricVRF, error) {
-	if _, ok := c.Spec.FabricVRFs[vrf.VRF]; !ok {
-		vni := uint32(0) //nolint:wastedassign
-		rt := ""         //nolint:wastedassign
-		if vrf.RouteTarget != nil && vrf.VNI != nil {
-			vni = uint32(*vrf.VNI) //nolint:gosec
-			rt = *vrf.RouteTarget
-		} else if configVni, configRt, err := crr.vrfConfig.GetVNIAndRT(vrf.VRF); err == nil {
-			vni = uint32(configVni) //nolint:gosec
-			rt = configRt
-		} else {
-			return v1alpha1.FabricVRF{}, fmt.Errorf("error getting VNI and RT for VRF %s: %w", vrf.VRF, err)
-		}
-
-		fabricVrf := v1alpha1.FabricVRF{
-			VRF: v1alpha1.VRF{
-				VRFImports: []v1alpha1.VRFImport{
-					{
-						FromVRF: "cluster",
-						Filter: v1alpha1.Filter{
-							DefaultAction: v1alpha1.Action{
-								Type: v1alpha1.Reject,
-							},
-						},
-					},
-				},
-			},
-			VNI:                    vni,
-			EVPNImportRouteTargets: []string{},
-			EVPNExportRouteTargets: []string{},
-			EVPNExportFilter: &v1alpha1.Filter{
-				DefaultAction: v1alpha1.Action{
-					Type: v1alpha1.Reject,
-				},
-			},
-		}
-		if rt != "" {
-			fabricVrf.EVPNImportRouteTargets = append(fabricVrf.EVPNImportRouteTargets, rt)
-			fabricVrf.EVPNExportRouteTargets = append(fabricVrf.EVPNExportRouteTargets, rt)
-		}
-		c.Spec.FabricVRFs[vrf.VRF] = fabricVrf
-	}
-
-	fabricVrf := c.Spec.FabricVRFs[vrf.VRF]
-
-	for _, aggregate := range vrf.Aggregate {
-		fabricVrf.StaticRoutes = append(fabricVrf.StaticRoutes, v1alpha1.StaticRoute{
-			Prefix: aggregate,
-		})
-	}
-
-	processExports(vrf, &fabricVrf)
-
-	processImports(vrf, defaultImportMap)
-
-	return fabricVrf, nil
-}
-
-func processExports(vrf *v1alpha1.VRFRouteConfigurationSpec, fabricVrf *v1alpha1.FabricVRF) {
-	sort.SliceStable(vrf.Export, func(i, j int) bool {
-		return vrf.Export[i].Seq < vrf.Export[j].Seq
-	})
-
-	for _, export := range vrf.Export {
-		filterItem := v1alpha1.FilterItem{
-			Matcher: v1alpha1.Matcher{
-				Prefix: &v1alpha1.PrefixMatcher{
-					Prefix: export.CIDR,
-					Ge:     export.GE,
-					Le:     export.LE,
-				},
-			},
-		}
-		filterItem.Action = v1alpha1.Action{
-			Type: v1alpha1.Reject,
-		}
-		if export.Action == "permit" {
-			filterItem.Action.Type = v1alpha1.Accept
-		}
-		fabricVrf.EVPNExportFilter.Items = append(fabricVrf.EVPNExportFilter.Items, filterItem)
-
-		vrfImportItem := filterItem.DeepCopy()
-		if vrf.Community != nil {
-			additive := true
-			vrfImportItem.Action.ModifyRoute = &v1alpha1.ModifyRouteAction{
-				AddCommunities:      []string{*vrf.Community},
-				AdditiveCommunities: &additive,
-			}
-		}
-		vrfImport := fabricVrf.VRFImports[0]
-		vrfImport.Filter.Items = append(vrfImport.Filter.Items, *vrfImportItem)
-		fabricVrf.VRFImports[0] = vrfImport
-	}
-}
-
-func processImports(vrf *v1alpha1.VRFRouteConfigurationSpec, defaultImportMap map[string]v1alpha1.VRFImport) {
-	sort.SliceStable(vrf.Import, func(i, j int) bool {
-		return vrf.Import[i].Seq < vrf.Import[j].Seq
-	})
-
-	for _, vrfImport := range vrf.Import {
-		if defaultImportMap == nil {
-			defaultImportMap = make(map[string]v1alpha1.VRFImport)
-		}
-		if _, ok := defaultImportMap[vrf.VRF]; !ok {
-			defaultImportMap[vrf.VRF] = v1alpha1.VRFImport{
-				FromVRF: vrf.VRF,
-				Filter: v1alpha1.Filter{
-					DefaultAction: v1alpha1.Action{
-						Type: v1alpha1.Reject,
-					},
-				},
-			}
-		}
-
-		filterItem := v1alpha1.FilterItem{
-			Matcher: v1alpha1.Matcher{
-				Prefix: &v1alpha1.PrefixMatcher{
-					Prefix: vrfImport.CIDR,
-					Ge:     vrfImport.GE,
-					Le:     vrfImport.LE,
-				},
-			},
-		}
-		filterItem.Action = v1alpha1.Action{
-			Type: v1alpha1.Reject,
-		}
-		if vrfImport.Action == "permit" {
-			filterItem.Action.Type = v1alpha1.Accept
-		}
-		vrfImport := defaultImportMap[vrf.VRF]
-		vrfImport.Filter.Items = append(vrfImport.Filter.Items, filterItem)
-		defaultImportMap[vrf.VRF] = vrfImport
-	}
-}
-
-func (crr *ConfigRevisionReconciler) createNodeNetplanConfig(node *corev1.Node, revision *v1alpha1.NetworkConfigRevision) (*v1alpha1.NodeNetplanConfig, error) {
-	c := &v1alpha1.NodeNetplanConfig{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: node.Name,
-		},
-		Spec: v1alpha1.NodeNetplanConfigSpec{
-			DesiredState: netplan.State{
-				Network: netplan.NetworkState{
-					Version: 2, //nolint:mnd
-					VLans:   make(map[string]netplan.Device),
-					Ethernets: map[string]netplan.Device{
-						"hbn": {
-							Raw: []byte("{}"),
-						},
-					},
-				},
-			},
-		},
-	}
-
-	layer2 := revision.Spec.Layer2
-	sort.SliceStable(layer2, func(i, j int) bool {
-		return layer2[i].ID < layer2[j].ID
-	})
-	for _, l2 := range layer2 {
-		vlan := map[string]interface{}{
-			"id":   l2.ID,
-			"link": "hbn",
-			"mtu":  l2.MTU,
-		}
-
-		rawVlan, err := json.Marshal(vlan)
-		if err != nil {
-			return nil, fmt.Errorf("error marshaling vlan: %w", err)
-		}
-
-		c.Spec.DesiredState.Network.VLans[fmt.Sprintf("vlan.%d", l2.ID)] = netplan.Device{
-			Raw: rawVlan,
-		}
-	}
-
-	if err := controllerutil.SetOwnerReference(node, c, scheme.Scheme); err != nil {
-		return nil, fmt.Errorf("error setting owner references (node): %w", err)
-	}
-
-	if err := controllerutil.SetOwnerReference(revision, c, crr.scheme); err != nil {
-		return nil, fmt.Errorf("error setting owner references (revision): %w", err)
-	}
-
-	return c, nil
-}
-
-//nolint:unused
 func convertSelector(matchLabels map[string]string, matchExpressions []metav1.LabelSelectorRequirement) (labels.Selector, error) {
 	selector := labels.NewSelector()
 	var reqs labels.Requirements
@@ -671,7 +496,7 @@ func convertSelector(matchLabels map[string]string, matchExpressions []metav1.La
 	return selector, nil
 }
 
-func (crr *ConfigRevisionReconciler) deployConfig(ctx context.Context, newConfig, currentConfig *v1alpha1.NodeNetworkConfig, node *corev1.Node) error {
+func (crr *ConfigRevisionReconciler) deployNodeNetworkConfig(ctx context.Context, newConfig, currentConfig *v1alpha1.NodeNetworkConfig, node *corev1.Node) error {
 	deploymentCtx, deploymentCtxCancel := context.WithTimeout(ctx, crr.apiTimeout)
 	defer deploymentCtxCancel()
 	var cfg *v1alpha1.NodeNetworkConfig
@@ -718,10 +543,6 @@ func listNodes(ctx context.Context, c client.Client) (map[string]*corev1.Node, e
 				nodes[list.Items[i].Name] = &list.Items[i]
 				break
 			}
-		}
-
-		if _, ok := list.Items[i].Labels["node-role.kubernetes.io/worker"]; !ok {
-			delete(nodes, list.Items[i].Name)
 		}
 	}
 

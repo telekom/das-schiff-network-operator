@@ -52,6 +52,11 @@ spec:
                           type: object
                           x-kubernetes-preserve-unknown-fields: true
                         type: object
+                      dummy-devices:
+                        additionalProperties:
+                          type: object
+                          x-kubernetes-preserve-unknown-fields: true
+                        type: object
                       ethernets:
                         additionalProperties:
                           type: object

@@ -25,10 +25,26 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+type Layer2Revision struct {
+	Name                           string `json:"name,omitempty"`
+	Layer2NetworkConfigurationSpec `json:",inline"`
+}
+
+type VRFRevision struct {
+	Name                      string `json:"name,omitempty"`
+	VRFRouteConfigurationSpec `json:",inline"`
+}
+
+type BGPRevision struct {
+	Name           string `json:"name,omitempty"`
+	BGPPeeringSpec `json:",inline"`
+}
+
 // NetworkConfigSpec defines the desired state of NetworkConfig.
 type NetworkConfigRevisionSpec struct {
-	Layer2 []Layer2NetworkConfigurationSpec `json:"layer2,omitempty"`
-	Vrf    []VRFRouteConfigurationSpec      `json:"vrf,omitempty"`
+	Layer2 []Layer2Revision `json:"layer2,omitempty"`
+	Vrf    []VRFRevision    `json:"vrf,omitempty"`
+	BGP    []BGPRevision    `json:"bgp,omitempty"`
 	// Revision is a hash of the NetworkConfigRevision object that is used to identify the particular revision.
 	Revision string `json:"revision"`
 }
@@ -74,10 +90,11 @@ type NetworkConfigRevisionList struct {
 	Items           []NetworkConfigRevision `json:"items"`
 }
 
-func NewRevision(layer2 []Layer2NetworkConfigurationSpec, vrfs []VRFRouteConfigurationSpec) (*NetworkConfigRevision, error) {
+func NewRevision(layer2 []Layer2Revision, vrfs []VRFRevision, bgps []BGPRevision) (*NetworkConfigRevision, error) {
 	spec := NetworkConfigRevisionSpec{
 		Layer2:   layer2,
 		Vrf:      vrfs,
+		BGP:      bgps,
 		Revision: "",
 	}
 	data, err := json.Marshal(spec)

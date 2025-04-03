@@ -47,6 +47,32 @@ rules:
 - apiGroups:
   - network.t-caas.telekom.com
   resources:
+  - bgppeerings
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - network.t-caas.telekom.com
+  resources:
+  - bgppeerings/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - network.t-caas.telekom.com
+  resources:
+  - bgppeerings/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - network.t-caas.telekom.com
+  resources:
   - layer2networkconfigurations
   verbs:
   - create

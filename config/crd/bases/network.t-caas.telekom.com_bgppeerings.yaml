@@ -4,33 +4,27 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.14.0
-  name: vrfrouteconfigurations.network.t-caas.telekom.com
+  name: bgppeerings.network.t-caas.telekom.com
 spec:
   group: network.t-caas.telekom.com
   names:
-    kind: VRFRouteConfiguration
-    listKind: VRFRouteConfigurationList
-    plural: vrfrouteconfigurations
-    shortNames:
-    - vrf
-    singular: vrfrouteconfiguration
+    kind: BGPPeering
+    listKind: BGPPeeringList
+    plural: bgppeerings
+    singular: bgppeering
   scope: Cluster
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .spec.vrf
-      name: VRF
-      type: string
-    - jsonPath: .spec.seq
-      name: Sequence
+    - jsonPath: .spec.peeringVlan.name
+      name: VLAN
       type: integer
-    - jsonPath: .spec.community
-      name: Community
+    - jsonPath: .spec.remoteASN
+      name: ASN
       type: string
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: VRFRouteConfiguration is the Schema for the vrfrouteconfigurations
-          API.
+        description: BGPPeering is the Schema for the bgppeerings API.
         properties:
           apiVersion:
             description: |-
@@ -50,20 +44,13 @@ spec:
           metadata:
             type: object
           spec:
-            description: VRFRouteConfigurationSpec defines the desired state of VRFRouteConfiguration.
+            description: BGPPeeringSpec defines the desired state of BGPPeering.
             properties:
-              aggregate:
-                description: Aggregate Routes that should be announced
-                items:
-                  type: string
-                type: array
-              community:
-                description: Community for export, if omitted no community will be
-                  set
-                type: string
+              enableBFD:
+                description: EnableBFD is the flag to enable BFD for the BGP peering
+                type: boolean
               export:
-                description: Routes exported from the cluster VRF into the specified
-                  VRF
+                description: Routes exported to the BGP peer
                 items:
                   description: VRFRouteConfigurationPrefixItem defines a prefix item.
                   properties:
@@ -92,8 +79,10 @@ spec:
                   type: object
                 maxItems: 4294967295
                 type: array
+              holdTime:
+                type: string
               import:
-                description: Routes imported from this VRF into the cluster VRF
+                description: Routes imported from the BGP peer
                 items:
                   description: VRFRouteConfigurationPrefixItem defines a prefix item.
                   properties:
@@ -122,8 +111,27 @@ spec:
                   type: object
                 maxItems: 4294967295
                 type: array
+              keepaliveTime:
+                type: string
+              loopbackPeer:
+                description: Loopback is the loopback interface used for the BGP peering
+                properties:
+                  ips:
+                    description: IPAddresses are the IP addresses of the loopback
+                      interface, one for IPv4 and/or one for IPv6
+                    items:
+                      type: string
+                    type: array
+                required:
+                - ips
+                type: object
+              maximumPrefixes:
+                description: MaximumPrefixes is the maximum number of received prefixes
+                  allowed
+                format: int32
+                type: integer
               nodeSelector:
-                description: Select nodes to create VRF on
+                description: Select nodes to create BGPPeering on
                 properties:
                   matchExpressions:
                     description: matchExpressions is a list of label selector requirements.
@@ -168,28 +176,28 @@ spec:
                     type: object
                 type: object
                 x-kubernetes-map-type: atomic
-              routeTarget:
-                type: string
-              seq:
-                description: Sequence of the generated route-map, maximum of 65534
-                  because we sometimes have to set an explicit default-deny
-                maximum: 65534
-                minimum: 1
+              peeringVlan:
+                description: PeeringVlan is the VLAN used for the BGP peering
+                properties:
+                  name:
+                    description: Name is the name of the Layer2NetworkConfiguration
+                      resource
+                    type: string
+                required:
+                - name
+                type: object
+              remoteASN:
+                description: RemoteASN is the ASN of the remote BGP peer
+                format: int32
                 type: integer
-              vni:
-                type: integer
-              vrf:
-                description: VRF this configuration refers to
-                maxLength: 12
-                type: string
             required:
+            - enableBFD
             - export
             - import
-            - seq
+            - remoteASN
             type: object
           status:
-            description: VRFRouteConfigurationStatus defines the observed state of
-              VRFRouteConfiguration.
+            description: BGPPeeringStatus defines the observed state of BGPPeering.
             type: object
         type: object
     served: true

@@ -77,6 +77,9 @@ type VRFRouteConfigurationSpec struct {
 
 	// Community for export, if omitted no community will be set
 	Community *string `json:"community,omitempty"`
+
+	// Select nodes to create VRF on
+	NodeSelector *metav1.LabelSelector `json:"nodeSelector,omitempty"`
 }
 
 // VRFRouteConfigurationStatus defines the observed state of VRFRouteConfiguration.

@@ -3,6 +3,7 @@ package agent_hbn_l2 //nolint:revive
 import (
 	"context"
 	"fmt"
+	"github.com/telekom/das-schiff-network-operator/pkg/network/netplan"
 	"os"
 	"strings"
 
@@ -19,13 +20,19 @@ import (
 
 const (
 	hbnMasterName   = "hbn"
-	vlanNamePrefix  = "vlan."
-	vlanAliasPrefix = "hbn::vlan::"
+	vlanNamePrefix  = "vlan"
+	dummyNamePrefix = "dummy"
+	aliasPrefix     = "hbn"
 )
 
 type netplanVlan struct {
-	Id  int `json:"id"`
-	Mtu int `json:"mtu"`
+	Id        int      `json:"id"`
+	Mtu       int      `json:"mtu"`
+	Addresses []string `json:"addresses"`
+}
+
+type netplanDummy struct {
+	Addresses []string `json:"addresses"`
 }
 
 type NodeNetplanConfigReconciler struct {
@@ -58,30 +65,16 @@ func (r *reconcileNodeNetworkConfig) fetchNodeConfig(ctx context.Context) (*v1al
 
 /*
 Yes, we duplicate code in here. This is a temporary solution until we have a better way to handle this, either by using
-nmstate or netplan. This just creates the VLAN interfaces and nothing else.
+nmstate or netplan. This just creates VLAN and dummy interfaces and nothing else (for now...).
 */
 
-func (reconciler *NodeNetplanConfigReconciler) Reconcile(ctx context.Context) error {
-	r := &reconcileNodeNetworkConfig{
-		NodeNetplanConfigReconciler: reconciler,
-		Logger:                      reconciler.logger,
-	}
-
-	cfg, err := r.fetchNodeConfig(ctx)
-	if err != nil {
-		// discard IsNotFound error
-		if apierrors.IsNotFound(err) {
-			return nil
-		}
-		return err
-	}
-
+func (reconciler *NodeNetplanConfigReconciler) reconcileVLANs(devices map[string]netplan.Device) error {
 	masterInterface, err := netlink.LinkByName(hbnMasterName)
 	if err != nil {
 		return fmt.Errorf("error getting master interface: %w", err)
 	}
 
-	desiredVlans := cfg.Spec.DesiredState.Network.VLans
+	vlanAliasPrefix := fmt.Sprintf("%s::%s::", aliasPrefix, vlanNamePrefix)
 
 	allInterfaces, err := netlink.LinkList()
 	if err != nil {
@@ -93,21 +86,24 @@ func (reconciler *NodeNetplanConfigReconciler) Reconcile(ctx context.Context) er
 			alias := existingInterface.Attrs().Alias
 			if strings.HasPrefix(alias, vlanAliasPrefix) {
 				name := strings.TrimPrefix(alias, vlanAliasPrefix)
-				if _, ok := desiredVlans[name]; !ok {
+				if _, ok := devices[name]; !ok {
 					// remove vlan
 					if err := netlink.LinkDel(existingInterface); err != nil {
 						return fmt.Errorf("error deleting vlan %s: %w", existingInterface.Attrs().Name, err)
 					}
 				} else {
-					if err := reconcileEUIAutogeneration(existingInterface, false); err != nil {
+					if err := setEUIAutogeneration(existingInterface.Attrs().Name, false); err != nil {
 						return fmt.Errorf("error setting EUI autogeneration: %w", err)
+					}
+					if err := reconciler.reconcileAddresses(existingInterface, devices[name].Addresses); err != nil {
+						return fmt.Errorf("error reconciling addresses for vlan %s: %w", existingInterface.Attrs().Name, err)
 					}
 				}
 			}
 		}
 	}
 
-	for name, vlan := range desiredVlans {
+	for name, vlan := range devices {
 		vlanConfig := netplanVlan{}
 		if err := yaml.Unmarshal(vlan.Raw, &vlanConfig); err != nil {
 			return fmt.Errorf("error unmarshalling vlan config: %w", err)
@@ -126,7 +122,7 @@ func (reconciler *NodeNetplanConfigReconciler) Reconcile(ctx context.Context) er
 		if !existing {
 			link := netlink.Vlan{
 				LinkAttrs: netlink.LinkAttrs{
-					Name:        fmt.Sprintf("%s%d", vlanNamePrefix, vlanConfig.Id),
+					Name:        fmt.Sprintf("%s.%d", vlanNamePrefix, vlanConfig.Id),
 					ParentIndex: masterInterface.Attrs().Index,
 					MTU:         vlanConfig.Mtu,
 				},
@@ -150,6 +146,139 @@ func (reconciler *NodeNetplanConfigReconciler) Reconcile(ctx context.Context) er
 	return nil
 }
 
+func (reconciler *NodeNetplanConfigReconciler) removeNotExistingAddresses(link netlink.Link, addresses []string, family int) error {
+	allAddresses, err := netlink.AddrList(link, family)
+	if err != nil {
+		return fmt.Errorf("error listing link's addresses: %w", err)
+	}
+	for _, addr := range allAddresses {
+		existing := false
+		for _, address := range addresses {
+			if addr.String() == address {
+				existing = true
+				break
+			}
+		}
+		if !existing {
+			if err := netlink.AddrDel(link, &addr); err != nil {
+				return fmt.Errorf("error deleting address %s from link %s: %w", addr.String(), link.Attrs().Name, err)
+			}
+		}
+	}
+
+	return nil
+}
+
+func (reconciler *NodeNetplanConfigReconciler) reconcileAddresses(link netlink.Link, addresses []string) error {
+	for _, address := range addresses {
+		addr, err := netlink.ParseAddr(address)
+		if err != nil {
+			return fmt.Errorf("error parsing address %s: %w", address, err)
+		}
+		if err := netlink.AddrReplace(link, addr); err != nil {
+			return fmt.Errorf("error adding address %s to link %s: %w", address, link.Attrs().Name, err)
+		}
+	}
+
+	if err := reconciler.removeNotExistingAddresses(link, addresses, unix.AF_INET); err != nil {
+		return fmt.Errorf("error removing not existing IPv4 addresses: %w", err)
+	}
+	if err := reconciler.removeNotExistingAddresses(link, addresses, unix.AF_INET6); err != nil {
+		return fmt.Errorf("error removing not existing IPv6 addresses: %w", err)
+	}
+
+	return nil
+}
+
+func (reconciler *NodeNetplanConfigReconciler) reconcileLoopbacks(devices map[string]netplan.Device) error {
+	dummyAliasPrefix := fmt.Sprintf("%s::%s::", aliasPrefix, dummyNamePrefix)
+
+	allInterfaces, err := netlink.LinkList()
+	if err != nil {
+		return fmt.Errorf("error listing interfaces: %w", err)
+	}
+
+	for _, existingInterface := range allInterfaces {
+		if existingInterface.Type() == "dummy" {
+			alias := existingInterface.Attrs().Alias
+			if strings.HasPrefix(alias, dummyAliasPrefix) {
+				name := strings.TrimPrefix(alias, dummyAliasPrefix)
+				if _, ok := devices[name]; !ok {
+					// remove dummy
+					if err := netlink.LinkDel(existingInterface); err != nil {
+						return fmt.Errorf("error deleting dummy %s: %w", existingInterface.Attrs().Name, err)
+					}
+				} else {
+					if err := setEUIAutogeneration(existingInterface.Attrs().Name, false); err != nil {
+						return fmt.Errorf("error setting EUI autogeneration: %w", err)
+					}
+				}
+			}
+		}
+	}
+
+	for name, dummy := range devices {
+		dummyConfig := netplanDummy{}
+		if err := yaml.Unmarshal(dummy.Raw, &dummyConfig); err != nil {
+			return fmt.Errorf("error unmarshalling dummy config: %w", err)
+		}
+
+		existing := false
+		for _, existingInterface := range allInterfaces {
+			if existingInterface.Type() == "dummy" {
+				alias := existingInterface.Attrs().Alias
+				if strings.HasPrefix(alias, dummyAliasPrefix) && strings.TrimPrefix(alias, dummyAliasPrefix) == name {
+					existing = true
+					break
+				}
+			}
+		}
+		if !existing {
+			link := netlink.Dummy{
+				LinkAttrs: netlink.LinkAttrs{
+					Name: name,
+				},
+			}
+			if err := netlink.LinkAdd(&link); err != nil {
+				return fmt.Errorf("error adding dummy %s: %w", name, err)
+			}
+			if err := netlink.LinkSetAlias(&link, fmt.Sprintf("%s%s", dummyAliasPrefix, name)); err != nil {
+				return fmt.Errorf("error setting alias for dummy %s: %w", name, err)
+			}
+			if err := setEUIAutogeneration(link.Attrs().Name, false); err != nil {
+				return fmt.Errorf("error setting EUI autogeneration: %w", err)
+			}
+			if err := netlink.LinkSetUp(&link); err != nil {
+				return fmt.Errorf("error setting up vlan %s: %w", name, err)
+			}
+		}
+	}
+
+	return nil
+}
+
+func (reconciler *NodeNetplanConfigReconciler) Reconcile(ctx context.Context) error {
+	r := &reconcileNodeNetworkConfig{
+		NodeNetplanConfigReconciler: reconciler,
+		Logger:                      reconciler.logger,
+	}
+
+	cfg, err := r.fetchNodeConfig(ctx)
+	if err != nil {
+		// discard IsNotFound error
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		return err
+	}
+
+	if err := r.reconcileVLANs(cfg.Spec.DesiredState.Network.VLans); err != nil {
+		return fmt.Errorf("error reconciling VLANs: %w", err)
+	}
+
+	return nil
+}
+
 func setEUIAutogeneration(intfName string, generateEUI bool) error {
 	fileName := fmt.Sprintf("/proc/sys/net/ipv6/conf/%s/addr_gen_mode", intfName)
 	file, err := os.OpenFile(fileName, os.O_WRONLY, 0)
@@ -163,26 +292,6 @@ func setEUIAutogeneration(intfName string, generateEUI bool) error {
 	}
 	if _, err := fmt.Fprintf(file, "%s\n", value); err != nil {
 		return fmt.Errorf("error writing to file: %w", err)
-	}
-	return nil
-}
-
-func reconcileEUIAutogeneration(intf netlink.Link, enableEUI bool) error {
-	if err := setEUIAutogeneration(intf.Attrs().Name, enableEUI); err != nil {
-		return fmt.Errorf("error setting EUI autogeneration: %w", err)
-	}
-	if !enableEUI {
-		addresses, err := netlink.AddrList(intf, unix.AF_INET6)
-		if err != nil {
-			return fmt.Errorf("error listing link's IPv6 addresses: %w", err)
-		}
-		for i := range addresses {
-			if addresses[i].IP.IsLinkLocalUnicast() {
-				if err := netlink.AddrDel(intf, &addresses[i]); err != nil {
-					return fmt.Errorf("error removing link local IPv6 address: %w", err)
-				}
-			}
-		}
 	}
 	return nil
 }

@@ -62,13 +62,13 @@ func (cr *ConfigReconciler) ReconcileDebounced(ctx context.Context) error {
 	defer cancel()
 
 	// Get HBRConfigs
-	l2vnis, l3vnis, err := r.fetchConfigData(timeoutCtx)
+	l2vnis, l3vnis, bgps, err := r.fetchConfigData(timeoutCtx)
 	if err != nil {
 		return fmt.Errorf("failed to fetch configuration details: %w", err)
 	}
 
 	// prepare new revision
-	revision, err := v1alpha1.NewRevision(l2vnis, l3vnis)
+	revision, err := v1alpha1.NewRevision(l2vnis, l3vnis, bgps)
 	if err != nil {
 		return fmt.Errorf("failed to prepare new NetworkConfigRevision: %w", err)
 	}
@@ -140,21 +140,7 @@ func (r *reconcileConfig) createRevision(ctx context.Context, revision *v1alpha1
 	return nil
 }
 
-func checkL2Duplicates(configs []v1alpha1.Layer2NetworkConfiguration) error {
-	for i := range configs {
-		for j := i + 1; j < len(configs); j++ {
-			if configs[i].Spec.ID == configs[j].Spec.ID {
-				return fmt.Errorf("dupliate Layer2 ID found: %s %s", configs[i].ObjectMeta.Name, configs[j].ObjectMeta.Name)
-			}
-			if configs[i].Spec.VNI == configs[j].Spec.VNI {
-				return fmt.Errorf("dupliate Layer2 VNI found: %s %s", configs[i].ObjectMeta.Name, configs[j].ObjectMeta.Name)
-			}
-		}
-	}
-	return nil
-}
-
-func (r *reconcileConfig) fetchLayer2(ctx context.Context) ([]v1alpha1.Layer2NetworkConfigurationSpec, error) {
+func (r *reconcileConfig) fetchLayer2(ctx context.Context) ([]v1alpha1.Layer2Revision, error) {
 	layer2List := &v1alpha1.Layer2NetworkConfigurationList{}
 	err := r.client.List(ctx, layer2List)
 	if err != nil {
@@ -166,15 +152,18 @@ func (r *reconcileConfig) fetchLayer2(ctx context.Context) ([]v1alpha1.Layer2Net
 		return nil, err
 	}
 
-	l2vnis := make([]v1alpha1.Layer2NetworkConfigurationSpec, len(layer2List.Items))
+	l2vnis := make([]v1alpha1.Layer2Revision, len(layer2List.Items))
 	for i := range layer2List.Items {
-		l2vnis[i] = layer2List.Items[i].Spec
+		l2vnis[i] = v1alpha1.Layer2Revision{
+			Name:                           layer2List.Items[i].Name,
+			Layer2NetworkConfigurationSpec: layer2List.Items[i].Spec,
+		}
 	}
 
 	return l2vnis, nil
 }
 
-func (r *reconcileConfig) fetchLayer3(ctx context.Context) ([]v1alpha1.VRFRouteConfigurationSpec, error) {
+func (r *reconcileConfig) fetchLayer3(ctx context.Context) ([]v1alpha1.VRFRevision, error) {
 	vrfs := &v1alpha1.VRFRouteConfigurationList{}
 	err := r.client.List(ctx, vrfs)
 	if err != nil {
@@ -182,29 +171,57 @@ func (r *reconcileConfig) fetchLayer3(ctx context.Context) ([]v1alpha1.VRFRouteC
 		return nil, fmt.Errorf("error getting list of VRFs from Kubernetes: %w", err)
 	}
 
-	l3vnis := make([]v1alpha1.VRFRouteConfigurationSpec, len(vrfs.Items))
+	l3vnis := make([]v1alpha1.VRFRevision, len(vrfs.Items))
 	for i := range vrfs.Items {
-		l3vnis[i] = vrfs.Items[i].Spec
+		l3vnis[i] = v1alpha1.VRFRevision{
+			Name:                      vrfs.Items[i].Name,
+			VRFRouteConfigurationSpec: vrfs.Items[i].Spec,
+		}
 	}
 
 	return l3vnis, nil
 }
 
-func (r *reconcileConfig) fetchConfigData(ctx context.Context) ([]v1alpha1.Layer2NetworkConfigurationSpec, []v1alpha1.VRFRouteConfigurationSpec, error) {
+func (r *reconcileConfig) fetchBgp(ctx context.Context) ([]v1alpha1.BGPRevision, error) {
+	bgpConfigs := &v1alpha1.BGPPeeringList{}
+	err := r.client.List(ctx, bgpConfigs)
+	if err != nil {
+		r.Logger.Error(err, "error getting list of BGP peering configurations from Kubernetes")
+		return nil, fmt.Errorf("error getting list of BGP peering configurations from Kubernetes: %w", err)
+	}
+
+	bgps := make([]v1alpha1.BGPRevision, len(bgpConfigs.Items))
+	for i := range bgpConfigs.Items {
+		bgps[i] = v1alpha1.BGPRevision{
+			Name:           bgpConfigs.Items[i].Name,
+			BGPPeeringSpec: bgpConfigs.Items[i].Spec,
+		}
+	}
+
+	return bgps, nil
+}
+
+func (r *reconcileConfig) fetchConfigData(ctx context.Context) ([]v1alpha1.Layer2Revision, []v1alpha1.VRFRevision, []v1alpha1.BGPRevision, error) {
 	// get Layer2networkConfiguration objects
 	l2vnis, err := r.fetchLayer2(ctx)
 	if err != nil {
 		r.Logger.Error(err, "error getting list of Layer2s from Kubernetes")
-		return nil, nil, fmt.Errorf("error getting list of Layer2s from Kubernetes: %w", err)
+		return nil, nil, nil, fmt.Errorf("error getting list of Layer2s from Kubernetes: %w", err)
 	}
 
 	// get VRFRouteConfiguration objects
 	l3vnis, err := r.fetchLayer3(ctx)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
-	return l2vnis, l3vnis, nil
+	// get BGPPeering objects
+	bgps, err := r.fetchBgp(ctx)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	return l2vnis, l3vnis, bgps, nil
 }
 
 func listRevisions(ctx context.Context, c client.Client) (*v1alpha1.NetworkConfigRevisionList, error) {
