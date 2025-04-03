@@ -128,7 +128,7 @@ neighbor {{ $peerIdentifier }} timers {{ .KeepaliveTime.Seconds }} {{ .HoldTime.
 address-family ipv4 unicast
   neighbor {{ $peerIdentifier }} activate
   {{ if .IPv4.MaxPrefixes }}
-  neighbor {{ $peerIdentifier }} maximum-prefix {{ .MaxPrefixes }}
+  neighbor {{ $peerIdentifier }} maximum-prefix {{ .IPv4.MaxPrefixes }}
   {{ end }}
   {{ if .IPv4.ImportFilter }}
   neighbor {{ $peerIdentifier }} route-map {{ $safeName }}-ipv4-in in
@@ -144,7 +144,7 @@ exit-address-family
 address-family ipv4 unicast
   neighbor {{ $peerIdentifier }} activate
   {{ if .IPv6.MaxPrefixes }}
-  neighbor {{ $peerIdentifier }} maximum-prefix {{ .MaxPrefixes }}
+  neighbor {{ $peerIdentifier }} maximum-prefix {{ .IPv6.MaxPrefixes }}
   {{ end }}
   {{ if .IPv6.ImportFilter }}
   neighbor {{ $peerIdentifier }} route-map {{ $safeName }}-ipv6-in in
