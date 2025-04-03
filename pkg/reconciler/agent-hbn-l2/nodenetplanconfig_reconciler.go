@@ -3,13 +3,14 @@ package agent_hbn_l2 //nolint:revive
 import (
 	"context"
 	"fmt"
-	"github.com/vishvananda/netlink"
 	"os"
 	"strings"
 
 	"github.com/go-logr/logr"
 	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
+	"github.com/vishvananda/netlink"
+	"golang.org/x/sys/unix"
 	"gopkg.in/yaml.v2"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
@@ -55,6 +56,11 @@ func (r *reconcileNodeNetworkConfig) fetchNodeConfig(ctx context.Context) (*v1al
 	return cfg, nil
 }
 
+/*
+Yes, we duplicate code in here. This is a temporary solution until we have a better way to handle this, either by using
+nmstate or netplan. This just creates the VLAN interfaces and nothing else.
+*/
+
 func (reconciler *NodeNetplanConfigReconciler) Reconcile(ctx context.Context) error {
 	r := &reconcileNodeNetworkConfig{
 		NodeNetplanConfigReconciler: reconciler,
@@ -89,9 +95,12 @@ func (reconciler *NodeNetplanConfigReconciler) Reconcile(ctx context.Context) er
 				name := strings.TrimPrefix(alias, vlanAliasPrefix)
 				if _, ok := desiredVlans[name]; !ok {
 					// remove vlan
-					err := netlink.LinkDel(existingInterface)
-					if err != nil {
+					if err := netlink.LinkDel(existingInterface); err != nil {
 						return fmt.Errorf("error deleting vlan %s: %w", existingInterface.Attrs().Name, err)
+					}
+				} else {
+					if err := reconcileEUIAutogeneration(existingInterface, false); err != nil {
+						return fmt.Errorf("error setting EUI autogeneration: %w", err)
 					}
 				}
 			}
@@ -100,8 +109,7 @@ func (reconciler *NodeNetplanConfigReconciler) Reconcile(ctx context.Context) er
 
 	for name, vlan := range desiredVlans {
 		vlanConfig := netplanVlan{}
-		err := yaml.Unmarshal(vlan.Raw, &vlanConfig)
-		if err != nil {
+		if err := yaml.Unmarshal(vlan.Raw, &vlanConfig); err != nil {
 			return fmt.Errorf("error unmarshalling vlan config: %w", err)
 		}
 
@@ -130,11 +138,51 @@ func (reconciler *NodeNetplanConfigReconciler) Reconcile(ctx context.Context) er
 			if err := netlink.LinkSetAlias(&link, fmt.Sprintf("%s%s", vlanAliasPrefix, name)); err != nil {
 				return fmt.Errorf("error setting alias for vlan %s: %w", name, err)
 			}
+			if err := setEUIAutogeneration(link.Attrs().Name, false); err != nil {
+				return fmt.Errorf("error setting EUI autogeneration: %w", err)
+			}
 			if err := netlink.LinkSetUp(&link); err != nil {
 				return fmt.Errorf("error setting up vlan %s: %w", name, err)
 			}
 		}
 	}
 
+	return nil
+}
+
+func setEUIAutogeneration(intfName string, generateEUI bool) error {
+	fileName := fmt.Sprintf("/proc/sys/net/ipv6/conf/%s/addr_gen_mode", intfName)
+	file, err := os.OpenFile(fileName, os.O_WRONLY, 0)
+	if err != nil {
+		return fmt.Errorf("error opening file: %w", err)
+	}
+	defer file.Close()
+	value := "1"
+	if generateEUI {
+		value = "0"
+	}
+	if _, err := fmt.Fprintf(file, "%s\n", value); err != nil {
+		return fmt.Errorf("error writing to file: %w", err)
+	}
+	return nil
+}
+
+func reconcileEUIAutogeneration(intf netlink.Link, enableEUI bool) error {
+	if err := setEUIAutogeneration(intf.Attrs().Name, enableEUI); err != nil {
+		return fmt.Errorf("error setting EUI autogeneration: %w", err)
+	}
+	if !enableEUI {
+		addresses, err := netlink.AddrList(intf, unix.AF_INET6)
+		if err != nil {
+			return fmt.Errorf("error listing link's IPv6 addresses: %w", err)
+		}
+		for i := range addresses {
+			if addresses[i].IP.IsLinkLocalUnicast() {
+				if err := netlink.AddrDel(intf, &addresses[i]); err != nil {
+					return fmt.Errorf("error removing link local IPv6 address: %w", err)
+				}
+			}
+		}
+	}
 	return nil
 }
