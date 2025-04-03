@@ -660,8 +660,6 @@ spec:
                           format: int32
                           type: integer
                       required:
-                      - address
-                      - listenRange
                       - remoteAsn
                       type: object
                     type: array
@@ -1565,8 +1563,6 @@ spec:
                             format: int32
                             type: integer
                         required:
-                        - address
-                        - listenRange
                         - remoteAsn
                         type: object
                       type: array
@@ -2725,8 +2721,6 @@ spec:
                             format: int32
                             type: integer
                         required:
-                        - address
-                        - listenRange
                         - remoteAsn
                         type: object
                       type: array

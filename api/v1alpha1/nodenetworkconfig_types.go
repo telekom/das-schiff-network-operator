@@ -116,9 +116,9 @@ type VRFImport struct {
 // BGPPeer represents a BGP peer configuration.
 type BGPPeer struct {
 	// Address is the address of the BGP peer.
-	Address *string `json:"address"`
+	Address *string `json:"address,omitempty"`
 	// ListenRange is the listen range for the BGP peer.
-	ListenRange *string `json:"listenRange"`
+	ListenRange *string `json:"listenRange,omitempty"`
 	// RemoteASN is the remote Autonomous System Number.
 	RemoteASN uint32 `json:"remoteAsn"`
 	// IPv4 is the IPv4 address family configuration.
