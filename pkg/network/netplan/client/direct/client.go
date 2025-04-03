@@ -119,19 +119,19 @@ func (dc *Client) Info() ([]string, netplan.Error) {
 	return infoResult.NetPlan.Features, nil
 }
 
-func (dc *Client) Get() (netplan.State, netplan.Error) {
+func (dc *Client) Get() (*netplan.State, netplan.Error) {
 	var resultYaml string
 	var err error
 	if resultYaml, err = dc.netplan([]string{"get", "all"}); err != nil {
-		return netplan.State{}, netplan.ParseError(err)
+		return nil, netplan.ParseError(err)
 	}
 	var result netplan.State
 	if err := yaml.Unmarshal([]byte(resultYaml), &result); err != nil {
-		return netplan.State{}, netplan.ParseError(err)
+		return nil, netplan.ParseError(err)
 	}
-	return result, nil
+	return &result, nil
 }
-func (*Client) Apply(_ string, _ netplan.State, _ time.Duration, _ func() error) netplan.Error {
+func (*Client) Apply(_ string, _ *netplan.State, _ time.Duration, _ func() error) netplan.Error {
 	panic("NotImplemented")
 }
 

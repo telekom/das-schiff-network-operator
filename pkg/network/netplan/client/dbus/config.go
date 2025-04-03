@@ -28,7 +28,7 @@ type Config struct {
 	initialHints []string
 	path         string
 	conn         *dbus.Conn
-	initialState netplan.State
+	initialState *netplan.State
 	log          *logrus.Entry
 	netManager   net.Manager
 	executionLog *logrus.Logger
@@ -167,7 +167,7 @@ func (config *Config) apply() netplan.Error {
 	}
 	return nil
 }
-func (config *Config) Set(state netplan.State) netplan.Error {
+func (config *Config) Set(state *netplan.State) netplan.Error {
 	var errors []netplan.Error
 	successfullTotalOperations := 0
 
@@ -246,20 +246,20 @@ func (*Client) Generate() netplan.Error {
 	return nil
 }
 
-func (config *Config) Get() (netplan.State, netplan.Error) {
+func (config *Config) Get() (*netplan.State, netplan.Error) {
 	configObject := config.conn.Object(InterfacePath, dbus.ObjectPath(config.path))
 	config.executionLog.Infof("busctl --system call io.netplan.Netplan %s io.netplan.Netplan.Config Get", config.path)
 	call := configObject.Call(ConfigGetCall, 0)
 	if call.Err != nil {
-		return netplan.State{}, netplan.ParseError(call.Err)
+		return nil, netplan.ParseError(call.Err)
 	}
 	var rawState string
 	if err := call.Store(&rawState); err != nil {
-		return netplan.State{}, netplan.ParseError(err)
+		return nil, netplan.ParseError(err)
 	}
 	var state netplan.State
 	if err := yaml.Unmarshal([]byte(rawState), &state); err != nil {
-		return netplan.State{}, netplan.ParseError(err)
+		return nil, netplan.ParseError(err)
 	}
-	return state, nil
+	return &state, nil
 }

@@ -6,8 +6,8 @@ import (
 
 type Config interface {
 	Reset() netplan.Error
-	Get() (netplan.State, netplan.Error)
-	Set(state netplan.State) netplan.Error
+	Get() (*netplan.State, netplan.Error)
+	Set(state *netplan.State) netplan.Error
 	Apply() netplan.Error
 	IsSynced() bool
 	Discard() netplan.Error

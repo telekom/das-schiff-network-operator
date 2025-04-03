@@ -207,7 +207,7 @@ func TestStateEqual(t *testing.T) {
 	dev1String, _ := yaml.Marshal(dev1)
 	dev2String, _ := yaml.Marshal(dev2)
 
-	s1 := State{
+	s1 := &State{
 		Network: NetworkState{
 			Ethernets: map[string]Device{
 				"dev": {
@@ -217,7 +217,7 @@ func TestStateEqual(t *testing.T) {
 		},
 	}
 
-	s2 := State{
+	s2 := &State{
 		Network: NetworkState{
 			Ethernets: map[string]Device{
 				"dev": {

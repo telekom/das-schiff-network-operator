@@ -73,10 +73,10 @@ type StateDeviceIterator struct {
 	currentItem int
 }
 
-func (s State) IsEmpty() bool {
+func (s *State) IsEmpty() bool {
 	return cmp.Equal(s, NewEmptyState(), cmpopts.EquateEmpty())
 }
-func (s State) DeviceIterator() StateDeviceIterator {
+func (s *State) DeviceIterator() StateDeviceIterator {
 	items := make([]StateDeviceIteratorItem, 0)
 	add := func(t net.InterfaceType, n string, d Device) {
 		items = append(items, StateDeviceIteratorItem{Type: t, Name: n, Device: d})
@@ -93,7 +93,7 @@ func (s State) DeviceIterator() StateDeviceIterator {
 	maps.ForEach(s.Network.Dummies, func(name string, device Device) { add(net.InterfaceTypeDummy, name, device) })
 
 	return StateDeviceIterator{
-		state:       &s,
+		state:       s,
 		items:       items,
 		currentItem: -1,
 	}
@@ -135,24 +135,24 @@ func NewState(raw string) (State, error) {
 	}
 	return state, nil
 }
-func (s State) Clone() State {
+func (s *State) Clone() State {
 	result, _ := NewState(s.YAML())
 	return result
 }
-func (s State) YAML() string {
+func (s *State) YAML() string {
 	result, _ := yaml.Marshal(s)
 	return string(result)
 }
 
 // Simple stringer for State.
-func (s State) String() string {
+func (s *State) String() string {
 	return s.YAML()
 }
-func (s State) ContainsVirtualInterfaces() bool {
+func (s *State) ContainsVirtualInterfaces() bool {
 	return len(s.Network.Bonds) > 0 || len(s.Network.Bridges) > 0
 }
 
-func (s NetworkState) Equals(target NetworkState) bool {
+func (s *NetworkState) Equals(target *NetworkState) bool {
 	return s.Version == target.Version &&
 		maps.AreEqual(s.Ethernets, target.Ethernets) &&
 		maps.AreEqual(s.VLans, target.VLans) &&
@@ -160,8 +160,8 @@ func (s NetworkState) Equals(target NetworkState) bool {
 		maps.AreEqual(s.Bridges, target.Bridges)
 }
 
-func (s State) Equals(target State) bool {
-	return s.Network.Equals(target.Network)
+func (s *State) Equals(target *State) bool {
+	return s.Network.Equals(&target.Network)
 }
 func (d *Device) Clear() {
 	d.Raw = nil
@@ -240,7 +240,7 @@ func less(a, b interface{}) bool {
 func SanitizeDeviceName(name string) string {
 	return strings.ReplaceAll(name, ".", "\\.")
 }
-func GetChangedVirtualInterfaces(source, target State) ([]net.Interface, error) {
+func GetChangedVirtualInterfaces(source, target *State) ([]net.Interface, error) {
 	log := logrus.WithField("name", "netplan")
 	result := make([]net.Interface, 0)
 	compare := func(t net.InterfaceType, sourceMap, targetMap map[string]Device) ([]net.Interface, error) {

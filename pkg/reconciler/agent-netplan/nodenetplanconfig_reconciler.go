@@ -83,7 +83,7 @@ func (reconciler *NodeNetplanConfigReconciler) Reconcile(ctx context.Context) er
 	if err != nil {
 		return fmt.Errorf("error initializing netplan client: %w", err)
 	}
-	if err := netplanConfig.Set(cfg.Spec.DesiredState); err != nil {
+	if err := netplanConfig.Set(&cfg.Spec.DesiredState); err != nil {
 		return fmt.Errorf("error setting desired state: %w", err)
 	}
 

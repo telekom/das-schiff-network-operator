@@ -88,13 +88,13 @@ func (client *Client) Initialize() (config.Config, netplan.Error) {
 	}
 	return cfg, nil
 }
-func (client *Client) Get() (netplan.State, netplan.Error) {
+func (client *Client) Get() (*netplan.State, netplan.Error) {
 	tempConfig, err := client.config()
 	if err != nil {
-		return netplan.State{}, err
+		return nil, err
 	}
 	if err := tempConfig.Discard(); err != nil {
-		return netplan.State{}, err
+		return nil, err
 	}
 	return tempConfig.initialState, nil
 }

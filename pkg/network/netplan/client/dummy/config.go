@@ -18,7 +18,7 @@ type Config struct {
 	hint         string
 	initialHints []string
 	path         string
-	initialState netplan.State
+	initialState *netplan.State
 	plan         *netwrangler.Netplan
 	log          *logrus.Entry
 }
@@ -81,7 +81,7 @@ func (*Config) Discard() netplan.Error {
 	return nil
 }
 
-func (config *Config) Set(state netplan.State) netplan.Error {
+func (config *Config) Set(state *netplan.State) netplan.Error {
 	planJSON, err := json.Marshal(state)
 	if err != nil {
 		return netplan.UnknownError{Err: err}
@@ -127,20 +127,20 @@ func (*Client) Generate() netplan.Error {
 	return nil
 }
 
-func (config *Config) Get() (netplan.State, netplan.Error) {
+func (config *Config) Get() (*netplan.State, netplan.Error) {
 	var result netplan.State
 	planJSON, err := json.Marshal(config.plan)
 	if err != nil {
-		return result, netplan.UnknownError{Err: err}
+		return nil, netplan.UnknownError{Err: err}
 	}
 	if err := json.Unmarshal(planJSON, &result); err != nil {
-		return result, netplan.UnknownError{Err: err}
+		return nil, netplan.UnknownError{Err: err}
 	}
 
-	return result, nil
+	return &result, nil
 }
 
-func (config *Config) load() (netplan.State, netplan.Error) {
+func (config *Config) load() (*netplan.State, netplan.Error) {
 	result := netplan.NewEmptyState()
 	if err := filepath.Walk(config.path, func(path string, info fs.FileInfo, _ error) error {
 		if info.IsDir() {
@@ -160,7 +160,7 @@ func (config *Config) load() (netplan.State, netplan.Error) {
 		}
 		return result.Merge(&partialState)
 	}); err != nil {
-		return result, netplan.ParseError(err)
+		return nil, netplan.ParseError(err)
 	}
-	return result, nil
+	return &result, nil
 }

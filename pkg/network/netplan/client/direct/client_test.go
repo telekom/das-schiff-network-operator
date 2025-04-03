@@ -27,7 +27,7 @@ network:
 `)
 	g.Expect(err).NotTo(HaveOccurred())
 	expectedErr := fmt.Errorf("rollback")
-	g.Expect(client.Apply("hint", state, time.Second*20, func() error { return expectedErr })).To(Equal(expectedErr))
+	g.Expect(client.Apply("hint", &state, time.Second*20, func() error { return expectedErr })).To(Equal(expectedErr))
 }
 
 func TestConfigApplyInvalidIP(t *testing.T) {
@@ -51,7 +51,7 @@ network:
           - workgroup
 `)
 	g.Expect(err).NotTo(HaveOccurred())
-	err = client.Apply("hint", state, time.Second, func() error { return nil })
+	err = client.Apply("hint", &state, time.Second, func() error { return nil })
 	g.Expect(err).To(HaveOccurred())
 	g.Expect(err.Error()).Should(ContainSubstring("invalid IPv4"))
 }
@@ -80,7 +80,7 @@ network:
 `)
 	g.Expect(err).NotTo(HaveOccurred())
 	expectedErr := fmt.Errorf("rollback")
-	g.Expect(client.Apply("hint", state, time.Second, func() error { return expectedErr })).To(Equal(expectedErr))
+	g.Expect(client.Apply("hint", &state, time.Second, func() error { return expectedErr })).To(Equal(expectedErr))
 }
 func TestConfigGet(t *testing.T) {
 	t.Skip("skipping integration tests as they may break host netplan configuration")

@@ -12,27 +12,29 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-func (crr *ConfigRevisionReconciler) buildBgpPeer(loopbackIP *string, listenRange *string, peer v1alpha1.BGPRevision) (*v1alpha1.BGPPeer, error) {
+func buildBgpPeer(loopbackIP, listenRange *string, peer *v1alpha1.BGPRevision) (*v1alpha1.BGPPeer, error) {
 	var family AddressFamily
 	if loopbackIP != nil {
-		if ip := net.ParseIP(*loopbackIP); ip != nil {
-			if ip.To4() != nil {
-				family = IPv4
-			} else {
-				family = IPv6
-			}
-		} else {
+		ip := net.ParseIP(*loopbackIP)
+		if ip == nil {
 			return nil, fmt.Errorf("failed to parse loopback IP %s", *loopbackIP)
 		}
-	} else if listenRange != nil {
-		if ip, _, err := net.ParseCIDR(*listenRange); err != nil {
-			return nil, fmt.Errorf("failed to parse listen range %s: %w", *listenRange, err)
+
+		if ip.To4() != nil {
+			family = IPv4
 		} else {
-			if ip.To4() != nil {
-				family = IPv4
-			} else {
-				family = IPv6
-			}
+			family = IPv6
+		}
+	} else if listenRange != nil {
+		ip, _, err := net.ParseCIDR(*listenRange)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse listen range %s: %w", *listenRange, err)
+		}
+
+		if ip.To4() != nil {
+			family = IPv4
+		} else {
+			family = IPv6
 		}
 	}
 
@@ -50,16 +52,17 @@ func (crr *ConfigRevisionReconciler) buildBgpPeer(loopbackIP *string, listenRang
 		},
 	}
 
-	if filterItems, err := crr.buildFilterItems(peer.Export, family); err != nil {
+	filterItems, err := buildFilterItems(peer.Export, family)
+	if err != nil {
 		return nil, fmt.Errorf("failed to build filter items for export: %w", err)
-	} else {
-		bgpAddressFamily.ExportFilter.Items = append(bgpAddressFamily.ExportFilter.Items, filterItems...)
 	}
-	if filterItems, err := crr.buildFilterItems(peer.Import, family); err != nil {
+	bgpAddressFamily.ExportFilter.Items = append(bgpAddressFamily.ExportFilter.Items, filterItems...)
+
+	filterItems, err = buildFilterItems(peer.Import, family)
+	if err != nil {
 		return nil, fmt.Errorf("failed to build filter items for import: %w", err)
-	} else {
-		bgpAddressFamily.ImportFilter.Items = append(bgpAddressFamily.ImportFilter.Items, filterItems...)
 	}
+	bgpAddressFamily.ImportFilter.Items = append(bgpAddressFamily.ImportFilter.Items, filterItems...)
 
 	bgpPeer := v1alpha1.BGPPeer{
 		ListenRange:   listenRange,
@@ -77,76 +80,87 @@ func (crr *ConfigRevisionReconciler) buildBgpPeer(loopbackIP *string, listenRang
 	return &bgpPeer, nil
 }
 
-func (crr *ConfigRevisionReconciler) buildNodeBgpPeers(node *corev1.Node, revision *v1alpha1.NetworkConfigRevision, c *v1alpha1.NodeNetworkConfig) error {
-	bgp := revision.Spec.BGP
-	sort.SliceStable(bgp, func(i, j int) bool {
-		return bgp[i].Name < bgp[j].Name
-	})
+func buildPeeringVlanPeer(node *corev1.Node, peer *v1alpha1.BGPRevision, revision *v1alpha1.NetworkConfigRevision, c *v1alpha1.NodeNetworkConfig) error {
+	if peer.PeeringVlan == nil {
+		return fmt.Errorf("peering VLAN is nil")
+	}
 
-	for _, peer := range bgp {
-		if !matchSelector(node, peer.NodeSelector) {
+	var irbIPs []string
+	var vrf string
+	for _, l2 := range revision.Spec.Layer2 {
+		if !matchSelector(node, l2.NodeSelector) {
 			continue
 		}
 
-		if peer.PeeringVlan != nil {
-			// Find peering VLAN...
-			var irbIPs []string
-			var vrf string
-			for _, l2 := range revision.Spec.Layer2 {
-				if !matchSelector(node, l2.NodeSelector) {
-					continue
-				}
+		if l2.Name == peer.PeeringVlan.Name {
+			irbIPs = l2.AnycastGateways
+			vrf = l2.VRF
+			break
+		}
+	}
+	if len(irbIPs) == 0 {
+		return fmt.Errorf("no IRB IPs found for peering VLAN %s", peer.PeeringVlan.Name)
+	}
 
-				if l2.Name == peer.PeeringVlan.Name {
-					irbIPs = l2.AnycastGateways
-					vrf = l2.VRF
-					break
-				}
-			}
-			if len(irbIPs) == 0 {
-				return fmt.Errorf("no IRB IPs found for peering VLAN %s", peer.PeeringVlan.Name)
-			}
+	for _, ip := range irbIPs {
+		// Parse IP address (which is CIDR) and get network+CIDR
+		_, ipNet, err := net.ParseCIDR(ip)
+		if err != nil {
+			return fmt.Errorf("failed to parse IP address %s: %w", ip, err)
+		}
 
-			for _, ip := range irbIPs {
-				// Parse IP address (which is CIDR) and get network+CIDR
-				_, ipNet, err := net.ParseCIDR(ip)
-				if err != nil {
-					return fmt.Errorf("failed to parse IP address %s: %w", ip, err)
-				}
+		listenRange := ipNet.String()
+		bgpPeer, err := buildBgpPeer(nil, &listenRange, peer)
+		if err != nil {
+			return fmt.Errorf("failed to build BGP peer: %w", err)
+		}
 
-				listenRange := ipNet.String()
-				bgpPeer, err := crr.buildBgpPeer(nil, &listenRange, peer)
-				if err != nil {
-					return fmt.Errorf("failed to build BGP peer: %w", err)
-				}
-
-				if vrf != "" {
-					if fabricVrf, ok := c.Spec.FabricVRFs[vrf]; ok {
-						fabricVrf.BGPPeers = append(fabricVrf.BGPPeers, *bgpPeer)
-						c.Spec.FabricVRFs[vrf] = fabricVrf
-					} else {
-						return fmt.Errorf("fabric VRF %s not found", vrf)
-					}
-				} else {
-					c.Spec.DefaultVRF.BGPPeers = append(c.Spec.DefaultVRF.BGPPeers, *bgpPeer)
-				}
+		if vrf != "" {
+			fabricVrf, ok := c.Spec.FabricVRFs[vrf]
+			if !ok {
+				return fmt.Errorf("fabric VRF %s not found", vrf)
 			}
-		} else if peer.LoopbackPeer != nil && len(peer.LoopbackPeer.IPAddresses) > 0 {
-			for _, ip := range peer.LoopbackPeer.IPAddresses {
-				bgpPeer, err := crr.buildBgpPeer(&ip, nil, peer)
-				if err != nil {
-					return fmt.Errorf("failed to build BGP peer: %w", err)
-				}
-				c.Spec.DefaultVRF.BGPPeers = append(c.Spec.DefaultVRF.BGPPeers, *bgpPeer)
-			}
+			fabricVrf.BGPPeers = append(fabricVrf.BGPPeers, *bgpPeer)
+			c.Spec.FabricVRFs[vrf] = fabricVrf
 		} else {
-			return fmt.Errorf("no loopback IPs found for BGP peer %s", peer.Name)
+			c.Spec.DefaultVRF.BGPPeers = append(c.Spec.DefaultVRF.BGPPeers, *bgpPeer)
 		}
 	}
 	return nil
 }
 
-func (crr *ConfigRevisionReconciler) buildNetplanDummies(node *corev1.Node, revision *v1alpha1.NetworkConfigRevision) (map[string]netplan.Device, error) {
+func buildNodeBgpPeers(node *corev1.Node, revision *v1alpha1.NetworkConfigRevision, c *v1alpha1.NodeNetworkConfig) error {
+	bgp := revision.Spec.BGP
+	sort.SliceStable(bgp, func(i, j int) bool {
+		return bgp[i].Name < bgp[j].Name
+	})
+
+	for i := range bgp {
+		if !matchSelector(node, bgp[i].NodeSelector) {
+			continue
+		}
+
+		switch {
+		case bgp[i].PeeringVlan != nil:
+			if err := buildPeeringVlanPeer(node, &bgp[i], revision, c); err != nil {
+				return fmt.Errorf("failed to build peering VLAN peer: %w", err)
+			}
+		case bgp[i].LoopbackPeer != nil && len(bgp[i].LoopbackPeer.IPAddresses) > 0:
+			for i := range bgp[i].LoopbackPeer.IPAddresses {
+				bgpPeer, err := buildBgpPeer(&bgp[i].LoopbackPeer.IPAddresses[i], nil, &bgp[i])
+				if err != nil {
+					return fmt.Errorf("failed to build BGP peer: %w", err)
+				}
+				c.Spec.DefaultVRF.BGPPeers = append(c.Spec.DefaultVRF.BGPPeers, *bgpPeer)
+			}
+		default:
+			return fmt.Errorf("no loopback IPs found for BGP peer %s", bgp[i].Name)
+		}
+	}
+	return nil
+}
+
+func buildNetplanDummies(node *corev1.Node, revision *v1alpha1.NetworkConfigRevision) (map[string]netplan.Device, error) {
 	dummies := make(map[string]netplan.Device)
 	for _, bgp := range revision.Spec.BGP {
 		if !matchSelector(node, bgp.NodeSelector) {

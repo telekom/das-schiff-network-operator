@@ -36,6 +36,8 @@ const (
 	numOfRefs = 2
 
 	numOfDeploymentRetries = 3
+
+	permitRoute = "permit"
 )
 
 type AddressFamily int
@@ -386,10 +388,10 @@ func (crr *ConfigRevisionReconciler) createNodeNetworkConfig(node *corev1.Node, 
 	if err := crr.buildNodeVrf(node, revision, c); err != nil {
 		return nil, fmt.Errorf("error building node VRFs: %w", err)
 	}
-	if err := crr.buildNodeLayer2(node, revision, c); err != nil {
+	if err := buildNodeLayer2(node, revision, c); err != nil {
 		return nil, fmt.Errorf("error building node Layer2: %w", err)
 	}
-	if err := crr.buildNodeBgpPeers(node, revision, c); err != nil {
+	if err := buildNodeBgpPeers(node, revision, c); err != nil {
 		return nil, fmt.Errorf("error building node Layer2: %w", err)
 	}
 
@@ -422,17 +424,17 @@ func (crr *ConfigRevisionReconciler) createNodeNetplanConfig(node *corev1.Node, 
 		},
 	}
 
-	if vlans, err := crr.buildNetplanVLANs(node, revision); err != nil {
+	vlans, err := buildNetplanVLANs(node, revision)
+	if err != nil {
 		return nil, fmt.Errorf("error building netplan VLANs: %w", err)
-	} else {
-		c.Spec.DesiredState.Network.VLans = vlans
 	}
+	c.Spec.DesiredState.Network.VLans = vlans
 
-	if dummies, err := crr.buildNetplanDummies(node, revision); err != nil {
+	dummies, err := buildNetplanDummies(node, revision)
+	if err != nil {
 		return nil, fmt.Errorf("error building netplan dummies: %w", err)
-	} else {
-		c.Spec.DesiredState.Network.Dummies = dummies
 	}
+	c.Spec.DesiredState.Network.Dummies = dummies
 
 	if err := controllerutil.SetOwnerReference(node, c, scheme.Scheme); err != nil {
 		return nil, fmt.Errorf("error setting owner references (node): %w", err)

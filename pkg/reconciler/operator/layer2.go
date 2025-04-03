@@ -10,7 +10,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-func (crr *ConfigRevisionReconciler) buildNodeLayer2(node *corev1.Node, revision *v1alpha1.NetworkConfigRevision, c *v1alpha1.NodeNetworkConfig) error {
+func buildNodeLayer2(node *corev1.Node, revision *v1alpha1.NetworkConfigRevision, c *v1alpha1.NodeNetworkConfig) error {
 	c.Spec.Layer2s = make(map[string]v1alpha1.Layer2)
 
 	layer2 := revision.Spec.Layer2
@@ -45,7 +45,7 @@ func (crr *ConfigRevisionReconciler) buildNodeLayer2(node *corev1.Node, revision
 	}
 	return nil
 }
-func (crr *ConfigRevisionReconciler) buildNetplanVLANs(node *corev1.Node, revision *v1alpha1.NetworkConfigRevision) (map[string]netplan.Device, error) {
+func buildNetplanVLANs(node *corev1.Node, revision *v1alpha1.NetworkConfigRevision) (map[string]netplan.Device, error) {
 	vlans := make(map[string]netplan.Device)
 
 	layer2 := revision.Spec.Layer2

@@ -14,7 +14,7 @@ import (
 type Client interface {
 	Version() (string, netplan.Error)
 	// Apply(hint string, state netplan.State, timeout time.Duration, persistFn func() error) netplan.Error
-	Get() (netplan.State, netplan.Error)
+	Get() (*netplan.State, netplan.Error)
 	// Generate() netplan.Error
 	Info() ([]string, netplan.Error)
 	Initialize() (config.Config, netplan.Error)

@@ -116,7 +116,7 @@ func processExports(vrf *v1alpha1.VRFRevision, fabricVrf *v1alpha1.FabricVRF) {
 		filterItem.Action = v1alpha1.Action{
 			Type: v1alpha1.Reject,
 		}
-		if export.Action == "permit" {
+		if export.Action == permitRoute {
 			filterItem.Action.Type = v1alpha1.Accept
 		}
 		fabricVrf.EVPNExportFilter.Items = append(fabricVrf.EVPNExportFilter.Items, filterItem)
@@ -167,7 +167,7 @@ func processImports(vrf *v1alpha1.VRFRevision, defaultImportMap map[string]v1alp
 		filterItem.Action = v1alpha1.Action{
 			Type: v1alpha1.Reject,
 		}
-		if vrfImport.Action == "permit" {
+		if vrfImport.Action == permitRoute {
 			filterItem.Action.Type = v1alpha1.Accept
 		}
 		vrfImport := defaultImportMap[vrf.VRF]
