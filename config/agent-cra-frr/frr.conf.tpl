@@ -215,6 +215,9 @@ vrf cluster
   {{ if $.NodeConfig.DefaultVRF }}
   {{ template "staticRoutes" $.NodeConfig.DefaultVRF.StaticRoutes }}
   {{ end }}
+  {{ range $exportCIDR := $.Config.ExportCIDRs }}
+  {{ if isIPv4 $exportCIDR }}ip{{ else }}ipv6{{ end }} route {{ $exportCIDR }} blackhole
+  {{ end }}
 exit-vrf
 !
 vrf {{ $.Config.ManagementVRF.Name }}
