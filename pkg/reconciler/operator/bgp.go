@@ -192,16 +192,16 @@ func buildNetplanDummies(node *corev1.Node, revision *v1alpha1.NetworkConfigRevi
 
 		if bgp.LoopbackPeer != nil && len(bgp.LoopbackPeer.IPAddresses) > 0 {
 			addresses := make([]string, len(bgp.LoopbackPeer.IPAddresses))
-			for _, ip := range bgp.LoopbackPeer.IPAddresses {
+			for i := range bgp.LoopbackPeer.IPAddresses {
 				// convert ip to CIDR format
-				ipAddr := net.ParseIP(ip)
+				ipAddr := net.ParseIP(bgp.LoopbackPeer.IPAddresses[i])
 				if ipAddr == nil {
-					return nil, fmt.Errorf("failed to parse IP address %s", ip)
+					return nil, fmt.Errorf("failed to parse IP address %s", bgp.LoopbackPeer.IPAddresses[i])
 				}
 				if ipAddr.To4() != nil {
-					addresses = append(addresses, fmt.Sprintf("%s/32", ip))
+					addresses[i] = fmt.Sprintf("%s/32", ipAddr.String())
 				} else {
-					addresses = append(addresses, fmt.Sprintf("%s/128", ip))
+					addresses[i] = fmt.Sprintf("%s/128", ipAddr.String())
 				}
 			}
 			dummy := map[string]interface{}{
