@@ -142,7 +142,7 @@ func removeNotExistingAddresses(link netlink.Link, addresses []string, family in
 	for i := range allAddresses {
 		existing := false
 		for _, address := range addresses {
-			if allAddresses[i].IP.String() == address {
+			if allAddresses[i].IPNet.String() == address {
 				existing = true
 				break
 			}
