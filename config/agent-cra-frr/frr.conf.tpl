@@ -89,13 +89,13 @@ end
 {{ template "filter" dict "Filter" $peer.IPv4.ExportFilter "Name" (printf "%s-ipv4-out" $safeName) }}
 {{ end }}
 {{ if and $peer.IPv4 $peer.IPv4.ImportFilter }}
-{{ template "filter" dict "Filter" $peer.IPv4.ExportFilter "Name" (printf "%s-ipv4-in" $safeName) }}
+{{ template "filter" dict "Filter" $peer.IPv4.ImportFilter "Name" (printf "%s-ipv4-in" $safeName) }}
 {{ end }}
 {{ if and $peer.IPv6 $peer.IPv6.ExportFilter }}
 {{ template "filter" dict "Filter" $peer.IPv6.ExportFilter "Name" (printf "%s-ipv6-out" $safeName) }}
 {{ end }}
 {{ if and $peer.IPv6 $peer.IPv6.ImportFilter }}
-{{ template "filter" dict "Filter" $peer.IPv6.ExportFilter "Name" (printf "%s-ipv6-in" $safeName) }}
+{{ template "filter" dict "Filter" $peer.IPv6.ImportFilter "Name" (printf "%s-ipv6-in" $safeName) }}
 {{ end }}
 {{ end }}
 {{ end }}
@@ -123,6 +123,9 @@ neighbor {{ $peerIdentifier }} remote-as {{ .RemoteASN }}
 bgp listen range {{ .ListenRange }} peer-group {{ $peerIdentifier }}
 {{ end }}
 neighbor {{ $peerIdentifier }} timers {{ .KeepaliveTime.Seconds }} {{ .HoldTime.Seconds }}
+{{ if .Multihop }}
+neighbor {{ $peerIdentifier }} ttl-security hops {{ .Multihop }}
+{{ end }}
 
 {{ if .IPv4 }}
 address-family ipv4 unicast
@@ -212,8 +215,8 @@ log syslog informational
 !
 vrf cluster
   vni {{ $.Config.ClusterVRF.VNI }}
-  {{ if $.NodeConfig.DefaultVRF }}
-  {{ template "staticRoutes" $.NodeConfig.DefaultVRF.StaticRoutes }}
+  {{ if $.NodeConfig.ClusterVRF }}
+  {{ template "staticRoutes" $.NodeConfig.ClusterVRF.StaticRoutes }}
   {{ end }}
   {{ range $exportCIDR := $.Config.ExportCIDRs }}
   {{ if isIPv4 $exportCIDR }}ip{{ else }}ipv6{{ end }} route {{ $exportCIDR }} blackhole
@@ -345,8 +348,8 @@ router bgp {{ $.Config.LocalASN }} vrf cluster
     redistribute connected
     redistribute static
     redistribute kernel
-    {{ if $.NodeConfig.DefaultVRF }}
-    {{ range $vrfImport := $.NodeConfig.DefaultVRF.VRFImports }}
+    {{ if $.NodeConfig.ClusterVRF }}
+    {{ range $vrfImport := $.NodeConfig.ClusterVRF.VRFImports }}
     {{ if ne $vrfImport.FromVRF $.Config.ManagementVRF.Name }}
 	  import vrf {{ $vrfImport.FromVRF }}
     {{ end }}
@@ -360,8 +363,8 @@ router bgp {{ $.Config.LocalASN }} vrf cluster
     redistribute connected
     redistribute static
 	  redistribute kernel
-	  {{ if $.NodeConfig.DefaultVRF }}
-    {{ range $vrfImport := $.NodeConfig.DefaultVRF.VRFImports }}
+	  {{ if $.NodeConfig.ClusterVRF }}
+    {{ range $vrfImport := $.NodeConfig.ClusterVRF.VRFImports }}
     {{ if ne $vrfImport.FromVRF $.Config.ManagementVRF.Name }}
     import vrf {{ $vrfImport.FromVRF }}
 	  {{ end }}
@@ -378,8 +381,8 @@ router bgp {{ $.Config.LocalASN }} vrf cluster
     route-target export {{ $.Config.ClusterVRF.EVPNRouteTarget }}
   exit-address-family
 
-  {{ if $.NodeConfig.DefaultVRF }}
-  {{ range $peer := $.NodeConfig.DefaultVRF.BGPPeers }}
+  {{ if $.NodeConfig.ClusterVRF }}
+  {{ range $peer := $.NodeConfig.ClusterVRF.BGPPeers }}
   {{ template "bgpNeighbor" $peer }}
   {{ end }}
   {{ end }}
@@ -390,8 +393,8 @@ router bgp {{ $.Config.LocalASN }} vrf cluster
 {{ end }}
 exit
 !
-{{ if $.NodeConfig.DefaultVRF }}
-{{ template "vrfFilters" dict "Vrf" "cluster" "Imports" $.NodeConfig.DefaultVRF.VRFImports "BGPPeers" $.NodeConfig.DefaultVRF.BGPPeers }}
+{{ if $.NodeConfig.ClusterVRF }}
+{{ template "vrfFilters" dict "Vrf" "cluster" "Imports" $.NodeConfig.ClusterVRF.VRFImports "BGPPeers" $.NodeConfig.ClusterVRF.BGPPeers }}
 {{ end }}
 !
 router bgp {{ $.Config.LocalASN }} vrf {{ $.Config.ManagementVRF.Name }}
@@ -492,8 +495,8 @@ exit
 {{ template "vrfFilters" dict "Vrf" $.Config.ManagementVRF.Name "Imports" $vrf.VRFImports "BGPPeers" $vrf.BGPPeers }}
 {{ end }}
 !
-{{ if $.NodeConfig.DefaultVRF }}
-{{ range $i, $pbrRule := $.NodeConfig.DefaultVRF.PolicyRoutes }}
+{{ if $.NodeConfig.ClusterVRF }}
+{{ range $i, $pbrRule := $.NodeConfig.ClusterVRF.PolicyRoutes }}
 pbr-map hbr seq {{ add $i 1 }}
 {{ if $pbrRule.TrafficMatch.SrcPrefix }}match src-ip {{ $pbrRule.TrafficMatch.SrcPrefix }}{{ end }}
 {{ if $pbrRule.TrafficMatch.DstPrefix }}match dst-ip {{ $pbrRule.TrafficMatch.DstPrefix }}{{ end }}

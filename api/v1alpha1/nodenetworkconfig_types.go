@@ -26,8 +26,8 @@ type NodeNetworkConfigSpec struct {
 	Revision string `json:"revision"`
 	// Layer2s is a map of Layer2 configurations.
 	Layer2s map[string]Layer2 `json:"layer2s,omitempty"`
-	// DefaultVRF is the default VRF configuration used for the default route of HBR.
-	DefaultVRF *VRF `json:"defaultVRF,omitempty"`
+	// ClusterVRF is the default VRF configuration used for the default route of HBR.
+	ClusterVRF *VRF `json:"clusterVRF,omitempty"`
 	// FabricVRFs is a map of fabric VRF configurations.
 	FabricVRFs map[string]FabricVRF `json:"fabricVRFs,omitempty"`
 	// LocalVRFs is a map of local VRF configurations.
@@ -127,6 +127,8 @@ type BGPPeer struct {
 	IPv6 *AddressFamily `json:"ipv6,omitempty"`
 	// BFDProfile is the BFD profile for the BGP peer.
 	BFDProfile *BFDProfile `json:"bfdProfile,omitempty"`
+	// Multihop is the flag to enable multihop for the BGP peer.
+	Multihop *uint32 `json:"multihop,omitempty"`
 	// HoldTime is the hold time for the BGP session, default is 90s.
 	HoldTime *metav1.Duration `json:"holdTime,omitempty"`
 	// KeepaliveTime is the keepalive time for the BGP session, default is 30s.

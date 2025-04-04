@@ -32,9 +32,9 @@ func (crr *ConfigRevisionReconciler) buildNodeVrf(node *corev1.Node, revision *v
 		}
 	}
 
-	c.Spec.DefaultVRF = &v1alpha1.VRF{}
+	c.Spec.ClusterVRF = &v1alpha1.VRF{}
 	for _, vrfImport := range defaultImportMap {
-		c.Spec.DefaultVRF.VRFImports = append(c.Spec.DefaultVRF.VRFImports, vrfImport)
+		c.Spec.ClusterVRF.VRFImports = append(c.Spec.ClusterVRF.VRFImports, vrfImport)
 	}
 
 	return nil

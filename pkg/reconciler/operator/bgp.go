@@ -5,11 +5,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"os"
 	"sort"
 
 	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/pkg/network/netplan"
 	corev1 "k8s.io/api/core/v1"
+)
+
+var (
+	hbnHostNextHop = os.Getenv("HBN_HOST_NEXTHOP")
 )
 
 func buildBgpPeer(loopbackIP, listenRange *string, peer *v1alpha1.BGPRevision) (*v1alpha1.BGPPeer, error) {
@@ -72,6 +77,11 @@ func buildBgpPeer(loopbackIP, listenRange *string, peer *v1alpha1.BGPRevision) (
 		KeepaliveTime: peer.KeepaliveTime,
 	}
 
+	if loopbackIP != nil {
+		multihop := uint32(2)
+		bgpPeer.Multihop = &multihop
+	}
+
 	if family == IPv4 {
 		bgpPeer.IPv4 = bgpAddressFamily
 	} else {
@@ -123,7 +133,7 @@ func buildPeeringVlanPeer(node *corev1.Node, peer *v1alpha1.BGPRevision, revisio
 			fabricVrf.BGPPeers = append(fabricVrf.BGPPeers, *bgpPeer)
 			c.Spec.FabricVRFs[vrf] = fabricVrf
 		} else {
-			c.Spec.DefaultVRF.BGPPeers = append(c.Spec.DefaultVRF.BGPPeers, *bgpPeer)
+			c.Spec.ClusterVRF.BGPPeers = append(c.Spec.ClusterVRF.BGPPeers, *bgpPeer)
 		}
 	}
 	return nil
@@ -151,7 +161,13 @@ func buildNodeBgpPeers(node *corev1.Node, revision *v1alpha1.NetworkConfigRevisi
 				if err != nil {
 					return fmt.Errorf("failed to build BGP peer: %w", err)
 				}
-				c.Spec.DefaultVRF.BGPPeers = append(c.Spec.DefaultVRF.BGPPeers, *bgpPeer)
+				c.Spec.ClusterVRF.BGPPeers = append(c.Spec.ClusterVRF.BGPPeers, *bgpPeer)
+				c.Spec.ClusterVRF.StaticRoutes = append(c.Spec.ClusterVRF.StaticRoutes, v1alpha1.StaticRoute{
+					Prefix: bgp[i].LoopbackPeer.IPAddresses[i],
+					NextHop: &v1alpha1.NextHop{
+						Address: &hbnHostNextHop,
+					},
+				})
 			}
 		default:
 			return fmt.Errorf("no loopback IPs found for BGP peer %s", bgp[i].Name)
@@ -171,8 +187,21 @@ func buildNetplanDummies(node *corev1.Node, revision *v1alpha1.NetworkConfigRevi
 		interfaceName := fmt.Sprintf("%x", h.Sum(nil))[:10]
 
 		if bgp.LoopbackPeer != nil && len(bgp.LoopbackPeer.IPAddresses) > 0 {
+			addresses := make([]string, len(bgp.LoopbackPeer.IPAddresses))
+			for _, ip := range bgp.LoopbackPeer.IPAddresses {
+				// convert ip to CIDR format
+				ipAddr := net.ParseIP(ip)
+				if ipAddr == nil {
+					return nil, fmt.Errorf("failed to parse IP address %s", ip)
+				}
+				if ipAddr.To4() != nil {
+					addresses = append(addresses, fmt.Sprintf("%s/32", ip))
+				} else {
+					addresses = append(addresses, fmt.Sprintf("%s/128", ip))
+				}
+			}
 			dummy := map[string]interface{}{
-				"addresses": bgp.LoopbackPeer.IPAddresses,
+				"addresses": addresses,
 			}
 
 			rawDummy, err := json.Marshal(dummy)

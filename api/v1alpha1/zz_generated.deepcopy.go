@@ -133,6 +133,11 @@ func (in *BGPPeer) DeepCopyInto(out *BGPPeer) {
 		*out = new(BFDProfile)
 		**out = **in
 	}
+	if in.Multihop != nil {
+		in, out := &in.Multihop, &out.Multihop
+		*out = new(uint32)
+		**out = **in
+	}
 	if in.HoldTime != nil {
 		in, out := &in.HoldTime, &out.HoldTime
 		*out = new(v1.Duration)
@@ -967,8 +972,8 @@ func (in *NodeNetworkConfigSpec) DeepCopyInto(out *NodeNetworkConfigSpec) {
 			(*out)[key] = *val.DeepCopy()
 		}
 	}
-	if in.DefaultVRF != nil {
-		in, out := &in.DefaultVRF, &out.DefaultVRF
+	if in.ClusterVRF != nil {
+		in, out := &in.ClusterVRF, &out.ClusterVRF
 		*out = new(VRF)
 		(*in).DeepCopyInto(*out)
 	}

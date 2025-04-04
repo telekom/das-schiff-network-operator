@@ -23,7 +23,7 @@ import (
 
 const (
 	all          = "all"
-	defaultVrf   = "default"
+	clusterVRF   = "default"
 	protocolIP   = "ip"
 	protocolIPv4 = "ipv4"
 	protocolIPv6 = "ipv6"
@@ -86,7 +86,7 @@ func (e *Endpoint) ShowRoute(w http.ResponseWriter, r *http.Request) {
 
 	vrf := r.URL.Query().Get("vrf")
 	if vrf == "" {
-		vrf = defaultVrf
+		vrf = clusterVRF
 	}
 	if vrf == all {
 		e.Logger.Error(fmt.Errorf("VRF value cannot be 'all'"), "error validating value")
@@ -150,7 +150,7 @@ func (e *Endpoint) ShowBGP(w http.ResponseWriter, r *http.Request) {
 	e.Logger.Info("got ShowBGP request")
 	vrf := r.URL.Query().Get("vrf")
 	if vrf == "" {
-		vrf = defaultVrf
+		vrf = clusterVRF
 	}
 	if vrf == all {
 		e.Logger.Error(fmt.Errorf("VRF value cannot be 'all'"), "error validating value")

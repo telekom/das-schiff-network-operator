@@ -50,8 +50,8 @@ spec:
           spec:
             description: NodeNetworkConfigSpec defines the desired state of NodeConfig.
             properties:
-              defaultVRF:
-                description: DefaultVRF is the default VRF configuration used for
+              clusterVRF:
+                description: ClusterVRF is the default VRF configuration used for
                   the default route of HBR.
                 properties:
                   bgpPeers:
@@ -655,6 +655,11 @@ spec:
                           description: ListenRange is the listen range for the BGP
                             peer.
                           type: string
+                        multihop:
+                          description: Multihop is the flag to enable multihop for
+                            the BGP peer.
+                          format: int32
+                          type: integer
                         remoteAsn:
                           description: RemoteASN is the remote Autonomous System Number.
                           format: int32
@@ -1557,6 +1562,11 @@ spec:
                             description: ListenRange is the listen range for the BGP
                               peer.
                             type: string
+                          multihop:
+                            description: Multihop is the flag to enable multihop for
+                              the BGP peer.
+                            format: int32
+                            type: integer
                           remoteAsn:
                             description: RemoteASN is the remote Autonomous System
                               Number.
@@ -2715,6 +2725,11 @@ spec:
                             description: ListenRange is the listen range for the BGP
                               peer.
                             type: string
+                          multihop:
+                            description: Multihop is the flag to enable multihop for
+                              the BGP peer.
+                            format: int32
+                            type: integer
                           remoteAsn:
                             description: RemoteASN is the remote Autonomous System
                               Number.
