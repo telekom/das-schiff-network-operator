@@ -13,6 +13,10 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
+const (
+	bgpMultihop = uint32(2)
+)
+
 var (
 	hbnHostNextHop = os.Getenv("HBN_HOST_NEXTHOP")
 )
@@ -78,7 +82,7 @@ func buildBgpPeer(loopbackIP, listenRange *string, peer *v1alpha1.BGPRevision) (
 	}
 
 	if loopbackIP != nil {
-		multihop := uint32(2)
+		multihop := bgpMultihop
 		bgpPeer.Multihop = &multihop
 	}
 
