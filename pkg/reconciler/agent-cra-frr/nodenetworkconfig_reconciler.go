@@ -279,7 +279,7 @@ func (reconciler *NodeNetworkConfigReconciler) checkHealth(ctx context.Context) 
 	return nil
 }
 
-func (r *NodeNetworkConfigReconciler) ConvertNodeConfigToNetlink(nodeCfg *v1alpha1.NodeNetworkConfig) (netlinkConfig nl.NetlinkConfiguration) {
+func (reconciler *NodeNetworkConfigReconciler) ConvertNodeConfigToNetlink(nodeCfg *v1alpha1.NodeNetworkConfig) (netlinkConfig nl.NetlinkConfiguration) {
 	for _, layer2 := range nodeCfg.Spec.Layer2s {
 		neighSuppression := false
 
@@ -302,7 +302,7 @@ func (r *NodeNetworkConfigReconciler) ConvertNodeConfigToNetlink(nodeCfg *v1alph
 
 	// Skip adding management VRF
 	for name := range nodeCfg.Spec.FabricVRFs {
-		if name == r.baseConfig.ManagementVRF.Name {
+		if name == reconciler.baseConfig.ManagementVRF.Name {
 			continue
 		}
 
