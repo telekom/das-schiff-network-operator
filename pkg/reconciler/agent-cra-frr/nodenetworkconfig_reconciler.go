@@ -205,7 +205,7 @@ func (r *reconcileNodeNetworkConfig) invalidateAndRestore(ctx context.Context, c
 func (r *reconcileNodeNetworkConfig) doReconciliation(ctx context.Context, nodeCfg *v1alpha1.NodeNetworkConfig) error {
 	r.logger.Info("config to reconcile", "NodeNetworkConfig", *nodeCfg)
 
-	netlinkConfig := ConvertNodeConfigToNetlink(nodeCfg)
+	netlinkConfig := r.ConvertNodeConfigToNetlink(nodeCfg)
 
 	frrConfig, err := r.frrTemplate.TemplateFRR(r.baseConfig, &nodeCfg.Spec)
 	if err != nil {
@@ -279,7 +279,7 @@ func (reconciler *NodeNetworkConfigReconciler) checkHealth(ctx context.Context) 
 	return nil
 }
 
-func ConvertNodeConfigToNetlink(nodeCfg *v1alpha1.NodeNetworkConfig) (netlinkConfig nl.NetlinkConfiguration) {
+func (r *NodeNetworkConfigReconciler) ConvertNodeConfigToNetlink(nodeCfg *v1alpha1.NodeNetworkConfig) (netlinkConfig nl.NetlinkConfiguration) {
 	for _, layer2 := range nodeCfg.Spec.Layer2s {
 		neighSuppression := false
 
@@ -300,7 +300,12 @@ func ConvertNodeConfigToNetlink(nodeCfg *v1alpha1.NodeNetworkConfig) (netlinkCon
 		netlinkConfig.Layer2s = append(netlinkConfig.Layer2s, nlLayer2)
 	}
 
+	// Skip adding management VRF
 	for name := range nodeCfg.Spec.FabricVRFs {
+		if name == r.baseConfig.ManagementVRF.Name {
+			continue
+		}
+
 		nlVrf := nl.VRFInformation{
 			Name: name,
 			VNI:  int(nodeCfg.Spec.FabricVRFs[name].VNI),
