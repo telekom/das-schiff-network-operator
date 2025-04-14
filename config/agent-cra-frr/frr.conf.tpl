@@ -6,7 +6,7 @@
 {{ if isIPv4 $route.Prefix }}ip{{ else }}ipv6{{ end }} route {{ $route.Prefix }} {{ $route.NextHop.Address }}
 {{ end }}
 {{ if $route.NextHop.Vrf }}
-{{ if isIPv4 $route.Prefix }}ip{{ else }}ipv6{{ end }} route {{ $route.Prefix }} nexthop-vrf {{ $route.NextHop.Vrf }}
+{{ if isIPv4 $route.Prefix }}ip{{ else }}ipv6{{ end }} route {{ $route.Prefix }} {{ if isIPv4 $route.Prefix }}0.0.0.0{{ else }}::{{ end }} nexthop-vrf {{ $route.NextHop.Vrf }}
 {{ end }}
 {{ else }}
 {{ if isIPv4 $route.Prefix }}ip{{ else }}ipv6{{ end }} route {{ $route.Prefix }} blackhole
@@ -478,6 +478,11 @@ route-map rm_cluster_import permit 1
   set ipv4 vpn next-hop 0.0.0.0
   on-match next
 exit
+route-map rm_cluster_import permit 2
+  set local-preference 50
+  on-match next
+exit
+!
 route-map rm_cluster_import deny 65533
   match ip address prefix-list DEFAULT
   match source-vrf p_zerotrust
