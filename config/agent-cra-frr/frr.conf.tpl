@@ -523,6 +523,7 @@ exit
 !
 route-map TAG-FABRIC-IN permit 10
   set community 65169:200 additive
+  set local-preference 100
 exit
 !
 bgp community-list standard cm-received-fabric permit 65169:200
