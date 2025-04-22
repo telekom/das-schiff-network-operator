@@ -459,11 +459,6 @@ ipv6 prefix-list ANY permit any
 ip prefix-list DEFAULT permit 0.0.0.0/0
 ipv6 prefix-list DEFAULT permit ::/0
 !
-route-map rm_{{ $.Config.ManagementVRF.Name }}_import permit 1
-  match ip address prefix-list ANY
-  set ipv4 vpn next-hop 0.0.0.0
-  on-match next
-exit
 route-map rm_{{ $.Config.ManagementVRF.Name }}_import permit 2
   match ip address prefix-list pl_export_base
   match source-vrf cluster
