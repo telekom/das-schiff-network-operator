@@ -51,7 +51,7 @@ match community cm_{{ $param.Name }}_{{ $j }}
 {{ if $item.Action.ModifyRoute }}
 {{ if $item.Action.ModifyRoute }}
 {{ if $item.Action.ModifyRoute.AddCommunities }}
-set community {{ join $item.MAction.odifyRoute.AddCommunities " " }}{{ if $item.Action.ModifyRoute.AdditiveCommunities }} additive{{ end }}
+set community {{ join $item.Action.ModifyRoute.AddCommunities " " }}{{ if $item.Action.ModifyRoute.AdditiveCommunities }} additive{{ end }}
 {{ end }}
 {{ if $item.Action.ModifyRoute.RemoveCommunities }}
 set comm-list cm_remove_{{ $param.Name }}_{{ $j }} delete
