@@ -36,7 +36,7 @@ jobs:
           # body_path: _releasenotes/${{ env.RELEASE_TAG }}.md
 
   release_amd64_image:
-    name: Build and Push Release Image
+    name: Build and Push Release amd64 Image
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -77,7 +77,7 @@ jobs:
           file: ${{ matrix.image }}.Dockerfile
 
   release_arm64_image:
-    name: Build and Push Release Image
+    name: Build and Push Release arm64 Image
     runs-on: ubuntu-24.04-arm
     strategy:
       matrix:

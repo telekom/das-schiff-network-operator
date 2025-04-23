@@ -7,7 +7,7 @@ on:
 
 jobs:
   main-amd64-image:
-    name: build "main" image
+    name: build "main" amd64 image
     runs-on: "ubuntu-latest"
     strategy:
       matrix:
@@ -39,7 +39,7 @@ jobs:
           file: ${{ matrix.image }}.Dockerfile
 
   main-arm64-image:
-    name: build "main" image
+    name: build "main" arm64 image
     runs-on: "ubuntu-24.04-arm"
     strategy:
       matrix:
