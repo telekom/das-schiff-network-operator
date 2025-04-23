@@ -17,7 +17,7 @@ COPY controllers/ controllers/
 COPY pkg/ pkg/
 
 # Build
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -o frr-cra main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -a -o frr-cra main.go
 
 FROM docker.io/library/ubuntu:24.10
 

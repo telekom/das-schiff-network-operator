@@ -35,5 +35,6 @@ jobs:
         with:
           context: .
           push: true
+          platforms: linux/amd64,linux/arm64
           tags: ghcr.io/telekom/${{ matrix.image }}:main
           file: ${{ matrix.image }}.Dockerfile
