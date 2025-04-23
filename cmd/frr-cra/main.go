@@ -400,9 +400,14 @@ func main() {
 		ClientAuth: tls.RequireAndVerifyClientCert,
 	}
 
+	address := fmt.Sprintf("%s:%d", *ip, *port)
+	if parsedIP.To4() == nil {
+		address = fmt.Sprintf("[%s]:%d", *ip, *port)
+	}
+
 	//nolint:gosec
 	server := &http.Server{
-		Addr:      fmt.Sprintf(":%d", *port),
+		Addr:      address,
 		TLSConfig: tlsConfig,
 	}
 
