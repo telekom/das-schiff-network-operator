@@ -73,6 +73,42 @@ Yes, we duplicate code in here. This is a temporary solution until we have a bet
 nmstate or netplan. This just creates VLAN and dummy interfaces and nothing else (for now...).
 */
 
+func createVLAN(masterInterface netlink.Link, vlanConfig *netplanVlan, name string, vlan netplan.Device, bridge *netlink.Bridge) error {
+	link := netlink.Vlan{
+		LinkAttrs: netlink.LinkAttrs{
+			Name:        fmt.Sprintf("%s.%d", vlanNamePrefix, vlanConfig.ID),
+			ParentIndex: masterInterface.Attrs().Index,
+			MTU:         vlanConfig.Mtu,
+		},
+		VlanId: vlanConfig.ID,
+	}
+	if err := netlink.LinkAdd(&link); err != nil {
+		return fmt.Errorf("error adding vlan %s: %w", name, err)
+	}
+	if err := netlink.LinkSetAlias(&link, fmt.Sprintf("%s%s", vlanAliasPrefix, name)); err != nil {
+		return fmt.Errorf("error setting alias for vlan %s: %w", name, err)
+	}
+	if err := setEUIAutogeneration(link.Attrs().Name, false); err != nil {
+		return fmt.Errorf("error setting EUI autogeneration: %w", err)
+	}
+	if err := netlink.LinkSetUp(&link); err != nil {
+		return fmt.Errorf("error setting up vlan %s: %w", name, err)
+	}
+	if err := reconcileAddresses(&link, vlan); err != nil {
+		return fmt.Errorf("error reconciling addresses for vlan %s: %w", name, err)
+	}
+	if bridge != nil {
+		vlanId, err := parseVlanId(vlanConfig.ID)
+		if err != nil {
+			return fmt.Errorf("error parsing vlan ID %d: %w", vlanConfig.ID, err)
+		}
+		if err := netlink.BridgeVlanAdd(bridge, vlanId, false, false, true, false); err != nil {
+			return fmt.Errorf("error adding vlan %d to bridge %s: %w", vlanConfig.ID, (*bridge).Attrs().Name, err)
+		}
+	}
+	return nil
+}
+
 func reconcileVLANs(devices map[string]netplan.Device) error {
 	masterInterface, err := netlink.LinkByName(hbnMasterName)
 	if err != nil {
@@ -80,7 +116,9 @@ func reconcileVLANs(devices map[string]netplan.Device) error {
 	}
 	var bridge *netlink.Bridge
 	if masterInterface.Type() == "bridge" {
-		bridge = masterInterface.(*netlink.Bridge)
+		if intf, ok := masterInterface.(*netlink.Bridge); ok {
+			bridge = intf
+		}
 	}
 
 	allInterfaces, err := netlink.LinkList()
@@ -109,33 +147,8 @@ func reconcileVLANs(devices map[string]netplan.Device) error {
 			}
 		}
 		if !existing {
-			link := netlink.Vlan{
-				LinkAttrs: netlink.LinkAttrs{
-					Name:        fmt.Sprintf("%s.%d", vlanNamePrefix, vlanConfig.ID),
-					ParentIndex: masterInterface.Attrs().Index,
-					MTU:         vlanConfig.Mtu,
-				},
-				VlanId: vlanConfig.ID,
-			}
-			if err := netlink.LinkAdd(&link); err != nil {
-				return fmt.Errorf("error adding vlan %s: %w", name, err)
-			}
-			if err := netlink.LinkSetAlias(&link, fmt.Sprintf("%s%s", vlanAliasPrefix, name)); err != nil {
-				return fmt.Errorf("error setting alias for vlan %s: %w", name, err)
-			}
-			if err := setEUIAutogeneration(link.Attrs().Name, false); err != nil {
-				return fmt.Errorf("error setting EUI autogeneration: %w", err)
-			}
-			if err := netlink.LinkSetUp(&link); err != nil {
-				return fmt.Errorf("error setting up vlan %s: %w", name, err)
-			}
-			if err := reconcileAddresses(&link, vlan); err != nil {
-				return fmt.Errorf("error reconciling addresses for vlan %s: %w", name, err)
-			}
-			if bridge != nil {
-				if err := netlink.BridgeVlanAdd(bridge, uint16(vlanConfig.ID), false, false, true, false); err != nil {
-					return fmt.Errorf("error adding vlan %d to bridge %s: %w", vlanConfig.ID, (*bridge).Attrs().Name, err)
-				}
+			if err := createVLAN(masterInterface, vlanConfig, name, vlan, bridge); err != nil {
+				return fmt.Errorf("error creating vlan %s: %w", name, err)
 			}
 		}
 	}
@@ -191,6 +204,45 @@ func reconcileAddresses(link netlink.Link, device netplan.Device) error {
 	return nil
 }
 
+func parseVlanId(vlan int) (uint16, error) {
+	if vlan < 0 || vlan > 4095 {
+		return 0, fmt.Errorf("vlan ID %d is out of bounds (0-4095)", vlan)
+	}
+	return uint16(vlan), nil
+}
+
+func deleteBridgeVlan(bridge *netlink.Bridge, existing netlink.Link) error {
+	if existing.Type() != "vlan" {
+		return fmt.Errorf("error deleting vlan %s: not a vlan", existing.Attrs().Name)
+	}
+
+	var vlanID uint16
+	if vlan, ok := existing.(*netlink.Vlan); ok {
+		if parsedVlan, err := parseVlanId(vlan.VlanId); err != nil {
+			return fmt.Errorf("error parsing vlan ID %d: %w", vlan.VlanId, err)
+		} else {
+			vlanID = parsedVlan
+		}
+	} else {
+		return fmt.Errorf("error deleting vlan %s: not a vlan", existing.Attrs().Name)
+	}
+
+	if err := netlink.BridgeVlanDel(bridge, vlanID, false, false, true, false); err != nil {
+		return fmt.Errorf("error deleting vlan %d from bridge %s: %w", vlanID, (*bridge).Attrs().Name, err)
+	}
+	return nil
+}
+
+func reconcileExistingAddresses(existingInterface netlink.Link, device netplan.Device) error {
+	if err := setEUIAutogeneration(existingInterface.Attrs().Name, false); err != nil {
+		return fmt.Errorf("error setting EUI autogeneration: %w", err)
+	}
+	if err := reconcileAddresses(existingInterface, device); err != nil {
+		return fmt.Errorf("error reconciling addresses for %s: %w", existingInterface.Attrs().Name, err)
+	}
+	return nil
+}
+
 func reconcileExisting(prefix, interfaceType string, devices map[string]netplan.Device, allInterfaces []netlink.Link, bridge *netlink.Bridge) error {
 	for _, existingInterface := range allInterfaces {
 		if existingInterface.Type() == interfaceType {
@@ -202,17 +254,13 @@ func reconcileExisting(prefix, interfaceType string, devices map[string]netplan.
 						return fmt.Errorf("error deleting %s: %w", existingInterface.Attrs().Name, err)
 					}
 					if bridge != nil && existingInterface.Type() == "vlan" {
-						vlanID := (existingInterface.(*netlink.Vlan)).VlanId
-						if err := netlink.BridgeVlanDel(bridge, uint16(vlanID), false, false, true, false); err != nil {
-							return fmt.Errorf("error deleting vlan %d from bridge %s: %w", vlanID, (*bridge).Attrs().Name, err)
+						if err := deleteBridgeVlan(bridge, existingInterface); err != nil {
+							return fmt.Errorf("error deleting vlan %s from bridge %s: %w", existingInterface.Attrs().Name, (*bridge).Attrs().Name, err)
 						}
 					}
 				} else {
-					if err := setEUIAutogeneration(existingInterface.Attrs().Name, false); err != nil {
-						return fmt.Errorf("error setting EUI autogeneration: %w", err)
-					}
-					if err := reconcileAddresses(existingInterface, devices[name]); err != nil {
-						return fmt.Errorf("error reconciling addresses for %s: %w", existingInterface.Attrs().Name, err)
+					if err := reconcileExistingAddresses(existingInterface, devices[name]); err != nil {
+						return fmt.Errorf("error reconciling existing addresses for %s: %w", existingInterface.Attrs().Name, err)
 					}
 				}
 			}
