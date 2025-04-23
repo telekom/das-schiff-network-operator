@@ -103,7 +103,7 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
 
       - name: Create manifest list and push
-        working-directory: ${{ runner.temp }}/digests
+        working-directory: ${{ runner.temp }}/digests-${{ matrix.image }}
         run: |
           docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
             $(printf 'ghcr.io/telekom/${{ matrix.image }}@sha256:%s ' *)
