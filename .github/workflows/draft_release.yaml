@@ -82,7 +82,7 @@ jobs:
         with:
           context: .
           outputs: type=image,push-by-digest=true,name-canonical=true,push=true
-          tags: ${{ steps.meta.outputs.tags }}
+          tags: ghcr.io/telekom/${{ matrix.image }}
           labels: ${{ steps.meta.outputs.labels }}
           file: ${{ matrix.image }}.Dockerfile
 

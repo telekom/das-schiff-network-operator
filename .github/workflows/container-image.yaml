@@ -36,6 +36,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Extract Metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v5.5.1
+        with:
+          images: ghcr.io/telekom/${{ matrix.image }}
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -45,7 +51,7 @@ jobs:
         with:
           context: .
           outputs: type=image,push-by-digest=true,name-canonical=true,push=true
-          tags: ${{ steps.meta.outputs.tags }}
+          tags: ghcr.io/telekom/${{ matrix.image }}
           labels: ${{ steps.meta.outputs.labels }}
           file: ${{ matrix.image }}.Dockerfile
 
