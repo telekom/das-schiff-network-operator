@@ -88,7 +88,7 @@ jobs:
 
       - name: Export digest
         run: |
-          mkdir -p ${{ runner.temp }}/digests
+          mkdir -p ${{ runner.temp }}/digests-${{ matrix.image }}
           digest="${{ steps.build.outputs.digest }}"
           touch "${{ runner.temp }}/digests-${{ matrix.image }}/${digest#sha256:}"
 
