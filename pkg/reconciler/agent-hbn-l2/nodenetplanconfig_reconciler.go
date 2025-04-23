@@ -78,13 +78,17 @@ func reconcileVLANs(devices map[string]netplan.Device) error {
 	if err != nil {
 		return fmt.Errorf("error getting master interface: %w", err)
 	}
+	var bridge *netlink.Bridge
+	if masterInterface.Type() == "bridge" {
+		bridge = masterInterface.(*netlink.Bridge)
+	}
 
 	allInterfaces, err := netlink.LinkList()
 	if err != nil {
 		return fmt.Errorf("error listing interfaces: %w", err)
 	}
 
-	if err := reconcileExisting(vlanAliasPrefix, "vlan", devices, allInterfaces); err != nil {
+	if err := reconcileExisting(vlanAliasPrefix, "vlan", devices, allInterfaces, bridge); err != nil {
 		return fmt.Errorf("error reconciling existing vlans: %w", err)
 	}
 
@@ -127,6 +131,11 @@ func reconcileVLANs(devices map[string]netplan.Device) error {
 			}
 			if err := reconcileAddresses(&link, vlan); err != nil {
 				return fmt.Errorf("error reconciling addresses for vlan %s: %w", name, err)
+			}
+			if bridge != nil {
+				if err := netlink.BridgeVlanAdd(bridge, uint16(vlanConfig.ID), false, false, true, false); err != nil {
+					return fmt.Errorf("error adding vlan %d to bridge %s: %w", vlanConfig.ID, (*bridge).Attrs().Name, err)
+				}
 			}
 		}
 	}
@@ -182,7 +191,7 @@ func reconcileAddresses(link netlink.Link, device netplan.Device) error {
 	return nil
 }
 
-func reconcileExisting(prefix, interfaceType string, devices map[string]netplan.Device, allInterfaces []netlink.Link) error {
+func reconcileExisting(prefix, interfaceType string, devices map[string]netplan.Device, allInterfaces []netlink.Link, bridge *netlink.Bridge) error {
 	for _, existingInterface := range allInterfaces {
 		if existingInterface.Type() == interfaceType {
 			alias := existingInterface.Attrs().Alias
@@ -191,6 +200,12 @@ func reconcileExisting(prefix, interfaceType string, devices map[string]netplan.
 				if _, ok := devices[name]; !ok {
 					if err := netlink.LinkDel(existingInterface); err != nil {
 						return fmt.Errorf("error deleting %s: %w", existingInterface.Attrs().Name, err)
+					}
+					if bridge != nil && existingInterface.Type() == "vlan" {
+						vlanID := (existingInterface.(*netlink.Vlan)).VlanId
+						if err := netlink.BridgeVlanDel(bridge, uint16(vlanID), false, false, true, false); err != nil {
+							return fmt.Errorf("error deleting vlan %d from bridge %s: %w", vlanID, (*bridge).Attrs().Name, err)
+						}
 					}
 				} else {
 					if err := setEUIAutogeneration(existingInterface.Attrs().Name, false); err != nil {
@@ -213,7 +228,7 @@ func reconcileLoopbacks(devices map[string]netplan.Device) error {
 		return fmt.Errorf("error listing interfaces: %w", err)
 	}
 
-	if err := reconcileExisting(dummyAliasPrefix, "dummy", devices, allInterfaces); err != nil {
+	if err := reconcileExisting(dummyAliasPrefix, "dummy", devices, allInterfaces, nil); err != nil {
 		return fmt.Errorf("error reconciling existing loopbacks: %w", err)
 	}
 
