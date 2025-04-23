@@ -353,7 +353,7 @@ func setupTLS(address net.IP) error {
 }
 
 func main() {
-	ip := flag.String("ip", "169.254.1.0", "IP to listen on and generate certificate for")
+	ip := flag.String("ip", "fd00:7:caa5::", "IP to listen on and generate certificate for")
 	port := flag.Int("port", 8443, "Port to listen on") //nolint:mnd
 	flag.Parse()
 

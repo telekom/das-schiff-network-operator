@@ -10,16 +10,17 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
 )
 
 type Manager struct {
-	craURL string
-	client http.Client
+	craURLs []string
+	client  http.Client
 }
 
-func NewManager(craURL, clientCert, clientKey string) (*Manager, error) {
+func NewManager(craURLs []string, clientCert, clientKey string) (*Manager, error) {
 	clientCertData, err := os.ReadFile(clientCert)
 	if err != nil {
 		return nil, fmt.Errorf("error reading client cert file: %w", err)
@@ -34,8 +35,9 @@ func NewManager(craURL, clientCert, clientKey string) (*Manager, error) {
 	}
 
 	return &Manager{
-		craURL: craURL,
+		craURLs: craURLs,
 		client: http.Client{
+			Timeout: 30 * time.Second,
 			Transport: &http.Transport{
 				TLSClientConfig: &tls.Config{
 					RootCAs:      caCertPool,
@@ -48,30 +50,40 @@ func NewManager(craURL, clientCert, clientKey string) (*Manager, error) {
 }
 
 func (m Manager) postRequest(ctx context.Context, path string, body []byte) error {
-	// Send configuration to CRA via HTTP
-	url := fmt.Sprintf("%s%s", m.craURL, path)
-
 	bodyReader := bytes.NewReader(body)
 
-	req, err := http.NewRequest(http.MethodPost, url, bodyReader)
-	if err != nil {
-		return fmt.Errorf("error creating request: %w", err)
-	}
-	res, err := m.client.Do(req.WithContext(ctx))
-	if err != nil {
-		return fmt.Errorf("error sending request: %w", err)
-	}
-	defer res.Body.Close()
+	for _, baseURL := range m.craURLs {
+		url := fmt.Sprintf("%s%s", baseURL, path)
 
-	resBody, err := io.ReadAll(res.Body)
-	if err != nil {
-		return fmt.Errorf("error reading response body: %w", err)
+		req, err := http.NewRequest(http.MethodPost, url, bodyReader)
+		if err != nil {
+			return fmt.Errorf("error creating request: %w", err)
+		}
+
+		res, err := m.client.Do(req.WithContext(ctx))
+		if err != nil {
+			// Continue to the next URL if there is a connection issue
+			continue
+		}
+		defer res.Body.Close()
+
+		// Read the response body
+		resBody, err := io.ReadAll(res.Body)
+		if err != nil {
+			return fmt.Errorf("error reading response body: %w", err)
+		}
+
+		// Fail directly if a response is received, regardless of status code
+		if res.StatusCode != http.StatusOK {
+			return fmt.Errorf("unexpected status code (%d): %s", res.StatusCode, resBody)
+		}
+
+		// Success, return nil
+		return nil
 	}
 
-	if res.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected status code (%d): %s", res.StatusCode, resBody)
-	}
-	return nil
+	// If all URLs fail due to connection issues
+	return fmt.Errorf("all CRA URLs failed due to connection issues")
 }
 
 func (m Manager) ApplyConfiguration(ctx context.Context, netlinkConfig *nl.NetlinkConfiguration, frrConfig string) error {

@@ -40,7 +40,7 @@ spec:
                 fieldRef:
                   fieldPath: spec.nodeName
             - name: CRA_URL
-              value: https://169.254.1.0:8443
+              value: https://[fd00:7:caa5::]:8443,https://169.254.1.0:8443
             - name: CRA_CLIENT_CERT
               value: /etc/cra/certs/cert.pem
             - name: CRA_CLIENT_KEY
