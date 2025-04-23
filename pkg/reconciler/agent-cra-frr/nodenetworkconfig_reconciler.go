@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
@@ -51,7 +52,18 @@ func NewNodeNetworkConfigReconciler(clusterClient client.Client, logger logr.Log
 		NodeNetworkConfigPath: nodeNetworkConfigPath,
 	}
 
-	craManager, err := cra.NewManager(strings.Split(os.Getenv("CRA_URL"), ","), os.Getenv("CRA_CLIENT_CERT"), os.Getenv("CRA_CLIENT_KEY"))
+	craUrls := strings.Split(os.Getenv("CRA_URL"), ",")
+	if len(craUrls) == 0 {
+		return nil, fmt.Errorf("no CRA URL provided")
+	}
+	timeout, err := time.ParseDuration(os.Getenv("CRA_TIMEOUT"))
+	if err != nil {
+		return nil, fmt.Errorf("error parsing CRA timeout: %w", err)
+	}
+	clientCert := os.Getenv("CRA_CLIENT_CERT")
+	clientKey := os.Getenv("CRA_CLIENT_KEY")
+
+	craManager, err := cra.NewManager(craUrls, timeout, clientCert, clientKey)
 	if err != nil {
 		return nil, fmt.Errorf("error creating CRA manager: %w", err)
 	}

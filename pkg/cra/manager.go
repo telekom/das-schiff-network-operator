@@ -20,7 +20,7 @@ type Manager struct {
 	client  http.Client
 }
 
-func NewManager(craURLs []string, clientCert, clientKey string) (*Manager, error) {
+func NewManager(craURLs []string, timeout time.Duration, clientCert, clientKey string) (*Manager, error) {
 	clientCertData, err := os.ReadFile(clientCert)
 	if err != nil {
 		return nil, fmt.Errorf("error reading client cert file: %w", err)
@@ -37,7 +37,7 @@ func NewManager(craURLs []string, clientCert, clientKey string) (*Manager, error
 	return &Manager{
 		craURLs: craURLs,
 		client: http.Client{
-			Timeout: 30 * time.Second,
+			Timeout: timeout,
 			Transport: &http.Transport{
 				TLSClientConfig: &tls.Config{
 					RootCAs:      caCertPool,
@@ -65,12 +65,14 @@ func (m Manager) postRequest(ctx context.Context, path string, body []byte) erro
 			// Continue to the next URL if there is a connection issue
 			continue
 		}
-		defer res.Body.Close()
 
-		// Read the response body
-		resBody, err := io.ReadAll(res.Body)
-		if err != nil {
-			return fmt.Errorf("error reading response body: %w", err)
+		// Ensure the response body is closed after processing
+		resBody, readErr := func() ([]byte, error) {
+			defer res.Body.Close()
+			return io.ReadAll(res.Body)
+		}()
+		if readErr != nil {
+			return fmt.Errorf("error reading response body: %w", readErr)
 		}
 
 		// Fail directly if a response is received, regardless of status code

@@ -23,6 +23,10 @@ const (
 	vlanNamePrefix  = "vlan"
 	dummyNamePrefix = "dummy"
 	aliasPrefix     = "hbn"
+
+	vlanInterfaceType   = "vlan"
+	bridgeInterfaceType = "bridge"
+	dummyInterfaceType  = "dummy"
 )
 
 var (
@@ -98,11 +102,11 @@ func createVLAN(masterInterface netlink.Link, vlanConfig *netplanVlan, name stri
 		return fmt.Errorf("error reconciling addresses for vlan %s: %w", name, err)
 	}
 	if bridge != nil {
-		vlanId, err := parseVlanId(vlanConfig.ID)
+		vlanID, err := parseVlanID(vlanConfig.ID)
 		if err != nil {
 			return fmt.Errorf("error parsing vlan ID %d: %w", vlanConfig.ID, err)
 		}
-		if err := netlink.BridgeVlanAdd(bridge, vlanId, false, false, true, false); err != nil {
+		if err := netlink.BridgeVlanAdd(bridge, vlanID, false, false, true, false); err != nil {
 			return fmt.Errorf("error adding vlan %d to bridge %s: %w", vlanConfig.ID, (*bridge).Attrs().Name, err)
 		}
 	}
@@ -115,7 +119,7 @@ func reconcileVLANs(devices map[string]netplan.Device) error {
 		return fmt.Errorf("error getting master interface: %w", err)
 	}
 	var bridge *netlink.Bridge
-	if masterInterface.Type() == "bridge" {
+	if masterInterface.Type() == bridgeInterfaceType {
 		if intf, ok := masterInterface.(*netlink.Bridge); ok {
 			bridge = intf
 		}
@@ -126,7 +130,7 @@ func reconcileVLANs(devices map[string]netplan.Device) error {
 		return fmt.Errorf("error listing interfaces: %w", err)
 	}
 
-	if err := reconcileExisting(vlanAliasPrefix, "vlan", devices, allInterfaces, bridge); err != nil {
+	if err := reconcileExisting(vlanAliasPrefix, vlanInterfaceType, devices, allInterfaces, bridge); err != nil {
 		return fmt.Errorf("error reconciling existing vlans: %w", err)
 	}
 
@@ -138,7 +142,7 @@ func reconcileVLANs(devices map[string]netplan.Device) error {
 
 		existing := false
 		for _, existingInterface := range allInterfaces {
-			if existingInterface.Type() == "vlan" {
+			if existingInterface.Type() == vlanInterfaceType {
 				alias := existingInterface.Attrs().Alias
 				if strings.HasPrefix(alias, vlanAliasPrefix) && strings.TrimPrefix(alias, vlanAliasPrefix) == name {
 					existing = true
@@ -204,7 +208,7 @@ func reconcileAddresses(link netlink.Link, device netplan.Device) error {
 	return nil
 }
 
-func parseVlanId(vlan int) (uint16, error) {
+func parseVlanID(vlan int) (uint16, error) {
 	if vlan < 0 || vlan > 4095 {
 		return 0, fmt.Errorf("vlan ID %d is out of bounds (0-4095)", vlan)
 	}
@@ -212,23 +216,22 @@ func parseVlanId(vlan int) (uint16, error) {
 }
 
 func deleteBridgeVlan(bridge *netlink.Bridge, existing netlink.Link) error {
-	if existing.Type() != "vlan" {
+	if existing.Type() != vlanInterfaceType {
 		return fmt.Errorf("error deleting vlan %s: not a vlan", existing.Attrs().Name)
 	}
 
-	var vlanID uint16
-	if vlan, ok := existing.(*netlink.Vlan); ok {
-		if parsedVlan, err := parseVlanId(vlan.VlanId); err != nil {
-			return fmt.Errorf("error parsing vlan ID %d: %w", vlan.VlanId, err)
-		} else {
-			vlanID = parsedVlan
-		}
-	} else {
+	vlan, ok := existing.(*netlink.Vlan)
+	if !ok {
 		return fmt.Errorf("error deleting vlan %s: not a vlan", existing.Attrs().Name)
 	}
 
-	if err := netlink.BridgeVlanDel(bridge, vlanID, false, false, true, false); err != nil {
-		return fmt.Errorf("error deleting vlan %d from bridge %s: %w", vlanID, (*bridge).Attrs().Name, err)
+	parsedVlan, err := parseVlanID(vlan.VlanId)
+	if err != nil {
+		return fmt.Errorf("error parsing vlan ID %d: %w", vlan.VlanId, err)
+	}
+
+	if err := netlink.BridgeVlanDel(bridge, parsedVlan, false, false, true, false); err != nil {
+		return fmt.Errorf("error deleting vlan %d from bridge %s: %w", parsedVlan, (*bridge).Attrs().Name, err)
 	}
 	return nil
 }
@@ -253,7 +256,7 @@ func reconcileExisting(prefix, interfaceType string, devices map[string]netplan.
 					if err := netlink.LinkDel(existingInterface); err != nil {
 						return fmt.Errorf("error deleting %s: %w", existingInterface.Attrs().Name, err)
 					}
-					if bridge != nil && existingInterface.Type() == "vlan" {
+					if bridge != nil && existingInterface.Type() == vlanInterfaceType {
 						if err := deleteBridgeVlan(bridge, existingInterface); err != nil {
 							return fmt.Errorf("error deleting vlan %s from bridge %s: %w", existingInterface.Attrs().Name, (*bridge).Attrs().Name, err)
 						}
@@ -276,14 +279,14 @@ func reconcileLoopbacks(devices map[string]netplan.Device) error {
 		return fmt.Errorf("error listing interfaces: %w", err)
 	}
 
-	if err := reconcileExisting(dummyAliasPrefix, "dummy", devices, allInterfaces, nil); err != nil {
+	if err := reconcileExisting(dummyAliasPrefix, dummyInterfaceType, devices, allInterfaces, nil); err != nil {
 		return fmt.Errorf("error reconciling existing loopbacks: %w", err)
 	}
 
 	for name, dummy := range devices {
 		existing := false
 		for _, existingInterface := range allInterfaces {
-			if existingInterface.Type() == "dummy" {
+			if existingInterface.Type() == dummyInterfaceType {
 				alias := existingInterface.Attrs().Alias
 				if strings.HasPrefix(alias, dummyAliasPrefix) && strings.TrimPrefix(alias, dummyAliasPrefix) == name {
 					existing = true
