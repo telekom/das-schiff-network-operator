@@ -49,7 +49,6 @@ resources:
 - ../cert
 - ../operator
 - ../webhook
-- ../prometheus
 labels:
 - includeSelectors: true
   pairs:
