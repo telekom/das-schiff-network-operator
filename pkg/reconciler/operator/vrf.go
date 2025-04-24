@@ -32,7 +32,7 @@ func (crr *ConfigRevisionReconciler) buildNodeVrf(node *corev1.Node, revision *v
 		}
 
 		fabricVrf := c.Spec.FabricVRFs[vrfs[i].VRF]
-		if err := crr.updateFabricVRF(&fabricVrf, &vrfs[i], defaultImportMap); err != nil {
+		if err := updateFabricVRF(&fabricVrf, &vrfs[i], defaultImportMap); err != nil {
 			return fmt.Errorf("failed to update fabric VRF definition: %w", err)
 		}
 		c.Spec.FabricVRFs[vrfs[i].VRF] = fabricVrf
@@ -88,7 +88,7 @@ func (crr *ConfigRevisionReconciler) createFabricVRF(vrf *v1alpha1.VRFRevision) 
 	return fabricVrf, nil
 }
 
-func (crr *ConfigRevisionReconciler) updateFabricVRF(fabricVrf *v1alpha1.FabricVRF, vrf *v1alpha1.VRFRevision, defaultImportMap map[string]v1alpha1.VRFImport) error {
+func updateFabricVRF(fabricVrf *v1alpha1.FabricVRF, vrf *v1alpha1.VRFRevision, defaultImportMap map[string]v1alpha1.VRFImport) error {
 	for _, aggregate := range vrf.Aggregate {
 		fabricVrf.StaticRoutes = append(fabricVrf.StaticRoutes, v1alpha1.StaticRoute{
 			Prefix: aggregate,
