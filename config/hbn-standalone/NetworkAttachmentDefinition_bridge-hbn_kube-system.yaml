@@ -1,0 +1,26 @@
+apiVersion: "k8s.cni.cncf.io/v1"
+kind: NetworkAttachmentDefinition
+metadata:
+  name: bridge-hbn
+  namespace: kube-system
+spec:
+  config: |
+    {
+      "cniVersion": "0.3.0",
+      "name": "bridge-hbn",
+      "type": "bridge",
+      "bridge": "hbn",
+      "isGateway": true,
+      "preserveDefaultVlan": true,
+      "vlanTrunk": [
+        { "minID": 2, "maxID": 4094 }
+      ],
+      "ipam": {
+        "type": "static",
+        "addresses": [
+          {
+            "address": "fd00:7:caa5::/127"
+          }
+        ]
+      }
+    }

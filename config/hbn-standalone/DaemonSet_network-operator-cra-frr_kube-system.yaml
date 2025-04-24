@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  labels:
+    app.kubernetes.io/component: cra-frr
+    app.kubernetes.io/name: network-operator
+  name: network-operator-cra-frr
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: cra-frr
+      app.kubernetes.io/name: network-operator
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/default-container: cra-frr
+        k8s.v1.cni.cncf.io/networks: bridge-hbn@hbn
+      labels:
+        app.kubernetes.io/component: cra-frr
+        app.kubernetes.io/name: network-operator
+    spec:
+      containers:
+        - command:
+            - /sbin/init
+          image: cra-frr:latest
+          imagePullPolicy: IfNotPresent
+          name: cra-frr
+          resources:
+            limits:
+              cpu: "2"
+              memory: 2Gi
+            requests:
+              cpu: "1"
+              memory: 128Mi
+          securityContext:
+            privileged: true
+            runAsUser: 0
+          volumeMounts:
+            - mountPath: /sys/fs/cgroup
+              name: cgroups
+            - mountPath: /etc/cra/base-config.yaml
+              name: base-config
+              subPath: base-config.yaml
+            - mountPath: /etc/netplan/10-base.yaml
+              name: base-config
+              subPath: 10-base.yaml
+            - mountPath: /etc/cra
+              name: certs
+      serviceAccountName: network-operator-controller-manager
+      terminationGracePeriodSeconds: 10
+      tolerations:
+        - effect: NoSchedule
+          key: node-role.kubernetes.io/control-plane
+          operator: Exists
+        - effect: NoSchedule
+          key: node.t-caas.telekom.com/uninitialized
+          operator: Exists
+        - effect: NoSchedule
+          key: node.cloudprovider.kubernetes.io/uninitialized
+          value: "true"
+        - effect: NoSchedule
+          key: node.kubernetes.io/not-ready
+          operator: Exists
+      volumes:
+        - hostPath:
+            path: /sys/fs/cgroup
+            type: Directory
+          name: cgroups
+        - configMap:
+            name: network-operator-base-config
+          name: base-config
+        - hostPath:
+            path: /etc/cra/certs/
+            type: DirectoryOrCreate
+          name: certs

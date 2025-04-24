@@ -1,0 +1,6 @@
+$patch: delete
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: network-operator-agent-netplan-config
+  namespace: kube-system
