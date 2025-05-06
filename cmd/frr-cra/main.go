@@ -19,9 +19,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/telekom/das-schiff-network-operator/pkg/config"
 	"github.com/telekom/das-schiff-network-operator/pkg/cra"
 	"github.com/telekom/das-schiff-network-operator/pkg/frr"
+	"github.com/telekom/das-schiff-network-operator/pkg/monitoring"
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
 )
 
@@ -352,6 +356,26 @@ func setupTLS(address net.IP) error {
 	return nil
 }
 
+func setupPrometheusRegistry() (*prometheus.Registry, error) {
+	// Create a new registry.
+	reg := prometheus.NewRegistry()
+
+	// Add Go module build info.
+	reg.MustRegister(collectors.NewBuildInfoCollector())
+	reg.MustRegister(collectors.NewGoCollector())
+	collector, err := monitoring.NewDasSchiffNetworkOperatorCollector(
+		map[string]bool{
+			"frr":     true,
+			"netlink": true,
+		})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create collector %w", err)
+	}
+	reg.MustRegister(collector)
+
+	return reg, nil
+}
+
 func main() {
 	ip := flag.String("ip", "fd00:7:caa5::", "IP to listen on and generate certificate for")
 	port := flag.Int("port", 8443, "Port to listen on") //nolint:mnd
@@ -370,8 +394,21 @@ func main() {
 	frrManager = frr.NewFRRManager()
 	nlManager = nl.NewManager(&nl.Toolkit{}, baseConfig)
 
-	http.HandleFunc("/config", applyConfig)
-	http.HandleFunc("/frr/execute", executeFrr)
+	registry, err := setupPrometheusRegistry()
+	if err != nil {
+		log.Fatal("Failed to setup Prometheus registry", err)
+	}
+
+	http.HandleFunc("/frr/configuration", applyConfig)
+	http.HandleFunc("/frr/command", executeFrr)
+	http.Handle("/metrics", promhttp.HandlerFor(
+		registry,
+		promhttp.HandlerOpts{
+			// Opt into OpenMetrics to support exemplars.
+			EnableOpenMetrics: true,
+			Timeout:           time.Minute,
+		},
+	))
 
 	// Check if the server certificate and key exist
 	if _, err := os.Stat(serverCert); os.IsNotExist(err) {

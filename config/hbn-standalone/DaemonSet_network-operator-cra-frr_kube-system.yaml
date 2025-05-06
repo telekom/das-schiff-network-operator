@@ -23,7 +23,7 @@ spec:
       containers:
         - command:
             - /sbin/init
-          image: cra-frr:latest
+          image: ghcr.io/telekom/das-schiff-cra-frr:latest
           imagePullPolicy: IfNotPresent
           name: cra-frr
           resources:

@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
@@ -49,7 +50,7 @@ func NewManager(craURLs []string, timeout time.Duration, clientCert, clientKey s
 	}, nil
 }
 
-func (m Manager) postRequest(ctx context.Context, path string, body []byte) error {
+func (m *Manager) postRequest(ctx context.Context, path string, body []byte) ([]byte, error) {
 	bodyReader := bytes.NewReader(body)
 
 	for _, baseURL := range m.craURLs {
@@ -57,7 +58,7 @@ func (m Manager) postRequest(ctx context.Context, path string, body []byte) erro
 
 		req, err := http.NewRequest(http.MethodPost, url, bodyReader)
 		if err != nil {
-			return fmt.Errorf("error creating request: %w", err)
+			return nil, fmt.Errorf("error creating request: %w", err)
 		}
 
 		res, err := m.client.Do(req.WithContext(ctx))
@@ -72,23 +73,23 @@ func (m Manager) postRequest(ctx context.Context, path string, body []byte) erro
 			return io.ReadAll(res.Body)
 		}()
 		if readErr != nil {
-			return fmt.Errorf("error reading response body: %w", readErr)
+			return nil, fmt.Errorf("error reading response body: %w", readErr)
 		}
 
 		// Fail directly if a response is received, regardless of status code
 		if res.StatusCode != http.StatusOK {
-			return fmt.Errorf("unexpected status code (%d): %s", res.StatusCode, resBody)
+			return nil, fmt.Errorf("unexpected status code (%d): %s", res.StatusCode, resBody)
 		}
 
 		// Success, return nil
-		return nil
+		return resBody, nil
 	}
 
 	// If all URLs fail due to connection issues
-	return fmt.Errorf("all CRA URLs failed due to connection issues")
+	return nil, fmt.Errorf("all CRA URLs failed due to connection issues")
 }
 
-func (m Manager) ApplyConfiguration(ctx context.Context, netlinkConfig *nl.NetlinkConfiguration, frrConfig string) error {
+func (m *Manager) ApplyConfiguration(ctx context.Context, netlinkConfig *nl.NetlinkConfiguration, frrConfig string) error {
 	craConfig := Configuration{
 		NetlinkConfiguration: *netlinkConfig,
 		FRRConfiguration:     frrConfig,
@@ -98,5 +99,45 @@ func (m Manager) ApplyConfiguration(ctx context.Context, netlinkConfig *nl.Netli
 		return fmt.Errorf("error marshalling netlink configuration: %w", err)
 	}
 
-	return m.postRequest(ctx, "/config", jsonBody)
+	_, err = m.postRequest(ctx, "/frr/configuration", jsonBody)
+	return err
+}
+
+func (m *Manager) ExecuteWithJSON(args []string) []byte {
+	command := strings.Join(args, " ")
+
+	resBody, err := m.postRequest(context.Background(), "/frr/command", []byte(command))
+	if err != nil {
+		return nil
+	}
+
+	return resBody
+}
+
+func (m *Manager) GetMetrics(ctx context.Context) ([]byte, error) {
+	for _, baseURL := range m.craURLs {
+		url := fmt.Sprintf("%s/metrics", baseURL)
+
+		req, err := http.NewRequest(http.MethodGet, url, http.NoBody)
+		if err != nil {
+			return nil, fmt.Errorf("error creating request: %w", err)
+		}
+
+		res, err := m.client.Do(req.WithContext(ctx))
+		if err != nil {
+			continue
+		}
+
+		resBody, readErr := func() ([]byte, error) {
+			defer res.Body.Close()
+			return io.ReadAll(res.Body)
+		}()
+		if readErr != nil {
+			return nil, fmt.Errorf("error reading response body: %w", readErr)
+		}
+
+		return resBody, nil
+	}
+
+	return nil, fmt.Errorf("all CRA URLs failed due to connection issues")
 }

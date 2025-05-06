@@ -47,7 +47,7 @@ spec:
               value: /etc/cra/certs/cert.pem
             - name: CRA_CLIENT_KEY
               value: /etc/cra/certs/key.pem
-          image: agent-cra-frr:latest
+          image: ghcr.io/telekom/das-schiff-nwop-agent-cra-frr:latest
           imagePullPolicy: IfNotPresent
           name: agent-cra-frr
           securityContext:

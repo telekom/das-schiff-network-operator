@@ -1,6 +1,7 @@
 
 # Image URL to use all building/pushing image targets
-IMG ?= ghcr.io/telekom/das-schiff-network-operator:latest
+IMG_BASE ?= ghcr.io/telekom
+IMG ?= $IMG_BASE/das-schiff-network-operator:latest
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 ENVTEST_K8S_VERSION = 1.25
 
@@ -73,7 +74,11 @@ run: manifests generate fmt vet ## Run a controller from your host.
 
 .PHONY: docker-build
 docker-build: #test ## Build docker image with the manager.
-	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-network-operator.Dockerfile -t ${IMG} .
+	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-cra-frr.Dockerfile -t ${IMG_BASE}/das-schiff-cra-frr:latest .
+	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-network-operator.Dockerfile -t ${IMG_BASE}/das-schiff-network-operator:latest .
+	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-nwop-agent-cra-frr.Dockerfile -t ${IMG_BASE}/das-schiff-nwop-agent-cra-frr:latest .
+	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-nwop-agent-hbn-l2.Dockerfile -t ${IMG_BASE}/das-schiff-nwop-agent-hbn-l2:latest .
+	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-nwop-agent-netplan.Dockerfile -t ${IMG_BASE}/das-schiff-nwop-agent-netplan:latest .
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
@@ -83,6 +88,13 @@ docker-push: ## Push docker image with the manager.
 docker-push-sidecar: ## Push docker image with the manager.
 	docker push ${SIDECAR_IMG}
 
+.PHONY: kind-load
+kind-load: docker-build ## Load docker image into kind cluster.
+	kind load docker-image ${IMG_BASE}/das-schiff-cra-frr:latest
+	kind load docker-image ${IMG_BASE}/das-schiff-network-operator:latest
+	kind load docker-image ${IMG_BASE}/das-schiff-nwop-agent-cra-frr:latest
+	kind load docker-image ${IMG_BASE}/das-schiff-nwop-agent-hbn-l2:latest
+	kind load docker-image ${IMG_BASE}/das-schiff-nwop-agent-netplan:latest
 
 ##@ Release
 

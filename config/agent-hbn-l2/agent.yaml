@@ -39,7 +39,7 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
-          image: agent-hbn-l2:latest
+          image: ghcr.io/telekom/das-schiff-nwop-agent-hbn-l2:latest
           imagePullPolicy: IfNotPresent
           name: agent-hbn-l2
           securityContext:

@@ -21,13 +21,17 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"sort"
+	"strings"
+	"time"
 
 	controllerfrr "github.com/telekom/das-schiff-network-operator/controllers/agent-cra-frr"
 	reconcilerfrr "github.com/telekom/das-schiff-network-operator/pkg/reconciler/agent-cra-frr"
 
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
+	"github.com/telekom/das-schiff-network-operator/pkg/cra"
 	"github.com/telekom/das-schiff-network-operator/pkg/managerconfig"
 	"github.com/telekom/das-schiff-network-operator/pkg/monitoring"
 	"github.com/telekom/das-schiff-network-operator/pkg/version"
@@ -80,6 +84,22 @@ func initCollectors() error {
 	return nil
 }
 
+func handleCraMetrics(craManager *cra.Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		craMetrics, err := craManager.GetMetrics(r.Context())
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		if _, err := w.Write(craMetrics); err != nil {
+			setupLog.Error(err, "Failed to write response")
+			return
+		}
+	}
+}
+
 func main() {
 	version.Get().Print(os.Args[0])
 
@@ -98,7 +118,13 @@ func main() {
 	flag.Parse()
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
-	options, err := setManagerOptions(configFile)
+	craManager, err := createCraManager()
+	if err != nil {
+		setupLog.Error(err, "unable to create CRA manager")
+		os.Exit(1)
+	}
+
+	options, err := setManagerOptions(configFile, craManager)
 	if err != nil {
 		setupLog.Error(err, "unable to configure manager's options")
 		os.Exit(1)
@@ -111,7 +137,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := initComponents(mgr, nodeNetworkConfigPath); err != nil {
+	if err := initComponents(mgr, nodeNetworkConfigPath, craManager); err != nil {
 		setupLog.Error(err, "unable to initialize components")
 		os.Exit(1)
 	}
@@ -123,7 +149,7 @@ func main() {
 	}
 }
 
-func setManagerOptions(configFile string) (*manager.Options, error) {
+func setManagerOptions(configFile string, craManager *cra.Manager) (*manager.Options, error) {
 	var err error
 	var options manager.Options
 	if configFile != "" {
@@ -137,6 +163,9 @@ func setManagerOptions(configFile string) (*manager.Options, error) {
 
 	if options.Metrics.BindAddress != "0" && options.Metrics.BindAddress != "" {
 		err = initCollectors()
+		options.Metrics.ExtraHandlers = map[string]http.Handler{
+			"/cra/metrics": handleCraMetrics(craManager),
+		}
 		if err != nil {
 			return nil, fmt.Errorf("unable to initialize metrics collectors: %w", err)
 		}
@@ -145,7 +174,7 @@ func setManagerOptions(configFile string) (*manager.Options, error) {
 	return &options, nil
 }
 
-func initComponents(mgr manager.Manager, nodeConfigPath string) error {
+func initComponents(mgr manager.Manager, nodeConfigPath string, craManager *cra.Manager) error {
 	//+kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
@@ -155,7 +184,7 @@ func initComponents(mgr manager.Manager, nodeConfigPath string) error {
 		return fmt.Errorf("unable to set up ready check: %w", err)
 	}
 
-	r, err := setupReconcilers(mgr, nodeConfigPath)
+	r, err := setupReconcilers(mgr, nodeConfigPath, craManager)
 	if err != nil {
 		return fmt.Errorf("unable to setup reconcilers: %w", err)
 	}
@@ -168,8 +197,8 @@ func initComponents(mgr manager.Manager, nodeConfigPath string) error {
 	return nil
 }
 
-func setupReconcilers(mgr manager.Manager, nodeConfigPath string) (*reconcilerfrr.NodeNetworkConfigReconciler, error) {
-	r, err := reconcilerfrr.NewNodeNetworkConfigReconciler(mgr.GetClient(), mgr.GetLogger(), nodeConfigPath)
+func setupReconcilers(mgr manager.Manager, nodeConfigPath string, craManager *cra.Manager) (*reconcilerfrr.NodeNetworkConfigReconciler, error) {
+	r, err := reconcilerfrr.NewNodeNetworkConfigReconciler(craManager, mgr.GetClient(), mgr.GetLogger(), nodeConfigPath)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create debounced reconciler: %w", err)
 	}
@@ -183,4 +212,24 @@ func setupReconcilers(mgr manager.Manager, nodeConfigPath string) (*reconcilerfr
 	}
 
 	return r, nil
+}
+
+func createCraManager() (*cra.Manager, error) {
+	craUrls := strings.Split(os.Getenv("CRA_URL"), ",")
+	if len(craUrls) == 0 {
+		return nil, fmt.Errorf("no CRA URL provided")
+	}
+	timeout, err := time.ParseDuration(os.Getenv("CRA_TIMEOUT"))
+	if err != nil {
+		return nil, fmt.Errorf("error parsing CRA timeout: %w", err)
+	}
+	clientCert := os.Getenv("CRA_CLIENT_CERT")
+	clientKey := os.Getenv("CRA_CLIENT_KEY")
+
+	craManager, err := cra.NewManager(craUrls, timeout, clientCert, clientKey)
+	if err != nil {
+		return nil, fmt.Errorf("error creating CRA manager: %w", err)
+	}
+
+	return craManager, nil
 }

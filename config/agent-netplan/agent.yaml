@@ -39,7 +39,7 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
-          image: agent-netplan:latest
+          image: ghcr.io/telekom/das-schiff-nwop-agent-netplan:latest
           imagePullPolicy: IfNotPresent
           name: agent-netplan
           securityContext:

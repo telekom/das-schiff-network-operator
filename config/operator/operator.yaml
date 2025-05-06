@@ -37,7 +37,7 @@ spec:
         env:
         - name: HBN_HOST_NEXTHOP
           value: fd00:7:caa5::1
-        image: operator:latest
+        image: ghcr.io/telekom/das-schiff-network-operator:latest
         imagePullPolicy: IfNotPresent
         name: operator
         livenessProbe:
