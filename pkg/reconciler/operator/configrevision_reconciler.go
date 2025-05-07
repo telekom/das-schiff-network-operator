@@ -48,6 +48,13 @@ const (
 	IPv6
 )
 
+type ImportMode int
+
+const (
+	ImportModeImport ImportMode = iota
+	ImportModeStaticRoute
+)
+
 // ConfigRevisionReconciler is responsible for creating NodeConfig objects.
 type ConfigRevisionReconciler struct {
 	logger           logr.Logger
@@ -59,6 +66,8 @@ type ConfigRevisionReconciler struct {
 	preconfigTimeout time.Duration
 	scheme           *runtime.Scheme
 	maxUpdating      int
+
+	importMode ImportMode
 }
 
 // Reconcile starts reconciliation.
@@ -67,7 +76,7 @@ func (crr *ConfigRevisionReconciler) Reconcile(ctx context.Context) {
 }
 
 // // NewNodeConfigReconciler creates new reconciler that creates NodeConfig objects.
-func NewNodeConfigReconciler(clusterClient client.Client, logger logr.Logger, apiTimeout, configTimeout, preconfigTimeout time.Duration, s *runtime.Scheme, maxUpdating int) (*ConfigRevisionReconciler, error) {
+func NewNodeConfigReconciler(clusterClient client.Client, logger logr.Logger, apiTimeout, configTimeout, preconfigTimeout time.Duration, s *runtime.Scheme, maxUpdating int, importMode ImportMode) (*ConfigRevisionReconciler, error) {
 	reconciler := &ConfigRevisionReconciler{
 		logger:           logger,
 		apiTimeout:       apiTimeout,
@@ -76,6 +85,7 @@ func NewNodeConfigReconciler(clusterClient client.Client, logger logr.Logger, ap
 		client:           clusterClient,
 		scheme:           s,
 		maxUpdating:      maxUpdating,
+		importMode:       importMode,
 	}
 
 	cfg, err := config.LoadConfig()

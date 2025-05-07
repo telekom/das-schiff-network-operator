@@ -75,6 +75,7 @@ func main() {
 	var maxUpdating int
 	var disableCertRotation bool
 	var disableRestartOnCertRefresh bool
+	var processImportsAsStaticRoutes bool
 	flag.StringVar(&configFile, "config", "",
 		"The controller will load its initial configuration from this file. "+
 			"Omit this flag to use the default configuration values. "+
@@ -86,6 +87,7 @@ func main() {
 	flag.IntVar(&maxUpdating, "max-updating", 1, "Configures how many nodes can be updated simultaneously when rolling update is performed.")
 	flag.BoolVar(&disableCertRotation, "disable-cert-rotation", false, "Disables certificate rotation if set true.")
 	flag.BoolVar(&disableRestartOnCertRefresh, "disable-restart-on-cert-rotation", false, "Disables operator's restart after certificates refresh was performed.")
+	flag.BoolVar(&processImportsAsStaticRoutes, "process-imports-as-static-routes", false, "If set to true, the operator will process imports as static routes.")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -128,7 +130,7 @@ func main() {
 	setupErr := make(chan error)
 
 	go func() {
-		setupErr <- setupReconcilers(mgr, apiTimeout, configTimeout, preconfigTimeout, maxUpdating, setupFinished)
+		setupErr <- setupReconcilers(mgr, apiTimeout, configTimeout, preconfigTimeout, maxUpdating, processImportsAsStaticRoutes, setupFinished)
 		close(setupErr)
 	}()
 
@@ -205,7 +207,7 @@ func setupRotator(mgr ctrl.Manager, disableRestartOnCertRefresh bool) (chan stru
 	return setupFinished, nil
 }
 
-func setupReconcilers(mgr manager.Manager, apiTimeout, configTimeout, preconfigTimeout string, maxUpdating int, setupFinished chan struct{}) error {
+func setupReconcilers(mgr manager.Manager, apiTimeout, configTimeout, preconfigTimeout string, maxUpdating int, processImportsAsStaticRoutes bool, setupFinished chan struct{}) error {
 	apiTimoutVal, err := time.ParseDuration(apiTimeout)
 	if err != nil {
 		return fmt.Errorf("error parsing API timeout value %s: %w", apiTimeout, err)
@@ -226,7 +228,12 @@ func setupReconcilers(mgr manager.Manager, apiTimeout, configTimeout, preconfigT
 		return fmt.Errorf("unable to create config reconciler reconciler: %w", err)
 	}
 
-	ncr, err := operator.NewNodeConfigReconciler(mgr.GetClient(), mgr.GetLogger().WithName("NodeConfigReconciler"), apiTimoutVal, configTimeoutVal, preconfigTimeoutVal, mgr.GetScheme(), maxUpdating)
+	importMode := operator.ImportModeImport
+	if processImportsAsStaticRoutes {
+		importMode = operator.ImportModeStaticRoute
+	}
+
+	ncr, err := operator.NewNodeConfigReconciler(mgr.GetClient(), mgr.GetLogger().WithName("NodeConfigReconciler"), apiTimoutVal, configTimeoutVal, preconfigTimeoutVal, mgr.GetScheme(), maxUpdating, importMode)
 	if err != nil {
 		return fmt.Errorf("unable to create node reconciler: %w", err)
 	}

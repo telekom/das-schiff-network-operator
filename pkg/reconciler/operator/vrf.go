@@ -32,8 +32,11 @@ func (crr *ConfigRevisionReconciler) buildNodeVrf(node *corev1.Node, revision *v
 		}
 
 		fabricVrf := c.Spec.FabricVRFs[vrfs[i].VRF]
-		updateFabricVRF(&fabricVrf, &vrfs[i], defaultImportMap)
-		c.Spec.FabricVRFs[vrfs[i].VRF] = fabricVrf
+		updateFabricVRF(&fabricVrf, &vrfs[i], defaultImportMap, crr.importMode)
+
+		if crr.importMode == ImportModeStaticRoute {
+			c.Spec.ClusterVRF.StaticRoutes = appendImportsAsStaticRoutes(c.Spec.ClusterVRF.StaticRoutes, &vrfs[i])
+		}
 	}
 
 	c.Spec.ClusterVRF = &v1alpha1.VRF{}
@@ -86,7 +89,7 @@ func (crr *ConfigRevisionReconciler) createFabricVRF(vrf *v1alpha1.VRFRevision) 
 	return fabricVrf, nil
 }
 
-func updateFabricVRF(fabricVrf *v1alpha1.FabricVRF, vrf *v1alpha1.VRFRevision, defaultImportMap map[string]v1alpha1.VRFImport) {
+func updateFabricVRF(fabricVrf *v1alpha1.FabricVRF, vrf *v1alpha1.VRFRevision, defaultImportMap map[string]v1alpha1.VRFImport, importMode ImportMode) {
 	for _, aggregate := range vrf.Aggregate {
 		fabricVrf.StaticRoutes = append(fabricVrf.StaticRoutes, v1alpha1.StaticRoute{
 			Prefix: aggregate,
@@ -94,6 +97,10 @@ func updateFabricVRF(fabricVrf *v1alpha1.FabricVRF, vrf *v1alpha1.VRFRevision, d
 	}
 
 	processExports(vrf, fabricVrf)
+
+	if importMode != ImportModeImport {
+		return
+	}
 	processImports(vrf, defaultImportMap)
 }
 
@@ -173,4 +180,21 @@ func processImports(vrf *v1alpha1.VRFRevision, defaultImportMap map[string]v1alp
 		vrfImport.Filter.Items = append(vrfImport.Filter.Items, filterItem)
 		defaultImportMap[vrf.VRF] = vrfImport
 	}
+}
+
+func appendImportsAsStaticRoutes(staticRoutes []v1alpha1.StaticRoute, vrf *v1alpha1.VRFRevision) []v1alpha1.StaticRoute {
+	for _, vrfImport := range vrf.Import {
+		if vrfImport.Action != permitRoute {
+			continue
+		}
+
+		staticRoute := v1alpha1.StaticRoute{
+			Prefix: vrfImport.CIDR,
+			NextHop: &v1alpha1.NextHop{
+				Vrf: &vrf.VRF,
+			},
+		}
+		staticRoutes = append(staticRoutes, staticRoute)
+	}
+	return staticRoutes
 }
