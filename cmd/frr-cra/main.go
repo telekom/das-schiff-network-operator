@@ -101,7 +101,7 @@ func createLayer2(cfg nl.NetlinkConfiguration) error {
 		}
 		if currentConfig == nil {
 			if err := nlManager.CreateL2(&cfg.Layer2s[i]); err != nil {
-				return fmt.Errorf("error creating L2 (VLAN: %d): %w", &cfg.Layer2s[i].VlanID, err)
+				return fmt.Errorf("error creating L2 (VLAN: %d): %w", cfg.Layer2s[i].VlanID, err)
 			}
 		} else {
 			if err := nlManager.ReconcileL2(currentConfig, &cfg.Layer2s[i]); err != nil {
