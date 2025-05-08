@@ -10,7 +10,6 @@ import (
 	"encoding/pem"
 	"flag"
 	"fmt"
-	"github.com/telekom/das-schiff-network-operator/pkg/utils"
 	"io"
 	"log"
 	"math/big"
@@ -31,6 +30,7 @@ import (
 	"github.com/telekom/das-schiff-network-operator/pkg/frr"
 	"github.com/telekom/das-schiff-network-operator/pkg/monitoring"
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
+	"github.com/telekom/das-schiff-network-operator/pkg/utils"
 )
 
 const (
@@ -463,12 +463,12 @@ func main() {
 		},
 	))
 
-	exporterUrl, err := url.Parse("http://localhost:9100")
+	exporterURL, err := url.Parse("http://localhost:9100")
 	if err != nil {
 		log.Fatal("Failed to parse URL", err)
 	}
 	// Build proxy for local node-exporter
-	proxy := httputil.NewSingleHostReverseProxy(exporterUrl)
+	proxy := httputil.NewSingleHostReverseProxy(exporterURL)
 	http.Handle("/node-exporter/metrics", utils.ExactPathHandler("/node-exporter/metrics", http.StripPrefix("/node-exporter", proxy)))
 
 	// Check if the server certificate and key exist
