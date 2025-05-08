@@ -55,8 +55,6 @@ func deleteLayer2(cfg nl.NetlinkConfiguration) error {
 		return fmt.Errorf("error listing L2: %w", err)
 	}
 
-	var toDelete []nl.Layer2Information
-
 	vrfsToDelete, err := getVRFsToDelete(cfg)
 	if err != nil {
 		return fmt.Errorf("error getting VRFs to delete: %w", err)
@@ -77,8 +75,8 @@ func deleteLayer2(cfg nl.NetlinkConfiguration) error {
 			}
 		}
 		if needsDeletion {
-			if err := nlManager.CleanupL2(&toDelete[i]); len(err) > 0 {
-				return fmt.Errorf("error deleting L2 (VLAN: %d): %v", toDelete[i].VlanID, err)
+			if err := nlManager.CleanupL2(&existing[i]); len(err) > 0 {
+				return fmt.Errorf("error deleting L2 (VLAN: %d): %v", existing[i].VlanID, err)
 			}
 		}
 	}
