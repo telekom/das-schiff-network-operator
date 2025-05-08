@@ -59,7 +59,7 @@ COPY ./docker/daemons /etc/frr/daemons
 COPY ./docker/networkd.conf /etc/systemd/networkd.conf.d/cra.conf
 COPY ./docker/10-cra.conf /etc/sysctl.d/10-cra.conf
 COPY --from=builder /workspace/frr-cra /usr/local/bin/frr-cra
-COPY ./docker/node-exporter-override.conf /etc/systemd/system/prometheus-node-exporter.service.d/override.conf
+COPY ./docker/prometheus-node-exporter.env /etc/default/prometheus-node-exporter
 RUN systemctl enable frr-cra.service
 RUN systemctl enable fix-vrf-rules.service
 RUN systemctl enable prometheus-node-exporter.service

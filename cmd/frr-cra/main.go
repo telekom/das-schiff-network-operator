@@ -10,13 +10,17 @@ import (
 	"encoding/pem"
 	"flag"
 	"fmt"
+	"github.com/telekom/das-schiff-network-operator/pkg/utils"
 	"io"
 	"log"
 	"math/big"
 	"net"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -376,8 +380,59 @@ func setupPrometheusRegistry() (*prometheus.Registry, error) {
 	return reg, nil
 }
 
+func createListener(ip net.IP, port int, bindInterface string) (net.Listener, error) {
+	var domain int
+	var socketAddress syscall.Sockaddr
+	if ip.To4() != nil {
+		domain = syscall.AF_INET
+		socketAddress = &syscall.SockaddrInet4{
+			Port: port,
+		}
+		copy(socketAddress.(*syscall.SockaddrInet4).Addr[:], ip.To4())
+	} else {
+		domain = syscall.AF_INET6
+		socketAddress = &syscall.SockaddrInet6{
+			Port: port,
+		}
+		copy(socketAddress.(*syscall.SockaddrInet6).Addr[:], ip.To16())
+	}
+
+	fd, err := syscall.Socket(domain, syscall.SOCK_STREAM, syscall.IPPROTO_TCP)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create socket: %w", err)
+	}
+
+	if bindInterface != "" {
+		err = syscall.BindToDevice(fd, bindInterface)
+		if err != nil {
+			return nil, fmt.Errorf("failed to bind to device %s: %w", bindInterface, err)
+		}
+	}
+
+	err = syscall.SetsockoptInt(fd, syscall.SOL_SOCKET, syscall.SO_REUSEADDR, 1)
+	if err != nil {
+		return nil, fmt.Errorf("failed to set socket options: %w", err)
+	}
+
+	if err := syscall.Bind(fd, socketAddress); err != nil {
+		return nil, fmt.Errorf("failed to bind socket: %w", err)
+	}
+
+	if err := syscall.Listen(fd, syscall.SOMAXCONN); err != nil {
+		return nil, fmt.Errorf("failed to listen on socket: %w", err)
+	}
+
+	file := os.NewFile(uintptr(fd), fmt.Sprintf("%s:%d", ip, port))
+	listener, err := net.FileListener(file)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create listener: %w", err)
+	}
+	return listener, nil
+}
+
 func main() {
 	ip := flag.String("ip", "fd00:7:caa5::", "IP to listen on and generate certificate for")
+	bindInterface := flag.String("bind-interface", "cluster", "Bind interface to use for netlink")
 	port := flag.Int("port", 8443, "Port to listen on") //nolint:mnd
 	flag.Parse()
 
@@ -401,7 +456,7 @@ func main() {
 
 	http.HandleFunc("/frr/configuration", applyConfig)
 	http.HandleFunc("/frr/command", executeFrr)
-	http.Handle("/metrics", promhttp.HandlerFor(
+	http.Handle("/frr/metrics", promhttp.HandlerFor(
 		registry,
 		promhttp.HandlerOpts{
 			// Opt into OpenMetrics to support exemplars.
@@ -409,6 +464,14 @@ func main() {
 			Timeout:           time.Minute,
 		},
 	))
+
+	exporterUrl, err := url.Parse("http://localhost:9100")
+	if err != nil {
+		log.Fatal("Failed to parse URL", err)
+	}
+	// Build proxy for local node-exporter
+	proxy := httputil.NewSingleHostReverseProxy(exporterUrl)
+	http.Handle("/node-exporter/metrics", utils.ExactPathHandler("/node-exporter/metrics", http.StripPrefix("/node-exporter", proxy)))
 
 	// Check if the server certificate and key exist
 	if _, err := os.Stat(serverCert); os.IsNotExist(err) {
@@ -437,18 +500,17 @@ func main() {
 		ClientAuth: tls.RequireAndVerifyClientCert,
 	}
 
-	address := fmt.Sprintf("%s:%d", *ip, *port)
-	if parsedIP.To4() == nil {
-		address = fmt.Sprintf("[%s]:%d", *ip, *port)
-	}
-
 	//nolint:gosec
 	server := &http.Server{
-		Addr:      address,
 		TLSConfig: tlsConfig,
 	}
 
-	err = server.ListenAndServeTLS(serverCert, serverKey)
+	listener, err := createListener(parsedIP, *port, *bindInterface)
+	if err != nil {
+		log.Fatal("Failed to create listener", err)
+	}
+
+	err = server.ServeTLS(listener, serverCert, serverKey)
 	if err != nil {
 		log.Fatal("Failed to start server", err)
 	}

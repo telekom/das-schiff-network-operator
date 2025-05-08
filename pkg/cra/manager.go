@@ -16,6 +16,13 @@ import (
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
 )
 
+type MetricsType string
+
+const (
+	MetricsFRR          MetricsType = "frr"
+	MetricsNodeExporter MetricsType = "node-exporter"
+)
+
 type Manager struct {
 	craURLs []string
 	client  http.Client
@@ -114,9 +121,9 @@ func (m *Manager) ExecuteWithJSON(args []string) []byte {
 	return resBody
 }
 
-func (m *Manager) GetMetrics(ctx context.Context) ([]byte, error) {
+func (m *Manager) GetMetrics(ctx context.Context, metricsType MetricsType) ([]byte, error) {
 	for _, baseURL := range m.craURLs {
-		url := fmt.Sprintf("%s/metrics", baseURL)
+		url := fmt.Sprintf("%s/%s/metrics", baseURL, metricsType)
 
 		req, err := http.NewRequest(http.MethodGet, url, http.NoBody)
 		if err != nil {

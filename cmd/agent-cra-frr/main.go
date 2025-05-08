@@ -84,9 +84,9 @@ func initCollectors() error {
 	return nil
 }
 
-func handleCraMetrics(craManager *cra.Manager) http.HandlerFunc {
+func handleCraMetrics(craManager *cra.Manager, metricsType cra.MetricsType) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		craMetrics, err := craManager.GetMetrics(r.Context())
+		craMetrics, err := craManager.GetMetrics(r.Context(), metricsType)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -164,7 +164,8 @@ func setManagerOptions(configFile string, craManager *cra.Manager) (*manager.Opt
 	if options.Metrics.BindAddress != "0" && options.Metrics.BindAddress != "" {
 		err = initCollectors()
 		options.Metrics.ExtraHandlers = map[string]http.Handler{
-			"/cra/metrics": handleCraMetrics(craManager),
+			"/cra/frr/metrics":           handleCraMetrics(craManager, cra.MetricsFRR),
+			"/cra/node-exporter/metrics": handleCraMetrics(craManager, cra.MetricsNodeExporter),
 		}
 		if err != nil {
 			return nil, fmt.Errorf("unable to initialize metrics collectors: %w", err)

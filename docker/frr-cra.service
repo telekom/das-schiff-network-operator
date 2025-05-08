@@ -11,7 +11,7 @@ Group=root
 Restart=on-failure
 RestartSec=10
 
-ExecStart=/usr/sbin/ip vrf exec cluster /usr/local/bin/frr-cra
+ExecStart=/usr/local/bin/frr-cra
 
 [Install]
 WantedBy=multi-user.target
