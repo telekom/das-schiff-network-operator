@@ -8,10 +8,12 @@ Type=simple
 User=root
 Group=root
 
+EnvironmentFile=/etc/default/frr-cra
+
 Restart=on-failure
 RestartSec=10
 
-ExecStart=/usr/local/bin/frr-cra
+ExecStart=/usr/local/bin/frr-cra $ARGS
 
 [Install]
 WantedBy=multi-user.target
