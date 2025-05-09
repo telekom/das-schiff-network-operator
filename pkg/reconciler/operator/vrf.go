@@ -18,6 +18,8 @@ func (crr *ConfigRevisionReconciler) buildNodeVrf(node *corev1.Node, revision *v
 		return vrfs[i].Seq < vrfs[j].Seq
 	})
 
+	c.Spec.ClusterVRF = &v1alpha1.VRF{}
+
 	for i := range vrfs {
 		if !matchSelector(node, vrfs[i].NodeSelector) {
 			continue
@@ -39,7 +41,6 @@ func (crr *ConfigRevisionReconciler) buildNodeVrf(node *corev1.Node, revision *v
 		}
 	}
 
-	c.Spec.ClusterVRF = &v1alpha1.VRF{}
 	for _, vrfImport := range defaultImportMap {
 		c.Spec.ClusterVRF.VRFImports = append(c.Spec.ClusterVRF.VRFImports, vrfImport)
 	}
