@@ -166,8 +166,14 @@ func buildNodeBgpPeers(node *corev1.Node, revision *v1alpha1.NetworkConfigRevisi
 					return fmt.Errorf("failed to build BGP peer: %w", err)
 				}
 				c.Spec.ClusterVRF.BGPPeers = append(c.Spec.ClusterVRF.BGPPeers, *bgpPeer)
+
+				ipAddr, err := convertIPToCIDR(bgp[i].LoopbackPeer.IPAddresses[i])
+				if err != nil {
+					return fmt.Errorf("failed to convert IP address %s to CIDR: %w", bgp[i].LoopbackPeer.IPAddresses[i], err)
+				}
+
 				c.Spec.ClusterVRF.StaticRoutes = append(c.Spec.ClusterVRF.StaticRoutes, v1alpha1.StaticRoute{
-					Prefix: bgp[i].LoopbackPeer.IPAddresses[i],
+					Prefix: ipAddr,
 					NextHop: &v1alpha1.NextHop{
 						Address: &hbnHostNextHop,
 					},
@@ -194,15 +200,11 @@ func buildNetplanDummies(node *corev1.Node, revision *v1alpha1.NetworkConfigRevi
 			addresses := make([]string, len(bgp.LoopbackPeer.IPAddresses))
 			for i := range bgp.LoopbackPeer.IPAddresses {
 				// convert ip to CIDR format
-				ipAddr := net.ParseIP(bgp.LoopbackPeer.IPAddresses[i])
-				if ipAddr == nil {
-					return nil, fmt.Errorf("failed to parse IP address %s", bgp.LoopbackPeer.IPAddresses[i])
+				ipAddr, err := convertIPToCIDR(bgp.LoopbackPeer.IPAddresses[i])
+				if err != nil {
+					return nil, fmt.Errorf("failed to convert IP address %s to CIDR: %w", bgp.LoopbackPeer.IPAddresses[i], err)
 				}
-				if ipAddr.To4() != nil {
-					addresses[i] = fmt.Sprintf("%s/32", ipAddr.String())
-				} else {
-					addresses[i] = fmt.Sprintf("%s/128", ipAddr.String())
-				}
+				addresses[i] = ipAddr
 			}
 			dummy := map[string]interface{}{
 				"addresses": addresses,
@@ -219,4 +221,16 @@ func buildNetplanDummies(node *corev1.Node, revision *v1alpha1.NetworkConfigRevi
 		}
 	}
 	return dummies, nil
+}
+
+func convertIPToCIDR(ip string) (string, error) {
+	parsedIP := net.ParseIP(ip)
+	if parsedIP == nil {
+		return "", fmt.Errorf("failed to parse IP address %s", ip)
+	}
+
+	if parsedIP.To4() != nil {
+		return fmt.Sprintf("%s/32", parsedIP.String()), nil
+	}
+	return fmt.Sprintf("%s/128", parsedIP.String()), nil
 }
