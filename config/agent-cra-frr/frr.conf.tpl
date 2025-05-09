@@ -6,7 +6,7 @@
 {{ if isIPv4 $route.Prefix }}ip{{ else }}ipv6{{ end }} route {{ $route.Prefix }} {{ $route.NextHop.Address }}
 {{ end }}
 {{ if $route.NextHop.Vrf }}
-{{ if isIPv4 $route.Prefix }}ip{{ else }}ipv6{{ end }} route {{ $route.Prefix }} {{ if isIPv4 $route.Prefix }}0.0.0.0{{ else }}::{{ end }} nexthop-vrf {{ $route.NextHop.Vrf }}
+{{ if isIPv4 $route.Prefix }}ip{{ else }}ipv6{{ end }} route {{ $route.Prefix }} {{ $route.NextHop.Vrf }} nexthop-vrf {{ $route.NextHop.Vrf }}
 {{ end }}
 {{ else }}
 {{ if isIPv4 $route.Prefix }}ip{{ else }}ipv6{{ end }} route {{ $route.Prefix }} blackhole
