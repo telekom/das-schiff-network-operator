@@ -28,9 +28,9 @@ WIP
 
 ## License
 
-This project is licensed under Apache License Version 2.0, with the **exception of the code in [`./bpf/](./bpf/)** which falls under the [GPLv2 license](./bpf/LICENSE).
+This project is licensed under Apache License Version 2.0.
 
-Copyright (c) 2022 Deutsche Telekom AG.
+Copyright (c) 2022-2025 Deutsche Telekom AG.
 
 Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the License.
 
