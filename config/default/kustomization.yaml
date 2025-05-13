@@ -42,17 +42,20 @@ kind: Kustomization
 resources:
 - ../crd
 - ../rbac
-- ../manager
+- ../agent-cra-frr
+- ../agent-netplan
+- ../agent-hbn-l2
+# [CERTMANAGER] To enable cert-manager, please comment cert related line below.
+- ../cert
+- ../operator
 - ../webhook
-- ../prometheus
 labels:
 - includeSelectors: true
   pairs:
     app.kubernetes.io/name: network-operator
 patches:
-- path: manager_metrics_patch.yaml
-- path: manager_master_metrics_patch.yaml
-- path: manager_config_patch.yaml
-- path: manager_master_config_patch.yaml
+- path: agent_cra_frr_config_patch.yaml
+- path: agent_netplan_config_patch.yaml
+- path: agent_hbn_l2_config_patch.yaml
+- path: operator_config_patch.yaml
 - path: manager_webhook_patch.yaml
-- path: manager_master_webhook_patch.yaml

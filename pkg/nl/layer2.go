@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"slices"
 	"time"
 
 	schiff_unix "github.com/telekom/das-schiff-network-operator/pkg/unix"
@@ -21,19 +22,16 @@ const (
 var procSysNetPath = "/proc/sys/net"
 
 type Layer2Information struct {
-	VlanID                 int
-	MTU                    int
-	VNI                    int
-	VRF                    string
-	AnycastMAC             *net.HardwareAddr
-	AnycastGateways        []*netlink.Addr
-	AdvertiseNeighbors     bool
-	NeighSuppression       *bool
-	CreateMACVLANInterface bool
-	bridge                 *netlink.Bridge
-	vxlan                  *netlink.Vxlan
-	macvlanBridge          *netlink.Veth
-	macvlanHost            *netlink.Veth
+	VlanID           int      `json:"vlanID"`
+	MTU              int      `json:"mtu"`
+	VNI              int      `json:"vni"`
+	VRF              string   `json:"vrf"`
+	AnycastMAC       *string  `json:"anycastMAC"`
+	AnycastGateways  []string `json:"anycastGateways"`
+	NeighSuppression *bool    `json:"neighSuppression"`
+	bridge           *netlink.Bridge
+	vxlan            *netlink.Vxlan
+	vlanInterface    *netlink.Vlan
 }
 
 type NeighborInformation struct {
@@ -110,11 +108,11 @@ func (n *Manager) ParseIPAddresses(addresses []string) ([]*netlink.Addr, error) 
 func (n *Manager) CreateL2(info *Layer2Information) error {
 	masterIdx := -1
 	if info.VRF != "" {
-		l3Info, err := n.GetL3ByName(info.VRF)
+		vrfID, err := n.GetVRFInterfaceIdxByName(info.VRF)
 		if err != nil {
 			return err
 		}
-		masterIdx = l3Info.vrfID
+		masterIdx = vrfID
 	}
 
 	if len(info.AnycastGateways) > 0 && info.AnycastMAC == nil {
@@ -130,7 +128,19 @@ func (n *Manager) CreateL2(info *Layer2Information) error {
 }
 
 func (n *Manager) setupBridge(info *Layer2Information, masterIdx int) (*netlink.Bridge, error) {
-	bridge, err := n.createBridge(fmt.Sprintf("%s%d", layer2Prefix, info.VlanID), info.AnycastMAC, masterIdx, info.MTU, false, len(info.AnycastGateways) > 0)
+	var macAddress *net.HardwareAddr
+	if info.AnycastMAC != nil {
+		mac, err := net.ParseMAC(*info.AnycastMAC)
+		if err != nil {
+			return nil, fmt.Errorf("error while parsing MAC address: %w", err)
+		}
+		macAddress = &mac
+	}
+	if len(info.AnycastGateways) > 0 && info.VRF == "" {
+		return nil, fmt.Errorf("anycastGateways require VRF to be set")
+	}
+
+	bridge, err := n.createBridge(fmt.Sprintf("%s%d", layer2SVI, info.VlanID), macAddress, masterIdx, info.MTU, false, len(info.AnycastGateways) > 0)
 	if err != nil {
 		return nil, err
 	}
@@ -144,7 +154,11 @@ func (n *Manager) setupBridge(info *Layer2Information, masterIdx int) (*netlink.
 
 	// Wait 500ms before configuring anycast gateways on newly added interface
 	time.Sleep(interfaceConfigTimeout)
-	for _, addr := range info.AnycastGateways {
+	anycastGateways, err := n.ParseIPAddresses(info.AnycastGateways)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse addresses: %w", err)
+	}
+	for _, addr := range anycastGateways {
 		err = n.toolkit.AddrAdd(bridge, addr)
 		if err != nil {
 			return nil, fmt.Errorf("error while adding address: %w", err)
@@ -178,23 +192,15 @@ func (n *Manager) setupVXLAN(info *Layer2Information, bridge *netlink.Bridge) er
 	}
 	info.vxlan = vxlan
 
-	if info.CreateMACVLANInterface {
-		_, err := n.createLink(
-			fmt.Sprintf("%s%d", vethL2Prefix, info.VlanID),
-			fmt.Sprintf("%s%d", macvlanPrefix, info.VlanID),
-			bridge.Attrs().Index,
-			info.MTU,
-			false,
-		)
-		if err != nil {
-			return err
-		}
-		if err := n.setUp(fmt.Sprintf("%s%d", vethL2Prefix, info.VlanID)); err != nil {
-			return err
-		}
-		if err := n.setUp(fmt.Sprintf("%s%d", macvlanPrefix, info.VlanID)); err != nil {
-			return err
-		}
+	if _, err := n.createVLAN(
+		info.VlanID,
+		bridge.Attrs().Index,
+		info.MTU); err != nil {
+		return err
+	}
+
+	if err := n.setUp(fmt.Sprintf("%s%d", vlanPrefix, info.VlanID)); err != nil {
+		return err
 	}
 
 	return nil
@@ -212,8 +218,8 @@ func (n *Manager) CleanupL2(info *Layer2Information) []error {
 			errors = append(errors, err)
 		}
 	}
-	if info.CreateMACVLANInterface && info.macvlanBridge != nil {
-		if err := n.toolkit.LinkDel(info.macvlanBridge); err != nil {
+	if info.vlanInterface != nil {
+		if err := n.toolkit.LinkDel(info.vlanInterface); err != nil {
 			errors = append(errors, err)
 		}
 	}
@@ -222,7 +228,7 @@ func (n *Manager) CleanupL2(info *Layer2Information) []error {
 
 func containsNetlinkAddress(list []*netlink.Addr, addr *netlink.Addr) bool {
 	for _, v := range list {
-		if v.Equal(*addr) {
+		if v.IP.Equal(addr.IP) && slices.Equal(v.Mask, addr.Mask) {
 			return true
 		}
 	}
@@ -269,7 +275,7 @@ func (n *Manager) reconcileEUIAutogeneration(intfName string, intf netlink.Link,
 }
 
 func (n *Manager) ReconcileL2(current, desired *Layer2Information) error {
-	bridgeName := fmt.Sprintf("%s%d", layer2Prefix, current.VlanID)
+	bridgeName := fmt.Sprintf("%s%d", layer2SVI, current.VlanID)
 	if len(desired.AnycastGateways) > 0 && desired.AnycastMAC == nil {
 		return fmt.Errorf("anycastGateways require anycastMAC to be set")
 	}
@@ -299,11 +305,6 @@ func (n *Manager) ReconcileL2(current, desired *Layer2Information) error {
 		}
 	}
 
-	// Add/Remove macvlan Interface
-	if err := n.setupMACVLANinterface(current, desired); err != nil {
-		return err
-	}
-
 	if err := n.configureBridge(bridgeName); err != nil {
 		return err
 	}
@@ -312,13 +313,21 @@ func (n *Manager) ReconcileL2(current, desired *Layer2Information) error {
 		return err
 	}
 
+	currentGateways, err := n.ParseIPAddresses(current.AnycastGateways)
+	if err != nil {
+		return err
+	}
+	desiredGateways, err := n.ParseIPAddresses(desired.AnycastGateways)
+	if err != nil {
+		return err
+	}
 	// Add/Remove anycast gateways
-	if err := n.reconcileIPAddresses(current.bridge, current.AnycastGateways, desired.AnycastGateways); err != nil {
+	if err := n.reconcileIPAddresses(current.bridge, currentGateways, desiredGateways); err != nil {
 		return err
 	}
 
 	// Reconcile EUI Autogeneration
-	return n.reconcileEUIAutogeneration(bridgeName, current.bridge, desired.AnycastGateways)
+	return n.reconcileEUIAutogeneration(bridgeName, current.bridge, desiredGateways)
 }
 
 func (n *Manager) setMTU(current, desired *Layer2Information) error {
@@ -329,26 +338,29 @@ func (n *Manager) setMTU(current, desired *Layer2Information) error {
 	if err := n.toolkit.LinkSetMTU(current.vxlan, desired.MTU); err != nil {
 		return fmt.Errorf("error setting vxlan MTU: %w", err)
 	}
-	if current.CreateMACVLANInterface {
-		if err := n.toolkit.LinkSetMTU(current.macvlanBridge, desired.MTU); err != nil {
-			return fmt.Errorf("error setting veth bridge side MTU: %w", err)
-		}
-		if err := n.toolkit.LinkSetMTU(current.macvlanHost, desired.MTU); err != nil {
-			return fmt.Errorf("error setting veth macvlan side MTU: %w", err)
-		}
+	if err := n.toolkit.LinkSetMTU(current.vlanInterface, desired.MTU); err != nil {
+		return fmt.Errorf("error setting vlan interface MTU: %w", err)
 	}
 	return nil
 }
 
 func (n *Manager) setHardwareAddresses(current, desired *Layer2Information, vxlanMAC net.HardwareAddr) error {
-	if desired.AnycastMAC != nil && !bytes.Equal(current.bridge.HardwareAddr, *desired.AnycastMAC) {
+	if desired.AnycastMAC != nil && current.bridge.HardwareAddr.String() != *desired.AnycastMAC {
 		if err := n.toolkit.LinkSetDown(current.vxlan); err != nil {
 			return fmt.Errorf("error downing vxlan before changing MAC: %w", err)
 		}
 		time.Sleep(interfaceConfigTimeout) // Wait for FRR to pickup interface down
-		if err := n.toolkit.LinkSetHardwareAddr(current.bridge, *desired.AnycastMAC); err != nil {
-			return fmt.Errorf("error setting vxlan mac address: %w", err)
+
+		if desired.AnycastMAC != nil {
+			mac, err := net.ParseMAC(*desired.AnycastMAC)
+			if err != nil {
+				return fmt.Errorf("error while parsing MAC address: %w", err)
+			}
+			if err := n.toolkit.LinkSetHardwareAddr(current.bridge, mac); err != nil {
+				return fmt.Errorf("error setting bridge mac address: %w", err)
+			}
 		}
+
 		time.Sleep(interfaceConfigTimeout)
 		if err := n.toolkit.LinkSetUp(current.vxlan); err != nil {
 			return fmt.Errorf("error upping vxlan after changing MAC: %w", err)
@@ -405,11 +417,11 @@ func (n *Manager) isL2VNIreattachRequired(current, desired *Layer2Information) (
 	if current.VRF != desired.VRF {
 		shouldReattachL2VNI = true
 		if desired.VRF != "" {
-			l3Info, err := n.GetL3ByName(desired.VRF)
+			vrfID, err := n.GetVRFInterfaceIdxByName(desired.VRF)
 			if err != nil {
 				return shouldReattachL2VNI, fmt.Errorf("error while getting L3 by name: %w", err)
 			}
-			if err := n.toolkit.LinkSetMasterByIndex(current.bridge, l3Info.vrfID); err != nil {
+			if err := n.toolkit.LinkSetMasterByIndex(current.bridge, vrfID); err != nil {
 				return shouldReattachL2VNI, fmt.Errorf("error while setting master by index: %w", err)
 			}
 		} else {
@@ -428,26 +440,6 @@ func (n *Manager) isL2VNIreattachRequired(current, desired *Layer2Information) (
 	}
 
 	return shouldReattachL2VNI, nil
-}
-
-func (n *Manager) setupMACVLANinterface(current, desired *Layer2Information) error {
-	if current.CreateMACVLANInterface && !desired.CreateMACVLANInterface {
-		if err := n.toolkit.LinkDel(current.macvlanBridge); err != nil {
-			return fmt.Errorf("error deleting MACVLAN interface: %w", err)
-		}
-	} else if !current.CreateMACVLANInterface && desired.CreateMACVLANInterface {
-		_, err := n.createLink(
-			fmt.Sprintf("%s%d", vethL2Prefix, current.VlanID),
-			fmt.Sprintf("%s%d", macvlanPrefix, current.VlanID),
-			current.bridge.Attrs().Index,
-			desired.MTU,
-			false,
-		)
-		if err != nil {
-			return fmt.Errorf("error creating MACVLAN interface: %w", err)
-		}
-	}
-	return nil
 }
 
 func (*Manager) configureBridge(intfName string) error {
@@ -536,13 +528,4 @@ func (n *Manager) ListNeighborInformation() ([]NeighborInformation, error) {
 	}
 
 	return maps.Values(neighbors), nil
-}
-
-func (n *Manager) GetBridgeID(info *Layer2Information) (int, error) {
-	bridgeName := fmt.Sprintf("%s%d", layer2Prefix, info.VlanID)
-	link, err := n.toolkit.LinkByName(bridgeName)
-	if err != nil {
-		return -1, fmt.Errorf("error while getting link by name: %w", err)
-	}
-	return link.Attrs().Index, nil
 }

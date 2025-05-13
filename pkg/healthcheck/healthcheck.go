@@ -36,15 +36,15 @@ var (
 	// InitTaints is a list of taints that are applied during initialisation of a node
 	// to prevent workloads being scheduled before the network stack is initialised.
 	InitTaints = []string{
-		"node.schiff.telekom.de/uninitialized",
+		"node.t-caas.telekom.com/uninitialized",
 		"node.cloudprovider.kubernetes.io/uninitialized",
 	}
 )
 
 // HealthChecker is a struct that holds data required for networking healthcheck.
 type HealthChecker struct {
-	client              client.Client
-	isNetworkingHealthy bool
+	client        client.Client
+	taintsRemoved bool
 	logr.Logger
 	netConfig *NetHealthcheckConfig
 	toolkit   *Toolkit
@@ -61,18 +61,18 @@ func NewHealthChecker(clusterClient client.Client, toolkit *Toolkit, netconf *Ne
 	}
 
 	return &HealthChecker{
-		client:              clusterClient,
-		isNetworkingHealthy: false,
-		Logger:              log.Log.WithName("HealthCheck"),
-		netConfig:           netconf,
-		toolkit:             toolkit,
-		retries:             retries,
+		client:        clusterClient,
+		taintsRemoved: false,
+		Logger:        log.Log.WithName("HealthCheck"),
+		netConfig:     netconf,
+		toolkit:       toolkit,
+		retries:       retries,
 	}, nil
 }
 
-// IsNetworkingHealthy returns value of isNetworkingHealthly bool.
-func (hc *HealthChecker) IsNetworkingHealthy() bool {
-	return hc.isNetworkingHealthy
+// TaintsRemoved returns value of isNetworkingHealthly bool.
+func (hc *HealthChecker) TaintsRemoved() bool {
+	return hc.taintsRemoved
 }
 
 // RemoveTaints removes taint from the node.
@@ -102,23 +102,9 @@ func (hc *HealthChecker) RemoveTaints(ctx context.Context) error {
 		}
 	}
 
-	hc.isNetworkingHealthy = true
+	hc.taintsRemoved = true
 
 	return nil
-}
-
-// IsFRRActive checks if FRR daemon is in active and running state.
-func (hc *HealthChecker) IsFRRActive() (bool, error) {
-	activeState, subState, err := hc.toolkit.frr.GetStatusFRR()
-	if err != nil {
-		return false, fmt.Errorf("error while ugetting FRR's status: %w", err)
-	}
-
-	if activeState != "active" || subState != "running" {
-		return false, errors.New("FRR is inactive with ActiveState=" + activeState + " and SubState=" + subState)
-	}
-
-	return true, nil
 }
 
 // CheckInterfaces checks if all interfaces in the Interfaces slice are in UP state.
@@ -137,17 +123,6 @@ func (hc *HealthChecker) CheckInterfaces() error {
 	return nil
 }
 
-func (hc *HealthChecker) checkInterface(intf string) error {
-	link, err := hc.toolkit.linkByName(intf)
-	if err != nil {
-		return err
-	}
-	if link.Attrs().OperState != netlink.OperUp {
-		return errors.New("link " + intf + " is not up - current state: " + link.Attrs().OperState.String())
-	}
-	return nil
-}
-
 // CheckReachability checks if all hosts in Reachability slice are reachable.
 func (hc *HealthChecker) CheckReachability() error {
 	for _, i := range hc.netConfig.Reachability {
@@ -159,6 +134,25 @@ func (hc *HealthChecker) CheckReachability() error {
 			}
 			return err
 		}
+	}
+	return nil
+}
+
+// CheckAPIServer checks if Kubernetes Api server is reachable from the pod.
+func (hc HealthChecker) CheckAPIServer(ctx context.Context) error {
+	if err := hc.client.List(ctx, &corev1.NodeList{}); err != nil {
+		return fmt.Errorf("unable to reach API server: %w", err)
+	}
+	return nil
+}
+
+func (hc *HealthChecker) checkInterface(intf string) error {
+	link, err := hc.toolkit.linkByName(intf)
+	if err != nil {
+		return err
+	}
+	if link.Attrs().OperState != netlink.OperUp {
+		return errors.New("link " + intf + " is not up - current state: " + link.Attrs().OperState.String())
 	}
 	return nil
 }
@@ -237,15 +231,13 @@ func LoadConfig(configFile string) (*NetHealthcheckConfig, error) {
 
 // Toolkit is a helper structure that holds interfaces and functions used by HealthChecker.
 type Toolkit struct {
-	frr        FRRInterface
 	linkByName func(name string) (netlink.Link, error)
 	tcpDialer  TCPDialerInterface
 }
 
 // NewHealthCheckToolkit returns new HealthCheckToolkit.
-func NewHealthCheckToolkit(frr FRRInterface, linkByName func(name string) (netlink.Link, error), tcpDialer TCPDialerInterface) *Toolkit {
+func NewHealthCheckToolkit(linkByName func(name string) (netlink.Link, error), tcpDialer TCPDialerInterface) *Toolkit {
 	return &Toolkit{
-		frr:        frr,
 		linkByName: linkByName,
 		tcpDialer:  tcpDialer,
 	}
@@ -269,13 +261,8 @@ func NewTCPDialer(dialerTimeout string) TCPDialerInterface {
 }
 
 // NewDefaultHealthcheckToolkit returns.
-func NewDefaultHealthcheckToolkit(frr FRRInterface, tcpDialer TCPDialerInterface) *Toolkit {
-	return NewHealthCheckToolkit(frr, netlink.LinkByName, tcpDialer)
-}
-
-//go:generate mockgen -destination ./mock/mock_healthcheck.go . FRRInterface,TCPDialerInterface
-type FRRInterface interface {
-	GetStatusFRR() (string, string, error)
+func NewDefaultHealthcheckToolkit(tcpDialer TCPDialerInterface) *Toolkit {
+	return NewHealthCheckToolkit(netlink.LinkByName, tcpDialer)
 }
 
 type TCPDialerInterface interface {

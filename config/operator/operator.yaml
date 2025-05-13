@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: operator
+  namespace: system
+  labels:
+    app.kubernetes.io/component: operator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: operator
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/default-container: operator
+      labels:
+        app.kubernetes.io/component: operator
+    spec:
+      tolerations:
+      - effect: NoSchedule
+        key: node.t-caas.telekom.com/uninitialized
+        operator: Exists
+      - key: node.cloudprovider.kubernetes.io/uninitialized
+        value: "true"
+        effect: NoSchedule
+      - key: node.kubernetes.io/not-ready
+        effect: NoSchedule
+        operator: Exists
+      hostNetwork: true
+      hostPID: true
+      containers:
+      - command:
+        - /manager
+        env:
+        - name: HBN_HOST_NEXTHOP
+          value: fd00:7:caa5::1
+        image: ghcr.io/telekom/das-schiff-network-operator:latest
+        imagePullPolicy: IfNotPresent
+        name: operator
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 7085
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 7085
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          limits:
+            cpu: 500m
+            memory: 128Mi
+          requests:
+            cpu: 10m
+            memory: 64Mi
+        volumeMounts:
+        - mountPath: /opt/network-operator
+          name: network-config
+      serviceAccountName: network-operator-controller-manager
+      terminationGracePeriodSeconds: 10
+      volumes:
+      - configMap:
+          name: network-operator-config
+        name: network-config

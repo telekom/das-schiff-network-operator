@@ -13,24 +13,13 @@ const (
 )
 
 type Config struct {
-	VRFToVNI      map[string]int       `yaml:"vnimap"`
-	VRFConfig     map[string]VRFConfig `yaml:"vrfConfig"`
-	BPFInterfaces []string             `yaml:"bpfInterfaces"`
-	SkipVRFConfig []string             `yaml:"skipVRFConfig"`
-	ServerASN     int                  `yaml:"serverASN"`
-
-	Replacements []Replacement `yaml:"replacements"`
+	VRFToVNI  map[string]int       `yaml:"vnimap"`
+	VRFConfig map[string]VRFConfig `yaml:"vrfConfig"`
 }
 
 type VRFConfig struct {
 	VNI int    `yaml:"vni"`
 	RT  string `yaml:"rt"`
-}
-
-type Replacement struct {
-	Old   string `yaml:"old"`
-	New   string `yaml:"new"`
-	Regex bool   `yaml:"regex"`
 }
 
 func LoadConfig() (*Config, error) {
@@ -60,11 +49,12 @@ func (c *Config) ReloadConfig() error {
 	return nil
 }
 
-func (c *Config) ShouldSkipVRFConfig(vrf string) bool {
-	for _, v := range c.SkipVRFConfig {
-		if v == vrf {
-			return true
-		}
+func (c *Config) GetVNIAndRT(vrf string) (int, string, error) {
+	if vrfConfig, ok := c.VRFConfig[vrf]; ok {
+		return vrfConfig.VNI, vrfConfig.RT, nil
 	}
-	return false
+	if vni, ok := c.VRFToVNI[vrf]; ok {
+		return vni, "", nil
+	}
+	return 0, "", fmt.Errorf("vrf %s not found in config", vrf)
 }

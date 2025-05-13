@@ -33,10 +33,10 @@ func getVRFInfo(vrf string) (name string, isMulti bool) {
 func (frr *Cli) ExecuteWithJSON(args []string) []byte {
 	// Ensure JSON is always appended
 	args = append(args, "json")
-	return frr.execute(args)
+	return frr.Execute(args)
 }
 
-func (frr *Cli) execute(args []string) []byte {
+func (frr *Cli) Execute(args []string) []byte {
 	joinedArgs := strings.Join(args, " ")
 	cmd := &exec.Cmd{
 		Path: frr.binaryPath,
@@ -147,7 +147,7 @@ func (frr *Cli) ShowVRFs(vrfName string) (VrfVni, error) {
 	if err != nil {
 		return vrfInfo, fmt.Errorf("cannot get vrf vni mapping from frr: %w", err)
 	}
-	data := frr.execute([]string{
+	data := frr.Execute([]string{
 		"show",
 		"vrf",
 	})

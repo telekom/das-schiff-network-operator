@@ -2,36 +2,35 @@ package nl
 
 import (
 	"net"
+
+	"github.com/telekom/das-schiff-network-operator/pkg/config"
 )
 
 const (
 	vrfTableStart = 50
 	vrfTableEnd   = 80
 
-	vrfPrefix          = "vr."
-	bridgePrefix       = "br."
-	vxlanPrefix        = "vx."
-	vrfToDefaultPrefix = "vd."
-	defaultToVrfPrefix = "dv."
-	layer2Prefix       = "l2."
-	macvlanPrefix      = "vlan."
-	vethL2Prefix       = "l2v."
-	taasVrfPrefix      = "taas."
+	bridgePrefix   = "br."
+	vxlanPrefix    = "vx."
+	layer2SVI      = "l2."
+	vlanPrefix     = "vlan."
+	loopbackPrefix = "lo."
 
-	underlayLoopback = "dum.underlay"
+	underlayInterfaceName = "dum.underlay"
 
 	vxlanPort  = 4789
-	defaultMtu = 9000
+	DefaultMtu = 9000
 )
 
 var macPrefix = []byte("\x02\x54")
 
 type Manager struct {
-	toolkit ToolkitInterface
+	toolkit    ToolkitInterface
+	baseConfig *config.BaseConfig
 }
 
-func NewManager(toolkit ToolkitInterface) *Manager {
-	return &Manager{toolkit: toolkit}
+func NewManager(toolkit ToolkitInterface, baseConfig *config.BaseConfig) *Manager {
+	return &Manager{toolkit: toolkit, baseConfig: baseConfig}
 }
 
 func (n *Manager) GetUnderlayIP() (net.IP, error) {

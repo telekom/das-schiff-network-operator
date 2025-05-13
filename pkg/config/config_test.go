@@ -57,16 +57,3 @@ var _ = Describe("LoadConfig()", func() {
 		}
 	})
 })
-
-var _ = Describe("ShouldSkipVRFConfig()", func() {
-	It("returns false", func() {
-		cfg := &Config{SkipVRFConfig: []string{"", "", ""}}
-		result := cfg.ShouldSkipVRFConfig("skip")
-		Expect(result).To(BeFalse())
-	})
-	It("returns true", func() {
-		cfg := &Config{SkipVRFConfig: []string{"", "skip", ""}}
-		result := cfg.ShouldSkipVRFConfig("skip")
-		Expect(result).To(BeTrue())
-	})
-})

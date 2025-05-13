@@ -1,12 +1,14 @@
 package managerconfig
 
 import (
+	"crypto/tls"
 	"fmt"
 	"os"
 
 	"gopkg.in/yaml.v2"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 )
 
@@ -68,11 +70,15 @@ func prepareManagerOptions(cfg *Config, scheme *runtime.Scheme) manager.Options 
 	return manager.Options{
 		Scheme:                 scheme,
 		HealthProbeBindAddress: cfg.Health.HealthProbeBindAddress,
-		MetricsBindAddress:     cfg.Metrics.BindAddress,
-		PprofBindAddress:       cfg.Pprof.BindAddress,
+		Metrics: server.Options{
+			BindAddress: cfg.Metrics.BindAddress,
+		},
+		PprofBindAddress: cfg.Pprof.BindAddress,
 		WebhookServer: &webhook.DefaultServer{
 			Options: webhook.Options{
-				Port: cfg.Webhook.Port,
+				Port:    cfg.Webhook.Port,
+				CertDir: "/tmp/k8s-webhook-server/serving-certs",
+				TLSOpts: []func(c *tls.Config){func(c *tls.Config) { c.MinVersion = tls.VersionTLS13 }},
 			},
 		},
 		LeaderElection:   cfg.LeaderElection.LeaderElect,

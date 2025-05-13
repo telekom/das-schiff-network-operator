@@ -12,7 +12,7 @@ metadata:
   name: routingtable-viewer-role
 rules:
 - apiGroups:
-  - network.schiff.telekom.de
+  - network.t-caas.telekom.com
   resources:
   - routingtables
   verbs:
@@ -20,7 +20,7 @@ rules:
   - list
   - watch
 - apiGroups:
-  - network.schiff.telekom.de
+  - network.t-caas.telekom.com
   resources:
   - routingtables/status
   verbs:

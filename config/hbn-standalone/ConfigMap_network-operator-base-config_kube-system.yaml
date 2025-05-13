@@ -1,0 +1,68 @@
+apiVersion: v1
+data:
+  base-config.yaml: |
+    vtepLoopbackIP: ""
+    exportCIDRs: []
+    localASN: ""
+    trunkInterfaceName: hbn
+    underlayNeighbors: []
+    clusterNeighbors: []
+    managementVRF:
+      name: ""
+      vni: ""
+      evpnRouteTarget: ""
+    clusterVRF:
+      name: cluster
+      vni: ""
+      evpnRouteTarget: ""
+  10-base.yaml: |
+    network:
+      version: 2
+      ethernets:
+        hbn:
+          addresses:
+          - fd00:7:caa5::/127
+          mtu: 1500
+      dummy-devices:
+        dum.underlay:
+          addresses:
+          - ""
+          mtu: 9100
+      vrfs:
+        cluster:
+          table: 10
+          interfaces:
+          - hbn
+          - br_cluster
+      tunnels:
+        vx_cluster:
+          mode: vxlan
+          mtu: 9000
+          link-local: []
+          link: dum.underlay
+          id: ""
+          local: ""
+          hairpin: true
+          port: 4789
+          accept-ra: false
+          ignore-carrier: false
+          mac-learning: false
+          arp-proxy: false
+          port-mac-learning: false
+      bridges:
+        br_cluster:
+          mtu: 9000
+          link-local: []
+          parameters:
+            stp: false
+          macaddress: ""
+          interfaces:
+          - vx_cluster
+          accept-ra: false
+          ignore-carrier: false
+kind: ConfigMap
+metadata:
+  labels:
+    app.kubernetes.io/name: network-operator
+  name: network-operator-base-config
+  namespace: kube-system

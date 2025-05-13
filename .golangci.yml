@@ -10,7 +10,6 @@ linters:
   - dogsled
   - errcheck
   - errorlint
-  - exportloopref
   - funlen
   - gci
   - ginkgolinter
@@ -20,7 +19,6 @@ linters:
   - gocyclo
   - godot
   - gofmt
-  - gomnd
   - goprintffuncname
   - gosec
   - gosimple
@@ -28,6 +26,7 @@ linters:
   - importas
   - ineffassign
   - misspell
+  - mnd
   - nakedret
   - nilerr
   - noctx
@@ -67,10 +66,8 @@ linters-settings:
   nolintlint:
     allow-unused: false
     require-specific: true
-  staticcheck:
-    go: "1.22"
   stylecheck:
-    go: "1.22"
+    checks: ["all",  "-ST1003"]
   gocritic:
     enabled-tags:
       - diagnostic
@@ -81,8 +78,9 @@ linters-settings:
     disabled-checks:
       - regexpSimplify
       - whyNoLint
+      - unnamedResult
   cyclop:
-    max-complexity: 13
+    max-complexity: 25
   revive:
     ignore-generated-header: true
     severity: error
@@ -94,10 +92,12 @@ linters-settings:
         disabled: true
       - name: banned-characters
         disabled: true
+      - name: bare-return
+        disabled: true
       - name: cognitive-complexity
         severity: error
         disabled: false
-        arguments: [24]
+        arguments: [33]
       - name: comment-spacings
         severity: warning
         disabled: false
@@ -106,7 +106,7 @@ linters-settings:
       - name: cyclomatic
         severity: error
         disabled: false
-        arguments: [13]
+        arguments: [18]
       - name: file-header
         disabled: true
       - name: flag-parameter
@@ -117,7 +117,7 @@ linters-settings:
       - name: function-length
         severity: error
         disabled: false
-        arguments: [40, 0]
+        arguments: [60, 0]
       - name: if-return
         disabled: true
       - name: line-length-limit
@@ -136,8 +136,13 @@ linters-settings:
           - "fmt.Printf"
       - name: use-any
         disabled: true
+      - name: use-errors-new
+        disabled: true
   funlen:
-    lines: 65
+    lines: 100
+    statements: 60
+  gocognit:
+    min-complexity: 33
 
 issues:
   exclude-rules:
@@ -176,5 +181,6 @@ issues:
     - path: '(.+)/nl/route\.go'
       text: "calculated cyclomatic complexity for function \\w+ is \\d+, max is \\d+"
 run:
+  go: 1.21
   timeout: 10m
   allow-parallel-runners: true

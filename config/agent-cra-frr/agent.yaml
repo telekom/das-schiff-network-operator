@@ -1,0 +1,97 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: agent-cra-frr
+  namespace: system
+  labels:
+    app.kubernetes.io/component: agent-cra-frr
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: agent-cra-frr
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/default-container: agent-cra-frr
+      labels:
+        app.kubernetes.io/component: agent-cra-frr
+    spec:
+      tolerations:
+        - effect: NoSchedule
+          key: node-role.kubernetes.io/control-plane
+          operator: Exists
+        - effect: NoSchedule
+          key: node.t-caas.telekom.com/uninitialized
+          operator: Exists
+        - key: node.cloudprovider.kubernetes.io/uninitialized
+          value: "true"
+          effect: NoSchedule
+        - key: node.kubernetes.io/not-ready
+          effect: NoSchedule
+          operator: Exists
+      hostNetwork: true
+      hostPID: true
+      containers:
+        - command:
+            - /agent
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: CRA_URL
+              value: https://[fd00:7:caa5::]:8443,https://169.254.1.0:8443
+            - name: CRA_TIMEOUT
+              value: 30s
+            - name: CRA_CLIENT_CERT
+              value: /etc/cra/certs/cert.pem
+            - name: CRA_CLIENT_KEY
+              value: /etc/cra/certs/key.pem
+          image: ghcr.io/telekom/das-schiff-nwop-agent-cra-frr:latest
+          imagePullPolicy: IfNotPresent
+          name: agent-cra-frr
+          securityContext:
+            privileged: true
+            runAsUser: 0
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 7081
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 7081
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          # TODO(user): Configure the resources accordingly based on the project requirements.
+          # More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+          resources:
+            limits:
+              cpu: 500m
+              memory: 128Mi
+            requests:
+              cpu: 10m
+              memory: 64Mi
+          volumeMounts:
+            - mountPath: /opt/network-operator/
+              name: network-config
+            - mountPath: /etc/cra/config/base-config.yaml
+              name: base-config
+            - mountPath: /etc/cra/certs/
+              name: certs
+      terminationGracePeriodSeconds: 10
+      serviceAccountName: controller-manager
+      volumes:
+        - configMap:
+            name: network-operator-config
+          name: network-config
+        - hostPath:
+            path: /etc/cra/base-config.yaml
+            type: File
+          name: base-config
+        - hostPath:
+            path: /etc/cra/certs/
+            type: Directory
+          name: certs

@@ -23,7 +23,7 @@ import (
 
 const (
 	all          = "all"
-	defaultVrf   = "default"
+	clusterVRF   = "default"
 	protocolIP   = "ip"
 	protocolIPv4 = "ipv4"
 	protocolIPv6 = "ipv6"
@@ -86,7 +86,7 @@ func (e *Endpoint) ShowRoute(w http.ResponseWriter, r *http.Request) {
 
 	vrf := r.URL.Query().Get("vrf")
 	if vrf == "" {
-		vrf = defaultVrf
+		vrf = clusterVRF
 	}
 	if vrf == all {
 		e.Logger.Error(fmt.Errorf("VRF value cannot be 'all'"), "error validating value")
@@ -150,7 +150,7 @@ func (e *Endpoint) ShowBGP(w http.ResponseWriter, r *http.Request) {
 	e.Logger.Info("got ShowBGP request")
 	vrf := r.URL.Query().Get("vrf")
 	if vrf == "" {
-		vrf = defaultVrf
+		vrf = clusterVRF
 	}
 	if vrf == all {
 		e.Logger.Error(fmt.Errorf("VRF value cannot be 'all'"), "error validating value")
@@ -322,7 +322,7 @@ func validateVNI(vni string) error {
 		return fmt.Errorf("VNI cannot be paresd to int: %w", err)
 	}
 
-	if uint(value) > uint(1<<vniBitLength) {
+	if uint(value) > uint(1<<vniBitLength) { //nolint:gosec
 		return fmt.Errorf("VNI is not a valid 24-bit number")
 	}
 
@@ -438,7 +438,8 @@ func passRequest(r *http.Request, addr, query string, results chan []byte, error
 	}
 
 	url := fmt.Sprintf("%s://%s:%s%s", protocol, addr, port, query)
-	resp, err := http.Get(url) //nolint
+	//nolint:gosec
+	resp, err := http.Get(url) //nolint:noctx
 	if err != nil {
 		errors <- fmt.Errorf("error getting data from %s: %w", addr, err)
 		return
