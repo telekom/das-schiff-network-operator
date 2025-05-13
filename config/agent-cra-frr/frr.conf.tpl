@@ -497,7 +497,7 @@ exit
 !
 {{ if $.NodeConfig.ClusterVRF }}
 {{ range $i, $pbrRule := $.NodeConfig.ClusterVRF.PolicyRoutes }}
-pbr-map hbr seq {{ add $i 1 }}
+pbr-map hbn seq {{ add $i 1 }}
 {{ if $pbrRule.TrafficMatch.SrcPrefix }}match src-ip {{ $pbrRule.TrafficMatch.SrcPrefix }}{{ end }}
 {{ if $pbrRule.TrafficMatch.DstPrefix }}match dst-ip {{ $pbrRule.TrafficMatch.DstPrefix }}{{ end }}
 {{ if $pbrRule.TrafficMatch.SrcPort }}match src-port {{ $pbrRule.TrafficMatch.SrcPort }}{{ end }}
@@ -506,7 +506,7 @@ pbr-map hbr seq {{ add $i 1 }}
 {{ if $pbrRule.NextHop.Address }}
 set nexthop {{ $pbrRule.NextHop.Address }}
 {{ else if $pbrRule.NextHop.Vrf }}
-set nexthop nexthop-vrf {{ $pbrRule.NextHop.Vrf }}
+set nexthop {{ $pbrRule.NextHop.Vrf }} nexthop-vrf {{ $pbrRule.NextHop.Vrf }}
 {{ end }}
 exit
 {{ end }}
