@@ -21,32 +21,7 @@ var (
 	hbnHostNextHop = os.Getenv("HBN_HOST_NEXTHOP")
 )
 
-func buildBgpPeer(loopbackIP, listenRange *string, peer *v1alpha1.BGPRevision) (*v1alpha1.BGPPeer, error) {
-	var family AddressFamily
-	if loopbackIP != nil {
-		ip := net.ParseIP(*loopbackIP)
-		if ip == nil {
-			return nil, fmt.Errorf("failed to parse loopback IP %s", *loopbackIP)
-		}
-
-		if ip.To4() != nil {
-			family = IPv4
-		} else {
-			family = IPv6
-		}
-	} else if listenRange != nil {
-		ip, _, err := net.ParseCIDR(*listenRange)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse listen range %s: %w", *listenRange, err)
-		}
-
-		if ip.To4() != nil {
-			family = IPv4
-		} else {
-			family = IPv6
-		}
-	}
-
+func buildBgpAddressFamily(peer *v1alpha1.BGPRevision, family AddressFamily) (*v1alpha1.AddressFamily, error) {
 	bgpAddressFamily := &v1alpha1.AddressFamily{
 		MaxPrefixes: peer.MaximumPrefixes,
 		ExportFilter: &v1alpha1.Filter{
@@ -73,6 +48,35 @@ func buildBgpPeer(loopbackIP, listenRange *string, peer *v1alpha1.BGPRevision) (
 	}
 	bgpAddressFamily.ImportFilter.Items = append(bgpAddressFamily.ImportFilter.Items, filterItems...)
 
+	return bgpAddressFamily, nil
+}
+
+func buildBgpPeer(loopbackIP, listenRange *string, peer *v1alpha1.BGPRevision) (*v1alpha1.BGPPeer, error) {
+	var family AddressFamily
+	if loopbackIP != nil {
+		ip := net.ParseIP(*loopbackIP)
+		if ip == nil {
+			return nil, fmt.Errorf("failed to parse loopback IP %s", *loopbackIP)
+		}
+
+		if ip.To4() != nil {
+			family = IPv4
+		} else {
+			family = IPv6
+		}
+	} else if listenRange != nil {
+		ip, _, err := net.ParseCIDR(*listenRange)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse listen range %s: %w", *listenRange, err)
+		}
+
+		if ip.To4() != nil {
+			family = IPv4
+		} else {
+			family = IPv6
+		}
+	}
+
 	bgpPeer := v1alpha1.BGPPeer{
 		ListenRange:   listenRange,
 		Address:       loopbackIP,
@@ -86,9 +90,19 @@ func buildBgpPeer(loopbackIP, listenRange *string, peer *v1alpha1.BGPRevision) (
 		bgpPeer.Multihop = &multihop
 	}
 
-	if family == IPv4 {
+	if family == IPv4 || loopbackIP != nil {
+		bgpAddressFamily, err := buildBgpAddressFamily(peer, IPv4)
+		if err != nil {
+			return nil, fmt.Errorf("failed to build BGP address family for IPv4: %w", err)
+		}
 		bgpPeer.IPv4 = bgpAddressFamily
-	} else {
+	}
+
+	if family == IPv6 {
+		bgpAddressFamily, err := buildBgpAddressFamily(peer, IPv6)
+		if err != nil {
+			return nil, fmt.Errorf("failed to build BGP address family for IPv6: %w", err)
+		}
 		bgpPeer.IPv6 = bgpAddressFamily
 	}
 	return &bgpPeer, nil
