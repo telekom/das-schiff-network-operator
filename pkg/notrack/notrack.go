@@ -61,7 +61,7 @@ func buildL2Rule(dst string) []string {
 	return []string{"-d", dst, "-m", "comment", "--comment", "nwop:l2", "-j", "NOTRACK"}
 }
 
-func reconcileRules(regex *regexp.Regexp, parameters []string, rules []string, parser RuleParser, builder RuleBuilder, ipt *iptables.IPTables) error {
+func reconcileRules(regex *regexp.Regexp, parameters, rules []string, parser RuleParser, builder RuleBuilder, ipt *iptables.IPTables) error {
 	var existing []string
 
 	for _, rule := range rules {
@@ -141,47 +141,51 @@ func appendDestinations(link netlink.Link, family int, destinations []string) []
 	return destinations
 }
 
+func reconcileLinks(ipt4, ipt6 *iptables.IPTables) {
+	links, err := netlink.LinkList()
+	if err != nil {
+		notrackLog.Error(err, "error getting link list for notrack check")
+		return
+	}
+
+	var notrackLinks []string
+	var v4Destinations []string
+	var v6Destinations []string
+
+	for _, link := range links {
+		// If the link is a VRF interface, we need to add it to the notrack rules
+		for _, notrackPrefix := range notrackLinkPrefixes {
+			if !strings.HasPrefix(link.Attrs().Name, notrackPrefix) {
+				continue
+			}
+
+			notrackLinks = append(notrackLinks, link.Attrs().Name)
+			break
+		}
+
+		// If the link is an L2 interface, we need to add its addresses to the notrack rules
+		for _, l2InterfacePrefix := range l2InterfacePrefixes {
+			if !strings.HasPrefix(link.Attrs().Name, l2InterfacePrefix) {
+				continue
+			}
+
+			v4Destinations = appendDestinations(link, netlink.FAMILY_V4, v4Destinations)
+			v6Destinations = appendDestinations(link, netlink.FAMILY_V6, v6Destinations)
+			break
+		}
+	}
+
+	if err := reconcileIPTables(notrackLinks, v4Destinations, ipt4); err != nil {
+		notrackLog.Error(err, "error reconciling notrack in IPv4 iptables")
+	}
+	if err := reconcileIPTables(notrackLinks, v6Destinations, ipt6); err != nil {
+		notrackLog.Error(err, "error reconciling notrack in IPv6 iptables")
+	}
+}
+
 func syncIPTTables(netlinkManager *nl.Manager, ipt4, ipt6 *iptables.IPTables) {
 	for {
-		links, err := netlink.LinkList()
-		if err != nil {
-			notrackLog.Error(err, "error getting link list for notrack check")
-			continue
-		}
-
-		var notrackLinks []string
-		var v4Destinations []string
-		var v6Destinations []string
-
-		for _, link := range links {
-			// If the link is a VRF interface, we need to add it to the notrack rules
-			for _, notrackPrefix := range notrackLinkPrefixes {
-				if !strings.HasPrefix(link.Attrs().Name, notrackPrefix) {
-					continue
-				}
-
-				notrackLinks = append(notrackLinks, link.Attrs().Name)
-				break
-			}
-
-			// If the link is an L2 interface, we need to add its addresses to the notrack rules
-			for _, l2InterfacePrefix := range l2InterfacePrefixes {
-				if !strings.HasPrefix(link.Attrs().Name, l2InterfacePrefix) {
-					continue
-				}
-
-				v4Destinations = appendDestinations(link, netlink.FAMILY_V4, v4Destinations)
-				v6Destinations = appendDestinations(link, netlink.FAMILY_V6, v6Destinations)
-				break
-			}
-		}
-
-		if err := reconcileIPTables(notrackLinks, v4Destinations, ipt4); err != nil {
-			notrackLog.Error(err, "error reconciling notrack in IPv4 iptables")
-		}
-		if err := reconcileIPTables(notrackLinks, v6Destinations, ipt6); err != nil {
-			notrackLog.Error(err, "error reconciling notrack in IPv6 iptables")
-		}
+		reconcileLinks(ipt4, ipt6)
 
 		if underlayIP, err := netlinkManager.GetUnderlayIP(); err == nil {
 			if err := ipt4.AppendUnique(iptablesTable, iptablesPrerouting, "-d", underlayIP.String(), "-p", "udp", "--dport", "4789", "-j", "NOTRACK"); err != nil {
