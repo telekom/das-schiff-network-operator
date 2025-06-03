@@ -46,7 +46,7 @@ func (r *reconcile) getL3Configs(l3vnis []networkv1alpha1.VRFRouteConfiguration)
 		return nil, err
 	}
 
-	var l3Configs []frr.VRFConfiguration
+	l3Configs := make([]frr.VRFConfiguration, 0, len(vrfConfigMap))
 	for key := range vrfConfigMap {
 		vrfConfig := vrfConfigMap[key]
 		stableSortVRFConfiguration(&vrfConfig)
@@ -58,7 +58,7 @@ func (r *reconcile) getL3Configs(l3vnis []networkv1alpha1.VRFRouteConfiguration)
 func getTaasConfigs(taas []networkv1alpha1.RoutingTable) []frr.VRFConfiguration {
 	vrfFromTaas := createVrfFromTaaS(taas)
 
-	var taasConfigs []frr.VRFConfiguration
+	taasConfigs := make([]frr.VRFConfiguration, 0, len(vrfFromTaas))
 	for key := range vrfFromTaas {
 		taasConfigs = append(taasConfigs, vrfFromTaas[key])
 	}
