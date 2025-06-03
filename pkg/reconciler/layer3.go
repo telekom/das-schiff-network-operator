@@ -46,7 +46,7 @@ func (r *reconcile) getL3Configs(l3vnis []networkv1alpha1.VRFRouteConfiguration)
 		return nil, err
 	}
 
-	l3Configs := []frr.VRFConfiguration{}
+	var l3Configs []frr.VRFConfiguration
 	for key := range vrfConfigMap {
 		vrfConfig := vrfConfigMap[key]
 		stableSortVRFConfiguration(&vrfConfig)
@@ -55,10 +55,10 @@ func (r *reconcile) getL3Configs(l3vnis []networkv1alpha1.VRFRouteConfiguration)
 	return l3Configs, nil
 }
 
-func (reconcile *reconcile) getTaasConfigs(taas []networkv1alpha1.RoutingTable) []frr.VRFConfiguration {
+func getTaasConfigs(taas []networkv1alpha1.RoutingTable) []frr.VRFConfiguration {
 	vrfFromTaas := createVrfFromTaaS(taas)
 
-	taasConfigs := []frr.VRFConfiguration{}
+	var taasConfigs []frr.VRFConfiguration
 	for key := range vrfFromTaas {
 		taasConfigs = append(taasConfigs, vrfFromTaas[key])
 	}
@@ -72,7 +72,7 @@ func (r *reconcile) reconcileLayer3(l3vnis []networkv1alpha1.VRFRouteConfigurati
 		r.Logger.Error(err, "error getting L3 configurations")
 		return fmt.Errorf("error getting L3 configurations: %w", err)
 	}
-	taasConfigs := r.getTaasConfigs(taas)
+	taasConfigs := getTaasConfigs(taas)
 
 	// Combine both L3 and TaaS configurations into a single slice
 	allConfigs := make([]frr.VRFConfiguration, 0, len(l3Configs)+len(taasConfigs))
