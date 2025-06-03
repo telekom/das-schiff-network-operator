@@ -92,7 +92,7 @@ func reconcileRules(regex *regexp.Regexp, parameters, rules []string, parser Rul
 	return nil
 }
 
-func reconcileIPTables(notrackLinks []string, l2Destinations []string, ipt *iptables.IPTables) error {
+func reconcileIPTables(notrackLinks, l2Destinations []string, ipt *iptables.IPTables) error {
 	rules, err := ipt.List(iptablesTable, iptablesPrerouting)
 	if err != nil {
 		return fmt.Errorf("error listing IPTables rules: %w", err)
