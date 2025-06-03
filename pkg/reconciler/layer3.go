@@ -99,23 +99,9 @@ func (r *reconcile) reconcileLayer3(l3vnis []networkv1alpha1.VRFRouteConfigurati
 		}
 	}
 
-	// We wait here for two seconds to let FRR settle after updating netlink devices
-	time.Sleep(defaultSleep)
-
-	for {
-		// Check that all VRFs are configured in FRR
-		err = r.checkFRRConfig(allConfigs)
-		if err == nil {
-			break
-		}
-
-		r.Logger.Error(err, "VRFs not yet configured")
-		// reload FRR again
-		if err := r.reloadFRR(); err != nil {
-			return fmt.Errorf("failed to reload FRR after checking VRF configuration: %w", err)
-		}
-		r.Logger.Info("Waiting for FRR to configure VRFs, retrying in 2 seconds")
-		time.Sleep(defaultSleep)
+	if err := r.waitUntilConfiguration(allConfigs); err != nil {
+		r.Logger.Error(err, "error waiting for FRR configuration to be applied")
+		return fmt.Errorf("error waiting for FRR configuration to be applied: %w", err)
 	}
 
 	for _, info := range created {
@@ -157,6 +143,29 @@ func (r *reconcile) reloadFRR() error {
 		}
 	}
 	r.Logger.Info("reloaded FRR config")
+	return nil
+}
+
+func (r *reconcile) waitUntilConfiguration(allConfigs []frr.VRFConfiguration) error {
+	// We wait here for two seconds to let FRR settle after updating netlink devices
+	time.Sleep(defaultSleep)
+
+	for {
+		// Check that all VRFs are configured in FRR
+		err := r.checkFRRConfig(allConfigs)
+		if err == nil {
+			break
+		}
+
+		r.Logger.Error(err, "VRFs not yet configured")
+		// reload FRR again
+		if err := r.reloadFRR(); err != nil {
+			return fmt.Errorf("failed to reload FRR after checking VRF configuration: %w", err)
+		}
+		r.Logger.Info("Waiting for FRR to configure VRFs, retrying in 2 seconds")
+		time.Sleep(defaultSleep)
+	}
+
 	return nil
 }
 
