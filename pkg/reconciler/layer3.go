@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/telekom/das-schiff-network-operator/pkg/frr/vty"
 	"net"
 	"sort"
 	"strconv"
@@ -13,6 +12,7 @@ import (
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/pkg/config"
 	"github.com/telekom/das-schiff-network-operator/pkg/frr"
+	"github.com/telekom/das-schiff-network-operator/pkg/frr/vty"
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
 )
 

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/telekom/das-schiff-network-operator/pkg/frr/vty"
 	"io/fs"
 	"net"
 	"os"
@@ -12,6 +11,7 @@ import (
 
 	"github.com/telekom/das-schiff-network-operator/pkg/config"
 	"github.com/telekom/das-schiff-network-operator/pkg/frr/dbus"
+	"github.com/telekom/das-schiff-network-operator/pkg/frr/vty"
 )
 
 const defaultPermissions = 0o640
