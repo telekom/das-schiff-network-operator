@@ -78,6 +78,8 @@ spec:
         - mountPath: /opt/network-operator/config.yaml
           name: network-config
           subPath: config.yaml
+        - mountPath: /var/run/frr
+          name: frr-run
         - mountPath: /etc/frr
           name: frr-config
       - command:

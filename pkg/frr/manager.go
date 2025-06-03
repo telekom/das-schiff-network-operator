@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/telekom/das-schiff-network-operator/pkg/frr/vty"
 	"io/fs"
 	"net"
 	"os"
@@ -31,6 +32,7 @@ type Manager struct {
 	ConfigPath   string
 	TemplatePath string
 	Cli          *Cli
+	Socket       *vty.Socket
 	dbusToolkit  dbus.System
 }
 
@@ -72,6 +74,7 @@ func NewFRRManager() *Manager {
 		ConfigPath:   "/etc/frr/frr.conf",
 		TemplatePath: "/etc/frr/frr.conf.tpl",
 		Cli:          NewCli(),
+		Socket:       vty.NewSocket("/var/run/frr"),
 		dbusToolkit:  &dbus.Toolkit{},
 	}
 }
