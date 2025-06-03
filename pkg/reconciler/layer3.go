@@ -40,28 +40,44 @@ func (r *reconcile) fetchTaas(ctx context.Context) ([]networkv1alpha1.RoutingTab
 	return tables.Items, nil
 }
 
-// nolint: contextcheck,funlen // context is not relevant
-func (r *reconcile) reconcileLayer3(l3vnis []networkv1alpha1.VRFRouteConfiguration, taas []networkv1alpha1.RoutingTable) error {
+func (r *reconcile) getL3Configs(l3vnis []networkv1alpha1.VRFRouteConfiguration) ([]frr.VRFConfiguration, error) {
 	vrfConfigMap, err := r.createVrfConfigMap(l3vnis)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	vrfFromTaas := createVrfFromTaaS(taas)
-
-	allConfigs := []frr.VRFConfiguration{}
 	l3Configs := []frr.VRFConfiguration{}
-	taasConfigs := []frr.VRFConfiguration{}
 	for key := range vrfConfigMap {
 		vrfConfig := vrfConfigMap[key]
 		stableSortVRFConfiguration(&vrfConfig)
-		allConfigs = append(allConfigs, vrfConfig)
 		l3Configs = append(l3Configs, vrfConfig)
 	}
+	return l3Configs, nil
+}
+
+func (reconcile *reconcile) getTaasConfigs(taas []networkv1alpha1.RoutingTable) []frr.VRFConfiguration {
+	vrfFromTaas := createVrfFromTaaS(taas)
+
+	taasConfigs := []frr.VRFConfiguration{}
 	for key := range vrfFromTaas {
-		allConfigs = append(allConfigs, vrfFromTaas[key])
 		taasConfigs = append(taasConfigs, vrfFromTaas[key])
 	}
+	return taasConfigs
+}
+
+// nolint: contextcheck,funlen // context is not relevant
+func (r *reconcile) reconcileLayer3(l3vnis []networkv1alpha1.VRFRouteConfiguration, taas []networkv1alpha1.RoutingTable) error {
+	l3Configs, err := r.getL3Configs(l3vnis)
+	if err != nil {
+		r.Logger.Error(err, "error getting L3 configurations")
+		return fmt.Errorf("error getting L3 configurations: %w", err)
+	}
+	taasConfigs := r.getTaasConfigs(taas)
+
+	// Combine both L3 and TaaS configurations into a single slice
+	allConfigs := make([]frr.VRFConfiguration, 0, len(l3Configs)+len(taasConfigs))
+	allConfigs = append(allConfigs, l3Configs...)
+	allConfigs = append(allConfigs, taasConfigs...)
 
 	sort.SliceStable(allConfigs, func(i, j int) bool {
 		return allConfigs[i].VNI < allConfigs[j].VNI
