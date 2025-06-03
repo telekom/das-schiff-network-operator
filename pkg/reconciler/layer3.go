@@ -12,6 +12,7 @@ import (
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/pkg/config"
 	"github.com/telekom/das-schiff-network-operator/pkg/frr"
+	"github.com/telekom/das-schiff-network-operator/pkg/frr/vty"
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
 )
 
@@ -114,6 +115,22 @@ func (r *reconcile) reconcileLayer3(data *reconcileData) error {
 	// We wait here for two seconds to let FRR settle after updating netlink devices
 	time.Sleep(defaultSleep)
 
+	for {
+		// Check that all VRFs are configured in FRR
+		err = r.checkFRRConfig(allConfigs)
+		if err == nil {
+			break
+		}
+
+		r.Logger.Error(err, "VRFs not yet configured")
+		// reload FRR again
+		if err := r.reloadFRR(); err != nil {
+			return fmt.Errorf("failed to reload FRR after checking VRF configuration: %w", err)
+		}
+		r.Logger.Info("Waiting for FRR to configure VRFs, retrying in 2 seconds")
+		time.Sleep(defaultSleep)
+	}
+
 	for _, info := range created {
 		if err := r.netlinkManager.UpL3(info); err != nil {
 			r.Logger.Error(err, "error setting L3 to state UP", "interface", info)
@@ -154,6 +171,45 @@ func (r *reconcile) reloadFRR() error {
 		}
 	}
 	r.Logger.Info("reloaded FRR config")
+	return nil
+}
+
+func (r *reconcile) checkFRRConfig(vrfConfigs []frr.VRFConfiguration) error {
+	vrfsConfigured := map[string]bool{}
+	for idx := range vrfConfigs {
+		vrfsConfigured[vrfConfigs[idx].Name] = false
+	}
+
+	// Check if all VRFs are configured in FRR
+	var frrConfig vty.Base
+	err := r.frrManager.Socket.GetConfig("/frr-vrf:lib", &frrConfig)
+	if err != nil {
+		return fmt.Errorf("error getting FRR VRF configuration: %w", err)
+	}
+
+	if frrConfig.FrrVrfLib == nil {
+		return fmt.Errorf("FRR VRF is not configured at all, please check your FRR configuration")
+	}
+
+	for _, vrf := range frrConfig.FrrVrfLib.VRFs {
+		if _, ok := vrfsConfigured[vrf.Name]; !ok {
+			continue
+		}
+
+		if vrf.FrrVrfLibZebra == nil {
+			return fmt.Errorf("VRF %s is not configured in FRR, missing frr-zebra:zebra configuration", vrf.Name)
+		}
+		if vrf.FrrVrfLibZebra.L3VNI == 0 {
+			return fmt.Errorf("VRF %s is not configured in FRR, missing L3VNI configuration", vrf.Name)
+		}
+		vrfsConfigured[vrf.Name] = true
+	}
+
+	for vrf, configured := range vrfsConfigured {
+		if !configured {
+			return fmt.Errorf("VRF %s is not configured in FRR", vrf)
+		}
+	}
 	return nil
 }
 
