@@ -76,8 +76,8 @@ func (r *reconcile) fetchLayer2(ctx context.Context) ([]networkv1alpha1.Layer2Ne
 	return l2vnis, nil
 }
 
-func (r *reconcile) reconcileLayer2(l2vnis []networkv1alpha1.Layer2NetworkConfiguration) error {
-	desired, err := r.getDesired(l2vnis)
+func (r *reconcile) reconcileLayer2(data *reconcileData) error {
+	desired, err := r.getDesired(data.l2vnis)
 	if err != nil {
 		return err
 	}
