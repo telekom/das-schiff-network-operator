@@ -34,7 +34,7 @@ func (n *Manager) CreateL3(info VRFInformation) error {
 	}
 	info.table = freeTableID
 
-	vrf, err := n.createVRF(vrfPrefix+info.Name, info.table)
+	vrf, err := n.createVRF(VrfPrefix+info.Name, info.table)
 	if err != nil {
 		return err
 	}
@@ -98,7 +98,7 @@ func (n *Manager) CleanupL3(name string) []error {
 	if err != nil {
 		errors = append(errors, err)
 	}
-	err = n.deleteLink(vrfPrefix + name)
+	err = n.deleteLink(VrfPrefix + name)
 	if err != nil {
 		errors = append(errors, err)
 	}
