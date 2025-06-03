@@ -26,10 +26,16 @@ const (
 var (
 	notrackLog = ctrl.Log.WithName("notrack")
 
-	rulesRegex          = regexp.MustCompile(`--comment "?nwop:notrack"?`)
+	vrfRulesRegex       = regexp.MustCompile(`--comment "?nwop:notrack"?`)
+	l2RulesRegex        = regexp.MustCompile(`--comment "?nwop:l2"?`)
 	inputInterfaceRegex = regexp.MustCompile(`-i "?([a-zA-Z0-9._-]*)"?`)
+	dstRegex            = regexp.MustCompile(`-d "?([0-9a-fA-F.:/]+)"?`)
 	notrackLinkPrefixes = []string{"vr."}
+	l2InterfacePrefixes = []string{"l2."}
 )
+
+type RuleParser func(string) (string, error)
+type RuleBuilder func(string) []string
 
 func parseRuleInterface(rule string) (string, error) {
 	matches := inputInterfaceRegex.FindStringSubmatch(rule)
@@ -39,42 +45,67 @@ func parseRuleInterface(rule string) (string, error) {
 	return matches[1], nil
 }
 
-func buildRule(link string) []string {
+func parseRuleDestination(rule string) (string, error) {
+	matches := dstRegex.FindStringSubmatch(rule)
+	if len(matches) != ruleMatchesCount {
+		return "", fmt.Errorf("illegal matchcount %d (should be %d)", len(matches), ruleMatchesCount)
+	}
+	return matches[1], nil
+}
+
+func buildVrfRule(link string) []string {
 	return []string{"-i", link, "-m", "comment", "--comment", "nwop:notrack", "-j", "NOTRACK"}
 }
 
-func reconcileIPTables(notrackLinks []string, ipt *iptables.IPTables) error {
+func buildL2Rule(dst string) []string {
+	return []string{"-d", dst, "-m", "comment", "--comment", "nwop:l2", "-j", "NOTRACK"}
+}
+
+func reconcileRules(regex *regexp.Regexp, parameters []string, rules []string, parser RuleParser, builder RuleBuilder, ipt *iptables.IPTables) error {
+	var existing []string
+
+	for _, rule := range rules {
+		if regex.MatchString(rule) {
+			link, err := parser(rule)
+			if err != nil {
+				notrackLog.Error(err, "error parsing rule", "rule", rule)
+			}
+
+			if !slices.Contains(parameters, link) {
+				if err := ipt.Delete(iptablesTable, iptablesPrerouting, builder(link)...); err != nil {
+					return fmt.Errorf("error deleting IPTables rule: %w", err)
+				}
+			}
+
+			existing = append(existing, link)
+		}
+	}
+
+	for _, param := range parameters {
+		if slices.Contains(existing, param) {
+			continue
+		}
+		if err := ipt.Append(iptablesTable, iptablesPrerouting, builder(param)...); err != nil {
+			return fmt.Errorf("error appending IPTables rule: %w", err)
+		}
+	}
+	return nil
+}
+
+func reconcileIPTables(notrackLinks []string, l2Destinations []string, ipt *iptables.IPTables) error {
 	rules, err := ipt.List(iptablesTable, iptablesPrerouting)
 	if err != nil {
 		return fmt.Errorf("error listing IPTables rules: %w", err)
 	}
 
-	existingLinks := []string{}
-	for _, rule := range rules {
-		if !rulesRegex.MatchString(rule) {
-			continue
-		}
-		link, err := parseRuleInterface(rule)
-		if err != nil {
-			notrackLog.Error(err, "error parsing rule", "rule", rule)
-		}
-
-		if !slices.Contains(notrackLinks, link) {
-			if err := ipt.Delete(iptablesTable, iptablesPrerouting, buildRule(link)...); err != nil {
-				return fmt.Errorf("error deleting IPTables rule: %w", err)
-			}
-		}
-
-		existingLinks = append(existingLinks, link)
+	if err := reconcileRules(vrfRulesRegex, notrackLinks, rules, parseRuleInterface, buildVrfRule, ipt); err != nil {
+		return fmt.Errorf("error reconciling VRF rules: %w", err)
 	}
-	for _, notrackLink := range notrackLinks {
-		if slices.Contains(existingLinks, notrackLink) {
-			continue
-		}
-		if err := ipt.Append(iptablesTable, iptablesPrerouting, buildRule(notrackLink)...); err != nil {
-			return fmt.Errorf("error appending IPTables rule: %w", err)
-		}
+
+	if err := reconcileRules(l2RulesRegex, l2Destinations, rules, parseRuleDestination, buildL2Rule, ipt); err != nil {
+		return fmt.Errorf("error reconciling L2 rules: %w", err)
 	}
+
 	return nil
 }
 
@@ -95,6 +126,21 @@ func RunIPTablesSync() error {
 	return nil
 }
 
+func appendDestinations(link netlink.Link, family int, destinations []string) []string {
+	addresses, err := netlink.AddrList(link, family)
+	if err != nil {
+		notrackLog.Error(err, "error getting addresses for link", "link", link.Attrs().Name)
+		return destinations
+	}
+
+	for _, addr := range addresses {
+		if addr.IP.IsGlobalUnicast() {
+			destinations = append(destinations, addr.IP.Mask(addr.Mask).String())
+		}
+	}
+	return destinations
+}
+
 func syncIPTTables(netlinkManager *nl.Manager, ipt4, ipt6 *iptables.IPTables) {
 	for {
 		links, err := netlink.LinkList()
@@ -104,19 +150,36 @@ func syncIPTTables(netlinkManager *nl.Manager, ipt4, ipt6 *iptables.IPTables) {
 		}
 
 		var notrackLinks []string
+		var v4Destinations []string
+		var v6Destinations []string
+
 		for _, link := range links {
+			// If the link is a VRF interface, we need to add it to the notrack rules
 			for _, notrackPrefix := range notrackLinkPrefixes {
-				if strings.HasPrefix(link.Attrs().Name, notrackPrefix) {
-					notrackLinks = append(notrackLinks, link.Attrs().Name)
-					break
+				if !strings.HasPrefix(link.Attrs().Name, notrackPrefix) {
+					continue
 				}
+
+				notrackLinks = append(notrackLinks, link.Attrs().Name)
+				break
+			}
+
+			// If the link is an L2 interface, we need to add its addresses to the notrack rules
+			for _, l2InterfacePrefix := range l2InterfacePrefixes {
+				if !strings.HasPrefix(link.Attrs().Name, l2InterfacePrefix) {
+					continue
+				}
+
+				v4Destinations = appendDestinations(link, netlink.FAMILY_V4, v4Destinations)
+				v6Destinations = appendDestinations(link, netlink.FAMILY_V6, v6Destinations)
+				break
 			}
 		}
 
-		if err := reconcileIPTables(notrackLinks, ipt4); err != nil {
+		if err := reconcileIPTables(notrackLinks, v4Destinations, ipt4); err != nil {
 			notrackLog.Error(err, "error reconciling notrack in IPv4 iptables")
 		}
-		if err := reconcileIPTables(notrackLinks, ipt6); err != nil {
+		if err := reconcileIPTables(notrackLinks, v6Destinations, ipt6); err != nil {
 			notrackLog.Error(err, "error reconciling notrack in IPv6 iptables")
 		}
 
