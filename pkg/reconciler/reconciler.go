@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/pkg/anycast"
 	"github.com/telekom/das-schiff-network-operator/pkg/config"
 	"github.com/telekom/das-schiff-network-operator/pkg/debounce"
@@ -33,6 +34,13 @@ type Reconciler struct {
 type reconcile struct {
 	*Reconciler
 	logr.Logger
+}
+
+type reconcileData struct {
+	l3vnis   []v1alpha1.VRFRouteConfiguration
+	l2vnis   []v1alpha1.Layer2NetworkConfiguration
+	taas     []v1alpha1.RoutingTable
+	peerings []v1alpha1.BGPPeering
 }
 
 func NewReconciler(clusterClient client.Client, anycastTracker *anycast.Tracker, logger logr.Logger) (*Reconciler, error) {
@@ -102,11 +110,22 @@ func (reconciler *Reconciler) reconcileDebounced(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-
-	if err := r.reconcileLayer3(l3vnis, taas); err != nil {
+	peerings, err := r.fetchBGPPeerings(ctx)
+	if err != nil {
 		return err
 	}
-	if err := r.reconcileLayer2(l2vnis); err != nil {
+
+	reconcileData := &reconcileData{
+		l3vnis:   l3vnis,
+		l2vnis:   l2vnis,
+		taas:     taas,
+		peerings: peerings,
+	}
+
+	if err := r.reconcileLayer3(reconcileData); err != nil {
+		return err
+	}
+	if err := r.reconcileLayer2(reconcileData); err != nil {
 		return err
 	}
 

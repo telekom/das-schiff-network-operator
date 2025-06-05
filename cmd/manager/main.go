@@ -259,6 +259,14 @@ func setupReconcilers(r *reconciler.Reconciler, mgr manager.Manager) error {
 		return fmt.Errorf("unable to create RoutingTable controller: %w", err)
 	}
 
+	if err := (&controllers.BGPPeeringReconciler{
+		Client:     mgr.GetClient(),
+		Scheme:     mgr.GetScheme(),
+		Reconciler: r,
+	}).SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to create BGPPeering controller: %w", err)
+	}
+
 	return nil
 }
 

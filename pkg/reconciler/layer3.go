@@ -39,20 +39,33 @@ func (r *reconcile) fetchTaas(ctx context.Context) ([]networkv1alpha1.RoutingTab
 	return tables.Items, nil
 }
 
+func (r *reconcile) fetchBGPPeerings(ctx context.Context) ([]networkv1alpha1.BGPPeering, error) {
+	peerings := &networkv1alpha1.BGPPeeringList{}
+	err := r.client.List(ctx, peerings)
+	if err != nil {
+		r.Logger.Error(err, "error getting list of BGP Peerings from Kubernetes")
+		return nil, fmt.Errorf("error getting list of BGP Peerings from Kubernetes: %w", err)
+	}
+
+	return peerings.Items, nil
+}
+
 // nolint: contextcheck,funlen // context is not relevant
-func (r *reconcile) reconcileLayer3(l3vnis []networkv1alpha1.VRFRouteConfiguration, taas []networkv1alpha1.RoutingTable) error {
-	vrfConfigMap, err := r.createVrfConfigMap(l3vnis)
+func (r *reconcile) reconcileLayer3(data *reconcileData) error {
+	vrfConfigMap, err := r.createVrfConfigMap(data.l3vnis)
 	if err != nil {
 		return err
 	}
 
-	vrfFromTaas := createVrfFromTaaS(taas)
+	defaultVRFPeerings := r.addBGPPeerings(vrfConfigMap, data.l2vnis, data.peerings)
+
+	vrfFromTaas := createVrfFromTaaS(data.taas)
 
 	allConfigs := []frr.VRFConfiguration{}
 	l3Configs := []frr.VRFConfiguration{}
 	taasConfigs := []frr.VRFConfiguration{}
 	for key := range vrfConfigMap {
-		vrfConfig := vrfConfigMap[key]
+		vrfConfig := *vrfConfigMap[key]
 		stableSortVRFConfiguration(&vrfConfig)
 		allConfigs = append(allConfigs, vrfConfig)
 		l3Configs = append(l3Configs, vrfConfig)
@@ -69,7 +82,7 @@ func (r *reconcile) reconcileLayer3(l3vnis []networkv1alpha1.VRFRouteConfigurati
 	time.Sleep(defaultSleep)
 
 	// Create FRR configuration and reload it
-	err = r.configureFRR(allConfigs)
+	err = r.configureFRR(allConfigs, defaultVRFPeerings)
 	if err != nil {
 		if !errors.Is(err, &frr.ConfigurationError{}) {
 			return err
@@ -109,10 +122,11 @@ func (r *reconcile) reconcileLayer3(l3vnis []networkv1alpha1.VRFRouteConfigurati
 	return nil
 }
 
-func (r *reconcile) configureFRR(vrfConfigs []frr.VRFConfiguration) error {
+func (r *reconcile) configureFRR(vrfConfigs []frr.VRFConfiguration, defaultVrfPeerings []frr.BGPPeering) error {
 	changed, err := r.frrManager.Configure(frr.Configuration{
-		VRFs: vrfConfigs,
-		ASN:  r.config.ServerASN,
+		VRFs:                  vrfConfigs,
+		DefaultVRFBGPPeerings: defaultVrfPeerings,
+		ASN:                   r.config.ServerASN,
 	}, r.netlinkManager, r.config)
 	if err != nil {
 		return fmt.Errorf("error updating FRR configuration: %w", err)
@@ -143,8 +157,8 @@ func (r *reconcile) reloadFRR() error {
 	return nil
 }
 
-func (r *reconcile) createVrfConfigMap(l3vnis []networkv1alpha1.VRFRouteConfiguration) (map[string]frr.VRFConfiguration, error) {
-	vrfConfigMap := map[string]frr.VRFConfiguration{}
+func (r *reconcile) createVrfConfigMap(l3vnis []networkv1alpha1.VRFRouteConfiguration) (map[string]*frr.VRFConfiguration, error) {
+	vrfConfigMap := map[string]*frr.VRFConfiguration{}
 	for i := range l3vnis {
 		spec := l3vnis[i].Spec
 		logger := r.Logger.WithValues("name", l3vnis[i].ObjectMeta.Name, "namespace", l3vnis[i].ObjectMeta.Namespace, "vrf", spec.VRF)
@@ -177,7 +191,7 @@ func (r *reconcile) createVrfConfigMap(l3vnis []networkv1alpha1.VRFRouteConfigur
 		if err != nil {
 			return nil, err
 		}
-		vrfConfigMap[spec.VRF] = *cfg
+		vrfConfigMap[spec.VRF] = cfg
 	}
 
 	return vrfConfigMap, nil
@@ -201,10 +215,10 @@ func createVrfFromTaaS(taas []networkv1alpha1.RoutingTable) map[string]frr.VRFCo
 	return vrfConfigMap
 }
 
-func createVrfConfig(vrfConfigMap map[string]frr.VRFConfiguration, spec *networkv1alpha1.VRFRouteConfigurationSpec, vni int, rt string) (*frr.VRFConfiguration, error) {
+func createVrfConfig(vrfConfigMap map[string]*frr.VRFConfiguration, spec *networkv1alpha1.VRFRouteConfigurationSpec, vni int, rt string) (*frr.VRFConfiguration, error) {
 	// If VRF is not yet in dict, initialize it
 	if _, ok := vrfConfigMap[spec.VRF]; !ok {
-		vrfConfigMap[spec.VRF] = frr.VRFConfiguration{
+		vrfConfigMap[spec.VRF] = &frr.VRFConfiguration{
 			Name: spec.VRF,
 			VNI:  vni,
 			RT:   rt,
@@ -239,7 +253,7 @@ func createVrfConfig(vrfConfigMap map[string]frr.VRFConfiguration, spec *network
 			cfg.AggregateIPv4 = append(cfg.AggregateIPv4, aggregate)
 		}
 	}
-	return &cfg, nil
+	return cfg, nil
 }
 
 func (r *reconcile) reconcileL3Netlink(vrfConfigs []frr.VRFConfiguration) ([]nl.VRFInformation, bool, error) {
@@ -377,6 +391,28 @@ func (r *reconcile) reconcileExisting(cfg nl.VRFInformation) error {
 	return nil
 }
 
+func (r *reconcile) addBGPPeerings(vrfConfigMap map[string]*frr.VRFConfiguration, l2vnis []networkv1alpha1.Layer2NetworkConfiguration, peerings []networkv1alpha1.BGPPeering) (defaultVrfPeerings []frr.BGPPeering) {
+	for i := range peerings {
+		peering := peerings[i]
+		layer2 := getLayerConfig2ByName(peering.Spec.PeeringVlan.Name, l2vnis)
+		if layer2 == nil {
+			r.Logger.Info("VLAN Of peering not found", "peering", peering.ObjectMeta.Name)
+			continue
+		}
+		if layer2.Spec.VRF == "" {
+			defaultVrfPeerings = append(defaultVrfPeerings, createBGPPeering(&peering, layer2)...)
+			continue
+		}
+		vrfConfig, ok := vrfConfigMap[layer2.Spec.VRF]
+		if !ok {
+			r.Logger.Info("VRF not found for peering", "peering", peering.ObjectMeta.Name)
+			continue
+		}
+		vrfConfig.Peerings = append(vrfConfig.Peerings, createBGPPeering(&peering, layer2)...)
+	}
+	return defaultVrfPeerings
+}
+
 func prepareVRFsToCreate(vrfConfigs []frr.VRFConfiguration, existing []nl.VRFInformation) []nl.VRFInformation {
 	create := []nl.VRFInformation{}
 	for i := range vrfConfigs {
@@ -407,14 +443,24 @@ func handlePrefixItemList(input []networkv1alpha1.VrfRouteConfigurationPrefixIte
 		Seq:       seq + 1,
 		Community: community,
 	}
+	items, err := handlePrefixList(input)
+	if err != nil {
+		return frr.PrefixList{}, err
+	}
+	prefixList.Items = items
+	return prefixList, nil
+}
+
+func handlePrefixList(input []networkv1alpha1.VrfRouteConfigurationPrefixItem) ([]frr.PrefixedRouteItem, error) {
+	items := []frr.PrefixedRouteItem{}
 	for i, item := range input {
 		frrItem, err := copyPrefixItemToFRRItem(i, item)
 		if err != nil {
-			return frr.PrefixList{}, err
+			return nil, err
 		}
-		prefixList.Items = append(prefixList.Items, frrItem)
+		items = append(items, frrItem)
 	}
-	return prefixList, nil
+	return items, nil
 }
 
 func copyPrefixItemToFRRItem(n int, item networkv1alpha1.VrfRouteConfigurationPrefixItem) (frr.PrefixedRouteItem, error) {
@@ -451,4 +497,50 @@ func stableSortVRFConfiguration(vrfConfig *frr.VRFConfiguration) {
 	sort.SliceStable(vrfConfig.AggregateIPv6, func(i, j int) bool {
 		return vrfConfig.AggregateIPv6[i] < vrfConfig.AggregateIPv6[j]
 	})
+}
+
+func getLayerConfig2ByName(layer2 string, layer2s []networkv1alpha1.Layer2NetworkConfiguration) *networkv1alpha1.Layer2NetworkConfiguration {
+	for i := range layer2s {
+		if layer2s[i].Name == layer2 {
+			return &layer2s[i]
+		}
+	}
+	return nil
+}
+
+func createBGPPeering(peering *networkv1alpha1.BGPPeering, layer2 *networkv1alpha1.Layer2NetworkConfiguration) []frr.BGPPeering {
+	spec := peering.Spec
+	imports, err := handlePrefixList(spec.Import)
+	if err != nil {
+		return nil
+	}
+	exports, err := handlePrefixList(spec.Export)
+	if err != nil {
+		return nil
+	}
+	frrPeerings := []frr.BGPPeering{}
+	for i := range layer2.Spec.AnycastGateways {
+		gateway, network, err := net.ParseCIDR(layer2.Spec.AnycastGateways[i])
+		if err != nil {
+			continue
+		}
+		addressFamily := 4
+		if gateway.To4() == nil {
+			addressFamily = 6
+		}
+		frrPeerings = append(frrPeerings, frr.BGPPeering{
+			Name:            peering.Name,
+			AddressFamily:   addressFamily,
+			NeighborRange:   network.String(),
+			UpdateSource:    gateway.String(),
+			RemoteASN:       spec.RemoteASN,
+			EnableBFD:       spec.EnableBFD,
+			MaximumPrefixes: spec.MaximumPrefixes,
+			HoldTime:        uint(spec.HoldTime.Seconds()),
+			KeepaliveTime:   uint(spec.KeepaliveTime.Seconds()),
+			Import:          imports,
+			Export:          exports,
+		})
+	}
+	return frrPeerings
 }
