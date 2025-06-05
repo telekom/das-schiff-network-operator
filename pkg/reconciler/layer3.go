@@ -188,7 +188,11 @@ func (r *reconcile) waitUntilConfiguration(allConfigs []frr.VRFConfiguration) er
 func (r *reconcile) checkFRRConfig(vrfConfigs []frr.VRFConfiguration) error {
 	vrfsConfigured := map[string]bool{}
 	for idx := range vrfConfigs {
-		vrfsConfigured[fmt.Sprintf("%s%s", nl.VrfPrefix, vrfConfigs[idx].Name)] = false
+		vrf := vrfConfigs[idx]
+		if vrf.VNI == config.SkipVrfTemplateVni {
+			continue
+		}
+		vrfsConfigured[fmt.Sprintf("%s%s", nl.VrfPrefix, vrf.Name)] = false
 	}
 
 	// Check if all VRFs are configured in FRR
