@@ -58,7 +58,7 @@ func (r *reconcile) getL3Configs(data *reconcileData) ([]frr.VRFConfiguration, [
 	}
 	defaultVRFPeerings := r.addBGPPeerings(vrfConfigMap, data.l2vnis, data.peerings)
 
-	var l3Configs []frr.VRFConfiguration
+	l3Configs := make([]frr.VRFConfiguration, 0, len(vrfConfigMap))
 	for key := range vrfConfigMap {
 		vrfConfig := vrfConfigMap[key]
 		stableSortVRFConfiguration(vrfConfig)
@@ -70,7 +70,7 @@ func (r *reconcile) getL3Configs(data *reconcileData) ([]frr.VRFConfiguration, [
 func getTaasConfigs(taas []networkv1alpha1.RoutingTable) []frr.VRFConfiguration {
 	vrfFromTaas := createVrfFromTaaS(taas)
 
-	var taasConfigs []frr.VRFConfiguration
+	taasConfigs := make([]frr.VRFConfiguration, 0, len(vrfFromTaas))
 	for key := range vrfFromTaas {
 		taasConfigs = append(taasConfigs, vrfFromTaas[key])
 	}
@@ -201,7 +201,11 @@ func (r *reconcile) waitUntilConfiguration(allConfigs []frr.VRFConfiguration) er
 func (r *reconcile) checkFRRConfig(vrfConfigs []frr.VRFConfiguration) error {
 	vrfsConfigured := map[string]bool{}
 	for idx := range vrfConfigs {
-		vrfsConfigured[fmt.Sprintf("%s%s", nl.VrfPrefix, vrfConfigs[idx].Name)] = false
+		vrf := vrfConfigs[idx]
+		if vrf.VNI == config.SkipVrfTemplateVni {
+			continue
+		}
+		vrfsConfigured[fmt.Sprintf("%s%s", nl.VrfPrefix, vrf.Name)] = false
 	}
 
 	// Check if all VRFs are configured in FRR
