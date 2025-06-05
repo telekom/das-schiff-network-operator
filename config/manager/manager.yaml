@@ -76,6 +76,8 @@ spec:
           subPath: config.yaml
         - mountPath: /etc/frr
           name: frr-config
+        - mountPath: /var/run/frr
+          name: frr-run
         - mountPath: /var/run/dbus/system_bus_socket
           name: dbus-socket
       - command:

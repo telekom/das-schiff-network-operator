@@ -5,10 +5,11 @@ import (
 )
 
 const (
+	VrfPrefix = "vr."
+
 	vrfTableStart = 50
 	vrfTableEnd   = 80
 
-	vrfPrefix          = "vr."
 	bridgePrefix       = "br."
 	vxlanPrefix        = "vx."
 	vrfToDefaultPrefix = "vd."

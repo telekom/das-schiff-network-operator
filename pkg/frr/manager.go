@@ -11,6 +11,7 @@ import (
 
 	"github.com/telekom/das-schiff-network-operator/pkg/config"
 	"github.com/telekom/das-schiff-network-operator/pkg/frr/dbus"
+	"github.com/telekom/das-schiff-network-operator/pkg/frr/vty"
 )
 
 const defaultPermissions = 0o640
@@ -31,6 +32,7 @@ type Manager struct {
 	ConfigPath   string
 	TemplatePath string
 	Cli          *Cli
+	Socket       *vty.Socket
 	dbusToolkit  dbus.System
 }
 
@@ -88,6 +90,7 @@ func NewFRRManager() *Manager {
 		ConfigPath:   "/etc/frr/frr.conf",
 		TemplatePath: "/etc/frr/frr.conf.tpl",
 		Cli:          NewCli(),
+		Socket:       vty.NewSocket("/var/run/frr"),
 		dbusToolkit:  &dbus.Toolkit{},
 	}
 }

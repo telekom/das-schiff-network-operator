@@ -88,7 +88,7 @@ func (n *Manager) ListL3() ([]VRFInformation, error) {
 	}
 
 	for _, link := range links {
-		if !(link.Type() == "vrf" && strings.HasPrefix(link.Attrs().Name, vrfPrefix)) {
+		if !(link.Type() == "vrf" && strings.HasPrefix(link.Attrs().Name, VrfPrefix)) {
 			continue
 		}
 		vrf, ok := link.(*netlink.Vrf)

@@ -12,6 +12,7 @@ import (
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/pkg/config"
 	"github.com/telekom/das-schiff-network-operator/pkg/frr"
+	"github.com/telekom/das-schiff-network-operator/pkg/frr/vty"
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
 )
 
@@ -50,30 +51,45 @@ func (r *reconcile) fetchBGPPeerings(ctx context.Context) ([]networkv1alpha1.BGP
 	return peerings.Items, nil
 }
 
-// nolint: contextcheck,funlen // context is not relevant
-func (r *reconcile) reconcileLayer3(data *reconcileData) error {
+func (r *reconcile) getL3Configs(data *reconcileData) ([]frr.VRFConfiguration, []frr.BGPPeering, error) {
 	vrfConfigMap, err := r.createVrfConfigMap(data.l3vnis)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
-
 	defaultVRFPeerings := r.addBGPPeerings(vrfConfigMap, data.l2vnis, data.peerings)
 
-	vrfFromTaas := createVrfFromTaaS(data.taas)
-
-	allConfigs := []frr.VRFConfiguration{}
-	l3Configs := []frr.VRFConfiguration{}
-	taasConfigs := []frr.VRFConfiguration{}
+	l3Configs := make([]frr.VRFConfiguration, 0, len(vrfConfigMap))
 	for key := range vrfConfigMap {
-		vrfConfig := *vrfConfigMap[key]
-		stableSortVRFConfiguration(&vrfConfig)
-		allConfigs = append(allConfigs, vrfConfig)
-		l3Configs = append(l3Configs, vrfConfig)
+		vrfConfig := vrfConfigMap[key]
+		stableSortVRFConfiguration(vrfConfig)
+		l3Configs = append(l3Configs, *vrfConfig)
 	}
+	return l3Configs, defaultVRFPeerings, nil
+}
+
+func getTaasConfigs(taas []networkv1alpha1.RoutingTable) []frr.VRFConfiguration {
+	vrfFromTaas := createVrfFromTaaS(taas)
+
+	taasConfigs := make([]frr.VRFConfiguration, 0, len(vrfFromTaas))
 	for key := range vrfFromTaas {
-		allConfigs = append(allConfigs, vrfFromTaas[key])
 		taasConfigs = append(taasConfigs, vrfFromTaas[key])
 	}
+	return taasConfigs
+}
+
+// nolint: contextcheck,funlen // context is not relevant
+func (r *reconcile) reconcileLayer3(data *reconcileData) error {
+	l3Configs, defaultVRFPeerings, err := r.getL3Configs(data)
+	if err != nil {
+		r.Logger.Error(err, "error getting L3 configurations")
+		return fmt.Errorf("error getting L3 configurations: %w", err)
+	}
+	taasConfigs := getTaasConfigs(data.taas)
+
+	// Combine both L3 and TaaS configurations into a single slice
+	allConfigs := make([]frr.VRFConfiguration, 0, len(l3Configs)+len(taasConfigs))
+	allConfigs = append(allConfigs, l3Configs...)
+	allConfigs = append(allConfigs, taasConfigs...)
 
 	sort.SliceStable(allConfigs, func(i, j int) bool {
 		return allConfigs[i].VNI < allConfigs[j].VNI
@@ -111,8 +127,10 @@ func (r *reconcile) reconcileLayer3(data *reconcileData) error {
 		}
 	}
 
-	// We wait here for two seconds to let FRR settle after updating netlink devices
-	time.Sleep(defaultSleep)
+	if err := r.waitUntilConfiguration(allConfigs); err != nil {
+		r.Logger.Error(err, "error waiting for FRR configuration to be applied")
+		return fmt.Errorf("error waiting for FRR configuration to be applied: %w", err)
+	}
 
 	for _, info := range created {
 		if err := r.netlinkManager.UpL3(info); err != nil {
@@ -154,6 +172,72 @@ func (r *reconcile) reloadFRR() error {
 		}
 	}
 	r.Logger.Info("reloaded FRR config")
+	return nil
+}
+
+func (r *reconcile) waitUntilConfiguration(allConfigs []frr.VRFConfiguration) error {
+	// We wait here for two seconds to let FRR settle after updating netlink devices
+	time.Sleep(defaultSleep)
+
+	for {
+		// Check that all VRFs are configured in FRR
+		err := r.checkFRRConfig(allConfigs)
+		if err == nil {
+			break
+		}
+
+		r.Logger.Error(err, "VRFs not yet configured")
+		// reload FRR again
+		if err := r.reloadFRR(); err != nil {
+			return fmt.Errorf("failed to reload FRR after checking VRF configuration: %w", err)
+		}
+		r.Logger.Info("Waiting for FRR to configure VRFs, retrying in 2 seconds")
+		time.Sleep(defaultSleep)
+	}
+
+	return nil
+}
+
+func (r *reconcile) checkFRRConfig(vrfConfigs []frr.VRFConfiguration) error {
+	vrfsConfigured := map[string]bool{}
+	for idx := range vrfConfigs {
+		vrf := vrfConfigs[idx]
+		if vrf.VNI == config.SkipVrfTemplateVni {
+			continue
+		}
+		vrfsConfigured[fmt.Sprintf("%s%s", nl.VrfPrefix, vrf.Name)] = false
+	}
+
+	// Check if all VRFs are configured in FRR
+	var frrConfig vty.Base
+	err := r.frrManager.Socket.GetConfig("/frr-vrf:lib", &frrConfig)
+	if err != nil {
+		return fmt.Errorf("error getting FRR VRF configuration: %w", err)
+	}
+
+	if frrConfig.FrrVrfLib == nil {
+		return fmt.Errorf("FRR VRF is not configured at all, please check your FRR configuration")
+	}
+
+	for _, vrf := range frrConfig.FrrVrfLib.VRFs {
+		if _, ok := vrfsConfigured[vrf.Name]; !ok {
+			continue
+		}
+
+		if vrf.FrrVrfLibZebra == nil {
+			return fmt.Errorf("VRF %s is not configured in FRR, missing frr-zebra:zebra configuration", vrf.Name)
+		}
+		if vrf.FrrVrfLibZebra.L3VNI == 0 {
+			return fmt.Errorf("VRF %s is not configured in FRR, missing L3VNI configuration", vrf.Name)
+		}
+		vrfsConfigured[vrf.Name] = true
+	}
+
+	for vrf, configured := range vrfsConfigured {
+		if !configured {
+			return fmt.Errorf("VRF %s is not configured in FRR", vrf)
+		}
+	}
 	return nil
 }
 
