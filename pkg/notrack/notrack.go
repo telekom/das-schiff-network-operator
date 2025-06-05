@@ -2,6 +2,7 @@ package notrack
 
 import (
 	"fmt"
+	"net"
 	"regexp"
 	"strings"
 	"time"
@@ -126,6 +127,11 @@ func RunIPTablesSync() error {
 	return nil
 }
 
+func networkCIDR(ipnet *net.IPNet) string {
+	networkIP := ipnet.IP.Mask(ipnet.Mask)
+	return (&net.IPNet{IP: networkIP, Mask: ipnet.Mask}).String()
+}
+
 func appendDestinations(link netlink.Link, family int, destinations []string) []string {
 	addresses, err := netlink.AddrList(link, family)
 	if err != nil {
@@ -135,7 +141,13 @@ func appendDestinations(link netlink.Link, family int, destinations []string) []
 
 	for _, addr := range addresses {
 		if addr.IP.IsGlobalUnicast() {
-			destinations = append(destinations, addr.IP.Mask(addr.Mask).String())
+			network := networkCIDR(addr.IPNet)
+
+			if slices.Contains(destinations, network) {
+				continue
+			}
+
+			destinations = append(destinations, network)
 		}
 	}
 	return destinations
