@@ -132,6 +132,14 @@ func (r *reconcile) reconcileLayer3(data *reconcileData) error {
 		return fmt.Errorf("error waiting for FRR configuration to be applied: %w", err)
 	}
 
+	if err := r.checkEVPNL3VNIs(l3Configs); err != nil {
+		r.Logger.Error(err, "invalid runtime state of FRR discovered, restarting FRR")
+
+		if err := r.frrManager.RestartFRR(); err != nil {
+			return fmt.Errorf("failed to restart FRR after checking EVPN L3 VNIs: %w", err)
+		}
+	}
+
 	for _, info := range created {
 		if err := r.netlinkManager.UpL3(info); err != nil {
 			r.Logger.Error(err, "error setting L3 to state UP", "interface", info)
@@ -198,7 +206,7 @@ func (r *reconcile) waitUntilConfiguration(allConfigs []frr.VRFConfiguration) er
 	return nil
 }
 
-func (r *reconcile) checkFRRConfig(vrfConfigs []frr.VRFConfiguration) error {
+func vrfsToBooleanMap(vrfConfigs []frr.VRFConfiguration) map[string]bool {
 	vrfsConfigured := map[string]bool{}
 	for idx := range vrfConfigs {
 		vrf := vrfConfigs[idx]
@@ -207,6 +215,38 @@ func (r *reconcile) checkFRRConfig(vrfConfigs []frr.VRFConfiguration) error {
 		}
 		vrfsConfigured[fmt.Sprintf("%s%s", nl.VrfPrefix, vrf.Name)] = false
 	}
+	return vrfsConfigured
+}
+
+func (r *reconcile) checkEVPNL3VNIs(vrfConfigs []frr.VRFConfiguration) error {
+	vrfsConfigured := vrfsToBooleanMap(vrfConfigs)
+
+	var evpnVnis map[string]vty.ShowEvpnVni
+	err := r.frrManager.Socket.RunJSON("zebra", "show evpn vni json", &evpnVnis)
+	if err != nil {
+		return fmt.Errorf("error getting FRR EVPN VNI configuration: %w", err)
+	}
+
+	for _, vni := range evpnVnis {
+		if vni.Type != vty.EvpnTypeL3 {
+			continue
+		}
+		if _, ok := vrfsConfigured[vni.TenantVRF]; !ok {
+			continue
+		}
+		vrfsConfigured[vni.TenantVRF] = true
+	}
+
+	for vrf, configured := range vrfsConfigured {
+		if !configured {
+			return fmt.Errorf("VRF %s is not configured in FRR, missing EVPN L3 VNI configuration or marked as L2", vrf)
+		}
+	}
+	return nil
+}
+
+func (r *reconcile) checkFRRConfig(vrfConfigs []frr.VRFConfiguration) error {
+	vrfsConfigured := vrfsToBooleanMap(vrfConfigs)
 
 	// Check if all VRFs are configured in FRR
 	var frrConfig vty.Base
