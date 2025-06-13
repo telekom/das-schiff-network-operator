@@ -16,3 +16,16 @@ type VRF struct {
 type FrrVrfLibZebra struct {
 	L3VNI int32 `json:"l3vni-id,omitempty"`
 }
+
+type EvpnType string
+
+const (
+	EvpnTypeL2 EvpnType = "L2"
+	EvpnTypeL3 EvpnType = "L3"
+)
+
+type ShowEvpnVni struct {
+	VNI       int32    `json:"vni,omitempty"`
+	TenantVRF string   `json:"tenantVrf,omitempty"`
+	Type      EvpnType `json:"type,omitempty"`
+}
