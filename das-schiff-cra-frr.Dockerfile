@@ -61,6 +61,7 @@ COPY ./docker/10-cra.conf /etc/sysctl.d/10-cra.conf
 COPY --from=builder /workspace/frr-cra /usr/local/bin/frr-cra
 COPY ./docker/frr-cra.env /etc/default/frr-cra
 COPY ./docker/prometheus-node-exporter.env /etc/default/prometheus-node-exporter
+COPY ./docker/hosts /etc/hosts
 RUN systemctl enable frr-cra.service
 RUN systemctl enable fix-vrf-rules.service
 RUN systemctl enable prometheus-node-exporter.service
