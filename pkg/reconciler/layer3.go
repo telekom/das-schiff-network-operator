@@ -202,7 +202,7 @@ func (r *reconcile) checkFRRConfig(vrfConfigs []frr.VRFConfiguration) error {
 	vrfsConfigured := map[string]bool{}
 	for idx := range vrfConfigs {
 		vrf := vrfConfigs[idx]
-		if vrf.VNI == config.SkipVrfTemplateVni {
+		if vrf.VNI == config.SkipVrfTemplateVni || vrf.IsTaaS {
 			continue
 		}
 		vrfsConfigured[fmt.Sprintf("%s%s", nl.VrfPrefix, vrf.Name)] = false
