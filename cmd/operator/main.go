@@ -90,9 +90,9 @@ func parseFlags() *operatorConfig {
 	flag.StringVar(&cfg.apiTimeout, "api-timeout", operator.DefaultTimeout,
 		"Timeout for Kubernetes API connections (default: 60s).")
 	flag.StringVar(&cfg.preconfigTimeout, "preconfig-timeout", operator.DefaultPreconfigTimout,
-		"Timoeut for NodeConfig reconciliation process, when agent DID NOT picked the work yet")
+		"Timeout for NodeConfig reconciliation process, when agent DID NOT picked the work yet")
 	flag.StringVar(&cfg.configTimeout, "config-timeout", operator.DefaultConfigTimeout,
-		"Timoeut for NodeConfig reconciliation process, when agent picked the work")
+		"Timeout for NodeConfig reconciliation process, when agent picked the work")
 	flag.IntVar(&cfg.maxUpdating, "max-updating", 1,
 		"Configures how many nodes can be updated simultaneously when rolling update is performed.")
 	flag.BoolVar(&cfg.disableCertRotation, "disable-cert-rotation", false,
