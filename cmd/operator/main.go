@@ -22,7 +22,9 @@ import (
 	"crypto/tls"
 	"flag"
 	"fmt"
+	"net"
 	"os"
+	"strconv"
 	"time"
 
 	operator2 "github.com/telekom/das-schiff-network-operator/controllers/operator"
@@ -37,7 +39,6 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
-	"github.com/telekom/das-schiff-network-operator/pkg/managerconfig"
 	"github.com/telekom/das-schiff-network-operator/pkg/version"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.) //nolint:gci
@@ -47,6 +48,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	//nolint:gci // kubebuilder import
 	//+kubebuilder:scaffold:imports
 )
@@ -63,46 +65,93 @@ func init() {
 	//+kubebuilder:scaffold:scheme
 }
 
-const defaultWebhookPort = 7443
+type operatorConfig struct {
+	apiTimeout                   string
+	configTimeout                string
+	preconfigTimeout             string
+	maxUpdating                  int
+	disableCertRotation          bool
+	disableRestartOnCertRefresh  bool
+	processImportsAsStaticRoutes bool
+	healthAddr                   string
+	metricsAddr                  string
+	webhookAddr                  string
+	leaderElectionID             string
+	zapOpts                      zap.Options
+}
+
+func parseFlags() *operatorConfig {
+	cfg := &operatorConfig{
+		zapOpts: zap.Options{
+			Development: true,
+		},
+	}
+
+	flag.StringVar(&cfg.apiTimeout, "api-timeout", operator.DefaultTimeout,
+		"Timeout for Kubernetes API connections (default: 60s).")
+	flag.StringVar(&cfg.preconfigTimeout, "preconfig-timeout", operator.DefaultPreconfigTimout,
+		"Timoeut for NodeConfig reconciliation process, when agent DID NOT picked the work yet")
+	flag.StringVar(&cfg.configTimeout, "config-timeout", operator.DefaultConfigTimeout,
+		"Timoeut for NodeConfig reconciliation process, when agent picked the work")
+	flag.IntVar(&cfg.maxUpdating, "max-updating", 1,
+		"Configures how many nodes can be updated simultaneously when rolling update is performed.")
+	flag.BoolVar(&cfg.disableCertRotation, "disable-cert-rotation", false,
+		"Disables certificate rotation if set true.")
+	flag.BoolVar(&cfg.disableRestartOnCertRefresh, "disable-restart-on-cert-rotation", false,
+		"Disables operator's restart after certificates refresh was performed.")
+	flag.BoolVar(&cfg.processImportsAsStaticRoutes, "process-imports-as-static-routes", false,
+		"If set to true, the operator will process imports as static routes.")
+	flag.StringVar(&cfg.healthAddr, "health-addr", ":7081",
+		"bind address of health/readiness probes")
+	flag.StringVar(&cfg.metricsAddr, "metrics-addr", ":7080",
+		"bind address of metrics endpoint")
+	flag.StringVar(&cfg.webhookAddr, "webhook-addr", ":7443",
+		"bind address of the webhook server")
+	flag.StringVar(&cfg.leaderElectionID, "leader-election-id", "network-operator",
+		"ID for leader election")
+
+	cfg.zapOpts.BindFlags(flag.CommandLine)
+	flag.Parse()
+
+	return cfg
+}
 
 func main() {
 	version.Get().Print(os.Args[0])
 
-	var configFile string
-	var apiTimeout string
-	var configTimeout string
-	var preconfigTimeout string
-	var maxUpdating int
-	var disableCertRotation bool
-	var disableRestartOnCertRefresh bool
-	var processImportsAsStaticRoutes bool
-	flag.StringVar(&configFile, "config", "",
-		"The controller will load its initial configuration from this file. "+
-			"Omit this flag to use the default configuration values. "+
-			"Command-line flags override configuration from this file.")
-	flag.StringVar(&apiTimeout, "api-timeout", operator.DefaultTimeout,
-		"Timeout for Kubernetes API connections (default: 60s).")
-	flag.StringVar(&preconfigTimeout, "preconfig-timeout", operator.DefaultPreconfigTimout, "Timoeut for NodeConfig reconciliation process, when agent DID NOT picked the work yet")
-	flag.StringVar(&configTimeout, "config-timeout", operator.DefaultConfigTimeout, "Timoeut for NodeConfig reconciliation process, when agent picked the work")
-	flag.IntVar(&maxUpdating, "max-updating", 1, "Configures how many nodes can be updated simultaneously when rolling update is performed.")
-	flag.BoolVar(&disableCertRotation, "disable-cert-rotation", false, "Disables certificate rotation if set true.")
-	flag.BoolVar(&disableRestartOnCertRefresh, "disable-restart-on-cert-rotation", false, "Disables operator's restart after certificates refresh was performed.")
-	flag.BoolVar(&processImportsAsStaticRoutes, "process-imports-as-static-routes", false, "If set to true, the operator will process imports as static routes.")
-	opts := zap.Options{
-		Development: true,
-	}
-	opts.BindFlags(flag.CommandLine)
-	flag.Parse()
-	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+	cfg := parseFlags()
+	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&cfg.zapOpts)))
 
-	options, err := setMangerOptions(configFile)
+	host, portStr, err := net.SplitHostPort(cfg.webhookAddr)
 	if err != nil {
-		setupLog.Error(err, "error configuring manager options")
+		setupLog.Error(err, "invalid webhook address")
+		os.Exit(1)
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		setupLog.Error(err, "invalid webhook address")
 		os.Exit(1)
 	}
 
+	options := ctrl.Options{
+		Scheme:                  scheme,
+		LeaderElection:          true,
+		LeaderElectionID:        cfg.leaderElectionID,
+		LeaderElectionNamespace: utils.GetNamespace(),
+		Metrics: metricsserver.Options{
+			BindAddress: cfg.metricsAddr,
+		},
+		HealthProbeBindAddress: cfg.healthAddr,
+		WebhookServer: webhook.NewServer(webhook.Options{
+			Host:    host,
+			Port:    port,
+			CertDir: "/tmp/k8s-webhook-server/serving-certs",
+			TLSOpts: []func(c *tls.Config){func(c *tls.Config) { c.MinVersion = tls.VersionTLS13 }},
+		}),
+	}
+
 	clientConfig := ctrl.GetConfigOrDie()
-	mgr, err := ctrl.NewManager(clientConfig, *options)
+	mgr, err := ctrl.NewManager(clientConfig, options)
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
 		os.Exit(1)
@@ -119,8 +168,8 @@ func main() {
 
 	var setupFinished chan struct{}
 
-	if !disableCertRotation {
-		setupFinished, err = setupRotator(mgr, disableRestartOnCertRefresh)
+	if !cfg.disableCertRotation {
+		setupFinished, err = setupRotator(mgr, cfg.disableRestartOnCertRefresh)
 		if err != nil {
 			setupLog.Error(err, "failed to setup add Rotator")
 			os.Exit(1)
@@ -130,7 +179,7 @@ func main() {
 	setupErr := make(chan error)
 
 	go func() {
-		setupErr <- setupReconcilers(mgr, apiTimeout, configTimeout, preconfigTimeout, maxUpdating, processImportsAsStaticRoutes, setupFinished)
+		setupErr <- setupReconcilers(mgr, cfg.apiTimeout, cfg.configTimeout, cfg.preconfigTimeout, cfg.maxUpdating, cfg.processImportsAsStaticRoutes, setupFinished)
 		close(setupErr)
 	}()
 
@@ -269,37 +318,6 @@ func setupReconcilers(mgr manager.Manager, apiTimeout, configTimeout, preconfigT
 	}
 
 	return nil
-}
-
-func setMangerOptions(configFile string) (*manager.Options, error) {
-	var err error
-	var options manager.Options
-	if configFile != "" {
-		options, err = managerconfig.Load(configFile, scheme)
-		if err != nil {
-			return nil, fmt.Errorf("unable to load the config file: %w", err)
-		}
-	} else {
-		webhookOpts := webhook.Options{
-			Host:    "",
-			Port:    defaultWebhookPort,
-			CertDir: "/tmp/k8s-webhook-server/serving-certs",
-			TLSOpts: []func(c *tls.Config){func(c *tls.Config) { c.MinVersion = tls.VersionTLS13 }},
-		}
-
-		options = manager.Options{
-			Scheme:        scheme,
-			WebhookServer: webhook.NewServer(webhookOpts),
-		}
-	}
-
-	// force leader election
-	options.LeaderElection = true
-	if options.LeaderElectionID == "" {
-		options.LeaderElectionID = "network-operator"
-	}
-
-	return &options, nil
 }
 
 type onLeaderElectionEvent struct {

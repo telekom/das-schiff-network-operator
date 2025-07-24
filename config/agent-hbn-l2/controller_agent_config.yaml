@@ -1,4 +1,0 @@
-health:
-  healthProbeBindAddress: :7083
-metrics:
-  bindAddress: :7082

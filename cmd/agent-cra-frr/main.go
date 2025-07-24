@@ -32,7 +32,6 @@ import (
 
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/pkg/cra"
-	"github.com/telekom/das-schiff-network-operator/pkg/managerconfig"
 	"github.com/telekom/das-schiff-network-operator/pkg/monitoring"
 	"github.com/telekom/das-schiff-network-operator/pkg/version"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -47,6 +46,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	//nolint:gci // kubebuilder import
 	//+kubebuilder:scaffold:imports
 )
@@ -103,14 +103,13 @@ func handleCraMetrics(craManager *cra.Manager, metricsType cra.MetricsType) http
 func main() {
 	version.Get().Print(os.Args[0])
 
-	var configFile string
 	var nodeNetworkConfigPath string
-	flag.StringVar(&configFile, "config", "",
-		"The controller will load its initial configuration from this file. "+
-			"Omit this flag to use the default configuration values. "+
-			"Command-line flags override configuration from this file.")
+	var healthAddr string
+	var metricsAddr string
 	flag.StringVar(&nodeNetworkConfigPath, "nodenetworkconfig-path", reconcilerfrr.DefaultNodeNetworkConfigPath,
 		"Path to store working node configuration.")
+	flag.StringVar(&healthAddr, "health-addr", ":7081", "bind address of health/readiness probes")
+	flag.StringVar(&metricsAddr, "metrics-addr", ":7080", "bind address of metrics endpoint")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -124,14 +123,21 @@ func main() {
 		os.Exit(1)
 	}
 
-	options, err := setManagerOptions(configFile, craManager)
+	options := ctrl.Options{
+		Scheme: scheme,
+		Metrics: metricsserver.Options{
+			BindAddress: metricsAddr,
+		},
+		HealthProbeBindAddress: healthAddr,
+	}
+	err = updateManagerOptions(&options, craManager)
 	if err != nil {
-		setupLog.Error(err, "unable to configure manager's options")
+		setupLog.Error(err, "unable to update manager options")
 		os.Exit(1)
 	}
 
 	clientConfig := ctrl.GetConfigOrDie()
-	mgr, err := ctrl.NewManager(clientConfig, *options)
+	mgr, err := ctrl.NewManager(clientConfig, options)
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
 		os.Exit(1)
@@ -149,30 +155,19 @@ func main() {
 	}
 }
 
-func setManagerOptions(configFile string, craManager *cra.Manager) (*manager.Options, error) {
-	var err error
-	var options manager.Options
-	if configFile != "" {
-		options, err = managerconfig.Load(configFile, scheme)
-		if err != nil {
-			return nil, fmt.Errorf("unable to load the config file: %w", err)
-		}
-	} else {
-		options = ctrl.Options{Scheme: scheme}
-	}
-
+func updateManagerOptions(options *manager.Options, craManager *cra.Manager) error {
 	if options.Metrics.BindAddress != "0" && options.Metrics.BindAddress != "" {
-		err = initCollectors()
+		err := initCollectors()
 		options.Metrics.ExtraHandlers = map[string]http.Handler{
 			"/cra/frr/metrics":           handleCraMetrics(craManager, cra.MetricsFRR),
 			"/cra/node-exporter/metrics": handleCraMetrics(craManager, cra.MetricsNodeExporter),
 		}
 		if err != nil {
-			return nil, fmt.Errorf("unable to initialize metrics collectors: %w", err)
+			return fmt.Errorf("unable to initialize metrics collectors: %w", err)
 		}
 	}
 
-	return &options, nil
+	return nil
 }
 
 func initComponents(mgr manager.Manager, nodeConfigPath string, craManager *cra.Manager) error {

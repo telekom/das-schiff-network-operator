@@ -54,8 +54,4 @@ labels:
   pairs:
     app.kubernetes.io/name: network-operator
 patches:
-- path: agent_cra_frr_config_patch.yaml
-- path: agent_netplan_config_patch.yaml
-- path: agent_hbn_l2_config_patch.yaml
-- path: operator_config_patch.yaml
 - path: manager_webhook_patch.yaml
