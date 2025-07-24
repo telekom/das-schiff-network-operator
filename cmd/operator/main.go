@@ -101,9 +101,9 @@ func parseFlags() *operatorConfig {
 		"Disables operator's restart after certificates refresh was performed.")
 	flag.BoolVar(&cfg.processImportsAsStaticRoutes, "process-imports-as-static-routes", false,
 		"If set to true, the operator will process imports as static routes.")
-	flag.StringVar(&cfg.healthAddr, "health-addr", ":7081",
+	flag.StringVar(&cfg.healthAddr, "health-addr", ":7085",
 		"bind address of health/readiness probes")
-	flag.StringVar(&cfg.metricsAddr, "metrics-addr", ":7080",
+	flag.StringVar(&cfg.metricsAddr, "metrics-addr", ":7084",
 		"bind address of metrics endpoint")
 	flag.StringVar(&cfg.webhookAddr, "webhook-addr", ":7443",
 		"bind address of the webhook server")

@@ -34,6 +34,8 @@ spec:
       containers:
         - args:
             - "--nodenetworkconfig-path=/tmp/current-config.yaml"
+            - "--health-addr=:7081"
+            - "--metrics-addr=:7080"
           command:
             - /agent
           env:
@@ -52,19 +54,26 @@ spec:
           image: ghcr.io/telekom/das-schiff-nwop-agent-cra-frr:latest
           imagePullPolicy: IfNotPresent
           name: agent-cra-frr
+          ports:
+            - containerPort: 7081
+              name: health
+              protocol: TCP
+            - containerPort: 7080
+              name: metrics
+              protocol: TCP
           securityContext:
             privileged: true
             runAsUser: 0
           livenessProbe:
             httpGet:
               path: /healthz
-              port: 7081
+              port: health
             initialDelaySeconds: 15
             periodSeconds: 20
           readinessProbe:
             httpGet:
               path: /readyz
-              port: 7081
+              port: health
             initialDelaySeconds: 5
             periodSeconds: 10
           # TODO(user): Configure the resources accordingly based on the project requirements.
