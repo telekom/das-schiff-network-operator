@@ -33,14 +33,18 @@ spec:
       hostPID: true
       containers:
       - args:
-        - "--health-addr=:7085"
-        - "--metrics-addr=:7084"
-        - "--webhook-addr=:7443"
+        - "--health-addr=[$(HOST_IP)]:7085"
+        - "--metrics-addr=[$(HOST_IP)]:7084"
+        - "--webhook-addr=[$(HOST_IP)]:7443"
         command:
         - /manager
         env:
         - name: HBN_HOST_NEXTHOP
           value: fd00:7:caa5::1
+        - name: HOST_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
         image: ghcr.io/telekom/das-schiff-network-operator:latest
         imagePullPolicy: IfNotPresent
         name: operator

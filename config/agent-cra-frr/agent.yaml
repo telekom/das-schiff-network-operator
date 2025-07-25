@@ -34,8 +34,8 @@ spec:
       containers:
         - args:
             - "--nodenetworkconfig-path=/tmp/current-config.yaml"
-            - "--health-addr=:7081"
-            - "--metrics-addr=:7080"
+            - "--health-addr=[$(HOST_IP)]:7081"
+            - "--metrics-addr=[$(HOST_IP)]:7080"
           command:
             - /agent
           env:
@@ -51,6 +51,10 @@ spec:
               value: /etc/cra/certs/cert.pem
             - name: CRA_CLIENT_KEY
               value: /etc/cra/certs/key.pem
+            - name: HOST_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
           image: ghcr.io/telekom/das-schiff-nwop-agent-cra-frr:latest
           imagePullPolicy: IfNotPresent
           name: agent-cra-frr

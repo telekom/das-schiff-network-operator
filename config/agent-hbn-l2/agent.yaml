@@ -33,8 +33,8 @@ spec:
       hostPID: true
       containers:
         - args:
-            - "--health-addr=:7083"
-            - "--metrics-addr=:7082"
+            - "--health-addr=[$(HOST_IP)]:7083"
+            - "--metrics-addr=[$(HOST_IP)]:7082"
           command:
             - /agent
           env:
@@ -42,6 +42,10 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
+            - name: HOST_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
           image: ghcr.io/telekom/das-schiff-nwop-agent-hbn-l2:latest
           imagePullPolicy: IfNotPresent
           name: agent-hbn-l2
