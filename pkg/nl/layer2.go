@@ -244,6 +244,21 @@ func (n *Manager) reconcileIPAddresses(intf netlink.Link, current, desired []*ne
 			}
 		}
 	}
+
+	// let's also fix dadfailed addresses
+	addresses, err := n.toolkit.AddrList(intf, unix.AF_INET6)
+	if err != nil {
+		return fmt.Errorf("error listing link's IPv6 addresses: %w", err)
+	}
+	for i := range addresses {
+		if addresses[i].Flags&unix.IFA_F_DADFAILED != 0 {
+			addresses[i].Flags = unix.IFA_F_NODAD
+			if err := n.toolkit.AddrReplace(intf, &addresses[i]); err != nil {
+				return fmt.Errorf("error replacing IPv6 address with DADFAILED flag: %w", err)
+			}
+		}
+	}
+
 	return nil
 }
 

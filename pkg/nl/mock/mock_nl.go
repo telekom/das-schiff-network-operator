@@ -64,6 +64,20 @@ func (mr *MockToolkitInterfaceMockRecorder) AddrDel(arg0, arg1 interface{}) *gom
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddrDel", reflect.TypeOf((*MockToolkitInterface)(nil).AddrDel), arg0, arg1)
 }
 
+// AddrReplace mocks base method.
+func (m *MockToolkitInterface) AddrReplace(arg0 netlink.Link, arg1 *netlink.Addr) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "AddrReplace", arg0, arg1)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// AddrReplace indicates an expected call of AddrReplace.
+func (mr *MockToolkitInterfaceMockRecorder) AddrReplace(arg0, arg1 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddrReplace", reflect.TypeOf((*MockToolkitInterface)(nil).AddrReplace), arg0, arg1)
+}
+
 // AddrList mocks base method.
 func (m *MockToolkitInterface) AddrList(arg0 netlink.Link, arg1 int) ([]netlink.Addr, error) {
 	m.ctrl.T.Helper()
