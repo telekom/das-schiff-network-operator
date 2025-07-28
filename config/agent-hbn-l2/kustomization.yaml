@@ -5,9 +5,5 @@ resources:
 generatorOptions:
   disableNameSuffixHash: true
 
-configMapGenerator:
-- files:
-  - controller_agent_config.yaml
-  name: agent-hbn-l2-config
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization

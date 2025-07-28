@@ -32,24 +32,39 @@ spec:
       hostNetwork: true
       hostPID: true
       containers:
-      - command:
+      - args:
+        - "--health-addr=[$(HOST_IP)]:7085"
+        - "--metrics-addr=[$(HOST_IP)]:7084"
+        - "--webhook-addr=[$(HOST_IP)]:7443"
+        command:
         - /manager
         env:
         - name: HBN_HOST_NEXTHOP
           value: fd00:7:caa5::1
+        - name: HOST_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
         image: ghcr.io/telekom/das-schiff-network-operator:latest
         imagePullPolicy: IfNotPresent
         name: operator
+        ports:
+        - containerPort: 7085
+          name: health
+          protocol: TCP
+        - containerPort: 7084
+          name: metrics
+          protocol: TCP
         livenessProbe:
           httpGet:
             path: /healthz
-            port: 7085
+            port: health
           initialDelaySeconds: 15
           periodSeconds: 20
         readinessProbe:
           httpGet:
             path: /readyz
-            port: 7085
+            port: health
           initialDelaySeconds: 5
           periodSeconds: 10
         resources:

@@ -1,15 +1,11 @@
 resources:
 - agent.yaml
 - service.yaml
-# - namespace.yaml
 
 generatorOptions:
   disableNameSuffixHash: true
 
 configMapGenerator:
-- files:
-  - controller_agent_config.yaml
-  name: agent-cra-frr-config
 - files:
   - config.yaml
   - frr.conf.tpl

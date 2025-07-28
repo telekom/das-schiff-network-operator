@@ -27,7 +27,6 @@ import (
 	reconcilernetplan "github.com/telekom/das-schiff-network-operator/pkg/reconciler/agent-netplan"
 
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
-	"github.com/telekom/das-schiff-network-operator/pkg/managerconfig"
 	"github.com/telekom/das-schiff-network-operator/pkg/version"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -40,6 +39,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	//nolint:gci // kubebuilder import
 	//+kubebuilder:scaffold:imports
 )
@@ -59,11 +59,10 @@ func init() {
 func main() {
 	version.Get().Print(os.Args[0])
 
-	var configFile string
-	flag.StringVar(&configFile, "config", "",
-		"The controller will load its initial configuration from this file. "+
-			"Omit this flag to use the default configuration values. "+
-			"Command-line flags override configuration from this file.")
+	var healthAddr string
+	var metricsAddr string
+	flag.StringVar(&healthAddr, "health-addr", ":7083", "bind address of health/readiness probes")
+	flag.StringVar(&metricsAddr, "metrics-addr", ":7082", "bind address of metrics endpoint")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -71,14 +70,16 @@ func main() {
 	flag.Parse()
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
-	options, err := setManagerOptions(configFile)
-	if err != nil {
-		setupLog.Error(err, "unable to configure manager's options")
-		os.Exit(1)
+	options := ctrl.Options{
+		Scheme: scheme,
+		Metrics: metricsserver.Options{
+			BindAddress: metricsAddr,
+		},
+		HealthProbeBindAddress: healthAddr,
 	}
 
 	clientConfig := ctrl.GetConfigOrDie()
-	mgr, err := ctrl.NewManager(clientConfig, *options)
+	mgr, err := ctrl.NewManager(clientConfig, options)
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
 		os.Exit(1)
@@ -94,21 +95,6 @@ func main() {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
-}
-
-func setManagerOptions(configFile string) (*manager.Options, error) {
-	var err error
-	var options manager.Options
-	if configFile != "" {
-		options, err = managerconfig.Load(configFile, scheme)
-		if err != nil {
-			return nil, fmt.Errorf("unable to load the config file: %w", err)
-		}
-	} else {
-		options = ctrl.Options{Scheme: scheme}
-	}
-
-	return &options, nil
 }
 
 func initComponents(mgr manager.Manager) error {
