@@ -465,6 +465,11 @@ func (*Manager) configureBridge(intfName string) error {
 		return fmt.Errorf("error checking if accept_untracked_na exists: %w", err)
 	}
 
+	// Ensure that we have disabled duplicate address detection
+	if err := os.WriteFile(fmt.Sprintf("%s/ipv6/conf/%s/accept_dad", procSysNetPath, intfName), []byte("0"), neighFilePermissions); err != nil {
+		return fmt.Errorf("error setting accept_dad = 0 for interface: %w", err)
+	}
+
 	baseTimer := os.Getenv("NWOP_NEIGH_BASE_REACHABLE_TIME")
 	if baseTimer == "" {
 		baseTimer = "30000"
