@@ -252,6 +252,10 @@ func (n *Manager) reconcileIPAddresses(intf netlink.Link, current, desired []*ne
 	}
 	for i := range addresses {
 		if addresses[i].Flags&unix.IFA_F_DADFAILED != 0 {
+			if err := n.toolkit.AddrDel(intf, &addresses[i]); err != nil {
+				return fmt.Errorf("error removing IPv6 address with DADFAILED flag: %w", err)
+			}
+
 			addresses[i].Flags = unix.IFA_F_NODAD
 			if err := n.toolkit.AddrReplace(intf, &addresses[i]); err != nil {
 				return fmt.Errorf("error replacing IPv6 address with DADFAILED flag: %w", err)
