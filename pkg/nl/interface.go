@@ -26,6 +26,7 @@ type ToolkitInterface interface {
 	LinkAdd(link netlink.Link) error
 	AddrAdd(link netlink.Link, addr *netlink.Addr) error
 	AddrDel(link netlink.Link, addr *netlink.Addr) error
+	AddrReplace(link netlink.Link, addr *netlink.Addr) error
 	LinkSetLearning(link netlink.Link, mode bool) error
 	LinkSetHairpin(link netlink.Link, mode bool) error
 	ExecuteNetlinkRequest(req *nl.NetlinkRequest, sockType int, resType uint16) ([][]byte, error)
@@ -98,6 +99,10 @@ func (*Toolkit) LinkAdd(link netlink.Link) error {
 
 func (*Toolkit) AddrAdd(link netlink.Link, addr *netlink.Addr) error {
 	return netlink.AddrAdd(link, addr)
+}
+
+func (*Toolkit) AddrReplace(link netlink.Link, addr *netlink.Addr) error {
+	return netlink.AddrReplace(link, addr)
 }
 
 func (*Toolkit) LinkSetLearning(link netlink.Link, mode bool) error {

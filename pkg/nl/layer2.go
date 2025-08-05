@@ -244,6 +244,25 @@ func (n *Manager) reconcileIPAddresses(intf netlink.Link, current, desired []*ne
 			}
 		}
 	}
+
+	// Handle IPv6 addresses that failed Duplicate Address Detection (DAD)
+	addresses, err := n.toolkit.AddrList(intf, unix.AF_INET6)
+	if err != nil {
+		return fmt.Errorf("error listing link's IPv6 addresses: %w", err)
+	}
+	for i := range addresses {
+		if addresses[i].Flags&unix.IFA_F_DADFAILED != 0 {
+			if err := n.toolkit.AddrDel(intf, &addresses[i]); err != nil {
+				return fmt.Errorf("error removing IPv6 address with DADFAILED flag: %w", err)
+			}
+
+			addresses[i].Flags = unix.IFA_F_NODAD
+			if err := n.toolkit.AddrReplace(intf, &addresses[i]); err != nil {
+				return fmt.Errorf("error replacing IPv6 address with DADFAILED flag: %w", err)
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -463,6 +482,11 @@ func (*Manager) configureBridge(intfName string) error {
 		}
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("error checking if accept_untracked_na exists: %w", err)
+	}
+
+	// Ensure that we have disabled duplicate address detection
+	if err := os.WriteFile(fmt.Sprintf("%s/ipv6/conf/%s/accept_dad", procSysNetPath, intfName), []byte("0"), neighFilePermissions); err != nil {
+		return fmt.Errorf("error setting accept_dad = 0 for interface: %w", err)
 	}
 
 	baseTimer := os.Getenv("NWOP_NEIGH_BASE_REACHABLE_TIME")
