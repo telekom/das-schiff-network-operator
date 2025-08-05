@@ -245,7 +245,7 @@ func (n *Manager) reconcileIPAddresses(intf netlink.Link, current, desired []*ne
 		}
 	}
 
-	// let's also fix dadfailed addresses
+	// Handle IPv6 addresses that failed Duplicate Address Detection (DAD)
 	addresses, err := n.toolkit.AddrList(intf, unix.AF_INET6)
 	if err != nil {
 		return fmt.Errorf("error listing link's IPv6 addresses: %w", err)
