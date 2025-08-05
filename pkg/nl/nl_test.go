@@ -1201,6 +1201,9 @@ var _ = Describe("ReconcileL2()", func() {
 		netlinkMock.EXPECT().ExecuteNetlinkRequest(gomock.Any(), gomock.Any(), gomock.Any()).Return([][]byte{}, nil)
 		netlinkMock.EXPECT().AddrAdd(gomock.Any(), gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().AddrDel(gomock.Any(), gomock.Any()).Return(nil)
+		netlinkMock.EXPECT().AddrList(gomock.Any(), gomock.Eq(unix.AF_INET6)).Return([]netlink.Addr{{IPNet: netlink.NewIPNet(net.ParseIP("2a01::1")), Flags: unix.IFA_F_DADFAILED}}, nil)
+		netlinkMock.EXPECT().AddrDel(gomock.Any(), gomock.Any()).Return(nil)
+		netlinkMock.EXPECT().AddrReplace(gomock.Any(), gomock.Any()).Return(nil)
 
 		vethName := fmt.Sprintf("%s%d", vethL2Prefix, current.VlanID)
 		addrGenModePathIPv6 := fmt.Sprintf("%s/ipv6/conf/%s", procSysNetPath, vethName)
