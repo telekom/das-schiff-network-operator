@@ -126,6 +126,10 @@ func (r *reconcile) reconcileLayer2(data *reconcileData) error {
 
 	r.anycastTracker.TrackedBridges = anycastTrackerInterfaces
 
+	if err := r.netlinkManager.ReconcileL2NodeConfig(); err != nil {
+		r.Logger.Error(err, "error reconciling L2 node config")
+	}
+
 	return nil
 }
 

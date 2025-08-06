@@ -570,3 +570,33 @@ func (n *Manager) GetBridgeID(info *Layer2Information) (int, error) {
 	}
 	return link.Attrs().Index, nil
 }
+
+// ReconcileL2NodeConfig sets bridge netfilter according to NWOP_BRIDGE_NF environment variable.
+// NWOP_BRIDGE_NF can be "enable" or "disable". Any other value leaves the setting unchanged.
+func (*Manager) ReconcileL2NodeConfig() error {
+	switch os.Getenv("NWOP_BRIDGE_NF") {
+	case "disable":
+		// Disable bridge netfilter
+		if err := os.WriteFile(fmt.Sprintf("%s/bridge/nf_call_iptables", procSysNetPath), []byte("0"), neighFilePermissions); err != nil {
+			return fmt.Errorf("error setting bridge nf_call_iptables = 0: %w", err)
+		}
+		if err := os.WriteFile(fmt.Sprintf("%s/bridge/nf_call_ip6tables", procSysNetPath), []byte("0"), neighFilePermissions); err != nil {
+			return fmt.Errorf("error setting bridge nf_call_ip6tables = 0: %w", err)
+		}
+		if err := os.WriteFile(fmt.Sprintf("%s/bridge/nf_call_arptables", procSysNetPath), []byte("0"), neighFilePermissions); err != nil {
+			return fmt.Errorf("error setting bridge nf_call_arptables = 0: %w", err)
+		}
+	case "enable":
+		// Enable bridge netfilter
+		if err := os.WriteFile(fmt.Sprintf("%s/bridge/nf_call_iptables", procSysNetPath), []byte("1"), neighFilePermissions); err != nil {
+			return fmt.Errorf("error setting bridge nf_call_iptables = 1: %w", err)
+		}
+		if err := os.WriteFile(fmt.Sprintf("%s/bridge/nf_call_ip6tables", procSysNetPath), []byte("1"), neighFilePermissions); err != nil {
+			return fmt.Errorf("error setting bridge nf_call_ip6tables = 1: %w", err)
+		}
+		if err := os.WriteFile(fmt.Sprintf("%s/bridge/nf_call_arptables", procSysNetPath), []byte("1"), neighFilePermissions); err != nil {
+			return fmt.Errorf("error setting bridge nf_call_arptables = 1: %w", err)
+		}
+	}
+	return nil
+}
