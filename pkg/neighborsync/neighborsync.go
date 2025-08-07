@@ -2,6 +2,7 @@ package neighborsync
 
 import (
 	"fmt"
+	"k8s.io/utils/strings/slices"
 	"net"
 	"net/netip"
 	"time"
@@ -17,6 +18,8 @@ import (
 var (
 	refreshEvery = time.Second * 10
 	neighbors    = make(map[timerKey]*timer)
+
+	l2InterfacePrefixes = []string{"l2."}
 )
 
 type timerKey struct {
@@ -163,6 +166,16 @@ func getFirstNonLLIPv6FromInterface(iface *net.Interface) (netip.Addr, error) {
 }
 
 func processUpdate(update *netlink.NeighUpdate) {
+	intf, err := net.InterfaceByIndex(update.Neigh.LinkIndex)
+	if err != nil {
+		ctrl.Log.Error(err, "failed to get interface by index", "index", update.Neigh.LinkIndex)
+		return
+	}
+
+	if !slices.Contains(l2InterfacePrefixes, intf.Name) {
+		return
+	}
+
 	switch update.Type {
 	case unix.RTM_NEWNEIGH:
 		handleNeighborAdd(&update.Neigh)
@@ -175,6 +188,7 @@ func handleNeighborAdd(neigh *netlink.Neigh) {
 	if neigh.State&netlink.NUD_REACHABLE != 0 {
 		createTimerIfNotExistsForNeigh(neigh)
 	}
+
 	if neigh.State&netlink.NUD_STALE != 0 {
 		addr, ok := netip.AddrFromSlice(neigh.IP)
 		if ok {
