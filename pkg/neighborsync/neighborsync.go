@@ -139,9 +139,12 @@ func getFirstIPv4FromInterface(iface *net.Interface) (netip.Addr, error) {
 		if !ok {
 			continue
 		}
-		ip, ok := netip.AddrFromSlice(ipNet.IP)
-		if ok && ip.Is4() {
-			return ip, nil
+		ipBytes := ipNet.IP.To4()
+		if ipBytes != nil {
+			ip, ok := netip.AddrFromSlice(ipBytes)
+			if ok && ip.Is4() {
+				return ip, nil
+			}
 		}
 	}
 	return netip.Addr{}, fmt.Errorf("no valid IPv4 address found on interface %s", iface.Name)
@@ -155,6 +158,9 @@ func getFirstNonLLIPv6FromInterface(iface *net.Interface) (netip.Addr, error) {
 	for _, addr := range addrs {
 		ipNet, ok := addr.(*net.IPNet)
 		if !ok {
+			continue
+		}
+		if ipNet.IP.To4() != nil {
 			continue
 		}
 		ip, ok := netip.AddrFromSlice(ipNet.IP)
