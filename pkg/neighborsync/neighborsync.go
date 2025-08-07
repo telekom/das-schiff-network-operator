@@ -208,38 +208,84 @@ func handleNeighborDelete(neigh *netlink.Neigh) {
 	}
 }
 
-func StartNeighborSync(toolkit nl.ToolkitInterface) {
+func loadAllNeighbors(toolkit nl.ToolkitInterface) error {
+	links, err := toolkit.LinkList()
+	if err != nil {
+		return fmt.Errorf("failed to get link list: %w", err)
+	}
+
+	for i := range links {
+		if !slices.Contains(l2InterfacePrefixes, links[i].Attrs().Name) {
+			continue
+		}
+
+		for _, family := range []int{unix.AF_INET, unix.AF_INET6} {
+			neighbors, err := toolkit.NeighList(links[i].Attrs().Index, family)
+			if err != nil {
+				return fmt.Errorf("failed to get neighbors for link %s: %w", links[i].Attrs().Name, err)
+			}
+
+			for j := range neighbors {
+				handleNeighborAdd(&neighbors[j])
+			}
+		}
+	}
+
+	return nil
+}
+
+func receiveUpdates(toolkit nl.ToolkitInterface) {
 	logger := ctrl.Log.WithName("neighborsync")
 
-	go func() {
-		for {
-			updates := make(chan netlink.NeighUpdate)
-			done := make(chan struct{})
-			err := toolkit.NeighSubscribe(updates, done)
-			if err != nil {
-				logger.Error(err, "failed to subscribe to neighbor updates")
-				break
-			}
-			for update := range updates {
-				processUpdate(&update)
-			}
-			close(done)
-			logger.Info("neighbor updates channel closed, restarting neighbor sync, clearing timers")
-			neighbors = make(map[timerKey]*timer)
-			time.Sleep(time.Second)
+	for {
+		if err := loadAllNeighbors(toolkit); err != nil {
+			logger.Error(err, "failed to load all neighbors")
 		}
-	}()
 
-	go func() {
-		ticker := time.NewTicker(time.Second)
-		defer ticker.Stop()
-		for range ticker.C {
-			for key, timer := range neighbors {
-				if time.Now().After(timer.NextRun) {
-					sendNeighborRequest(key.LinkIndex, timer.Address, key.Address)
-					timer.NextRun = time.Now().Add(refreshEvery)
+		updates := make(chan netlink.NeighUpdate)
+		done := make(chan struct{})
+		err := toolkit.NeighSubscribe(updates, done)
+		if err != nil {
+			logger.Error(err, "failed to subscribe to neighbor updates")
+			break
+		}
+		for update := range updates {
+			processUpdate(&update)
+		}
+		close(done)
+		logger.Info("neighbor updates channel closed, restarting neighbor sync, clearing timers")
+		neighbors = make(map[timerKey]*timer)
+		time.Sleep(time.Second)
+	}
+}
+
+func runNeighborCheck() {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for range ticker.C {
+		var interfaceRemoved []timerKey
+
+		for key, timer := range neighbors {
+			if time.Now().After(timer.NextRun) {
+				if _, err := net.InterfaceByIndex(key.LinkIndex); err != nil {
+					ctrl.Log.Info("interface removed, deleting neighbor timer", "linkIndex", key.LinkIndex, "address", key.Address)
+					interfaceRemoved = append(interfaceRemoved, key)
+					continue
 				}
+
+				sendNeighborRequest(key.LinkIndex, timer.Address, key.Address)
+				timer.NextRun = time.Now().Add(refreshEvery)
 			}
 		}
-	}()
+
+		for _, key := range interfaceRemoved {
+			delete(neighbors, key)
+		}
+	}
+}
+
+func StartNeighborSync(toolkit nl.ToolkitInterface) {
+	go receiveUpdates(toolkit)
+
+	go runNeighborCheck()
 }
