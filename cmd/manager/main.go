@@ -21,6 +21,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/telekom/das-schiff-network-operator/pkg/neighborsync"
 	"os"
 	"sort"
 
@@ -190,6 +191,8 @@ func initComponents(mgr manager.Manager, anycastTracker *anycast.Tracker, cfg *c
 
 	setupLog.Info("start anycast sync")
 	anycastTracker.RunAnycastSync()
+
+	neighborsync.StartNeighborSync(&nl.Toolkit{})
 
 	setupLog.Info("start notrack sync")
 	if err := notrack.RunIPTablesSync(); err != nil {
