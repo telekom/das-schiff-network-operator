@@ -185,6 +185,10 @@ func processUpdate(update *netlink.NeighUpdate) {
 }
 
 func handleNeighborAdd(neigh *netlink.Neigh) {
+	if neigh.State&netlink.NUD_PERMANENT != 0 || neigh.Flags&netlink.NTF_EXT_LEARNED != 0 {
+		return
+	}
+
 	if neigh.State&netlink.NUD_REACHABLE != 0 {
 		createTimerIfNotExistsForNeigh(neigh)
 	}
