@@ -21,6 +21,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/telekom/das-schiff-network-operator/pkg/neighborsync"
 	"os"
 	"sort"
 
@@ -238,6 +239,8 @@ func startTasks(anycastTracker *anycast.Tracker) error {
 
 	setupLog.Info("start bpf interface check")
 	bpf.RunInterfaceCheck()
+
+	neighborsync.StartNeighborSync(&nl.Toolkit{})
 
 	return nil
 }
