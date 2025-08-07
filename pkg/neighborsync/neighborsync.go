@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"strings"
 	"time"
 
 	"github.com/mdlayher/arp"
@@ -11,7 +12,6 @@ import (
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
-	"k8s.io/utils/strings/slices"
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
@@ -172,7 +172,7 @@ func processUpdate(update *netlink.NeighUpdate) {
 		return
 	}
 
-	if !slices.Contains(l2InterfacePrefixes, intf.Name) {
+	if !shouldTrackInterface(intf.Name) {
 		return
 	}
 
@@ -208,6 +208,15 @@ func handleNeighborDelete(neigh *netlink.Neigh) {
 	}
 }
 
+func shouldTrackInterface(name string) bool {
+	for _, prefix := range l2InterfacePrefixes {
+		if strings.HasPrefix(name, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 func loadAllNeighbors(toolkit nl.ToolkitInterface) error {
 	links, err := toolkit.LinkList()
 	if err != nil {
@@ -215,7 +224,7 @@ func loadAllNeighbors(toolkit nl.ToolkitInterface) error {
 	}
 
 	for i := range links {
-		if !slices.Contains(l2InterfacePrefixes, links[i].Attrs().Name) {
+		if !shouldTrackInterface(links[i].Attrs().Name) {
 			continue
 		}
 
