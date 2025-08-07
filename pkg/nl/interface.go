@@ -14,6 +14,7 @@ type ToolkitInterface interface {
 	LinkByName(name string) (netlink.Link, error)
 	LinkList() ([]netlink.Link, error)
 	NeighList(linkIndex int, family int) ([]netlink.Neigh, error)
+	NeighSubscribe(ch chan<- netlink.NeighUpdate, done <-chan struct{}) error
 	NewIPNet(ip net.IP) *net.IPNet
 	RouteListFiltered(family int, filter *netlink.Route, filterMask uint64) ([]netlink.Route, error)
 	RouteDel(route *netlink.Route) error
@@ -55,6 +56,10 @@ func (*Toolkit) LinkList() ([]netlink.Link, error) {
 
 func (*Toolkit) NeighList(linkIndex, family int) ([]netlink.Neigh, error) {
 	return netlink.NeighList(linkIndex, family)
+}
+
+func (*Toolkit) NeighSubscribe(ch chan<- netlink.NeighUpdate, done <-chan struct{}) error {
+	return netlink.NeighSubscribe(ch, done)
 }
 
 func (*Toolkit) NewIPNet(ip net.IP) *net.IPNet {

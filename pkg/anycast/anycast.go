@@ -29,8 +29,6 @@ func NewTracker(toolkit nl.ToolkitInterface) *Tracker {
 		toolkit: toolkit}
 }
 
-// TODO: Anycast Support is currently highly experimental.
-
 func (t *Tracker) checkTrackedInterfaces() {
 	logger := ctrl.Log.WithName("anycast")
 	for _, intfIdx := range t.TrackedBridges {
@@ -77,11 +75,8 @@ func filterNeighbors(neighIn []netlink.Neigh) (neighOut []netlink.Neigh) {
 		if neighIn[i].Flags&netlink.NTF_EXT_LEARNED == netlink.NTF_EXT_LEARNED {
 			continue
 		}
-		if neighIn[i].State != netlink.NUD_NONE &&
-			neighIn[i].State&netlink.NUD_PERMANENT != netlink.NUD_PERMANENT &&
-			neighIn[i].State&netlink.NUD_STALE != netlink.NUD_STALE &&
-			neighIn[i].State&netlink.NUD_REACHABLE != netlink.NUD_REACHABLE &&
-			neighIn[i].State&netlink.NUD_DELAY != netlink.NUD_DELAY {
+		if neighIn[i].State&netlink.NUD_INCOMPLETE == netlink.NUD_INCOMPLETE ||
+			neighIn[i].State&netlink.NUD_FAILED == netlink.NUD_FAILED {
 			continue
 		}
 		neighOut = append(neighOut, neighIn[i])
