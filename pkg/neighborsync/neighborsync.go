@@ -168,7 +168,6 @@ func getFirstNonLLIPv6FromInterface(iface *net.Interface) (netip.Addr, error) {
 func processUpdate(update *netlink.NeighUpdate) {
 	intf, err := net.InterfaceByIndex(update.Neigh.LinkIndex)
 	if err != nil {
-		ctrl.Log.Error(err, "failed to get interface by index", "index", update.Neigh.LinkIndex)
 		return
 	}
 
