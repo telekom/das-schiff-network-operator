@@ -185,15 +185,8 @@ func initComponents(mgr manager.Manager, anycastTracker *anycast.Tracker, cfg *c
 		return fmt.Errorf("unable to attach bpf to interfaces: %w", err)
 	}
 
-	setupLog.Info("start bpf interface check")
-	bpf.RunInterfaceCheck()
-
-	setupLog.Info("start anycast sync")
-	anycastTracker.RunAnycastSync()
-
-	setupLog.Info("start notrack sync")
-	if err := notrack.RunIPTablesSync(); err != nil {
-		setupLog.Error(err, "error starting IPTables sync")
+	if err := startTasks(anycastTracker); err != nil {
+		return fmt.Errorf("unable to start tasks: %w", err)
 	}
 
 	if onlyBPFMode {
@@ -230,6 +223,21 @@ func initComponents(mgr manager.Manager, anycastTracker *anycast.Tracker, cfg *c
 		// Trigger initial reconciliation.
 		r.Reconcile(context.Background())
 	}
+
+	return nil
+}
+
+func startTasks(anycastTracker *anycast.Tracker) error {
+	setupLog.Info("start anycast sync")
+	anycastTracker.RunAnycastSync()
+
+	setupLog.Info("start notrack sync")
+	if err := notrack.RunIPTablesSync(); err != nil {
+		return fmt.Errorf("error starting IPTables sync: %w", err)
+	}
+
+	setupLog.Info("start bpf interface check")
+	bpf.RunInterfaceCheck()
 
 	return nil
 }
