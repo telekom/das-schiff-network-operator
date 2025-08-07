@@ -97,13 +97,8 @@ func sendNDPRequest(linkIndex int, destination net.HardwareAddr, address netip.A
 	if err != nil {
 		return
 	}
-	ip, err := getFirstNonLLIPv6FromInterface(iface)
-	if err != nil {
-		ctrl.Log.Error(err, "failed to get IPv6 address from interface", "interface", iface.Name)
-		return
-	}
 
-	c, _, err := ndp.Listen(iface, ndp.Addr(ip.String()))
+	c, _, err := ndp.Listen(iface, ndp.LinkLocal)
 	if err != nil {
 		ctrl.Log.Error(err, "failed to listen for NDP messages", "interface", iface.Name)
 		return
@@ -124,7 +119,7 @@ func sendNDPRequest(linkIndex int, destination net.HardwareAddr, address netip.A
 		},
 	}
 
-	if err := c.WriteTo(m, nil, ip); err != nil {
+	if err := c.WriteTo(m, nil, address); err != nil {
 		ctrl.Log.Error(err, "sendNDPRequest failed", "address", address)
 	}
 }
@@ -148,27 +143,6 @@ func getFirstIPv4FromInterface(iface *net.Interface) (netip.Addr, error) {
 		}
 	}
 	return netip.Addr{}, fmt.Errorf("no valid IPv4 address found on interface %s", iface.Name)
-}
-
-func getFirstNonLLIPv6FromInterface(iface *net.Interface) (netip.Addr, error) {
-	addrs, err := iface.Addrs()
-	if err != nil {
-		return netip.Addr{}, fmt.Errorf("failed to get addresses for interface %s: %w", iface.Name, err)
-	}
-	for _, addr := range addrs {
-		ipNet, ok := addr.(*net.IPNet)
-		if !ok {
-			continue
-		}
-		if ipNet.IP.To4() != nil {
-			continue
-		}
-		ip, ok := netip.AddrFromSlice(ipNet.IP)
-		if ok && ip.Is6() && !ip.IsLinkLocalUnicast() {
-			return ip, nil
-		}
-	}
-	return netip.Addr{}, fmt.Errorf("no valid global IPv6 address found on interface %s", iface.Name)
 }
 
 func processUpdate(update *netlink.NeighUpdate) {
