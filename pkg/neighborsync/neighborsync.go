@@ -149,6 +149,8 @@ func getFirstIPv4FromInterface(iface *net.Interface) (netip.Addr, error) {
 }
 
 func processUpdate(update *netlink.NeighUpdate) {
+	logger := ctrl.Log.WithName("neighborsync")
+
 	intf, err := net.InterfaceByIndex(update.Neigh.LinkIndex)
 	if err != nil {
 		return
@@ -165,8 +167,10 @@ func processUpdate(update *netlink.NeighUpdate) {
 
 	switch update.Type {
 	case unix.RTM_NEWNEIGH:
+		logger.Info("Received neighbor update", "link", intf.Name, "ip", update.Neigh.IP, "hardwareAddr", update.Neigh.HardwareAddr, "state", update.Neigh.State, "flags", update.Neigh.Flags)
 		handleNeighborAdd(addr, &update.Neigh)
 	case unix.RTM_DELNEIGH:
+		logger.Info("Received neighbor delete", "link", intf.Name, "ip", update.Neigh.IP, "hardwareAddr", update.Neigh.HardwareAddr, "state", update.Neigh.State, "flags", update.Neigh.Flags)
 		handleNeighborDelete(addr, &update.Neigh)
 	}
 }
