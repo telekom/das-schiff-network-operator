@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/netip"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mdlayher/arp"
@@ -18,6 +19,7 @@ import (
 var (
 	refreshEvery = time.Second * 10
 	neighbors    = make(map[timerKey]*timer)
+	neighborsMu  sync.Mutex
 
 	l2InterfacePrefixes = []string{"l2."}
 )
@@ -34,6 +36,8 @@ type timer struct {
 
 func createTimerIfNotExists(linkIndex int, destination net.HardwareAddr, address netip.Addr) {
 	key := timerKey{LinkIndex: linkIndex, Address: address}
+	neighborsMu.Lock()
+	defer neighborsMu.Unlock()
 	if t, exists := neighbors[key]; !exists {
 		neighbors[key] = &timer{NextRun: time.Now().Add(refreshEvery), Address: destination}
 	} else {
@@ -47,7 +51,9 @@ func createTimerIfNotExistsForNeigh(addr netip.Addr, neigh *netlink.Neigh) {
 
 func deleteTimerIfExists(linkIndex int, address netip.Addr) {
 	key := timerKey{LinkIndex: linkIndex, Address: address}
+	neighborsMu.Lock()
 	delete(neighbors, key)
+	neighborsMu.Unlock()
 }
 
 func sendNeighborRequest(linkIndex int, destination net.HardwareAddr, address netip.Addr) {
@@ -244,7 +250,9 @@ func receiveUpdates(toolkit nl.ToolkitInterface) {
 		}
 		close(done)
 		logger.Info("neighbor updates channel closed, restarting neighbor sync, clearing timers")
+		neighborsMu.Lock()
 		neighbors = make(map[timerKey]*timer)
+		neighborsMu.Unlock()
 		time.Sleep(time.Second)
 	}
 }
@@ -255,6 +263,7 @@ func runNeighborCheck() {
 	for range ticker.C {
 		var interfaceRemoved []timerKey
 
+		neighborsMu.Lock()
 		for key, timer := range neighbors {
 			if time.Now().After(timer.NextRun) {
 				if _, err := net.InterfaceByIndex(key.LinkIndex); err != nil {
@@ -267,10 +276,10 @@ func runNeighborCheck() {
 				timer.NextRun = time.Now().Add(refreshEvery)
 			}
 		}
-
 		for _, key := range interfaceRemoved {
 			delete(neighbors, key)
 		}
+		neighborsMu.Unlock()
 	}
 }
 
