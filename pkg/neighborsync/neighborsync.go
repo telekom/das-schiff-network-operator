@@ -41,11 +41,8 @@ func createTimerIfNotExists(linkIndex int, destination net.HardwareAddr, address
 	}
 }
 
-func createTimerIfNotExistsForNeigh(neigh *netlink.Neigh) {
-	addr, ok := netip.AddrFromSlice(neigh.IP)
-	if ok {
-		createTimerIfNotExists(neigh.LinkIndex, neigh.HardwareAddr, addr)
-	}
+func createTimerIfNotExistsForNeigh(addr netip.Addr, neigh *netlink.Neigh) {
+	createTimerIfNotExists(neigh.LinkIndex, neigh.HardwareAddr, addr)
 }
 
 func deleteTimerIfExists(linkIndex int, address netip.Addr) {
@@ -155,36 +152,37 @@ func processUpdate(update *netlink.NeighUpdate) {
 		return
 	}
 
+	addr, ok := netip.AddrFromSlice(update.Neigh.IP)
+	if !ok {
+		return
+	}
+
 	switch update.Type {
 	case unix.RTM_NEWNEIGH:
-		handleNeighborAdd(&update.Neigh)
+		handleNeighborAdd(addr, &update.Neigh)
 	case unix.RTM_DELNEIGH:
-		handleNeighborDelete(&update.Neigh)
+		handleNeighborDelete(addr, &update.Neigh)
 	}
 }
 
-func handleNeighborAdd(neigh *netlink.Neigh) {
+func handleNeighborAdd(addr netip.Addr, neigh *netlink.Neigh) {
 	if neigh.State&netlink.NUD_PERMANENT != 0 || neigh.Flags&netlink.NTF_EXT_LEARNED != 0 {
+		// When the neighbor is moving to permanent or learned, we should stop tracking it.
+		deleteTimerIfExists(neigh.LinkIndex, addr)
 		return
 	}
 
 	if neigh.State&netlink.NUD_REACHABLE != 0 {
-		createTimerIfNotExistsForNeigh(neigh)
+		createTimerIfNotExistsForNeigh(addr, neigh)
 	}
 
 	if neigh.State&netlink.NUD_STALE != 0 {
-		addr, ok := netip.AddrFromSlice(neigh.IP)
-		if ok {
-			sendNeighborRequest(neigh.LinkIndex, neigh.HardwareAddr, addr)
-		}
+		sendNeighborRequest(neigh.LinkIndex, neigh.HardwareAddr, addr)
 	}
 }
 
-func handleNeighborDelete(neigh *netlink.Neigh) {
-	addr, ok := netip.AddrFromSlice(neigh.IP)
-	if ok {
-		deleteTimerIfExists(neigh.LinkIndex, addr)
-	}
+func handleNeighborDelete(addr netip.Addr, neigh *netlink.Neigh) {
+	deleteTimerIfExists(neigh.LinkIndex, addr)
 }
 
 func shouldTrackInterface(name string) bool {
@@ -214,7 +212,11 @@ func loadAllNeighbors(toolkit nl.ToolkitInterface) error {
 			}
 
 			for j := range neighbors {
-				handleNeighborAdd(&neighbors[j])
+				addr, ok := netip.AddrFromSlice(neighbors[j].IP)
+				if !ok {
+					continue
+				}
+				handleNeighborAdd(addr, &neighbors[j])
 			}
 		}
 	}
