@@ -13,7 +13,7 @@ import (
 	mock_dbus "github.com/telekom/das-schiff-network-operator/pkg/frr/dbus/mock"
 	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
-	mock_nl "github.com/telekom/das-schiff-network-operator/pkg/nl/mock"
+	mock_nl "github.com/telekom/das-schiff-network-operator/pkg/nltoolkit/mock"
 	"github.com/vishvananda/netlink"
 	"go.uber.org/mock/gomock"
 )

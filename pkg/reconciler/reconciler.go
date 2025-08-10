@@ -13,7 +13,9 @@ import (
 	"github.com/telekom/das-schiff-network-operator/pkg/debounce"
 	"github.com/telekom/das-schiff-network-operator/pkg/frr"
 	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
+	"github.com/telekom/das-schiff-network-operator/pkg/neighborsync"
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
+	"github.com/telekom/das-schiff-network-operator/pkg/nltoolkit"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -24,6 +26,7 @@ type Reconciler struct {
 	netlinkManager *nl.Manager
 	frrManager     *frr.Manager
 	anycastTracker *anycast.Tracker
+	neighborSync   *neighborsync.NeighborSync
 	config         *config.Config
 	logger         logr.Logger
 	healthChecker  *healthcheck.HealthChecker
@@ -43,12 +46,13 @@ type reconcileData struct {
 	peerings []v1alpha1.BGPPeering
 }
 
-func NewReconciler(clusterClient client.Client, anycastTracker *anycast.Tracker, logger logr.Logger) (*Reconciler, error) {
+func NewReconciler(clusterClient client.Client, anycastTracker *anycast.Tracker, neighborSync *neighborsync.NeighborSync, logger logr.Logger) (*Reconciler, error) {
 	reconciler := &Reconciler{
 		client:         clusterClient,
-		netlinkManager: nl.NewManager(&nl.Toolkit{}),
+		netlinkManager: nl.NewManager(&nltoolkit.Toolkit{}),
 		frrManager:     frr.NewFRRManager(),
 		anycastTracker: anycastTracker,
+		neighborSync:   neighborSync,
 		logger:         logger,
 	}
 

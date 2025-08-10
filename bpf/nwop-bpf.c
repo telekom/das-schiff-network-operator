@@ -234,4 +234,179 @@ int tc_router_func(struct __sk_buff *skb)
 	return tc_redir(skb);
 }
 
+struct
+{
+    __uint(type, BPF_MAP_TYPE_RINGBUF);
+    __uint(max_entries, 1 << 24); // 16 MB
+} neighbor_ringbuf SEC(".maps");
+
+// Max number of ICMPv6 NA options to scan to find TLLA
+#define NA_MAX_OPTS 6
+
+struct neighbor_event
+{
+    __u32 ifindex;
+    __u8 family; // 4 for IPv4, 6 for IPv6
+    __u8 mac[6];
+    __u8 ip[16]; // IPv4 in first 4 bytes, rest zero
+};
+
+// Minimal vlan header definition (avoid kernel headers not available to BPF C)
+struct vlan_hdr
+{
+    __be16 h_vlan_TCI;
+    __be16 h_vlan_encapsulated_proto;
+};
+
+// Minimal ARP header (Ethernet/IPv4)
+struct arp_eth_ipv4
+{
+    __be16 htype;
+    __be16 ptype;
+    __u8 hlen;
+    __u8 plen;
+    __be16 oper;
+    __u8 sha[6];
+    __u8 spa[4];
+    __u8 tha[6];
+    __u8 tpa[4];
+};
+
+static __always_inline int parse_eth(struct xdp_md *ctx, void **data, void **data_end, __u16 *proto, __u64 *off)
+{
+    void *d = (void *)(long)ctx->data;
+    void *de = (void *)(long)ctx->data_end;
+    if (d + sizeof(struct ethhdr) > de)
+        return -1;
+    struct ethhdr *eth = d;
+    *proto = bpf_ntohs(eth->h_proto);
+    *off = sizeof(struct ethhdr);
+
+// Handle single VLAN tag if present
+#ifndef ETH_P_8021AD
+#define ETH_P_8021AD 0x88A8
+#endif
+    if (*proto == ETH_P_8021Q || *proto == ETH_P_8021AD)
+    {
+        if (d + *off + sizeof(struct vlan_hdr) > de)
+            return -1;
+        struct vlan_hdr *vh = d + *off;
+        *proto = bpf_ntohs(vh->h_vlan_encapsulated_proto);
+        *off += sizeof(struct vlan_hdr);
+    }
+
+    *data = d;
+    *data_end = de;
+    return 0;
+}
+
+static __always_inline void emit_event(__u32 ifindex, __u8 family, const __u8 mac[6], const __u8 ip[16])
+{
+    struct neighbor_event *ev = bpf_ringbuf_reserve(&neighbor_ringbuf, sizeof(*ev), 0);
+    if (!ev)
+        return;
+    ev->ifindex = ifindex;
+    ev->family = family;
+    __builtin_memcpy(ev->mac, mac, 6);
+    __builtin_memcpy(ev->ip, ip, 16);
+    bpf_ringbuf_submit(ev, 0);
+}
+
+SEC("xdp")
+int handle_neighbor_reply_xdp(struct xdp_md *ctx)
+{
+    void *data, *data_end;
+    __u16 proto = 0;
+    __u64 off = 0;
+    if (parse_eth(ctx, &data, &data_end, &proto, &off) < 0)
+        return XDP_PASS;
+
+    // Prepare buffers
+    __u8 mac[6] = {};
+    __u8 ip[16] = {};
+
+    if (proto == ETH_P_ARP)
+    {
+        if (data + off + sizeof(struct arp_eth_ipv4) > data_end)
+            return XDP_PASS;
+        struct arp_eth_ipv4 *arp = data + off;
+        if (arp->hlen != 6 || arp->plen != 4)
+            return XDP_PASS;
+        // Only handle ARP reply (oper == 2)
+        if (bpf_ntohs(arp->oper) != 2)
+            return XDP_PASS;
+
+        // Sender is the neighbor we're learning
+        __builtin_memcpy(mac, arp->sha, 6);
+        // IPv4 goes in first 4 bytes of ip buffer
+        __builtin_memcpy(ip, arp->spa, 4);
+        emit_event(ctx->ingress_ifindex, 4 /* IPv4 */, mac, ip);
+    }
+    else if (proto == ETH_P_IPV6)
+    {
+        if (data + off + sizeof(struct ipv6hdr) > data_end)
+            return XDP_PASS;
+        struct ipv6hdr *ip6 = data + off;
+        if (ip6->nexthdr != IPPROTO_ICMPV6)
+            return XDP_PASS;
+        __u64 off2 = off + sizeof(struct ipv6hdr);
+        // Minimal ICMPv6 header check
+        if (data + off2 + sizeof(struct icmp6hdr) > data_end)
+            return XDP_PASS;
+        struct icmp6hdr *icmp6 = data + off2;
+        // Neighbor Advertisement type = 136
+        if (icmp6->icmp6_type != 136)
+            return XDP_PASS;
+
+        // After icmp6hdr comes the 16-byte target address directly
+        unsigned char *pos = (unsigned char *)((void *)icmp6 + sizeof(struct icmp6hdr));
+        if ((void *)pos + 16 > data_end)
+            return XDP_PASS;
+        __builtin_memcpy(ip, pos, 16);
+        pos += 16;
+
+        // Parse up to NA_MAX_OPTS options to find Target Link-Layer Address (type 2)
+        __u8 emitted = 0;
+#pragma unroll
+        for (int i = 0; i < NA_MAX_OPTS; i++)
+        {
+            if (emitted)
+                break;
+            // Ensure we can read type and length without OOB
+            if ((void *)pos + 2 > data_end)
+                break;
+            __u8 hdr[2];
+            __builtin_memcpy(hdr, pos, 2);
+            __u8 opt_type = hdr[0];
+            __u8 opt_len_units = hdr[1];
+            if (opt_len_units == 0)
+                break;
+            // Cap units to a sane bound to help the verifier reason about opt_len
+            if (opt_len_units > 32)
+                break;
+            __u64 opt_len = (__u64)opt_len_units * 8;
+            // Ensure whole option is within bounds before accessing its body
+            if ((void *)pos + opt_len > data_end)
+                break;
+
+            if (opt_type == 2 /* TLLA */)
+            {
+                if (opt_len >= 8 && (void *)pos + 8 <= data_end)
+                {
+                    __u8 mac6[6] = {};
+                    __builtin_memcpy(mac6, (void *)pos + 2, 6);
+                    emit_event(ctx->ingress_ifindex, 6 /* IPv6 */, mac6, ip);
+                    emitted = 1;
+                }
+                break; // stop after TLLA processing
+            }
+
+            // Move to next option
+            pos += opt_len;
+        }
+    }
+
+    return XDP_PASS;
+}
+
 char _license[] SEC("license") = "GPL";

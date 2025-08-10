@@ -343,18 +343,32 @@ func (mr *MockToolkitInterfaceMockRecorder) NeighList(linkIndex, family any) *go
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NeighList", reflect.TypeOf((*MockToolkitInterface)(nil).NeighList), linkIndex, family)
 }
 
-// NeighSubscribe mocks base method.
-func (m *MockToolkitInterface) NeighSubscribe(ch chan<- netlink.NeighUpdate, done <-chan struct{}) error {
+// NeighSet mocks base method.
+func (m *MockToolkitInterface) NeighSet(neigh *netlink.Neigh) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "NeighSubscribe", ch, done)
+	ret := m.ctrl.Call(m, "NeighSet", neigh)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
-// NeighSubscribe indicates an expected call of NeighSubscribe.
-func (mr *MockToolkitInterfaceMockRecorder) NeighSubscribe(ch, done any) *gomock.Call {
+// NeighSet indicates an expected call of NeighSet.
+func (mr *MockToolkitInterfaceMockRecorder) NeighSet(neigh any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NeighSubscribe", reflect.TypeOf((*MockToolkitInterface)(nil).NeighSubscribe), ch, done)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NeighSet", reflect.TypeOf((*MockToolkitInterface)(nil).NeighSet), neigh)
+}
+
+// NeighSubscribeWithOptions mocks base method.
+func (m *MockToolkitInterface) NeighSubscribeWithOptions(ch chan<- netlink.NeighUpdate, done <-chan struct{}, options netlink.NeighSubscribeOptions) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "NeighSubscribeWithOptions", ch, done, options)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// NeighSubscribeWithOptions indicates an expected call of NeighSubscribeWithOptions.
+func (mr *MockToolkitInterfaceMockRecorder) NeighSubscribeWithOptions(ch, done, options any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NeighSubscribeWithOptions", reflect.TypeOf((*MockToolkitInterface)(nil).NeighSubscribeWithOptions), ch, done, options)
 }
 
 // NewIPNet mocks base method.

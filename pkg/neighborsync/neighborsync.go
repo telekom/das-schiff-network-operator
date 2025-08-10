@@ -1,28 +1,27 @@
 package neighborsync
 
 import (
+	"encoding/binary"
+	"errors"
 	"fmt"
 	"net"
 	"net/netip"
-	"strings"
 	"sync"
+	"syscall"
 	"time"
 
+	"github.com/cilium/ebpf/ringbuf"
 	"github.com/mdlayher/arp"
 	"github.com/mdlayher/ndp"
-	"github.com/telekom/das-schiff-network-operator/pkg/nl"
+	"github.com/telekom/das-schiff-network-operator/pkg/bpf"
+	"github.com/telekom/das-schiff-network-operator/pkg/nltoolkit"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
-var (
-	refreshEvery = time.Second * 10
-	neighbors    = make(map[timerKey]*timer)
-	neighborsMu  sync.Mutex
-
-	l2InterfacePrefixes = []string{"l2."}
-)
+const hardwareAddrLen = 6
+const refreshEvery = time.Second * 10
 
 type timerKey struct {
 	LinkIndex int
@@ -34,26 +33,33 @@ type timer struct {
 	Address net.HardwareAddr
 }
 
-func createTimerIfNotExists(linkIndex int, destination net.HardwareAddr, address netip.Addr) {
+type NeighborSync struct {
+	toolkit nltoolkit.ToolkitInterface
+
+	neighbors sync.Map // map[timerKey]*timer
+
+	neighRefreshInterfaces sync.Map
+	sendGratuitousNeighbor sync.Map
+	receiveNeighbors       sync.Map
+}
+
+func (n *NeighborSync) createTimerIfNotExists(linkIndex int, destination net.HardwareAddr, address netip.Addr) {
 	key := timerKey{LinkIndex: linkIndex, Address: address}
-	neighborsMu.Lock()
-	defer neighborsMu.Unlock()
-	if t, exists := neighbors[key]; !exists {
-		neighbors[key] = &timer{NextRun: time.Now().Add(refreshEvery), Address: destination}
-	} else {
-		t.Address = destination
+	actual, loaded := n.neighbors.LoadOrStore(key, &timer{NextRun: time.Now().Add(refreshEvery), Address: destination})
+	if loaded {
+		if t, ok := actual.(*timer); ok {
+			t.Address = destination
+		}
 	}
 }
 
-func createTimerIfNotExistsForNeigh(addr netip.Addr, neigh *netlink.Neigh) {
-	createTimerIfNotExists(neigh.LinkIndex, neigh.HardwareAddr, addr)
+func (n *NeighborSync) createTimerIfNotExistsForNeigh(addr netip.Addr, neigh *netlink.Neigh) {
+	n.createTimerIfNotExists(neigh.LinkIndex, neigh.HardwareAddr, addr)
 }
 
-func deleteTimerIfExists(linkIndex int, address netip.Addr) {
+func (n *NeighborSync) deleteTimerIfExists(linkIndex int, address netip.Addr) {
 	key := timerKey{LinkIndex: linkIndex, Address: address}
-	neighborsMu.Lock()
-	delete(neighbors, key)
-	neighborsMu.Unlock()
+	n.neighbors.Delete(key)
 }
 
 func sendNeighborRequest(linkIndex int, destination net.HardwareAddr, address netip.Addr) {
@@ -64,6 +70,23 @@ func sendNeighborRequest(linkIndex int, destination net.HardwareAddr, address ne
 		sendNDPRequest(linkIndex, destination, address)
 	default:
 		ctrl.Log.Error(fmt.Errorf("unsupported IP address type: %s", address), "sendNeighborRequest failed")
+	}
+}
+
+func sendGratuitousNeighbor(linkIndex int, address netip.Addr, mac net.HardwareAddr) {
+	intf, err := net.InterfaceByIndex(linkIndex)
+	if err != nil {
+		ctrl.Log.Error(err, "failed to get interface by index", "index", linkIndex)
+		return
+	}
+
+	switch {
+	case address.Is4():
+		sendGratuitousARP(intf, address, mac)
+	case address.Is6():
+		sendUnsolicitedNA(intf, address, mac)
+	default:
+		ctrl.Log.Error(fmt.Errorf("unsupported IP address type: %s", address), "sendGratuitousNeighbor failed")
 	}
 }
 
@@ -127,6 +150,53 @@ func sendNDPRequest(linkIndex int, destination net.HardwareAddr, address netip.A
 	}
 }
 
+// sendGratuitousARP emits a broadcast ARP reply announcing ip->mac.
+func sendGratuitousARP(ifi *net.Interface, nip netip.Addr, mac net.HardwareAddr) {
+	c, err := arp.Dial(ifi)
+	if err != nil {
+		ctrl.Log.Error(err, "failed to dial ARP", "interface", ifi.Name)
+		return
+	}
+	defer c.Close()
+
+	// ARP reply with sender and target set to the same mapping.
+	pkt, err := arp.NewPacket(arp.OperationReply, mac, nip, mac, nip)
+	if err != nil {
+		ctrl.Log.Error(err, "failed to create ARP packet", "interface", ifi.Name, "address", nip)
+		return
+	}
+	bcast := net.HardwareAddr{0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
+	if err := c.WriteTo(pkt, bcast); err != nil {
+		ctrl.Log.Error(err, "sendGratuitousARP failed", "interface", ifi.Name, "address", nip)
+	}
+}
+
+// sendUnsolicitedNA emits an unsolicited neighbor advertisement to all-nodes multicast.
+func sendUnsolicitedNA(ifi *net.Interface, nip netip.Addr, mac net.HardwareAddr) {
+	// Build NA message: Override=1, Solicited=0, Router=0, include TLLA option.
+	na := &ndp.NeighborAdvertisement{
+		Router:        false,
+		Solicited:     false,
+		Override:      true,
+		TargetAddress: nip,
+		Options: []ndp.Option{&ndp.LinkLayerAddress{
+			Direction: ndp.Target,
+			Addr:      mac,
+		}},
+	}
+	// Open an NDP connection bound to ifi and send to ff02::1 (all-nodes)
+	conn, _, err := ndp.Listen(ifi, ndp.LinkLocal)
+	if err != nil {
+		ctrl.Log.Error(err, "failed to open socket for NDP messages", "interface", ifi.Name)
+		return
+	}
+	defer conn.Close()
+	dst, _ := netip.ParseAddr("ff02::1")
+	if err := conn.WriteTo(na, nil, dst); err != nil {
+		ctrl.Log.Error(err, "sendUnsolicitedNA failed", "interface", ifi.Name, "address", nip)
+	}
+}
+
 func getFirstIPv4FromInterface(iface *net.Interface) (netip.Addr, error) {
 	addrs, err := iface.Addrs()
 	if err != nil {
@@ -148,7 +218,7 @@ func getFirstIPv4FromInterface(iface *net.Interface) (netip.Addr, error) {
 	return netip.Addr{}, fmt.Errorf("no valid IPv4 address found on interface %s", iface.Name)
 }
 
-func processUpdate(update *netlink.NeighUpdate) {
+func (n *NeighborSync) processUpdate(update *netlink.NeighUpdate) {
 	logger := ctrl.Log.WithName("neighborsync")
 
 	intf, err := net.InterfaceByIndex(update.Neigh.LinkIndex)
@@ -156,7 +226,7 @@ func processUpdate(update *netlink.NeighUpdate) {
 		return
 	}
 
-	if !shouldTrackInterface(intf.Name) {
+	if _, ok := n.neighRefreshInterfaces.Load(update.Neigh.LinkIndex); !ok {
 		return
 	}
 
@@ -168,22 +238,27 @@ func processUpdate(update *netlink.NeighUpdate) {
 	switch update.Type {
 	case unix.RTM_NEWNEIGH:
 		logger.Info("Received neighbor update", "link", intf.Name, "ip", update.Neigh.IP, "hardwareAddr", update.Neigh.HardwareAddr, "state", update.Neigh.State, "flags", update.Neigh.Flags)
-		handleNeighborAdd(addr, &update.Neigh)
+		n.handleNeighborAdd(addr, &update.Neigh)
 	case unix.RTM_DELNEIGH:
 		logger.Info("Received neighbor delete", "link", intf.Name, "ip", update.Neigh.IP, "hardwareAddr", update.Neigh.HardwareAddr, "state", update.Neigh.State, "flags", update.Neigh.Flags)
-		handleNeighborDelete(addr, &update.Neigh)
+		n.handleNeighborDelete(addr, &update.Neigh)
 	}
 }
 
-func handleNeighborAdd(addr netip.Addr, neigh *netlink.Neigh) {
-	if neigh.State&netlink.NUD_PERMANENT != 0 || neigh.Flags&netlink.NTF_EXT_LEARNED != 0 {
-		// When the neighbor is moving to permanent or learned, we should stop tracking it.
-		deleteTimerIfExists(neigh.LinkIndex, addr)
+func (n *NeighborSync) handleNeighborAdd(addr netip.Addr, neigh *netlink.Neigh) {
+	if neigh.Flags&netlink.NTF_EXT_LEARNED != 0 {
+		// Send gratuitous ARP/NA when creating an extern_learned
+		if _, ok := n.sendGratuitousNeighbor.Load(neigh.LinkIndex); ok {
+			sendGratuitousNeighbor(neigh.LinkIndex, addr, neigh.HardwareAddr)
+		}
+
+		// When the neighbor is moving to extern_learned, also stop tracking it.
+		n.deleteTimerIfExists(neigh.LinkIndex, addr)
 		return
 	}
 
 	if neigh.State&netlink.NUD_REACHABLE != 0 {
-		createTimerIfNotExistsForNeigh(addr, neigh)
+		n.createTimerIfNotExistsForNeigh(addr, neigh)
 	}
 
 	if neigh.State&netlink.NUD_STALE != 0 {
@@ -191,104 +266,226 @@ func handleNeighborAdd(addr netip.Addr, neigh *netlink.Neigh) {
 	}
 }
 
-func handleNeighborDelete(addr netip.Addr, neigh *netlink.Neigh) {
-	deleteTimerIfExists(neigh.LinkIndex, addr)
+func (n *NeighborSync) handleNeighborDelete(addr netip.Addr, neigh *netlink.Neigh) {
+	n.deleteTimerIfExists(neigh.LinkIndex, addr)
 }
 
-func shouldTrackInterface(name string) bool {
-	for _, prefix := range l2InterfacePrefixes {
-		if strings.HasPrefix(name, prefix) {
-			return true
-		}
-	}
-	return false
-}
-
-func loadAllNeighbors(toolkit nl.ToolkitInterface) error {
-	links, err := toolkit.LinkList()
-	if err != nil {
-		return fmt.Errorf("failed to get link list: %w", err)
-	}
-
-	for i := range links {
-		if !shouldTrackInterface(links[i].Attrs().Name) {
-			continue
-		}
-
-		for _, family := range []int{unix.AF_INET, unix.AF_INET6} {
-			neighbors, err := toolkit.NeighList(links[i].Attrs().Index, family)
-			if err != nil {
-				return fmt.Errorf("failed to get neighbors for link %s: %w", links[i].Attrs().Name, err)
-			}
-
-			for j := range neighbors {
-				addr, ok := netip.AddrFromSlice(neighbors[j].IP)
-				if !ok {
-					continue
-				}
-				handleNeighborAdd(addr, &neighbors[j])
-			}
-		}
-	}
-
-	return nil
-}
-
-func receiveUpdates(toolkit nl.ToolkitInterface) {
+func (n *NeighborSync) receiveUpdates() {
 	logger := ctrl.Log.WithName("neighborsync")
 
 	for {
-		if err := loadAllNeighbors(toolkit); err != nil {
-			logger.Error(err, "failed to load all neighbors")
-		}
-
 		updates := make(chan netlink.NeighUpdate)
 		done := make(chan struct{})
-		err := toolkit.NeighSubscribe(updates, done)
+		err := n.toolkit.NeighSubscribeWithOptions(updates, done, netlink.NeighSubscribeOptions{ListExisting: true})
 		if err != nil {
 			logger.Error(err, "failed to subscribe to neighbor updates")
 			break
 		}
 		for update := range updates {
-			processUpdate(&update)
+			n.processUpdate(&update)
 		}
 		close(done)
 		logger.Info("neighbor updates channel closed, restarting neighbor sync, clearing timers")
-		neighborsMu.Lock()
-		neighbors = make(map[timerKey]*timer)
-		neighborsMu.Unlock()
+		n.neighbors = sync.Map{} // Clear all timers
 		time.Sleep(time.Second)
 	}
 }
 
-func runNeighborCheck() {
+func (n *NeighborSync) syncKernelNeighbors(intfIndex int) {
+	neighbors, err := n.toolkit.NeighList(intfIndex, netlink.FAMILY_ALL)
+	if err != nil {
+		ctrl.Log.Error(err, "failed to list neighbors")
+		return
+	}
+
+	for i := range neighbors {
+		addr, ok := netip.AddrFromSlice(neighbors[i].IP)
+		if !ok {
+			continue
+		}
+		n.handleNeighborAdd(addr, &neighbors[i])
+	}
+}
+
+func (n *NeighborSync) runNeighborCheck() {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for range ticker.C {
 		var interfaceRemoved []timerKey
 
-		neighborsMu.Lock()
-		for key, timer := range neighbors {
-			if time.Now().After(timer.NextRun) {
-				if _, err := net.InterfaceByIndex(key.LinkIndex); err != nil {
-					ctrl.Log.Info("interface removed, deleting neighbor timer", "linkIndex", key.LinkIndex, "address", key.Address)
-					interfaceRemoved = append(interfaceRemoved, key)
-					continue
+		n.neighbors.Range(func(key any, value any) bool {
+			timerKeyVal, ok1 := key.(timerKey)
+			timerVal, ok2 := value.(*timer)
+			if !ok1 || !ok2 {
+				return true
+			}
+			if time.Now().After(timerVal.NextRun) {
+				if _, err := net.InterfaceByIndex(timerKeyVal.LinkIndex); err != nil {
+					ctrl.Log.Info("interface removed, deleting neighbor timer", "linkIndex", timerKeyVal.LinkIndex, "address", timerKeyVal.Address)
+					interfaceRemoved = append(interfaceRemoved, timerKeyVal)
+					return true
 				}
 
-				sendNeighborRequest(key.LinkIndex, timer.Address, key.Address)
-				timer.NextRun = time.Now().Add(refreshEvery)
+				sendNeighborRequest(timerKeyVal.LinkIndex, timerVal.Address, timerKeyVal.Address)
+				timerVal.NextRun = time.Now().Add(refreshEvery)
 			}
-		}
+			return true
+		})
 		for _, key := range interfaceRemoved {
-			delete(neighbors, key)
+			n.neighbors.Delete(key)
 		}
-		neighborsMu.Unlock()
 	}
 }
 
-func StartNeighborSync(toolkit nl.ToolkitInterface) {
-	go receiveUpdates(toolkit)
+func (n *NeighborSync) runBpfNeighborSync() {
+	// Open ring buffer reader.
+	rd, err := ringbuf.NewReader(bpf.EbpfNeighborRingbuf())
+	if err != nil {
+		ctrl.Log.Error(err, "failed to open ringbuf reader")
+	}
+	defer rd.Close()
 
-	go runNeighborCheck()
+	for {
+		rec, err := rd.Read()
+		if err != nil {
+			if errors.Is(err, ringbuf.ErrClosed) {
+				return
+			}
+			// EAGAIN is okay
+			var errno syscall.Errno
+			if errors.As(err, &errno) && (errno == unix.EINTR || errno == unix.EAGAIN) {
+				continue
+			}
+			ctrl.Log.Error(err, "failed to read ringbuf")
+			return
+		}
+
+		// Parse loader.NeighborEvent from rec.RawSample
+		var ev bpf.NeighborEvent
+		if len(rec.RawSample) < bpf.NeighborEventSize { // 4+1+6+16
+			continue
+		}
+		// Use unsafe-free manual copy
+		// Fields: ifindex u32, family u8, mac[6], ip[16]
+		b := rec.RawSample
+		ev.Ifindex = binary.LittleEndian.Uint32(b[0:4])
+		ev.Family = bpf.AddressFamily(b[4])
+		copy(ev.Mac[:], b[5:11])
+		copy(ev.IP[:], b[11:27])
+
+		skipping := false
+		if _, ok := n.receiveNeighbors.Load(int(ev.Ifindex)); !ok {
+			skipping = true
+		}
+
+		var ip net.IP
+		var family int
+		if ev.Family == bpf.AddressFamilyIPv4 {
+			ip = net.IP(ev.IP[:4])
+			family = unix.AF_INET
+		} else {
+			ip = net.IP(ev.IP[:])
+			family = unix.AF_INET6
+		}
+
+		ctrl.Log.Info("received BPF neighbor event", "ifindex", ev.Ifindex, "family", family, "ip", ip.String(), "mac", net.HardwareAddr(ev.Mac[:]).String(), "skipped", skipping)
+
+		if skipping {
+			continue
+		}
+
+		// Update neighbor table to REACHABLE for this mapping.
+		if err := n.replaceNeighborReachable(int(ev.Ifindex), family, ip, ev.Mac); err != nil {
+			ctrl.Log.Error(err, "neigh replace failed")
+		}
+	}
+}
+
+// replaceNeighborReachable sets/updates a neighbor entry for the given mapping with state REACHABLE.
+func (n *NeighborSync) replaceNeighborReachable(ifindex, family int, ip net.IP, macbuf [6]byte) error {
+	if len(ip) == 0 {
+		return fmt.Errorf("empty IP from event")
+	}
+	hw := net.HardwareAddr(macbuf[:])
+	if len(hw) != hardwareAddrLen {
+		return fmt.Errorf("invalid MAC from event")
+	}
+
+	link, err := n.toolkit.LinkByIndex(ifindex)
+	if err != nil {
+		return fmt.Errorf("failed to get link by index: %w", err)
+	}
+
+	neigh := &netlink.Neigh{
+		LinkIndex:    link.Attrs().MasterIndex,
+		Family:       family,
+		State:        netlink.NUD_REACHABLE,
+		IP:           ip,
+		HardwareAddr: hw,
+	}
+	if err := n.toolkit.NeighSet(neigh); err != nil {
+		return fmt.Errorf("failed to set neighbor: %w", err)
+	}
+	return nil
+}
+
+func NewNeighborSync(toolkit nltoolkit.ToolkitInterface) *NeighborSync {
+	return &NeighborSync{
+		toolkit: toolkit,
+	}
+}
+
+// StartNeighborSync starts the neighbor synchronization process.
+// a) Each netlink (non-extern_learn, non-permanent) neighbor entries are checked regularly. This is accomplished by periodically sending ARP requests for IPv4 and Neighbor Solicitation messages for IPv6.
+// b) BPF is attached to the "l2v." interfaces, reading all ARP responses and Neighbor Advertisements. When a neighbor entry is detected, it is added to the neighbor table as reachable.
+// c) When a neighbor moves to extern_learned or permanent state, it is no longer refreshed **by this instance**. However a gratuitous ARP request or Neighbor Solicitation is generated to notify local apps.
+// We don't make use of the extended community defined in RFC 9047, however there shouldn't be any RAs / router flags on the vlans we watch here (we are the router!)
+func (n *NeighborSync) StartNeighborSync() {
+	go n.receiveUpdates()
+	go n.runNeighborCheck()
+	go n.runBpfNeighborSync()
+}
+
+// EnsureARPRefresh marks the given interface ID for ARP refresh.
+func (n *NeighborSync) EnsureARPRefresh(interfaceID int) {
+	_, existing := n.neighRefreshInterfaces.Load(interfaceID)
+
+	n.neighRefreshInterfaces.Store(interfaceID, struct{}{})
+
+	if !existing {
+		n.syncKernelNeighbors(interfaceID)
+	}
+}
+
+// EnsureNeighborSuppression marks the given interface ID for neighbor suppression.
+func (n *NeighborSync) EnsureNeighborSuppression(bridgeID, vethID int) error {
+	_, existing := n.sendGratuitousNeighbor.Load(bridgeID)
+
+	n.sendGratuitousNeighbor.Store(bridgeID, struct{}{})
+	n.receiveNeighbors.Store(vethID, struct{}{})
+
+	if !existing {
+		n.syncKernelNeighbors(bridgeID)
+	}
+
+	// Load BPF program
+	nlLink, err := n.toolkit.LinkByIndex(vethID)
+	if err != nil {
+		return fmt.Errorf("failed to get link by index: %w", err)
+	}
+	if err := bpf.AttachNeighborHandlerToInterface(nlLink); err != nil {
+		return fmt.Errorf("failed to attach BPF program: %w", err)
+	}
+	return nil
+}
+
+// DisableARPRefresh marks the given interface ID for ARP refresh.
+func (n *NeighborSync) DisableARPRefresh(interfaceID int) {
+	n.neighRefreshInterfaces.Delete(interfaceID)
+}
+
+// DisableNeighborSuppression marks the given interface ID for neighbor suppression.
+func (n *NeighborSync) DisableNeighborSuppression(bridgeID, vethID int) {
+	n.sendGratuitousNeighbor.Delete(bridgeID)
+	n.receiveNeighbors.Delete(vethID)
 }

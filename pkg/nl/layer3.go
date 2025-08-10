@@ -43,7 +43,7 @@ func (n *Manager) CreateL3(info VRFInformation) error {
 	if err != nil {
 		return err
 	}
-	if err := bpf.AttachToInterface(bridge); err != nil {
+	if err := bpf.AttachRouterToInterface(bridge); err != nil {
 		return fmt.Errorf("error attaching BPF: %w", err)
 	}
 
@@ -51,7 +51,7 @@ func (n *Manager) CreateL3(info VRFInformation) error {
 	if err != nil {
 		return err
 	}
-	if err := bpf.AttachToInterface(veth); err != nil {
+	if err := bpf.AttachRouterToInterface(veth); err != nil {
 		return fmt.Errorf("error attaching BPF: %w", err)
 	}
 
@@ -59,7 +59,7 @@ func (n *Manager) CreateL3(info VRFInformation) error {
 	if err != nil {
 		return err
 	}
-	if err := bpf.AttachToInterface(vxlan); err != nil {
+	if err := bpf.AttachRouterToInterface(vxlan); err != nil {
 		return fmt.Errorf("error attaching BPF: %w", err)
 	}
 
@@ -146,19 +146,19 @@ func (n *Manager) GetL3ByName(name string) (*VRFInformation, error) {
 func (n *Manager) EnsureBPFProgram(info VRFInformation) error {
 	if link, err := n.toolkit.LinkByName(bridgePrefix + info.Name); err != nil {
 		return fmt.Errorf("error getting bridge interface of vrf %s: %w", info.Name, err)
-	} else if err := bpf.AttachToInterface(link); err != nil {
+	} else if err := bpf.AttachRouterToInterface(link); err != nil {
 		return fmt.Errorf("error attaching bpf program to bridge interface of vrf %s: %w", info.Name, err)
 	}
 
 	if link, err := n.toolkit.LinkByName(vrfToDefaultPrefix + info.Name); err != nil {
 		return fmt.Errorf("error getting vrf2default interface of vrf %s: %w", info.Name, err)
-	} else if err := bpf.AttachToInterface(link); err != nil {
+	} else if err := bpf.AttachRouterToInterface(link); err != nil {
 		return fmt.Errorf("error attaching bpf program to vrf2default interface of vrf %s: %w", info.Name, err)
 	}
 
 	if link, err := n.toolkit.LinkByName(vxlanPrefix + info.Name); err != nil {
 		return fmt.Errorf("error getting vxlan interface of vrf %s: %w", info.Name, err)
-	} else if err := bpf.AttachToInterface(link); err != nil {
+	} else if err := bpf.AttachRouterToInterface(link); err != nil {
 		return fmt.Errorf("error attaching bpf program to vxlan interface of vrf %s: %w", info.Name, err)
 	}
 

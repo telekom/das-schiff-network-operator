@@ -2,6 +2,8 @@ package nl
 
 import (
 	"net"
+
+	"github.com/telekom/das-schiff-network-operator/pkg/nltoolkit"
 )
 
 const (
@@ -28,10 +30,10 @@ const (
 var macPrefix = []byte("\x02\x54")
 
 type Manager struct {
-	toolkit ToolkitInterface
+	toolkit nltoolkit.ToolkitInterface
 }
 
-func NewManager(toolkit ToolkitInterface) *Manager {
+func NewManager(toolkit nltoolkit.ToolkitInterface) *Manager {
 	return &Manager{toolkit: toolkit}
 }
 

@@ -6,6 +6,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
+	"github.com/telekom/das-schiff-network-operator/pkg/nltoolkit"
 	"github.com/telekom/das-schiff-network-operator/pkg/route"
 	ctrl "sigs.k8s.io/controller-runtime"
 )
@@ -44,7 +45,7 @@ func NewNetlinkCollector() (Collector, error) {
 			),
 			valueType: prometheus.GaugeValue,
 		},
-		netlink: nl.NewManager(&nl.Toolkit{}),
+		netlink: nl.NewManager(&nltoolkit.Toolkit{}),
 	}
 	collector.name = nlCollectorName
 	collector.logger = ctrl.Log.WithName("netlink.collector")
