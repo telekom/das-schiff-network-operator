@@ -4,15 +4,17 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"time"
 
 	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/rlimit"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 )
 
-//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target amd64 router ../../bpf/router.c
+//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target amd64 nwopbpf ../../bpf/nwop-bpf.c
 
 const (
 	majorNumber            = 0xffff
@@ -21,22 +23,40 @@ const (
 )
 
 var (
-	router                  routerObjects
+	nwopbpf                 nwopbpfObjects
 	trackedInterfaceIndices []int
 	qdiscHandle             = netlink.MakeHandle(majorNumber, minorNumebr)
 )
+
+// NeighborEvent mirrors the C struct neighbor_event in neighbor-bpf.c.
+// Keep the field order and sizes in sync with the C program.
+type NeighborEvent struct {
+	Ifindex uint32
+	Family  AddressFamily // 4 or 6
+	Mac     [6]byte
+	IP      [16]byte
+}
+
+type AddressFamily uint8
+
+const (
+	AddressFamilyIPv4 AddressFamily = 4
+	AddressFamilyIPv6 AddressFamily = 6
+)
+
+const NeighborEventSize = 27 // 4 + 1 + 6 + 16
 
 func InitBPFRouter() error {
 	if err := rlimit.RemoveMemlock(); err != nil {
 		return fmt.Errorf("error removing memlock: %w", err)
 	}
-	if err := loadRouterObjects(&router, nil); err != nil {
+	if err := loadNwopbpfObjects(&nwopbpf, nil); err != nil {
 		return err
 	}
 	return nil
 }
 
-func AttachToInterface(intf netlink.Link) error {
+func AttachRouterToInterface(intf netlink.Link) error {
 	err := attach(intf)
 	if err != nil {
 		return err
@@ -45,25 +65,46 @@ func AttachToInterface(intf netlink.Link) error {
 	return nil
 }
 
-func AttachInterfaces(intfs []string) error {
+func AttachRouterInterfaces(intfs []string) error {
 	for _, name := range intfs {
 		intf, err := netlink.LinkByName(name)
 		if err != nil {
 			return fmt.Errorf("error getting link %s by name: %w", name, err)
 		}
-		if err := AttachToInterface(intf); err != nil {
+		if err := AttachRouterToInterface(intf); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
+func AttachNeighborHandlerToInterface(intf netlink.Link) error {
+	// Attach XDP program.
+	iface, err := net.InterfaceByName(intf.Attrs().Name)
+	if err != nil {
+		return fmt.Errorf("error getting interface by name %s: %w", intf.Attrs().Name, err)
+	}
+	_, err = link.AttachXDP(link.XDPOptions{
+		Program:   nwopbpf.HandleNeighborReplyXdp,
+		Interface: iface.Index,
+		Flags:     link.XDPGenericMode,
+	})
+	if err != nil {
+		return fmt.Errorf("error attaching XDP program: %w", err)
+	}
+	return nil
+}
+
 func EbpfRetStatsMap() *ebpf.Map {
-	return router.routerMaps.EbpfRetStatsMap
+	return nwopbpf.nwopbpfMaps.EbpfRetStatsMap
 }
 
 func EbpfFibLkupStatsMap() *ebpf.Map {
-	return router.routerMaps.EbpfFibLkupStatsMap
+	return nwopbpf.nwopbpfMaps.EbpfFibLkupStatsMap
+}
+
+func EbpfNeighborRingbuf() *ebpf.Map {
+	return nwopbpf.nwopbpfMaps.NeighborRingbuf
 }
 
 // First we ensure the qdisc is there. It is a very basic check, ensuring we have an clsact qdisc with the correct handle
@@ -101,7 +142,7 @@ func ensureFilter(intf netlink.Link) error {
 	if err != nil {
 		return fmt.Errorf("error getting list of filters for interface %s: %w", intf.Attrs().Name, err)
 	}
-	programInfo, err := router.TcRouterFunc.Info()
+	programInfo, err := nwopbpf.TcRouterFunc.Info()
 	if err != nil {
 		return fmt.Errorf("error getting program info: %w", err)
 	}
@@ -121,7 +162,7 @@ func ensureFilter(intf netlink.Link) error {
 			Protocol:  unix.ETH_P_ALL,
 		},
 		DirectAction: true,
-		Fd:           router.TcRouterFunc.FD(),
+		Fd:           nwopbpf.TcRouterFunc.FD(),
 		Name:         "tc_router",
 	}
 
@@ -136,7 +177,7 @@ func attach(intf netlink.Link) error {
 	ifIndex := intf.Attrs().Index
 
 	if intf.Type() == "vxlan" {
-		if err := router.LookupPort.Put(int32(ifIndex), int32(intf.Attrs().MasterIndex)); err != nil {
+		if err := nwopbpf.LookupPort.Put(int32(ifIndex), int32(intf.Attrs().MasterIndex)); err != nil {
 			return fmt.Errorf("error attaching eBPF map element: %w", err)
 		}
 	}
@@ -152,7 +193,7 @@ func attach(intf netlink.Link) error {
 func checkTrackedInterfaces() {
 	for i := 0; i < len(trackedInterfaceIndices); i++ {
 		idx := trackedInterfaceIndices[i]
-		link, err := netlink.LinkByIndex(idx)
+		nlLink, err := netlink.LinkByIndex(idx)
 
 		if errors.As(err, &netlink.LinkNotFoundError{}) {
 			trackedInterfaceIndices = append(trackedInterfaceIndices[:i], trackedInterfaceIndices[i+1:]...)
@@ -167,14 +208,14 @@ func checkTrackedInterfaces() {
 			continue
 		}
 
-		if err := attach(link); err != nil {
-			log.Printf("Link %d: %s error ensuring qdisc and filter on interface", link.Attrs().Index, link.Attrs().Name)
+		if err := attach(nlLink); err != nil {
+			log.Printf("Link %d: %s error ensuring qdisc and filter on interface", nlLink.Attrs().Index, nlLink.Attrs().Name)
 		}
 	}
 }
 
 func removeFromBPFMap(idx int) error {
-	if err := router.LookupPort.Delete(int32(idx)); err != nil && !errors.Is(err, ebpf.ErrKeyNotExist) {
+	if err := nwopbpf.LookupPort.Delete(int32(idx)); err != nil && !errors.Is(err, ebpf.ErrKeyNotExist) {
 		return fmt.Errorf("error deleting eBPF map element: %w", err)
 	}
 	return nil

@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/telekom/das-schiff-network-operator/pkg/bpf"
 	schiff_unix "github.com/telekom/das-schiff-network-operator/pkg/unix"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/exp/maps"
@@ -179,7 +180,7 @@ func (n *Manager) setupVXLAN(info *Layer2Information, bridge *netlink.Bridge) er
 	info.vxlan = vxlan
 
 	if info.CreateMACVLANInterface {
-		_, err := n.createLink(
+		link, err := n.createLink(
 			fmt.Sprintf("%s%d", vethL2Prefix, info.VlanID),
 			fmt.Sprintf("%s%d", macvlanPrefix, info.VlanID),
 			bridge.Attrs().Index,
@@ -188,6 +189,9 @@ func (n *Manager) setupVXLAN(info *Layer2Information, bridge *netlink.Bridge) er
 		)
 		if err != nil {
 			return err
+		}
+		if err := bpf.AttachNeighborHandlerToInterface(link); err != nil {
+			return fmt.Errorf("error attaching XDP program to l2v interface: %w", err)
 		}
 		if err := n.setUp(fmt.Sprintf("%s%d", vethL2Prefix, info.VlanID)); err != nil {
 			return err
@@ -408,6 +412,11 @@ func (n *Manager) reattachL2VNI(current *Layer2Information) error {
 }
 
 func (n *Manager) doNeighSuppression(current, desired *Layer2Information) error {
+	// Re-attach XDP program
+	if err := bpf.AttachNeighborHandlerToInterface(current.macvlanBridge); err != nil {
+		return fmt.Errorf("error attaching XDP program to l2v interface: %w", err)
+	}
+
 	neighSuppression := os.Getenv("NWOP_NEIGH_SUPPRESSION") == "true"
 	if len(desired.AnycastGateways) == 0 {
 		neighSuppression = false

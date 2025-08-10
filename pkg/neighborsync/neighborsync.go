@@ -1,20 +1,27 @@
 package neighborsync
 
 import (
+	"encoding/binary"
+	"errors"
 	"fmt"
 	"net"
 	"net/netip"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
+	"github.com/cilium/ebpf/ringbuf"
 	"github.com/mdlayher/arp"
 	"github.com/mdlayher/ndp"
+	"github.com/telekom/das-schiff-network-operator/pkg/bpf"
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 	ctrl "sigs.k8s.io/controller-runtime"
 )
+
+const HardwareAddrLen = 6
 
 var (
 	refreshEvery = time.Second * 10
@@ -64,6 +71,23 @@ func sendNeighborRequest(linkIndex int, destination net.HardwareAddr, address ne
 		sendNDPRequest(linkIndex, destination, address)
 	default:
 		ctrl.Log.Error(fmt.Errorf("unsupported IP address type: %s", address), "sendNeighborRequest failed")
+	}
+}
+
+func sendGratuitousNeighbor(linkIndex int, address netip.Addr, mac net.HardwareAddr) {
+	intf, err := net.InterfaceByIndex(linkIndex)
+	if err != nil {
+		ctrl.Log.Error(err, "failed to get interface by index", "index", linkIndex)
+		return
+	}
+
+	switch {
+	case address.Is4():
+		sendGratuitousARP(intf, address, mac)
+	case address.Is6():
+		sendUnsolicitedNA(intf, address, mac)
+	default:
+		ctrl.Log.Error(fmt.Errorf("unsupported IP address type: %s", address), "sendGratuitousNeighbor failed")
 	}
 }
 
@@ -127,6 +151,53 @@ func sendNDPRequest(linkIndex int, destination net.HardwareAddr, address netip.A
 	}
 }
 
+// sendGratuitousARP emits a broadcast ARP reply announcing ip->mac.
+func sendGratuitousARP(ifi *net.Interface, nip netip.Addr, mac net.HardwareAddr) {
+	c, err := arp.Dial(ifi)
+	if err != nil {
+		ctrl.Log.Error(err, "failed to dial ARP", "interface", ifi.Name)
+		return
+	}
+	defer c.Close()
+
+	// ARP reply with sender and target set to the same mapping.
+	pkt, err := arp.NewPacket(arp.OperationReply, mac, nip, mac, nip)
+	if err != nil {
+		ctrl.Log.Error(err, "failed to create ARP packet", "interface", ifi.Name, "address", nip)
+		return
+	}
+	bcast := net.HardwareAddr{0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
+	if err := c.WriteTo(pkt, bcast); err != nil {
+		ctrl.Log.Error(err, "sendGratuitousARP failed", "interface", ifi.Name, "address", nip)
+	}
+}
+
+// sendUnsolicitedNA emits an unsolicited neighbor advertisement to all-nodes multicast.
+func sendUnsolicitedNA(ifi *net.Interface, nip netip.Addr, mac net.HardwareAddr) {
+	// Build NA message: Override=1, Solicited=0, Router=0, include TLLA option.
+	na := &ndp.NeighborAdvertisement{
+		Router:        false,
+		Solicited:     false,
+		Override:      true,
+		TargetAddress: nip,
+		Options: []ndp.Option{&ndp.LinkLayerAddress{
+			Direction: ndp.Target,
+			Addr:      mac,
+		}},
+	}
+	// Open an NDP connection bound to ifi and send to ff02::1 (all-nodes)
+	conn, _, err := ndp.Listen(ifi, ndp.LinkLocal)
+	if err != nil {
+		ctrl.Log.Error(err, "failed to open socket for NDP messages", "interface", ifi.Name)
+		return
+	}
+	defer conn.Close()
+	dst, _ := netip.ParseAddr("ff02::1")
+	if err := conn.WriteTo(na, nil, dst); err != nil {
+		ctrl.Log.Error(err, "sendUnsolicitedNA failed", "interface", ifi.Name, "address", nip)
+	}
+}
+
 func getFirstIPv4FromInterface(iface *net.Interface) (netip.Addr, error) {
 	addrs, err := iface.Addrs()
 	if err != nil {
@@ -177,6 +248,11 @@ func processUpdate(update *netlink.NeighUpdate) {
 
 func handleNeighborAdd(addr netip.Addr, neigh *netlink.Neigh) {
 	if neigh.State&netlink.NUD_PERMANENT != 0 || neigh.Flags&netlink.NTF_EXT_LEARNED != 0 {
+		// Send gratuitous ARP/NA when moving to permanent and extern_learned
+		if neigh.State&netlink.NUD_PERMANENT != 0 && neigh.Flags&netlink.NTF_EXT_LEARNED != 0 {
+			sendGratuitousNeighbor(neigh.LinkIndex, addr, neigh.HardwareAddr)
+		}
+
 		// When the neighbor is moving to permanent or learned, we should stop tracking it.
 		deleteTimerIfExists(neigh.LinkIndex, addr)
 		return
@@ -204,47 +280,13 @@ func shouldTrackInterface(name string) bool {
 	return false
 }
 
-func loadAllNeighbors(toolkit nl.ToolkitInterface) error {
-	links, err := toolkit.LinkList()
-	if err != nil {
-		return fmt.Errorf("failed to get link list: %w", err)
-	}
-
-	for i := range links {
-		if !shouldTrackInterface(links[i].Attrs().Name) {
-			continue
-		}
-
-		for _, family := range []int{unix.AF_INET, unix.AF_INET6} {
-			neighbors, err := toolkit.NeighList(links[i].Attrs().Index, family)
-			if err != nil {
-				return fmt.Errorf("failed to get neighbors for link %s: %w", links[i].Attrs().Name, err)
-			}
-
-			for j := range neighbors {
-				addr, ok := netip.AddrFromSlice(neighbors[j].IP)
-				if !ok {
-					continue
-				}
-				handleNeighborAdd(addr, &neighbors[j])
-			}
-		}
-	}
-
-	return nil
-}
-
 func receiveUpdates(toolkit nl.ToolkitInterface) {
 	logger := ctrl.Log.WithName("neighborsync")
 
 	for {
-		if err := loadAllNeighbors(toolkit); err != nil {
-			logger.Error(err, "failed to load all neighbors")
-		}
-
 		updates := make(chan netlink.NeighUpdate)
 		done := make(chan struct{})
-		err := toolkit.NeighSubscribe(updates, done)
+		err := toolkit.NeighSubscribeWithOptions(updates, done, netlink.NeighSubscribeOptions{ListExisting: true})
 		if err != nil {
 			logger.Error(err, "failed to subscribe to neighbor updates")
 			break
@@ -287,8 +329,92 @@ func runNeighborCheck() {
 	}
 }
 
+func runBpfNeighborSync(toolkit nl.ToolkitInterface) {
+	// Open ring buffer reader.
+	rd, err := ringbuf.NewReader(bpf.EbpfNeighborRingbuf())
+	if err != nil {
+		ctrl.Log.Error(err, "failed to open ringbuf reader")
+	}
+	defer rd.Close()
+
+	for {
+		rec, err := rd.Read()
+		if err != nil {
+			if errors.Is(err, ringbuf.ErrClosed) {
+				return
+			}
+			// EAGAIN is okay
+			var errno syscall.Errno
+			if errors.As(err, &errno) && (errno == unix.EINTR || errno == unix.EAGAIN) {
+				continue
+			}
+			ctrl.Log.Error(err, "failed to read ringbuf")
+			return
+		}
+
+		// Parse loader.NeighborEvent from rec.RawSample
+		var ev bpf.NeighborEvent
+		if len(rec.RawSample) < bpf.NeighborEventSize { // 4+1+6+16
+			continue
+		}
+		// Use unsafe-free manual copy
+		// Fields: ifindex u32, family u8, mac[6], ip[16]
+		b := rec.RawSample
+		ev.Ifindex = binary.LittleEndian.Uint32(b[0:4])
+		ev.Family = bpf.AddressFamily(b[4])
+		copy(ev.Mac[:], b[5:11])
+		copy(ev.IP[:], b[11:27])
+
+		ctrl.Log.Info(fmt.Sprintf("ifindex=%d family=%d ip=%s mac=%s\n", ev.Ifindex, ev.Family, net.IP(ev.IP[:]), net.IP(ev.Mac[:])))
+
+		// Update neighbor table to REACHABLE for this mapping.
+		if err := replaceNeighborReachable(toolkit, int(ev.Ifindex), ev.Family, ev.IP, ev.Mac); err != nil {
+			ctrl.Log.Error(err, "neigh replace failed")
+		}
+	}
+}
+
+// replaceNeighborReachable sets/updates a neighbor entry for the given mapping with state REACHABLE.
+func replaceNeighborReachable(toolkit nl.ToolkitInterface, ifindex int, family bpf.AddressFamily, ipbuf [16]byte, macbuf [6]byte) error {
+	var ip net.IP
+	var fam int
+	if family == bpf.AddressFamilyIPv4 {
+		ip = net.IP(ipbuf[:4])
+		fam = unix.AF_INET
+	} else {
+		ip = net.IP(ipbuf[:])
+		fam = unix.AF_INET6
+	}
+	if len(ip) == 0 {
+		return fmt.Errorf("empty IP from event")
+	}
+	hw := net.HardwareAddr(macbuf[:])
+	if len(hw) != HardwareAddrLen {
+		return fmt.Errorf("invalid MAC from event")
+	}
+
+	n := &netlink.Neigh{
+		LinkIndex:    ifindex,
+		Family:       fam,
+		State:        netlink.NUD_REACHABLE,
+		IP:           ip,
+		HardwareAddr: hw,
+	}
+	if err := toolkit.NeighSet(n); err != nil {
+		return fmt.Errorf("failed to set neighbor: %w", err)
+	}
+	return nil
+}
+
+// StartNeighborSync starts the neighbor synchronization process.
+// a) Each netlink (non-extern_learn, non-permanent) neighbor entries are checked regularly. This is accomplished by periodically sending ARP requests for IPv4 and Neighbor Solicitation messages for IPv6.
+// b) BPF is attached to the "l2v." interfaces, reading all ARP responses and Neighbor Advertisements. When a neighbor entry is detected, it is added to the neighbor table as reachable.
+// c) When a neighbor moves to extern_learned or permanent state, it is no longer refreshed **by this instance**. However a gratuitous ARP request or Neighbor Solicitation is generated to notify local apps.
+// We don't make use of the extended community defined in RFC 9047, however there shouldn't be any RAs / router flags on the vlans we watch here (we are the router!)
 func StartNeighborSync(toolkit nl.ToolkitInterface) {
 	go receiveUpdates(toolkit)
 
 	go runNeighborCheck()
+
+	go runBpfNeighborSync(toolkit)
 }

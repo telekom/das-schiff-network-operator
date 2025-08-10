@@ -21,9 +21,10 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"github.com/telekom/das-schiff-network-operator/pkg/neighborsync"
 	"os"
 	"sort"
+
+	"github.com/telekom/das-schiff-network-operator/pkg/neighborsync"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -182,7 +183,7 @@ func initComponents(mgr manager.Manager, anycastTracker *anycast.Tracker, cfg *c
 		return fmt.Errorf("unable to init BPF router: %w", err)
 	}
 	setupLog.Info("attach bpf to interfaces specified in config")
-	if err := bpf.AttachInterfaces(cfg.BPFInterfaces); err != nil {
+	if err := bpf.AttachRouterInterfaces(cfg.BPFInterfaces); err != nil {
 		return fmt.Errorf("unable to attach bpf to interfaces: %w", err)
 	}
 

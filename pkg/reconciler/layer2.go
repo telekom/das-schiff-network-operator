@@ -192,12 +192,17 @@ func (r *reconcile) getDesired(l2vnis []networkv1alpha1.Layer2NetworkConfigurati
 			AnycastMAC:             anycastMAC,
 			AnycastGateways:        anycastGateways,
 			AdvertiseNeighbors:     spec.AdvertiseNeighbors,
-			NeighSuppression:       spec.NeighSuppression,
-			CreateMACVLANInterface: spec.CreateMACVLANInterface,
+			NeighSuppression:       ptrBool(true), // Enable neighbor suppression by default
+			CreateMACVLANInterface: true,          // Create MACVLAN interface by default
 		})
 	}
 
 	return desired, nil
+}
+
+// ptrBool returns a pointer to the given bool value.
+func ptrBool(b bool) *bool {
+	return &b
 }
 
 func determineToBeDeleted(existing, desired []nl.Layer2Information) []nl.Layer2Information {

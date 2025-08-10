@@ -130,16 +130,16 @@ func syncInterfaceByFamily(intf *netlink.Bridge, family int, routingTable uint32
 func syncInterface(intf *netlink.Bridge, toolkit nl.ToolkitInterface, logger logr.Logger) error {
 	routingTable := uint32(defaultVrfAnycastTable)
 	if intf.Attrs().MasterIndex > 0 {
-		link, err := toolkit.LinkByIndex(intf.Attrs().MasterIndex)
+		nlLink, err := toolkit.LinkByIndex(intf.Attrs().MasterIndex)
 		if err != nil {
 			logger.Error(err, "error getting VRF parent of interface", "interface", intf.Attrs().Name)
 			return fmt.Errorf("error getting VRF parent of interface %s: %w", intf.Attrs().Name, err)
 		}
-		if link.Type() != "vrf" {
+		if nlLink.Type() != "vrf" {
 			logger.Info("parent of the interface is not a VRF", "interface", intf.Attrs().Name)
 			return fmt.Errorf("parent interface of %s is not a VRF", intf.Attrs().Name)
 		}
-		routingTable = link.(*netlink.Vrf).Table
+		routingTable = nlLink.(*netlink.Vrf).Table
 	}
 
 	_ = syncInterfaceByFamily(intf, unix.AF_INET, routingTable, toolkit, logger)
