@@ -8,8 +8,8 @@ import (
 	"github.com/go-logr/logr"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
-	"github.com/telekom/das-schiff-network-operator/pkg/nl"
-	mock_nl "github.com/telekom/das-schiff-network-operator/pkg/nl/mock"
+	"github.com/telekom/das-schiff-network-operator/pkg/nltoolkit"
+	mock_nl "github.com/telekom/das-schiff-network-operator/pkg/nltoolkit/mock"
 	"github.com/vishvananda/netlink"
 	"go.uber.org/mock/gomock"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -156,7 +156,7 @@ var _ = Describe("syncInterface()", func() {
 
 var _ = Describe("NewTracker()", func() {
 	It("returns new anycast tracker", func() {
-		toolkit := &nl.Toolkit{}
+		toolkit := &nltoolkit.Toolkit{}
 		tracker := NewTracker(toolkit)
 		Expect(tracker).ToNot(BeNil())
 		Expect(tracker.toolkit).To(Equal(toolkit))

@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	"github.com/telekom/das-schiff-network-operator/pkg/nl"
+	"github.com/telekom/das-schiff-network-operator/pkg/nltoolkit"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -21,10 +21,10 @@ var (
 
 type Tracker struct {
 	TrackedBridges []int
-	toolkit        nl.ToolkitInterface
+	toolkit        nltoolkit.ToolkitInterface
 }
 
-func NewTracker(toolkit nl.ToolkitInterface) *Tracker {
+func NewTracker(toolkit nltoolkit.ToolkitInterface) *Tracker {
 	return &Tracker{TrackedBridges: []int{},
 		toolkit: toolkit}
 }
@@ -84,7 +84,7 @@ func filterNeighbors(neighIn []netlink.Neigh) (neighOut []netlink.Neigh) {
 	return neighOut
 }
 
-func syncInterfaceByFamily(intf *netlink.Bridge, family int, routingTable uint32, toolkit nl.ToolkitInterface, logger logr.Logger) error {
+func syncInterfaceByFamily(intf *netlink.Bridge, family int, routingTable uint32, toolkit nltoolkit.ToolkitInterface, logger logr.Logger) error {
 	bridgeNeighbors, err := toolkit.NeighList(intf.Attrs().Index, family)
 	if err != nil {
 		logger.Error(err, "error getting v4 neighbors of interface", "interface", intf.Attrs().Name)
@@ -127,7 +127,7 @@ func syncInterfaceByFamily(intf *netlink.Bridge, family int, routingTable uint32
 	return nil
 }
 
-func syncInterface(intf *netlink.Bridge, toolkit nl.ToolkitInterface, logger logr.Logger) error {
+func syncInterface(intf *netlink.Bridge, toolkit nltoolkit.ToolkitInterface, logger logr.Logger) error {
 	routingTable := uint32(defaultVrfAnycastTable)
 	if intf.Attrs().MasterIndex > 0 {
 		nlLink, err := toolkit.LinkByIndex(intf.Attrs().MasterIndex)

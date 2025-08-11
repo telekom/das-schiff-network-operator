@@ -1,5 +1,5 @@
 //nolint:wrapcheck
-package nl
+package nltoolkit
 
 import (
 	"net"

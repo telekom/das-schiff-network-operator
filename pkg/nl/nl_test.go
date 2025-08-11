@@ -11,7 +11,7 @@ import (
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
-	mock_nl "github.com/telekom/das-schiff-network-operator/pkg/nl/mock"
+	mock_nl "github.com/telekom/das-schiff-network-operator/pkg/nltoolkit/mock"
 	"github.com/vishvananda/netlink"
 	"go.uber.org/mock/gomock"
 	"golang.org/x/sys/unix"
@@ -1235,23 +1235,6 @@ var _ = Describe("ReconcileL2()", func() {
 		Expect(err).ToNot(HaveOccurred())
 
 		procSysNetPath = oldProcSysNetPath
-	})
-})
-
-var _ = Describe("GetBridgeID()", func() {
-	It("returns error if cannot find link", func() {
-		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock)
-		netlinkMock.EXPECT().LinkByName(gomock.Any()).Return(nil, errors.New("error getting link by name"))
-		_, err := nm.GetBridgeID(&Layer2Information{})
-		Expect(err).To(HaveOccurred())
-	})
-	It("returns no error", func() {
-		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock)
-		netlinkMock.EXPECT().LinkByName(gomock.Any()).Return(&netlink.Bridge{}, nil)
-		_, err := nm.GetBridgeID(&Layer2Information{})
-		Expect(err).ToNot(HaveOccurred())
 	})
 })
 
