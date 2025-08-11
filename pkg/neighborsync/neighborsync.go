@@ -226,7 +226,7 @@ func (n *NeighborSync) processUpdate(update *netlink.NeighUpdate) {
 		return
 	}
 
-	if _, ok := n.neighRefreshInterfaces.Load(update.Neigh.LinkIndex); ok {
+	if _, ok := n.neighRefreshInterfaces.Load(update.Neigh.LinkIndex); !ok {
 		return
 	}
 
@@ -359,7 +359,7 @@ func (n *NeighborSync) runBpfNeighborSync() {
 		copy(ev.IP[:], b[11:27])
 
 		skipping := false
-		if _, ok := n.receiveNeighbors.Load(int(ev.Ifindex)); ok {
+		if _, ok := n.receiveNeighbors.Load(int(ev.Ifindex)); !ok {
 			skipping = true
 		}
 
