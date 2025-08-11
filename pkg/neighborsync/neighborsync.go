@@ -292,6 +292,22 @@ func (n *NeighborSync) receiveUpdates() {
 	}
 }
 
+func (n *NeighborSync) syncKernelNeighbors(intfIndex int) {
+	neighbors, err := n.toolkit.NeighList(intfIndex, netlink.FAMILY_ALL)
+	if err != nil {
+		ctrl.Log.Error(err, "failed to list neighbors")
+		return
+	}
+
+	for i := range neighbors {
+		addr, ok := netip.AddrFromSlice(neighbors[i].IP)
+		if !ok {
+			continue
+		}
+		n.handleNeighborAdd(addr, &neighbors[i])
+	}
+}
+
 func (n *NeighborSync) runNeighborCheck() {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
@@ -395,8 +411,13 @@ func (n *NeighborSync) replaceNeighborReachable(ifindex int, family bpf.AddressF
 		return fmt.Errorf("invalid MAC from event")
 	}
 
+	link, err := n.toolkit.LinkByIndex(ifindex)
+	if err != nil {
+		return fmt.Errorf("failed to get link by index: %w", err)
+	}
+
 	neigh := &netlink.Neigh{
-		LinkIndex:    ifindex,
+		LinkIndex:    link.Attrs().MasterIndex,
 		Family:       fam,
 		State:        netlink.NUD_REACHABLE,
 		IP:           ip,
@@ -427,11 +448,19 @@ func (n *NeighborSync) StartNeighborSync() {
 
 // EnsureARPRefresh marks the given interface ID for ARP refresh.
 func (n *NeighborSync) EnsureARPRefresh(interfaceID int) {
+	if _, ok := n.neighRefreshInterfaces.Load(interfaceID); !ok {
+		n.syncKernelNeighbors(interfaceID)
+	}
+
 	n.neighRefreshInterfaces.Store(interfaceID, struct{}{})
 }
 
 // EnsureNeighborSuppression marks the given interface ID for neighbor suppression.
 func (n *NeighborSync) EnsureNeighborSuppression(bridgeID, vethID int) error {
+	if _, ok := n.sendGratuitousNeighbor.Load(bridgeID); !ok {
+		n.syncKernelNeighbors(bridgeID)
+	}
+
 	n.sendGratuitousNeighbor.Store(bridgeID, struct{}{})
 	n.receiveNeighbors.Store(vethID, struct{}{})
 

@@ -227,11 +227,9 @@ func (r *reconcile) applyConfiguration(desired, current *nl.Layer2Information, a
 		*anycastTrackerInterfaces = append(*anycastTrackerInterfaces, bridgeID)
 	}
 
-	r.logger.Info("Applying Layer2 configuration", "vlan", desired.VlanID, "vni", desired.VNI, "macvlanBridgeId", current.MacVLANBridgeID(), "bridgeId", current.BridgeID(), "neighSuppression", desired.IsNeighSuppressionEnabled())
 	if current.MacVLANBridgeID() != -1 {
 		if desired.IsNeighSuppressionEnabled() {
 			if err := r.neighborSync.EnsureNeighborSuppression(current.BridgeID(), current.MacVLANBridgeID()); err != nil {
-				r.logger.Error(err, "error ensuring neighbor suppression for macvlan bridge", "vlanId", desired.VlanID, "macvlanBridgeId", current.MacVLANBridgeID())
 				return fmt.Errorf("error ensuring neighbor suppression for vlanId %d: %w", desired.VlanID, err)
 			}
 		} else {
