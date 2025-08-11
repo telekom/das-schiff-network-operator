@@ -455,21 +455,25 @@ func (n *NeighborSync) StartNeighborSync() {
 
 // EnsureARPRefresh marks the given interface ID for ARP refresh.
 func (n *NeighborSync) EnsureARPRefresh(interfaceID int) {
-	if _, ok := n.neighRefreshInterfaces.Load(interfaceID); !ok {
-		n.syncKernelNeighbors(interfaceID)
-	}
+	_, existing := n.neighRefreshInterfaces.Load(interfaceID)
 
 	n.neighRefreshInterfaces.Store(interfaceID, struct{}{})
+
+	if !existing {
+		n.syncKernelNeighbors(interfaceID)
+	}
 }
 
 // EnsureNeighborSuppression marks the given interface ID for neighbor suppression.
 func (n *NeighborSync) EnsureNeighborSuppression(bridgeID, vethID int) error {
-	if _, ok := n.sendGratuitousNeighbor.Load(bridgeID); !ok {
-		n.syncKernelNeighbors(bridgeID)
-	}
+	_, existing := n.sendGratuitousNeighbor.Load(bridgeID)
 
 	n.sendGratuitousNeighbor.Store(bridgeID, struct{}{})
 	n.receiveNeighbors.Store(vethID, struct{}{})
+
+	if !existing {
+		n.syncKernelNeighbors(bridgeID)
+	}
 
 	// Load BPF program
 	nlLink, err := n.toolkit.LinkByIndex(vethID)
