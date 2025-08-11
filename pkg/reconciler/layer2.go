@@ -139,7 +139,7 @@ func (r *reconcile) createL2(info *nl.Layer2Information, anycastTrackerInterface
 	if err != nil {
 		return fmt.Errorf("error creating layer2 vlan %d vni %d: %w", info.VlanID, info.VNI, err)
 	}
-	return r.applyConfiguration(info, anycastTrackerInterfaces)
+	return r.applyConfiguration(info, info, anycastTrackerInterfaces)
 }
 
 func (r *reconcile) getDesired(l2vnis []networkv1alpha1.Layer2NetworkConfiguration) ([]nl.Layer2Information, error) {
@@ -178,15 +178,14 @@ func (r *reconcile) getDesired(l2vnis []networkv1alpha1.Layer2NetworkConfigurati
 		}
 
 		desired = append(desired, nl.Layer2Information{
-			VlanID:                 spec.ID,
-			MTU:                    spec.MTU,
-			VNI:                    spec.VNI,
-			VRF:                    spec.VRF,
-			AnycastMAC:             anycastMAC,
-			AnycastGateways:        anycastGateways,
-			AdvertiseNeighbors:     spec.AdvertiseNeighbors,
-			NeighSuppression:       spec.NeighSuppression,
-			CreateMACVLANInterface: true, // Create MACVLAN interface by default
+			VlanID:             spec.ID,
+			MTU:                spec.MTU,
+			VNI:                spec.VNI,
+			VRF:                spec.VRF,
+			AnycastMAC:         anycastMAC,
+			AnycastGateways:    anycastGateways,
+			AdvertiseNeighbors: spec.AdvertiseNeighbors,
+			NeighSuppression:   spec.NeighSuppression,
 		})
 	}
 
@@ -216,32 +215,32 @@ func (r *reconcile) reconcileExistingLayer(desired, currentConfig *nl.Layer2Info
 	if err != nil {
 		return fmt.Errorf("error reconciling layer2 vlan %d vni %d: %w", desired.VlanID, desired.VNI, err)
 	}
-	return r.applyConfiguration(desired, anycastTrackerInterfaces)
+	return r.applyConfiguration(desired, currentConfig, anycastTrackerInterfaces)
 }
 
-func (r *reconcile) applyConfiguration(info *nl.Layer2Information, anycastTrackerInterfaces *[]int) error {
-	if info.AdvertiseNeighbors {
-		bridgeID := info.BridgeID()
+func (r *reconcile) applyConfiguration(desired, current *nl.Layer2Information, anycastTrackerInterfaces *[]int) error {
+	if desired.AdvertiseNeighbors {
+		bridgeID := current.BridgeID()
 		if bridgeID == -1 {
-			return fmt.Errorf("error getting bridge id for vlanId %d", info.VlanID)
+			return fmt.Errorf("error getting bridge id for vlanId %d", desired.VlanID)
 		}
 		*anycastTrackerInterfaces = append(*anycastTrackerInterfaces, bridgeID)
 	}
 
-	if info.MacVLANBridgeID() != -1 {
-		if info.IsNeighSuppressionEnabled() {
-			if err := r.neighborSync.EnsureNeighborSuppression(info.BridgeID(), info.MacVLANBridgeID()); err != nil {
-				return fmt.Errorf("error ensuring neighbor suppression for vlanId %d: %w", info.VlanID, err)
+	if current.MacVLANBridgeID() != -1 {
+		if desired.IsNeighSuppressionEnabled() {
+			if err := r.neighborSync.EnsureNeighborSuppression(current.BridgeID(), current.MacVLANBridgeID()); err != nil {
+				return fmt.Errorf("error ensuring neighbor suppression for vlanId %d: %w", desired.VlanID, err)
 			}
 		} else {
-			r.neighborSync.DisableNeighborSuppression(info.BridgeID(), info.MacVLANBridgeID())
+			r.neighborSync.DisableNeighborSuppression(current.BridgeID(), current.MacVLANBridgeID())
 		}
 	}
 
-	if len(info.AnycastGateways) > 0 && info.BridgeID() != -1 {
-		r.neighborSync.EnsureARPRefresh(info.BridgeID())
+	if len(desired.AnycastGateways) > 0 && current.BridgeID() != -1 {
+		r.neighborSync.EnsureARPRefresh(current.BridgeID())
 	} else {
-		r.neighborSync.DisableARPRefresh(info.BridgeID())
+		r.neighborSync.DisableARPRefresh(current.BridgeID())
 	}
 	return nil
 }

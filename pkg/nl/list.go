@@ -196,7 +196,6 @@ func (n *Manager) updateLink(info *Layer2Information, link netlink.Link) error {
 			return fmt.Errorf("error casting link %v as netlink.Veth", link)
 		}
 		info.macvlanHost = macvlanHost
-		info.CreateMACVLANInterface = true
 	}
 
 	return nil
