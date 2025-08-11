@@ -246,14 +246,13 @@ func (n *NeighborSync) processUpdate(update *netlink.NeighUpdate) {
 }
 
 func (n *NeighborSync) handleNeighborAdd(addr netip.Addr, neigh *netlink.Neigh) {
-	if neigh.State&netlink.NUD_PERMANENT != 0 || neigh.Flags&netlink.NTF_EXT_LEARNED != 0 {
-		// Send gratuitous ARP/NA when moving to permanent and extern_learned
-		if _, ok := n.sendGratuitousNeighbor.Load(neigh.LinkIndex); ok &&
-			neigh.State&netlink.NUD_PERMANENT != 0 && neigh.Flags&netlink.NTF_EXT_LEARNED != 0 {
+	if neigh.Flags&netlink.NTF_EXT_LEARNED != 0 {
+		// Send gratuitous ARP/NA when creating an extern_learned
+		if _, ok := n.sendGratuitousNeighbor.Load(neigh.LinkIndex); ok {
 			sendGratuitousNeighbor(neigh.LinkIndex, addr, neigh.HardwareAddr)
 		}
 
-		// When the neighbor is moving to permanent or learned, we should stop tracking it.
+		// When the neighbor is moving to extern_learned, also stop tracking it.
 		n.deleteTimerIfExists(neigh.LinkIndex, addr)
 		return
 	}
