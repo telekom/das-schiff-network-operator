@@ -229,21 +229,28 @@ var _ = Describe("ListL2()", func() {
 	It("returns no error", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
 		nm := NewManager(netlinkMock)
+		bridgeSideVeth := &netlink.Veth{LinkAttrs: netlink.LinkAttrs{Name: vethL2Prefix + "33", MasterIndex: 3, Index: 4}}
 		netlinkMock.EXPECT().LinkList().Return([]netlink.Link{
-			&netlink.Bridge{LinkAttrs: netlink.LinkAttrs{Name: layer2Prefix + "33", MasterIndex: 3, Index: 3}},
-			&netlink.Veth{LinkAttrs: netlink.LinkAttrs{Name: vethL2Prefix + "33", MasterIndex: 3, Index: 3}},
+			&netlink.Vrf{LinkAttrs: netlink.LinkAttrs{Name: VrfPrefix + dummyIntf, Index: 2}},
+			&netlink.Bridge{LinkAttrs: netlink.LinkAttrs{Name: layer2Prefix + "33", MasterIndex: 2, Index: 3}},
+			bridgeSideVeth,
+			&netlink.Veth{LinkAttrs: netlink.LinkAttrs{Name: macvlanPrefix + "33", MasterIndex: 3, Index: 5}},
+			&netlink.Vxlan{LinkAttrs: netlink.LinkAttrs{Name: vxlanPrefix + dummyIntf, MasterIndex: 3, Index: 6}},
 		}, nil)
-		netlinkMock.EXPECT().LinkByIndex(3).Return(&netlink.Vxlan{LinkAttrs: netlink.LinkAttrs{Name: vxlanPrefix + dummyIntf, Index: 3}}, nil)
-		netlinkMock.EXPECT().VethPeerIndex(gomock.Any()).Return(0, nil)
-		netlinkMock.EXPECT().LinkByIndex(0).Return(
-			&netlink.Veth{LinkAttrs: netlink.LinkAttrs{Name: vethL2Prefix + "33", MasterIndex: 3, Index: 3}}, nil,
+		netlinkMock.EXPECT().LinkByIndex(2).Return(&netlink.Vrf{LinkAttrs: netlink.LinkAttrs{Name: VrfPrefix + dummyIntf, Index: 2}}, nil)
+		netlinkMock.EXPECT().VethPeerIndex(bridgeSideVeth).Return(7, nil)
+		netlinkMock.EXPECT().LinkByIndex(7).Return(
+			&netlink.Veth{LinkAttrs: netlink.LinkAttrs{Name: macvlanPrefix + "33", Index: 7}}, nil,
 		)
 		netlinkMock.EXPECT().AddrList(gomock.Any(), gomock.Any()).Return([]netlink.Addr{
 			{Scope: unix.RT_SCOPE_UNIVERSE},
 			{Scope: unix.RT_SCOPE_HOST},
 		}, nil).Times(2)
-		_, err := nm.ListL2()
+		ll, err := nm.ListL2()
 		Expect(err).ToNot(HaveOccurred())
+		Expect(ll).To(HaveLen(1))
+		Expect(ll[0].BridgeID()).To(Equal(3))
+		Expect(ll[0].MacVLANBridgeID()).To(Equal(4))
 	})
 })
 
@@ -1300,6 +1307,16 @@ var _ = Describe("CreateL3()", func() {
 		err := nm.CreateL3(vrfInfo)
 		Expect(err).To(HaveOccurred())
 		procSysNetPath = oldProcSysNetPath
+	})
+})
+
+var _ = Describe("Layer2Information", func() {
+	It("IsNeighSuppressionEnabled", func() {
+		trueVar := true
+		layer2 := Layer2Information{
+			NeighSuppression: &trueVar,
+		}
+		Expect(layer2.IsNeighSuppressionEnabled()).To(BeTrue())
 	})
 })
 
