@@ -379,30 +379,37 @@ func (n *NeighborSync) runBpfNeighborSync() {
 			skipping = true
 		}
 
-		ctrl.Log.Info(fmt.Sprintf("ifindex=%d family=%d ip=%s mac=%s skipped=%v\n", ev.Ifindex, ev.Family, net.IP(ev.IP[:]), net.IP(ev.Mac[:]), skipping))
+		var ip net.IP
+		var family int
+		if ev.Family == bpf.AddressFamilyIPv4 {
+			ip = net.IP(ev.IP[:4])
+			family = unix.AF_INET
+		} else {
+			ip = net.IP(ev.IP[:])
+			family = unix.AF_INET6
+		}
+
+		ctrl.Log.Info("received BPF neighbor event",
+			"ifindex", ev.Ifindex,
+			"family", family,
+			"ip", ip.String(),
+			"mac", net.HardwareAddr(ev.Mac[:]).String(),
+			"skipped", skipping,
+		)
 
 		if skipping {
 			continue
 		}
 
 		// Update neighbor table to REACHABLE for this mapping.
-		if err := n.replaceNeighborReachable(int(ev.Ifindex), ev.Family, ev.IP, ev.Mac); err != nil {
+		if err := n.replaceNeighborReachable(int(ev.Ifindex), family, ip, ev.Mac); err != nil {
 			ctrl.Log.Error(err, "neigh replace failed")
 		}
 	}
 }
 
 // replaceNeighborReachable sets/updates a neighbor entry for the given mapping with state REACHABLE.
-func (n *NeighborSync) replaceNeighborReachable(ifindex int, family bpf.AddressFamily, ipbuf [16]byte, macbuf [6]byte) error {
-	var ip net.IP
-	var fam int
-	if family == bpf.AddressFamilyIPv4 {
-		ip = net.IP(ipbuf[:4])
-		fam = unix.AF_INET
-	} else {
-		ip = net.IP(ipbuf[:])
-		fam = unix.AF_INET6
-	}
+func (n *NeighborSync) replaceNeighborReachable(ifindex int, family int, ip net.IP, macbuf [6]byte) error {
 	if len(ip) == 0 {
 		return fmt.Errorf("empty IP from event")
 	}
@@ -418,7 +425,7 @@ func (n *NeighborSync) replaceNeighborReachable(ifindex int, family bpf.AddressF
 
 	neigh := &netlink.Neigh{
 		LinkIndex:    link.Attrs().MasterIndex,
-		Family:       fam,
+		Family:       family,
 		State:        netlink.NUD_REACHABLE,
 		IP:           ip,
 		HardwareAddr: hw,
