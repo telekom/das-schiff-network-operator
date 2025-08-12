@@ -1,5 +1,5 @@
 //nolint:wrapcheck
-package nl
+package nltoolkit
 
 import (
 	"net"
@@ -14,6 +14,8 @@ type ToolkitInterface interface {
 	LinkByName(name string) (netlink.Link, error)
 	LinkList() ([]netlink.Link, error)
 	NeighList(linkIndex int, family int) ([]netlink.Neigh, error)
+	NeighSubscribeWithOptions(ch chan<- netlink.NeighUpdate, done <-chan struct{}, options netlink.NeighSubscribeOptions) error
+	NeighSet(neigh *netlink.Neigh) error
 	NewIPNet(ip net.IP) *net.IPNet
 	RouteListFiltered(family int, filter *netlink.Route, filterMask uint64) ([]netlink.Route, error)
 	RouteDel(route *netlink.Route) error
@@ -55,6 +57,14 @@ func (*Toolkit) LinkList() ([]netlink.Link, error) {
 
 func (*Toolkit) NeighList(linkIndex, family int) ([]netlink.Neigh, error) {
 	return netlink.NeighList(linkIndex, family)
+}
+
+func (*Toolkit) NeighSubscribeWithOptions(ch chan<- netlink.NeighUpdate, done <-chan struct{}, options netlink.NeighSubscribeOptions) error {
+	return netlink.NeighSubscribeWithOptions(ch, done, options)
+}
+
+func (*Toolkit) NeighSet(neigh *netlink.Neigh) error {
+	return netlink.NeighSet(neigh)
 }
 
 func (*Toolkit) NewIPNet(ip net.IP) *net.IPNet {

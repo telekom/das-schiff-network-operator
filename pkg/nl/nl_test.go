@@ -11,7 +11,7 @@ import (
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
-	mock_nl "github.com/telekom/das-schiff-network-operator/pkg/nl/mock"
+	mock_nl "github.com/telekom/das-schiff-network-operator/pkg/nltoolkit/mock"
 	"github.com/vishvananda/netlink"
 	"go.uber.org/mock/gomock"
 	"golang.org/x/sys/unix"
@@ -229,21 +229,28 @@ var _ = Describe("ListL2()", func() {
 	It("returns no error", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
 		nm := NewManager(netlinkMock)
+		bridgeSideVeth := &netlink.Veth{LinkAttrs: netlink.LinkAttrs{Name: vethL2Prefix + "33", MasterIndex: 3, Index: 4}}
 		netlinkMock.EXPECT().LinkList().Return([]netlink.Link{
-			&netlink.Bridge{LinkAttrs: netlink.LinkAttrs{Name: layer2Prefix + "33", MasterIndex: 3, Index: 3}},
-			&netlink.Veth{LinkAttrs: netlink.LinkAttrs{Name: vethL2Prefix + "33", MasterIndex: 3, Index: 3}},
+			&netlink.Vrf{LinkAttrs: netlink.LinkAttrs{Name: VrfPrefix + dummyIntf, Index: 2}},
+			&netlink.Bridge{LinkAttrs: netlink.LinkAttrs{Name: layer2Prefix + "33", MasterIndex: 2, Index: 3}},
+			bridgeSideVeth,
+			&netlink.Veth{LinkAttrs: netlink.LinkAttrs{Name: macvlanPrefix + "33", MasterIndex: 3, Index: 5}},
+			&netlink.Vxlan{LinkAttrs: netlink.LinkAttrs{Name: vxlanPrefix + dummyIntf, MasterIndex: 3, Index: 6}},
 		}, nil)
-		netlinkMock.EXPECT().LinkByIndex(3).Return(&netlink.Vxlan{LinkAttrs: netlink.LinkAttrs{Name: vxlanPrefix + dummyIntf, Index: 3}}, nil)
-		netlinkMock.EXPECT().VethPeerIndex(gomock.Any()).Return(0, nil)
-		netlinkMock.EXPECT().LinkByIndex(0).Return(
-			&netlink.Veth{LinkAttrs: netlink.LinkAttrs{Name: vethL2Prefix + "33", MasterIndex: 3, Index: 3}}, nil,
+		netlinkMock.EXPECT().LinkByIndex(2).Return(&netlink.Vrf{LinkAttrs: netlink.LinkAttrs{Name: VrfPrefix + dummyIntf, Index: 2}}, nil)
+		netlinkMock.EXPECT().VethPeerIndex(bridgeSideVeth).Return(7, nil)
+		netlinkMock.EXPECT().LinkByIndex(7).Return(
+			&netlink.Veth{LinkAttrs: netlink.LinkAttrs{Name: macvlanPrefix + "33", Index: 7}}, nil,
 		)
 		netlinkMock.EXPECT().AddrList(gomock.Any(), gomock.Any()).Return([]netlink.Addr{
 			{Scope: unix.RT_SCOPE_UNIVERSE},
 			{Scope: unix.RT_SCOPE_HOST},
 		}, nil).Times(2)
-		_, err := nm.ListL2()
+		ll, err := nm.ListL2()
 		Expect(err).ToNot(HaveOccurred())
+		Expect(ll).To(HaveLen(1))
+		Expect(ll[0].BridgeID()).To(Equal(3))
+		Expect(ll[0].MacVLANBridgeID()).To(Equal(4))
 	})
 })
 
@@ -402,10 +409,9 @@ var _ = Describe("findFreeTableID()", func() {
 var _ = Describe("CleanupL2()", func() {
 	numOfInterfaces := 3
 	info := &Layer2Information{
-		vxlan:                  &netlink.Vxlan{},
-		bridge:                 &netlink.Bridge{},
-		CreateMACVLANInterface: true,
-		macvlanBridge:          &netlink.Veth{},
+		vxlan:         &netlink.Vxlan{},
+		bridge:        &netlink.Bridge{},
+		macvlanBridge: &netlink.Veth{},
 	}
 	It("returns slice of 3 errors", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
@@ -439,11 +445,10 @@ var _ = Describe("ReconcileL2()", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
 		nm := NewManager(netlinkMock)
 		current := &Layer2Information{
-			bridge:                 &netlink.Bridge{},
-			vxlan:                  &netlink.Vxlan{},
-			macvlanBridge:          &netlink.Veth{},
-			macvlanHost:            &netlink.Veth{},
-			CreateMACVLANInterface: true,
+			bridge:        &netlink.Bridge{},
+			vxlan:         &netlink.Vxlan{},
+			macvlanBridge: &netlink.Veth{},
+			macvlanHost:   &netlink.Veth{},
 		}
 		desired := &Layer2Information{
 			AnycastGateways: []*netlink.Addr{{}},
@@ -460,11 +465,10 @@ var _ = Describe("ReconcileL2()", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
 		nm := NewManager(netlinkMock)
 		current := &Layer2Information{
-			bridge:                 &netlink.Bridge{},
-			vxlan:                  &netlink.Vxlan{},
-			macvlanBridge:          &netlink.Veth{},
-			macvlanHost:            &netlink.Veth{},
-			CreateMACVLANInterface: true,
+			bridge:        &netlink.Bridge{},
+			vxlan:         &netlink.Vxlan{},
+			macvlanBridge: &netlink.Veth{},
+			macvlanHost:   &netlink.Veth{},
 		}
 		desired := &Layer2Information{
 			AnycastGateways: []*netlink.Addr{{}},
@@ -482,11 +486,10 @@ var _ = Describe("ReconcileL2()", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
 		nm := NewManager(netlinkMock)
 		current := &Layer2Information{
-			bridge:                 &netlink.Bridge{},
-			vxlan:                  &netlink.Vxlan{},
-			macvlanBridge:          &netlink.Veth{},
-			macvlanHost:            &netlink.Veth{},
-			CreateMACVLANInterface: true,
+			bridge:        &netlink.Bridge{},
+			vxlan:         &netlink.Vxlan{},
+			macvlanBridge: &netlink.Veth{},
+			macvlanHost:   &netlink.Veth{},
 		}
 		desired := &Layer2Information{
 			AnycastGateways: []*netlink.Addr{{}},
@@ -504,11 +507,10 @@ var _ = Describe("ReconcileL2()", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
 		nm := NewManager(netlinkMock)
 		current := &Layer2Information{
-			bridge:                 &netlink.Bridge{},
-			vxlan:                  &netlink.Vxlan{},
-			macvlanBridge:          &netlink.Veth{},
-			macvlanHost:            &netlink.Veth{},
-			CreateMACVLANInterface: true,
+			bridge:        &netlink.Bridge{},
+			vxlan:         &netlink.Vxlan{},
+			macvlanBridge: &netlink.Veth{},
+			macvlanHost:   &netlink.Veth{},
 		}
 		desired := &Layer2Information{
 			AnycastGateways: []*netlink.Addr{{}},
@@ -526,11 +528,10 @@ var _ = Describe("ReconcileL2()", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
 		nm := NewManager(netlinkMock)
 		current := &Layer2Information{
-			bridge:                 &netlink.Bridge{},
-			vxlan:                  &netlink.Vxlan{},
-			macvlanBridge:          &netlink.Veth{},
-			macvlanHost:            &netlink.Veth{},
-			CreateMACVLANInterface: true,
+			bridge:        &netlink.Bridge{},
+			vxlan:         &netlink.Vxlan{},
+			macvlanBridge: &netlink.Veth{},
+			macvlanHost:   &netlink.Veth{},
 		}
 		desired := &Layer2Information{
 			AnycastGateways: []*netlink.Addr{{}},
@@ -548,11 +549,10 @@ var _ = Describe("ReconcileL2()", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
 		nm := NewManager(netlinkMock)
 		current := &Layer2Information{
-			bridge:                 &netlink.Bridge{},
-			vxlan:                  &netlink.Vxlan{},
-			macvlanBridge:          &netlink.Veth{},
-			macvlanHost:            &netlink.Veth{},
-			CreateMACVLANInterface: true,
+			bridge:        &netlink.Bridge{},
+			vxlan:         &netlink.Vxlan{},
+			macvlanBridge: &netlink.Veth{},
+			macvlanHost:   &netlink.Veth{},
 		}
 		desired := &Layer2Information{
 			AnycastGateways: []*netlink.Addr{{}},
@@ -570,11 +570,10 @@ var _ = Describe("ReconcileL2()", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
 		nm := NewManager(netlinkMock)
 		current := &Layer2Information{
-			bridge:                 &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
-			vxlan:                  &netlink.Vxlan{},
-			macvlanBridge:          &netlink.Veth{},
-			macvlanHost:            &netlink.Veth{},
-			CreateMACVLANInterface: true,
+			bridge:        &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
+			vxlan:         &netlink.Vxlan{},
+			macvlanBridge: &netlink.Veth{},
+			macvlanHost:   &netlink.Veth{},
 		}
 		desired := &Layer2Information{
 			AnycastGateways: []*netlink.Addr{{}},
@@ -593,11 +592,10 @@ var _ = Describe("ReconcileL2()", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
 		nm := NewManager(netlinkMock)
 		current := &Layer2Information{
-			bridge:                 &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
-			vxlan:                  &netlink.Vxlan{},
-			macvlanBridge:          &netlink.Veth{},
-			macvlanHost:            &netlink.Veth{},
-			CreateMACVLANInterface: true,
+			bridge:        &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
+			vxlan:         &netlink.Vxlan{},
+			macvlanBridge: &netlink.Veth{},
+			macvlanHost:   &netlink.Veth{},
 		}
 		desired := &Layer2Information{
 			AnycastGateways: []*netlink.Addr{{}},
@@ -617,11 +615,10 @@ var _ = Describe("ReconcileL2()", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
 		nm := NewManager(netlinkMock)
 		current := &Layer2Information{
-			bridge:                 &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
-			vxlan:                  &netlink.Vxlan{},
-			macvlanBridge:          &netlink.Veth{},
-			macvlanHost:            &netlink.Veth{},
-			CreateMACVLANInterface: true,
+			bridge:        &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
+			vxlan:         &netlink.Vxlan{},
+			macvlanBridge: &netlink.Veth{},
+			macvlanHost:   &netlink.Veth{},
 		}
 		desired := &Layer2Information{
 			AnycastGateways: []*netlink.Addr{{}},
@@ -642,11 +639,10 @@ var _ = Describe("ReconcileL2()", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
 		nm := NewManager(netlinkMock)
 		current := &Layer2Information{
-			bridge:                 &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
-			vxlan:                  &netlink.Vxlan{},
-			macvlanBridge:          &netlink.Veth{},
-			macvlanHost:            &netlink.Veth{},
-			CreateMACVLANInterface: true,
+			bridge:        &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
+			vxlan:         &netlink.Vxlan{},
+			macvlanBridge: &netlink.Veth{},
+			macvlanHost:   &netlink.Veth{},
 		}
 		desired := &Layer2Information{
 			AnycastGateways: []*netlink.Addr{{}},
@@ -668,12 +664,11 @@ var _ = Describe("ReconcileL2()", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
 		nm := NewManager(netlinkMock)
 		current := &Layer2Information{
-			bridge:                 &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
-			vxlan:                  &netlink.Vxlan{},
-			macvlanBridge:          &netlink.Veth{},
-			macvlanHost:            &netlink.Veth{},
-			CreateMACVLANInterface: true,
-			VRF:                    "current",
+			bridge:        &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
+			vxlan:         &netlink.Vxlan{},
+			macvlanBridge: &netlink.Veth{},
+			macvlanHost:   &netlink.Veth{},
+			VRF:           "current",
 		}
 		desired := &Layer2Information{
 			AnycastGateways: []*netlink.Addr{{}},
@@ -697,12 +692,11 @@ var _ = Describe("ReconcileL2()", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
 		nm := NewManager(netlinkMock)
 		current := &Layer2Information{
-			bridge:                 &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
-			vxlan:                  &netlink.Vxlan{},
-			macvlanBridge:          &netlink.Veth{},
-			macvlanHost:            &netlink.Veth{},
-			CreateMACVLANInterface: true,
-			VRF:                    "current",
+			bridge:        &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
+			vxlan:         &netlink.Vxlan{},
+			macvlanBridge: &netlink.Veth{},
+			macvlanHost:   &netlink.Veth{},
+			VRF:           "current",
 		}
 		desired := &Layer2Information{
 			AnycastGateways: []*netlink.Addr{{}},
@@ -730,12 +724,11 @@ var _ = Describe("ReconcileL2()", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
 		nm := NewManager(netlinkMock)
 		current := &Layer2Information{
-			bridge:                 &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
-			vxlan:                  &netlink.Vxlan{},
-			macvlanBridge:          &netlink.Veth{},
-			macvlanHost:            &netlink.Veth{},
-			CreateMACVLANInterface: true,
-			VRF:                    "current",
+			bridge:        &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
+			vxlan:         &netlink.Vxlan{},
+			macvlanBridge: &netlink.Veth{},
+			macvlanHost:   &netlink.Veth{},
+			VRF:           "current",
 		}
 		desired := &Layer2Information{
 			AnycastGateways: []*netlink.Addr{{}},
@@ -759,12 +752,11 @@ var _ = Describe("ReconcileL2()", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
 		nm := NewManager(netlinkMock)
 		current := &Layer2Information{
-			bridge:                 &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
-			vxlan:                  &netlink.Vxlan{},
-			macvlanBridge:          &netlink.Veth{},
-			macvlanHost:            &netlink.Veth{},
-			CreateMACVLANInterface: true,
-			VRF:                    "current",
+			bridge:        &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
+			vxlan:         &netlink.Vxlan{},
+			macvlanBridge: &netlink.Veth{},
+			macvlanHost:   &netlink.Veth{},
+			VRF:           "current",
 		}
 		desired := &Layer2Information{
 			AnycastGateways: []*netlink.Addr{{}},
@@ -789,12 +781,11 @@ var _ = Describe("ReconcileL2()", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
 		nm := NewManager(netlinkMock)
 		current := &Layer2Information{
-			bridge:                 &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
-			vxlan:                  &netlink.Vxlan{},
-			macvlanBridge:          &netlink.Veth{},
-			macvlanHost:            &netlink.Veth{},
-			CreateMACVLANInterface: true,
-			VRF:                    "current",
+			bridge:        &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
+			vxlan:         &netlink.Vxlan{},
+			macvlanBridge: &netlink.Veth{},
+			macvlanHost:   &netlink.Veth{},
+			VRF:           "current",
 		}
 		desired := &Layer2Information{
 			AnycastGateways: []*netlink.Addr{{}},
@@ -820,12 +811,11 @@ var _ = Describe("ReconcileL2()", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
 		nm := NewManager(netlinkMock)
 		current := &Layer2Information{
-			bridge:                 &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
-			vxlan:                  &netlink.Vxlan{},
-			macvlanBridge:          &netlink.Veth{},
-			macvlanHost:            &netlink.Veth{},
-			CreateMACVLANInterface: true,
-			VRF:                    "current",
+			bridge:        &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
+			vxlan:         &netlink.Vxlan{},
+			macvlanBridge: &netlink.Veth{},
+			macvlanHost:   &netlink.Veth{},
+			VRF:           "current",
 		}
 		desired := &Layer2Information{
 			AnycastGateways: []*netlink.Addr{{}},
@@ -852,12 +842,11 @@ var _ = Describe("ReconcileL2()", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
 		nm := NewManager(netlinkMock)
 		current := &Layer2Information{
-			bridge:                 &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
-			vxlan:                  &netlink.Vxlan{},
-			macvlanBridge:          &netlink.Veth{},
-			macvlanHost:            &netlink.Veth{},
-			CreateMACVLANInterface: true,
-			VRF:                    "current",
+			bridge:        &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
+			vxlan:         &netlink.Vxlan{},
+			macvlanBridge: &netlink.Veth{},
+			macvlanHost:   &netlink.Veth{},
+			VRF:           "current",
 		}
 		desired := &Layer2Information{
 			AnycastGateways: []*netlink.Addr{{}},
@@ -885,12 +874,11 @@ var _ = Describe("ReconcileL2()", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
 		nm := NewManager(netlinkMock)
 		current := &Layer2Information{
-			bridge:                 &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
-			vxlan:                  &netlink.Vxlan{},
-			macvlanBridge:          &netlink.Veth{},
-			macvlanHost:            &netlink.Veth{},
-			CreateMACVLANInterface: true,
-			VRF:                    "current",
+			bridge:        &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
+			vxlan:         &netlink.Vxlan{},
+			macvlanBridge: &netlink.Veth{},
+			macvlanHost:   &netlink.Veth{},
+			VRF:           "current",
 		}
 		desired := &Layer2Information{
 			AnycastGateways: []*netlink.Addr{{}},
@@ -919,12 +907,11 @@ var _ = Describe("ReconcileL2()", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
 		nm := NewManager(netlinkMock)
 		current := &Layer2Information{
-			bridge:                 &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
-			vxlan:                  &netlink.Vxlan{},
-			macvlanBridge:          &netlink.Veth{},
-			macvlanHost:            &netlink.Veth{},
-			CreateMACVLANInterface: true,
-			VRF:                    "current",
+			bridge:        &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
+			vxlan:         &netlink.Vxlan{},
+			macvlanBridge: &netlink.Veth{},
+			macvlanHost:   &netlink.Veth{},
+			VRF:           "current",
 		}
 		desired := &Layer2Information{
 			AnycastGateways: []*netlink.Addr{{}},
@@ -950,59 +937,19 @@ var _ = Describe("ReconcileL2()", func() {
 		err := nm.ReconcileL2(current, desired)
 		Expect(err).To(HaveOccurred())
 	})
-	It("returns error if cannot setup macvlan interface - error deleting interface", func() {
+	It("returns error if cannot setup macvlan interface - error creating macvlan interface", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
 		nm := NewManager(netlinkMock)
 		current := &Layer2Information{
-			bridge:                 &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
-			vxlan:                  &netlink.Vxlan{},
-			macvlanBridge:          &netlink.Veth{},
-			macvlanHost:            &netlink.Veth{},
-			CreateMACVLANInterface: true,
-			VRF:                    "current",
+			bridge: &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
+			vxlan:  &netlink.Vxlan{},
+			VRF:    "current",
 		}
 		desired := &Layer2Information{
 			AnycastGateways: []*netlink.Addr{{}},
 			AnycastMAC:      &net.HardwareAddr{0, 0, 0, 0, 0, 0},
 			MTU:             1399,
 			VRF:             "",
-		}
-
-		netlinkMock.EXPECT().LinkSetMTU(gomock.Any(), gomock.Any()).Return(nil).Times(4)
-		netlinkMock.EXPECT().AddrList(gomock.Any(), gomock.Any()).Return([]netlink.Addr{{IPNet: netlink.NewIPNet(net.IPv4(0, 0, 0, 0))}}, nil)
-		netlinkMock.EXPECT().LinkSetDown(gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkSetHardwareAddr(gomock.Any(), gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkSetUp(gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkSetHardwareAddr(gomock.Any(), gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkSetNoMaster(gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkGetProtinfo(gomock.Any()).Return(netlink.Protinfo{Learning: true}, nil)
-		netlinkMock.EXPECT().LinkSetDown(gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkSetNoMaster(gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkSetMaster(gomock.Any(), gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkSetLearning(gomock.Any(), gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkSetUp(gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().LinkDel(gomock.Any()).Return(errors.New("cannot delete interface"))
-
-		err := nm.ReconcileL2(current, desired)
-		Expect(err).To(HaveOccurred())
-	})
-	It("returns error if cannot setup macvlan interface - error creating macvlan interface", func() {
-		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock)
-		current := &Layer2Information{
-			bridge:                 &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
-			vxlan:                  &netlink.Vxlan{},
-			macvlanBridge:          &netlink.Veth{},
-			macvlanHost:            &netlink.Veth{},
-			CreateMACVLANInterface: false,
-			VRF:                    "current",
-		}
-		desired := &Layer2Information{
-			AnycastGateways:        []*netlink.Addr{{}},
-			AnycastMAC:             &net.HardwareAddr{0, 0, 0, 0, 0, 0},
-			MTU:                    1399,
-			VRF:                    "",
-			CreateMACVLANInterface: true,
 		}
 
 		netlinkMock.EXPECT().LinkSetMTU(gomock.Any(), gomock.Any()).Return(nil).Times(2)
@@ -1030,19 +977,15 @@ var _ = Describe("ReconcileL2()", func() {
 
 		procSysNetPath = tmpDir
 		current := &Layer2Information{
-			bridge:                 &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
-			vxlan:                  &netlink.Vxlan{},
-			macvlanBridge:          &netlink.Veth{},
-			macvlanHost:            &netlink.Veth{},
-			CreateMACVLANInterface: false,
-			VRF:                    "current",
+			bridge: &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
+			vxlan:  &netlink.Vxlan{},
+			VRF:    "current",
 		}
 		desired := &Layer2Information{
-			AnycastGateways:        []*netlink.Addr{{}},
-			AnycastMAC:             &net.HardwareAddr{0, 0, 0, 0, 0, 0},
-			MTU:                    1399,
-			VRF:                    "",
-			CreateMACVLANInterface: true,
+			AnycastGateways: []*netlink.Addr{{}},
+			AnycastMAC:      &net.HardwareAddr{0, 0, 0, 0, 0, 0},
+			MTU:             1399,
+			VRF:             "",
 		}
 
 		netlinkMock.EXPECT().LinkSetMTU(gomock.Any(), gomock.Any()).Return(nil).Times(2)
@@ -1102,20 +1045,16 @@ var _ = Describe("ReconcileL2()", func() {
 
 		procSysNetPath = tmpDir
 		current := &Layer2Information{
-			AnycastGateways:        []*netlink.Addr{{IPNet: netlink.NewIPNet(net.IPv4(1, 1, 1, 1))}},
-			bridge:                 &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
-			vxlan:                  &netlink.Vxlan{},
-			macvlanBridge:          &netlink.Veth{},
-			macvlanHost:            &netlink.Veth{},
-			CreateMACVLANInterface: false,
-			VRF:                    "current",
+			AnycastGateways: []*netlink.Addr{{IPNet: netlink.NewIPNet(net.IPv4(1, 1, 1, 1))}},
+			bridge:          &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
+			vxlan:           &netlink.Vxlan{},
+			VRF:             "current",
 		}
 		desired := &Layer2Information{
-			AnycastGateways:        []*netlink.Addr{{IPNet: netlink.NewIPNet(net.IPv4(2, 2, 2, 2))}},
-			AnycastMAC:             &net.HardwareAddr{0, 0, 0, 0, 0, 0},
-			MTU:                    1399,
-			VRF:                    "",
-			CreateMACVLANInterface: true,
+			AnycastGateways: []*netlink.Addr{{IPNet: netlink.NewIPNet(net.IPv4(2, 2, 2, 2))}},
+			AnycastMAC:      &net.HardwareAddr{0, 0, 0, 0, 0, 0},
+			MTU:             1399,
+			VRF:             "",
 		}
 
 		netlinkMock.EXPECT().LinkSetMTU(gomock.Any(), gomock.Any()).Return(nil).Times(2)
@@ -1168,20 +1107,16 @@ var _ = Describe("ReconcileL2()", func() {
 
 		procSysNetPath = tmpDir
 		current := &Layer2Information{
-			AnycastGateways:        []*netlink.Addr{{IPNet: netlink.NewIPNet(net.IPv4(1, 1, 1, 1))}},
-			bridge:                 &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
-			vxlan:                  &netlink.Vxlan{},
-			macvlanBridge:          &netlink.Veth{},
-			macvlanHost:            &netlink.Veth{},
-			CreateMACVLANInterface: false,
-			VRF:                    "current",
+			AnycastGateways: []*netlink.Addr{{IPNet: netlink.NewIPNet(net.IPv4(1, 1, 1, 1))}},
+			bridge:          &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{HardwareAddr: net.HardwareAddr{1, 1, 1, 1, 1, 1}}},
+			vxlan:           &netlink.Vxlan{},
+			VRF:             "current",
 		}
 		desired := &Layer2Information{
-			AnycastGateways:        []*netlink.Addr{{IPNet: netlink.NewIPNet(net.IPv4(2, 2, 2, 2))}},
-			AnycastMAC:             &net.HardwareAddr{0, 0, 0, 0, 0, 0},
-			MTU:                    1399,
-			VRF:                    "",
-			CreateMACVLANInterface: true,
+			AnycastGateways: []*netlink.Addr{{IPNet: netlink.NewIPNet(net.IPv4(2, 2, 2, 2))}},
+			AnycastMAC:      &net.HardwareAddr{0, 0, 0, 0, 0, 0},
+			MTU:             1399,
+			VRF:             "",
 		}
 
 		netlinkMock.EXPECT().LinkSetMTU(gomock.Any(), gomock.Any()).Return(nil).Times(2)
@@ -1235,23 +1170,6 @@ var _ = Describe("ReconcileL2()", func() {
 		Expect(err).ToNot(HaveOccurred())
 
 		procSysNetPath = oldProcSysNetPath
-	})
-})
-
-var _ = Describe("GetBridgeID()", func() {
-	It("returns error if cannot find link", func() {
-		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock)
-		netlinkMock.EXPECT().LinkByName(gomock.Any()).Return(nil, errors.New("error getting link by name"))
-		_, err := nm.GetBridgeID(&Layer2Information{})
-		Expect(err).To(HaveOccurred())
-	})
-	It("returns no error", func() {
-		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
-		nm := NewManager(netlinkMock)
-		netlinkMock.EXPECT().LinkByName(gomock.Any()).Return(&netlink.Bridge{}, nil)
-		_, err := nm.GetBridgeID(&Layer2Information{})
-		Expect(err).ToNot(HaveOccurred())
 	})
 })
 
@@ -1389,6 +1307,16 @@ var _ = Describe("CreateL3()", func() {
 		err := nm.CreateL3(vrfInfo)
 		Expect(err).To(HaveOccurred())
 		procSysNetPath = oldProcSysNetPath
+	})
+})
+
+var _ = Describe("Layer2Information", func() {
+	It("IsNeighSuppressionEnabled", func() {
+		trueVar := true
+		layer2 := Layer2Information{
+			NeighSuppression: &trueVar,
+		}
+		Expect(layer2.IsNeighSuppressionEnabled()).To(BeTrue())
 	})
 })
 

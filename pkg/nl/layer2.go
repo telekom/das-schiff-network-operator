@@ -21,19 +21,18 @@ const (
 var procSysNetPath = "/proc/sys/net"
 
 type Layer2Information struct {
-	VlanID                 int
-	MTU                    int
-	VNI                    int
-	VRF                    string
-	AnycastMAC             *net.HardwareAddr
-	AnycastGateways        []*netlink.Addr
-	AdvertiseNeighbors     bool
-	NeighSuppression       *bool
-	CreateMACVLANInterface bool
-	bridge                 *netlink.Bridge
-	vxlan                  *netlink.Vxlan
-	macvlanBridge          *netlink.Veth
-	macvlanHost            *netlink.Veth
+	VlanID             int
+	MTU                int
+	VNI                int
+	VRF                string
+	AnycastMAC         *net.HardwareAddr
+	AnycastGateways    []*netlink.Addr
+	AdvertiseNeighbors bool
+	NeighSuppression   *bool
+	bridge             *netlink.Bridge
+	vxlan              *netlink.Vxlan
+	macvlanBridge      *netlink.Veth
+	macvlanHost        *netlink.Veth
 }
 
 type NeighborInformation struct {
@@ -155,20 +154,13 @@ func (n *Manager) setupBridge(info *Layer2Information, masterIdx int) (*netlink.
 }
 
 func (n *Manager) setupVXLAN(info *Layer2Information, bridge *netlink.Bridge) error {
-	neighSuppression := os.Getenv("NWOP_NEIGH_SUPPRESSION") == "true"
-	if len(info.AnycastGateways) == 0 {
-		neighSuppression = false
-	}
-	if info.NeighSuppression != nil {
-		neighSuppression = *info.NeighSuppression
-	}
 	vxlan, err := n.createVXLAN(
 		fmt.Sprintf("%s%d", vxlanPrefix, info.VNI),
 		bridge.Attrs().Index,
 		info.VNI,
 		info.MTU,
 		false,
-		neighSuppression,
+		info.IsNeighSuppressionEnabled(),
 	)
 	if err != nil {
 		return err
@@ -178,23 +170,22 @@ func (n *Manager) setupVXLAN(info *Layer2Information, bridge *netlink.Bridge) er
 	}
 	info.vxlan = vxlan
 
-	if info.CreateMACVLANInterface {
-		_, err := n.createLink(
-			fmt.Sprintf("%s%d", vethL2Prefix, info.VlanID),
-			fmt.Sprintf("%s%d", macvlanPrefix, info.VlanID),
-			bridge.Attrs().Index,
-			info.MTU,
-			false,
-		)
-		if err != nil {
-			return err
-		}
-		if err := n.setUp(fmt.Sprintf("%s%d", vethL2Prefix, info.VlanID)); err != nil {
-			return err
-		}
-		if err := n.setUp(fmt.Sprintf("%s%d", macvlanPrefix, info.VlanID)); err != nil {
-			return err
-		}
+	link, err := n.createLink(
+		fmt.Sprintf("%s%d", vethL2Prefix, info.VlanID),
+		fmt.Sprintf("%s%d", macvlanPrefix, info.VlanID),
+		bridge.Attrs().Index,
+		info.MTU,
+		false,
+	)
+	info.macvlanBridge = link
+	if err != nil {
+		return err
+	}
+	if err := n.setUp(fmt.Sprintf("%s%d", vethL2Prefix, info.VlanID)); err != nil {
+		return err
+	}
+	if err := n.setUp(fmt.Sprintf("%s%d", macvlanPrefix, info.VlanID)); err != nil {
+		return err
 	}
 
 	return nil
@@ -212,7 +203,7 @@ func (n *Manager) CleanupL2(info *Layer2Information) []error {
 			errors = append(errors, err)
 		}
 	}
-	if info.CreateMACVLANInterface && info.macvlanBridge != nil {
+	if info.macvlanBridge != nil {
 		if err := n.toolkit.LinkDel(info.macvlanBridge); err != nil {
 			errors = append(errors, err)
 		}
@@ -348,7 +339,7 @@ func (n *Manager) setMTU(current, desired *Layer2Information) error {
 	if err := n.toolkit.LinkSetMTU(current.vxlan, desired.MTU); err != nil {
 		return fmt.Errorf("error setting vxlan MTU: %w", err)
 	}
-	if current.CreateMACVLANInterface {
+	if current.macvlanBridge != nil && current.macvlanHost != nil {
 		if err := n.toolkit.LinkSetMTU(current.macvlanBridge, desired.MTU); err != nil {
 			return fmt.Errorf("error setting veth bridge side MTU: %w", err)
 		}
@@ -408,14 +399,7 @@ func (n *Manager) reattachL2VNI(current *Layer2Information) error {
 }
 
 func (n *Manager) doNeighSuppression(current, desired *Layer2Information) error {
-	neighSuppression := os.Getenv("NWOP_NEIGH_SUPPRESSION") == "true"
-	if len(desired.AnycastGateways) == 0 {
-		neighSuppression = false
-	}
-	if desired.NeighSuppression != nil {
-		neighSuppression = *desired.NeighSuppression
-	}
-	return n.setNeighSuppression(current.vxlan, neighSuppression)
+	return n.setNeighSuppression(current.vxlan, desired.IsNeighSuppressionEnabled())
 }
 
 func (n *Manager) isL2VNIreattachRequired(current, desired *Layer2Information) (bool, error) {
@@ -450,12 +434,8 @@ func (n *Manager) isL2VNIreattachRequired(current, desired *Layer2Information) (
 }
 
 func (n *Manager) setupMACVLANinterface(current, desired *Layer2Information) error {
-	if current.CreateMACVLANInterface && !desired.CreateMACVLANInterface {
-		if err := n.toolkit.LinkDel(current.macvlanBridge); err != nil {
-			return fmt.Errorf("error deleting MACVLAN interface: %w", err)
-		}
-	} else if !current.CreateMACVLANInterface && desired.CreateMACVLANInterface {
-		_, err := n.createLink(
+	if current.macvlanBridge == nil {
+		veth, err := n.createLink(
 			fmt.Sprintf("%s%d", vethL2Prefix, current.VlanID),
 			fmt.Sprintf("%s%d", macvlanPrefix, current.VlanID),
 			current.bridge.Attrs().Index,
@@ -465,6 +445,7 @@ func (n *Manager) setupMACVLANinterface(current, desired *Layer2Information) err
 		if err != nil {
 			return fmt.Errorf("error creating MACVLAN interface: %w", err)
 		}
+		current.macvlanBridge = veth
 	}
 	return nil
 }
@@ -562,15 +543,6 @@ func (n *Manager) ListNeighborInformation() ([]NeighborInformation, error) {
 	return maps.Values(neighbors), nil
 }
 
-func (n *Manager) GetBridgeID(info *Layer2Information) (int, error) {
-	bridgeName := fmt.Sprintf("%s%d", layer2Prefix, info.VlanID)
-	link, err := n.toolkit.LinkByName(bridgeName)
-	if err != nil {
-		return -1, fmt.Errorf("error while getting link by name: %w", err)
-	}
-	return link.Attrs().Index, nil
-}
-
 // ReconcileL2NodeConfig sets bridge netfilter according to NWOP_BRIDGE_NF environment variable.
 // NWOP_BRIDGE_NF can be "enable" or "disable". Any other value leaves the setting unchanged.
 func (*Manager) ReconcileL2NodeConfig() error {
@@ -599,4 +571,25 @@ func (*Manager) ReconcileL2NodeConfig() error {
 		}
 	}
 	return nil
+}
+
+func (info *Layer2Information) IsNeighSuppressionEnabled() bool {
+	if info.NeighSuppression != nil {
+		return *info.NeighSuppression
+	}
+	return os.Getenv("NWOP_NEIGH_SUPPRESSION") == "true" && len(info.AnycastGateways) > 0
+}
+
+func (info *Layer2Information) BridgeID() int {
+	if info.bridge == nil {
+		return -1
+	}
+	return info.bridge.Attrs().Index
+}
+
+func (info *Layer2Information) MacVLANBridgeID() int {
+	if info.macvlanBridge == nil {
+		return -1
+	}
+	return info.macvlanBridge.Attrs().Index
 }

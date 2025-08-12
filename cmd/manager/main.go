@@ -24,6 +24,9 @@ import (
 	"os"
 	"sort"
 
+	"github.com/telekom/das-schiff-network-operator/pkg/neighborsync"
+	"github.com/telekom/das-schiff-network-operator/pkg/nltoolkit"
+
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -38,7 +41,6 @@ import (
 	"github.com/telekom/das-schiff-network-operator/pkg/macvlan"
 	"github.com/telekom/das-schiff-network-operator/pkg/managerconfig"
 	"github.com/telekom/das-schiff-network-operator/pkg/monitoring"
-	"github.com/telekom/das-schiff-network-operator/pkg/nl"
 	"github.com/telekom/das-schiff-network-operator/pkg/notrack"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler"
 	"github.com/telekom/das-schiff-network-operator/pkg/version"
@@ -142,14 +144,15 @@ func main() {
 		os.Exit(1)
 	}
 
-	anycastTracker := anycast.NewTracker(&nl.Toolkit{})
+	anycastTracker := anycast.NewTracker(&nltoolkit.Toolkit{})
+	neighborSync := neighborsync.NewNeighborSync(&nltoolkit.Toolkit{})
 
 	if err = (&networkv1alpha1.VRFRouteConfiguration{}).SetupWebhookWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create webhook", "webhook", "VRFRouteConfiguration")
 		os.Exit(1)
 	}
 
-	if err := initComponents(mgr, anycastTracker, cfg, clientConfig, onlyBPFMode); err != nil {
+	if err := initComponents(mgr, anycastTracker, neighborSync, cfg, clientConfig, onlyBPFMode); err != nil {
 		setupLog.Error(err, "unable to initialize components")
 		os.Exit(1)
 	}
@@ -166,7 +169,7 @@ func main() {
 	}
 }
 
-func initComponents(mgr manager.Manager, anycastTracker *anycast.Tracker, cfg *config.Config, clientConfig *rest.Config, onlyBPFMode bool) error {
+func initComponents(mgr manager.Manager, anycastTracker *anycast.Tracker, neighborSync *neighborsync.NeighborSync, cfg *config.Config, clientConfig *rest.Config, onlyBPFMode bool) error {
 	//+kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
@@ -181,19 +184,12 @@ func initComponents(mgr manager.Manager, anycastTracker *anycast.Tracker, cfg *c
 		return fmt.Errorf("unable to init BPF router: %w", err)
 	}
 	setupLog.Info("attach bpf to interfaces specified in config")
-	if err := bpf.AttachInterfaces(cfg.BPFInterfaces); err != nil {
+	if err := bpf.AttachRouterInterfaces(cfg.BPFInterfaces); err != nil {
 		return fmt.Errorf("unable to attach bpf to interfaces: %w", err)
 	}
 
-	setupLog.Info("start bpf interface check")
-	bpf.RunInterfaceCheck()
-
-	setupLog.Info("start anycast sync")
-	anycastTracker.RunAnycastSync()
-
-	setupLog.Info("start notrack sync")
-	if err := notrack.RunIPTablesSync(); err != nil {
-		setupLog.Error(err, "error starting IPTables sync")
+	if err := startTasks(anycastTracker, neighborSync); err != nil {
+		return fmt.Errorf("unable to start tasks: %w", err)
 	}
 
 	if onlyBPFMode {
@@ -219,7 +215,7 @@ func initComponents(mgr manager.Manager, anycastTracker *anycast.Tracker, cfg *c
 		}
 	} else {
 		// Start VRFRouteConfigurationReconciler when we are not running in only BPF mode.
-		r, err := reconciler.NewReconciler(mgr.GetClient(), anycastTracker, mgr.GetLogger())
+		r, err := reconciler.NewReconciler(mgr.GetClient(), anycastTracker, neighborSync, mgr.GetLogger())
 		if err != nil {
 			return fmt.Errorf("unable to create debounced reconciler: %w", err)
 		}
@@ -230,6 +226,23 @@ func initComponents(mgr manager.Manager, anycastTracker *anycast.Tracker, cfg *c
 		// Trigger initial reconciliation.
 		r.Reconcile(context.Background())
 	}
+
+	return nil
+}
+
+func startTasks(anycastTracker *anycast.Tracker, neighborSync *neighborsync.NeighborSync) error {
+	setupLog.Info("start anycast sync")
+	anycastTracker.RunAnycastSync()
+
+	setupLog.Info("start notrack sync")
+	if err := notrack.RunIPTablesSync(); err != nil {
+		return fmt.Errorf("error starting IPTables sync: %w", err)
+	}
+
+	setupLog.Info("start bpf interface check")
+	bpf.RunInterfaceCheck()
+
+	neighborSync.StartNeighborSync()
 
 	return nil
 }

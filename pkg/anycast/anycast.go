@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	"github.com/telekom/das-schiff-network-operator/pkg/nl"
+	"github.com/telekom/das-schiff-network-operator/pkg/nltoolkit"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -21,15 +21,13 @@ var (
 
 type Tracker struct {
 	TrackedBridges []int
-	toolkit        nl.ToolkitInterface
+	toolkit        nltoolkit.ToolkitInterface
 }
 
-func NewTracker(toolkit nl.ToolkitInterface) *Tracker {
+func NewTracker(toolkit nltoolkit.ToolkitInterface) *Tracker {
 	return &Tracker{TrackedBridges: []int{},
 		toolkit: toolkit}
 }
-
-// TODO: Anycast Support is currently highly experimental.
 
 func (t *Tracker) checkTrackedInterfaces() {
 	logger := ctrl.Log.WithName("anycast")
@@ -77,11 +75,8 @@ func filterNeighbors(neighIn []netlink.Neigh) (neighOut []netlink.Neigh) {
 		if neighIn[i].Flags&netlink.NTF_EXT_LEARNED == netlink.NTF_EXT_LEARNED {
 			continue
 		}
-		if neighIn[i].State != netlink.NUD_NONE &&
-			neighIn[i].State&netlink.NUD_PERMANENT != netlink.NUD_PERMANENT &&
-			neighIn[i].State&netlink.NUD_STALE != netlink.NUD_STALE &&
-			neighIn[i].State&netlink.NUD_REACHABLE != netlink.NUD_REACHABLE &&
-			neighIn[i].State&netlink.NUD_DELAY != netlink.NUD_DELAY {
+		if neighIn[i].State&netlink.NUD_INCOMPLETE == netlink.NUD_INCOMPLETE ||
+			neighIn[i].State&netlink.NUD_FAILED == netlink.NUD_FAILED {
 			continue
 		}
 		neighOut = append(neighOut, neighIn[i])
@@ -89,7 +84,7 @@ func filterNeighbors(neighIn []netlink.Neigh) (neighOut []netlink.Neigh) {
 	return neighOut
 }
 
-func syncInterfaceByFamily(intf *netlink.Bridge, family int, routingTable uint32, toolkit nl.ToolkitInterface, logger logr.Logger) error {
+func syncInterfaceByFamily(intf *netlink.Bridge, family int, routingTable uint32, toolkit nltoolkit.ToolkitInterface, logger logr.Logger) error {
 	bridgeNeighbors, err := toolkit.NeighList(intf.Attrs().Index, family)
 	if err != nil {
 		logger.Error(err, "error getting v4 neighbors of interface", "interface", intf.Attrs().Name)
@@ -132,19 +127,19 @@ func syncInterfaceByFamily(intf *netlink.Bridge, family int, routingTable uint32
 	return nil
 }
 
-func syncInterface(intf *netlink.Bridge, toolkit nl.ToolkitInterface, logger logr.Logger) error {
+func syncInterface(intf *netlink.Bridge, toolkit nltoolkit.ToolkitInterface, logger logr.Logger) error {
 	routingTable := uint32(defaultVrfAnycastTable)
 	if intf.Attrs().MasterIndex > 0 {
-		link, err := toolkit.LinkByIndex(intf.Attrs().MasterIndex)
+		nlLink, err := toolkit.LinkByIndex(intf.Attrs().MasterIndex)
 		if err != nil {
 			logger.Error(err, "error getting VRF parent of interface", "interface", intf.Attrs().Name)
 			return fmt.Errorf("error getting VRF parent of interface %s: %w", intf.Attrs().Name, err)
 		}
-		if link.Type() != "vrf" {
+		if nlLink.Type() != "vrf" {
 			logger.Info("parent of the interface is not a VRF", "interface", intf.Attrs().Name)
 			return fmt.Errorf("parent interface of %s is not a VRF", intf.Attrs().Name)
 		}
-		routingTable = link.(*netlink.Vrf).Table
+		routingTable = nlLink.(*netlink.Vrf).Table
 	}
 
 	_ = syncInterfaceByFamily(intf, unix.AF_INET, routingTable, toolkit, logger)

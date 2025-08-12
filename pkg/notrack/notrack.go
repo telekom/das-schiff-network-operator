@@ -9,6 +9,7 @@ import (
 
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
+	"github.com/telekom/das-schiff-network-operator/pkg/nltoolkit"
 	"github.com/vishvananda/netlink"
 	"k8s.io/utils/strings/slices"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -120,7 +121,7 @@ func RunIPTablesSync() error {
 		return fmt.Errorf("error connecting to ip6tables for notrack: %w", err)
 	}
 
-	netlinkManager := nl.NewManager(&nl.Toolkit{})
+	netlinkManager := nl.NewManager(&nltoolkit.Toolkit{})
 
 	go syncIPTTables(netlinkManager, ipt4, ipt6)
 
