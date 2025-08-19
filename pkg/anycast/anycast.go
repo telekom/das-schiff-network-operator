@@ -119,7 +119,7 @@ func syncInterfaceByFamily(intf *netlink.Bridge, family int, routingTable uint32
 		if !containsIPNetwork(alreadyV4Existing, ipnet) {
 			route := buildRoute(family, intf, ipnet, routingTable)
 			if err := toolkit.RouteAdd(route); err != nil {
-				logger.Error(err, "error adding route", "route", routes[i])
+				logger.Error(err, "error adding route", "route", route.String())
 			}
 		}
 	}
