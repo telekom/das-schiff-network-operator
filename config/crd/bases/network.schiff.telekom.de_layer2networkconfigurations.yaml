@@ -73,6 +73,10 @@ spec:
               createMacVLANInterface:
                 description: Create MACVLAN attach interface
                 type: boolean
+              disableSegmentation:
+                description: Disable segmentation offload on the interface in tx and
+                  rx path
+                type: boolean
               id:
                 description: VLAN Id of the layer 2 network
                 type: integer

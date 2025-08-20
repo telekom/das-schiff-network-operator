@@ -16,23 +16,25 @@ import (
 const (
 	interfaceConfigTimeout = 500 * time.Millisecond
 	neighFilePermissions   = 0o600
+	defaultGroGsoMaxSize   = 65536 // Default value for GRO/GSO max size, can be overridden by MTU
 )
 
 var procSysNetPath = "/proc/sys/net"
 
 type Layer2Information struct {
-	VlanID             int
-	MTU                int
-	VNI                int
-	VRF                string
-	AnycastMAC         *net.HardwareAddr
-	AnycastGateways    []*netlink.Addr
-	AdvertiseNeighbors bool
-	NeighSuppression   *bool
-	bridge             *netlink.Bridge
-	vxlan              *netlink.Vxlan
-	macvlanBridge      *netlink.Veth
-	macvlanHost        *netlink.Veth
+	VlanID              int
+	MTU                 int
+	VNI                 int
+	VRF                 string
+	AnycastMAC          *net.HardwareAddr
+	AnycastGateways     []*netlink.Addr
+	AdvertiseNeighbors  bool
+	NeighSuppression    *bool
+	DisableSegmentation bool
+	bridge              *netlink.Bridge
+	vxlan               *netlink.Vxlan
+	macvlanBridge       *netlink.Veth
+	macvlanHost         *netlink.Veth
 }
 
 type NeighborInformation struct {
@@ -138,6 +140,9 @@ func (n *Manager) setupBridge(info *Layer2Information, masterIdx int) (*netlink.
 	}
 	info.bridge = bridge
 	if err := n.configureBridge(bridge.Name); err != nil {
+		return nil, err
+	}
+	if err := n.setGroGsoMaxSize(bridge, info.GroGsoMaxSize()); err != nil {
 		return nil, err
 	}
 
@@ -346,6 +351,9 @@ func (n *Manager) setMTU(current, desired *Layer2Information) error {
 		if err := n.toolkit.LinkSetMTU(current.macvlanHost, desired.MTU); err != nil {
 			return fmt.Errorf("error setting veth macvlan side MTU: %w", err)
 		}
+	}
+	if err := n.setGroGsoMaxSize(current.bridge, desired.GroGsoMaxSize()); err != nil {
+		return fmt.Errorf("error setting GRO/GSO max size: %w", err)
 	}
 	return nil
 }
@@ -592,4 +600,11 @@ func (info *Layer2Information) MacVLANBridgeID() int {
 		return -1
 	}
 	return info.macvlanBridge.Attrs().Index
+}
+
+func (info *Layer2Information) GroGsoMaxSize() int {
+	if info.DisableSegmentation {
+		return info.MTU
+	}
+	return defaultGroGsoMaxSize
 }
