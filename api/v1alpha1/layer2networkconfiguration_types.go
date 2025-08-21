@@ -58,6 +58,9 @@ type Layer2NetworkConfigurationSpec struct {
 	// Enable ARP / ND suppression
 	NeighSuppression *bool `json:"neighSuppression,omitempty"`
 
+	// Disable segmentation offload on the interface in tx and rx path
+	DisableSegmentation bool `json:"disableSegmentation,omitempty"`
+
 	// VRF to attach Layer2 network to, default if not set
 	VRF string `json:"vrf,omitempty"`
 

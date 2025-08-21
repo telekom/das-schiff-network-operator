@@ -1,6 +1,7 @@
 package nl
 
 import (
+	"encoding/binary"
 	"fmt"
 	"net"
 	"os"
@@ -214,6 +215,31 @@ func (n *Manager) setNeighSuppression(link netlink.Link, mode bool) error {
 	br := nl.NewRtAttr(unix.IFLA_PROTINFO|unix.NLA_F_NESTED, nil)
 	br.AddRtAttr(iflaBrPortNeighSuppress, boolToByte(mode))
 	req.AddData(br)
+	_, err := n.toolkit.ExecuteNetlinkRequest(req, unix.NETLINK_ROUTE, 0)
+	if err != nil {
+		return fmt.Errorf("error executing request: %w", err)
+	}
+	return nil
+}
+
+func (n *Manager) setGroGsoMaxSize(link netlink.Link, size int) error {
+	req := nl.NewNetlinkRequest(unix.RTM_SETLINK, unix.NLM_F_ACK)
+
+	msg := nl.NewIfInfomsg(unix.AF_UNSPEC)
+	msg.Index = int32(link.Attrs().Index)
+	req.AddData(msg)
+
+	uSize := uint32(size)
+
+	b := make([]byte, binary.Size(uSize))
+	nl.NativeEndian().PutUint32(b, uSize)
+
+	groData := nl.NewRtAttr(unix.IFLA_GRO_MAX_SIZE, b)
+	req.AddData(groData)
+
+	gsoData := nl.NewRtAttr(unix.IFLA_GSO_MAX_SIZE, b)
+	req.AddData(gsoData)
+
 	_, err := n.toolkit.ExecuteNetlinkRequest(req, unix.NETLINK_ROUTE, 0)
 	if err != nil {
 		return fmt.Errorf("error executing request: %w", err)

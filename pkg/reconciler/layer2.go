@@ -178,14 +178,15 @@ func (r *reconcile) getDesired(l2vnis []networkv1alpha1.Layer2NetworkConfigurati
 		}
 
 		desired = append(desired, nl.Layer2Information{
-			VlanID:             spec.ID,
-			MTU:                spec.MTU,
-			VNI:                spec.VNI,
-			VRF:                spec.VRF,
-			AnycastMAC:         anycastMAC,
-			AnycastGateways:    anycastGateways,
-			AdvertiseNeighbors: spec.AdvertiseNeighbors,
-			NeighSuppression:   spec.NeighSuppression,
+			VlanID:              spec.ID,
+			MTU:                 spec.MTU,
+			VNI:                 spec.VNI,
+			VRF:                 spec.VRF,
+			AnycastMAC:          anycastMAC,
+			AnycastGateways:     anycastGateways,
+			AdvertiseNeighbors:  spec.AdvertiseNeighbors,
+			NeighSuppression:    spec.NeighSuppression,
+			DisableSegmentation: spec.DisableSegmentation,
 		})
 	}
 
