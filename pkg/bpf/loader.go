@@ -84,6 +84,10 @@ func AttachNeighborHandlerToInterface(intf netlink.Link) error {
 	if err != nil {
 		return fmt.Errorf("error getting interface by name %s: %w", intf.Attrs().Name, err)
 	}
+	linkXdp := intf.Attrs().Xdp
+	if linkXdp != nil && linkXdp.Attached && nwopbpf.HandleNeighborReplyXdp.FD() == linkXdp.Fd {
+		return nil
+	}
 	_, err = link.AttachXDP(link.XDPOptions{
 		Program:   nwopbpf.HandleNeighborReplyXdp,
 		Interface: iface.Index,
