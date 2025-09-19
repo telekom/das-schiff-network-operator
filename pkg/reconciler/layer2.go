@@ -211,7 +211,7 @@ func determineToBeDeleted(existing, desired []nl.Layer2Information) []nl.Layer2I
 }
 
 func (r *reconcile) reconcileExistingLayer(desired, currentConfig *nl.Layer2Information, anycastTrackerInterfaces *[]int) error {
-	r.Logger.Info("Reconciling existing Layer2", "vlan", desired.VlanID, "vni", desired.VNI)
+	r.Logger.Info("Reconciling existing Layer2", "vlan", desired.VlanID, "vni", desired.VNI, "neighborSuppression", desired.IsNeighSuppressionEnabled())
 	err := r.netlinkManager.ReconcileL2(currentConfig, desired)
 	if err != nil {
 		return fmt.Errorf("error reconciling layer2 vlan %d vni %d: %w", desired.VlanID, desired.VNI, err)
@@ -220,28 +220,31 @@ func (r *reconcile) reconcileExistingLayer(desired, currentConfig *nl.Layer2Info
 }
 
 func (r *reconcile) applyConfiguration(desired, current *nl.Layer2Information, anycastTrackerInterfaces *[]int) error {
+	bridgeID := current.BridgeID()
+	if bridgeID == -1 {
+		return fmt.Errorf("error getting bridge id for vlanId %d", desired.VlanID)
+	}
+	macVlanBridgeID := current.MacVLANBridgeID()
+	if macVlanBridgeID == -1 {
+		return fmt.Errorf("error getting macvlan bridge id for vlanId %d", desired.VlanID)
+	}
+
 	if desired.AdvertiseNeighbors {
-		bridgeID := current.BridgeID()
-		if bridgeID == -1 {
-			return fmt.Errorf("error getting bridge id for vlanId %d", desired.VlanID)
-		}
 		*anycastTrackerInterfaces = append(*anycastTrackerInterfaces, bridgeID)
 	}
 
-	if current.MacVLANBridgeID() != -1 {
-		if desired.IsNeighSuppressionEnabled() {
-			if err := r.neighborSync.EnsureNeighborSuppression(current.BridgeID(), current.MacVLANBridgeID()); err != nil {
-				return fmt.Errorf("error ensuring neighbor suppression for vlanId %d: %w", desired.VlanID, err)
-			}
-		} else {
-			r.neighborSync.DisableNeighborSuppression(current.BridgeID(), current.MacVLANBridgeID())
+	if desired.IsNeighSuppressionEnabled() {
+		if err := r.neighborSync.EnsureNeighborSuppression(bridgeID, macVlanBridgeID); err != nil {
+			return fmt.Errorf("error ensuring neighbor suppression for vlanId %d: %w", desired.VlanID, err)
 		}
+	} else {
+		r.neighborSync.DisableNeighborSuppression(bridgeID, macVlanBridgeID)
 	}
 
-	if len(desired.AnycastGateways) > 0 && current.BridgeID() != -1 {
-		r.neighborSync.EnsureARPRefresh(current.BridgeID())
+	if len(desired.AnycastGateways) > 0 {
+		r.neighborSync.EnsureARPRefresh(bridgeID)
 	} else {
-		r.neighborSync.DisableARPRefresh(current.BridgeID())
+		r.neighborSync.DisableARPRefresh(bridgeID)
 	}
 	return nil
 }

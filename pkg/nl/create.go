@@ -234,11 +234,10 @@ func (n *Manager) setGroGsoMaxSize(link netlink.Link, size int) error {
 	b := make([]byte, binary.Size(uSize))
 	nl.NativeEndian().PutUint32(b, uSize)
 
-	groData := nl.NewRtAttr(unix.IFLA_GRO_MAX_SIZE, b)
-	req.AddData(groData)
-
-	gsoData := nl.NewRtAttr(unix.IFLA_GSO_MAX_SIZE, b)
-	req.AddData(gsoData)
+	groAttr := nl.NewRtAttr(unix.IFLA_GRO_MAX_SIZE, nl.Uint32Attr(uint32(size)))
+	req.AddData(groAttr)
+	gsoAttr := nl.NewRtAttr(unix.IFLA_GSO_MAX_SIZE, nl.Uint32Attr(uint32(size)))
+	req.AddData(gsoAttr)
 
 	_, err := n.toolkit.ExecuteNetlinkRequest(req, unix.NETLINK_ROUTE, 0)
 	if err != nil {
