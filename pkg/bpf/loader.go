@@ -4,11 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"net"
 	"time"
 
 	"github.com/cilium/ebpf"
-	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/rlimit"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
@@ -80,15 +78,11 @@ func AttachRouterInterfaces(intfs []string) error {
 
 func AttachNeighborHandlerToInterface(intf netlink.Link) error {
 	// Attach XDP program.
-	iface, err := net.InterfaceByName(intf.Attrs().Name)
-	if err != nil {
-		return fmt.Errorf("error getting interface by name %s: %w", intf.Attrs().Name, err)
+	if intf.Attrs().Xdp != nil && intf.Attrs().Xdp.Attached && intf.Attrs().Xdp.Fd == nwopbpf.HandleNeighborReplyXdp.FD() {
+		// Already attached
+		return nil
 	}
-	_, err = link.AttachXDP(link.XDPOptions{
-		Program:   nwopbpf.HandleNeighborReplyXdp,
-		Interface: iface.Index,
-		Flags:     link.XDPGenericMode,
-	})
+	err := netlink.LinkSetXdpFd(intf, nwopbpf.HandleNeighborReplyXdp.FD())
 	if err != nil {
 		return fmt.Errorf("error attaching XDP program: %w", err)
 	}
