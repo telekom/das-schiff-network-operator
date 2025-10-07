@@ -16,6 +16,7 @@ import (
 	"github.com/vishvananda/netlink"
 	"go.uber.org/mock/gomock"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -118,6 +119,58 @@ var _ = Describe("RemoveTaints()", func() {
 		err = c.Get(context.Background(), types.NamespacedName{Name: testHostname}, node)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(node.Spec.Taints).To(BeEmpty())
+	})
+})
+var _ = Describe("UpdateReadinessCondition()", func() {
+	It("creates readiness condition when absent", func() {
+		node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: testHostname}}
+		c := fake.NewClientBuilder().WithRuntimeObjects(node).WithStatusSubresource(&corev1.Node{}).Build()
+		nc := &NetHealthcheckConfig{}
+		hc, err := NewHealthChecker(c, nil, nc)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(hc).ToNot(BeNil())
+		err = hc.UpdateReadinessCondition(context.Background(), corev1.ConditionTrue, ReasonHealthChecksPassed, "all good")
+		Expect(err).ToNot(HaveOccurred())
+		updated := &corev1.Node{}
+		Expect(c.Get(context.Background(), types.NamespacedName{Name: testHostname}, updated)).To(Succeed())
+		var cond *corev1.NodeCondition
+		for i := range updated.Status.Conditions {
+			if updated.Status.Conditions[i].Type == NetworkOperatorReadyConditionType {
+				cond = &updated.Status.Conditions[i]
+				break
+			}
+		}
+		Expect(cond).ToNot(BeNil())
+		Expect(cond.Status).To(Equal(corev1.ConditionTrue))
+		Expect(cond.Reason).To(Equal(ReasonHealthChecksPassed))
+	})
+	It("updates existing readiness condition without adding duplicate", func() {
+		now := metav1.Now()
+		node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: testHostname}, Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{{
+			Type:               NetworkOperatorReadyConditionType,
+			Status:             corev1.ConditionFalse,
+			LastHeartbeatTime:  now,
+			LastTransitionTime: now,
+			Reason:             ReasonInterfaceCheckFailed,
+			Message:            "iface down",
+		}}}}
+		c := fake.NewClientBuilder().WithRuntimeObjects(node).WithStatusSubresource(&corev1.Node{}).Build()
+		nc := &NetHealthcheckConfig{}
+		hc, err := NewHealthChecker(c, nil, nc)
+		Expect(err).ToNot(HaveOccurred())
+		err = hc.UpdateReadinessCondition(context.Background(), corev1.ConditionTrue, ReasonHealthChecksPassed, "all good")
+		Expect(err).ToNot(HaveOccurred())
+		updated := &corev1.Node{}
+		Expect(c.Get(context.Background(), types.NamespacedName{Name: testHostname}, updated)).To(Succeed())
+		count := 0
+		for i := range updated.Status.Conditions {
+			if updated.Status.Conditions[i].Type == NetworkOperatorReadyConditionType {
+				count++
+				Expect(updated.Status.Conditions[i].Status).To(Equal(corev1.ConditionTrue))
+				Expect(updated.Status.Conditions[i].Reason).To(Equal(ReasonHealthChecksPassed))
+			}
+		}
+		Expect(count).To(Equal(1))
 	})
 })
 var _ = Describe("CheckInterfaces()", func() {

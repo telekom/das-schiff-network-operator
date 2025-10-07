@@ -16,6 +16,7 @@ import (
 	"github.com/vishvananda/netlink"
 	"gopkg.in/yaml.v2"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -26,6 +27,16 @@ const (
 	NetHealthcheckFile = "/opt/network-operator/net-healthcheck-config.yaml"
 	// NodenameEnv is an env variable that holds Kubernetes node's name.
 	NodenameEnv = "NODE_NAME"
+
+	// NetworkOperatorReadyConditionType is the custom Node condition type signalling
+	// that the network operator has successfully initialised networking on the node.
+	NetworkOperatorReadyConditionType corev1.NodeConditionType = "NetworkOperatorReady"
+
+	// Condition reasons.
+	ReasonHealthChecksPassed   = "HealthChecksPassed"
+	ReasonInterfaceCheckFailed = "InterfaceCheckFailed"
+	ReasonReachabilityFailed   = "ReachabilityCheckFailed"
+	ReasonAPIServerFailed      = "APIServerCheckFailed"
 
 	configEnv         = "OPERATOR_NETHEALTHCHECK_CONFIG"
 	defaultTCPTimeout = 3
@@ -40,6 +51,7 @@ type HealthCheckerInterface interface {
 	CheckAPIServer(ctx context.Context) error
 	TaintsRemoved() bool
 	RemoveTaints(ctx context.Context) error
+	UpdateReadinessCondition(ctx context.Context, status corev1.ConditionStatus, reason, message string) error
 }
 
 // HealthChecker is a struct that holds data required for networking healthcheck.
@@ -105,6 +117,52 @@ func (hc *HealthChecker) RemoveTaints(ctx context.Context) error {
 
 	hc.taintsRemoved = true
 
+	return nil
+}
+
+// UpdateReadinessCondition sets or updates the custom NetworkOperatorReady Node condition.
+// status: corev1.ConditionTrue or corev1.ConditionFalse
+// reason & message provide contextual information visible to users.
+func (hc *HealthChecker) UpdateReadinessCondition(ctx context.Context, status corev1.ConditionStatus, reason, message string) error {
+	node := &corev1.Node{}
+	if err := hc.client.Get(ctx, types.NamespacedName{Name: os.Getenv(NodenameEnv)}, node); err != nil {
+		return fmt.Errorf("error retrieving node to update readiness condition: %w", err)
+	}
+
+	now := metav1.Now()
+	updated := false
+	found := false
+	for i, c := range node.Status.Conditions {
+		if c.Type == NetworkOperatorReadyConditionType {
+			found = true
+			// Transition time only changes if status changed
+			if c.Status != status {
+				node.Status.Conditions[i].LastTransitionTime = now
+			}
+			node.Status.Conditions[i].LastHeartbeatTime = now
+			node.Status.Conditions[i].Status = status
+			node.Status.Conditions[i].Reason = reason
+			node.Status.Conditions[i].Message = message
+			updated = true
+			break
+		}
+	}
+	if !found { // append new condition
+		node.Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
+			Type:               NetworkOperatorReadyConditionType,
+			Status:             status,
+			Reason:             reason,
+			Message:            message,
+			LastHeartbeatTime:  now,
+			LastTransitionTime: now,
+		})
+		updated = true
+	}
+	if updated {
+		if err := hc.client.Status().Update(ctx, node); err != nil {
+			return fmt.Errorf("error updating node readiness condition: %w", err)
+		}
+	}
 	return nil
 }
 
