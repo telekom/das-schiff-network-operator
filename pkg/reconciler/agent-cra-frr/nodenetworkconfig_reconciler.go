@@ -14,6 +14,7 @@ import (
 	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/operator"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -258,14 +259,22 @@ func (reconciler *NodeNetworkConfigReconciler) storeConfig(cfg *v1alpha1.NodeNet
 }
 
 func (reconciler *NodeNetworkConfigReconciler) checkHealth(ctx context.Context) error {
+	// Track errors to set appropriate Node condition reason
 	if err := reconciler.healthChecker.CheckInterfaces(); err != nil {
+		_ = reconciler.healthChecker.UpdateReadinessCondition(ctx, corev1.ConditionFalse, healthcheck.ReasonInterfaceCheckFailed, err.Error())
 		return fmt.Errorf("error checking network interfaces: %w", err)
 	}
 	if err := reconciler.healthChecker.CheckReachability(); err != nil {
+		_ = reconciler.healthChecker.UpdateReadinessCondition(ctx, corev1.ConditionFalse, healthcheck.ReasonReachabilityFailed, err.Error())
 		return fmt.Errorf("error checking network reachability: %w", err)
 	}
 	if err := reconciler.healthChecker.CheckAPIServer(ctx); err != nil {
+		_ = reconciler.healthChecker.UpdateReadinessCondition(ctx, corev1.ConditionFalse, healthcheck.ReasonAPIServerFailed, err.Error())
 		return fmt.Errorf("error checking API Server reachability: %w", err)
+	}
+	// All checks passed
+	if err := reconciler.healthChecker.UpdateReadinessCondition(ctx, corev1.ConditionTrue, healthcheck.ReasonHealthChecksPassed, "All network operator health checks passed"); err != nil {
+		reconciler.logger.Error(err, "failed to update network operator readiness condition")
 	}
 	if !reconciler.healthChecker.TaintsRemoved() {
 		if err := reconciler.healthChecker.RemoveTaints(ctx); err != nil {
