@@ -82,7 +82,7 @@ func AttachNeighborHandlerToInterface(intf netlink.Link) error {
 		// Already attached
 		return nil
 	}
-	err := netlink.LinkSetXdpFd(intf, nwopbpf.HandleNeighborReplyXdp.FD())
+	err := netlink.LinkSetXdpFdWithFlags(intf, nwopbpf.HandleNeighborReplyXdp.FD(), unix.BPF_F_XDP_HAS_FRAGS)
 	if err != nil {
 		return fmt.Errorf("error attaching XDP program: %w", err)
 	}
