@@ -1,180 +1,185 @@
-linters:
-  disable-all: true
-  enable:
-  - asciicheck
-  - bodyclose
-  - containedctx
-  - contextcheck
-  - cyclop 
-  - decorder
-  - dogsled
-  - errcheck
-  - errorlint
-  - exportloopref
-  - funlen
-  - gci
-  - ginkgolinter
-  - gocognit
-  - goconst
-  - gocritic
-  - gocyclo
-  - godot
-  - gofmt
-  - gomnd
-  - goprintffuncname
-  - gosec
-  - gosimple
-  - govet
-  - importas
-  - ineffassign
-  - misspell
-  - nakedret
-  - nilerr
-  - noctx
-  - prealloc
-  - predeclared
-  - revive
-  - rowserrcheck
-  - staticcheck
-  - stylecheck
-  - thelper
-  - typecheck
-  - unconvert
-  - unparam
-  - unused
-  - usestdlibvars
-  - wastedassign
-  - whitespace
-  - wrapcheck
-
-linters-settings:
-  godot:
-    scope: toplevel
-    exclude:
-    - '^ \+.*'
-    - '^ ANCHOR.*'
-  importas:
-    no-unaliased: true
-    alias:
-      # Kubernetes
-      - pkg: k8s.io/api/core/v1
-        alias: corev1
-      - pkg: k8s.io/apimachinery/pkg/apis/meta/v1
-        alias: metav1
-      # Controller Runtime
-      - pkg: sigs.k8s.io/controller-runtime
-        alias: ctrl
-  nolintlint:
-    allow-unused: false
-    require-specific: true
-  staticcheck:
-    go: "1.22"
-  stylecheck:
-    go: "1.22"
-  gocritic:
-    enabled-tags:
-      - diagnostic
-      - style
-      - performance
-      - experimental
-      - opinionated
-    disabled-checks:
-      - regexpSimplify
-      - whyNoLint
-  cyclop:
-    max-complexity: 13
-  revive:
-    ignore-generated-header: true
-    severity: error
-    enable-all-rules: true
-    rules:
-      - name: add-constant
-        disabled: true
-      - name: argument-limit
-        disabled: true
-      - name: banned-characters
-        disabled: true
-      - name: cognitive-complexity
-        severity: error
-        disabled: false
-        arguments: [24]
-      - name: comment-spacings
-        severity: warning
-        disabled: false
-        arguments:
-          - +kubebuilder
-      - name: cyclomatic
-        severity: error
-        disabled: false
-        arguments: [13]
-      - name: file-header
-        disabled: true
-      - name: flag-parameter
-        severity: warning
-        disabled: true
-      - name: function-result-limit
-        disabled: true
-      - name: function-length
-        severity: error
-        disabled: false
-        arguments: [40, 0]
-      - name: if-return
-        disabled: true
-      - name: line-length-limit
-        disabled: true
-      - name: max-public-structs
-        disabled: true
-      - name: struct-tag
-        arguments:
-          - "json,inline"
-        severity: warning
-        disabled: false
-      - name: unhandled-error
-        severity: warning
-        disabled: false
-        arguments:
-          - "fmt.Printf"
-      - name: use-any
-        disabled: true
-  funlen:
-    lines: 65
-
-issues:
-  exclude-rules:
-    # As of now we ignore the statements in main
-    - path: 'cmd/manager/main.go'
-      text: "Function 'main' has too many statements"
-    - path: 'cmd/manager/main.go'
-      text: "function-length: maximum number of statements per function exceeded; max \\d+ but got \\d+"
-    # This is very C near and those const values are easier to google.
-    - path: '(.+)/unix/(coil|frr|nl)\.go'
-      text: "ST1003: should not use ALL_CAPS in Go names; use CamelCase instead"
-    - path: '(.+)/unix/(coil|frr|nl)\.go'
-      text: "var-naming: don't use ALL_CAPS in Go names; use CamelCase"
-    - path: '(.+)/nl/(route|layer2)\.go'
-      text: 'import-alias-naming:.+\(schiff_unix\).*$'
-    # Test file exclusions
-    - path: '(.+)_test\.go'
-      text: 'unchecked-type-assertion:'
-    - path: '(.+)_test\.go'
-      text: 'import-alias-naming:'
-    - path: '(.+)_test\.go'
-      text: 'dot-imports:'
-    # fix issues i currently can't fix.
-    - path: '(.+)\.go'
-      text: "string `vrf` has (\\d+) occurrences, make it a constant"
-    - path: '(.+)/monitoring/frr\.go'
-      text: "Function '\\w+' is too long"
-    - path: '(.+)/monitoring/frr\.go'
-      text: "Function '\\w+' has too many statements"
-    - path: '(.+)/nl/route\.go'
-      text: "Function '\\w+' has too many statements"
-    - path: '(.+)/nl/route\.go'
-      text: "cyclomatic complexity \\d+ of func `\\w+` is high"
-    - path: '(.+)/nl/route\.go'
-      text: "cyclomatic: function \\w+ has cyclomatic complexity \\d+"
-    - path: '(.+)/nl/route\.go'
-      text: "calculated cyclomatic complexity for function \\w+ is \\d+, max is \\d+"
+version: "2"
 run:
-  timeout: 10m
   allow-parallel-runners: true
+linters:
+  default: none
+  enable:
+    - asciicheck
+    - bodyclose
+    - containedctx
+    - contextcheck
+    - cyclop
+    - decorder
+    - dogsled
+    - errcheck
+    - errorlint
+    - funlen
+    - ginkgolinter
+    - gocognit
+    - goconst
+    - gocritic
+    - gocyclo
+    - godot
+    - goprintffuncname
+    - gosec
+    - govet
+    - importas
+    - ineffassign
+    - misspell
+    - mnd
+    - nakedret
+    - nilerr
+    - noctx
+    - prealloc
+    - predeclared
+    - revive
+    - rowserrcheck
+    - staticcheck
+    - thelper
+    - unconvert
+    - unparam
+    - unused
+    - usestdlibvars
+    - wastedassign
+    - whitespace
+    - wrapcheck
+  settings:
+    cyclop:
+      max-complexity: 13
+    funlen:
+      lines: 65
+    gocritic:
+      disabled-checks:
+        - regexpSimplify
+        - whyNoLint
+      enabled-tags:
+        - diagnostic
+        - style
+        - performance
+        - experimental
+        - opinionated
+    godot:
+      scope: toplevel
+      exclude:
+        - ^ \+.*
+        - ^ ANCHOR.*
+    importas:
+      alias:
+        - pkg: k8s.io/api/core/v1
+          alias: corev1
+        - pkg: k8s.io/apimachinery/pkg/apis/meta/v1
+          alias: metav1
+        - pkg: sigs.k8s.io/controller-runtime
+          alias: ctrl
+      no-unaliased: true
+    nolintlint:
+      require-specific: true
+      allow-unused: false
+    revive:
+      severity: error
+      enable-all-rules: true
+      rules:
+        - name: add-constant
+          disabled: true
+        - name: argument-limit
+          disabled: true
+        - name: banned-characters
+          disabled: true
+        - name: cognitive-complexity
+          arguments:
+            - 24
+          severity: error
+          disabled: false
+        - name: comment-spacings
+          arguments:
+            - +kubebuilder
+          severity: warning
+          disabled: false
+        - name: cyclomatic
+          arguments:
+            - 13
+          severity: error
+          disabled: false
+        - name: file-header
+          disabled: true
+        - name: flag-parameter
+          severity: warning
+          disabled: true
+        - name: function-result-limit
+          disabled: true
+        - name: function-length
+          arguments:
+            - 40
+            - 0
+          severity: error
+          disabled: false
+        - name: if-return
+          disabled: true
+        - name: line-length-limit
+          disabled: true
+        - name: max-public-structs
+          disabled: true
+        - name: struct-tag
+          arguments:
+            - json,inline
+          severity: warning
+          disabled: false
+        - name: unhandled-error
+          arguments:
+            - fmt.Printf
+          severity: warning
+          disabled: false
+        - name: use-any
+          disabled: true
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - path: cmd/manager/main.go
+        text: Function 'main' has too many statements
+      - path: cmd/manager/main.go
+        text: 'function-length: maximum number of statements per function exceeded; max \d+ but got \d+'
+      - path: (.+)/unix/(coil|frr|nl)\.go
+        text: 'ST1003: should not use ALL_CAPS in Go names; use CamelCase instead'
+      - path: (.+)/unix/(coil|frr|nl)\.go
+        text: 'var-naming: don''t use ALL_CAPS in Go names; use CamelCase'
+      - path: (.+)/nl/(route|layer2)\.go
+        text: import-alias-naming:.+\(schiff_unix\).*$
+      - path: (.+)_test\.go
+        text: 'unchecked-type-assertion:'
+      - path: (.+)_test\.go
+        text: 'import-alias-naming:'
+      - path: (.+)_test\.go
+        text: 'dot-imports:'
+      - path: (.+)\.go
+        text: string `vrf` has (\d+) occurrences, make it a constant
+      - path: (.+)/monitoring/frr\.go
+        text: Function '\w+' is too long
+      - path: (.+)/monitoring/frr\.go
+        text: Function '\w+' has too many statements
+      - path: (.+)/nl/route\.go
+        text: Function '\w+' has too many statements
+      - path: (.+)/nl/route\.go
+        text: cyclomatic complexity \d+ of func `\w+` is high
+      - path: (.+)/nl/route\.go
+        text: 'cyclomatic: function \w+ has cyclomatic complexity \d+'
+      - path: (.+)/nl/route\.go
+        text: calculated cyclomatic complexity for function \w+ is \d+, max is \d+
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  enable:
+    - gci
+    - gofmt
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
