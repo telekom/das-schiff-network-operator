@@ -11,6 +11,7 @@ import (
 	"github.com/telekom/das-schiff-network-operator/pkg/network/net"
 	netplanclient "github.com/telekom/das-schiff-network-operator/pkg/network/netplan/client"
 	"github.com/telekom/das-schiff-network-operator/pkg/network/netplan/client/dbus"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -21,6 +22,7 @@ type NodeNetplanConfigReconciler struct {
 	logger logr.Logger
 
 	netplanClient netplanclient.Client
+	healthChecker *healthcheck.HealthChecker
 }
 
 type reconcileNodeNetworkConfig struct {
@@ -51,6 +53,17 @@ func NewNodeNetplanConfigReconciler(clusterClient client.Client, logger logr.Log
 	}
 
 	reconciler.netplanClient = netplanClient
+
+	// Load network healthcheck config and create health checker (reuse common file path)
+	nc, err := healthcheck.LoadConfig(healthcheck.NetHealthcheckFile)
+	if err != nil {
+		return nil, fmt.Errorf("error loading networking healthcheck config: %w", err)
+	}
+	tcpDialer := healthcheck.NewTCPDialer(nc.Timeout)
+	reconciler.healthChecker, err = healthcheck.NewHealthChecker(reconciler.client, healthcheck.NewDefaultHealthcheckToolkit(tcpDialer), nc)
+	if err != nil {
+		return nil, fmt.Errorf("error creating networking healthchecker: %w", err)
+	}
 
 	return reconciler, nil
 }
@@ -88,7 +101,30 @@ func (reconciler *NodeNetplanConfigReconciler) Reconcile(ctx context.Context) er
 	}
 
 	if err := netplanConfig.Apply(); err != nil {
+		_ = reconciler.healthChecker.UpdateReadinessCondition(ctx, corev1.ConditionFalse, healthcheck.ReasonNetplanApplyFailed, err.Error())
 		return fmt.Errorf("error applying desired state: %w", err)
+	}
+
+	// Run basic health checks (interfaces/reachability + API) after applying netplan config
+	if err := reconciler.healthChecker.CheckInterfaces(); err != nil {
+		_ = reconciler.healthChecker.UpdateReadinessCondition(ctx, corev1.ConditionFalse, healthcheck.ReasonInterfaceCheckFailed, err.Error())
+		return fmt.Errorf("error checking network interfaces: %w", err)
+	}
+	if err := reconciler.healthChecker.CheckReachability(); err != nil {
+		_ = reconciler.healthChecker.UpdateReadinessCondition(ctx, corev1.ConditionFalse, healthcheck.ReasonReachabilityFailed, err.Error())
+		return fmt.Errorf("error checking network reachability: %w", err)
+	}
+	if err := reconciler.healthChecker.CheckAPIServer(ctx); err != nil {
+		_ = reconciler.healthChecker.UpdateReadinessCondition(ctx, corev1.ConditionFalse, healthcheck.ReasonAPIServerFailed, err.Error())
+		return fmt.Errorf("error checking API Server reachability: %w", err)
+	}
+	if err := reconciler.healthChecker.UpdateReadinessCondition(ctx, corev1.ConditionTrue, healthcheck.ReasonHealthChecksPassed, "All network operator health checks passed"); err != nil {
+		reconciler.logger.Error(err, "failed to update network operator readiness condition")
+	}
+	if !reconciler.healthChecker.TaintsRemoved() {
+		if err := reconciler.healthChecker.RemoveTaints(ctx); err != nil {
+			return fmt.Errorf("error removing taint from the node: %w", err)
+		}
 	}
 
 	return nil

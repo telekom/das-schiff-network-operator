@@ -37,6 +37,12 @@ const (
 	ReasonInterfaceCheckFailed = "InterfaceCheckFailed"
 	ReasonReachabilityFailed   = "ReachabilityCheckFailed"
 	ReasonAPIServerFailed      = "APIServerCheckFailed"
+	// Additional agent specific reasons.
+	ReasonNetplanInitFailed     = "NetplanInitializationFailed"
+	ReasonNetplanApplyFailed    = "NetplanApplyFailed"
+	ReasonVLANReconcileFailed   = "VLANReconcileFailed"
+	ReasonLoopbackReconcileFail = "LoopbackReconcileFailed"
+	ReasonConfigFetchFailed     = "ConfigFetchFailed"
 
 	configEnv         = "OPERATOR_NETHEALTHCHECK_CONFIG"
 	defaultTCPTimeout = 3
