@@ -132,20 +132,22 @@ func (hc *HealthChecker) UpdateReadinessCondition(ctx context.Context, status co
 	now := metav1.Now()
 	updated := false
 	found := false
-	for i, c := range node.Status.Conditions {
-		if c.Type == NetworkOperatorReadyConditionType {
-			found = true
-			// Transition time only changes if status changed
-			if c.Status != status {
-				node.Status.Conditions[i].LastTransitionTime = now
-			}
-			node.Status.Conditions[i].LastHeartbeatTime = now
-			node.Status.Conditions[i].Status = status
-			node.Status.Conditions[i].Reason = reason
-			node.Status.Conditions[i].Message = message
-			updated = true
-			break
+	for i := range node.Status.Conditions {
+		c := &node.Status.Conditions[i]
+		if c.Type != NetworkOperatorReadyConditionType { // reduce nesting per gocritic suggestion
+			continue
 		}
+		found = true
+		// Transition time only changes if status changed
+		if c.Status != status {
+			c.LastTransitionTime = now
+		}
+		c.LastHeartbeatTime = now
+		c.Status = status
+		c.Reason = reason
+		c.Message = message
+		updated = true
+		break
 	}
 	if !found { // append new condition
 		node.Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
