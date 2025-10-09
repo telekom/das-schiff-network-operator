@@ -235,8 +235,8 @@ func startTasks(anycastTracker *anycast.Tracker, neighborSync *neighborsync.Neig
 	anycastTracker.RunAnycastSync()
 
 	setupLog.Info("start notrack sync")
-	if err := notrack.RunIPTablesSync(); err != nil {
-		return fmt.Errorf("error starting IPTables sync: %w", err)
+	if err := notrack.RunNoTrackSync(); err != nil {
+		return fmt.Errorf("error starting notrack sync: %w", err)
 	}
 
 	setupLog.Info("start bpf interface check")
