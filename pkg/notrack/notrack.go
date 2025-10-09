@@ -10,6 +10,7 @@ import (
 	"github.com/google/nftables/expr"
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
 	"github.com/telekom/das-schiff-network-operator/pkg/nltoolkit"
+	"golang.org/x/sys/unix"
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
@@ -28,7 +29,6 @@ const (
 	transDstLen    = 2
 
 	// protocol numbers and ports.
-	udpProto  = 17
 	vxlanPort = 4789
 
 	// bit shift used to split port into bytes.
@@ -71,7 +71,7 @@ func udpDstPortExprs(port uint16, reg uint32) []expr.Any {
 	return []expr.Any{
 		// ensure L4 proto is UDP.
 		&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: reg + 1},
-		&expr.Cmp{Op: expr.CmpOpEq, Register: reg + 1, Data: []byte{udpProto}}, // UDP = 17.
+		&expr.Cmp{Op: expr.CmpOpEq, Register: reg + 1, Data: []byte{unix.IPPROTO_UDP}},
 		// match transport dst port.
 		&expr.Payload{DestRegister: reg, Base: expr.PayloadBaseTransportHeader, Offset: transDstOffset, Len: transDstLen},
 		&expr.Cmp{Op: expr.CmpOpEq, Register: reg, Data: p},
