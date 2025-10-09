@@ -115,6 +115,9 @@ func syncInterfaceByFamily(intf *netlink.Bridge, family int, routingTable uint32
 	}
 
 	for i := range bridgeNeighbors {
+		if bridgeNeighbors[i].IP.IsMulticast() {
+			continue
+		}
 		ipnet := toolkit.NewIPNet(bridgeNeighbors[i].IP)
 		if !containsIPNetwork(alreadyV4Existing, ipnet) {
 			route := buildRoute(family, intf, ipnet, routingTable)
