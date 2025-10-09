@@ -29,6 +29,8 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "${ldflags}" -a -o m
 
 FROM alpine:latest
 
+RUN apk add --no-cache iptables ip6tables
+
 WORKDIR /
 COPY --from=builder /workspace/manager .
 USER 65532:65532

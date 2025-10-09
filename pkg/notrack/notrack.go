@@ -3,9 +3,11 @@ package notrack
 import (
 	"fmt"
 	"net"
+	"regexp"
 	"strings"
 	"time"
 
+	"github.com/coreos/go-iptables/iptables"
 	"github.com/google/nftables"
 	"github.com/google/nftables/expr"
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
@@ -33,6 +35,11 @@ const (
 
 	// bit shift used to split port into bytes.
 	portShift = 8
+
+	iptablesTimeout    = 5
+	iptablesTable      = "raw"
+	iptablesPrerouting = "PREROUTING"
+	iptablesOutput     = "OUTPUT"
 )
 
 // ruleKind represents the kind of generated notrack rule (fib or iif).
@@ -49,6 +56,8 @@ var (
 	vxlanUserData = "nwop:vxlan"
 	// precomputed big-endian bytes for VXLAN UDP port.
 	vxlanPortBE = []byte{byte(vxlanPort >> portShift), byte(vxlanPort & 0xff)} // nolint:mnd
+
+	oldIPtablesRules = regexp.MustCompile(`--comment "?nwop:\w+"?`)
 )
 
 func ipv4DstExprs(ip net.IP, reg uint32) []expr.Any {
@@ -357,8 +366,47 @@ func syncNFTables(netlinkManager *nl.Manager, c *nftables.Conn, chainPrerouting4
 	}
 }
 
+func cleanupProtocol(protocol iptables.Protocol, table, chain string) error {
+	ipt, err := iptables.New(iptables.IPFamily(protocol), iptables.Timeout(iptablesTimeout))
+	if err != nil {
+		return fmt.Errorf("error connecting to iptables for notrack cleanup: %w", err)
+	}
+	rules, err := ipt.List(table, chain)
+	if err != nil {
+		return fmt.Errorf("error listing %s rules in %s table for notrack cleanup: %w", chain, table, err)
+	}
+	for _, rule := range rules {
+		if oldIPtablesRules.MatchString(rule) {
+			// rule contains old usertag, delete it.
+			if err := ipt.Delete(table, chain, strings.Fields(rule)[2:]...); err != nil {
+				notrackLog.Error(err, "error deleting old iptables notrack rule (continuing)", "rule", rule)
+			} else {
+				notrackLog.Info("deleted old iptables notrack rule", "rule", rule)
+			}
+		}
+	}
+	return nil
+}
+
+func cleanupOldIptablesRules() error {
+	if err := cleanupProtocol(iptables.ProtocolIPv4, iptablesTable, iptablesPrerouting); err != nil {
+		return err
+	}
+	if err := cleanupProtocol(iptables.ProtocolIPv4, iptablesTable, iptablesOutput); err != nil {
+		return err
+	}
+	if err := cleanupProtocol(iptables.ProtocolIPv6, iptablesTable, iptablesPrerouting); err != nil {
+		return err
+	}
+	return nil
+}
+
 // Exported wrapper started by user: RunNoTrackSync.
 func RunNoTrackSync() error {
+	if err := cleanupOldIptablesRules(); err != nil {
+		notrackLog.Error(err, "error cleaning up old iptables notrack rules (continuing)")
+	}
+
 	conn, err := nftables.New()
 	if err != nil {
 		return fmt.Errorf("error creating nftables connection: %w", err)
