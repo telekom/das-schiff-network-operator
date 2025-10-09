@@ -88,7 +88,7 @@ func (n *Manager) ListL3() ([]VRFInformation, error) {
 	}
 
 	for _, link := range links {
-		if !(link.Type() == "vrf" && strings.HasPrefix(link.Attrs().Name, VrfPrefix)) {
+		if link.Type() != "vrf" || !strings.HasPrefix(link.Attrs().Name, VrfPrefix) {
 			continue
 		}
 		vrf, ok := link.(*netlink.Vrf)
@@ -210,7 +210,7 @@ func (n *Manager) ListL2() ([]Layer2Information, error) {
 	}
 
 	for _, link := range links {
-		if !(link.Type() == "bridge" && strings.HasPrefix(link.Attrs().Name, layer2Prefix)) {
+		if link.Type() != "bridge" || !strings.HasPrefix(link.Attrs().Name, layer2Prefix) {
 			continue
 		}
 		info := Layer2Information{}
@@ -258,7 +258,7 @@ func (*Manager) ListTaas() ([]TaasInformation, error) {
 	}
 
 	for _, link := range links {
-		if !(link.Type() == "vrf" && strings.HasPrefix(link.Attrs().Name, taasVrfPrefix)) {
+		if link.Type() != "vrf" || !strings.HasPrefix(link.Attrs().Name, taasVrfPrefix) {
 			continue
 		}
 

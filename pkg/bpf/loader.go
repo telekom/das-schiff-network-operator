@@ -90,15 +90,15 @@ func AttachNeighborHandlerToInterface(intf netlink.Link) error {
 }
 
 func EbpfRetStatsMap() *ebpf.Map {
-	return nwopbpf.nwopbpfMaps.EbpfRetStatsMap
+	return nwopbpf.EbpfRetStatsMap
 }
 
 func EbpfFibLkupStatsMap() *ebpf.Map {
-	return nwopbpf.nwopbpfMaps.EbpfFibLkupStatsMap
+	return nwopbpf.EbpfFibLkupStatsMap
 }
 
 func EbpfNeighborRingbuf() *ebpf.Map {
-	return nwopbpf.nwopbpfMaps.NeighborRingbuf
+	return nwopbpf.NeighborRingbuf
 }
 
 // First we ensure the qdisc is there. It is a very basic check, ensuring we have an clsact qdisc with the correct handle
@@ -171,7 +171,7 @@ func attach(intf netlink.Link) error {
 	ifIndex := intf.Attrs().Index
 
 	if intf.Type() == "vxlan" {
-		if err := nwopbpf.LookupPort.Put(int32(ifIndex), int32(intf.Attrs().MasterIndex)); err != nil {
+		if err := nwopbpf.LookupPort.Put(int32(ifIndex), int32(intf.Attrs().MasterIndex)); err != nil { // nolint:gosec
 			return fmt.Errorf("error attaching eBPF map element: %w", err)
 		}
 	}
@@ -209,7 +209,7 @@ func checkTrackedInterfaces() {
 }
 
 func removeFromBPFMap(idx int) error {
-	if err := nwopbpf.LookupPort.Delete(int32(idx)); err != nil && !errors.Is(err, ebpf.ErrKeyNotExist) {
+	if err := nwopbpf.LookupPort.Delete(int32(idx)); err != nil && !errors.Is(err, ebpf.ErrKeyNotExist) { // nolint:gosec
 		return fmt.Errorf("error deleting eBPF map element: %w", err)
 	}
 	return nil

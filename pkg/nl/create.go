@@ -2,6 +2,7 @@ package nl
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -17,6 +18,9 @@ const (
 )
 
 func (n *Manager) createVRF(vrfName string, table int) (*netlink.Vrf, error) {
+	if table < 1 || table > 0xFFFFFFFF {
+		return nil, errors.New("table must be in range 1-4294967295")
+	}
 	netlinkVrf := netlink.Vrf{
 		LinkAttrs: netlink.LinkAttrs{
 			Name: vrfName,
@@ -45,10 +49,10 @@ func (n *Manager) createBridge(bridgeName string, macAddress *net.HardwareAddr, 
 		},
 	}
 	if masterIdx != -1 {
-		netlinkBridge.LinkAttrs.MasterIndex = masterIdx
+		netlinkBridge.MasterIndex = masterIdx
 	}
 	if macAddress != nil {
-		netlinkBridge.LinkAttrs.HardwareAddr = *macAddress
+		netlinkBridge.HardwareAddr = *macAddress
 	} else if underlayRMAC {
 		_, vxlanIP, err := n.getUnderlayInterfaceAndIP()
 		if err != nil {
@@ -59,7 +63,7 @@ func (n *Manager) createBridge(bridgeName string, macAddress *net.HardwareAddr, 
 		if err != nil {
 			return nil, err
 		}
-		netlinkBridge.LinkAttrs.HardwareAddr = generatedMac
+		netlinkBridge.HardwareAddr = generatedMac
 	}
 
 	if err := n.toolkit.LinkAdd(&netlinkBridge); err != nil {
@@ -197,7 +201,7 @@ func (n *Manager) getUnderlayInterfaceAndIP() (int, net.IP, error) {
 
 func generateMAC(ip net.IP) (net.HardwareAddr, error) {
 	if ip.To4() == nil {
-		return nil, fmt.Errorf("generateMAC is only working with IPv4 addresses")
+		return nil, errors.New("generateMAC is only working with IPv4 addresses")
 	}
 	hwaddr := make([]byte, hwAddrByteSize)
 	copy(hwaddr, macPrefix)
@@ -209,7 +213,7 @@ func (n *Manager) setNeighSuppression(link netlink.Link, mode bool) error {
 	req := nl.NewNetlinkRequest(unix.RTM_SETLINK, unix.NLM_F_ACK)
 
 	msg := nl.NewIfInfomsg(unix.AF_BRIDGE)
-	msg.Index = int32(link.Attrs().Index)
+	msg.Index = int32(link.Attrs().Index) // nolint:gosec
 	req.AddData(msg)
 
 	br := nl.NewRtAttr(unix.IFLA_PROTINFO|unix.NLA_F_NESTED, nil)
@@ -226,9 +230,12 @@ func (n *Manager) setGroGsoMaxSize(link netlink.Link, size int) error {
 	req := nl.NewNetlinkRequest(unix.RTM_SETLINK, unix.NLM_F_ACK)
 
 	msg := nl.NewIfInfomsg(unix.AF_UNSPEC)
-	msg.Index = int32(link.Attrs().Index)
+	msg.Index = int32(link.Attrs().Index) // nolint:gosec
 	req.AddData(msg)
 
+	if size < 0 || size > 0xFFFFFFFF {
+		return errors.New("size must be in range 0-4294967295")
+	}
 	uSize := uint32(size)
 
 	b := make([]byte, binary.Size(uSize))

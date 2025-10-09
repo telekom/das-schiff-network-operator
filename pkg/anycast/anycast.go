@@ -128,7 +128,7 @@ func syncInterfaceByFamily(intf *netlink.Bridge, family int, routingTable uint32
 }
 
 func syncInterface(intf *netlink.Bridge, toolkit nltoolkit.ToolkitInterface, logger logr.Logger) error {
-	routingTable := uint32(defaultVrfAnycastTable)
+	routingTable := uint32(defaultVrfAnycastTable) //nolint:gosec // this is a constant
 	if intf.Attrs().MasterIndex > 0 {
 		nlLink, err := toolkit.LinkByIndex(intf.Attrs().MasterIndex)
 		if err != nil {

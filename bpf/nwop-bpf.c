@@ -312,7 +312,7 @@ static __always_inline void emit_event(__u32 ifindex, __u8 family, const __u8 ma
     bpf_ringbuf_submit(ev, 0);
 }
 
-SEC("xdp")
+SEC("xdp.frags/neighbor_reply")
 int handle_neighbor_reply_xdp(struct xdp_md *ctx)
 {
     void *data, *data_end;

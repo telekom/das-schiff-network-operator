@@ -3,6 +3,7 @@ package monitoring
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -75,27 +76,27 @@ func (e *Endpoint) CreateMux() *http.ServeMux {
 	sm.HandleFunc("/all/show/bgp", e.QueryAll)
 	sm.HandleFunc("/all/show/bgp/summary", e.QueryAll)
 	sm.HandleFunc("/all/show/evpn", e.QueryAll)
-	e.Logger.Info("created ServeMux")
+	e.Info("created ServeMux")
 	return sm
 }
 
 // ShowRoute returns result of show ip/ipv6 route command.
 // show ip/ipv6 route (vrf <vrf>) <input> (longer-prefixes).
 func (e *Endpoint) ShowRoute(w http.ResponseWriter, r *http.Request) {
-	e.Logger.Info("got ShowRoute request")
+	e.Info("got ShowRoute request")
 
 	vrf := r.URL.Query().Get("vrf")
 	if vrf == "" {
 		vrf = defaultVrf
 	}
 	if vrf == all {
-		e.Logger.Error(fmt.Errorf("VRF value cannot be 'all'"), "error validating value")
+		e.Error(errors.New("VRF value cannot be 'all'"), "error validating value")
 		http.Error(w, "VRF value cannot be 'all'", http.StatusBadRequest)
 		return
 	}
 
 	if !validVRF.MatchString(vrf) {
-		e.Logger.Error(fmt.Errorf("invalid VRF value"), "error validating value")
+		e.Error(errors.New("invalid VRF value"), "error validating value")
 		http.Error(w, "invalid VRF value", http.StatusBadRequest)
 		return
 	}
@@ -104,7 +105,7 @@ func (e *Endpoint) ShowRoute(w http.ResponseWriter, r *http.Request) {
 	if protocol == "" {
 		protocol = protocolIP
 	} else if protocol != protocolIP && protocol != protocolIPv6 {
-		e.Logger.Error(fmt.Errorf("protocol '%s' is not supported", protocol), "protocol not supported")
+		e.Error(fmt.Errorf("protocol '%s' is not supported", protocol), "protocol not supported")
 		http.Error(w, fmt.Sprintf("protocol '%s' is not supported", protocol), http.StatusBadRequest)
 		return
 	}
@@ -118,24 +119,24 @@ func (e *Endpoint) ShowRoute(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := setInput(r, &command); err != nil {
-		e.Logger.Error(err, "unable to set input")
+		e.Error(err, "unable to set input")
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	if err := setLongerPrefixes(r, &command); err != nil {
-		e.Logger.Error(err, "unable to set longer prefixes")
+		e.Error(err, "unable to set longer prefixes")
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	e.Logger.Info("command to be executed", "command", command)
+	e.Info("command to be executed", "command", command)
 
 	data := e.cli.ExecuteWithJSON(command)
 
 	result, err := withNodename(&data)
 	if err != nil {
-		e.Logger.Error(err, "unable to add nodename")
+		e.Error(err, "unable to add nodename")
 		http.Error(w, fmt.Sprintf("error adding nodename: %s", err.Error()), http.StatusBadRequest)
 		return
 	}
@@ -147,36 +148,36 @@ func (e *Endpoint) ShowRoute(w http.ResponseWriter, r *http.Request) {
 // show bgp (vrf <vrf>) ipv4/ipv6 unicast <input> (longer-prefixes).
 // show bgp vrf <all|vrf> summary.
 func (e *Endpoint) ShowBGP(w http.ResponseWriter, r *http.Request) {
-	e.Logger.Info("got ShowBGP request")
+	e.Info("got ShowBGP request")
 	vrf := r.URL.Query().Get("vrf")
 	if vrf == "" {
 		vrf = defaultVrf
 	}
 	if vrf == all {
-		e.Logger.Error(fmt.Errorf("VRF value cannot be 'all'"), "error validating value")
+		e.Error(errors.New("VRF value cannot be 'all'"), "error validating value")
 		http.Error(w, "VRF value cannot be 'all'", http.StatusBadRequest)
 		return
 	}
 
 	if !validVRF.MatchString(vrf) {
-		e.Logger.Error(fmt.Errorf("invalid VRF value"), "error validating value")
+		e.Error(errors.New("invalid VRF value"), "error validating value")
 		http.Error(w, "invalid VRF value", http.StatusBadRequest)
 		return
 	}
 
 	command, err := prepareBGPCommand(r, vrf)
 	if err != nil {
-		e.Logger.Error(err, "error preparing ShowBGP command")
+		e.Error(err, "error preparing ShowBGP command")
 		http.Error(w, "error preparing ShowBGP command: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	e.Logger.Info("command to be executed", "command", command)
+	e.Info("command to be executed", "command", command)
 	data := e.cli.ExecuteWithJSON(command)
 
 	result, err := withNodename(&data)
 	if err != nil {
-		e.Logger.Error(err, "error adding nodename")
+		e.Error(err, "error adding nodename")
 		http.Error(w, fmt.Sprintf("error adding nodename: %s", err.Error()), http.StatusBadRequest)
 		return
 	}
@@ -228,14 +229,14 @@ func prepareBGPCommand(r *http.Request, vrf string) ([]string, error) {
 
 // ShowBGPSummary returns result of show bgp vrf <all|vrf> summary command.
 func (e *Endpoint) ShowBGPSummary(w http.ResponseWriter, r *http.Request) {
-	e.Logger.Info("got ShowBGPSummary request")
+	e.Info("got ShowBGPSummary request")
 	vrf := r.URL.Query().Get("vrf")
 	if vrf == "" {
 		vrf = all
 	}
 
 	if !validVRF.MatchString(vrf) {
-		e.Logger.Error(fmt.Errorf("invalid VRF value"), "error validating value")
+		e.Error(errors.New("invalid VRF value"), "error validating value")
 		http.Error(w, "invalid VRF value", http.StatusBadRequest)
 		return
 	}
@@ -248,12 +249,12 @@ func (e *Endpoint) ShowBGPSummary(w http.ResponseWriter, r *http.Request) {
 		"summary",
 	}
 
-	e.Logger.Info("command to be executed", "command", command)
+	e.Info("command to be executed", "command", command)
 	data := e.cli.ExecuteWithJSON(command)
 
 	result, err := withNodename(&data)
 	if err != nil {
-		e.Logger.Error(err, "error adding nodename")
+		e.Error(err, "error adding nodename")
 		http.Error(w, fmt.Sprintf("error adding nodename: %s", err.Error()), http.StatusBadRequest)
 		return
 	}
@@ -267,7 +268,7 @@ func (e *Endpoint) ShowBGPSummary(w http.ResponseWriter, r *http.Request) {
 // show evpn mac vni <all|vrf>.
 // show evpn next-hops vni <all|vrf> json.
 func (e *Endpoint) ShowEVPN(w http.ResponseWriter, r *http.Request) {
-	e.Logger.Info("got ShowEVPN request")
+	e.Info("got ShowEVPN request")
 	var command []string
 	requestType := r.URL.Query().Get("type")
 	switch requestType {
@@ -282,7 +283,7 @@ func (e *Endpoint) ShowEVPN(w http.ResponseWriter, r *http.Request) {
 		if vni == "" {
 			vni = all
 		} else if err := validateVNI(vni); err != nil {
-			e.Logger.Error(fmt.Errorf("invalid VNI value: %w", err), "error validating value")
+			e.Error(fmt.Errorf("invalid VNI value: %w", err), "error validating value")
 			http.Error(w, "invalid VNI value", http.StatusBadRequest)
 			return
 		}
@@ -295,17 +296,17 @@ func (e *Endpoint) ShowEVPN(w http.ResponseWriter, r *http.Request) {
 			vni,
 		}
 	default:
-		e.Logger.Error(fmt.Errorf("request of type '%s' is not supported", requestType), "request type not supported")
+		e.Error(fmt.Errorf("request of type '%s' is not supported", requestType), "request type not supported")
 		http.Error(w, fmt.Sprintf("request of type '%s' is not supported", requestType), http.StatusBadRequest)
 		return
 	}
 
-	e.Logger.Info("command to be executed", "command", command)
+	e.Info("command to be executed", "command", command)
 	data := e.cli.ExecuteWithJSON(command)
 
 	result, err := withNodename(&data)
 	if err != nil {
-		e.Logger.Error(err, "error adding nodename")
+		e.Error(err, "error adding nodename")
 		http.Error(w, fmt.Sprintf("error adding nodename: %s", err.Error()), http.StatusBadRequest)
 		return
 	}
@@ -315,15 +316,15 @@ func (e *Endpoint) ShowEVPN(w http.ResponseWriter, r *http.Request) {
 
 func validateVNI(vni string) error {
 	if !validVNI.MatchString(vni) {
-		return fmt.Errorf("VNI does not match regular expression")
+		return errors.New("VNI does not match regular expression")
 	}
 	value, err := strconv.Atoi(vni)
 	if err != nil {
 		return fmt.Errorf("VNI cannot be paresd to int: %w", err)
 	}
 
-	if uint(value) > uint(1<<vniBitLength) {
-		return fmt.Errorf("VNI is not a valid 24-bit number")
+	if uint(value) > uint(1<<vniBitLength) { // nolint:gosec
+		return errors.New("VNI is not a valid 24-bit number")
 	}
 
 	return nil
@@ -333,33 +334,33 @@ func validateVNI(vni string) error {
 
 // QueryAll - when called, will pass the request to all nodes and return their responses.
 func (e *Endpoint) QueryAll(w http.ResponseWriter, r *http.Request) {
-	e.Logger.Info("got QueryAll request")
+	e.Info("got QueryAll request")
 	service := &corev1.Service{}
 	err := e.c.Get(r.Context(), client.ObjectKey{Name: e.statusSvcName, Namespace: e.statusSvcNamespace}, service)
 	if err != nil {
-		e.Logger.Error(err, "error getting service")
+		e.Error(err, "error getting service")
 		http.Error(w, fmt.Sprintf("error getting service: %s", err.Error()), http.StatusInternalServerError)
 		return
 	}
 
 	addr, err := e.getAddresses(r.Context(), service)
 	if err != nil {
-		e.Logger.Error(err, "error getting addresses")
+		e.Error(err, "error getting addresses")
 		http.Error(w, fmt.Sprintf("error getting addresses: %s", err.Error()), http.StatusInternalServerError)
 		return
 	}
 
 	if len(addr) == 0 {
-		e.Logger.Error(fmt.Errorf("addr slice length: %d", len(addr)), "error listing addresses: no addresses found")
+		e.Error(fmt.Errorf("addr slice length: %d", len(addr)), "error listing addresses: no addresses found")
 		http.Error(w, "error listing addresses: no addresses found", http.StatusInternalServerError)
 		return
 	}
 
-	e.Logger.Info("will querry endpoints", "endpoints", addr)
+	e.Info("will querry endpoints", "endpoints", addr)
 	response, errs := queryEndpoints(r, addr)
 	if len(errs) > 0 {
 		for _, err := range errs {
-			e.Logger.Error(err, "error querying endpoint")
+			e.Error(err, "error querying endpoint")
 		}
 		if len(errs) == 1 {
 			http.Error(w, fmt.Sprintf("error querying endpoints - %s", errs[0].Error()), http.StatusInternalServerError)
@@ -378,7 +379,7 @@ func (e *Endpoint) writeResponse(data *[]byte, w http.ResponseWriter, requestTyp
 		http.Error(w, "failed to write response: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	e.Logger.Info("response written", "type", requestType)
+	e.Info("response written", "type", requestType)
 }
 
 func setLongerPrefixes(r *http.Request, command *[]string) error {
@@ -425,7 +426,7 @@ func withNodename(data *[]byte) (*[]byte, error) {
 	return result, nil
 }
 
-func passRequest(r *http.Request, addr, query string, results chan []byte, errors chan error) {
+func passRequest(r *http.Request, addr, query string, results chan []byte, errs chan error) {
 	s := strings.Split(r.Host, ":")
 	port := ""
 	if len(s) > 1 {
@@ -440,14 +441,14 @@ func passRequest(r *http.Request, addr, query string, results chan []byte, error
 	url := fmt.Sprintf("%s://%s:%s%s", protocol, addr, port, query)
 	resp, err := http.Get(url) //nolint
 	if err != nil {
-		errors <- fmt.Errorf("error getting data from %s: %w", addr, err)
+		errs <- fmt.Errorf("error getting data from %s: %w", addr, err)
 		return
 	}
 
 	data, err := io.ReadAll(resp.Body)
 	defer resp.Body.Close()
 	if err != nil {
-		errors <- fmt.Errorf("error reading response from %s: %w", addr, err)
+		errs <- fmt.Errorf("error reading response from %s: %w", addr, err)
 		return
 	}
 

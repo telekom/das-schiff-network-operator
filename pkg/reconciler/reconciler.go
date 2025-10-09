@@ -97,7 +97,7 @@ func (reconciler *Reconciler) reconcileDebounced(ctx context.Context) error {
 		Logger:     reconciler.logger,
 	}
 
-	r.Logger.Info("Reloading config")
+	r.Info("Reloading config")
 	if err := r.config.ReloadConfig(); err != nil {
 		return fmt.Errorf("error reloading network-operator config: %w", err)
 	}

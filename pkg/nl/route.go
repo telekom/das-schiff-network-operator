@@ -48,11 +48,7 @@ func GetProtocolNumber(protocol string, frr bool) int {
 	switch protocol {
 	case "babel":
 		return unix.RTPROT_BABEL
-	case "bgp":
-		return unix.RTPROT_BGP
-	case "ibgp":
-		return unix.RTPROT_BGP
-	case "ebgp":
+	case "bgp", "ibgp", "ebgp":
 		return unix.RTPROT_BGP
 	case "bird":
 		return unix.RTPROT_BIRD
@@ -68,8 +64,6 @@ func GetProtocolNumber(protocol string, frr bool) int {
 		return unix.RTPROT_GATED
 	case "isis":
 		return unix.RTPROT_ISIS
-	case "kernel":
-		return unix.RTPROT_KERNEL
 	case "mrouted":
 		return unix.RTPROT_MROUTED
 	case "mrt":
@@ -98,9 +92,7 @@ func GetProtocolNumber(protocol string, frr bool) int {
 		return unix.RTPROT_ZEBRA
 	// this is a hack as there is no direct representation in Linux for
 	// directly connected routes but normally they are installed by kernel
-	case "local":
-		return unix.RTPROT_KERNEL
-	case "connected":
+	case "local", "connected", "kernel":
 		return unix.RTPROT_KERNEL
 	//
 	case "nhrp":

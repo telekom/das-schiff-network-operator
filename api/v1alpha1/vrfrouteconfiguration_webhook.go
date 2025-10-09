@@ -17,6 +17,7 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"context"
 	"fmt"
 	"net"
 
@@ -33,8 +34,12 @@ const geLen = 8
 var vrfrouteconfigurationlog = logf.Log.WithName("vrfrouteconfiguration-resource")
 
 func (r *VRFRouteConfiguration) SetupWebhookWithManager(mgr ctrl.Manager) error {
-	if err := ctrl.NewWebhookManagedBy(mgr).For(r).Complete(); err != nil {
-		return fmt.Errorf("error building webhook: %w", err)
+	err := ctrl.NewWebhookManagedBy(mgr).
+		For(r).
+		WithValidator(&VRFRouteConfigurationValidator{}).
+		Complete()
+	if err != nil {
+		return fmt.Errorf("error setting up webhook: %w", err)
 	}
 	return nil
 }
@@ -42,15 +47,20 @@ func (r *VRFRouteConfiguration) SetupWebhookWithManager(mgr ctrl.Manager) error 
 // TODO(user): EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 
 // TODO(user): change verbs to "verbs=create;update;delete" if you want to enable deletion validation.
-//+kubebuilder:webhook:path=/validate-network-schiff-telekom-de-v1alpha1-vrfrouteconfiguration,mutating=false,failurePolicy=fail,sideEffects=None,groups=network.schiff.telekom.de,resources=vrfrouteconfigurations,verbs=create;update,versions=v1alpha1,name=vvrfrouteconfiguration.kb.io,admissionReviewVersions=v1
+// +kubebuilder:webhook:path=/validate-network-schiff-telekom-de-v1alpha1-vrfrouteconfiguration,mutating=false,failurePolicy=fail,sideEffects=None,groups=network.schiff.telekom.de,resources=vrfrouteconfigurations,verbs=create;update,versions=v1alpha1,name=vvrfrouteconfiguration.kb.io,admissionReviewVersions=v1
+type VRFRouteConfigurationValidator struct{}
 
-var _ webhook.Validator = &VRFRouteConfiguration{}
+var _ webhook.CustomValidator = &VRFRouteConfigurationValidator{}
 
 // ValidateCreate implements webhook.Validator so a webhook will be registered for the type.
-func (r *VRFRouteConfiguration) ValidateCreate() (admission.Warnings, error) {
-	vrfrouteconfigurationlog.Info("validate create", "name", r.Name)
+func (*VRFRouteConfigurationValidator) ValidateCreate(_ context.Context, obj runtime.Object) (admission.Warnings, error) {
+	vrf, ok := obj.(*VRFRouteConfiguration)
+	if !ok {
+		return nil, fmt.Errorf("expected a VRFRouteConfiguration but got a %T", obj)
+	}
+	vrfrouteconfigurationlog.Info("validate create", "name", vrf.Name)
 
-	err := r.validateItems()
+	err := vrf.validateItems()
 	if err != nil {
 		return nil, err
 	}
@@ -59,10 +69,14 @@ func (r *VRFRouteConfiguration) ValidateCreate() (admission.Warnings, error) {
 }
 
 // ValidateUpdate implements webhook.Validator so a webhook will be registered for the type.
-func (r *VRFRouteConfiguration) ValidateUpdate(runtime.Object) (admission.Warnings, error) {
-	vrfrouteconfigurationlog.Info("validate update", "name", r.Name)
+func (*VRFRouteConfigurationValidator) ValidateUpdate(_ context.Context, _, objNew runtime.Object) (admission.Warnings, error) {
+	vrf, ok := objNew.(*VRFRouteConfiguration)
+	if !ok {
+		return nil, fmt.Errorf("expected a VRFRouteConfiguration but got a %T", objNew)
+	}
+	vrfrouteconfigurationlog.Info("validate update", "name", vrf.Name)
 
-	err := r.validateItems()
+	err := vrf.validateItems()
 	if err != nil {
 		return nil, err
 	}
@@ -71,10 +85,7 @@ func (r *VRFRouteConfiguration) ValidateUpdate(runtime.Object) (admission.Warnin
 }
 
 // ValidateDelete implements webhook.Validator so a webhook will be registered for the type.
-func (r *VRFRouteConfiguration) ValidateDelete() (admission.Warnings, error) {
-	vrfrouteconfigurationlog.Info("validate delete", "name", r.Name)
-
-	// TODO(user): fill in your validation logic upon object deletion.
+func (*VRFRouteConfigurationValidator) ValidateDelete(_ context.Context, _ runtime.Object) (admission.Warnings, error) {
 	return nil, nil
 }
 

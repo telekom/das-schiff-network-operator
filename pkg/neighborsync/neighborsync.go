@@ -221,27 +221,29 @@ func getFirstIPv4FromInterface(iface *net.Interface) (netip.Addr, error) {
 func (n *NeighborSync) processUpdate(update *netlink.NeighUpdate) {
 	logger := ctrl.Log.WithName("neighborsync")
 
-	intf, err := net.InterfaceByIndex(update.Neigh.LinkIndex)
+	intf, err := net.InterfaceByIndex(update.LinkIndex)
 	if err != nil {
 		return
 	}
 
-	if _, ok := n.neighRefreshInterfaces.Load(update.Neigh.LinkIndex); !ok {
+	if _, ok := n.neighRefreshInterfaces.Load(update.LinkIndex); !ok {
 		return
 	}
 
-	addr, ok := netip.AddrFromSlice(update.Neigh.IP)
+	addr, ok := netip.AddrFromSlice(update.IP)
 	if !ok {
 		return
 	}
 
 	switch update.Type {
 	case unix.RTM_NEWNEIGH:
-		logger.Info("Received neighbor update", "link", intf.Name, "ip", update.Neigh.IP, "hardwareAddr", update.Neigh.HardwareAddr, "state", update.Neigh.State, "flags", update.Neigh.Flags)
+		logger.Info("Received neighbor update", "link", intf.Name, "ip", update.IP, "hardwareAddr", update.HardwareAddr, "state", update.State, "flags", update.Flags)
 		n.handleNeighborAdd(addr, &update.Neigh)
 	case unix.RTM_DELNEIGH:
-		logger.Info("Received neighbor delete", "link", intf.Name, "ip", update.Neigh.IP, "hardwareAddr", update.Neigh.HardwareAddr, "state", update.Neigh.State, "flags", update.Neigh.Flags)
+		logger.Info("Received neighbor delete", "link", intf.Name, "ip", update.IP, "hardwareAddr", update.HardwareAddr, "state", update.State, "flags", update.Flags)
 		n.handleNeighborDelete(addr, &update.Neigh)
+	default:
+		return
 	}
 }
 
@@ -404,11 +406,11 @@ func (n *NeighborSync) runBpfNeighborSync() {
 // replaceNeighborReachable sets/updates a neighbor entry for the given mapping with state REACHABLE.
 func (n *NeighborSync) replaceNeighborReachable(ifindex, family int, ip net.IP, macbuf [6]byte) error {
 	if len(ip) == 0 {
-		return fmt.Errorf("empty IP from event")
+		return errors.New("empty IP from event")
 	}
 	hw := net.HardwareAddr(macbuf[:])
 	if len(hw) != hardwareAddrLen {
-		return fmt.Errorf("invalid MAC from event")
+		return errors.New("invalid MAC from event")
 	}
 
 	link, err := n.toolkit.LinkByIndex(ifindex)

@@ -3,6 +3,7 @@ package vty
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -76,7 +77,8 @@ func readMessage(reader *bufio.Reader) ([]byte, error) {
 }
 
 func (s *Socket) runCmd(module, cmd string) ([]byte, error) {
-	socket, err := net.Dial("unix", fmt.Sprintf("%s/%s.vty", s.socketPath, module))
+	dialer := &net.Dialer{}
+	socket, err := dialer.DialContext(context.Background(), "unix", fmt.Sprintf("%s/%s.vty", s.socketPath, module))
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to socket: %w", err)
 	}

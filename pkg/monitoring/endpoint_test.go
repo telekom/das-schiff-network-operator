@@ -312,7 +312,7 @@ var _ = Describe("Endpoint", func() {
 		})
 		It("returns error if request was properly passed to the endpoint but the response is malformed", func() {
 			svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				fmt.Fprintf(w, "invalidJson")
+				fmt.Fprint(w, "invalidJson")
 			}))
 			defer svr.Close()
 
@@ -326,7 +326,7 @@ var _ = Describe("Endpoint", func() {
 		})
 		It("returns no error if request was properly passed to the endpoint", func() {
 			svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				fmt.Fprintf(w, "{}")
+				fmt.Fprint(w, "{}")
 			}))
 			defer svr.Close()
 
