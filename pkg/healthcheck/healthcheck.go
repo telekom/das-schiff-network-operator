@@ -81,7 +81,7 @@ func (hc *HealthChecker) RemoveTaints(ctx context.Context) error {
 	err := hc.client.Get(ctx,
 		types.NamespacedName{Name: os.Getenv(NodenameEnv)}, node)
 	if err != nil {
-		hc.Logger.Error(err, "error while getting node's info")
+		hc.Error(err, "error while getting node's info")
 		return fmt.Errorf("error while getting node's info: %w", err)
 	}
 
@@ -97,7 +97,7 @@ func (hc *HealthChecker) RemoveTaints(ctx context.Context) error {
 	}
 	if updateNode {
 		if err := hc.client.Update(ctx, node, &client.UpdateOptions{}); err != nil {
-			hc.Logger.Error(err, "")
+			hc.Error(err, "")
 			return fmt.Errorf("error while updating node: %w", err)
 		}
 	}
@@ -126,7 +126,7 @@ func (hc *HealthChecker) CheckInterfaces() error {
 	issuesFound := false
 	for _, i := range hc.netConfig.Interfaces {
 		if err := hc.checkInterface(i); err != nil {
-			hc.Logger.Error(err, "problem with network interface "+i)
+			hc.Error(err, "problem with network interface "+i)
 			issuesFound = true
 		}
 	}

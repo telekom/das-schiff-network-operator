@@ -99,7 +99,7 @@ func (c *bpfCollector) updateReturnReasons(ch chan<- prometheus.Metric) error {
 		return ErrNoData
 	}
 	for idx, name := range epbfReturnReasons {
-		stats, err := c.fetchEbpfStatistics(bpf.EbpfRetStatsMap(), uint32(idx))
+		stats, err := c.fetchEbpfStatistics(bpf.EbpfRetStatsMap(), uint32(idx)) // nolint:gosec
 		if err != nil {
 			return err
 		}
@@ -114,7 +114,7 @@ func (c *bpfCollector) updateFibLookupResults(ch chan<- prometheus.Metric) error
 		return ErrNoData
 	}
 	for idx, name := range ebpfFibLookupResult {
-		stats, err := c.fetchEbpfStatistics(bpf.EbpfFibLkupStatsMap(), uint32(idx))
+		stats, err := c.fetchEbpfStatistics(bpf.EbpfFibLkupStatsMap(), uint32(idx)) // nolint:gosec
 		if err != nil {
 			return err
 		}

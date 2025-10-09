@@ -1,6 +1,7 @@
 package nl
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 
@@ -26,7 +27,7 @@ type VRFInformation struct {
 // Create will create a VRF and all interfaces necessary to operate the EVPN and leaking.
 func (n *Manager) CreateL3(info VRFInformation) error {
 	if len(info.Name) > maxVRFnameLen {
-		return fmt.Errorf("name of VRF can not be longer than 12 (15-3 prefix) chars")
+		return errors.New("name of VRF can not be longer than 12 (15-3 prefix) chars")
 	}
 	freeTableID, err := n.findFreeTableID()
 	if err != nil {
@@ -85,24 +86,24 @@ func (n *Manager) UpL3(info VRFInformation) error {
 
 // Cleanup will try to delete all interfaces associated with this VRF and return a list of errors (for logging) as a slice.
 func (n *Manager) CleanupL3(name string) []error {
-	errors := []error{}
+	errs := []error{}
 	err := n.deleteLink(vxlanPrefix + name)
 	if err != nil {
-		errors = append(errors, err)
+		errs = append(errs, err)
 	}
 	err = n.deleteLink(bridgePrefix + name)
 	if err != nil {
-		errors = append(errors, err)
+		errs = append(errs, err)
 	}
 	err = n.deleteLink(vrfToDefaultPrefix + name)
 	if err != nil {
-		errors = append(errors, err)
+		errs = append(errs, err)
 	}
 	err = n.deleteLink(VrfPrefix + name)
 	if err != nil {
-		errors = append(errors, err)
+		errs = append(errs, err)
 	}
-	return errors
+	return errs
 }
 
 func (n *Manager) findFreeTableID() (int, error) {

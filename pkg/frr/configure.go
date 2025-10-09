@@ -2,6 +2,7 @@ package frr
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"regexp"
@@ -42,7 +43,7 @@ func (m *Manager) Configure(in Configuration, nm *nl.Manager, nwopCfg *config.Co
 		for j := range in.VRFs[i].Import {
 			for k := range in.VRFs[i].Import[j].Items {
 				if in.VRFs[i].Import[j].Items[k].Action != "deny" {
-					return false, &ConfigurationError{fmt.Errorf("only deny rules are allowed in import prefix-lists of mgmt VRFs")}
+					return false, &ConfigurationError{errors.New("only deny rules are allowed in import prefix-lists of mgmt VRFs")}
 				}
 				// Swap deny to permit, this will be a prefix-list called from a deny route-map
 				in.VRFs[i].Import[j].Items[k].Action = "permit"
@@ -98,7 +99,7 @@ func (m *Manager) renderSubtemplates(in Configuration, nlManager *nl.Manager) (*
 
 	hostname := os.Getenv(healthcheck.NodenameEnv)
 	if hostname == "" {
-		return nil, fmt.Errorf("error getting node's name")
+		return nil, errors.New("error getting node's name")
 	}
 
 	vrfs, err := render(vrfTpl, data)

@@ -2,6 +2,7 @@ package nl
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -119,7 +120,7 @@ func (n *Manager) CreateL2(info *Layer2Information) error {
 	}
 
 	if len(info.AnycastGateways) > 0 && info.AnycastMAC == nil {
-		return fmt.Errorf("anycastGateways require anycastMAC to be set")
+		return errors.New("anycastGateways require anycastMAC to be set")
 	}
 
 	bridge, err := n.setupBridge(info, masterIdx)
@@ -197,23 +198,23 @@ func (n *Manager) setupVXLAN(info *Layer2Information, bridge *netlink.Bridge) er
 }
 
 func (n *Manager) CleanupL2(info *Layer2Information) []error {
-	errors := []error{}
+	errs := []error{}
 	if info.vxlan != nil {
 		if err := n.toolkit.LinkDel(info.vxlan); err != nil {
-			errors = append(errors, err)
+			errs = append(errs, err)
 		}
 	}
 	if info.bridge != nil {
 		if err := n.toolkit.LinkDel(info.bridge); err != nil {
-			errors = append(errors, err)
+			errs = append(errs, err)
 		}
 	}
 	if info.macvlanBridge != nil {
 		if err := n.toolkit.LinkDel(info.macvlanBridge); err != nil {
-			errors = append(errors, err)
+			errs = append(errs, err)
 		}
 	}
-	return errors
+	return errs
 }
 
 func containsNetlinkAddress(list []*netlink.Addr, addr *netlink.Addr) bool {
@@ -286,7 +287,7 @@ func (n *Manager) reconcileEUIAutogeneration(intfName string, intf netlink.Link,
 func (n *Manager) ReconcileL2(current, desired *Layer2Information) error {
 	bridgeName := fmt.Sprintf("%s%d", layer2Prefix, current.VlanID)
 	if len(desired.AnycastGateways) > 0 && desired.AnycastMAC == nil {
-		return fmt.Errorf("anycastGateways require anycastMAC to be set")
+		return errors.New("anycastGateways require anycastMAC to be set")
 	}
 
 	if err := n.setMTU(current, desired); err != nil {
@@ -577,6 +578,8 @@ func (*Manager) ReconcileL2NodeConfig() error {
 		if err := os.WriteFile(fmt.Sprintf("%s/bridge/bridge-nf-call-arptables", procSysNetPath), []byte("1"), neighFilePermissions); err != nil {
 			return fmt.Errorf("error setting bridge nf_call_arptables = 1: %w", err)
 		}
+	default:
+		// Do nothing
 	}
 	return nil
 }
