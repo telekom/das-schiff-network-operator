@@ -13,7 +13,6 @@ rules:
   - list
   - update
   - watch
-  # Allow updating node status conditions (NetworkOperatorReady)
 - apiGroups:
   - ""
   resources:

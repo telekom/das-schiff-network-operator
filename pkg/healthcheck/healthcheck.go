@@ -98,7 +98,7 @@ func (hc *HealthChecker) RemoveTaints(ctx context.Context) error {
 	err := hc.client.Get(ctx,
 		types.NamespacedName{Name: os.Getenv(NodenameEnv)}, node)
 	if err != nil {
-		hc.Logger.Error(err, "error while getting node's info")
+		hc.Error(err, "error while getting node's info")
 		return fmt.Errorf("error while getting node's info: %w", err)
 	}
 
@@ -114,7 +114,7 @@ func (hc *HealthChecker) RemoveTaints(ctx context.Context) error {
 	}
 	if updateNode {
 		if err := hc.client.Update(ctx, node, &client.UpdateOptions{}); err != nil {
-			hc.Logger.Error(err, "")
+				hc.Error(err, "")
 			return fmt.Errorf("error while updating node: %w", err)
 		}
 	}
