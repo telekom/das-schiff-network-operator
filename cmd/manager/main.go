@@ -27,6 +27,7 @@ import (
 	"github.com/telekom/das-schiff-network-operator/pkg/neighborsync"
 	"github.com/telekom/das-schiff-network-operator/pkg/nltoolkit"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -290,8 +291,12 @@ func performNetworkingHealthcheck(hc *healthcheck.HealthChecker) error {
 	if err := hc.CheckReachability(); err != nil {
 		return fmt.Errorf("error checking network reachability: %w", err)
 	}
-	if err := hc.RemoveTaints(context.Background()); err != nil {
+	ctx := context.Background()
+	if err := hc.RemoveTaints(ctx); err != nil {
 		return fmt.Errorf("error removing taint: %w", err)
+	}
+	if err := hc.UpdateReadinessCondition(ctx, corev1.ConditionTrue, healthcheck.ReasonHealthChecksPassed, "All network operator health checks passed"); err != nil {
+		return fmt.Errorf("error updating readiness condition: %w", err)
 	}
 	return nil
 }
