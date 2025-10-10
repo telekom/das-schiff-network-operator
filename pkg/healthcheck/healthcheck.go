@@ -36,13 +36,6 @@ const (
 	ReasonHealthChecksPassed   = "HealthChecksPassed"
 	ReasonInterfaceCheckFailed = "InterfaceCheckFailed"
 	ReasonReachabilityFailed   = "ReachabilityCheckFailed"
-	ReasonAPIServerFailed      = "APIServerCheckFailed"
-	// Additional agent specific reasons.
-	ReasonNetplanInitFailed     = "NetplanInitializationFailed"
-	ReasonNetplanApplyFailed    = "NetplanApplyFailed"
-	ReasonVLANReconcileFailed   = "VLANReconcileFailed"
-	ReasonLoopbackReconcileFail = "LoopbackReconcileFailed"
-	ReasonConfigFetchFailed     = "ConfigFetchFailed"
 
 	configEnv         = "OPERATOR_NETHEALTHCHECK_CONFIG"
 	defaultTCPTimeout = 3
@@ -87,7 +80,7 @@ func NewHealthChecker(clusterClient client.Client, toolkit *Toolkit, netconf *Ne
 	}, nil
 }
 
-// IsNetworkingHealthy returns value of isNetworkingHealthly bool.
+// TaintsRemoved returns value of isNetworkingHealthly bool.
 func (hc *HealthChecker) TaintsRemoved() bool {
 	return hc.taintsRemoved
 }
@@ -134,7 +127,7 @@ func (hc *HealthChecker) UpdateReadinessCondition(ctx context.Context, status co
 	}
 
 	now := metav1.Now()
-	updated := false
+
 	found := false
 	for i := range node.Status.Conditions {
 		c := &node.Status.Conditions[i]
@@ -150,7 +143,6 @@ func (hc *HealthChecker) UpdateReadinessCondition(ctx context.Context, status co
 		c.Status = status
 		c.Reason = reason
 		c.Message = message
-		updated = true
 		break
 	}
 	if !found { // append new condition
@@ -162,12 +154,10 @@ func (hc *HealthChecker) UpdateReadinessCondition(ctx context.Context, status co
 			LastHeartbeatTime:  now,
 			LastTransitionTime: now,
 		})
-		updated = true
 	}
-	if updated {
-		if err := hc.client.Status().Update(ctx, node); err != nil {
-			return fmt.Errorf("error updating node readiness condition: %w", err)
-		}
+
+	if err := hc.client.Status().Update(ctx, node); err != nil {
+		return fmt.Errorf("error updating node readiness condition: %w", err)
 	}
 	return nil
 }
