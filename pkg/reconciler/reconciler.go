@@ -16,6 +16,7 @@ import (
 	"github.com/telekom/das-schiff-network-operator/pkg/neighborsync"
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
 	"github.com/telekom/das-schiff-network-operator/pkg/nltoolkit"
+	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -133,18 +134,24 @@ func (reconciler *Reconciler) reconcileDebounced(ctx context.Context) error {
 		return err
 	}
 
-	if !reconciler.healthChecker.IsNetworkingHealthy() {
-		_, err := reconciler.healthChecker.IsFRRActive()
-		if err != nil {
+	if !reconciler.healthChecker.TaintsRemoved() {
+		// Run health checks and update readiness condition accordingly
+		if _, err := reconciler.healthChecker.IsFRRActive(); err != nil {
+			_ = reconciler.healthChecker.UpdateReadinessCondition(ctx, corev1.ConditionFalse, healthcheck.ReasonReachabilityFailed, fmt.Sprintf("FRR inactive: %v", err))
 			return fmt.Errorf("error checking FRR status: %w", err)
 		}
-		if err = reconciler.healthChecker.CheckInterfaces(); err != nil {
+		if err := reconciler.healthChecker.CheckInterfaces(); err != nil {
+			_ = reconciler.healthChecker.UpdateReadinessCondition(ctx, corev1.ConditionFalse, healthcheck.ReasonInterfaceCheckFailed, err.Error())
 			return fmt.Errorf("error checking network interfaces: %w", err)
 		}
-		if err = reconciler.healthChecker.CheckReachability(); err != nil {
+		if err := reconciler.healthChecker.CheckReachability(); err != nil {
+			_ = reconciler.healthChecker.UpdateReadinessCondition(ctx, corev1.ConditionFalse, healthcheck.ReasonReachabilityFailed, err.Error())
 			return fmt.Errorf("error checking network reachability: %w", err)
 		}
-		if err = reconciler.healthChecker.RemoveTaints(ctx); err != nil {
+		if err := reconciler.healthChecker.UpdateReadinessCondition(ctx, corev1.ConditionTrue, healthcheck.ReasonHealthChecksPassed, "All network operator health checks passed"); err != nil {
+			reconciler.logger.Error(err, "failed to update network operator readiness condition")
+		}
+		if err := reconciler.healthChecker.RemoveTaints(ctx); err != nil {
 			return fmt.Errorf("error removing taint from the node: %w", err)
 		}
 	}

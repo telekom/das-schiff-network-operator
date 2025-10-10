@@ -24,8 +24,7 @@ import (
 const testHostname = "worker"
 
 var (
-	fakeNodesJSON = `{"items":[{"metadata":{"name":"` + testHostname + `"},"spec":{"taints":[{"effect":"NoSchedule",
-					"key":"` + InitTaints[0] + `"}]}}]}`
+	fakeNodesJSON = `{"items":[{"metadata":{"name":"` + testHostname + `"},"spec":{"taints":[{"effect":"NoSchedule","key":"` + InitTaints[0] + `"}]}}]}`
 	fakeNodes *corev1.NodeList
 	tmpPath   string
 	ctrl      *gomock.Controller
@@ -112,10 +111,10 @@ var _ = Describe("RemoveTaints()", func() {
 		hc, err := NewHealthChecker(c, nil, nc)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(hc).ToNot(BeNil())
-		Expect(hc.IsNetworkingHealthy()).To(BeFalse())
+		Expect(hc.TaintsRemoved()).To(BeFalse())
 		err = hc.RemoveTaints(context.Background())
 		Expect(err).To(HaveOccurred())
-		Expect(hc.IsNetworkingHealthy()).To(BeFalse())
+		Expect(hc.TaintsRemoved()).To(BeFalse())
 	})
 	It("returns error when trying to remove taint (update node)", func() {
 		c := &updateErrorClient{}
@@ -123,10 +122,10 @@ var _ = Describe("RemoveTaints()", func() {
 		hc, err := NewHealthChecker(c, nil, nc)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(hc).ToNot(BeNil())
-		Expect(hc.IsNetworkingHealthy()).To(BeFalse())
+		Expect(hc.TaintsRemoved()).To(BeFalse())
 		err = hc.RemoveTaints(context.Background())
 		Expect(err).To(HaveOccurred())
-		Expect(hc.IsNetworkingHealthy()).To(BeFalse())
+		Expect(hc.TaintsRemoved()).To(BeFalse())
 	})
 	It("removes taint and set isInitialized true", func() {
 		c := fake.NewClientBuilder().WithRuntimeObjects(fakeNodes).Build()
@@ -134,10 +133,10 @@ var _ = Describe("RemoveTaints()", func() {
 		hc, err := NewHealthChecker(c, nil, nc)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(hc).ToNot(BeNil())
-		Expect(hc.IsNetworkingHealthy()).To(BeFalse())
+		Expect(hc.TaintsRemoved()).To(BeFalse())
 		err = hc.RemoveTaints(context.Background())
 		Expect(err).ToNot(HaveOccurred())
-		Expect(hc.IsNetworkingHealthy()).To(BeTrue())
+		Expect(hc.TaintsRemoved()).To(BeTrue())
 	})
 })
 var _ = Describe("CheckInterfaces()", func() {
@@ -147,10 +146,10 @@ var _ = Describe("CheckInterfaces()", func() {
 		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(nil, fakeErrorGetByName, &net.Dialer{Timeout: time.Duration(3)}), nc)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(hc).ToNot(BeNil())
-		Expect(hc.IsNetworkingHealthy()).To(BeFalse())
+		Expect(hc.TaintsRemoved()).To(BeFalse())
 		err = hc.CheckInterfaces()
 		Expect(err).To(HaveOccurred())
-		Expect(hc.IsNetworkingHealthy()).To(BeFalse())
+		Expect(hc.TaintsRemoved()).To(BeFalse())
 	})
 	It("returns error if interface is not up", func() {
 		c := fake.NewClientBuilder().Build()
@@ -158,10 +157,10 @@ var _ = Describe("CheckInterfaces()", func() {
 		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(nil, fakeDownGetByName, &net.Dialer{Timeout: time.Duration(3)}), nc)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(hc).ToNot(BeNil())
-		Expect(hc.IsNetworkingHealthy()).To(BeFalse())
+		Expect(hc.TaintsRemoved()).To(BeFalse())
 		err = hc.CheckInterfaces()
 		Expect(err).To(HaveOccurred())
-		Expect(hc.IsNetworkingHealthy()).To(BeFalse())
+		Expect(hc.TaintsRemoved()).To(BeFalse())
 	})
 	It("returns error if all links are up", func() {
 		c := fake.NewClientBuilder().Build()
@@ -169,10 +168,10 @@ var _ = Describe("CheckInterfaces()", func() {
 		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(nil, fakeUpGetByName, NewTCPDialer("")), nc)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(hc).ToNot(BeNil())
-		Expect(hc.IsNetworkingHealthy()).To(BeFalse())
+		Expect(hc.TaintsRemoved()).To(BeFalse())
 		err = hc.CheckInterfaces()
 		Expect(err).ToNot(HaveOccurred())
-		Expect(hc.IsNetworkingHealthy()).To(BeFalse())
+		Expect(hc.TaintsRemoved()).To(BeFalse())
 	})
 })
 var _ = Describe("NewTcpDialer()", func() {
@@ -181,7 +180,7 @@ var _ = Describe("NewTcpDialer()", func() {
 		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(nil, fakeUpGetByName, NewTCPDialer("")), &NetHealthcheckConfig{})
 		Expect(err).ToNot(HaveOccurred())
 		Expect(hc).ToNot(BeNil())
-		Expect(hc.IsNetworkingHealthy()).To(BeFalse())
+		Expect(hc.TaintsRemoved()).To(BeFalse())
 		d := hc.toolkit.tcpDialer.(*net.Dialer)
 		Expect(d.Timeout).To(Equal(time.Second * 3))
 	})
@@ -190,7 +189,7 @@ var _ = Describe("NewTcpDialer()", func() {
 		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(nil, fakeUpGetByName, NewTCPDialer("5")), &NetHealthcheckConfig{})
 		Expect(err).ToNot(HaveOccurred())
 		Expect(hc).ToNot(BeNil())
-		Expect(hc.IsNetworkingHealthy()).To(BeFalse())
+		Expect(hc.TaintsRemoved()).To(BeFalse())
 		d := hc.toolkit.tcpDialer.(*net.Dialer)
 		Expect(d.Timeout).To(Equal(time.Second * 5))
 	})
@@ -199,7 +198,7 @@ var _ = Describe("NewTcpDialer()", func() {
 		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(nil, fakeUpGetByName, NewTCPDialer("500ms")), &NetHealthcheckConfig{})
 		Expect(err).ToNot(HaveOccurred())
 		Expect(hc).ToNot(BeNil())
-		Expect(hc.IsNetworkingHealthy()).To(BeFalse())
+		Expect(hc.TaintsRemoved()).To(BeFalse())
 		d := hc.toolkit.tcpDialer.(*net.Dialer)
 		Expect(d.Timeout).To(Equal(time.Millisecond * 500))
 	})
@@ -216,7 +215,7 @@ var _ = Describe("CheckReachability()", func() {
 		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(nil, fakeUpGetByName, dialerMock), nc)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(hc).ToNot(BeNil())
-		Expect(hc.IsNetworkingHealthy()).To(BeFalse())
+		Expect(hc.TaintsRemoved()).To(BeFalse())
 		err = hc.CheckReachability()
 		Expect(err).To(HaveOccurred())
 	})
@@ -229,7 +228,7 @@ var _ = Describe("CheckReachability()", func() {
 		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(nil, fakeUpGetByName, dialerMock), nc)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(hc).ToNot(BeNil())
-		Expect(hc.IsNetworkingHealthy()).To(BeFalse())
+		Expect(hc.TaintsRemoved()).To(BeFalse())
 		err = hc.CheckReachability()
 		Expect(err).ToNot(HaveOccurred())
 	})
@@ -242,7 +241,7 @@ var _ = Describe("CheckReachability()", func() {
 		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(nil, fakeUpGetByName, dialerMock), nc)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(hc).ToNot(BeNil())
-		Expect(hc.IsNetworkingHealthy()).To(BeFalse())
+		Expect(hc.TaintsRemoved()).To(BeFalse())
 		err = hc.CheckReachability()
 		Expect(err).ToNot(HaveOccurred())
 	})
@@ -256,7 +255,7 @@ var _ = Describe("CheckReachability()", func() {
 		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(nil, fakeUpGetByName, dialerMock), nc)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(hc).ToNot(BeNil())
-		Expect(hc.IsNetworkingHealthy()).To(BeFalse())
+		Expect(hc.TaintsRemoved()).To(BeFalse())
 		err = hc.CheckReachability()
 		Expect(err).To(HaveOccurred())
 	})
