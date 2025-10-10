@@ -16,6 +16,7 @@ import (
 	"github.com/telekom/das-schiff-network-operator/pkg/neighborsync"
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
 	"github.com/telekom/das-schiff-network-operator/pkg/nltoolkit"
+	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -92,62 +93,82 @@ func (reconciler *Reconciler) Reconcile(ctx context.Context) {
 }
 
 func (reconciler *Reconciler) reconcileDebounced(ctx context.Context) error {
-	r := &reconcile{
-		Reconciler: reconciler,
-		Logger:     reconciler.logger,
+	r := &reconcile{Reconciler: reconciler, Logger: reconciler.logger}
+	if err := r.reloadConfig(); err != nil {
+		return err
 	}
+	data, err := r.collectData(ctx)
+	if err != nil {
+		return err
+	}
+	if err := r.reconcileDataSets(data); err != nil {
+		return err
+	}
+	if err := r.ensureNodeReady(ctx); err != nil {
+		return err
+	}
+	return nil
+}
 
+func (r *reconcile) reloadConfig() error {
 	r.Info("Reloading config")
 	if err := r.config.ReloadConfig(); err != nil {
 		return fmt.Errorf("error reloading network-operator config: %w", err)
 	}
+	return nil
+}
 
+func (r *reconcile) collectData(ctx context.Context) (*reconcileData, error) {
 	l3vnis, err := r.fetchLayer3(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	l2vnis, err := r.fetchLayer2(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	taas, err := r.fetchTaas(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	peerings, err := r.fetchBGPPeerings(ctx)
 	if err != nil {
+		return nil, err
+	}
+	return &reconcileData{l3vnis: l3vnis, l2vnis: l2vnis, taas: taas, peerings: peerings}, nil
+}
+
+func (r *reconcile) reconcileDataSets(data *reconcileData) error {
+	if err := r.reconcileLayer3(data); err != nil {
 		return err
 	}
-
-	reconcileData := &reconcileData{
-		l3vnis:   l3vnis,
-		l2vnis:   l2vnis,
-		taas:     taas,
-		peerings: peerings,
-	}
-
-	if err := r.reconcileLayer3(reconcileData); err != nil {
+	if err := r.reconcileLayer2(data); err != nil {
 		return err
 	}
-	if err := r.reconcileLayer2(reconcileData); err != nil {
-		return err
-	}
+	return nil
+}
 
-	if !reconciler.healthChecker.IsNetworkingHealthy() {
-		_, err := reconciler.healthChecker.IsFRRActive()
-		if err != nil {
-			return fmt.Errorf("error checking FRR status: %w", err)
-		}
-		if err = reconciler.healthChecker.CheckInterfaces(); err != nil {
-			return fmt.Errorf("error checking network interfaces: %w", err)
-		}
-		if err = reconciler.healthChecker.CheckReachability(); err != nil {
-			return fmt.Errorf("error checking network reachability: %w", err)
-		}
-		if err = reconciler.healthChecker.RemoveTaints(ctx); err != nil {
-			return fmt.Errorf("error removing taint from the node: %w", err)
-		}
+func (r *reconcile) ensureNodeReady(ctx context.Context) error {
+	if r.healthChecker.TaintsRemoved() {
+		return nil
 	}
-
+	if _, err := r.healthChecker.IsFRRActive(); err != nil {
+		_ = r.healthChecker.UpdateReadinessCondition(ctx, corev1.ConditionFalse, healthcheck.ReasonReachabilityFailed, fmt.Sprintf("FRR inactive: %v", err))
+		return fmt.Errorf("error checking FRR status: %w", err)
+	}
+	if err := r.healthChecker.CheckInterfaces(); err != nil {
+		_ = r.healthChecker.UpdateReadinessCondition(ctx, corev1.ConditionFalse, healthcheck.ReasonInterfaceCheckFailed, err.Error())
+		return fmt.Errorf("error checking network interfaces: %w", err)
+	}
+	if err := r.healthChecker.CheckReachability(); err != nil {
+		_ = r.healthChecker.UpdateReadinessCondition(ctx, corev1.ConditionFalse, healthcheck.ReasonReachabilityFailed, err.Error())
+		return fmt.Errorf("error checking network reachability: %w", err)
+	}
+	if err := r.healthChecker.UpdateReadinessCondition(ctx, corev1.ConditionTrue, healthcheck.ReasonHealthChecksPassed, "All network operator health checks passed"); err != nil {
+		r.logger.Error(err, "failed to update network operator readiness condition")
+	}
+	if err := r.healthChecker.RemoveTaints(ctx); err != nil {
+		return fmt.Errorf("error removing taint from the node: %w", err)
+	}
 	return nil
 }

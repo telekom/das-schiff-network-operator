@@ -49,6 +49,7 @@ type Layer2NetworkConfigurationReconciler struct {
 }
 
 //+kubebuilder:rbac:groups=core,resources=nodes,verbs=get;list;update;watch
+//+kubebuilder:rbac:groups=core,resources=nodes/status,verbs=get;patch;update
 //+kubebuilder:rbac:groups=network.schiff.telekom.de,resources=layer2networkconfigurations,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=network.schiff.telekom.de,resources=layer2networkconfigurations/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=network.schiff.telekom.de,resources=layer2networkconfigurations/finalizers,verbs=update
