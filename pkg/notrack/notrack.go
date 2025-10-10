@@ -190,6 +190,12 @@ func reconcileLinks(c *nftables.Conn, chainPrerouting4, chainPrerouting6 *nftabl
 		{c, ruleKindFib, "dv.", "l2.", "nwop:gen:dv-l2"},
 		// def -> l2
 		{c, ruleKindFib, "def_", "l2.", "nwop:gen:def-l2"},
+		// br -> l2
+		{c, ruleKindFib, "br.", "Vrf_nwop", "nwop:gen:br-vrf_nwop"},
+		// dv -> l2
+		{c, ruleKindFib, "dv.", "Vrf_nwop", "nwop:gen:dv-vrf_nwop"},
+		// def -> l2
+		{c, ruleKindFib, "def_", "Vrf_nwop", "nwop:gen:def-vrf_nwop"},
 		// vr
 		{c, ruleKindIif, "vr.", "", "nwop:gen:vr"},
 	}
