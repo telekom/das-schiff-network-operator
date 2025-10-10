@@ -1,7 +1,7 @@
 package healthcheck
 
 import (
-	// Standard library
+	// Standard library.
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	// Third-party
+	// Third-party.
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	"github.com/vishvananda/netlink"
@@ -21,7 +21,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	// Project local
+	// Project local.
 	mock_healthcheck "github.com/telekom/das-schiff-network-operator/pkg/healthcheck/mock"
 )
 
