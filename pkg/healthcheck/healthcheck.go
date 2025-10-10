@@ -114,7 +114,7 @@ func (hc *HealthChecker) RemoveTaints(ctx context.Context) error {
 	}
 	if updateNode {
 		if err := hc.client.Update(ctx, node, &client.UpdateOptions{}); err != nil {
-				hc.Error(err, "")
+			hc.Error(err, "")
 			return fmt.Errorf("error while updating node: %w", err)
 		}
 	}

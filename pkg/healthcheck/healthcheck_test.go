@@ -12,23 +12,22 @@ import (
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+	mock_healthcheck "github.com/telekom/das-schiff-network-operator/pkg/healthcheck/mock"
 	"github.com/vishvananda/netlink"
 	"go.uber.org/mock/gomock"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
-
-	mock_healthcheck "github.com/telekom/das-schiff-network-operator/pkg/healthcheck/mock"
 )
 
 const testHostname = "worker"
 
 var (
 	fakeNodesJSON = `{"items":[{"metadata":{"name":"` + testHostname + `"},"spec":{"taints":[{"effect":"NoSchedule","key":"` + InitTaints[0] + `"}]}}]}`
-	fakeNodes *corev1.NodeList
-	tmpPath   string
-	ctrl      *gomock.Controller
+	fakeNodes     *corev1.NodeList
+	tmpPath       string
+	ctrl          *gomock.Controller
 )
 
 var _ = BeforeSuite(func() {
