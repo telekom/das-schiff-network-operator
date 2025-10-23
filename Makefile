@@ -77,6 +77,7 @@ docker-build: #test ## Build docker image with the manager.
 	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-cra-frr.Dockerfile -t ${IMG_BASE}/das-schiff-cra-frr:latest .
 	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-network-operator.Dockerfile -t ${IMG_BASE}/das-schiff-network-operator:latest .
 	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-nwop-agent-cra-frr.Dockerfile -t ${IMG_BASE}/das-schiff-nwop-agent-cra-frr:latest .
+	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-nwop-agent-cra-vsr.Dockerfile -t ${IMG_BASE}/das-schiff-nwop-agent-cra-vsr:latest .
 	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-nwop-agent-hbn-l2.Dockerfile -t ${IMG_BASE}/das-schiff-nwop-agent-hbn-l2:latest .
 	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-nwop-agent-netplan.Dockerfile -t ${IMG_BASE}/das-schiff-nwop-agent-netplan:latest .
 
@@ -93,6 +94,7 @@ kind-load: docker-build ## Load docker image into kind cluster.
 	kind load docker-image ${IMG_BASE}/das-schiff-cra-frr:latest
 	kind load docker-image ${IMG_BASE}/das-schiff-network-operator:latest
 	kind load docker-image ${IMG_BASE}/das-schiff-nwop-agent-cra-frr:latest
+	kind load docker-image ${IMG_BASE}/das-schiff-nwop-agent-cra-vsr:latest
 	kind load docker-image ${IMG_BASE}/das-schiff-nwop-agent-hbn-l2:latest
 	kind load docker-image ${IMG_BASE}/das-schiff-nwop-agent-netplan:latest
 
