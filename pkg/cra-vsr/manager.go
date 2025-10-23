@@ -18,7 +18,9 @@ package cra
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"time"
 
@@ -66,7 +68,7 @@ func NewManager(urls []string, user, password string, timeout time.Duration) (*M
 			Auth: []ssh.AuthMethod{
 				ssh.Password(password),
 			},
-			HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+			HostKeyCallback: ssh.InsecureIgnoreHostKey(), //nolint:gosec
 		},
 	}
 
@@ -91,9 +93,8 @@ func NewManager(urls []string, user, password string, timeout time.Duration) (*M
 }
 
 func (m *Manager) openSession(ctx context.Context) error {
-	var err error
-
-	if err = m.nc.openSession(ctx, m.urls, m.timeout, &m.sshConfig); err != nil {
+	err := m.nc.openSession(ctx, m.urls, m.timeout, &m.sshConfig)
+	if err != nil {
 		return err
 	}
 
@@ -144,5 +145,82 @@ func (m *Manager) ApplyConfiguration(
 	ctx context.Context,
 	nodeCfg *v1alpha1.NodeNetworkConfigSpec,
 ) error {
+	return m.applyNodeNetworkConfig(ctx, nodeCfg, false)
+}
+
+func (m *Manager) applyNodeNetworkConfig(
+	ctx context.Context,
+	nodeCfg *v1alpha1.NodeNetworkConfigSpec,
+	retry bool,
+) error {
+	if retry || m.nc.session == nil {
+		fmt.Println("netconf connection closed, re-open it")
+		if err := m.openSession(ctx); err != nil {
+			return fmt.Errorf("failed to re-open netconf session: %w", err)
+		}
+	}
+
+	err := m.nc.editConfig(ctx, m.startupXML, netconf.Candidate, netconf.ReplaceConfig)
+	if err != nil {
+		if !retry && errors.Is(err, io.EOF) {
+			return m.applyNodeNetworkConfig(ctx, nodeCfg, true)
+		}
+		return err
+	}
+
+	vrouter, err := m.makeVRouter(nodeCfg)
+	if err != nil {
+		return err
+	}
+
+	err = m.nc.editVRouter(ctx, vrouter, netconf.Candidate, netconf.MergeConfig)
+	if err != nil {
+		return err
+	}
+
+	err = m.nc.commit(ctx)
+	if err != nil {
+		return err
+	}
+
+	m.running = vrouter
 	return nil
+}
+
+func (m *Manager) makeVRouter(nodeCfg *v1alpha1.NodeNetworkConfigSpec) (*VRouter, error) {
+	vrouter := &VRouter{
+		XmlnsNCAttr: "urn:ietf:params:xml:ns:netconf:base:1.0",
+		Routing: &GlobalRouting{
+			NCOperation: netconf.ReplaceConfig,
+			BGP:         &GlobalBGP{},
+		},
+	}
+
+	ns := Namespace{
+		Name:       m.workNS,
+		Interfaces: &Interfaces{},
+		Routing: &Routing{
+			NCOperation: netconf.ReplaceConfig,
+			BGP:         &BGP{},
+		},
+	}
+
+	l3 := NewLayer3(nodeCfg, &ns, m)
+	if err := l3.setup(); err != nil {
+		return nil, err
+	}
+
+	l2 := NewLayer2(nodeCfg, &ns, m)
+	if err := l2.setup(); err != nil {
+		return nil, err
+	}
+
+	bgp := NewLayerBGP(nodeCfg, vrouter, &ns, m)
+	if err := bgp.setup(); err != nil {
+		return nil, err
+	}
+
+	vrouter.Namespaces = append(vrouter.Namespaces, ns)
+
+	return vrouter, nil
 }
