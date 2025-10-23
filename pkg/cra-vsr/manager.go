@@ -22,8 +22,10 @@ import (
 	"net"
 	"time"
 
+	"github.com/nemith/netconf"
 	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/pkg/config"
+	"golang.org/x/crypto/ssh"
 )
 
 const (
@@ -46,12 +48,26 @@ const (
 
 type Manager struct {
 	urls       []string
+	sshConfig  ssh.ClientConfig
 	baseConfig *config.BaseConfig
+	timeout    time.Duration
+	startupXML []byte
+	workNS     string
+	running    *VRouter
+	nc         Netconf
 }
 
 func NewManager(urls []string, user, password string, timeout time.Duration) (*Manager, error) {
 	m := &Manager{
-		urls: urls,
+		urls:    urls,
+		timeout: timeout,
+		sshConfig: ssh.ClientConfig{
+			User: user,
+			Auth: []ssh.AuthMethod{
+				ssh.Password(password),
+			},
+			HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		},
 	}
 
 	baseConfig, err := config.LoadBaseConfig(baseConfigPath)
@@ -67,7 +83,57 @@ func NewManager(urls []string, user, password string, timeout time.Duration) (*M
 	}
 	m.baseConfig = baseConfig
 
+	if err := m.openSession(context.Background()); err != nil {
+		return nil, err
+	}
+
 	return m, nil
+}
+
+func (m *Manager) openSession(ctx context.Context) error {
+	var err error
+
+	if err = m.nc.openSession(ctx, m.urls, m.timeout, &m.sshConfig); err != nil {
+		return err
+	}
+
+	m.startupXML, err = m.nc.getConfig(ctx, netconf.Startup)
+	if err != nil {
+		return err
+	}
+
+	m.running, err = m.nc.getVRouter(ctx, netconf.Running)
+	if err != nil {
+		return err
+	}
+
+	m.workNS, err = m.findWorkNS(m.running)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (m *Manager) findWorkNS(vrouter *VRouter) (string, error) {
+	for _, ns := range vrouter.Namespaces {
+		if ns.Interfaces != nil {
+			for _, infra := range ns.Interfaces.Infras {
+				if infra.Name == m.baseConfig.TrunkInterfaceName {
+					return ns.Name, nil
+				}
+			}
+		}
+		for _, vrf := range ns.VRFs {
+			for _, infra := range vrf.Interfaces.Infras {
+				if infra.Name == m.baseConfig.TrunkInterfaceName {
+					return ns.Name, nil
+				}
+			}
+		}
+	}
+
+	return "", fmt.Errorf("failed to found working NetNS")
 }
 
 func (m *Manager) ApplyConfiguration(
