@@ -136,6 +136,10 @@ func (m *Manager) findWorkNS(vrouter *VRouter) (string, error) {
 	return "", fmt.Errorf("failed to found working NetNS")
 }
 
+func (m *Manager) isReservedVRF(name string) bool {
+	return name == m.baseConfig.ManagementVRF.Name || name == m.baseConfig.ClusterVRF.Name
+}
+
 func (m *Manager) ApplyConfiguration(
 	ctx context.Context,
 	nodeCfg *v1alpha1.NodeNetworkConfigSpec,
