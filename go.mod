@@ -8,6 +8,7 @@ require (
 	github.com/go-logr/logr v1.4.2
 	github.com/godbus/dbus/v5 v5.0.4
 	github.com/google/go-cmp v0.6.0
+	github.com/nemith/netconf v0.0.2
 	github.com/onsi/ginkgo v1.16.5
 	github.com/onsi/gomega v1.35.1
 	github.com/open-policy-agent/cert-controller v0.12.0
@@ -17,7 +18,7 @@ require (
 	github.com/vishvananda/netlink v1.3.0
 	go.uber.org/mock v0.5.0
 	golang.org/x/exp v0.0.0-20240719175910-8a7402abbf56
-	golang.org/x/sys v0.26.0
+	golang.org/x/sys v0.27.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gopkg.in/yaml.v2 v2.4.0
 	k8s.io/api v0.31.2
