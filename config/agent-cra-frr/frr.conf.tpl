@@ -1,4 +1,4 @@
-{{- /*gotype:github.com/telekom/das-schiff-network-operator/pkg/cra.frrTemplateData*/ -}}
+{{- /*gotype:github.com/telekom/das-schiff-network-operator/pkg/cra-frr.frrTemplateData*/ -}}
 {{ define "staticRoutes" }}
 {{ range $route := . }}
 {{ if $route.NextHop }}
