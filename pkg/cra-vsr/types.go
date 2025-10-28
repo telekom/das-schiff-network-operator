@@ -24,6 +24,7 @@ import (
 )
 
 type NoStringType string
+type Direction string
 type Policy string
 type IO string
 type IPvX int
@@ -147,18 +148,46 @@ type RtMapSetCommAdd struct {
 }
 
 type Namespace struct {
-	XMLName    xml.Name    `xml:"vrf"`
-	Name       string      `xml:"name"`
-	Routing    *Routing    `xml:"routing,omitempty"`
-	Interfaces *Interfaces `xml:"interface,omitempty"`
-	VRFs       []VRF       `xml:"l3vrf,omitempty"`
+	XMLName    xml.Name       `xml:"vrf"`
+	Name       string         `xml:"name"`
+	Routing    *Routing       `xml:"routing,omitempty"`
+	Interfaces *Interfaces    `xml:"interface,omitempty"`
+	VRFs       []VRF          `xml:"l3vrf,omitempty"`
+	MTraffic   *MirrorTraffic `xml:"mirror-traffic,omitempty"`
 }
 
-type VRF struct {
-	Name       string      `xml:"name"`
-	TableID    int         `xml:"table-id,omitempty"`
-	Routing    *Routing    `xml:"routing,omitempty"`
-	Interfaces *Interfaces `xml:"interface,omitempty"`
+type MirrorTraffic struct {
+	XMLName xml.Name         `xml:"urn:6wind:vrouter/mirror-traffic mirror-traffic"`
+	Filters []MTrafficFilter `xml:"filter,omitempty"`
+	Actions []MTrafficAction `xml:"rule,omitempty"`
+}
+
+type MTrafficFilter struct {
+	Name  string               `xml:"name"`
+	Rules []MTrafficFilterRule `xml:"rule,omitempty"`
+}
+
+type MTrafficFilterRule struct {
+	ID   int              `xml:"id"`
+	IPv4 *MTrafficMatcher `xml:"ipv4,omitempty"`
+	IPv6 *MTrafficMatcher `xml:"ipv6,omitempty"`
+}
+
+type MTrafficMatcher struct {
+	SrcAddress *string `xml:"source-address,omitempty"`
+	DstAddress *string `xml:"destination-address,omitempty"`
+	SrcPrefix  *string `xml:"source-prefix,omitempty"`
+	DstPrefix  *string `xml:"destination-prefix,omitempty"`
+	SrcPort    *int    `xml:"source-port,omitempty"`
+	DstPort    *int    `xml:"destination-port,omitempty"`
+	Protocol   *string `xml:"protocol,omitempty"`
+}
+
+type MTrafficAction struct {
+	From      string  `xml:"from"`
+	Direction string  `xml:"direction"`
+	To        string  `xml:"to"`
+	Filter    *string `xml:"filter,omitempty"`
 }
 
 type Routing struct {
@@ -167,6 +196,13 @@ type Routing struct {
 	Static      *StaticRouting        `xml:"static,omitempty"`
 	PBR         *PolicyBasedRouting   `xml:"policy-based-routing,omitempty"`
 	BGP         *BGP                  `xml:"bgp,omitempty"`
+}
+
+type VRF struct {
+	Name       string      `xml:"name"`
+	TableID    int         `xml:"table-id,omitempty"`
+	Routing    *Routing    `xml:"routing,omitempty"`
+	Interfaces *Interfaces `xml:"interface,omitempty"`
 }
 
 type StaticRouting struct {
@@ -735,6 +771,23 @@ func (routing *Routing) Sort() {
 	}
 }
 
+func (mt *MirrorTraffic) Sort() {
+	sort.Slice(mt.Filters, func(i, j int) bool {
+		return mt.Filters[i].Name < mt.Filters[j].Name
+	})
+	sort.Slice(mt.Actions, func(i, j int) bool {
+		l := &mt.Actions[i]
+		r := &mt.Actions[j]
+		return l.From+l.Direction+l.To < r.From+r.Direction+r.To
+	})
+	for i := range mt.Filters {
+		filter := &mt.Filters[i]
+		sort.Slice(filter.Rules, func(i, j int) bool {
+			return filter.Rules[i].ID < filter.Rules[j].ID
+		})
+	}
+}
+
 func (vrf *VRF) Sort() {
 	if vrf.Interfaces != nil {
 		vrf.Interfaces.Sort()
@@ -756,6 +809,9 @@ func (ns *Namespace) Sort() {
 	}
 	if ns.Interfaces != nil {
 		ns.Interfaces.Sort()
+	}
+	if ns.MTraffic != nil {
+		ns.MTraffic.Sort()
 	}
 }
 
