@@ -332,15 +332,57 @@ int handle_neighbor_reply_xdp(struct xdp_md *ctx)
         struct arp_eth_ipv4 *arp = data + off;
         if (arp->hlen != 6 || arp->plen != 4)
             return XDP_PASS;
-        // Only handle ARP reply (oper == 2)
-        if (bpf_ntohs(arp->oper) != 2)
+        
+        __u16 oper = bpf_ntohs(arp->oper);
+        // Handle ARP Request (oper == 1) and ARP Reply (oper == 2)
+        if (oper != 1 && oper != 2)
             return XDP_PASS;
 
-        // Sender is the neighbor we're learning
-        __builtin_memcpy(mac, arp->sha, 6);
-        // IPv4 goes in first 4 bytes of ip buffer
-        __builtin_memcpy(ip, arp->spa, 4);
-        emit_event(ctx->ingress_ifindex, 4 /* IPv4 */, mac, ip);
+        // Check for Gratuitous ARP according to RFC 5944 section 4.6:
+        // Both ARP Sender Protocol Address and ARP Target Protocol Address
+        // are set to the same IP address (the address being announced)
+        
+        // Simple memory comparison for IPv4 addresses (4 bytes)
+        __u8 spa_bytes[4], tpa_bytes[4];
+        __builtin_memcpy(spa_bytes, arp->spa, 4);
+        __builtin_memcpy(tpa_bytes, arp->tpa, 4);
+        
+        // Compare the 4 bytes manually since memcmp might not be available
+        __u8 is_gratuitous = 1;
+        #pragma unroll
+        for (int i = 0; i < 4; i++) {
+            if (spa_bytes[i] != tpa_bytes[i]) {
+                is_gratuitous = 0;
+                break;
+            }
+        }
+        
+        if (is_gratuitous) {
+            // Handle Gratuitous ARP
+            // For gratuitous ARP, extract the correct MAC address:
+            // - ARP Request: use Sender Hardware Address (sha)  
+            // - ARP Reply: use Target Hardware Address (tha) as per RFC 5944 section 4.6
+            if (oper == 1) {
+                // ARP Request: THA field is not used, get MAC from SHA
+                __builtin_memcpy(mac, arp->sha, 6);
+            } else {
+                // ARP Reply: THA is set to the link-layer address for cache update
+                __builtin_memcpy(mac, arp->tha, 6);
+            }
+            
+            // IPv4 goes in first 4 bytes of ip buffer (use spa since spa == tpa)
+            __builtin_memcpy(ip, arp->spa, 4);
+            emit_event(ctx->ingress_ifindex, 4 /* IPv4 */, mac, ip);
+        } else if (oper == 2) {
+            // Handle non-gratuitous ARP Reply
+            // In a regular ARP reply, the sender is replying with their own MAC/IP mapping
+            // Learn from the ARP Sender Hardware Address and Protocol Address
+            __builtin_memcpy(mac, arp->sha, 6);
+            __builtin_memcpy(ip, arp->spa, 4);
+            emit_event(ctx->ingress_ifindex, 4 /* IPv4 */, mac, ip);
+        }
+        // Note: We don't process non-gratuitous ARP requests as they don't provide
+        // definitive MAC-to-IP mappings (the sender might not own the target IP)
     }
     else if (proto == ETH_P_IPV6)
     {

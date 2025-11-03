@@ -8,6 +8,9 @@ on:
 jobs:
   draft_release:
     name: Create Draft Release
+    permissions:
+      packages: write
+      contents: write
     runs-on: ubuntu-latest
     steps:
       - name: Checkout the Repository
@@ -17,7 +20,7 @@ jobs:
       - name: Install Go
         uses: actions/setup-go@v5
         with:
-          go-version: "^1.24"
+          go-version: "1.24"
       - name: Install packages
         run: sudo apt-get update && sudo apt-get install -y llvm clang libbpf-dev gcc-multilib linux-headers-$(uname -r)
 
@@ -37,6 +40,8 @@ jobs:
 
   release_image:
     name: Build and Push Release Image
+    permissions:
+      packages: write
     runs-on: ubuntu-latest
     steps:
       - name: Check out the repo
@@ -45,7 +50,7 @@ jobs:
       - name: Install Go
         uses: actions/setup-go@v5
         with:
-          go-version: "^1.24"
+          go-version: "1.24"
 
       - name: Create Licenses Report
         run: |
