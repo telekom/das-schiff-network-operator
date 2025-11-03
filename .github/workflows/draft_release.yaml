@@ -10,6 +10,7 @@ jobs:
     name: Create Draft Release
     permissions:
       packages: write
+      contents: write
     runs-on: ubuntu-latest
     steps:
       - name: Checkout the Repository
