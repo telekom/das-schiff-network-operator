@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"time"
 
 	"github.com/nemith/netconf"
@@ -49,20 +50,26 @@ const (
 )
 
 type Manager struct {
-	urls       []string
-	sshConfig  ssh.ClientConfig
-	baseConfig *config.BaseConfig
-	timeout    time.Duration
-	startupXML []byte
-	workNS     string
-	running    *VRouter
-	nc         Netconf
+	urls        []string
+	metricsUrls []string
+	sshConfig   ssh.ClientConfig
+	baseConfig  *config.BaseConfig
+	timeout     time.Duration
+	startupXML  []byte
+	workNS      string
+	running     *VRouter
+	nc          Netconf
 }
 
-func NewManager(urls []string, user, password string, timeout time.Duration) (*Manager, error) {
+func NewManager(
+	urls, metricsUrls []string,
+	user, password string,
+	timeout time.Duration,
+) (*Manager, error) {
 	m := &Manager{
-		urls:    urls,
-		timeout: timeout,
+		urls:        urls,
+		timeout:     timeout,
+		metricsUrls: metricsUrls,
 		sshConfig: ssh.ClientConfig{
 			User: user,
 			Auth: []ssh.AuthMethod{
@@ -223,4 +230,36 @@ func (m *Manager) makeVRouter(nodeCfg *v1alpha1.NodeNetworkConfigSpec) (*VRouter
 	vrouter.Namespaces = append(vrouter.Namespaces, ns)
 
 	return vrouter, nil
+}
+
+func (m *Manager) GetMetrics(ctx context.Context) ([]byte, error) {
+	for _, url := range m.metricsUrls {
+		client := http.Client{
+			Timeout: m.timeout,
+		}
+		url := fmt.Sprintf("%s/metrics", url)
+
+		req, err := http.NewRequest(http.MethodGet, url, http.NoBody)
+		if err != nil {
+			return nil, fmt.Errorf("error creating request: %w", err)
+		}
+
+		res, err := client.Do(req.WithContext(ctx))
+		if err != nil {
+			fmt.Println(err)
+			continue
+		}
+
+		resBody, readErr := func() ([]byte, error) {
+			defer res.Body.Close()
+			return io.ReadAll(res.Body)
+		}()
+		if readErr != nil {
+			return nil, fmt.Errorf("error reading response body: %w", readErr)
+		}
+
+		return resBody, nil
+	}
+
+	return nil, fmt.Errorf("all CRA URLs failed due to connection issues")
 }

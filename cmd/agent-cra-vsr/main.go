@@ -21,6 +21,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"sort"
 	"strings"
@@ -87,11 +88,31 @@ func initCollectors() error {
 	return nil
 }
 
-func updateManagerOptions(options *manager.Options) error {
+func handleCraMetrics(craManager *cra.Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		craMetrics, err := craManager.GetMetrics(r.Context())
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		if _, err := w.Write(craMetrics); err != nil {
+			setupLog.Error(err, "Failed to write response")
+			return
+		}
+	}
+}
+
+func updateManagerOptions(options *manager.Options, craManager *cra.Manager) error {
 	if options.Metrics.BindAddress != "0" && options.Metrics.BindAddress != "" {
 		err := initCollectors()
 		if err != nil {
 			return fmt.Errorf("unable to initialize metrics collectors: %w", err)
+		}
+
+		options.Metrics.ExtraHandlers = map[string]http.Handler{
+			"/cra/metrics": handleCraMetrics(craManager),
 		}
 	}
 
@@ -100,6 +121,11 @@ func updateManagerOptions(options *manager.Options) error {
 
 func createCraManager() (*cra.Manager, error) {
 	urls := strings.Split(os.Getenv("CRA_URL"), ",")
+	if len(urls) == 0 {
+		return nil, fmt.Errorf("no CRA URL provided")
+	}
+
+	metricsUrls := strings.Split(os.Getenv("CRA_METRICS_URL"), ",")
 	if len(urls) == 0 {
 		return nil, fmt.Errorf("no CRA URL provided")
 	}
@@ -119,7 +145,7 @@ func createCraManager() (*cra.Manager, error) {
 		return nil, fmt.Errorf("no CRA password provided")
 	}
 
-	craManager, err := cra.NewManager(urls, user, pwd, timeout)
+	craManager, err := cra.NewManager(urls, metricsUrls, user, pwd, timeout)
 	if err != nil {
 		return nil, fmt.Errorf("error creating CRA manager: %w", err)
 	}
@@ -205,7 +231,7 @@ func main() {
 		},
 		HealthProbeBindAddress: healthAddr,
 	}
-	err = updateManagerOptions(&options)
+	err = updateManagerOptions(&options, craManager)
 	if err != nil {
 		setupLog.Error(err, "unable to update manager options")
 		os.Exit(1)
