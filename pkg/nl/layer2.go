@@ -8,7 +8,6 @@ import (
 	"os"
 	"time"
 
-	schiff_unix "github.com/telekom/das-schiff-network-operator/pkg/unix"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/exp/maps"
 	"golang.org/x/sys/unix"
