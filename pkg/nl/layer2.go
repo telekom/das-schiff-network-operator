@@ -73,7 +73,6 @@ func getNeighborState(state int) (string, error) {
 	}
 }
 
-
 func (n *Manager) ParseIPAddresses(addresses []string) ([]*netlink.Addr, error) {
 	addrs := []*netlink.Addr{}
 	for _, ip := range addresses {
