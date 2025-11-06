@@ -8,7 +8,6 @@ import (
 	"os"
 	"time"
 
-	schiff_unix "github.com/telekom/das-schiff-network-operator/pkg/unix"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/exp/maps"
 	"golang.org/x/sys/unix"
@@ -71,29 +70,6 @@ func getNeighborState(state int) (string, error) {
 		return "stale", nil
 	default:
 		return "", fmt.Errorf("[%x] is not a valid neighbor state", state)
-	}
-}
-
-func getFlags(flag int) (string, error) {
-	switch flag {
-	case schiff_unix.NTF_UNSPEC:
-		return "", nil
-	case netlink.NTF_MASTER:
-		return "permanent", nil
-	case netlink.NTF_ROUTER:
-		return "router", nil
-	case netlink.NTF_SELF:
-		return "self", nil
-	case netlink.NTF_PROXY:
-		return "proxy", nil
-	case netlink.NTF_USE:
-		return "use", nil
-	case unix.NTF_EXT_LEARNED:
-		return "extern_learn", nil
-	case unix.NTF_OFFLOADED:
-		return "offloaded", nil
-	default:
-		return "", fmt.Errorf("cannot convert flag %x", flag)
 	}
 }
 
@@ -535,7 +511,7 @@ func (n *Manager) ListNeighborInformation() ([]NeighborInformation, error) {
 			if err != nil {
 				return nil, fmt.Errorf("error converting neighborState: %w", err)
 			}
-			flag, err := getFlags(netlinkNeighbors[index].Flags)
+			flag := fmt.Sprintf("0x%02x", netlinkNeighbors[index].Flags)
 			if err != nil {
 				return nil, fmt.Errorf("error converting flag: %w", err)
 			}
