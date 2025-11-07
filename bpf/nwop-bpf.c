@@ -272,10 +272,10 @@ struct arp_eth_ipv4
     __u8 tpa[4];
 };
 
-static __always_inline int parse_eth(struct xdp_md *ctx, void **data, void **data_end, __u16 *proto, __u64 *off)
+static __always_inline int parse_eth_tc(struct __sk_buff *skb, void **data, void **data_end, __u16 *proto, __u64 *off)
 {
-    void *d = (void *)(long)ctx->data;
-    void *de = (void *)(long)ctx->data_end;
+    void *d = ctx_ptr(skb->data);
+    void *de = ctx_ptr(skb->data_end);
     if (d + sizeof(struct ethhdr) > de)
         return -1;
     struct ethhdr *eth = d;
@@ -312,14 +312,14 @@ static __always_inline void emit_event(__u32 ifindex, __u8 family, const __u8 ma
     bpf_ringbuf_submit(ev, 0);
 }
 
-SEC("xdp.frags/neighbor_reply")
-int handle_neighbor_reply_xdp(struct xdp_md *ctx)
+SEC("tc/neighbor_reply")
+int handle_neighbor_reply_tc(struct __sk_buff *skb)
 {
     void *data, *data_end;
     __u16 proto = 0;
     __u64 off = 0;
-    if (parse_eth(ctx, &data, &data_end, &proto, &off) < 0)
-        return XDP_PASS;
+    if (parse_eth_tc(skb, &data, &data_end, &proto, &off) < 0)
+        return TC_ACT_OK;
 
     // Prepare buffers
     __u8 mac[6] = {};
@@ -328,15 +328,15 @@ int handle_neighbor_reply_xdp(struct xdp_md *ctx)
     if (proto == ETH_P_ARP)
     {
         if (data + off + sizeof(struct arp_eth_ipv4) > data_end)
-            return XDP_PASS;
+            return TC_ACT_OK;
         struct arp_eth_ipv4 *arp = data + off;
         if (arp->hlen != 6 || arp->plen != 4)
-            return XDP_PASS;
+            return TC_ACT_OK;
         
         __u16 oper = bpf_ntohs(arp->oper);
         // Handle ARP Request (oper == 1) and ARP Reply (oper == 2)
         if (oper != 1 && oper != 2)
-            return XDP_PASS;
+            return TC_ACT_OK;
 
         // Check for Gratuitous ARP according to RFC 5944 section 4.6:
         // Both ARP Sender Protocol Address and ARP Target Protocol Address
@@ -372,14 +372,14 @@ int handle_neighbor_reply_xdp(struct xdp_md *ctx)
             
             // IPv4 goes in first 4 bytes of ip buffer (use spa since spa == tpa)
             __builtin_memcpy(ip, arp->spa, 4);
-            emit_event(ctx->ingress_ifindex, 4 /* IPv4 */, mac, ip);
+            emit_event(skb->ifindex, 4 /* IPv4 */, mac, ip);
         } else if (oper == 2) {
             // Handle non-gratuitous ARP Reply
             // In a regular ARP reply, the sender is replying with their own MAC/IP mapping
             // Learn from the ARP Sender Hardware Address and Protocol Address
             __builtin_memcpy(mac, arp->sha, 6);
             __builtin_memcpy(ip, arp->spa, 4);
-            emit_event(ctx->ingress_ifindex, 4 /* IPv4 */, mac, ip);
+            emit_event(skb->ifindex, 4 /* IPv4 */, mac, ip);
         }
         // Note: We don't process non-gratuitous ARP requests as they don't provide
         // definitive MAC-to-IP mappings (the sender might not own the target IP)
@@ -387,23 +387,23 @@ int handle_neighbor_reply_xdp(struct xdp_md *ctx)
     else if (proto == ETH_P_IPV6)
     {
         if (data + off + sizeof(struct ipv6hdr) > data_end)
-            return XDP_PASS;
+            return TC_ACT_OK;
         struct ipv6hdr *ip6 = data + off;
         if (ip6->nexthdr != IPPROTO_ICMPV6)
-            return XDP_PASS;
+            return TC_ACT_OK;
         __u64 off2 = off + sizeof(struct ipv6hdr);
         // Minimal ICMPv6 header check
         if (data + off2 + sizeof(struct icmp6hdr) > data_end)
-            return XDP_PASS;
+            return TC_ACT_OK;
         struct icmp6hdr *icmp6 = data + off2;
         // Neighbor Advertisement type = 136
         if (icmp6->icmp6_type != 136)
-            return XDP_PASS;
+            return TC_ACT_OK;
 
         // After icmp6hdr comes the 16-byte target address directly
         unsigned char *pos = (unsigned char *)((void *)icmp6 + sizeof(struct icmp6hdr));
         if ((void *)pos + 16 > data_end)
-            return XDP_PASS;
+            return TC_ACT_OK;
         __builtin_memcpy(ip, pos, 16);
         pos += 16;
 
@@ -437,7 +437,7 @@ int handle_neighbor_reply_xdp(struct xdp_md *ctx)
                 {
                     __u8 mac6[6] = {};
                     __builtin_memcpy(mac6, (void *)pos + 2, 6);
-                    emit_event(ctx->ingress_ifindex, 6 /* IPv6 */, mac6, ip);
+                    emit_event(skb->ifindex, 6 /* IPv6 */, mac6, ip);
                     emitted = 1;
                 }
                 break; // stop after TLLA processing
@@ -448,7 +448,7 @@ int handle_neighbor_reply_xdp(struct xdp_md *ctx)
         }
     }
 
-    return XDP_PASS;
+    return TC_ACT_OK;
 }
 
 char _license[] SEC("license") = "GPL";

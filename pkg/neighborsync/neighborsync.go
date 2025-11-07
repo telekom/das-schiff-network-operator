@@ -487,7 +487,15 @@ func (n *NeighborSync) DisableARPRefresh(interfaceID int) {
 }
 
 // DisableNeighborSuppression marks the given interface ID for neighbor suppression.
-func (n *NeighborSync) DisableNeighborSuppression(bridgeID, vethID int) {
+func (n *NeighborSync) DisableNeighborSuppression(bridgeID, vethID int) error {
 	n.sendGratuitousNeighbor.Delete(bridgeID)
 	n.receiveNeighbors.Delete(vethID)
+	nlLink, err := n.toolkit.LinkByIndex(vethID)
+	if err != nil {
+		return fmt.Errorf("failed to get link by index: %w", err)
+	}
+	if err := bpf.DetachNeighborHandlerFromInterface(nlLink); err != nil {
+		return fmt.Errorf("failed to detach BPF program: %w", err)
+	}
+	return nil
 }

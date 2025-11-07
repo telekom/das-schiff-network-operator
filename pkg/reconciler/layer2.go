@@ -238,7 +238,9 @@ func (r *reconcile) applyConfiguration(desired, current *nl.Layer2Information, a
 			return fmt.Errorf("error ensuring neighbor suppression for vlanId %d: %w", desired.VlanID, err)
 		}
 	} else {
-		r.neighborSync.DisableNeighborSuppression(bridgeID, macVlanBridgeID)
+		if err := r.neighborSync.DisableNeighborSuppression(bridgeID, macVlanBridgeID); err != nil {
+			return fmt.Errorf("error ensuring neighbor suppression for vlanId %d: %w", desired.VlanID, err)
+		}
 	}
 
 	if len(desired.AnycastGateways) > 0 {

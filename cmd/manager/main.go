@@ -113,6 +113,8 @@ func main() {
 	flag.Parse()
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
+	defer bpf.CleanupTCX()
+
 	var err error
 	var options manager.Options
 	if configFile != "" {
