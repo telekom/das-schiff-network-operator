@@ -518,13 +518,8 @@ func (crr *ConfigRevisionReconciler) deployNodeNetworkConfig(ctx context.Context
 		cfg.Spec = newConfig.Spec
 		cfg.ObjectMeta.OwnerReferences = newConfig.ObjectMeta.OwnerReferences
 		cfg.Name = node.Name
-		cfg.Status.ConfigStatus = ""
-		cfg.Status.LastUpdate = metav1.Now()
 		if err := crr.client.Update(deploymentCtx, cfg); err != nil {
 			return fmt.Errorf("error updating NodeNetworkConfig for node %s: %w", node.Name, err)
-		}
-		if err := crr.client.Status().Update(deploymentCtx, cfg); err != nil {
-			return fmt.Errorf("error updating NodeNetworkConfig status for node %s: %w", node, err)
 		}
 	} else {
 		cfg = newConfig

@@ -123,7 +123,7 @@ func (reconciler *NodeNetworkConfigReconciler) Reconcile(ctx context.Context) er
 	}
 
 	// NodeNetworkConfig is invalid - discard
-	if cfg.Status.ConfigStatus == operator.StatusInvalid {
+	if cfg.Spec.Revision == cfg.Status.LastAppliedRevision && cfg.Status.ConfigStatus == operator.StatusInvalid {
 		r.logger.Info("skipping invalid NodeNetworkConfig", "name", cfg.Name)
 		return nil
 	}
@@ -177,6 +177,9 @@ func setStatus(ctx context.Context, c client.Client, cfg *v1alpha1.NodeNetworkCo
 	logger.Info("setting NodeNetworkConfig status", "name", cfg.Name, "status", status)
 	cfg.Status.ConfigStatus = status
 	cfg.Status.LastUpdate = metav1.Now()
+	if status == operator.StatusProvisioned || status == operator.StatusInvalid {
+		cfg.Status.LastAppliedRevision = cfg.Spec.Revision
+	}
 	if err := c.Status().Update(ctx, cfg); err != nil {
 		return fmt.Errorf("error updating NodeNetworkConfig status: %w", err)
 	}

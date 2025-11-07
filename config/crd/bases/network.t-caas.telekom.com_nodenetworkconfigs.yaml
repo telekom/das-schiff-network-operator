@@ -3041,6 +3041,10 @@ spec:
                 description: ConfigStatus describes provisioning state of the NodeConfig.
                   Can be either 'provisioning', 'provisioned' or 'failed'.
                 type: string
+              lastAppliedRevision:
+                description: LastAppliedRevision stores hash of the NodeConfigRevision
+                  that was last applied to the node.
+                type: string
               lastUpdate:
                 description: LastUpdate determines when last update (change) of the
                   ConfigStatus field took place.
