@@ -92,6 +92,11 @@ func initCollectors() error {
 	return nil
 }
 
+func exit(code int) {
+	bpf.CleanupTCX()
+	os.Exit(code)
+}
+
 func main() {
 	version.Get().Print(os.Args[0])
 
@@ -119,7 +124,7 @@ func main() {
 		options, err = managerconfig.Load(configFile, scheme)
 		if err != nil {
 			setupLog.Error(err, "unable to load the config file")
-			os.Exit(1)
+			exit(1)
 		}
 	} else {
 		options = ctrl.Options{Scheme: scheme}
@@ -128,7 +133,7 @@ func main() {
 		err = initCollectors()
 		if err != nil {
 			setupLog.Error(err, "unable to initialize metrics collectors")
-			os.Exit(1)
+			exit(1)
 		}
 	}
 
@@ -136,13 +141,13 @@ func main() {
 	mgr, err := ctrl.NewManager(clientConfig, options)
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
-		os.Exit(1)
+		exit(1)
 	}
 
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		setupLog.Error(err, "unable to load config")
-		os.Exit(1)
+		exit(1)
 	}
 
 	anycastTracker := anycast.NewTracker(&nltoolkit.Toolkit{})
@@ -150,13 +155,14 @@ func main() {
 
 	if err = (&networkv1alpha1.VRFRouteConfiguration{}).SetupWebhookWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create webhook", "webhook", "VRFRouteConfiguration")
-		os.Exit(1)
+		exit(1)
 	}
 
 	if err := initComponents(mgr, anycastTracker, neighborSync, cfg, clientConfig, onlyBPFMode); err != nil {
 		setupLog.Error(err, "unable to initialize components")
-		os.Exit(1)
+		exit(1)
 	}
+	defer bpf.CleanupTCX()
 
 	if interfacePrefix != "" {
 		setupLog.Info("start macvlan sync")
@@ -166,7 +172,7 @@ func main() {
 	setupLog.Info("starting manager")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		setupLog.Error(err, "problem running manager")
-		os.Exit(1)
+		exit(1)
 	}
 }
 
