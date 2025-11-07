@@ -54,8 +54,8 @@ type nwopbpfSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type nwopbpfProgramSpecs struct {
-	HandleNeighborReplyXdp *ebpf.ProgramSpec `ebpf:"handle_neighbor_reply_xdp"`
-	TcRouterFunc           *ebpf.ProgramSpec `ebpf:"tc_router_func"`
+	HandleNeighborReplyTc *ebpf.ProgramSpec `ebpf:"handle_neighbor_reply_tc"`
+	TcRouterFunc          *ebpf.ProgramSpec `ebpf:"tc_router_func"`
 }
 
 // nwopbpfMapSpecs contains maps before they are loaded into the kernel.
@@ -119,13 +119,13 @@ type nwopbpfVariables struct {
 //
 // It can be passed to loadNwopbpfObjects or ebpf.CollectionSpec.LoadAndAssign.
 type nwopbpfPrograms struct {
-	HandleNeighborReplyXdp *ebpf.Program `ebpf:"handle_neighbor_reply_xdp"`
-	TcRouterFunc           *ebpf.Program `ebpf:"tc_router_func"`
+	HandleNeighborReplyTc *ebpf.Program `ebpf:"handle_neighbor_reply_tc"`
+	TcRouterFunc          *ebpf.Program `ebpf:"tc_router_func"`
 }
 
 func (p *nwopbpfPrograms) Close() error {
 	return _NwopbpfClose(
-		p.HandleNeighborReplyXdp,
+		p.HandleNeighborReplyTc,
 		p.TcRouterFunc,
 	)
 }
