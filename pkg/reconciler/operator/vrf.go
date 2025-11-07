@@ -40,6 +40,13 @@ func (crr *ConfigRevisionReconciler) buildNodeVrf(node *corev1.Node, revision *v
 			c.Spec.ClusterVRF.StaticRoutes = appendImportsAsStaticRoutes(c.Spec.ClusterVRF.StaticRoutes, &vrfs[i])
 			dropStaticRouteImports(c.Spec.ClusterVRF.Redistribute, &vrfs[i])
 		}
+
+		for sbrPrefixIdx := range vrfs[i].SBRPrefixes {
+			c.Spec.ClusterVRF.PolicyRoutes = append(c.Spec.ClusterVRF.PolicyRoutes, v1alpha1.PolicyRoute{
+				TrafficMatch: v1alpha1.TrafficMatch{SrcPrefix: &vrfs[i].SBRPrefixes[sbrPrefixIdx]},
+				NextHop:      v1alpha1.NextHop{Vrf: &vrfs[i].VRF},
+			})
+		}
 	}
 
 	for _, vrfImport := range defaultImportMap {

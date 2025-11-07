@@ -170,6 +170,12 @@ spec:
                 x-kubernetes-map-type: atomic
               routeTarget:
                 type: string
+              sbrPrefixes:
+                description: Traffic from the given prefixes will directly be sent
+                  to this VRF
+                items:
+                  type: string
+                type: array
               seq:
                 description: Sequence of the generated route-map, maximum of 65534
                   because we sometimes have to set an explicit default-deny
