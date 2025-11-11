@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/rlimit"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
@@ -24,6 +25,7 @@ var (
 	nwopbpf                 nwopbpfObjects
 	trackedInterfaceIndices []int
 	qdiscHandle             = netlink.MakeHandle(majorNumber, minorNumebr)
+	tcxLinkFds              = map[int]*link.Link{}
 )
 
 // NeighborEvent mirrors the C struct neighbor_event in neighbor-bpf.c.
@@ -76,17 +78,52 @@ func AttachRouterInterfaces(intfs []string) error {
 	return nil
 }
 
+func cleanupXDP(intf netlink.Link) {
+	if intf.Attrs().Xdp != nil && intf.Attrs().Xdp.Attached {
+		log.Printf("Detaching XDP program from interface %s (index %d) to avoid conflicts with TCX program\n", intf.Attrs().Name, intf.Attrs().Index)
+		err := netlink.LinkSetXdpFd(intf, -1)
+		if err != nil {
+			log.Printf("Error detaching XDP program from interface %s (index %d): %v\n", intf.Attrs().Name, intf.Attrs().Index, err)
+		}
+	}
+}
+
 func AttachNeighborHandlerToInterface(intf netlink.Link) error {
-	// Attach XDP program.
-	if intf.Attrs().Xdp != nil && intf.Attrs().Xdp.Attached && intf.Attrs().Xdp.Fd == nwopbpf.HandleNeighborReplyXdp.FD() {
-		// Already attached
+	cleanupXDP(intf)
+	if _, ok := tcxLinkFds[intf.Attrs().Index]; ok {
 		return nil
 	}
-	err := netlink.LinkSetXdpFd(intf, nwopbpf.HandleNeighborReplyXdp.FD())
+
+	tcxLink, err := link.AttachTCX(link.TCXOptions{
+		Interface: intf.Attrs().Index,
+		Program:   nwopbpf.HandleNeighborReplyTc,
+		Attach:    ebpf.AttachTCXIngress,
+	})
 	if err != nil {
-		return fmt.Errorf("error attaching XDP program: %w", err)
+		return fmt.Errorf("error attaching TCX program: %w", err)
 	}
+	tcxLinkFds[intf.Attrs().Index] = &tcxLink
 	return nil
+}
+
+func DetachNeighborHandlerFromInterface(intf netlink.Link) error {
+	cleanupXDP(intf)
+
+	tcxLink, ok := tcxLinkFds[intf.Attrs().Index]
+	if !ok {
+		return nil
+	}
+	if err := (*tcxLink).Close(); err != nil {
+		return fmt.Errorf("error detaching TCX program: %w", err)
+	}
+	delete(tcxLinkFds, intf.Attrs().Index)
+	return nil
+}
+
+func CleanupTCX() {
+	for _, tcxLink := range tcxLinkFds {
+		_ = (*tcxLink).Close()
+	}
 }
 
 func EbpfRetStatsMap() *ebpf.Map {
