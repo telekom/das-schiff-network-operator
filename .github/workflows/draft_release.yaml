@@ -8,6 +8,9 @@ on:
 jobs:
   draft_release:
     name: Create Draft Release
+    permissions:
+      packages: write
+      contents: write
     runs-on: ubuntu-latest
     steps:
       - name: Checkout the Repository
@@ -37,6 +40,8 @@ jobs:
 
   build_image:
     name: Build and Push Release Image
+    permissions:
+      packages: write
     runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
@@ -102,6 +107,8 @@ jobs:
 
   release_image:
     runs-on: ubuntu-latest
+    permissions:
+      packages: write
     needs:
       - build_image
     strategy:
