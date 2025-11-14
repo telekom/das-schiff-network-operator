@@ -291,6 +291,8 @@ type NodeNetworkConfigStatus struct {
 	ConfigStatus string `json:"configStatus"`
 	// LastUpdate determines when last update (change) of the ConfigStatus field took place.
 	LastUpdate metav1.Time `json:"lastUpdate"`
+	// LastAppliedRevision stores hash of the NodeConfigRevision that was last applied to the node.
+	LastAppliedRevision string `json:"lastAppliedRevision,omitempty"`
 }
 
 //+kubebuilder:object:root=true
