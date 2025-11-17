@@ -10,3 +10,7 @@ func GetName(obj interface{}) string {
 	}
 	return t.Name()
 }
+
+func ToPtr[T any](x T) *T {
+	return &x
+}

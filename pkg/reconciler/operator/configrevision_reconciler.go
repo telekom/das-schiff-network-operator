@@ -345,7 +345,7 @@ func (crr *ConfigRevisionReconciler) deployNodeConfig(ctx context.Context, node 
 		return nil
 	}
 
-	newConfig, err := crr.createNodeNetworkConfig(node, revision)
+	newConfig, err := crr.CreateNodeNetworkConfig(node, revision)
 	if err != nil {
 		return fmt.Errorf("error preparing NodeNetworkConfig for node %s: %w", node.Name, err)
 	}
@@ -383,7 +383,7 @@ func matchSelector(node *corev1.Node, selector *metav1.LabelSelector) bool {
 	return labelSelector.Matches(labels.Set(node.ObjectMeta.Labels))
 }
 
-func (crr *ConfigRevisionReconciler) createNodeNetworkConfig(node *corev1.Node, revision *v1alpha1.NetworkConfigRevision) (*v1alpha1.NodeNetworkConfig, error) {
+func (crr *ConfigRevisionReconciler) CreateNodeNetworkConfig(node *corev1.Node, revision *v1alpha1.NetworkConfigRevision) (*v1alpha1.NodeNetworkConfig, error) {
 	// create new config
 	c := &v1alpha1.NodeNetworkConfig{
 		ObjectMeta: metav1.ObjectMeta{

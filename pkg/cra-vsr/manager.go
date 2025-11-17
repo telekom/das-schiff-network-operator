@@ -1,0 +1,265 @@
+/*
+Copyright 2025.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package cra
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"time"
+
+	"github.com/nemith/netconf"
+	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
+	"github.com/telekom/das-schiff-network-operator/pkg/config"
+	"golang.org/x/crypto/ssh"
+)
+
+const (
+	vrfTableStart = 50
+	vrfTableEnd   = 80
+
+	bridgePrefix   = "br."
+	vxlanPrefix    = "vx."
+	layer2SVI      = "l2."
+	vlanPrefix     = "vlan."
+	loopbackPrefix = "lo."
+
+	underlayInterfaceName = "dum.underlay"
+
+	vxlanPort  = 4789
+	defaultMtu = 9000
+
+	baseConfigPath = "/etc/cra/config/base-config.yaml"
+)
+
+type Manager struct {
+	urls        []string
+	metricsUrls []string
+	sshConfig   ssh.ClientConfig
+	baseConfig  *config.BaseConfig
+	timeout     time.Duration
+	startupXML  []byte
+	workNS      string
+	running     *VRouter
+	nc          Netconf
+}
+
+func NewManager(
+	urls, metricsUrls []string,
+	user, password string,
+	timeout time.Duration,
+) (*Manager, error) {
+	m := &Manager{
+		urls:        urls,
+		timeout:     timeout,
+		metricsUrls: metricsUrls,
+		sshConfig: ssh.ClientConfig{
+			User: user,
+			Auth: []ssh.AuthMethod{
+				ssh.Password(password),
+			},
+			HostKeyCallback: ssh.InsecureIgnoreHostKey(), //nolint:gosec
+		},
+	}
+
+	baseConfig, err := config.LoadBaseConfig(baseConfigPath)
+	if err != nil {
+		return nil, fmt.Errorf("error loading base config: %w", err)
+	}
+
+	if net.ParseIP(baseConfig.VTEPLoopbackIP).To4() == nil {
+		return nil, fmt.Errorf(
+			"VTEPLoopbackIP is not IPv4 in base config: %s",
+			baseConfig.VTEPLoopbackIP,
+		)
+	}
+	m.baseConfig = baseConfig
+
+	if err := m.openSession(context.Background()); err != nil {
+		return nil, err
+	}
+
+	return m, nil
+}
+
+func (m *Manager) openSession(ctx context.Context) error {
+	err := m.nc.openSession(ctx, m.urls, m.timeout, &m.sshConfig)
+	if err != nil {
+		return err
+	}
+
+	m.startupXML, err = m.nc.getConfig(ctx, netconf.Startup)
+	if err != nil {
+		return err
+	}
+
+	m.running, err = m.nc.getVRouter(ctx, netconf.Running)
+	if err != nil {
+		return err
+	}
+
+	m.workNS, err = m.findWorkNS(m.running)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (m *Manager) findWorkNS(vrouter *VRouter) (string, error) {
+	for _, ns := range vrouter.Namespaces {
+		if ns.Interfaces != nil {
+			for _, infra := range ns.Interfaces.Infras {
+				if infra.Name == m.baseConfig.TrunkInterfaceName {
+					return ns.Name, nil
+				}
+			}
+		}
+		for _, vrf := range ns.VRFs {
+			for _, infra := range vrf.Interfaces.Infras {
+				if infra.Name == m.baseConfig.TrunkInterfaceName {
+					return ns.Name, nil
+				}
+			}
+		}
+	}
+
+	return "", fmt.Errorf("failed to found working NetNS")
+}
+
+func (m *Manager) isReservedVRF(name string) bool {
+	return name == m.baseConfig.ManagementVRF.Name || name == m.baseConfig.ClusterVRF.Name
+}
+
+func (m *Manager) ApplyConfiguration(
+	ctx context.Context,
+	nodeCfg *v1alpha1.NodeNetworkConfigSpec,
+) error {
+	return m.applyNodeNetworkConfig(ctx, nodeCfg, false)
+}
+
+func (m *Manager) applyNodeNetworkConfig(
+	ctx context.Context,
+	nodeCfg *v1alpha1.NodeNetworkConfigSpec,
+	retry bool,
+) error {
+	if retry || m.nc.session == nil {
+		fmt.Println("netconf connection closed, re-open it")
+		if err := m.openSession(ctx); err != nil {
+			return fmt.Errorf("failed to re-open netconf session: %w", err)
+		}
+	}
+
+	err := m.nc.editConfig(ctx, m.startupXML, netconf.Candidate, netconf.ReplaceConfig)
+	if err != nil {
+		if !retry && errors.Is(err, io.EOF) {
+			return m.applyNodeNetworkConfig(ctx, nodeCfg, true)
+		}
+		return err
+	}
+
+	vrouter, err := m.makeVRouter(nodeCfg)
+	if err != nil {
+		return err
+	}
+
+	err = m.nc.editVRouter(ctx, vrouter, netconf.Candidate, netconf.MergeConfig)
+	if err != nil {
+		return err
+	}
+
+	err = m.nc.commit(ctx)
+	if err != nil {
+		return err
+	}
+
+	m.running = vrouter
+	return nil
+}
+
+func (m *Manager) makeVRouter(nodeCfg *v1alpha1.NodeNetworkConfigSpec) (*VRouter, error) {
+	vrouter := &VRouter{
+		XmlnsNCAttr: "urn:ietf:params:xml:ns:netconf:base:1.0",
+		Routing: &GlobalRouting{
+			NCOperation: netconf.ReplaceConfig,
+			BGP:         &GlobalBGP{},
+		},
+	}
+
+	ns := Namespace{
+		Name:       m.workNS,
+		Interfaces: &Interfaces{},
+		Routing: &Routing{
+			NCOperation: netconf.ReplaceConfig,
+			BGP:         &BGP{},
+		},
+	}
+
+	l3 := NewLayer3(nodeCfg, &ns, m)
+	if err := l3.setup(); err != nil {
+		return nil, err
+	}
+
+	l2 := NewLayer2(nodeCfg, &ns, m)
+	if err := l2.setup(); err != nil {
+		return nil, err
+	}
+
+	bgp := NewLayerBGP(nodeCfg, vrouter, &ns, m)
+	if err := bgp.setup(); err != nil {
+		return nil, err
+	}
+
+	vrouter.Namespaces = append(vrouter.Namespaces, ns)
+
+	return vrouter, nil
+}
+
+func (m *Manager) GetMetrics(ctx context.Context) ([]byte, error) {
+	for _, url := range m.metricsUrls {
+		client := http.Client{
+			Timeout: m.timeout,
+		}
+		url := fmt.Sprintf("%s/metrics", url)
+
+		req, err := http.NewRequest(http.MethodGet, url, http.NoBody)
+		if err != nil {
+			return nil, fmt.Errorf("error creating request: %w", err)
+		}
+
+		res, err := client.Do(req.WithContext(ctx))
+		if err != nil {
+			fmt.Println(err)
+			continue
+		}
+
+		resBody, readErr := func() ([]byte, error) {
+			defer res.Body.Close()
+			return io.ReadAll(res.Body)
+		}()
+		if readErr != nil {
+			return nil, fmt.Errorf("error reading response body: %w", readErr)
+		}
+
+		return resBody, nil
+	}
+
+	return nil, fmt.Errorf("all CRA URLs failed due to connection issues")
+}

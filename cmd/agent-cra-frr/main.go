@@ -31,7 +31,7 @@ import (
 	reconcilerfrr "github.com/telekom/das-schiff-network-operator/pkg/reconciler/agent-cra-frr"
 
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
-	"github.com/telekom/das-schiff-network-operator/pkg/cra"
+	"github.com/telekom/das-schiff-network-operator/pkg/cra-frr"
 	"github.com/telekom/das-schiff-network-operator/pkg/monitoring"
 	"github.com/telekom/das-schiff-network-operator/pkg/version"
 	"k8s.io/apimachinery/pkg/runtime"
