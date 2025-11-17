@@ -13,7 +13,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
-        image: ["das-schiff-network-operator", "das-schiff-cra-frr", "das-schiff-nwop-agent-cra-frr", "das-schiff-nwop-agent-netplan", "das-schiff-nwop-agent-hbn-l2"]
+        image: ["das-schiff-network-operator", "das-schiff-cra-frr", "das-schiff-nwop-agent-cra-frr", "das-schiff-nwop-agent-cra-vsr", "das-schiff-nwop-agent-netplan", "das-schiff-nwop-agent-hbn-l2"]
         arch: ["amd64", "arm64"]
         include:
           - runner: ubuntu-latest
@@ -79,7 +79,7 @@ jobs:
       - main-image
     strategy:
       matrix:
-        image: ["das-schiff-network-operator", "das-schiff-cra-frr", "das-schiff-nwop-agent-cra-frr", "das-schiff-nwop-agent-netplan", "das-schiff-nwop-agent-hbn-l2"]
+        image: ["das-schiff-network-operator", "das-schiff-cra-frr", "das-schiff-nwop-agent-cra-frr", "das-schiff-nwop-agent-cra-vsr", "das-schiff-nwop-agent-netplan", "das-schiff-nwop-agent-hbn-l2"]
     steps:
       - name: Download digests
         uses: actions/download-artifact@v4
