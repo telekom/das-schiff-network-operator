@@ -4,8 +4,6 @@ go 1.24.0
 
 toolchain go1.24.1
 
-replace golang.org/x/tools => golang.org/x/tools v0.39.0
-
 require (
 	github.com/cnf/structhash v0.0.0-20250313080605-df4c6cc74a9a
 	github.com/coreos/go-systemd/v22 v22.6.0
