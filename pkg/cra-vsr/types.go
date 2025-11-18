@@ -424,16 +424,14 @@ type BGPAdvertUcast struct {
 }
 
 type BGPNeighborGroup struct {
-	Name           string `xml:"name"`
-	EnforceFirstAS *bool  `xml:"enforce-first-as,omitempty"`
+	Name string `xml:"name"`
 	BGPNeighbor
 }
 
 type BGPNeighborIP struct {
-	Address        string  `xml:"neighbor-address"`
-	NeighGroup     *string `xml:"neighbor-group,omitempty"`
-	Interface      *string `xml:"interface,omitempty"`
-	EnforceFirstAS *bool   `xml:"enforce-first-as,omitempty"`
+	Address    string  `xml:"neighbor-address"`
+	NeighGroup *string `xml:"neighbor-group,omitempty"`
+	Interface  *string `xml:"interface,omitempty"`
 	BGPNeighbor
 }
 
@@ -444,14 +442,15 @@ type BGPNeighborIF struct {
 }
 
 type BGPNeighbor struct {
-	RemoteAS     *string          `xml:"remote-as,omitempty"`
-	LocalAS      *BGPNeighLocalAS `xml:"local-as,omitempty"`
-	Timers       *BGPNeighTimers  `xml:"timers,omitempty"`
-	AF           *BGPNeighAF      `xml:"address-family,omitempty"`
-	UpdateSrc    *string          `xml:"update-source,omitempty"`
-	EnforceMHops *bool            `xml:"enforce-multihop,omitempty"`
-	TTLSecHops   *int             `xml:"ttl-security-hops,omitempty"`
-	Track        *string          `xml:"track,omitempty"`
+	EnforceFirstAS *bool            `xml:"enforce-first-as,omitempty"`
+	RemoteAS       *string          `xml:"remote-as,omitempty"`
+	LocalAS        *BGPNeighLocalAS `xml:"local-as,omitempty"`
+	Timers         *BGPNeighTimers  `xml:"timers,omitempty"`
+	AF             *BGPNeighAF      `xml:"address-family,omitempty"`
+	UpdateSrc      *string          `xml:"update-source,omitempty"`
+	EnforceMHops   *bool            `xml:"enforce-multihop,omitempty"`
+	TTLSecHops     *int             `xml:"ttl-security-hops,omitempty"`
+	Track          *string          `xml:"track,omitempty"`
 }
 
 type BGPNeighLocalAS struct {
