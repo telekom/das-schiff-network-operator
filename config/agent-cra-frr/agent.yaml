@@ -100,7 +100,7 @@ spec:
       serviceAccountName: controller-manager
       volumes:
         - configMap:
-            name: network-operator-config
+            name: frr-template
           name: network-config
         - hostPath:
             path: /etc/cra/base-config.yaml
