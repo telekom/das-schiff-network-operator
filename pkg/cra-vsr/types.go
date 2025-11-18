@@ -439,6 +439,7 @@ type BGPNeighborIF struct {
 	Interface  string  `xml:"interface"`
 	NeighGroup *string `xml:"neighbor-group,omitempty"`
 	IPv6Only   *bool   `xml:"ipv6-only,omitempty"`
+	BGPNeighbor
 }
 
 type BGPNeighbor struct {

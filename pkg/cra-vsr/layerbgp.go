@@ -450,14 +450,10 @@ func (LayerBGP) setupBaseNeighbor(bgp *BGP, conf *config.Neighbor, isUnderlay bo
 		neigh = &bgp.NeighborIPs[len(bgp.NeighborIPs)-1].BGPNeighbor
 	case conf.Interface != nil:
 		bgp.NeighborIFs = append(bgp.NeighborIFs, BGPNeighborIF{
-			Interface:  *conf.Interface,
-			NeighGroup: types.ToPtr(*conf.Interface + "-leaf"),
-			IPv6Only:   types.ToPtr(false),
+			Interface: *conf.Interface,
+			IPv6Only:  types.ToPtr(false),
 		})
-		bgp.NeighGroups = append(bgp.NeighGroups, BGPNeighborGroup{
-			Name: *conf.Interface + "-leaf",
-		})
-		neigh = &bgp.NeighGroups[len(bgp.NeighGroups)-1].BGPNeighbor
+		neigh = &bgp.NeighborIFs[len(bgp.NeighborIFs)-1].BGPNeighbor
 	default:
 		return
 	}
