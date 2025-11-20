@@ -20,9 +20,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"math"
 	"strconv"
-	"strings"
 
 	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/pkg/config"
@@ -599,7 +597,6 @@ func (l *LayerBGP) setupLocalVRF(name string, conf *v1alpha1.VRF) error {
 }
 
 func (l *LayerBGP) setupFabricVRF(name string, conf *v1alpha1.FabricVRF) error {
-	baseCfg := l.mgr.baseConfig
 	vni := int(conf.VNI)
 
 	vrf := lookupVRF(l.ns, name)
@@ -661,20 +658,6 @@ func (l *LayerBGP) setupFabricVRF(name string, conf *v1alpha1.FabricVRF) error {
 		Imports: &BGPImportEVPN{
 			RouteTargets: conf.EVPNImportRouteTargets,
 		},
-	}
-
-	if len(conf.EVPNExportRouteTargets) > 0 {
-		rd := baseCfg.VTEPLoopbackIP + ":"
-		if vni > int(math.MaxUint16) {
-			split := strings.Split(conf.EVPNExportRouteTargets[0], ":")
-			if len(split) == 0 {
-				return fmt.Errorf("failed to retrieve BGP RD for VRF %s", name)
-			}
-			rd += split[len(split)-1]
-		} else {
-			rd += strconv.Itoa(vni)
-		}
-		bgp.AF.EVPN.Exports.RouteDisting = &rd
 	}
 
 	if conf.EVPNExportFilter != nil {
@@ -761,8 +744,6 @@ func (l *LayerBGP) setupClusterVRF() error {
 		},
 		Exports: &BGPExportEVPN{
 			RouteTargets: []string{baseCfg.ClusterVRF.EVPNRouteTarget},
-			RouteDisting: types.ToPtr(
-				baseCfg.VTEPLoopbackIP + ":" + strconv.Itoa(vni)),
 		},
 		Imports: &BGPImportEVPN{
 			RouteTargets: []string{baseCfg.ClusterVRF.EVPNRouteTarget},
@@ -881,8 +862,6 @@ func (l *LayerBGP) setupManagementVRF() error {
 		},
 		Exports: &BGPExportEVPN{
 			RouteTargets: []string{baseCfg.ManagementVRF.EVPNRouteTarget},
-			RouteDisting: types.ToPtr(
-				baseCfg.VTEPLoopbackIP + ":" + strconv.Itoa(vni)),
 		},
 		Imports: &BGPImportEVPN{
 			RouteTargets: []string{baseCfg.ManagementVRF.EVPNRouteTarget},

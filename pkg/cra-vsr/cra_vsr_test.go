@@ -672,7 +672,6 @@ var expectedXML = `
               </advertisement>
               <export>
                 <route-target>64497:30</route-target>
-                <route-distinguisher>10.50.0.10:30</route-distinguisher>
               </export>
               <import>
                 <route-target>64497:30</route-target>
@@ -827,7 +826,6 @@ var expectedXML = `
               </advertisement>
               <export>
                 <route-target>65188:2026</route-target>
-                <route-distinguisher>10.50.0.10:2026</route-distinguisher>
               </export>
               <import>
                 <route-target>65188:2026</route-target>
@@ -1025,7 +1023,6 @@ var expectedXML = `
               </advertisement>
               <export>
                 <route-target>64497:20</route-target>
-                <route-distinguisher>10.50.0.10:20</route-distinguisher>
               </export>
               <import>
                 <route-target>64497:20</route-target>
