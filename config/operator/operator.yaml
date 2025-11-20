@@ -81,5 +81,5 @@ spec:
       terminationGracePeriodSeconds: 10
       volumes:
       - configMap:
-          name: network-operator-config
+          name: config
         name: network-config
