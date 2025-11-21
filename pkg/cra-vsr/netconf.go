@@ -25,9 +25,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nemith/netconf"
-	ncssh "github.com/nemith/netconf/transport/ssh"
 	"golang.org/x/crypto/ssh"
+	"nemith.io/netconf"
+	"nemith.io/netconf/rpc"
+	ncssh "nemith.io/netconf/transport/ssh"
 )
 
 type Datastore string
@@ -54,9 +55,12 @@ type GetData struct {
 	Filter             string    `xml:"xpath-filter,omitempty"`
 }
 
+//nolint:revive
 type GetDataReply struct {
-	XMLName xml.Name `xml:"data"`
-	Data    []byte   `xml:",innerxml"`
+	netconf.RPCReply
+	Data struct {
+		Payload []byte `xml:",innerxml"`
+	} `xml:"data"`
 }
 
 type EditData struct {
@@ -105,7 +109,7 @@ func (nc *Netconf) Open(ctx context.Context) error {
 			continue
 		}
 
-		nc.session, err = netconf.Open(transport)
+		nc.session, err = netconf.NewSession(transport)
 		if err != nil {
 			return fmt.Errorf("failed to open netconf session on %s: %w", url, err)
 		}
@@ -127,7 +131,7 @@ func (nc *Netconf) Send(ctx context.Context, req, rep any) error {
 		var err error
 
 		subctx, cancel := context.WithTimeout(ctx, nc.timeout)
-		err = nc.session.Call(subctx, req, rep)
+		err = nc.session.Exec(subctx, req, rep)
 		cancel()
 
 		if err == nil {
@@ -159,7 +163,7 @@ func (nc *Netconf) Get(ctx context.Context, ds Datastore, filter string) ([]byte
 		return []byte{}, fmt.Errorf("failed to get netconf ds=%s filter=%s: %w", ds, filter, err)
 	}
 
-	return rep.Data, nil
+	return rep.Data.Payload, nil
 }
 
 func (nc *Netconf) GetUnmarshal(ctx context.Context, ds Datastore, filter string) (*VRouter, error) {
@@ -210,7 +214,7 @@ func (nc *Netconf) Edit(
 		}
 	}
 
-	var rep netconf.OKResp
+	var rep rpc.OkReply
 	if err := nc.Send(ctx, &req, &rep); err != nil {
 		return fmt.Errorf("failed to edit netconf: %w", err)
 	}
@@ -219,8 +223,8 @@ func (nc *Netconf) Edit(
 }
 
 func (nc *Netconf) Commit(ctx context.Context) error {
-	var req netconf.CommitReq
-	var rep netconf.OKResp
+	var rep rpc.OkReply
+	var req rpc.Commit
 
 	if err := nc.Send(ctx, &req, &rep); err != nil {
 		return fmt.Errorf("failed to commit netconf: %w", err)
