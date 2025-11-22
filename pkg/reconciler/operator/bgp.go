@@ -207,7 +207,9 @@ func buildNetplanDummies(node *corev1.Node, revision *v1alpha1.NetworkConfigRevi
 			continue
 		}
 		h := sha256.New()
-		h.Write([]byte(bgp.Name))
+		if _, err := h.Write([]byte(bgp.Name)); err != nil { // handle error per revive unhandled-error rule
+			return nil, fmt.Errorf("failed to hash BGP name: %w", err)
+		}
 		interfaceName := fmt.Sprintf("%x", h.Sum(nil))[:10]
 
 		if bgp.LoopbackPeer != nil && len(bgp.LoopbackPeer.IPAddresses) > 0 {
