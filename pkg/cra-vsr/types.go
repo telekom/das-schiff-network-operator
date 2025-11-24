@@ -167,6 +167,23 @@ type Routing struct {
 	Static      *StaticRouting        `xml:"static,omitempty"`
 	PBR         *PolicyBasedRouting   `xml:"policy-based-routing,omitempty"`
 	BGP         *BGP                  `xml:"bgp,omitempty"`
+	*RoutingState
+}
+
+type RoutingState struct {
+	EVPN EVPN `xml:"evpn,omitempty"`
+}
+
+type EVPN struct {
+	VNIs []VniEVPN `xml:"vni"`
+}
+
+type VniEVPN struct {
+	VNI   int    `xml:"vni"`
+	Type  string `xml:"type"`
+	VXLAN string `xml:"vxlan"`
+	SVI   string `xml:"svi"`
+	State string `xml:"state"`
 }
 
 type StaticRouting struct {
