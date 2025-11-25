@@ -234,6 +234,25 @@ var revision = &v1alpha1.NetworkConfigRevision{
 						},
 					},
 				},
+			}, {
+				Name: "internet",
+				VRFRouteConfigurationSpec: v1alpha1.VRFRouteConfigurationSpec{
+					VRF:         "p_internet",
+					Seq:         10,
+					VNI:         types.ToPtr(2002001),
+					RouteTarget: types.ToPtr("64512:2001"),
+					Export: []v1alpha1.VrfRouteConfigurationPrefixItem{
+						{
+							CIDR:   "192.0.2.0/29",
+							LE:     types.ToPtr(32),
+							Action: "permit",
+						}, {
+							CIDR:   "fd82:c2b0:431a::/64",
+							LE:     types.ToPtr(128),
+							Action: "permit",
+						},
+					},
+				},
 			},
 		},
 		BGP: []v1alpha1.BGPRevision{
@@ -546,6 +565,23 @@ var expectedXML = `
       <vxlan xmlns="urn:6wind:vrouter/vxlan">
         <name>vx.m2m</name>
         <vni>2002026</vni>
+        <mtu>9000</mtu>
+        <dst>4789</dst>
+        <local>10.50.0.10</local>
+        <learning>false</learning>
+        <ethernet>
+          <mac-address>02:54:0a:32:00:0a</mac-address>
+        </ethernet>
+        <network-stack>
+          <ipv6>
+            <address-generation-mode>no-link-local</address-generation-mode>
+          </ipv6>
+        </network-stack>
+        <link-interface>dum.underlay</link-interface>
+      </vxlan>
+      <vxlan xmlns="urn:6wind:vrouter/vxlan">
+        <name>vx.p_internet</name>
+        <vni>2002001</vni>
         <mtu>9000</mtu>
         <dst>4789</dst>
         <local>10.50.0.10</local>
@@ -1033,6 +1069,91 @@ var expectedXML = `
       </routing>
       <interface xmlns="urn:6wind:vrouter/interface"></interface>
     </l3vrf>
+    <l3vrf>
+      <name>p_internet</name>
+      <table-id>51</table-id>
+      <routing xmlns="urn:6wind:vrouter/routing" nc:operation="replace">
+        <static></static>
+        <bgp xmlns="urn:6wind:vrouter/bgp">
+          <as>64497</as>
+          <router-id>10.50.0.10</router-id>
+          <suppress-duplicates>false</suppress-duplicates>
+          <l3vni>2002001</l3vni>
+          <address-family>
+            <ipv4-unicast>
+              <redistribute>
+                <protocol>connected</protocol>
+              </redistribute>
+              <redistribute>
+                <protocol>kernel</protocol>
+              </redistribute>
+              <redistribute>
+                <protocol>static</protocol>
+              </redistribute>
+              <l3vrf>
+                <import>
+                  <l3vrf>cluster</l3vrf>
+                  <route-map>rm_p_internet_import</route-map>
+                </import>
+              </l3vrf>
+            </ipv4-unicast>
+            <ipv6-unicast>
+              <redistribute>
+                <protocol>connected</protocol>
+              </redistribute>
+              <redistribute>
+                <protocol>kernel</protocol>
+              </redistribute>
+              <redistribute>
+                <protocol>static</protocol>
+              </redistribute>
+              <l3vrf>
+                <import>
+                  <l3vrf>cluster</l3vrf>
+                  <route-map>rm_p_internet_import</route-map>
+                </import>
+              </l3vrf>
+            </ipv6-unicast>
+            <l2vpn-evpn>
+              <advertisement>
+                <ipv4-unicast>
+                  <route-map>rm_p_internet_export</route-map>
+                </ipv4-unicast>
+                <ipv6-unicast>
+                  <route-map>rm_p_internet_export</route-map>
+                </ipv6-unicast>
+              </advertisement>
+              <export>
+                <route-target>64512:2001</route-target>
+              </export>
+              <import>
+	        <route-target>64512:2001</route-target>
+              </import>
+            </l2vpn-evpn>
+          </address-family>
+        </bgp>
+      </routing>
+      <interface xmlns="urn:6wind:vrouter/interface">
+        <bridge xmlns="urn:6wind:vrouter/bridge">
+          <name>br.p_internet</name>
+          <mtu>9000</mtu>
+          <ethernet>
+            <mac-address>02:54:0a:32:00:0a</mac-address>
+          </ethernet>
+          <link-interface>
+            <slave>vx.p_internet</slave>
+            <learning>false</learning>
+            <neighbor-suppress>false</neighbor-suppress>
+            <hairpin>true</hairpin>
+          </link-interface>
+          <network-stack>
+            <ipv6>
+              <address-generation-mode>no-link-local</address-generation-mode>
+            </ipv6>
+          </network-stack>
+        </bridge>
+      </interface>
+    </l3vrf>
   </vrf>
   <routing xmlns="urn:6wind:vrouter/routing" nc:operation="replace">
     <route-map>
@@ -1436,6 +1557,75 @@ var expectedXML = `
         </match>
       </seq>
     </route-map>
+    <route-map>
+      <name>rm_p_internet_export</name>
+      <seq>
+        <num>10</num>
+        <policy>permit</policy>
+        <match>
+          <ip>
+            <address>
+              <prefix-list>pl_p_internet_export_0</prefix-list>
+            </address>
+          </ip>
+        </match>
+      </seq>
+      <seq>
+        <num>11</num>
+        <policy>permit</policy>
+        <match>
+          <ipv6>
+            <address>
+              <prefix-list>pl_p_internet_export_1</prefix-list>
+            </address>
+          </ipv6>
+        </match>
+      </seq>
+      <seq>
+        <num>12</num>
+        <policy>deny</policy>
+      </seq>
+    </route-map>
+    <route-map>
+      <name>rm_p_internet_import</name>
+      <seq>
+        <num>10</num>
+        <policy>permit</policy>
+        <match>
+          <source-l3vrf>cluster</source-l3vrf>
+        </match>
+        <call>rm_p_internet_import_cluster</call>
+      </seq>
+    </route-map>
+    <route-map>
+      <name>rm_p_internet_import_cluster</name>
+      <seq>
+        <num>10</num>
+        <policy>permit</policy>
+        <match>
+          <ip>
+            <address>
+              <prefix-list>pl_p_internet_import_cluster_0</prefix-list>
+            </address>
+          </ip>
+        </match>
+      </seq>
+      <seq>
+        <num>11</num>
+        <policy>permit</policy>
+        <match>
+          <ipv6>
+            <address>
+              <prefix-list>pl_p_internet_import_cluster_1</prefix-list>
+            </address>
+          </ipv6>
+        </match>
+      </seq>
+      <seq>
+        <num>12</num>
+        <policy>deny</policy>
+      </seq>
+    </route-map>
     <ipv4-prefix-list>
       <name>ANY</name>
       <seq>
@@ -1541,6 +1731,24 @@ var expectedXML = `
         <le>32</le>
       </seq>
     </ipv4-prefix-list>
+    <ipv4-prefix-list>
+      <name>pl_p_internet_export_0</name>
+      <seq>
+        <num>5</num>
+        <policy>permit</policy>
+        <address>192.0.2.0/29</address>
+        <le>32</le>
+      </seq>
+    </ipv4-prefix-list>
+    <ipv4-prefix-list>
+      <name>pl_p_internet_import_cluster_0</name>
+      <seq>
+        <num>5</num>
+        <policy>permit</policy>
+        <address>192.0.2.0/29</address>
+        <le>32</le>
+      </seq>
+    </ipv4-prefix-list>
     <ipv6-prefix-list>
       <name>ANY</name>
       <seq>
@@ -1643,6 +1851,24 @@ var expectedXML = `
         <num>5</num>
         <policy>permit</policy>
         <address>fdcb:f93c:3a3e::/64</address>
+        <le>128</le>
+      </seq>
+    </ipv6-prefix-list>
+    <ipv6-prefix-list>
+      <name>pl_p_internet_export_1</name>
+      <seq>
+        <num>5</num>
+        <policy>permit</policy>
+        <address>fd82:c2b0:431a::/64</address>
+        <le>128</le>
+      </seq>
+    </ipv6-prefix-list>
+    <ipv6-prefix-list>
+      <name>pl_p_internet_import_cluster_1</name>
+      <seq>
+        <num>5</num>
+        <policy>permit</policy>
+        <address>fd82:c2b0:431a::/64</address>
         <le>128</le>
       </seq>
     </ipv6-prefix-list>

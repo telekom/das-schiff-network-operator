@@ -65,7 +65,7 @@ func (l *Layer3) findFreeTableID() (int, error) {
 	sort.Ints(listTableID)
 
 	freeTableID := vrfTableStart
-	for t := range listTableID {
+	for _, t := range listTableID {
 		if t == freeTableID {
 			freeTableID++
 		}
