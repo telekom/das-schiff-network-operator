@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/xml"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/nemith/netconf"
@@ -27,14 +28,47 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+type Datastore string
+
+const (
+	Running     Datastore = "running"
+	Candidate   Datastore = "candidate"
+	Startup     Datastore = "startup"
+	Operational Datastore = "operational"
+)
+
+type Operation string
+
+const (
+	Merge   Operation = "merge"
+	Replace Operation = "replace"
+	None    Operation = "none"
+)
+
+type GetData struct {
+	XMLName            xml.Name  `xml:"urn:ietf:params:xml:ns:yang:ietf-netconf-nmda get-data"`
+	XmlnsDatastoreAttr string    `xml:"xmlns:ds,attr"`
+	Datastore          Datastore `xml:"datastore"`
+	Filter             string    `xml:"xpath-filter,omitempty"`
+}
+
+type GetDataReply struct {
+	XMLName xml.Name `xml:"data"`
+	Data    []byte   `xml:",innerxml"`
+}
+
+type EditData struct {
+	XMLName            xml.Name  `xml:"urn:ietf:params:xml:ns:yang:ietf-netconf-nmda edit-data"`
+	XmlnsBaseAttr      string    `xml:"xmlns:nc,attr"`
+	XmlnsDatastoreAttr string    `xml:"xmlns:ds,attr"`
+	Datastore          Datastore `xml:"datastore"`
+	Operation          Operation `xml:"default-operation,omitempty"`
+	Data               any       `xml:"config,omitempty"`
+}
+
 type Netconf struct {
 	session *netconf.Session
 	timeout time.Duration
-}
-
-type GetConfigReq struct {
-	netconf.GetConfigReq
-	Filter string `xml:",innerxml"`
 }
 
 func (nc *Netconf) Open(
@@ -69,38 +103,34 @@ func (nc *Netconf) Open(
 	return fmt.Errorf("all CRA URLs failed due to connection issues")
 }
 
-func (nc *Netconf) Get(ctx context.Context, source netconf.Datastore) ([]byte, error) {
-	req := GetConfigReq{
-		GetConfigReq: netconf.GetConfigReq{
-			Source: source,
-		},
-		Filter: `<filter>
-				<config xmlns="urn:6wind:vrouter">
-				</config>
-			</filter>`,
+func (nc *Netconf) Get(ctx context.Context, ds Datastore, filter string) ([]byte, error) {
+	filter = strings.Join(strings.Fields(filter), " ")
+	req := GetData{
+		XmlnsDatastoreAttr: "urn:ietf:params:xml:ns:yang:ietf-datastores",
+		Datastore:          "ds:" + ds,
+		Filter:             filter,
 	}
-	var reply netconf.GetConfigReply
 
 	ctx, cancel := context.WithTimeout(ctx, nc.timeout)
 	defer cancel()
 
-	if err := nc.session.Call(ctx, &req, &reply); err != nil {
-		return []byte{}, fmt.Errorf("failed to get netconf %s: %w", source, err)
+	var rep GetDataReply
+	if err := nc.session.Call(ctx, &req, &rep); err != nil {
+		return []byte{}, fmt.Errorf("failed to get netconf ds=%s filter=%s: %w", ds, filter, err)
 	}
 
-	return reply.Config, nil
+	return rep.Data, nil
 }
 
-func (nc *Netconf) GetVRouter(ctx context.Context, source netconf.Datastore) (*VRouter, error) {
-	var vrouter VRouter
-
-	configXML, err := nc.Get(ctx, source)
+func (nc *Netconf) GetUnmarshal(ctx context.Context, ds Datastore, filter string) (*VRouter, error) {
+	data, err := nc.Get(ctx, ds, filter)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := xml.Unmarshal(configXML, &vrouter); err != nil {
-		return nil, fmt.Errorf("failed to un-marshal netconf %s: %w", source, err)
+	var vrouter VRouter
+	if err := xml.Unmarshal(data, &vrouter); err != nil {
+		return nil, fmt.Errorf("failed to un-marshal netconf data=%s: %w", data, err)
 	}
 
 	return &vrouter, nil
@@ -108,16 +138,43 @@ func (nc *Netconf) GetVRouter(ctx context.Context, source netconf.Datastore) (*V
 
 func (nc *Netconf) Edit(
 	ctx context.Context,
-	config any,
-	source netconf.Datastore,
-	strategy netconf.MergeStrategy,
+	ds Datastore,
+	op Operation,
+	data any,
 ) error {
 	ctx, cancel := context.WithTimeout(ctx, nc.timeout)
 	defer cancel()
 
-	err := nc.session.EditConfig(ctx, source, config,
-		netconf.WithDefaultMergeStrategy(strategy))
-	if err != nil {
+	req := EditData{
+		XmlnsBaseAttr:      "urn:ietf:params:xml:ns:netconf:base:1.0",
+		XmlnsDatastoreAttr: "urn:ietf:params:xml:ns:yang:ietf-datastores",
+		Datastore:          "ds:" + ds,
+		Operation:          op,
+	}
+
+	switch v := data.(type) {
+	case string:
+		req.Data = struct {
+			Inner []byte `xml:",innerxml"`
+		}{
+			Inner: []byte(v),
+		}
+	case []byte:
+		req.Data = struct {
+			Inner []byte `xml:",innerxml"`
+		}{
+			Inner: v,
+		}
+	default:
+		req.Data = struct {
+			Inner any `xml:"config"`
+		}{
+			Inner: data,
+		}
+	}
+
+	var rep netconf.OKResp
+	if err := nc.session.Call(ctx, &req, &rep); err != nil {
 		return fmt.Errorf("failed to edit netconf: %w", err)
 	}
 

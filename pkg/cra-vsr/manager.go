@@ -105,12 +105,12 @@ func (m *Manager) openSession(ctx context.Context) error {
 		return err
 	}
 
-	m.startupXML, err = m.nc.Get(ctx, netconf.Startup)
+	m.startupXML, err = m.nc.Get(ctx, Startup, "/config")
 	if err != nil {
 		return err
 	}
 
-	m.running, err = m.nc.GetVRouter(ctx, netconf.Running)
+	m.running, err = m.nc.GetUnmarshal(ctx, Running, "/config")
 	if err != nil {
 		return err
 	}
@@ -167,7 +167,7 @@ func (m *Manager) applyNodeNetworkConfig(
 		}
 	}
 
-	err := m.nc.Edit(ctx, m.startupXML, netconf.Candidate, netconf.ReplaceConfig)
+	err := m.nc.Edit(ctx, Candidate, Replace, m.startupXML)
 	if err != nil {
 		if !retry && errors.Is(err, io.EOF) {
 			return m.applyNodeNetworkConfig(ctx, nodeCfg, true)
@@ -180,7 +180,7 @@ func (m *Manager) applyNodeNetworkConfig(
 		return err
 	}
 
-	err = m.nc.Edit(ctx, vrouter, netconf.Candidate, netconf.MergeConfig)
+	err = m.nc.Edit(ctx, Candidate, Merge, vrouter)
 	if err != nil {
 		return err
 	}
@@ -196,7 +196,6 @@ func (m *Manager) applyNodeNetworkConfig(
 
 func (m *Manager) makeVRouter(nodeCfg *v1alpha1.NodeNetworkConfigSpec) (*VRouter, error) {
 	vrouter := &VRouter{
-		XmlnsNCAttr: "urn:ietf:params:xml:ns:netconf:base:1.0",
 		Routing: &GlobalRouting{
 			NCOperation: netconf.ReplaceConfig,
 			BGP:         &GlobalBGP{},

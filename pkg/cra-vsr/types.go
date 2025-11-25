@@ -43,10 +43,9 @@ const (
 )
 
 type VRouter struct {
-	XMLName     xml.Name       `xml:"urn:6wind:vrouter config"`
-	XmlnsNCAttr string         `xml:"xmlns:nc,attr,omitempty"`
-	Namespaces  []Namespace    `xml:"vrf,omitempty"`
-	Routing     *GlobalRouting `xml:"routing,omitempty"`
+	XMLName    xml.Name       `xml:"urn:6wind:vrouter config"`
+	Namespaces []Namespace    `xml:"vrf,omitempty"`
+	Routing    *GlobalRouting `xml:"routing,omitempty"`
 }
 
 type GlobalRouting struct {

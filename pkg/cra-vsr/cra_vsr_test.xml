@@ -1,4 +1,4 @@
-<config xmlns="urn:6wind:vrouter" xmlns:nc="urn:ietf:params:xml:ns:netconf:base:1.0">
+<config xmlns="urn:6wind:vrouter">
   <vrf>
     <name>hbn</name>
     <routing xmlns="urn:6wind:vrouter/routing" nc:operation="replace">
