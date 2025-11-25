@@ -469,6 +469,32 @@ type BGPNeighbor struct {
 	EnforceMHops   *bool            `xml:"enforce-multihop,omitempty"`
 	TTLSecHops     *int             `xml:"ttl-security-hops,omitempty"`
 	Track          *string          `xml:"track,omitempty"`
+	*BGPNeighborState
+}
+
+type BGPNeighborState struct {
+	State             string           `xml:"state"`
+	EstablishmentDate string           `xml:"established-date"`
+	Statistics        BGPNeighborStats `xml:"message-statistics"`
+}
+
+type BGPNeighborStats struct {
+	PacketWaitProcess int `xml:"packet-wait-process"`
+	PacketWaitWritten int `xml:"packet-wait-written"`
+	OpenSent          int `xml:"opent-sent"`
+	OpenRecv          int `xml:"opens-received"`
+	NotifSent         int `xml:"notifications-sent"`
+	NotificationRecv  int `xml:"notifications-received"`
+	UpdateSent        int `xml:"updates-sent"`
+	UpdateRecv        int `xml:"updates-received"`
+	KeepaliveSent     int `xml:"keepalives-sent"`
+	KeepaliveRecv     int `xml:"keepalives-received"`
+	RouteRefreshSent  int `xml:"route-refresh-sent"`
+	RouteRefreshRecv  int `xml:"route-refresh-received"`
+	CapabilitySent    int `xml:"capability-sent"`
+	CapabilityRecv    int `xml:"capability-received"`
+	TotalSent         int `xml:"total-sent"`
+	TotalRecv         int `xml:"total-received"`
 }
 
 type BGPNeighLocalAS struct {
@@ -490,11 +516,22 @@ type BGPNeighAF struct {
 	EVPN    *BGPNeighEVPN  `xml:"l2vpn-evpn,omitempty"`
 }
 
+type BGPNeighAFState struct {
+	UpdateGroupID         int    `xml:"update-group-id"`
+	SubGroupID            int    `xml:"sub-group-id"`
+	PacketQueueLength     int    `xml:"packet-queue-length"`
+	PrefixAccepted        int    `xml:"accepted-prefix"`
+	PrefixSent            int    `xml:"sent-prefixes"`
+	EbgpPolicyRequiredIn  string `xml:"inbound-ebgp-requires-policy"`
+	EbgpPolicyRequiredOut string `xml:"outbound-ebgp-requires-policy"`
+}
+
 type BGPNeighUcast struct {
 	AllowASIn   *int                 `xml:"allowas-in,omitempty"`
 	RouteMaps   []BGPNeighRouteMap   `xml:"route-map,omitempty"`
 	PrefixLists []BGPNeighPrefixList `xml:"prefix-list,omitempty"`
 	MaxPrefix   *BGPNeighMaxPrefix   `xml:"maximum-prefix,omitempty"`
+	*BGPNeighAFState
 }
 
 type BGPNeighMaxPrefix struct {
@@ -507,6 +544,7 @@ type BGPNeighMaxPrefix struct {
 type BGPNeighEVPN struct {
 	AllowASIn *int               `xml:"allowas-in,omitempty"`
 	RouteMaps []BGPNeighRouteMap `xml:"route-map,omitempty"`
+	*BGPNeighAFState
 }
 
 type BGPNeighRouteMap struct {
