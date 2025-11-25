@@ -585,6 +585,25 @@ type ShowRouteSummaryProtocol struct {
 	FIB      int    `xml:"routes-in-fib"`
 }
 
+type ShowNeighborsInput struct {
+	XMLName   xml.Name `xml:"urn:6wind:vrouter/system show-neighbors"`
+	Namespace *string  `xml:"vrf,omitempty"`
+	Family    *string  `xml:"family,omitempty"`
+	Interface *string  `xml:"interface,omitempty"`
+}
+
+type ShowNeighborsOutput struct {
+	Neighbors []ShowNeighborEntry `xml:"neighbor,omitempty"`
+}
+
+type ShowNeighborEntry struct {
+	LinkLayerAddress string `xml:"link-layer-address"`
+	IPAddress        string `xml:"neighbor"`
+	Interface        string `xml:"interface"`
+	State            string `xml:"state"`
+	Origin           string `xml:"origin"`
+}
+
 func lookupNS(vrouter *VRouter, name string) *Namespace {
 	for i := range vrouter.Namespaces {
 		if vrouter.Namespaces[i].Name == name {
