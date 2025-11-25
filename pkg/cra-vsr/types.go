@@ -557,6 +557,34 @@ type BGPNeighPrefixList struct {
 	Direction IO     `xml:"update-direction"`
 }
 
+type ShowIPv4RouteSummaryInput struct {
+	XMLName   xml.Name `xml:"urn:6wind:vrouter/routing show-ipv4-routes-summary"`
+	Namespace *string  `xml:"vrf,omitempty"`
+	VRF       *string  `xml:"l3vrf,omitempty"`
+}
+
+type ShowIPv6RouteSummaryInput struct {
+	XMLName   xml.Name `xml:"urn:6wind:vrouter/routing show-ipv6-routes-summary"`
+	Namespace *string  `xml:"vrf,omitempty"`
+	VRF       *string  `xml:"l3vrf,omitempty"`
+}
+
+type ShowRouteSummaryOutput struct {
+	Total  ShowRouteSummaryTotal      `xml:"total"`
+	Routes []ShowRouteSummaryProtocol `xml:"route"`
+}
+
+type ShowRouteSummaryTotal struct {
+	RIB int `xml:"routes-in-rib"`
+	FIB int `xml:"routes-in-fib"`
+}
+
+type ShowRouteSummaryProtocol struct {
+	Protocol string `xml:"protocol"`
+	RIB      int    `xml:"routes-in-rib"`
+	FIB      int    `xml:"routes-in-fib"`
+}
+
 func lookupNS(vrouter *VRouter, name string) *Namespace {
 	for i := range vrouter.Namespaces {
 		if vrouter.Namespaces[i].Name == name {
