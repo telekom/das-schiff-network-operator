@@ -108,7 +108,7 @@ func (nc *Netconf) getVRouter(ctx context.Context, source netconf.Datastore) (*V
 
 func (nc *Netconf) editConfig(
 	ctx context.Context,
-	config []byte,
+	config any,
 	source netconf.Datastore,
 	strategy netconf.MergeStrategy,
 ) error {
@@ -122,20 +122,6 @@ func (nc *Netconf) editConfig(
 	}
 
 	return nil
-}
-
-func (nc *Netconf) editVRouter(
-	ctx context.Context,
-	vrouter *VRouter,
-	source netconf.Datastore,
-	strategy netconf.MergeStrategy,
-) error {
-	config, err := xml.Marshal(vrouter)
-	if err != nil {
-		return fmt.Errorf("failed to edit vrouter: %w", err)
-	}
-
-	return nc.editConfig(ctx, config, source, strategy)
 }
 
 func (nc *Netconf) commit(ctx context.Context) error {

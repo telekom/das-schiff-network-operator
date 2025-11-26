@@ -180,7 +180,7 @@ func (m *Manager) applyNodeNetworkConfig(
 		return err
 	}
 
-	err = m.nc.editVRouter(ctx, vrouter, netconf.Candidate, netconf.MergeConfig)
+	err = m.nc.editConfig(ctx, vrouter, netconf.Candidate, netconf.MergeConfig)
 	if err != nil {
 		return err
 	}
