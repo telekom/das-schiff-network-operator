@@ -97,6 +97,11 @@ func (l *Layer2) setupBridge(info *InfoL2, intfs *Interfaces) *Bridge {
 		br.NetworkStack = &NetworkStack{}
 	}
 
+	if br.NetworkStack.IPv6 == nil {
+		br.NetworkStack.IPv6 = &NetworkStackV6{}
+	}
+	br.NetworkStack.IPv6.AcceptDAD = types.ToPtr(NeverDAD)
+
 	br.NetworkStack.IPv4 = &NetworkStackV4{
 		AcceptARP: types.ToPtr("always"),
 	}

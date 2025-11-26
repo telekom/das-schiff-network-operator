@@ -596,6 +596,9 @@
             <ipv4>
               <arp-accept-gratuitous>always</arp-accept-gratuitous>
             </ipv4>
+            <ipv6>
+              <accept-duplicate-address-detection>never</accept-duplicate-address-detection>
+            </ipv6>
             <neighbor>
               <ipv4-base-reachable-time>30000</ipv4-base-reachable-time>
               <ipv6-base-reachable-time>30000</ipv6-base-reachable-time>
@@ -631,6 +634,9 @@
             <ipv4>
               <arp-accept-gratuitous>always</arp-accept-gratuitous>
             </ipv4>
+            <ipv6>
+              <accept-duplicate-address-detection>never</accept-duplicate-address-detection>
+            </ipv6>
             <neighbor>
               <ipv4-base-reachable-time>30000</ipv4-base-reachable-time>
               <ipv6-base-reachable-time>30000</ipv6-base-reachable-time>
