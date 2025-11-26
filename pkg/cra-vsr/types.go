@@ -40,8 +40,17 @@ const (
 	DefaultCommunityListSeqNum int = 5
 )
 
+type VRouterConfig struct {
+	XMLName xml.Name `xml:"urn:6wind:vrouter config"`
+	VRouter
+}
+
+type VRouterState struct {
+	XMLName xml.Name `xml:"urn:6wind:vrouter state"`
+	VRouter
+}
+
 type VRouter struct {
-	XMLName    xml.Name       `xml:"urn:6wind:vrouter config"`
 	Namespaces []Namespace    `xml:"vrf,omitempty"`
 	Routing    *GlobalRouting `xml:"routing,omitempty"`
 }

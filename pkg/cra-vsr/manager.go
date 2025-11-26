@@ -91,7 +91,8 @@ func NewManager(
 		return nil, err
 	}
 
-	m.running, err = m.nc.GetUnmarshal(ctx, Running, "/config")
+	m.running = &VRouter{}
+	err = m.nc.GetUnmarshal(ctx, Running, "/config", m.running)
 	if err != nil {
 		return nil, err
 	}
@@ -143,7 +144,7 @@ func (m *Manager) ApplyConfiguration(
 		return err
 	}
 
-	err = m.nc.Edit(ctx, Candidate, Merge, vrouter)
+	err = m.nc.Edit(ctx, Candidate, Merge, &VRouterConfig{VRouter: *vrouter})
 	if err != nil {
 		return err
 	}

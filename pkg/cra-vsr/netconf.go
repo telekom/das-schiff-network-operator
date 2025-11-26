@@ -176,18 +176,17 @@ func (nc *Netconf) Get(ctx context.Context, ds Datastore, filter string) ([]byte
 	return rep.Data.Payload, nil
 }
 
-func (nc *Netconf) GetUnmarshal(ctx context.Context, ds Datastore, filter string) (*VRouter, error) {
+func (nc *Netconf) GetUnmarshal(ctx context.Context, ds Datastore, filter string, out any) error {
 	data, err := nc.Get(ctx, ds, filter)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	var vrouter VRouter
-	if err := xml.Unmarshal(data, &vrouter); err != nil {
-		return nil, fmt.Errorf("failed to un-marshal netconf data=%s: %w", data, err)
+	if err := xml.Unmarshal(data, out); err != nil {
+		return fmt.Errorf("failed to un-marshal netconf data=%s: %w", data, err)
 	}
 
-	return &vrouter, nil
+	return nil
 }
 
 func (nc *Netconf) Edit(
