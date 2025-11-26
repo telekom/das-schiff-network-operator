@@ -19,7 +19,9 @@ package cra
 import (
 	"context"
 	"encoding/xml"
+	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -114,6 +116,36 @@ func (nc *Netconf) Open(ctx context.Context) error {
 	return fmt.Errorf("all CRA URLs failed due to connection issues")
 }
 
+func (nc *Netconf) Send(ctx context.Context, req, rep any) error {
+	if nc.session == nil {
+		if err := nc.Open(ctx); err != nil {
+			return fmt.Errorf("failed to open netconf session: %w", err)
+		}
+	}
+
+	for i := 0; i < 2; i++ {
+		var err error
+
+		subctx, cancel := context.WithTimeout(ctx, nc.timeout)
+		err = nc.session.Call(subctx, req, rep)
+		cancel()
+
+		if err == nil {
+			return nil
+		} else if !errors.Is(err, io.EOF) {
+			return fmt.Errorf("failed to send netconf message: %w", err)
+		}
+
+		if i == 0 {
+			if err := nc.Open(ctx); err != nil {
+				return fmt.Errorf("failed to re-open netconf session: %w", err)
+			}
+		}
+	}
+
+	return fmt.Errorf("all netconf send attempt failed with EOF")
+}
+
 func (nc *Netconf) Get(ctx context.Context, ds Datastore, filter string) ([]byte, error) {
 	filter = strings.Join(strings.Fields(filter), " ")
 	req := GetData{
@@ -122,11 +154,8 @@ func (nc *Netconf) Get(ctx context.Context, ds Datastore, filter string) ([]byte
 		Filter:             filter,
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, nc.timeout)
-	defer cancel()
-
 	var rep GetDataReply
-	if err := nc.session.Call(ctx, &req, &rep); err != nil {
+	if err := nc.Send(ctx, &req, &rep); err != nil {
 		return []byte{}, fmt.Errorf("failed to get netconf ds=%s filter=%s: %w", ds, filter, err)
 	}
 
@@ -153,9 +182,6 @@ func (nc *Netconf) Edit(
 	op Operation,
 	data any,
 ) error {
-	ctx, cancel := context.WithTimeout(ctx, nc.timeout)
-	defer cancel()
-
 	req := EditData{
 		XmlnsBaseAttr:      "urn:ietf:params:xml:ns:netconf:base:1.0",
 		XmlnsDatastoreAttr: "urn:ietf:params:xml:ns:yang:ietf-datastores",
@@ -185,7 +211,7 @@ func (nc *Netconf) Edit(
 	}
 
 	var rep netconf.OKResp
-	if err := nc.session.Call(ctx, &req, &rep); err != nil {
+	if err := nc.Send(ctx, &req, &rep); err != nil {
 		return fmt.Errorf("failed to edit netconf: %w", err)
 	}
 
@@ -193,11 +219,10 @@ func (nc *Netconf) Edit(
 }
 
 func (nc *Netconf) Commit(ctx context.Context) error {
-	ctx, cancel := context.WithTimeout(ctx, nc.timeout)
-	defer cancel()
+	var req netconf.CommitReq
+	var rep netconf.OKResp
 
-	err := nc.session.Commit(ctx)
-	if err != nil {
+	if err := nc.Send(ctx, &req, &rep); err != nil {
 		return fmt.Errorf("failed to commit netconf: %w", err)
 	}
 

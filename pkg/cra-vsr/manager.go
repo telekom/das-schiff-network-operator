@@ -18,7 +18,6 @@ package cra
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -134,26 +133,8 @@ func (m *Manager) ApplyConfiguration(
 	ctx context.Context,
 	nodeCfg *v1alpha1.NodeNetworkConfigSpec,
 ) error {
-	return m.applyNodeNetworkConfig(ctx, nodeCfg, false)
-}
-
-func (m *Manager) applyNodeNetworkConfig(
-	ctx context.Context,
-	nodeCfg *v1alpha1.NodeNetworkConfigSpec,
-	retry bool,
-) error {
-	if retry || m.nc.session == nil {
-		fmt.Println("netconf connection closed, re-open it")
-		if err := m.nc.Open(ctx); err != nil {
-			return fmt.Errorf("failed to re-open netconf session: %w", err)
-		}
-	}
-
 	err := m.nc.Edit(ctx, Candidate, Replace, m.startupXML)
 	if err != nil {
-		if !retry && errors.Is(err, io.EOF) {
-			return m.applyNodeNetworkConfig(ctx, nodeCfg, true)
-		}
 		return err
 	}
 
