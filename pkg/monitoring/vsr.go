@@ -38,8 +38,14 @@ const (
 
 type VSRCollector struct {
 	basicCollector
-	CraManager *cra.Manager
-	vrfVniDesc typedFactoryDesc
+	CraManager                 *cra.Manager
+	vrfVniDesc                 typedFactoryDesc
+	bgpUptimeDesc              typedFactoryDesc
+	bgpStatusDesc              typedFactoryDesc
+	bgpPrefixesReceivedDesc    typedFactoryDesc
+	bgpPrefixesTransmittedDesc typedFactoryDesc
+	bgpMessagesReceivedDesc    typedFactoryDesc
+	bgpMessagesTransmittedDesc typedFactoryDesc
 }
 
 type BGPNeighborInfo struct {
@@ -59,6 +65,16 @@ func init() {
 }
 
 func NewVSRCollector() (Collector, error) {
+	bgpLabels := []string{
+		"vrf",
+		"as",
+		"peer_name",
+		"ip_family",
+		"message_type",
+		"subsequent_family",
+		"remote_as",
+	}
+
 	collector := VSRCollector{
 		vrfVniDesc: typedFactoryDesc{
 			desc: prometheus.NewDesc(
@@ -71,12 +87,71 @@ func NewVSRCollector() (Collector, error) {
 			),
 			valueType: prometheus.GaugeValue,
 		},
+		bgpUptimeDesc: typedFactoryDesc{
+			desc: prometheus.NewDesc(
+				prometheus.BuildFQName(namespace, vsrCollectorName, "bgp_uptime_seconds_total"),
+				"Uptime of the session with the other BGP Peer",
+				bgpLabels,
+				nil,
+			),
+			valueType: prometheus.CounterValue,
+		},
+		bgpStatusDesc: typedFactoryDesc{
+			desc: prometheus.NewDesc(
+				prometheus.BuildFQName(namespace, vsrCollectorName, "bgp_status"),
+				"The Session Status to the other BGP Peer",
+				bgpLabels,
+				nil,
+			),
+			valueType: prometheus.GaugeValue,
+		},
+		bgpPrefixesReceivedDesc: typedFactoryDesc{
+			desc: prometheus.NewDesc(
+				prometheus.BuildFQName(namespace, vsrCollectorName, "bgp_prefixes_received_total"),
+				"The Prefixes Received from the other peer.",
+				bgpLabels,
+				nil,
+			),
+			valueType: prometheus.CounterValue,
+		},
+		bgpPrefixesTransmittedDesc: typedFactoryDesc{
+			desc: prometheus.NewDesc(
+				prometheus.BuildFQName(namespace, vsrCollectorName, "bgp_prefixes_transmitted_total"),
+				"The Prefixes Transmitted to the other peer.",
+				bgpLabels,
+				nil,
+			),
+			valueType: prometheus.CounterValue,
+		},
+		bgpMessagesReceivedDesc: typedFactoryDesc{
+			desc: prometheus.NewDesc(
+				prometheus.BuildFQName(namespace, vsrCollectorName, "bgp_messages_received_total"),
+				"The messages Received to the other peer.",
+				bgpLabels,
+				nil,
+			),
+			valueType: prometheus.CounterValue,
+		},
+		bgpMessagesTransmittedDesc: typedFactoryDesc{
+			desc: prometheus.NewDesc(
+				prometheus.BuildFQName(namespace, vsrCollectorName, "bgp_messages_transmitted_total"),
+				"The messages Transmitted to the other peer.",
+				bgpLabels,
+				nil,
+			),
+			valueType: prometheus.CounterValue,
+		},
 	}
 
 	collector.name = vsrCollectorName
 	collector.logger = ctrl.Log.WithName("vsr.collector")
 
 	return &collector, nil
+}
+
+//nolint:mnd
+func (*VSRCollector) isIPv6(address string) bool {
+	return strings.Count(address, ":") >= 2
 }
 
 func (*VSRCollector) convertToStateFloat(state string) float64 {
@@ -125,9 +200,173 @@ func (c *VSRCollector) updateVRFs(ch chan<- prometheus.Metric, metrics *cra.Metr
 	}
 }
 
+func (*VSRCollector) findBGP(rt *cra.Routing) *cra.BGP {
+	if rt != nil {
+		return rt.BGP
+	}
+
+	return nil
+}
+
+func (*VSRCollector) findBGPNeighborGroup(name string, bgp *cra.BGP) *cra.BGPNeighborGroup {
+	for i := range bgp.NeighGroups {
+		if bgp.NeighGroups[i].Name == name {
+			return &bgp.NeighGroups[i]
+		}
+	}
+
+	return nil
+}
+
+func (c *VSRCollector) updateBGPNeighborAF(
+	ch chan<- prometheus.Metric,
+	info *BGPNeighborInfo,
+	afi, safi string,
+) {
+	labels := []string{
+		info.vrfName,
+		info.bgpAS,
+		info.neighName,
+		info.idType,
+		afi,
+		safi,
+		info.remoteAS,
+	}
+
+	value := 0.0
+	if uptime, err := time.Parse(time.RFC3339, info.uptime); err == nil {
+		value = float64(int(time.Since(uptime).Seconds()))
+	}
+	ch <- c.bgpUptimeDesc.mustNewConstMetric(value, labels...)
+
+	value = convertToStateFloat(info.state)
+	ch <- c.bgpStatusDesc.mustNewConstMetric(value, labels...)
+
+	value = float64(info.pfxrcd)
+	ch <- c.bgpPrefixesReceivedDesc.mustNewConstMetric(value, labels...)
+
+	value = float64(info.pfxsnd)
+	ch <- c.bgpPrefixesTransmittedDesc.mustNewConstMetric(value, labels...)
+
+	value = float64(info.msgrcd)
+	ch <- c.bgpMessagesReceivedDesc.mustNewConstMetric(value, labels...)
+
+	value = float64(info.msgsnd)
+	ch <- c.bgpMessagesTransmittedDesc.mustNewConstMetric(value, labels...)
+}
+
+func (c *VSRCollector) updateBGPNeighborAFs(
+	ch chan<- prometheus.Metric,
+	vrfName string,
+	bgp *cra.BGP,
+	neigh any,
+) {
+	var neighConfig *cra.BGPNeighbor
+	var neighState *cra.BGPNeighbor
+	var groupName *string
+
+	info := &BGPNeighborInfo{
+		vrfName: vrfName,
+		bgpAS:   bgp.AS,
+	}
+
+	switch v := neigh.(type) {
+	case *cra.BGPNeighborIP:
+		info.neighName = v.Address
+		if c.isIPv6(v.Address) {
+			info.idType = "ipv6"
+		} else {
+			info.idType = "ipv4"
+		}
+		groupName = v.NeighGroup
+		neighState = &v.BGPNeighbor
+	case *cra.BGPNeighborIF:
+		info.neighName = v.Interface
+		info.idType = "interface"
+		groupName = v.NeighGroup
+		neighState = &v.BGPNeighbor
+	default:
+		return
+	}
+
+	if neighState.BGPNeighborState == nil {
+		return
+	}
+
+	if groupName != nil {
+		neighConfig := c.findBGPNeighborGroup(*groupName, bgp)
+		if neighConfig == nil {
+			return
+		}
+	} else {
+		neighConfig = neighState
+	}
+
+	if neighConfig.RemoteAS != nil {
+		info.remoteAS = *neighConfig.RemoteAS
+	}
+
+	info.state = neighState.State
+	info.uptime = neighState.EstablishmentDate
+	info.msgrcd = neighState.Statistics.TotalRecv
+	info.msgsnd = neighState.Statistics.TotalSent
+
+	if neighState.AF != nil {
+		af := neighState.AF
+		if af.UcastV4 != nil && af.UcastV4.BGPNeighAFState != nil {
+			info.pfxrcd = af.UcastV4.PrefixAccepted
+			info.pfxsnd = af.UcastV4.PrefixSent
+			c.updateBGPNeighborAF(ch, info, "ipv4", "unicast")
+		}
+		if af.UcastV6 != nil && af.UcastV6.BGPNeighAFState != nil {
+			info.pfxrcd = af.UcastV6.PrefixAccepted
+			info.pfxsnd = af.UcastV6.PrefixSent
+			c.updateBGPNeighborAF(ch, info, "ipv6", "unicast")
+		}
+		if af.EVPN != nil && af.EVPN.BGPNeighAFState != nil {
+			info.pfxrcd = af.EVPN.PrefixAccepted
+			info.pfxsnd = af.EVPN.PrefixSent
+			c.updateBGPNeighborAF(ch, info, "l2vpn", "evpn")
+		}
+	}
+}
+
+func (c *VSRCollector) updateBGPNeighbors(ch chan<- prometheus.Metric, metrics *cra.Metrics) {
+	workns := cra.LookupNS(&metrics.State, c.CraManager.WorkNS)
+	if workns == nil {
+		return
+	}
+
+	bgp := c.findBGP(workns.Routing)
+	if bgp != nil {
+		for i := range bgp.NeighborIPs {
+			c.updateBGPNeighborAFs(ch, defaultVRF, bgp, &bgp.NeighborIPs[i])
+		}
+		for i := range bgp.NeighborIFs {
+			c.updateBGPNeighborAFs(ch, defaultVRF, bgp, &bgp.NeighborIFs[i])
+		}
+	}
+
+	for k := range workns.VRFs {
+		bgp := c.findBGP(workns.VRFs[k].Routing)
+		if bgp == nil {
+			continue
+		}
+
+		vrf := &workns.VRFs[k]
+		for i := range bgp.NeighborIPs {
+			c.updateBGPNeighborAFs(ch, vrf.Name, bgp, &bgp.NeighborIPs[i])
+		}
+		for i := range bgp.NeighborIFs {
+			c.updateBGPNeighborAFs(ch, vrf.Name, bgp, &bgp.NeighborIFs[i])
+		}
+	}
+}
+
 func (c *VSRCollector) updateChannels(metrics *cra.Metrics) {
 	for _, ch := range c.channels {
 		c.updateVRFs(ch, metrics)
+		c.updateBGPNeighbors(ch, metrics)
 	}
 }
 

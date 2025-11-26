@@ -212,8 +212,16 @@ func (m *Manager) GetMetrics(ctx context.Context) (*Metrics, error) {
 
 	xpath := m.xpath("/state/vrf[name='"+m.WorkNS+"']", []string{
 		"/routing/evpn",
+		"/routing/bgp/as",
+		"/routing/bgp/neighbor",
+		"/routing/bgp/neighbor-group",
+		"/routing/bgp/unnumbered-neighbor",
 		"/l3vrf/table-id",
 		"/l3vrf/routing/evpn",
+		"/l3vrf/routing/bgp/as",
+		"/l3vrf/routing/bgp/neighbor",
+		"/l3vrf/routing/bgp/neighbor-group",
+		"/l3vrf/routing/bgp/unnumbered-neighbor",
 	})
 	err := m.nc.GetUnmarshal(ctx, Operational, xpath, &metrics.State)
 	if err != nil {
