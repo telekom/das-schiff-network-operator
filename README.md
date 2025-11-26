@@ -15,6 +15,26 @@ The project provides five components:
   - `agent-hbn-l2`: This is an alternative to `agent-netplan`, providing a very simple binary to apply the needed configuration, a subset of the `netplan` functionality and spec.
 - The _containerized routing agent_ (CRA), providing FRR and a small `cra-frr` configuration binary. This exposes an API to dynamically configure L2 and L3VNIs and reconfigure FRR.
 
+## Node readiness signalling
+
+During initialisation nodes are tainted with the following keys to prevent premature workload scheduling while the network stack is being prepared:
+
+```text
+node.t-caas.telekom.com/uninitialized
+node.cloudprovider.kubernetes.io/uninitialized
+```
+
+Once all health checks (interface state, reachability targets, API server access) pass, these taints are removed and a custom Node condition is (created or updated):
+
+```text
+Type:    NetworkOperatorReady
+Status:  True | False
+Reason:  HealthChecksPassed | InterfaceCheckFailed | ReachabilityCheckFailed | APIServerCheckFailed
+Message: Human readable description of the last evaluation.
+```
+
+This allows cluster operators and higher level automation to rely on a standard Node condition instead of only watching for taint removal. When any health check fails the condition is set to `False` with the corresponding reason; taints are not re-applied (to avoid disruptive rescheduling) but the condition provides ongoing status.
+
 ![schematic diagram of cra-frr and the host ns](./docs/cra-frr.png)
 
 ## Deploying the operator
