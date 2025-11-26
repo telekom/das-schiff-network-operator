@@ -19,8 +19,6 @@ package cra
 import (
 	"encoding/xml"
 	"sort"
-
-	"github.com/nemith/netconf"
 )
 
 type NoStringType string
@@ -49,12 +47,12 @@ type VRouter struct {
 }
 
 type GlobalRouting struct {
-	XMLName      xml.Name              `xml:"urn:6wind:vrouter/routing routing"`
-	NCOperation  netconf.MergeStrategy `xml:"nc:operation,attr,omitempty"`
-	RouteMaps    []RouteMap            `xml:"route-map,omitempty"`
-	PrefixListV4 []PrefixList          `xml:"ipv4-prefix-list,omitempty"`
-	PrefixListV6 []PrefixList          `xml:"ipv6-prefix-list,omitempty"`
-	BGP          *GlobalBGP            `xml:"bgp,omitempty"`
+	XMLName      xml.Name     `xml:"urn:6wind:vrouter/routing routing"`
+	NCOperation  Operation    `xml:"nc:operation,attr,omitempty"`
+	RouteMaps    []RouteMap   `xml:"route-map,omitempty"`
+	PrefixListV4 []PrefixList `xml:"ipv4-prefix-list,omitempty"`
+	PrefixListV6 []PrefixList `xml:"ipv6-prefix-list,omitempty"`
+	BGP          *GlobalBGP   `xml:"bgp,omitempty"`
 }
 
 type GlobalBGP struct {
@@ -161,11 +159,11 @@ type VRF struct {
 }
 
 type Routing struct {
-	XMLName     xml.Name              `xml:"urn:6wind:vrouter/routing routing"`
-	NCOperation netconf.MergeStrategy `xml:"nc:operation,attr,omitempty"`
-	Static      *StaticRouting        `xml:"static,omitempty"`
-	PBR         *PolicyBasedRouting   `xml:"policy-based-routing,omitempty"`
-	BGP         *BGP                  `xml:"bgp,omitempty"`
+	XMLName     xml.Name            `xml:"urn:6wind:vrouter/routing routing"`
+	NCOperation Operation           `xml:"nc:operation,attr,omitempty"`
+	Static      *StaticRouting      `xml:"static,omitempty"`
+	PBR         *PolicyBasedRouting `xml:"policy-based-routing,omitempty"`
+	BGP         *BGP                `xml:"bgp,omitempty"`
 	*RoutingState
 }
 

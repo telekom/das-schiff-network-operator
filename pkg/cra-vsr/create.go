@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/nemith/netconf"
 	"github.com/telekom/das-schiff-network-operator/pkg/helpers/types"
 )
 
@@ -83,7 +82,7 @@ func (Manager) createVRF(name string, table int, ns *Namespace) *VRF {
 		TableID:    table,
 		Interfaces: &Interfaces{},
 		Routing: &Routing{
-			NCOperation: netconf.ReplaceConfig,
+			NCOperation: Replace,
 			Static:      &StaticRouting{},
 			BGP:         &BGP{},
 		},

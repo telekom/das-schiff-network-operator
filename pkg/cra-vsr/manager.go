@@ -25,7 +25,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/nemith/netconf"
 	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/pkg/config"
 	"golang.org/x/crypto/ssh"
@@ -197,7 +196,7 @@ func (m *Manager) applyNodeNetworkConfig(
 func (m *Manager) makeVRouter(nodeCfg *v1alpha1.NodeNetworkConfigSpec) (*VRouter, error) {
 	vrouter := &VRouter{
 		Routing: &GlobalRouting{
-			NCOperation: netconf.ReplaceConfig,
+			NCOperation: Replace,
 			BGP:         &GlobalBGP{},
 		},
 	}
@@ -206,7 +205,7 @@ func (m *Manager) makeVRouter(nodeCfg *v1alpha1.NodeNetworkConfigSpec) (*VRouter
 		Name:       m.workNS,
 		Interfaces: &Interfaces{},
 		Routing: &Routing{
-			NCOperation: netconf.ReplaceConfig,
+			NCOperation: Replace,
 			BGP:         &BGP{},
 		},
 	}
