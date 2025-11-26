@@ -67,6 +67,7 @@ func NewManager(
 		metricsUrls: metricsUrls,
 		nc:          NewNetconf(urls, user, password, timeout),
 	}
+	ctx := context.Background()
 
 	baseConfig, err := config.LoadBaseConfig(baseConfigPath)
 	if err != nil {
@@ -81,35 +82,27 @@ func NewManager(
 	}
 	m.baseConfig = baseConfig
 
-	if err := m.openSession(context.Background()); err != nil {
-		return nil, err
-	}
-
-	return m, nil
-}
-
-func (m *Manager) openSession(ctx context.Context) error {
-	err := m.nc.Open(ctx)
+	err = m.nc.Open(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	m.startupXML, err = m.nc.Get(ctx, Startup, "/config")
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	m.running, err = m.nc.GetUnmarshal(ctx, Running, "/config")
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	m.workNS, err = m.findWorkNS(m.running)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	return nil
+	return m, nil
 }
 
 func (m *Manager) findWorkNS(vrouter *VRouter) (string, error) {
@@ -151,7 +144,7 @@ func (m *Manager) applyNodeNetworkConfig(
 ) error {
 	if retry || m.nc.session == nil {
 		fmt.Println("netconf connection closed, re-open it")
-		if err := m.openSession(ctx); err != nil {
+		if err := m.nc.Open(ctx); err != nil {
 			return fmt.Errorf("failed to re-open netconf session: %w", err)
 		}
 	}
