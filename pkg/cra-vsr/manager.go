@@ -100,17 +100,17 @@ func NewManager(
 }
 
 func (m *Manager) openSession(ctx context.Context) error {
-	err := m.nc.openSession(ctx, m.urls, m.timeout, &m.sshConfig)
+	err := m.nc.Open(ctx, m.urls, m.timeout, &m.sshConfig)
 	if err != nil {
 		return err
 	}
 
-	m.startupXML, err = m.nc.getConfig(ctx, netconf.Startup)
+	m.startupXML, err = m.nc.Get(ctx, netconf.Startup)
 	if err != nil {
 		return err
 	}
 
-	m.running, err = m.nc.getVRouter(ctx, netconf.Running)
+	m.running, err = m.nc.GetVRouter(ctx, netconf.Running)
 	if err != nil {
 		return err
 	}
@@ -167,7 +167,7 @@ func (m *Manager) applyNodeNetworkConfig(
 		}
 	}
 
-	err := m.nc.editConfig(ctx, m.startupXML, netconf.Candidate, netconf.ReplaceConfig)
+	err := m.nc.Edit(ctx, m.startupXML, netconf.Candidate, netconf.ReplaceConfig)
 	if err != nil {
 		if !retry && errors.Is(err, io.EOF) {
 			return m.applyNodeNetworkConfig(ctx, nodeCfg, true)
@@ -180,12 +180,12 @@ func (m *Manager) applyNodeNetworkConfig(
 		return err
 	}
 
-	err = m.nc.editConfig(ctx, vrouter, netconf.Candidate, netconf.MergeConfig)
+	err = m.nc.Edit(ctx, vrouter, netconf.Candidate, netconf.MergeConfig)
 	if err != nil {
 		return err
 	}
 
-	err = m.nc.commit(ctx)
+	err = m.nc.Commit(ctx)
 	if err != nil {
 		return err
 	}

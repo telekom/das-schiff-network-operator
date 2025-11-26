@@ -37,7 +37,7 @@ type GetConfigReq struct {
 	Filter string `xml:",innerxml"`
 }
 
-func (nc *Netconf) openSession(
+func (nc *Netconf) Open(
 	ctx context.Context, urls []string,
 	timeout time.Duration, sshConfig *ssh.ClientConfig,
 ) error {
@@ -69,7 +69,7 @@ func (nc *Netconf) openSession(
 	return fmt.Errorf("all CRA URLs failed due to connection issues")
 }
 
-func (nc *Netconf) getConfig(ctx context.Context, source netconf.Datastore) ([]byte, error) {
+func (nc *Netconf) Get(ctx context.Context, source netconf.Datastore) ([]byte, error) {
 	req := GetConfigReq{
 		GetConfigReq: netconf.GetConfigReq{
 			Source: source,
@@ -91,10 +91,10 @@ func (nc *Netconf) getConfig(ctx context.Context, source netconf.Datastore) ([]b
 	return reply.Config, nil
 }
 
-func (nc *Netconf) getVRouter(ctx context.Context, source netconf.Datastore) (*VRouter, error) {
+func (nc *Netconf) GetVRouter(ctx context.Context, source netconf.Datastore) (*VRouter, error) {
 	var vrouter VRouter
 
-	configXML, err := nc.getConfig(ctx, source)
+	configXML, err := nc.Get(ctx, source)
 	if err != nil {
 		return nil, err
 	}
@@ -106,7 +106,7 @@ func (nc *Netconf) getVRouter(ctx context.Context, source netconf.Datastore) (*V
 	return &vrouter, nil
 }
 
-func (nc *Netconf) editConfig(
+func (nc *Netconf) Edit(
 	ctx context.Context,
 	config any,
 	source netconf.Datastore,
@@ -124,7 +124,7 @@ func (nc *Netconf) editConfig(
 	return nil
 }
 
-func (nc *Netconf) commit(ctx context.Context) error {
+func (nc *Netconf) Commit(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, nc.timeout)
 	defer cancel()
 
