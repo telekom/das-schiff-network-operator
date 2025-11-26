@@ -27,7 +27,6 @@ import (
 
 	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/pkg/config"
-	"golang.org/x/crypto/ssh"
 )
 
 const (
@@ -49,15 +48,13 @@ const (
 )
 
 type Manager struct {
-	urls        []string
 	metricsUrls []string
-	sshConfig   ssh.ClientConfig
 	baseConfig  *config.BaseConfig
 	timeout     time.Duration
 	startupXML  []byte
 	workNS      string
 	running     *VRouter
-	nc          Netconf
+	nc          *Netconf
 }
 
 func NewManager(
@@ -66,16 +63,9 @@ func NewManager(
 	timeout time.Duration,
 ) (*Manager, error) {
 	m := &Manager{
-		urls:        urls,
 		timeout:     timeout,
 		metricsUrls: metricsUrls,
-		sshConfig: ssh.ClientConfig{
-			User: user,
-			Auth: []ssh.AuthMethod{
-				ssh.Password(password),
-			},
-			HostKeyCallback: ssh.InsecureIgnoreHostKey(), //nolint:gosec
-		},
+		nc:          NewNetconf(urls, user, password, timeout),
 	}
 
 	baseConfig, err := config.LoadBaseConfig(baseConfigPath)
@@ -99,7 +89,7 @@ func NewManager(
 }
 
 func (m *Manager) openSession(ctx context.Context) error {
-	err := m.nc.Open(ctx, m.urls, m.timeout, &m.sshConfig)
+	err := m.nc.Open(ctx)
 	if err != nil {
 		return err
 	}

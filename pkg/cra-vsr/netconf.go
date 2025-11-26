@@ -67,16 +67,27 @@ type EditData struct {
 }
 
 type Netconf struct {
-	session *netconf.Session
-	timeout time.Duration
+	session   *netconf.Session
+	timeout   time.Duration
+	sshConfig *ssh.ClientConfig
+	urls      []string
 }
 
-func (nc *Netconf) Open(
-	ctx context.Context, urls []string,
-	timeout time.Duration, sshConfig *ssh.ClientConfig,
-) error {
-	nc.timeout = timeout
+func NewNetconf(urls []string, user, pwd string, timeout time.Duration) *Netconf {
+	return &Netconf{
+		urls:    urls,
+		timeout: timeout,
+		sshConfig: &ssh.ClientConfig{
+			User: user,
+			Auth: []ssh.AuthMethod{
+				ssh.Password(pwd),
+			},
+			HostKeyCallback: ssh.InsecureIgnoreHostKey(), //nolint:gosec
+		},
+	}
+}
 
+func (nc *Netconf) Open(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, nc.timeout)
 	defer cancel()
 
@@ -85,8 +96,8 @@ func (nc *Netconf) Open(
 		nc.session = nil
 	}
 
-	for _, url := range urls {
-		transport, err := ncssh.Dial(ctx, "tcp", url, sshConfig)
+	for _, url := range nc.urls {
+		transport, err := ncssh.Dial(ctx, "tcp", url, nc.sshConfig)
 		if err != nil {
 			fmt.Println(err)
 			continue
