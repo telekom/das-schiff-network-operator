@@ -566,8 +566,6 @@ func (l *LayerBGP) setupLocalVRF(name string, conf *v1alpha1.VRF) error {
 				Protocol: BGPRedistConnect,
 			}, {
 				Protocol: BGPRedistStatic,
-			}, {
-				Protocol: BGPRedistKernel,
 			},
 		},
 	}
@@ -577,8 +575,6 @@ func (l *LayerBGP) setupLocalVRF(name string, conf *v1alpha1.VRF) error {
 				Protocol: BGPRedistConnect,
 			}, {
 				Protocol: BGPRedistStatic,
-			}, {
-				Protocol: BGPRedistKernel,
 			},
 		},
 	}
@@ -617,8 +613,6 @@ func (l *LayerBGP) setupFabricVRF(name string, conf *v1alpha1.FabricVRF) error {
 				Protocol: BGPRedistConnect,
 			}, {
 				Protocol: BGPRedistStatic,
-			}, {
-				Protocol: BGPRedistKernel,
 			},
 		},
 		VRFImports: &BGPUcastVRF{
@@ -633,8 +627,6 @@ func (l *LayerBGP) setupFabricVRF(name string, conf *v1alpha1.FabricVRF) error {
 				Protocol: BGPRedistConnect,
 			}, {
 				Protocol: BGPRedistStatic,
-			}, {
-				Protocol: BGPRedistKernel,
 			},
 		},
 		VRFImports: &BGPUcastVRF{
@@ -705,8 +697,6 @@ func (l *LayerBGP) setupClusterVRF() error {
 				Protocol: BGPRedistConnect,
 			}, {
 				Protocol: BGPRedistStatic,
-			}, {
-				Protocol: BGPRedistKernel,
 			},
 		},
 		VRFImports: &BGPUcastVRF{
@@ -722,8 +712,6 @@ func (l *LayerBGP) setupClusterVRF() error {
 				Protocol: BGPRedistConnect,
 			}, {
 				Protocol: BGPRedistStatic,
-			}, {
-				Protocol: BGPRedistKernel,
 			},
 		},
 		VRFImports: &BGPUcastVRF{
