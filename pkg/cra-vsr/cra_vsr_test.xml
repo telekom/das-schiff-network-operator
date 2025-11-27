@@ -296,9 +296,6 @@
                 <protocol>connected</protocol>
               </redistribute>
               <redistribute>
-                <protocol>kernel</protocol>
-              </redistribute>
-              <redistribute>
                 <protocol>static</protocol>
               </redistribute>
               <l3vrf>
@@ -312,9 +309,6 @@
             <ipv6-unicast>
               <redistribute>
                 <protocol>connected</protocol>
-              </redistribute>
-              <redistribute>
-                <protocol>kernel</protocol>
               </redistribute>
               <redistribute>
                 <protocol>static</protocol>
@@ -452,9 +446,6 @@
                 <protocol>connected</protocol>
               </redistribute>
               <redistribute>
-                <protocol>kernel</protocol>
-              </redistribute>
-              <redistribute>
                 <protocol>static</protocol>
               </redistribute>
               <l3vrf>
@@ -467,9 +458,6 @@
             <ipv6-unicast>
               <redistribute>
                 <protocol>connected</protocol>
-              </redistribute>
-              <redistribute>
-                <protocol>kernel</protocol>
               </redistribute>
               <redistribute>
                 <protocol>static</protocol>
@@ -721,9 +709,6 @@
                 <protocol>connected</protocol>
               </redistribute>
               <redistribute>
-                <protocol>kernel</protocol>
-              </redistribute>
-              <redistribute>
                 <protocol>static</protocol>
               </redistribute>
               <l3vrf>
@@ -736,9 +721,6 @@
             <ipv6-unicast>
               <redistribute>
                 <protocol>connected</protocol>
-              </redistribute>
-              <redistribute>
-                <protocol>kernel</protocol>
               </redistribute>
               <redistribute>
                 <protocol>static</protocol>
