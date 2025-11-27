@@ -96,7 +96,9 @@ func (l *Layer3) setupTableID() error {
 			continue
 		}
 		if _, ok := l.nodeCfg.FabricVRFs[name]; !ok {
-			delete(l.tableID, name)
+			if _, ok := l.nodeCfg.LocalVRFs[name]; !ok {
+				delete(l.tableID, name)
+			}
 		}
 	}
 
