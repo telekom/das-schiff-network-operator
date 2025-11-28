@@ -237,17 +237,10 @@ const (
 	EUI64       AddressGenMode = "eui64"
 )
 
-type DAD string
-
-const (
-	NeverDAD       DAD = "never"
-	AlwaysDAD      DAD = "always"
-	DisableIPv6DAD DAD = "disable-ipv6-on-dad-fail"
-)
-
 type NetworkStackV6 struct {
-	AddrGenMode *AddressGenMode `xml:"address-generation-mode,omitempty"`
-	AcceptDAD   *DAD            `xml:"accept-duplicate-address-detection,omitempty"`
+	AddrGenMode       *AddressGenMode `xml:"address-generation-mode,omitempty"`
+	AcceptDuplicateAD *string         `xml:"accept-duplicate-address-detection,omitempty"`
+	AcceptUntrackedNA *string         `xml:"accept-untracked-neighbor-advertisement"`
 }
 
 type NeighborNetworkStack struct {
