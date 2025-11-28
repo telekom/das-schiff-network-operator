@@ -96,7 +96,9 @@ func (l *Layer3) setupTableID() error {
 			continue
 		}
 		if _, ok := l.nodeCfg.FabricVRFs[name]; !ok {
-			delete(l.tableID, name)
+			if _, ok := l.nodeCfg.LocalVRFs[name]; !ok {
+				delete(l.tableID, name)
+			}
 		}
 	}
 
@@ -113,37 +115,43 @@ func (Layer3) makeInfo(name string, tid, vni int) InfoL3 {
 }
 
 func (l *Layer3) setupInformations() error {
-	for name := range l.nodeCfg.FabricVRFs {
-		if l.mgr.isReservedVRF(name) {
-			continue
-		}
-		tid, ok := l.tableID[name]
-		if !ok {
-			var err error
-			tid, err = l.findFreeTableID()
-			if err != nil {
-				return err
-			}
-			l.tableID[name] = tid
-		}
-		vni := int(l.nodeCfg.FabricVRFs[name].VNI)
-		l.infos[name] = l.makeInfo(name, tid, vni)
+	type FlattenVRF struct {
+		name string
+		vni  int
 	}
 
+	vrfs := []FlattenVRF{}
+	for name := range l.nodeCfg.FabricVRFs {
+		vrfs = append(vrfs, FlattenVRF{
+			name: name,
+			vni:  int(l.nodeCfg.FabricVRFs[name].VNI),
+		})
+	}
 	for name := range l.nodeCfg.LocalVRFs {
-		if l.mgr.isReservedVRF(name) {
+		vrfs = append(vrfs, FlattenVRF{
+			name: name,
+			vni:  -1,
+		})
+	}
+	sort.Slice(vrfs, func(i, j int) bool {
+		return vrfs[i].name < vrfs[j].name
+	})
+
+	for _, vrf := range vrfs {
+		if l.mgr.isReservedVRF(vrf.name) {
 			continue
 		}
-		tid, ok := l.tableID[name]
+		tid, ok := l.tableID[vrf.name]
 		if !ok {
 			var err error
 			tid, err = l.findFreeTableID()
 			if err != nil {
 				return err
 			}
-			l.tableID[name] = tid
+			l.tableID[vrf.name] = tid
 		}
-		l.infos[name] = l.makeInfo(name, tid, -1)
+
+		l.infos[vrf.name] = l.makeInfo(vrf.name, tid, vrf.vni)
 	}
 
 	{
