@@ -50,7 +50,7 @@ var oldConfigPath string
 var isConfigEnvExist bool
 
 var manager = &Manager{
-	workNS: "hbn",
+	WorkNS: "hbn",
 	running: &VRouter{
 		Namespaces: []Namespace{
 			{

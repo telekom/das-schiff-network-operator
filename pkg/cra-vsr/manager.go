@@ -51,7 +51,7 @@ type Manager struct {
 	baseConfig  *config.BaseConfig
 	timeout     time.Duration
 	startupXML  []byte
-	workNS      string
+	WorkNS      string
 	running     *VRouter
 	nc          *Netconf
 }
@@ -97,7 +97,7 @@ func NewManager(
 		return nil, err
 	}
 
-	m.workNS, err = m.findWorkNS(m.running)
+	m.WorkNS, err = m.findWorkNS(m.running)
 	if err != nil {
 		return nil, err
 	}
@@ -167,7 +167,7 @@ func (m *Manager) makeVRouter(nodeCfg *v1alpha1.NodeNetworkConfigSpec) (*VRouter
 	}
 
 	ns := Namespace{
-		Name:       m.workNS,
+		Name:       m.WorkNS,
 		Interfaces: &Interfaces{},
 		Routing: &Routing{
 			NCOperation: Replace,
