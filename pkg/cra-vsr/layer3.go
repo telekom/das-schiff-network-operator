@@ -82,7 +82,7 @@ func (l *Layer3) findFreeTableID() (int, error) {
 }
 
 func (l *Layer3) setupTableID() error {
-	running := lookupNS(l.mgr.running, l.mgr.workNS)
+	running := LookupNS(l.mgr.running, l.mgr.workNS)
 	if running == nil {
 		return fmt.Errorf("failed to found NetNS %s", l.mgr.workNS)
 	}

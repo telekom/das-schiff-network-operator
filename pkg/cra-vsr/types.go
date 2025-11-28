@@ -632,7 +632,7 @@ type ShowBridgeFDBNeighEntry struct {
 	Origin           string `xml:"origin"`
 }
 
-func lookupNS(vrouter *VRouter, name string) *Namespace {
+func LookupNS(vrouter *VRouter, name string) *Namespace {
 	for i := range vrouter.Namespaces {
 		if vrouter.Namespaces[i].Name == name {
 			return &vrouter.Namespaces[i]
@@ -641,7 +641,7 @@ func lookupNS(vrouter *VRouter, name string) *Namespace {
 	return nil
 }
 
-func lookupVRF(ns *Namespace, name string) *VRF {
+func LookupVRF(ns *Namespace, name string) *VRF {
 	for i := range ns.VRFs {
 		if ns.VRFs[i].Name == name {
 			return &ns.VRFs[i]
