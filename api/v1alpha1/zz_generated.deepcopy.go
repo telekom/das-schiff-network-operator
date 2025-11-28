@@ -1306,6 +1306,11 @@ func (in *VRFRouteConfigurationSpec) DeepCopyInto(out *VRFRouteConfigurationSpec
 		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}
+	if in.SBRPrefixes != nil {
+		in, out := &in.SBRPrefixes, &out.SBRPrefixes
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	if in.Community != nil {
 		in, out := &in.Community, &out.Community
 		*out = new(string)

@@ -68,6 +68,9 @@ type VRFRouteConfigurationSpec struct {
 	// Aggregate Routes that should be announced
 	Aggregate []string `json:"aggregate,omitempty"`
 
+	// Traffic from the given prefixes will directly be sent to this VRF
+	SBRPrefixes []string `json:"sbrPrefixes,omitempty"`
+
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=65534
