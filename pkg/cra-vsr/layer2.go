@@ -73,7 +73,7 @@ func (l *Layer2) setupInformations() {
 }
 
 func (l *Layer2) setupVXLAN(info *InfoL2, br *Bridge, intfs *Interfaces) {
-	neighSuppress := (os.Getenv("NWOP_NEIGH_SUPPRESSION") == "true")
+	neighSuppress := os.Getenv("NWOP_NEIGH_SUPPRESSION") != "false"
 	if len(info.ips) == 0 {
 		neighSuppress = false
 	}
