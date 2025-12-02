@@ -25,6 +25,7 @@ import (
 
 	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/pkg/config"
+	"github.com/telekom/das-schiff-network-operator/pkg/helpers/types"
 )
 
 const (
@@ -56,7 +57,9 @@ type Manager struct {
 }
 
 type Metrics struct {
-	State VRouter
+	State            VRouter
+	V4RouteSummaries map[string]ShowRouteSummaryOutput
+	V6RouteSummaries map[string]ShowRouteSummaryOutput
 }
 
 func NewManager(
@@ -207,7 +210,9 @@ func (*Manager) xpath(prefix string, paths []string) string {
 
 func (m *Manager) GetMetrics(ctx context.Context) (*Metrics, error) {
 	metrics := Metrics{
-		State: VRouter{},
+		State:            VRouter{},
+		V4RouteSummaries: map[string]ShowRouteSummaryOutput{},
+		V6RouteSummaries: map[string]ShowRouteSummaryOutput{},
 	}
 
 	xpath := m.xpath("/state/vrf[name='"+m.WorkNS+"']", []string{
@@ -226,6 +231,38 @@ func (m *Manager) GetMetrics(ctx context.Context) (*Metrics, error) {
 	err := m.nc.GetUnmarshal(ctx, Operational, xpath, &metrics.State)
 	if err != nil {
 		return nil, fmt.Errorf("get-state failed in metrics: %w", err)
+	}
+
+	workns := LookupNS(&metrics.State, m.WorkNS)
+	if workns == nil {
+		return nil, fmt.Errorf("work-ns not found in metrics state")
+	}
+
+	vrfList := []string{"default"}
+	for i := range workns.VRFs {
+		vrfList = append(vrfList, workns.VRFs[i].Name)
+	}
+
+	for _, name := range vrfList {
+		req4 := ShowIPv4RouteSummaryInput{
+			Namespace: &m.WorkNS,
+			VRF:       types.ToPtr(name),
+		}
+		out := ShowRouteSummaryOutput{}
+		if err := m.nc.RPC(ctx, &req4, &out); err != nil {
+			return nil, fmt.Errorf("show-ipv4-route-summary failed in metrics: %w", err)
+		}
+		metrics.V4RouteSummaries[name] = out
+
+		req6 := ShowIPv6RouteSummaryInput{
+			Namespace: &m.WorkNS,
+			VRF:       types.ToPtr(name),
+		}
+		out = ShowRouteSummaryOutput{}
+		if err := m.nc.RPC(ctx, &req6, &out); err != nil {
+			return nil, fmt.Errorf("show-ipv6-route-summary failed in metrics: %w", err)
+		}
+		metrics.V6RouteSummaries[name] = out
 	}
 
 	return &metrics, nil

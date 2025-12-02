@@ -19,6 +19,8 @@ package monitoring
 import (
 	"context"
 	"fmt"
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -27,6 +29,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/telekom/das-schiff-network-operator/pkg/cra-vsr"
 	"github.com/telekom/das-schiff-network-operator/pkg/helpers/slice"
+	"github.com/telekom/das-schiff-network-operator/pkg/nl"
+	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 	ctrl "sigs.k8s.io/controller-runtime"
 )
@@ -46,6 +50,8 @@ type VSRCollector struct {
 	bgpPrefixesTransmittedDesc typedFactoryDesc
 	bgpMessagesReceivedDesc    typedFactoryDesc
 	bgpMessagesTransmittedDesc typedFactoryDesc
+	routesFibDesc              typedFactoryDesc
+	routesRibDesc              typedFactoryDesc
 }
 
 type BGPNeighborInfo struct {
@@ -140,6 +146,24 @@ func NewVSRCollector() (Collector, error) {
 				nil,
 			),
 			valueType: prometheus.CounterValue,
+		},
+		routesFibDesc: typedFactoryDesc{
+			desc: prometheus.NewDesc(
+				prometheus.BuildFQName(namespace, vsrCollectorName, "routes_fib"),
+				"The number of routes currently in the frr Controlplane.",
+				[]string{"table", "vrf", "protocol", "address_family"},
+				nil,
+			),
+			valueType: prometheus.GaugeValue,
+		},
+		routesRibDesc: typedFactoryDesc{
+			desc: prometheus.NewDesc(
+				prometheus.BuildFQName(namespace, vsrCollectorName, "routes_rib"),
+				"The number of routes currently in the frr Controlplane.",
+				[]string{"table", "vrf", "protocol", "address_family"},
+				nil,
+			),
+			valueType: prometheus.GaugeValue,
 		},
 	}
 
@@ -363,9 +387,86 @@ func (c *VSRCollector) updateBGPNeighbors(ch chan<- prometheus.Metric, metrics *
 	}
 }
 
+func (*VSRCollector) updateRouteQuantities(
+	routes []cra.ShowRouteSummaryProtocol,
+) []cra.ShowRouteSummaryProtocol {
+	newRoutes := map[string]cra.ShowRouteSummaryProtocol{}
+
+	for _, route := range routes {
+		protocol := nl.GetProtocolName(
+			netlink.RouteProtocol(nl.GetProtocolNumber(route.Protocol, true)),
+		)
+
+		if newRoute, ok := newRoutes[protocol]; ok {
+			newRoutes[protocol] = cra.ShowRouteSummaryProtocol{
+				Protocol: protocol,
+				FIB:      newRoute.FIB + route.FIB,
+				RIB:      newRoute.RIB + route.RIB,
+			}
+			continue
+		}
+
+		newRoutes[protocol] = cra.ShowRouteSummaryProtocol{
+			Protocol: protocol,
+			RIB:      route.RIB,
+			FIB:      route.FIB,
+		}
+	}
+
+	return slices.Collect(maps.Values(newRoutes))
+}
+
+func (c *VSRCollector) updateRoute(
+	ch chan<- prometheus.Metric,
+	workns *cra.Namespace,
+	vrfName string,
+	route *cra.ShowRouteSummaryProtocol,
+	af string,
+) {
+	var tableID int
+
+	if vrfName != defaultVRFIntern {
+		vrf := cra.LookupVRF(workns, vrfName)
+		if vrf == nil {
+			return
+		}
+		tableID = vrf.TableID
+	} else {
+		vrfName = defaultVRF
+		tableID = unix.RT_CLASS_MAIN
+	}
+
+	ch <- c.routesFibDesc.mustNewConstMetric(
+		float64(route.FIB), strconv.Itoa(tableID), vrfName, route.Protocol, af)
+	ch <- c.routesRibDesc.mustNewConstMetric(
+		float64(route.RIB), strconv.Itoa(tableID), vrfName, route.Protocol, af)
+}
+
+func (c *VSRCollector) updateRoutes(ch chan<- prometheus.Metric, metrics *cra.Metrics) {
+	workns := cra.LookupNS(&metrics.State, c.CraManager.WorkNS)
+	if workns == nil {
+		return
+	}
+
+	for name, summary := range metrics.V4RouteSummaries {
+		routes := c.updateRouteQuantities(summary.Routes)
+		for i := range routes {
+			c.updateRoute(ch, workns, name, &routes[i], "ipv4")
+		}
+	}
+
+	for name, summary := range metrics.V6RouteSummaries {
+		routes := c.updateRouteQuantities(summary.Routes)
+		for i := range routes {
+			c.updateRoute(ch, workns, name, &routes[i], "ipv6")
+		}
+	}
+}
+
 func (c *VSRCollector) updateChannels(metrics *cra.Metrics) {
 	for _, ch := range c.channels {
 		c.updateVRFs(ch, metrics)
+		c.updateRoutes(ch, metrics)
 		c.updateBGPNeighbors(ch, metrics)
 	}
 }
