@@ -567,7 +567,7 @@
           <link-interface>
             <slave>vx.4000002</slave>
             <learning>false</learning>
-            <neighbor-suppress>false</neighbor-suppress>
+            <neighbor-suppress>true</neighbor-suppress>
             <hairpin>false</hairpin>
           </link-interface>
           <ipv4>
@@ -605,7 +605,7 @@
           <link-interface>
             <slave>vx.4000003</slave>
             <learning>false</learning>
-            <neighbor-suppress>false</neighbor-suppress>
+            <neighbor-suppress>true</neighbor-suppress>
             <hairpin>false</hairpin>
           </link-interface>
           <ipv4>
