@@ -17,6 +17,7 @@ limitations under the License.
 package cra
 
 import (
+	"bytes"
 	"context"
 	"encoding/xml"
 	"errors"
@@ -70,6 +71,15 @@ type EditData struct {
 	Datastore          Datastore `xml:"datastore"`
 	Operation          Operation `xml:"default-operation,omitempty"`
 	Data               any       `xml:"config,omitempty"`
+}
+
+type RPCReply struct {
+	netconf.RPCReply
+	Refresh []byte `xml:"refresh-rpc,omitempty"`
+	Status  []byte `xml:"status-rpc,omitempty"`
+	Stop    []byte `xml:"stop-command,omitempty"`
+	Exit    *int   `xml:"exit-code,omitempty"`
+	Body    []byte `xml:",innerxml"`
 }
 
 type Netconf struct {
@@ -228,6 +238,46 @@ func (nc *Netconf) Commit(ctx context.Context) error {
 
 	if err := nc.Send(ctx, &req, &rep); err != nil {
 		return fmt.Errorf("failed to commit netconf: %w", err)
+	}
+
+	return nil
+}
+
+func (nc *Netconf) RPC(ctx context.Context, req, out any) error {
+	var rep RPCReply
+	if err := nc.Send(ctx, req, &rep); err != nil {
+		return fmt.Errorf("failed to send netconf rpc: %w", err)
+	}
+
+	buf := bytes.Buffer{}
+	buf.WriteString("<wrap>")
+	buf.Write(rep.Body)
+
+	refresh := rep.Refresh
+	status := rep.Status
+	isLong := len(refresh) > 0 && len(status) > 0
+
+	//nolint:mnd
+	for isLong && rep.Exit != nil {
+		time.Sleep(50 * time.Millisecond)
+
+		rep = RPCReply{}
+		if err := nc.Send(ctx, &refresh, &rep); err != nil {
+			return fmt.Errorf("failed to refresh netconf rpc: %w", err)
+		}
+
+		rep = RPCReply{}
+		if err := nc.Send(ctx, &status, &rep); err != nil {
+			return fmt.Errorf("failed to get status of netconf rpc: %w", err)
+		}
+
+		buf.Write(rep.Body)
+	}
+
+	buf.WriteString("</wrap>")
+
+	if err := xml.Unmarshal(buf.Bytes(), out); err != nil {
+		return fmt.Errorf("failed to unmarshal netconf rpc: %w", err)
 	}
 
 	return nil
