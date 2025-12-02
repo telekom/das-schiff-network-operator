@@ -35,6 +35,7 @@ func (crr *ConfigRevisionReconciler) buildNodeVrf(node *corev1.Node, revision *v
 
 		fabricVrf := c.Spec.FabricVRFs[vrfs[i].VRF]
 		updateFabricVRF(&fabricVrf, &vrfs[i], defaultImportMap, crr.importMode)
+		c.Spec.FabricVRFs[vrfs[i].VRF] = fabricVrf
 
 		if crr.importMode == ImportModeStaticRoute {
 			c.Spec.ClusterVRF.StaticRoutes = appendImportsAsStaticRoutes(c.Spec.ClusterVRF.StaticRoutes, &vrfs[i])
