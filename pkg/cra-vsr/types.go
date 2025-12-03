@@ -604,6 +604,28 @@ type ShowNeighborEntry struct {
 	Origin           string `xml:"origin"`
 }
 
+type ShowBridgeFDBInput struct {
+	XMLName   xml.Name `xml:"urn:6wind:vrouter/bridge show-bridge-fdb"`
+	Namespace *string  `xml:"vrf,omitempty"`
+	Interface *string  `xml:"name,omitempty"`
+}
+
+type ShowBridgeFDBOutput struct {
+	Bridges []ShowBridgeFDBEntry `xml:"bridge,omitempty"`
+}
+
+type ShowBridgeFDBEntry struct {
+	Name      string                    `xml:"name"`
+	Neighbors []ShowBridgeFDBNeighEntry `xml:"fdb"`
+}
+
+type ShowBridgeFDBNeighEntry struct {
+	LinkLayerAddress string `xml:"link-layer-address"`
+	LinkInterface    string `xml:"link-interface"`
+	State            string `xml:"state"`
+	Origin           string `xml:"origin"`
+}
+
 func lookupNS(vrouter *VRouter, name string) *Namespace {
 	for i := range vrouter.Namespaces {
 		if vrouter.Namespaces[i].Name == name {
