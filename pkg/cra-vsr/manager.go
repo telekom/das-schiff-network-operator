@@ -60,6 +60,8 @@ type Metrics struct {
 	State            VRouter
 	V4RouteSummaries map[string]ShowRouteSummaryOutput
 	V6RouteSummaries map[string]ShowRouteSummaryOutput
+	Neighbors        ShowNeighborsOutput
+	BridgeFDB        ShowBridgeFDBOutput
 }
 
 func NewManager(
@@ -213,6 +215,8 @@ func (m *Manager) GetMetrics(ctx context.Context) (*Metrics, error) {
 		State:            VRouter{},
 		V4RouteSummaries: map[string]ShowRouteSummaryOutput{},
 		V6RouteSummaries: map[string]ShowRouteSummaryOutput{},
+		Neighbors:        ShowNeighborsOutput{},
+		BridgeFDB:        ShowBridgeFDBOutput{},
 	}
 
 	xpath := m.xpath("/state/vrf[name='"+m.WorkNS+"']", []string{
@@ -263,6 +267,24 @@ func (m *Manager) GetMetrics(ctx context.Context) (*Metrics, error) {
 			return nil, fmt.Errorf("show-ipv6-route-summary failed in metrics: %w", err)
 		}
 		metrics.V6RouteSummaries[name] = out
+	}
+
+	{
+		req := ShowNeighborsInput{
+			Namespace: &m.WorkNS,
+		}
+		if err := m.nc.RPC(ctx, &req, &metrics.Neighbors); err != nil {
+			return nil, fmt.Errorf("show-neighbors failed in metrics: %w", err)
+		}
+	}
+
+	{
+		req := ShowBridgeFDBInput{
+			Namespace: &m.WorkNS,
+		}
+		if err := m.nc.RPC(ctx, &req, &metrics.BridgeFDB); err != nil {
+			return nil, fmt.Errorf("show-bridge-fdb failed in metrics: %w", err)
+		}
 	}
 
 	return &metrics, nil

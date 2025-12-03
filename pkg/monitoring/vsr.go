@@ -52,6 +52,7 @@ type VSRCollector struct {
 	bgpMessagesTransmittedDesc typedFactoryDesc
 	routesFibDesc              typedFactoryDesc
 	routesRibDesc              typedFactoryDesc
+	neighborsDesc              typedFactoryDesc
 }
 
 type BGPNeighborInfo struct {
@@ -70,6 +71,7 @@ func init() {
 	registerCollector(vsrCollectorName, defaultDisabled, NewVSRCollector)
 }
 
+//nolint:funlen
 func NewVSRCollector() (Collector, error) {
 	bgpLabels := []string{
 		"vrf",
@@ -161,6 +163,15 @@ func NewVSRCollector() (Collector, error) {
 				prometheus.BuildFQName(namespace, vsrCollectorName, "routes_rib"),
 				"The number of routes currently in the frr Controlplane.",
 				[]string{"table", "vrf", "protocol", "address_family"},
+				nil,
+			),
+			valueType: prometheus.GaugeValue,
+		},
+		neighborsDesc: typedFactoryDesc{
+			desc: prometheus.NewDesc(
+				prometheus.BuildFQName(namespace, vsrCollectorName, "neighbors"),
+				"The number of neighbors currently in the Linux Dataplane.",
+				[]string{"interface", "address_family", "flags", "status"},
 				nil,
 			),
 			valueType: prometheus.GaugeValue,
@@ -463,11 +474,75 @@ func (c *VSRCollector) updateRoutes(ch chan<- prometheus.Metric, metrics *cra.Me
 	}
 }
 
+func (c *VSRCollector) updateNeighbors(ch chan<- prometheus.Metric, metrics *cra.Metrics) {
+	type Key struct {
+		iface, state, origin, family string
+	}
+	neighbors := map[Key]int{}
+
+	for i := range metrics.Neighbors.Neighbors {
+		neigh := &metrics.Neighbors.Neighbors[i]
+		key := Key{
+			iface:  neigh.Interface,
+			state:  neigh.State,
+			origin: neigh.Origin,
+		}
+
+		if c.isIPv6(neigh.IPAddress) {
+			key.family = "ipv6"
+		} else {
+			key.family = "ipv4"
+		}
+
+		if counter, ok := neighbors[key]; ok {
+			neighbors[key] = counter + 1
+		} else {
+			neighbors[key] = 1
+		}
+	}
+
+	for key, counter := range neighbors {
+		ch <- c.neighborsDesc.mustNewConstMetric(
+			float64(counter), key.iface, key.family, key.origin, key.state)
+	}
+}
+
+func (c *VSRCollector) updateBridgeFDB(ch chan<- prometheus.Metric, metrics *cra.Metrics) {
+	type Key struct {
+		iface, state, origin string
+	}
+	neighbors := map[Key]int{}
+
+	for _, br := range metrics.BridgeFDB.Bridges {
+		for i := range br.Neighbors {
+			neigh := &br.Neighbors[i]
+			key := Key{
+				iface:  neigh.LinkInterface,
+				state:  neigh.State,
+				origin: neigh.Origin,
+			}
+
+			if counter, ok := neighbors[key]; ok {
+				neighbors[key] = counter + 1
+			} else {
+				neighbors[key] = 1
+			}
+		}
+	}
+
+	for key, counter := range neighbors {
+		ch <- c.neighborsDesc.mustNewConstMetric(
+			float64(counter), key.iface, "bridge", key.origin, key.state)
+	}
+}
+
 func (c *VSRCollector) updateChannels(metrics *cra.Metrics) {
 	for _, ch := range c.channels {
 		c.updateVRFs(ch, metrics)
 		c.updateRoutes(ch, metrics)
 		c.updateBGPNeighbors(ch, metrics)
+		c.updateNeighbors(ch, metrics)
+		c.updateBridgeFDB(ch, metrics)
 	}
 }
 
