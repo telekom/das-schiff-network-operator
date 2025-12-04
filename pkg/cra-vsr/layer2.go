@@ -101,7 +101,6 @@ func (l *Layer2) setupBridge(info *InfoL2, intfs *Interfaces) *Bridge {
 		br.NetworkStack.IPv6 = &NetworkStackV6{}
 	}
 	br.NetworkStack.IPv6.AcceptDuplicateAD = types.ToPtr("never")
-	br.NetworkStack.IPv6.AcceptUntrackedNA = types.ToPtr("connected")
 
 	br.NetworkStack.IPv4 = &NetworkStackV4{
 		AcceptARP: types.ToPtr("always"),

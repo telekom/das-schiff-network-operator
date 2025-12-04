@@ -586,7 +586,6 @@
             </ipv4>
             <ipv6>
               <accept-duplicate-address-detection>never</accept-duplicate-address-detection>
-              <accept-untracked-neighbor-advertisement>connected</accept-untracked-neighbor-advertisement>
             </ipv6>
             <neighbor>
               <ipv4-base-reachable-time>30000</ipv4-base-reachable-time>
@@ -625,7 +624,6 @@
             </ipv4>
             <ipv6>
               <accept-duplicate-address-detection>never</accept-duplicate-address-detection>
-              <accept-untracked-neighbor-advertisement>connected</accept-untracked-neighbor-advertisement>
             </ipv6>
             <neighbor>
               <ipv4-base-reachable-time>30000</ipv4-base-reachable-time>
