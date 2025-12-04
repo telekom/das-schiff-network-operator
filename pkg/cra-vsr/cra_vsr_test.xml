@@ -17,7 +17,6 @@
         <ipv6-rule>
           <priority>2</priority>
           <match>
-            <inbound-interface>hbn</inbound-interface>
             <source>fd00:34::2</source>
           </match>
           <action>

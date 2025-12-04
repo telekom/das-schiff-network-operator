@@ -126,6 +126,9 @@ func (LayerBGP) mkRule(routing *Routing, rules ...Rule) {
 		if isIPv4(ip) {
 			routing.PBR.IPv4 = append(routing.PBR.IPv4, rule)
 		} else {
+			if rule.Match != nil {
+				rule.Match.Interface = nil
+			}
 			routing.PBR.IPv6 = append(routing.PBR.IPv6, rule)
 		}
 	}
