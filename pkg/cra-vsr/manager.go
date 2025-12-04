@@ -19,9 +19,7 @@ package cra
 import (
 	"context"
 	"fmt"
-	"io"
 	"net"
-	"net/http"
 	"time"
 
 	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
@@ -55,6 +53,8 @@ type Manager struct {
 	running     *VRouter
 	nc          *Netconf
 }
+
+type Metrics struct{}
 
 func NewManager(
 	urls, metricsUrls []string,
@@ -195,34 +195,8 @@ func (m *Manager) makeVRouter(nodeCfg *v1alpha1.NodeNetworkConfigSpec) (*VRouter
 	return vrouter, nil
 }
 
-func (m *Manager) GetMetrics(ctx context.Context) ([]byte, error) {
-	for _, url := range m.metricsUrls {
-		client := http.Client{
-			Timeout: m.timeout,
-		}
-		url := fmt.Sprintf("%s/metrics", url)
+func (m *Manager) GetMetrics(ctx context.Context) (*Metrics, error) {
+	metrics := Metrics{}
 
-		req, err := http.NewRequest(http.MethodGet, url, http.NoBody)
-		if err != nil {
-			return nil, fmt.Errorf("error creating request: %w", err)
-		}
-
-		res, err := client.Do(req.WithContext(ctx))
-		if err != nil {
-			fmt.Println(err)
-			continue
-		}
-
-		resBody, readErr := func() ([]byte, error) {
-			defer res.Body.Close()
-			return io.ReadAll(res.Body)
-		}()
-		if readErr != nil {
-			return nil, fmt.Errorf("error reading response body: %w", readErr)
-		}
-
-		return resBody, nil
-	}
-
-	return nil, fmt.Errorf("all CRA URLs failed due to connection issues")
+	return &metrics, nil
 }
