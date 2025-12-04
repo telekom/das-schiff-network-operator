@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
@@ -54,7 +55,9 @@ type Manager struct {
 	nc          *Netconf
 }
 
-type Metrics struct{}
+type Metrics struct {
+	State VRouter
+}
 
 func NewManager(
 	urls, metricsUrls []string,
@@ -195,8 +198,27 @@ func (m *Manager) makeVRouter(nodeCfg *v1alpha1.NodeNetworkConfigSpec) (*VRouter
 	return vrouter, nil
 }
 
+func (*Manager) xpath(prefix string, paths []string) string {
+	for i := range paths {
+		paths[i] = prefix + paths[i]
+	}
+	return strings.Join(paths, " | ")
+}
+
 func (m *Manager) GetMetrics(ctx context.Context) (*Metrics, error) {
-	metrics := Metrics{}
+	metrics := Metrics{
+		State: VRouter{},
+	}
+
+	xpath := m.xpath("/state/vrf[name='"+m.WorkNS+"']", []string{
+		"/routing/evpn",
+		"/l3vrf/table-id",
+		"/l3vrf/routing/evpn",
+	})
+	err := m.nc.GetUnmarshal(ctx, Operational, xpath, &metrics.State)
+	if err != nil {
+		return nil, fmt.Errorf("get-state failed in metrics: %w", err)
+	}
 
 	return &metrics, nil
 }

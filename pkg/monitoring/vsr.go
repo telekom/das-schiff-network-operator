@@ -19,11 +19,15 @@ package monitoring
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/telekom/das-schiff-network-operator/pkg/cra-vsr"
+	"github.com/telekom/das-schiff-network-operator/pkg/helpers/slice"
+	"golang.org/x/sys/unix"
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
@@ -35,6 +39,7 @@ const (
 type VSRCollector struct {
 	basicCollector
 	CraManager *cra.Manager
+	vrfVniDesc typedFactoryDesc
 }
 
 type BGPNeighborInfo struct {
@@ -54,7 +59,19 @@ func init() {
 }
 
 func NewVSRCollector() (Collector, error) {
-	collector := VSRCollector{}
+	collector := VSRCollector{
+		vrfVniDesc: typedFactoryDesc{
+			desc: prometheus.NewDesc(
+				prometheus.BuildFQName(namespace, vsrCollectorName, "vni_state"),
+				"The state of the vrf interface in frr",
+				[]string{
+					"table", "vrf", "svi", "vtep",
+				},
+				nil,
+			),
+			valueType: prometheus.GaugeValue,
+		},
+	}
 
 	collector.name = vsrCollectorName
 	collector.logger = ctrl.Log.WithName("vsr.collector")
@@ -62,8 +79,56 @@ func NewVSRCollector() (Collector, error) {
 	return &collector, nil
 }
 
+func (*VSRCollector) convertToStateFloat(state string) float64 {
+	lowerState := strings.ToLower(state)
+	if slice.ContainsString([]string{"up", "established", "ok", "true"}, lowerState) {
+		return 1.0
+	}
+	return 0.0
+}
+
+func (c *VSRCollector) updateVRF(
+	ch chan<- prometheus.Metric, name string, tid int, rt *cra.Routing,
+) {
+	state := 0.0
+	vtep := ""
+	svi := ""
+
+	if rt == nil {
+		return
+	}
+
+	if rt != nil && rt.RoutingState != nil {
+		for i := range rt.EVPN.VNIs {
+			vni := &rt.EVPN.VNIs[i]
+			if vni.Type != "L3" {
+				continue
+			}
+			state = c.convertToStateFloat(vni.State)
+			vtep = vni.VXLAN
+			svi = vni.SVI
+		}
+	}
+
+	ch <- c.vrfVniDesc.mustNewConstMetric(state, strconv.Itoa(tid), name, svi, vtep)
+}
+
+func (c *VSRCollector) updateVRFs(ch chan<- prometheus.Metric, metrics *cra.Metrics) {
+	workns := cra.LookupNS(&metrics.State, c.CraManager.WorkNS)
+	if workns == nil {
+		return
+	}
+
+	c.updateVRF(ch, defaultVRF, unix.RT_CLASS_MAIN, workns.Routing)
+	for _, vrf := range workns.VRFs {
+		c.updateVRF(ch, vrf.Name, vrf.TableID, vrf.Routing)
+	}
+}
+
 func (c *VSRCollector) updateChannels(metrics *cra.Metrics) {
-	return
+	for _, ch := range c.channels {
+		c.updateVRFs(ch, metrics)
+	}
 }
 
 func (c *VSRCollector) Update(ch chan<- prometheus.Metric) error {
