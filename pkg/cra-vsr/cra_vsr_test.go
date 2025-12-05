@@ -235,6 +235,15 @@ var revision = &v1alpha1.NetworkConfigRevision{
 					},
 				},
 			}, {
+				Name: "m2m-test-vrf-2",
+				VRFRouteConfigurationSpec: v1alpha1.VRFRouteConfigurationSpec{
+					SBRPrefixes: []string{"10.250.4.0/24", "fdbb:6b17:90ba::/64"},
+					Seq:         20,
+					VRF:         "m2m",
+					VNI:         types.ToPtr(2002000),
+					RouteTarget: types.ToPtr("65188:2000"),
+				},
+			}, {
 				Name: "internet",
 				VRFRouteConfigurationSpec: v1alpha1.VRFRouteConfigurationSpec{
 					VRF:         "p_internet",

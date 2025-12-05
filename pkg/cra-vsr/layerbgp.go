@@ -571,6 +571,11 @@ func (l *LayerBGP) setupLocalVRF(name string, conf *v1alpha1.VRF) error {
 				Protocol: BGPRedistStatic,
 			},
 		},
+		VRFImports: &BGPUcastVRF{
+			Imports: &BGPUcastImportVRF{
+				RouteMaps: []string{"rm_" + name + "_import"},
+			},
+		},
 	}
 	bgp.AF.UcastV6 = &BGPUcast{
 		Redists: []BGPRedist{
@@ -578,6 +583,11 @@ func (l *LayerBGP) setupLocalVRF(name string, conf *v1alpha1.VRF) error {
 				Protocol: BGPRedistConnect,
 			}, {
 				Protocol: BGPRedistStatic,
+			},
+		},
+		VRFImports: &BGPUcastVRF{
+			Imports: &BGPUcastImportVRF{
+				RouteMaps: []string{"rm_" + name + "_import"},
 			},
 		},
 	}
