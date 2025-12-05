@@ -1,3 +1,5 @@
+github.com/6wind/netconf v0.0.0-20251121155202-18e7c0cf5d1e h1:LKSi44qYwXC1ObOUvY0Uxcn63FG9nHHOv/tQEVCa20w=
+github.com/6wind/netconf v0.0.0-20251121155202-18e7c0cf5d1e/go.mod h1:A9fkS8o4Xl+jQta7CHGOk0ppPt2DjrDDGKAq4hPqeGU=
 github.com/VictorLowther/godmi v0.6.1/go.mod h1:O/JaTV/eBIggbtmYJ4Ld+Jqpn35C2OejkC5f0wNGt2o=
 github.com/beorn7/perks v1.0.1 h1:VlbKKnNfV8bJzeqoa4cOKqO6bYr3WgKZxO8Z16+hsOM=
 github.com/beorn7/perks v1.0.1/go.mod h1:G2ZrVWU2WbWT9wwq4/hrbKbnv/1ERSJQ0ibhJ6rlkpw=
@@ -114,8 +116,6 @@ github.com/modern-go/reflect2 v1.0.3-0.20250322232337-35a7c28c31ee h1:W5t00kpgFd
 github.com/modern-go/reflect2 v1.0.3-0.20250322232337-35a7c28c31ee/go.mod h1:yWuevngMOJpCy52FWWMvUC8ws7m/LJsjYzDa0/r8luk=
 github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 h1:C3w9PqII01/Oq1c1nUAm88MOHcQC9l5mIlSMApZMrHA=
 github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822/go.mod h1:+n7T8mK8HuQTcFwEeznm/DIxMOiR9yIdICNftLE1DvQ=
-github.com/nemith/netconf v0.0.2 h1:sRnG1gWoQ+hIBOGHONCna71D6XsyvNact+cVr/j7lpE=
-github.com/nemith/netconf v0.0.2/go.mod h1:Z/2MGfpn3++rYycJK7nk4W7tOzBkzcrvKj9josVyDxg=
 github.com/nxadm/tail v1.4.4/go.mod h1:kenIhsEOeOJmVchQTgglprH7qJGnHDVpk1VPCcaMI8A=
 github.com/nxadm/tail v1.4.8 h1:nPr65rt6Y5JFSKQO7qToXr7pePgD6Gwiw05lkbyAQTE=
 github.com/nxadm/tail v1.4.8/go.mod h1:+ncqLTQzXmGhMZNUePPaPqPvBxHAIsmXswZKocGu+AU=

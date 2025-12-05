@@ -17,9 +17,13 @@ limitations under the License.
 package cra
 
 import (
+	"bytes"
 	"context"
 	"encoding/xml"
+	"errors"
 	"fmt"
+	"io"
+	"strings"
 	"time"
 
 	"github.com/nemith/netconf"
@@ -27,22 +31,74 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+type Datastore string
+
+const (
+	Running     Datastore = "running"
+	Candidate   Datastore = "candidate"
+	Startup     Datastore = "startup"
+	Operational Datastore = "operational"
+)
+
+type Operation string
+
+const (
+	Merge   Operation = "merge"
+	Replace Operation = "replace"
+	None    Operation = "none"
+)
+
+type GetData struct {
+	XMLName            xml.Name  `xml:"urn:ietf:params:xml:ns:yang:ietf-netconf-nmda get-data"`
+	XmlnsDatastoreAttr string    `xml:"xmlns:ds,attr"`
+	Datastore          Datastore `xml:"datastore"`
+	Filter             string    `xml:"xpath-filter,omitempty"`
+}
+
+type EditData struct {
+	XMLName            xml.Name  `xml:"urn:ietf:params:xml:ns:yang:ietf-netconf-nmda edit-data"`
+	XmlnsBaseAttr      string    `xml:"xmlns:nc,attr"`
+	XmlnsDatastoreAttr string    `xml:"xmlns:ds,attr"`
+	Datastore          Datastore `xml:"datastore"`
+	Operation          Operation `xml:"default-operation,omitempty"`
+	Data               any       `xml:"config,omitempty"`
+}
+
+type DataReply struct {
+	XMLName xml.Name `xml:"data"`
+	Data    []byte   `xml:",innerxml"`
+}
+
+type RPCReply struct {
+	Refresh []byte `xml:"refresh-rpc,omitempty"`
+	Status  []byte `xml:"status-rpc,omitempty"`
+	Stop    []byte `xml:"stop-command,omitempty"`
+	Exit    *int   `xml:"exit-code,omitempty"`
+	Body    []byte `xml:",innerxml"`
+}
+
 type Netconf struct {
-	session *netconf.Session
-	timeout time.Duration
+	session   *netconf.Session
+	timeout   time.Duration
+	sshConfig *ssh.ClientConfig
+	urls      []string
 }
 
-type GetConfigReq struct {
-	netconf.GetConfigReq
-	Filter string `xml:",innerxml"`
+func NewNetconf(urls []string, user, pwd string, timeout time.Duration) *Netconf {
+	return &Netconf{
+		urls:    urls,
+		timeout: timeout,
+		sshConfig: &ssh.ClientConfig{
+			User: user,
+			Auth: []ssh.AuthMethod{
+				ssh.Password(pwd),
+			},
+			HostKeyCallback: ssh.InsecureIgnoreHostKey(), //nolint:gosec
+		},
+	}
 }
 
-func (nc *Netconf) openSession(
-	ctx context.Context, urls []string,
-	timeout time.Duration, sshConfig *ssh.ClientConfig,
-) error {
-	nc.timeout = timeout
-
+func (nc *Netconf) Open(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, nc.timeout)
 	defer cancel()
 
@@ -51,8 +107,8 @@ func (nc *Netconf) openSession(
 		nc.session = nil
 	}
 
-	for _, url := range urls {
-		transport, err := ncssh.Dial(ctx, "tcp", url, sshConfig)
+	for _, url := range nc.urls {
+		transport, err := ncssh.Dial(ctx, "tcp", url, nc.sshConfig)
 		if err != nil {
 			fmt.Println(err)
 			continue
@@ -69,82 +125,157 @@ func (nc *Netconf) openSession(
 	return fmt.Errorf("all CRA URLs failed due to connection issues")
 }
 
-func (nc *Netconf) getConfig(ctx context.Context, source netconf.Datastore) ([]byte, error) {
-	req := GetConfigReq{
-		GetConfigReq: netconf.GetConfigReq{
-			Source: source,
-		},
-		Filter: `<filter>
-				<config xmlns="urn:6wind:vrouter">
-				</config>
-			</filter>`,
-	}
-	var reply netconf.GetConfigReply
-
-	ctx, cancel := context.WithTimeout(ctx, nc.timeout)
-	defer cancel()
-
-	if err := nc.session.Call(ctx, &req, &reply); err != nil {
-		return []byte{}, fmt.Errorf("failed to get netconf %s: %w", source, err)
+func (nc *Netconf) Send(ctx context.Context, req, rep any, wrap bool) error {
+	if nc.session == nil {
+		if err := nc.Open(ctx); err != nil {
+			return fmt.Errorf("failed to open netconf session: %w", err)
+		}
 	}
 
-	return reply.Config, nil
+	for i := 0; i < 2; i++ {
+		var err error
+
+		subctx, cancel := context.WithTimeout(ctx, nc.timeout)
+		if !wrap {
+			err = nc.session.Call(subctx, req, rep)
+		} else {
+			err = nc.session.CallWrap(subctx, req, rep)
+		}
+		cancel()
+
+		if err == nil {
+			return nil
+		} else if !errors.Is(err, io.EOF) {
+			return fmt.Errorf("failed to send netconf message: %w", err)
+		}
+
+		if i == 0 {
+			if err := nc.Open(ctx); err != nil {
+				return fmt.Errorf("failed to re-open netconf session: %w", err)
+			}
+		}
+	}
+
+	return fmt.Errorf("all netconf send attempt failed with EOF")
 }
 
-func (nc *Netconf) getVRouter(ctx context.Context, source netconf.Datastore) (*VRouter, error) {
-	var vrouter VRouter
+func (nc *Netconf) Get(ctx context.Context, ds Datastore, filter string) ([]byte, error) {
+	filter = strings.Join(strings.Fields(filter), " ")
+	req := GetData{
+		XmlnsDatastoreAttr: "urn:ietf:params:xml:ns:yang:ietf-datastores",
+		Datastore:          "ds:" + ds,
+		Filter:             filter,
+	}
 
-	configXML, err := nc.getConfig(ctx, source)
+	var rep DataReply
+	if err := nc.Send(ctx, &req, &rep, false); err != nil {
+		return []byte{}, fmt.Errorf("failed to get netconf ds=%s filter=%s: %w", ds, filter, err)
+	}
+
+	return rep.Data, nil
+}
+
+func (nc *Netconf) GetUnmarshal(ctx context.Context, ds Datastore, filter string, out any) error {
+	data, err := nc.Get(ctx, ds, filter)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	if err := xml.Unmarshal(configXML, &vrouter); err != nil {
-		return nil, fmt.Errorf("failed to un-marshal netconf %s: %w", source, err)
+	if err := xml.Unmarshal(data, out); err != nil {
+		return fmt.Errorf("failed to un-marshal netconf data=%s: %w", data, err)
 	}
 
-	return &vrouter, nil
+	return nil
 }
 
-func (nc *Netconf) editConfig(
+func (nc *Netconf) Edit(
 	ctx context.Context,
-	config []byte,
-	source netconf.Datastore,
-	strategy netconf.MergeStrategy,
+	ds Datastore,
+	op Operation,
+	data any,
 ) error {
-	ctx, cancel := context.WithTimeout(ctx, nc.timeout)
-	defer cancel()
+	req := EditData{
+		XmlnsBaseAttr:      "urn:ietf:params:xml:ns:netconf:base:1.0",
+		XmlnsDatastoreAttr: "urn:ietf:params:xml:ns:yang:ietf-datastores",
+		Datastore:          "ds:" + ds,
+		Operation:          op,
+	}
 
-	err := nc.session.EditConfig(ctx, source, config,
-		netconf.WithDefaultMergeStrategy(strategy))
-	if err != nil {
+	switch v := data.(type) {
+	case string:
+		req.Data = struct {
+			Inner []byte `xml:",innerxml"`
+		}{
+			Inner: []byte(v),
+		}
+	case []byte:
+		req.Data = struct {
+			Inner []byte `xml:",innerxml"`
+		}{
+			Inner: v,
+		}
+	default:
+		req.Data = struct {
+			Inner any `xml:"config"`
+		}{
+			Inner: data,
+		}
+	}
+
+	var rep netconf.OKResp
+	if err := nc.Send(ctx, &req, &rep, false); err != nil {
 		return fmt.Errorf("failed to edit netconf: %w", err)
 	}
 
 	return nil
 }
 
-func (nc *Netconf) editVRouter(
-	ctx context.Context,
-	vrouter *VRouter,
-	source netconf.Datastore,
-	strategy netconf.MergeStrategy,
-) error {
-	config, err := xml.Marshal(vrouter)
-	if err != nil {
-		return fmt.Errorf("failed to edit vrouter: %w", err)
+func (nc *Netconf) Commit(ctx context.Context) error {
+	var req netconf.CommitReq
+	var rep netconf.OKResp
+
+	if err := nc.Send(ctx, &req, &rep, false); err != nil {
+		return fmt.Errorf("failed to commit netconf: %w", err)
 	}
 
-	return nc.editConfig(ctx, config, source, strategy)
+	return nil
 }
 
-func (nc *Netconf) commit(ctx context.Context) error {
-	ctx, cancel := context.WithTimeout(ctx, nc.timeout)
-	defer cancel()
+func (nc *Netconf) RPC(ctx context.Context, req, out any) error {
+	var rep RPCReply
+	if err := nc.Send(ctx, req, &rep, true); err != nil {
+		return fmt.Errorf("failed to send netconf rpc: %w", err)
+	}
 
-	err := nc.session.Commit(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to commit netconf: %w", err)
+	buf := bytes.Buffer{}
+	buf.WriteString("<wrap>")
+	buf.Write(rep.Body)
+
+	refresh := rep.Refresh
+	status := rep.Status
+	isLong := len(refresh) > 0 && len(status) > 0
+
+	//nolint:mnd
+	for isLong && rep.Exit != nil {
+		time.Sleep(50 * time.Millisecond)
+
+		rep = RPCReply{}
+		if err := nc.Send(ctx, &refresh, &rep, true); err != nil {
+			return fmt.Errorf("failed to refresh netconf rpc: %w", err)
+		}
+
+		rep = RPCReply{}
+		if err := nc.Send(ctx, &status, &rep, true); err != nil {
+			return fmt.Errorf("failed to get status of netconf rpc: %w", err)
+		}
+
+		buf.Write(rep.Body)
+	}
+
+	buf.WriteString("</wrap>")
+
+	if err := xml.Unmarshal(buf.Bytes(), out); err != nil {
+		return fmt.Errorf("failed to unmarshal netconf rpc: %w", err)
 	}
 
 	return nil

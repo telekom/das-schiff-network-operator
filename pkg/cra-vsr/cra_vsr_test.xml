@@ -1,4 +1,4 @@
-<config xmlns="urn:6wind:vrouter" xmlns:nc="urn:ietf:params:xml:ns:netconf:base:1.0">
+<config xmlns="urn:6wind:vrouter">
   <vrf>
     <name>hbn</name>
     <routing xmlns="urn:6wind:vrouter/routing" nc:operation="replace">
@@ -44,62 +44,6 @@
             <multipath-relax>no-as-set</multipath-relax>
           </as-path>
         </bestpath>
-        <neighbor-group>
-          <name>ens3-leaf</name>
-          <enforce-first-as>true</enforce-first-as>
-          <remote-as>65500</remote-as>
-          <local-as>
-            <as-number>65501</as-number>
-            <no-prepend>true</no-prepend>
-            <replace-as>true</replace-as>
-          </local-as>
-          <timers>
-            <keepalive-interval>30</keepalive-interval>
-            <hold-time>90</hold-time>
-          </timers>
-          <address-family>
-            <ipv4-unicast>
-              <allowas-in>3</allowas-in>
-              <route-map>
-                <route-map-name>DENY-TAG-FABRIC-OUT</route-map-name>
-                <route-direction>out</route-direction>
-              </route-map>
-              <route-map>
-                <route-map-name>TAG-FABRIC-IN</route-map-name>
-                <route-direction>in</route-direction>
-              </route-map>
-            </ipv4-unicast>
-          </address-family>
-          <track>bfd</track>
-        </neighbor-group>
-        <neighbor-group>
-          <name>ens4-leaf</name>
-          <enforce-first-as>true</enforce-first-as>
-          <remote-as>65500</remote-as>
-          <local-as>
-            <as-number>65501</as-number>
-            <no-prepend>true</no-prepend>
-            <replace-as>true</replace-as>
-          </local-as>
-          <timers>
-            <keepalive-interval>30</keepalive-interval>
-            <hold-time>90</hold-time>
-          </timers>
-          <address-family>
-            <ipv4-unicast>
-              <allowas-in>3</allowas-in>
-              <route-map>
-                <route-map-name>DENY-TAG-FABRIC-OUT</route-map-name>
-                <route-direction>out</route-direction>
-              </route-map>
-              <route-map>
-                <route-map-name>TAG-FABRIC-IN</route-map-name>
-                <route-direction>in</route-direction>
-              </route-map>
-            </ipv4-unicast>
-          </address-family>
-          <track>bfd</track>
-        </neighbor-group>
         <neighbor>
           <neighbor-address>192.0.2.1</neighbor-address>
           <enforce-first-as>true</enforce-first-as>
@@ -146,13 +90,61 @@
         </neighbor>
         <unnumbered-neighbor>
           <interface>ens3</interface>
-          <neighbor-group>ens3-leaf</neighbor-group>
           <ipv6-only>false</ipv6-only>
+          <enforce-first-as>true</enforce-first-as>
+          <remote-as>65500</remote-as>
+          <local-as>
+            <as-number>65501</as-number>
+            <no-prepend>true</no-prepend>
+            <replace-as>true</replace-as>
+          </local-as>
+          <timers>
+            <keepalive-interval>30</keepalive-interval>
+            <hold-time>90</hold-time>
+          </timers>
+          <address-family>
+            <ipv4-unicast>
+              <allowas-in>3</allowas-in>
+              <route-map>
+                <route-map-name>TAG-FABRIC-IN</route-map-name>
+                <route-direction>in</route-direction>
+              </route-map>
+              <route-map>
+                <route-map-name>DENY-TAG-FABRIC-OUT</route-map-name>
+                <route-direction>out</route-direction>
+              </route-map>
+            </ipv4-unicast>
+          </address-family>
+          <track>bfd</track>
         </unnumbered-neighbor>
         <unnumbered-neighbor>
           <interface>ens4</interface>
-          <neighbor-group>ens4-leaf</neighbor-group>
           <ipv6-only>false</ipv6-only>
+          <enforce-first-as>true</enforce-first-as>
+          <remote-as>65500</remote-as>
+          <local-as>
+            <as-number>65501</as-number>
+            <no-prepend>true</no-prepend>
+            <replace-as>true</replace-as>
+          </local-as>
+          <timers>
+            <keepalive-interval>30</keepalive-interval>
+            <hold-time>90</hold-time>
+          </timers>
+          <address-family>
+            <ipv4-unicast>
+              <allowas-in>3</allowas-in>
+              <route-map>
+                <route-map-name>TAG-FABRIC-IN</route-map-name>
+                <route-direction>in</route-direction>
+              </route-map>
+              <route-map>
+                <route-map-name>DENY-TAG-FABRIC-OUT</route-map-name>
+                <route-direction>out</route-direction>
+              </route-map>
+            </ipv4-unicast>
+          </address-family>
+          <track>bfd</track>
         </unnumbered-neighbor>
       </bgp>
     </routing>

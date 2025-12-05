@@ -172,8 +172,8 @@ func (c *frrCollector) updateVrfs(ch chan<- prometheus.Metric, vrfs []frr.VrfVni
 	for _, vrf := range vrfs {
 		// hotfix for default as it is called
 		// main in netlink/kernel
-		if vrf.Vrf == "default" {
-			vrf.Vrf = "main"
+		if vrf.Vrf == defaultVRFIntern {
+			vrf.Vrf = defaultVRF
 			vrf.Table = strconv.Itoa(unix.RT_CLASS_MAIN)
 		}
 		state := convertToStateFloat(vrf.State)
@@ -190,8 +190,8 @@ func (c *frrCollector) getRoutes() []route.Information {
 
 func (c *frrCollector) updateRoutes(ch chan<- prometheus.Metric, routeSummaries []route.Information) {
 	for _, routeSummary := range routeSummaries {
-		if routeSummary.VrfName == "default" {
-			routeSummary.VrfName = "main"
+		if routeSummary.VrfName == defaultVRFIntern {
+			routeSummary.VrfName = defaultVRF
 			routeSummary.TableID = unix.RT_CLASS_MAIN
 		}
 		ch <- c.routesFibDesc.mustNewConstMetric(float64(routeSummary.Fib), strconv.Itoa(routeSummary.TableID), routeSummary.VrfName, nl.GetProtocolName(routeSummary.RouteProtocol), routeSummary.AddressFamily)
