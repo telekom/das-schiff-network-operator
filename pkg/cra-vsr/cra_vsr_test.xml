@@ -775,6 +775,51 @@
         </bridge>
       </interface>
     </l3vrf>
+    <l3vrf>
+      <name>s-m2m</name>
+      <table-id>52</table-id>
+      <routing xmlns="urn:6wind:vrouter/routing" nc:operation="replace">
+        <static></static>
+        <bgp xmlns="urn:6wind:vrouter/bgp">
+          <as>64497</as>
+          <router-id>10.50.0.10</router-id>
+          <suppress-duplicates>false</suppress-duplicates>
+          <address-family>
+            <ipv4-unicast>
+              <redistribute>
+                <protocol>connected</protocol>
+              </redistribute>
+              <redistribute>
+                <protocol>static</protocol>
+              </redistribute>
+              <l3vrf>
+                <import>
+                  <l3vrf>cluster</l3vrf>
+                  <l3vrf>m2m</l3vrf>
+                  <route-map>rm_s-m2m_import</route-map>
+                </import>
+              </l3vrf>
+            </ipv4-unicast>
+            <ipv6-unicast>
+              <redistribute>
+                <protocol>connected</protocol>
+              </redistribute>
+              <redistribute>
+                <protocol>static</protocol>
+              </redistribute>
+              <l3vrf>
+                <import>
+                  <l3vrf>cluster</l3vrf>
+                  <l3vrf>m2m</l3vrf>
+                  <route-map>rm_s-m2m_import</route-map>
+                </import>
+              </l3vrf>
+            </ipv6-unicast>
+          </address-family>
+        </bgp>
+      </routing>
+      <interface xmlns="urn:6wind:vrouter/interface"></interface>
+    </l3vrf>
   </vrf>
   <routing xmlns="urn:6wind:vrouter/routing" nc:operation="replace">
     <route-map>
@@ -1259,6 +1304,39 @@
       <seq>
         <num>12</num>
         <policy>deny</policy>
+      </seq>
+    </route-map>
+    <route-map>
+      <name>rm_s-m2m_import</name>
+      <seq>
+        <num>10</num>
+        <policy>permit</policy>
+        <match>
+          <source-l3vrf>m2m</source-l3vrf>
+        </match>
+        <call>rm_s-m2m_import_m2m</call>
+      </seq>
+      <seq>
+        <num>11</num>
+        <policy>permit</policy>
+        <match>
+          <source-l3vrf>cluster</source-l3vrf>
+        </match>
+        <call>rm_s-m2m_import_cluster</call>
+      </seq>
+    </route-map>
+    <route-map>
+      <name>rm_s-m2m_import_cluster</name>
+      <seq>
+        <num>10</num>
+        <policy>permit</policy>
+      </seq>
+    </route-map>
+    <route-map>
+      <name>rm_s-m2m_import_m2m</name>
+      <seq>
+        <num>10</num>
+        <policy>permit</policy>
       </seq>
     </route-map>
     <ipv4-prefix-list>
