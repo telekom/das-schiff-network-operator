@@ -10,6 +10,7 @@ import (
 
 func (crr *ConfigRevisionReconciler) buildNodeVrf(node *corev1.Node, revision *v1alpha1.NetworkConfigRevision, c *v1alpha1.NodeNetworkConfig) error {
 	c.Spec.FabricVRFs = make(map[string]v1alpha1.FabricVRF)
+	c.Spec.LocalVRFs = make(map[string]v1alpha1.VRF)
 
 	defaultImportMap := make(map[string]v1alpha1.VRFImport)
 
@@ -37,16 +38,11 @@ func (crr *ConfigRevisionReconciler) buildNodeVrf(node *corev1.Node, revision *v
 		updateFabricVRF(&fabricVrf, &vrfs[i], defaultImportMap, crr.importMode)
 		c.Spec.FabricVRFs[vrfs[i].VRF] = fabricVrf
 
+		updateLocalVRFs(c.Spec.LocalVRFs, c.Spec.ClusterVRF, &vrfs[i])
+
 		if crr.importMode == ImportModeStaticRoute {
 			c.Spec.ClusterVRF.StaticRoutes = appendImportsAsStaticRoutes(c.Spec.ClusterVRF.StaticRoutes, &vrfs[i])
 			dropStaticRouteImports(c.Spec.ClusterVRF.Redistribute, &vrfs[i])
-		}
-
-		for sbrPrefixIdx := range vrfs[i].SBRPrefixes {
-			c.Spec.ClusterVRF.PolicyRoutes = append(c.Spec.ClusterVRF.PolicyRoutes, v1alpha1.PolicyRoute{
-				TrafficMatch: v1alpha1.TrafficMatch{SrcPrefix: &vrfs[i].SBRPrefixes[sbrPrefixIdx]},
-				NextHop:      v1alpha1.NextHop{Vrf: &vrfs[i].VRF},
-			})
 		}
 	}
 
@@ -244,5 +240,38 @@ func dropStaticRouteImports(redistribute *v1alpha1.Redistribute, vrf *v1alpha1.V
 		}
 
 		redistribute.Static.Items = append(redistribute.Static.Items, filterItem)
+	}
+}
+
+func updateLocalVRFs(localVrfs map[string]v1alpha1.VRF, clusterVrf *v1alpha1.VRF, vrf *v1alpha1.VRFRevision) {
+	if len(vrf.SBRPrefixes) > 0 {
+		sbrIntermediateName := fmt.Sprintf("s-%s", vrf.VRF)
+		localVrfs[sbrIntermediateName] = v1alpha1.VRF{
+			VRFImports: []v1alpha1.VRFImport{
+				{
+					FromVRF: vrf.VRF,
+					Filter: v1alpha1.Filter{
+						DefaultAction: v1alpha1.Action{
+							Type: v1alpha1.Accept,
+						},
+					},
+				},
+				{
+					FromVRF: "cluster",
+					Filter: v1alpha1.Filter{
+						DefaultAction: v1alpha1.Action{
+							Type: v1alpha1.Accept,
+						},
+					},
+				},
+			},
+		}
+
+		for sbrPrefixIdx := range vrf.SBRPrefixes {
+			clusterVrf.PolicyRoutes = append(clusterVrf.PolicyRoutes, v1alpha1.PolicyRoute{
+				TrafficMatch: v1alpha1.TrafficMatch{SrcPrefix: &vrf.SBRPrefixes[sbrPrefixIdx]},
+				NextHop:      v1alpha1.NextHop{Vrf: &sbrIntermediateName},
+			})
+		}
 	}
 }
