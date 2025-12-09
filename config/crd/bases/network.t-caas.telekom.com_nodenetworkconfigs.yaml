@@ -772,6 +772,276 @@ spec:
                       - trafficMatch
                       type: object
                     type: array
+                  redistribute:
+                    description: Redistribute is a config for BGP redistribution.
+                    properties:
+                      connected:
+                        description: Connected indicates whether to redistribute connected
+                          routes.
+                        properties:
+                          defaultAction:
+                            description: DefaultAction is the default action for the
+                              filter.
+                            properties:
+                              modifyRoute:
+                                description: ModifyRoute is the modify route action.
+                                properties:
+                                  addCommunities:
+                                    description: AddCommunities is the community to
+                                      add to the route.
+                                    items:
+                                      type: string
+                                    type: array
+                                  additiveCommunities:
+                                    description: AdditiveCommunities is the flag to
+                                      add communities to the route, by default the
+                                      communities are replaced.
+                                    type: boolean
+                                  removeAllCommunities:
+                                    description: RemoveAllCommunities is the flag
+                                      to remove all communities from the route.
+                                    type: boolean
+                                  removeCommunities:
+                                    description: RemoveCommunities is the community
+                                      to remove from the route.
+                                    items:
+                                      type: string
+                                    type: array
+                                type: object
+                              type:
+                                description: Type is the type of action.
+                                enum:
+                                - accept
+                                - reject
+                                - next
+                                type: string
+                            required:
+                            - type
+                            type: object
+                          items:
+                            description: Items is a list of filter items.
+                            items:
+                              description: FilterItem represents a filter item.
+                              properties:
+                                action:
+                                  description: Action is the action for the filter
+                                    item.
+                                  properties:
+                                    modifyRoute:
+                                      description: ModifyRoute is the modify route
+                                        action.
+                                      properties:
+                                        addCommunities:
+                                          description: AddCommunities is the community
+                                            to add to the route.
+                                          items:
+                                            type: string
+                                          type: array
+                                        additiveCommunities:
+                                          description: AdditiveCommunities is the
+                                            flag to add communities to the route,
+                                            by default the communities are replaced.
+                                          type: boolean
+                                        removeAllCommunities:
+                                          description: RemoveAllCommunities is the
+                                            flag to remove all communities from the
+                                            route.
+                                          type: boolean
+                                        removeCommunities:
+                                          description: RemoveCommunities is the community
+                                            to remove from the route.
+                                          items:
+                                            type: string
+                                          type: array
+                                      type: object
+                                    type:
+                                      description: Type is the type of action.
+                                      enum:
+                                      - accept
+                                      - reject
+                                      - next
+                                      type: string
+                                  required:
+                                  - type
+                                  type: object
+                                matcher:
+                                  description: Matcher is the matcher for the filter
+                                    item.
+                                  properties:
+                                    bgpCommunity:
+                                      description: BGPCommunity is the BGP community
+                                        matcher.
+                                      properties:
+                                        community:
+                                          description: Community is the BGP community
+                                            to match.
+                                          type: string
+                                        exactMatch:
+                                          type: boolean
+                                      required:
+                                      - community
+                                      - exactMatch
+                                      type: object
+                                    prefix:
+                                      description: Prefix is the prefix matcher.
+                                      properties:
+                                        ge:
+                                          description: Ge is the minimum prefix length
+                                            to match.
+                                          type: integer
+                                        le:
+                                          description: Le is the maximum prefix length
+                                            to match.
+                                          type: integer
+                                        prefix:
+                                          description: Prefix is the prefix to match.
+                                          type: string
+                                      required:
+                                      - prefix
+                                      type: object
+                                  type: object
+                              required:
+                              - action
+                              - matcher
+                              type: object
+                            type: array
+                        required:
+                        - defaultAction
+                        type: object
+                      static:
+                        description: Static indicates whether to redistribute static
+                          routes.
+                        properties:
+                          defaultAction:
+                            description: DefaultAction is the default action for the
+                              filter.
+                            properties:
+                              modifyRoute:
+                                description: ModifyRoute is the modify route action.
+                                properties:
+                                  addCommunities:
+                                    description: AddCommunities is the community to
+                                      add to the route.
+                                    items:
+                                      type: string
+                                    type: array
+                                  additiveCommunities:
+                                    description: AdditiveCommunities is the flag to
+                                      add communities to the route, by default the
+                                      communities are replaced.
+                                    type: boolean
+                                  removeAllCommunities:
+                                    description: RemoveAllCommunities is the flag
+                                      to remove all communities from the route.
+                                    type: boolean
+                                  removeCommunities:
+                                    description: RemoveCommunities is the community
+                                      to remove from the route.
+                                    items:
+                                      type: string
+                                    type: array
+                                type: object
+                              type:
+                                description: Type is the type of action.
+                                enum:
+                                - accept
+                                - reject
+                                - next
+                                type: string
+                            required:
+                            - type
+                            type: object
+                          items:
+                            description: Items is a list of filter items.
+                            items:
+                              description: FilterItem represents a filter item.
+                              properties:
+                                action:
+                                  description: Action is the action for the filter
+                                    item.
+                                  properties:
+                                    modifyRoute:
+                                      description: ModifyRoute is the modify route
+                                        action.
+                                      properties:
+                                        addCommunities:
+                                          description: AddCommunities is the community
+                                            to add to the route.
+                                          items:
+                                            type: string
+                                          type: array
+                                        additiveCommunities:
+                                          description: AdditiveCommunities is the
+                                            flag to add communities to the route,
+                                            by default the communities are replaced.
+                                          type: boolean
+                                        removeAllCommunities:
+                                          description: RemoveAllCommunities is the
+                                            flag to remove all communities from the
+                                            route.
+                                          type: boolean
+                                        removeCommunities:
+                                          description: RemoveCommunities is the community
+                                            to remove from the route.
+                                          items:
+                                            type: string
+                                          type: array
+                                      type: object
+                                    type:
+                                      description: Type is the type of action.
+                                      enum:
+                                      - accept
+                                      - reject
+                                      - next
+                                      type: string
+                                  required:
+                                  - type
+                                  type: object
+                                matcher:
+                                  description: Matcher is the matcher for the filter
+                                    item.
+                                  properties:
+                                    bgpCommunity:
+                                      description: BGPCommunity is the BGP community
+                                        matcher.
+                                      properties:
+                                        community:
+                                          description: Community is the BGP community
+                                            to match.
+                                          type: string
+                                        exactMatch:
+                                          type: boolean
+                                      required:
+                                      - community
+                                      - exactMatch
+                                      type: object
+                                    prefix:
+                                      description: Prefix is the prefix matcher.
+                                      properties:
+                                        ge:
+                                          description: Ge is the minimum prefix length
+                                            to match.
+                                          type: integer
+                                        le:
+                                          description: Le is the maximum prefix length
+                                            to match.
+                                          type: integer
+                                        prefix:
+                                          description: Prefix is the prefix to match.
+                                          type: string
+                                      required:
+                                      - prefix
+                                      type: object
+                                  type: object
+                              required:
+                              - action
+                              - matcher
+                              type: object
+                            type: array
+                        required:
+                        - defaultAction
+                        type: object
+                    type: object
                   staticRoutes:
                     description: StaticRoutes is a list of static routes.
                     items:
@@ -1821,6 +2091,276 @@ spec:
                         - trafficMatch
                         type: object
                       type: array
+                    redistribute:
+                      description: Redistribute is a config for BGP redistribution.
+                      properties:
+                        connected:
+                          description: Connected indicates whether to redistribute
+                            connected routes.
+                          properties:
+                            defaultAction:
+                              description: DefaultAction is the default action for
+                                the filter.
+                              properties:
+                                modifyRoute:
+                                  description: ModifyRoute is the modify route action.
+                                  properties:
+                                    addCommunities:
+                                      description: AddCommunities is the community
+                                        to add to the route.
+                                      items:
+                                        type: string
+                                      type: array
+                                    additiveCommunities:
+                                      description: AdditiveCommunities is the flag
+                                        to add communities to the route, by default
+                                        the communities are replaced.
+                                      type: boolean
+                                    removeAllCommunities:
+                                      description: RemoveAllCommunities is the flag
+                                        to remove all communities from the route.
+                                      type: boolean
+                                    removeCommunities:
+                                      description: RemoveCommunities is the community
+                                        to remove from the route.
+                                      items:
+                                        type: string
+                                      type: array
+                                  type: object
+                                type:
+                                  description: Type is the type of action.
+                                  enum:
+                                  - accept
+                                  - reject
+                                  - next
+                                  type: string
+                              required:
+                              - type
+                              type: object
+                            items:
+                              description: Items is a list of filter items.
+                              items:
+                                description: FilterItem represents a filter item.
+                                properties:
+                                  action:
+                                    description: Action is the action for the filter
+                                      item.
+                                    properties:
+                                      modifyRoute:
+                                        description: ModifyRoute is the modify route
+                                          action.
+                                        properties:
+                                          addCommunities:
+                                            description: AddCommunities is the community
+                                              to add to the route.
+                                            items:
+                                              type: string
+                                            type: array
+                                          additiveCommunities:
+                                            description: AdditiveCommunities is the
+                                              flag to add communities to the route,
+                                              by default the communities are replaced.
+                                            type: boolean
+                                          removeAllCommunities:
+                                            description: RemoveAllCommunities is the
+                                              flag to remove all communities from
+                                              the route.
+                                            type: boolean
+                                          removeCommunities:
+                                            description: RemoveCommunities is the
+                                              community to remove from the route.
+                                            items:
+                                              type: string
+                                            type: array
+                                        type: object
+                                      type:
+                                        description: Type is the type of action.
+                                        enum:
+                                        - accept
+                                        - reject
+                                        - next
+                                        type: string
+                                    required:
+                                    - type
+                                    type: object
+                                  matcher:
+                                    description: Matcher is the matcher for the filter
+                                      item.
+                                    properties:
+                                      bgpCommunity:
+                                        description: BGPCommunity is the BGP community
+                                          matcher.
+                                        properties:
+                                          community:
+                                            description: Community is the BGP community
+                                              to match.
+                                            type: string
+                                          exactMatch:
+                                            type: boolean
+                                        required:
+                                        - community
+                                        - exactMatch
+                                        type: object
+                                      prefix:
+                                        description: Prefix is the prefix matcher.
+                                        properties:
+                                          ge:
+                                            description: Ge is the minimum prefix
+                                              length to match.
+                                            type: integer
+                                          le:
+                                            description: Le is the maximum prefix
+                                              length to match.
+                                            type: integer
+                                          prefix:
+                                            description: Prefix is the prefix to match.
+                                            type: string
+                                        required:
+                                        - prefix
+                                        type: object
+                                    type: object
+                                required:
+                                - action
+                                - matcher
+                                type: object
+                              type: array
+                          required:
+                          - defaultAction
+                          type: object
+                        static:
+                          description: Static indicates whether to redistribute static
+                            routes.
+                          properties:
+                            defaultAction:
+                              description: DefaultAction is the default action for
+                                the filter.
+                              properties:
+                                modifyRoute:
+                                  description: ModifyRoute is the modify route action.
+                                  properties:
+                                    addCommunities:
+                                      description: AddCommunities is the community
+                                        to add to the route.
+                                      items:
+                                        type: string
+                                      type: array
+                                    additiveCommunities:
+                                      description: AdditiveCommunities is the flag
+                                        to add communities to the route, by default
+                                        the communities are replaced.
+                                      type: boolean
+                                    removeAllCommunities:
+                                      description: RemoveAllCommunities is the flag
+                                        to remove all communities from the route.
+                                      type: boolean
+                                    removeCommunities:
+                                      description: RemoveCommunities is the community
+                                        to remove from the route.
+                                      items:
+                                        type: string
+                                      type: array
+                                  type: object
+                                type:
+                                  description: Type is the type of action.
+                                  enum:
+                                  - accept
+                                  - reject
+                                  - next
+                                  type: string
+                              required:
+                              - type
+                              type: object
+                            items:
+                              description: Items is a list of filter items.
+                              items:
+                                description: FilterItem represents a filter item.
+                                properties:
+                                  action:
+                                    description: Action is the action for the filter
+                                      item.
+                                    properties:
+                                      modifyRoute:
+                                        description: ModifyRoute is the modify route
+                                          action.
+                                        properties:
+                                          addCommunities:
+                                            description: AddCommunities is the community
+                                              to add to the route.
+                                            items:
+                                              type: string
+                                            type: array
+                                          additiveCommunities:
+                                            description: AdditiveCommunities is the
+                                              flag to add communities to the route,
+                                              by default the communities are replaced.
+                                            type: boolean
+                                          removeAllCommunities:
+                                            description: RemoveAllCommunities is the
+                                              flag to remove all communities from
+                                              the route.
+                                            type: boolean
+                                          removeCommunities:
+                                            description: RemoveCommunities is the
+                                              community to remove from the route.
+                                            items:
+                                              type: string
+                                            type: array
+                                        type: object
+                                      type:
+                                        description: Type is the type of action.
+                                        enum:
+                                        - accept
+                                        - reject
+                                        - next
+                                        type: string
+                                    required:
+                                    - type
+                                    type: object
+                                  matcher:
+                                    description: Matcher is the matcher for the filter
+                                      item.
+                                    properties:
+                                      bgpCommunity:
+                                        description: BGPCommunity is the BGP community
+                                          matcher.
+                                        properties:
+                                          community:
+                                            description: Community is the BGP community
+                                              to match.
+                                            type: string
+                                          exactMatch:
+                                            type: boolean
+                                        required:
+                                        - community
+                                        - exactMatch
+                                        type: object
+                                      prefix:
+                                        description: Prefix is the prefix matcher.
+                                        properties:
+                                          ge:
+                                            description: Ge is the minimum prefix
+                                              length to match.
+                                            type: integer
+                                          le:
+                                            description: Le is the maximum prefix
+                                              length to match.
+                                            type: integer
+                                          prefix:
+                                            description: Prefix is the prefix to match.
+                                            type: string
+                                        required:
+                                        - prefix
+                                        type: object
+                                    type: object
+                                required:
+                                - action
+                                - matcher
+                                type: object
+                              type: array
+                          required:
+                          - defaultAction
+                          type: object
+                      type: object
                     staticRoutes:
                       description: StaticRoutes is a list of static routes.
                       items:
@@ -2843,6 +3383,276 @@ spec:
                         - trafficMatch
                         type: object
                       type: array
+                    redistribute:
+                      description: Redistribute is a config for BGP redistribution.
+                      properties:
+                        connected:
+                          description: Connected indicates whether to redistribute
+                            connected routes.
+                          properties:
+                            defaultAction:
+                              description: DefaultAction is the default action for
+                                the filter.
+                              properties:
+                                modifyRoute:
+                                  description: ModifyRoute is the modify route action.
+                                  properties:
+                                    addCommunities:
+                                      description: AddCommunities is the community
+                                        to add to the route.
+                                      items:
+                                        type: string
+                                      type: array
+                                    additiveCommunities:
+                                      description: AdditiveCommunities is the flag
+                                        to add communities to the route, by default
+                                        the communities are replaced.
+                                      type: boolean
+                                    removeAllCommunities:
+                                      description: RemoveAllCommunities is the flag
+                                        to remove all communities from the route.
+                                      type: boolean
+                                    removeCommunities:
+                                      description: RemoveCommunities is the community
+                                        to remove from the route.
+                                      items:
+                                        type: string
+                                      type: array
+                                  type: object
+                                type:
+                                  description: Type is the type of action.
+                                  enum:
+                                  - accept
+                                  - reject
+                                  - next
+                                  type: string
+                              required:
+                              - type
+                              type: object
+                            items:
+                              description: Items is a list of filter items.
+                              items:
+                                description: FilterItem represents a filter item.
+                                properties:
+                                  action:
+                                    description: Action is the action for the filter
+                                      item.
+                                    properties:
+                                      modifyRoute:
+                                        description: ModifyRoute is the modify route
+                                          action.
+                                        properties:
+                                          addCommunities:
+                                            description: AddCommunities is the community
+                                              to add to the route.
+                                            items:
+                                              type: string
+                                            type: array
+                                          additiveCommunities:
+                                            description: AdditiveCommunities is the
+                                              flag to add communities to the route,
+                                              by default the communities are replaced.
+                                            type: boolean
+                                          removeAllCommunities:
+                                            description: RemoveAllCommunities is the
+                                              flag to remove all communities from
+                                              the route.
+                                            type: boolean
+                                          removeCommunities:
+                                            description: RemoveCommunities is the
+                                              community to remove from the route.
+                                            items:
+                                              type: string
+                                            type: array
+                                        type: object
+                                      type:
+                                        description: Type is the type of action.
+                                        enum:
+                                        - accept
+                                        - reject
+                                        - next
+                                        type: string
+                                    required:
+                                    - type
+                                    type: object
+                                  matcher:
+                                    description: Matcher is the matcher for the filter
+                                      item.
+                                    properties:
+                                      bgpCommunity:
+                                        description: BGPCommunity is the BGP community
+                                          matcher.
+                                        properties:
+                                          community:
+                                            description: Community is the BGP community
+                                              to match.
+                                            type: string
+                                          exactMatch:
+                                            type: boolean
+                                        required:
+                                        - community
+                                        - exactMatch
+                                        type: object
+                                      prefix:
+                                        description: Prefix is the prefix matcher.
+                                        properties:
+                                          ge:
+                                            description: Ge is the minimum prefix
+                                              length to match.
+                                            type: integer
+                                          le:
+                                            description: Le is the maximum prefix
+                                              length to match.
+                                            type: integer
+                                          prefix:
+                                            description: Prefix is the prefix to match.
+                                            type: string
+                                        required:
+                                        - prefix
+                                        type: object
+                                    type: object
+                                required:
+                                - action
+                                - matcher
+                                type: object
+                              type: array
+                          required:
+                          - defaultAction
+                          type: object
+                        static:
+                          description: Static indicates whether to redistribute static
+                            routes.
+                          properties:
+                            defaultAction:
+                              description: DefaultAction is the default action for
+                                the filter.
+                              properties:
+                                modifyRoute:
+                                  description: ModifyRoute is the modify route action.
+                                  properties:
+                                    addCommunities:
+                                      description: AddCommunities is the community
+                                        to add to the route.
+                                      items:
+                                        type: string
+                                      type: array
+                                    additiveCommunities:
+                                      description: AdditiveCommunities is the flag
+                                        to add communities to the route, by default
+                                        the communities are replaced.
+                                      type: boolean
+                                    removeAllCommunities:
+                                      description: RemoveAllCommunities is the flag
+                                        to remove all communities from the route.
+                                      type: boolean
+                                    removeCommunities:
+                                      description: RemoveCommunities is the community
+                                        to remove from the route.
+                                      items:
+                                        type: string
+                                      type: array
+                                  type: object
+                                type:
+                                  description: Type is the type of action.
+                                  enum:
+                                  - accept
+                                  - reject
+                                  - next
+                                  type: string
+                              required:
+                              - type
+                              type: object
+                            items:
+                              description: Items is a list of filter items.
+                              items:
+                                description: FilterItem represents a filter item.
+                                properties:
+                                  action:
+                                    description: Action is the action for the filter
+                                      item.
+                                    properties:
+                                      modifyRoute:
+                                        description: ModifyRoute is the modify route
+                                          action.
+                                        properties:
+                                          addCommunities:
+                                            description: AddCommunities is the community
+                                              to add to the route.
+                                            items:
+                                              type: string
+                                            type: array
+                                          additiveCommunities:
+                                            description: AdditiveCommunities is the
+                                              flag to add communities to the route,
+                                              by default the communities are replaced.
+                                            type: boolean
+                                          removeAllCommunities:
+                                            description: RemoveAllCommunities is the
+                                              flag to remove all communities from
+                                              the route.
+                                            type: boolean
+                                          removeCommunities:
+                                            description: RemoveCommunities is the
+                                              community to remove from the route.
+                                            items:
+                                              type: string
+                                            type: array
+                                        type: object
+                                      type:
+                                        description: Type is the type of action.
+                                        enum:
+                                        - accept
+                                        - reject
+                                        - next
+                                        type: string
+                                    required:
+                                    - type
+                                    type: object
+                                  matcher:
+                                    description: Matcher is the matcher for the filter
+                                      item.
+                                    properties:
+                                      bgpCommunity:
+                                        description: BGPCommunity is the BGP community
+                                          matcher.
+                                        properties:
+                                          community:
+                                            description: Community is the BGP community
+                                              to match.
+                                            type: string
+                                          exactMatch:
+                                            type: boolean
+                                        required:
+                                        - community
+                                        - exactMatch
+                                        type: object
+                                      prefix:
+                                        description: Prefix is the prefix matcher.
+                                        properties:
+                                          ge:
+                                            description: Ge is the minimum prefix
+                                              length to match.
+                                            type: integer
+                                          le:
+                                            description: Le is the maximum prefix
+                                              length to match.
+                                            type: integer
+                                          prefix:
+                                            description: Prefix is the prefix to match.
+                                            type: string
+                                        required:
+                                        - prefix
+                                        type: object
+                                    type: object
+                                required:
+                                - action
+                                - matcher
+                                type: object
+                              type: array
+                          required:
+                          - defaultAction
+                          type: object
+                      type: object
                     staticRoutes:
                       description: StaticRoutes is a list of static routes.
                       items:
