@@ -689,19 +689,15 @@ spec:
                     items:
                       description: MirrorACL represents a mirror ACL configuration.
                       properties:
-                        destinationAddress:
-                          description: DestinationAddress is the destination address
-                            for the mirrored traffic.
-                          type: string
-                        destinationVrf:
-                          description: DestinationVrf is the destination VRF for the
-                            mirrored traffic.
-                          type: string
-                        encapsulationType:
-                          description: EncapsulationType is the encapsulation type
-                            for the mirrored traffic.
+                        direction:
+                          description: Direction is the direction of mirrored traffic.
                           enum:
-                          - gre
+                          - ingress
+                          - egress
+                          type: string
+                        mirrorDestination:
+                          description: MirrorDestination is the name of the mirror
+                            destination.
                           type: string
                         trafficMatch:
                           description: TrafficMatch is the traffic match for the mirror
@@ -725,12 +721,43 @@ spec:
                               type: string
                           type: object
                       required:
-                      - destinationAddress
-                      - destinationVrf
-                      - encapsulationType
+                      - direction
+                      - mirrorDestination
                       - trafficMatch
                       type: object
                     type: array
+                  mirrorDestinations:
+                    additionalProperties:
+                      description: MirrorDestination represents a mirror destination
+                        configuration.
+                      properties:
+                        destinationAddress:
+                          description: DestinationAddress is the address of the mirror
+                            destination.
+                          type: string
+                        encapsulationKey:
+                          description: EncapsulationKey is the encapsulation key for
+                            the mirrored traffic.
+                          format: int32
+                          type: integer
+                        encapsulationType:
+                          description: EncapsulationType is the encapsulation type
+                            for the mirrored traffic.
+                          enum:
+                          - gre
+                          type: string
+                        sourceAddress:
+                          description: SourceAddress is the source address of the
+                            mirror destination.
+                          type: string
+                      required:
+                      - destinationAddress
+                      - encapsulationType
+                      - sourceAddress
+                      type: object
+                    description: MirrorDestinations is a map of mirror destinations.
+                      (unique name across all VRFs)
+                    type: object
                   policyRoutes:
                     description: PolicyRoutes is a list of policy-based routes.
                     items:
@@ -1738,19 +1765,15 @@ spec:
                       items:
                         description: MirrorACL represents a mirror ACL configuration.
                         properties:
-                          destinationAddress:
-                            description: DestinationAddress is the destination address
-                              for the mirrored traffic.
-                            type: string
-                          destinationVrf:
-                            description: DestinationVrf is the destination VRF for
-                              the mirrored traffic.
-                            type: string
-                          encapsulationType:
-                            description: EncapsulationType is the encapsulation type
-                              for the mirrored traffic.
+                          direction:
+                            description: Direction is the direction of mirrored traffic.
                             enum:
-                            - gre
+                            - ingress
+                            - egress
+                            type: string
+                          mirrorDestination:
+                            description: MirrorDestination is the name of the mirror
+                              destination.
                             type: string
                           trafficMatch:
                             description: TrafficMatch is the traffic match for the
@@ -1774,12 +1797,43 @@ spec:
                                 type: string
                             type: object
                         required:
-                        - destinationAddress
-                        - destinationVrf
-                        - encapsulationType
+                        - direction
+                        - mirrorDestination
                         - trafficMatch
                         type: object
                       type: array
+                    mirrorDestinations:
+                      additionalProperties:
+                        description: MirrorDestination represents a mirror destination
+                          configuration.
+                        properties:
+                          destinationAddress:
+                            description: DestinationAddress is the address of the
+                              mirror destination.
+                            type: string
+                          encapsulationKey:
+                            description: EncapsulationKey is the encapsulation key
+                              for the mirrored traffic.
+                            format: int32
+                            type: integer
+                          encapsulationType:
+                            description: EncapsulationType is the encapsulation type
+                              for the mirrored traffic.
+                            enum:
+                            - gre
+                            type: string
+                          sourceAddress:
+                            description: SourceAddress is the source address of the
+                              mirror destination.
+                            type: string
+                        required:
+                        - destinationAddress
+                        - encapsulationType
+                        - sourceAddress
+                        type: object
+                      description: MirrorDestinations is a map of mirror destinations.
+                        (unique name across all VRFs)
+                      type: object
                     policyRoutes:
                       description: PolicyRoutes is a list of policy-based routes.
                       items:
@@ -2045,19 +2099,15 @@ spec:
                       items:
                         description: MirrorACL represents a mirror ACL configuration.
                         properties:
-                          destinationAddress:
-                            description: DestinationAddress is the destination address
-                              for the mirrored traffic.
-                            type: string
-                          destinationVrf:
-                            description: DestinationVrf is the destination VRF for
-                              the mirrored traffic.
-                            type: string
-                          encapsulationType:
-                            description: EncapsulationType is the encapsulation type
-                              for the mirrored traffic.
+                          direction:
+                            description: Direction is the direction of mirrored traffic.
                             enum:
-                            - gre
+                            - ingress
+                            - egress
+                            type: string
+                          mirrorDestination:
+                            description: MirrorDestination is the name of the mirror
+                              destination.
                             type: string
                           trafficMatch:
                             description: TrafficMatch is the traffic match for the
@@ -2081,9 +2131,8 @@ spec:
                                 type: string
                             type: object
                         required:
-                        - destinationAddress
-                        - destinationVrf
-                        - encapsulationType
+                        - direction
+                        - mirrorDestination
                         - trafficMatch
                         type: object
                       type: array
@@ -2760,19 +2809,15 @@ spec:
                       items:
                         description: MirrorACL represents a mirror ACL configuration.
                         properties:
-                          destinationAddress:
-                            description: DestinationAddress is the destination address
-                              for the mirrored traffic.
-                            type: string
-                          destinationVrf:
-                            description: DestinationVrf is the destination VRF for
-                              the mirrored traffic.
-                            type: string
-                          encapsulationType:
-                            description: EncapsulationType is the encapsulation type
-                              for the mirrored traffic.
+                          direction:
+                            description: Direction is the direction of mirrored traffic.
                             enum:
-                            - gre
+                            - ingress
+                            - egress
+                            type: string
+                          mirrorDestination:
+                            description: MirrorDestination is the name of the mirror
+                              destination.
                             type: string
                           trafficMatch:
                             description: TrafficMatch is the traffic match for the
@@ -2796,12 +2841,43 @@ spec:
                                 type: string
                             type: object
                         required:
-                        - destinationAddress
-                        - destinationVrf
-                        - encapsulationType
+                        - direction
+                        - mirrorDestination
                         - trafficMatch
                         type: object
                       type: array
+                    mirrorDestinations:
+                      additionalProperties:
+                        description: MirrorDestination represents a mirror destination
+                          configuration.
+                        properties:
+                          destinationAddress:
+                            description: DestinationAddress is the address of the
+                              mirror destination.
+                            type: string
+                          encapsulationKey:
+                            description: EncapsulationKey is the encapsulation key
+                              for the mirrored traffic.
+                            format: int32
+                            type: integer
+                          encapsulationType:
+                            description: EncapsulationType is the encapsulation type
+                              for the mirrored traffic.
+                            enum:
+                            - gre
+                            type: string
+                          sourceAddress:
+                            description: SourceAddress is the source address of the
+                              mirror destination.
+                            type: string
+                        required:
+                        - destinationAddress
+                        - encapsulationType
+                        - sourceAddress
+                        type: object
+                      description: MirrorDestinations is a map of mirror destinations.
+                        (unique name across all VRFs)
+                      type: object
                     policyRoutes:
                       description: PolicyRoutes is a list of policy-based routes.
                       items:

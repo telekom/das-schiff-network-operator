@@ -83,6 +83,8 @@ type VRF struct {
 	PolicyRoutes []PolicyRoute `json:"policyRoutes,omitempty"`
 	// MirrorACLs is a list of mirror ACLs.
 	MirrorACLs []MirrorACL `json:"mirrorAcls,omitempty"`
+	// MirrorDestinations is a map of mirror destinations. (unique name across all VRFs)
+	MirrorDestinations map[string]MirrorDestination `json:"mirrorDestinations,omitempty"`
 }
 
 // FabricVRF represents a fabric VRF configuration.
@@ -257,6 +259,27 @@ type PolicyRoute struct {
 	NextHop NextHop `json:"nextHop"`
 }
 
+// MirrorDirection represents the direction of mirrored traffic.
+type MirrorDirection string
+
+const (
+	// MirrorDirectionIngress represents ingress mirrored traffic.
+	MirrorDirectionIngress MirrorDirection = "ingress"
+	// MirrorDirectionEgress represents egress mirrored traffic.
+	MirrorDirectionEgress MirrorDirection = "egress"
+)
+
+// MirrorACL represents a mirror ACL configuration.
+type MirrorACL struct {
+	// TrafficMatch is the traffic match for the mirror ACL.
+	TrafficMatch TrafficMatch `json:"trafficMatch"`
+	// MirrorDestination is the name of the mirror destination.
+	MirrorDestination string `json:"mirrorDestination"`
+	// Direction is the direction of mirrored traffic.
+	// +kubebuilder:validation:Enum=ingress;egress
+	Direction MirrorDirection `json:"direction"`
+}
+
 // EncapsulationType represents an encapsulation type.
 type EncapsulationType string
 
@@ -264,17 +287,17 @@ const (
 	EncapsulationTypeGRE EncapsulationType = "gre"
 )
 
-// MirrorACL represents a mirror ACL configuration.
-type MirrorACL struct {
-	// TrafficMatch is the traffic match for the mirror ACL.
-	TrafficMatch TrafficMatch `json:"trafficMatch"`
-	// DestinationAddress is the destination address for the mirrored traffic.
+// MirrorDestination represents a mirror destination configuration.
+type MirrorDestination struct {
+	// DestinationAddress is the address of the mirror destination.
 	DestinationAddress string `json:"destinationAddress"`
-	// DestinationVrf is the destination VRF for the mirrored traffic.
-	DestinationVrf string `json:"destinationVrf"`
+	// SourceAddress is the source address of the mirror destination.
+	SourceAddress string `json:"sourceAddress"`
 	// EncapsulationType is the encapsulation type for the mirrored traffic.
 	// +kubebuilder:validation:Enum=gre
 	EncapsulationType EncapsulationType `json:"encapsulationType"`
+	// EncapsulationKey is the encapsulation key for the mirrored traffic.
+	EncapsulationKey *uint32 `json:"encapsulationKey,omitempty"`
 }
 
 // NextHop represents a next hop configuration.
