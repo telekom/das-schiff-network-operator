@@ -293,9 +293,11 @@
             <ipv4-unicast>
               <redistribute>
                 <protocol>connected</protocol>
+                <route-map>rm_cluster_redist_connected</route-map>
               </redistribute>
               <redistribute>
                 <protocol>static</protocol>
+                <route-map>rm_cluster_redist_static</route-map>
               </redistribute>
               <l3vrf>
                 <import>
@@ -308,9 +310,11 @@
             <ipv6-unicast>
               <redistribute>
                 <protocol>connected</protocol>
+                <route-map>rm_cluster_redist_connected</route-map>
               </redistribute>
               <redistribute>
                 <protocol>static</protocol>
+                <route-map>rm_cluster_redist_static</route-map>
               </redistribute>
               <l3vrf>
                 <import>
@@ -950,6 +954,20 @@
       <seq>
         <num>12</num>
         <policy>deny</policy>
+      </seq>
+    </route-map>
+    <route-map>
+      <name>rm_cluster_redist_connected</name>
+      <seq>
+        <num>10</num>
+        <policy>permit</policy>
+      </seq>
+    </route-map>
+    <route-map>
+      <name>rm_cluster_redist_static</name>
+      <seq>
+        <num>10</num>
+        <policy>permit</policy>
       </seq>
     </route-map>
     <route-map>
