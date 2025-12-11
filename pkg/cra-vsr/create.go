@@ -65,7 +65,7 @@ func (m *Manager) generateUnderlayMAC() string {
 	return macAddr
 }
 
-func (Manager) createIPAddress(addr string, ipv4, ipv6 *IPAddressList) *IPAddress {
+func (Manager) createIPAddress(addr string, ipv4, ipv6 *IPAddressList) {
 	ipList := ipv6
 	if isIPv4(addr) {
 		ipList = ipv4
@@ -73,7 +73,6 @@ func (Manager) createIPAddress(addr string, ipv4, ipv6 *IPAddressList) *IPAddres
 	ipList.IPAddresses = append(ipList.IPAddresses, IPAddress{
 		IP: addr,
 	})
-	return &ipList.IPAddresses[len(ipList.IPAddresses)-1]
 }
 
 func (Manager) createVRF(name string, table int, ns *Namespace) *VRF {
