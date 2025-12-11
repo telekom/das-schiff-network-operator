@@ -254,6 +254,13 @@ func (l *Layer3) setupVRF(info InfoL3) error {
 		for name, conf := range info.vrf.Loopbacks {
 			l.setupLoopback(vrf, name, conf)
 		}
+
+		if info.vni != -1 || l.mgr.isReservedVRF(info.name) {
+			for i := range info.vrf.MirrorACLs {
+				from := (vxlanPrefix + info.name)
+				l.mgr.createMirrorTraffic(l.ns, from, &info.vrf.MirrorACLs[i])
+			}
+		}
 	}
 
 	return nil
