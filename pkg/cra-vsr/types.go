@@ -291,6 +291,9 @@ type Interfaces struct {
 	VXLANs    []VXLAN          `xml:"vxlan,omitempty"`
 	VLANs     []VLAN           `xml:"vlan,omitempty"`
 	Infras    []Infrastructure `xml:"infrastructure,omitempty"`
+	GREs      []GRE            `xml:"gre,omitempty"`
+	GRETaps   []GRETap         `xml:"gretap,omitempty"`
+	Loopbacks []Loopback       `xml:"loopback,omitempty"`
 }
 
 type Infrastructure struct {
@@ -303,6 +306,30 @@ type Physical struct {
 	IPv4         *IPAddressList `xml:"ipv4,omitempty"`
 	IPv6         *IPAddressList `xml:"ipv6,omitempty"`
 	NetworkStack *NetworkStack  `xml:"network-stack,omitempty"`
+}
+
+type Loopback struct {
+	XMLName xml.Name       `xml:"urn:6wind:vrouter/loopback loopback"`
+	Name    string         `xml:"name"`
+	IPv4    *IPAddressList `xml:"ipv4,omitempty"`
+	IPv6    *IPAddressList `xml:"ipv6,omitempty"`
+}
+
+type GRE struct {
+	XMLName      xml.Name      `xml:"urn:6wind:vrouter/gre gre"`
+	Name         string        `xml:"name"`
+	Local        string        `xml:"local"`
+	Remote       *string       `xml:"remote,omitempty"`
+	MTU          *int          `xml:"mtu,omitempty"`
+	KeyInput     *uint32       `xml:"key>input,omitempty"`
+	KeyOutput    *uint32       `xml:"key>output,omitempty"`
+	KeyBoth      *uint32       `xml:"key>both,omitempty"`
+	NetworkStack *NetworkStack `xml:"network-stack,omitempty"`
+}
+
+type GRETap struct {
+	XMLName xml.Name `xml:"urn:6wind:vrouter/gretap gretap"`
+	GRE
 }
 
 type Bridge struct {
@@ -583,6 +610,15 @@ func (br *Bridge) Sort() {
 	}
 }
 
+func (lo *Loopback) Sort() {
+	if lo.IPv4 != nil {
+		lo.IPv4.Sort()
+	}
+	if lo.IPv6 != nil {
+		lo.IPv4.Sort()
+	}
+}
+
 func (vxlan *VXLAN) Sort() {
 	if vxlan.IPv4 != nil {
 		vxlan.IPv4.Sort()
@@ -608,12 +644,24 @@ func (intfs *Interfaces) Sort() {
 	sort.Slice(intfs.Infras, func(i, j int) bool {
 		return intfs.Infras[i].Name < intfs.Infras[j].Name
 	})
+	sort.Slice(intfs.GREs, func(i, j int) bool {
+		return intfs.GREs[i].Name < intfs.GREs[j].Name
+	})
+	sort.Slice(intfs.GRETaps, func(i, j int) bool {
+		return intfs.GRETaps[i].Name < intfs.GRETaps[j].Name
+	})
+	sort.Slice(intfs.Loopbacks, func(i, j int) bool {
+		return intfs.Loopbacks[i].Name < intfs.Loopbacks[j].Name
+	})
 
 	for _, phys := range intfs.Physicals {
 		phys.Sort()
 	}
 	for _, br := range intfs.Bridges {
 		br.Sort()
+	}
+	for _, lo := range intfs.Loopbacks {
+		lo.Sort()
 	}
 	for i := range intfs.VXLANs {
 		intfs.VXLANs[i].Sort()
