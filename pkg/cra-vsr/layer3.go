@@ -21,6 +21,7 @@ import (
 	"sort"
 
 	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
+	"github.com/telekom/das-schiff-network-operator/pkg/helpers/types"
 )
 
 const (
@@ -189,6 +190,46 @@ func (l *Layer3) setupInformations() error {
 	return nil
 }
 
+func (*Layer3) setupGRE(vrf *VRF, name string, conf v1alpha1.GRE) {
+	//nolint:mnd
+	gre := GRE{
+		Name:    name,
+		MTU:     types.ToPtr(1500),
+		Local:   conf.SourceAddress,
+		Remote:  &conf.DestinationAddress,
+		KeyBoth: conf.EncapsulationKey,
+	}
+
+	if conf.Layer == v1alpha1.GRELayer2 {
+		vrf.Interfaces.GRETaps = append(vrf.Interfaces.GRETaps, GRETap{
+			GRE: gre,
+		})
+	} else {
+		vrf.Interfaces.GREs = append(vrf.Interfaces.GREs, gre)
+	}
+}
+
+func (l *Layer3) setupLoopback(vrf *VRF, name string, conf v1alpha1.Loopback) {
+	ipv4 := &IPAddressList{}
+	ipv6 := &IPAddressList{}
+	for _, addr := range conf.IPAddresses {
+		l.mgr.createIPAddress(addr, ipv4, ipv6)
+	}
+
+	lo := Loopback{
+		Name: name,
+	}
+
+	if len(ipv4.IPAddresses) > 0 {
+		lo.IPv4 = ipv4
+	}
+	if len(ipv6.IPAddresses) > 0 {
+		lo.IPv6 = ipv6
+	}
+
+	vrf.Interfaces.Loopbacks = append(vrf.Interfaces.Loopbacks, lo)
+}
+
 func (l *Layer3) setupVRF(info InfoL3) error {
 	if len(info.name) > maxVRFnameLen {
 		return fmt.Errorf("VRF name too long (max 12): %s", info.name)
@@ -204,6 +245,15 @@ func (l *Layer3) setupVRF(info InfoL3) error {
 		l.mgr.createVXLAN(
 			(vxlanPrefix + info.name), br, l.ns.Interfaces,
 			info.vni, info.mtu, true, false)
+	}
+
+	if info.vrf != nil {
+		for name, conf := range info.vrf.GREs {
+			l.setupGRE(vrf, name, conf)
+		}
+		for name, conf := range info.vrf.Loopbacks {
+			l.setupLoopback(vrf, name, conf)
+		}
 	}
 
 	return nil
