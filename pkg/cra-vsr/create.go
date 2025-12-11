@@ -19,8 +19,10 @@ package cra
 import (
 	"fmt"
 	"net"
+	"strings"
 
 	"github.com/nemith/netconf"
+	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/pkg/helpers/types"
 )
 
@@ -172,4 +174,76 @@ func (m *Manager) createVLAN(vlanID, mtu int, br *Bridge, intfs *Interfaces) *VL
 	br.Slaves = append(br.Slaves, slave)
 
 	return &intfs.VLANs[len(intfs.VLANs)-1]
+}
+
+func (*Manager) createMirrorTraffic(ns *Namespace, from string, acl *v1alpha1.MirrorACL) {
+	if ns.MTraffic == nil {
+		ns.MTraffic = &MirrorTraffic{}
+	}
+
+	filterKey := from + "-" + string(acl.Direction) + "-" + acl.MirrorDestination
+
+	var filter *MTrafficFilter
+	for i := range ns.MTraffic.Filters {
+		f := &ns.MTraffic.Filters[i]
+		if f.Name == filterKey {
+			filter = f
+			break
+		}
+	}
+
+	if filter == nil {
+		ns.MTraffic.Actions = append(ns.MTraffic.Actions, MTrafficAction{
+			From:      from,
+			Direction: string(acl.Direction),
+			To:        acl.MirrorDestination,
+			Filter:    &filterKey,
+		})
+
+		ns.MTraffic.Filters = append(ns.MTraffic.Filters, MTrafficFilter{
+			Name: filterKey,
+		})
+		filter = &ns.MTraffic.Filters[len(ns.MTraffic.Filters)-1]
+	}
+
+	matcher := MTrafficMatcher{
+		Protocol: acl.TrafficMatch.Protocol,
+	}
+
+	var address *string
+	if acl.TrafficMatch.SrcPrefix != nil {
+		if strings.Contains(*acl.TrafficMatch.SrcPrefix, "/") {
+			matcher.SrcPrefix = acl.TrafficMatch.SrcPrefix
+		} else {
+			matcher.SrcAddress = acl.TrafficMatch.SrcPrefix
+		}
+		address = acl.TrafficMatch.SrcPrefix
+	}
+	if acl.TrafficMatch.DstPrefix != nil {
+		if strings.Contains(*acl.TrafficMatch.DstPrefix, "/") {
+			matcher.DstPrefix = acl.TrafficMatch.DstPrefix
+		} else {
+			matcher.DstAddress = acl.TrafficMatch.DstPrefix
+		}
+		address = acl.TrafficMatch.DstPrefix
+	}
+
+	if acl.TrafficMatch.SrcPort != nil {
+		matcher.SrcPort = types.ToPtr(int(*acl.TrafficMatch.SrcPort))
+	}
+	if acl.TrafficMatch.DstPort != nil {
+		matcher.DstPort = types.ToPtr(int(*acl.TrafficMatch.DstPort))
+	}
+
+	filterRule := MTrafficFilterRule{
+		ID: len(filter.Rules) + 1,
+	}
+
+	if address != nil && strings.Contains(*address, ":") {
+		filterRule.IPv6 = &matcher
+	} else {
+		filterRule.IPv4 = &matcher
+	}
+
+	filter.Rules = append(filter.Rules, filterRule)
 }
