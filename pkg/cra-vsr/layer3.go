@@ -40,6 +40,7 @@ type InfoL3 struct {
 	tid  int
 	vni  int
 	mtu  int
+	vrf  *v1alpha1.VRF
 }
 
 func NewLayer3(
@@ -105,12 +106,13 @@ func (l *Layer3) setupTableID() error {
 	return nil
 }
 
-func (Layer3) makeInfo(name string, tid, vni int) InfoL3 {
+func (Layer3) makeInfo(name string, tid, vni int, vrf *v1alpha1.VRF) InfoL3 {
 	return InfoL3{
 		name: name,
 		tid:  tid,
 		vni:  vni,
 		mtu:  defaultMtu,
+		vrf:  vrf,
 	}
 }
 
@@ -118,6 +120,7 @@ func (l *Layer3) setupInformations() error {
 	type FlattenVRF struct {
 		name string
 		vni  int
+		conf v1alpha1.VRF
 	}
 
 	vrfs := []FlattenVRF{}
@@ -125,19 +128,23 @@ func (l *Layer3) setupInformations() error {
 		vrfs = append(vrfs, FlattenVRF{
 			name: name,
 			vni:  int(l.nodeCfg.FabricVRFs[name].VNI),
+			conf: l.nodeCfg.FabricVRFs[name].VRF,
 		})
 	}
 	for name := range l.nodeCfg.LocalVRFs {
 		vrfs = append(vrfs, FlattenVRF{
 			name: name,
 			vni:  -1,
+			conf: l.nodeCfg.LocalVRFs[name],
 		})
 	}
 	sort.Slice(vrfs, func(i, j int) bool {
 		return vrfs[i].name < vrfs[j].name
 	})
 
-	for _, vrf := range vrfs {
+	for i := range vrfs {
+		vrf := &vrfs[i]
+
 		if l.mgr.isReservedVRF(vrf.name) {
 			continue
 		}
@@ -151,7 +158,7 @@ func (l *Layer3) setupInformations() error {
 			l.tableID[vrf.name] = tid
 		}
 
-		l.infos[vrf.name] = l.makeInfo(vrf.name, tid, vrf.vni)
+		l.infos[vrf.name] = l.makeInfo(vrf.name, tid, vrf.vni, &vrf.conf)
 	}
 
 	{
@@ -160,7 +167,7 @@ func (l *Layer3) setupInformations() error {
 		if !ok {
 			return fmt.Errorf("cluster vrf not found in cra")
 		}
-		l.infos[name] = l.makeInfo(name, tid, -1)
+		l.infos[name] = l.makeInfo(name, tid, -1, l.nodeCfg.ClusterVRF)
 	}
 
 	{
@@ -169,7 +176,14 @@ func (l *Layer3) setupInformations() error {
 		if !ok {
 			return fmt.Errorf("management vrf not found in cra")
 		}
-		l.infos[name] = l.makeInfo(name, tid, -1)
+
+		var vrf *v1alpha1.VRF
+		conf, ok := l.nodeCfg.FabricVRFs[name]
+		if ok {
+			vrf = &conf.VRF
+		}
+
+		l.infos[name] = l.makeInfo(name, tid, -1, vrf)
 	}
 
 	return nil
