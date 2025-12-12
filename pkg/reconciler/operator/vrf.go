@@ -18,7 +18,7 @@ func (crr *ConfigRevisionReconciler) buildNodeVrf(node *corev1.Node, revision *v
 		return vrfs[i].Seq < vrfs[j].Seq
 	})
 
-	c.Spec.ClusterVRF = &v1alpha1.VRF{}
+	c.Spec.ClusterVRF = createDefaultClusterVRF()
 
 	for i := range vrfs {
 		if !matchSelector(node, vrfs[i].NodeSelector) {
@@ -38,6 +38,7 @@ func (crr *ConfigRevisionReconciler) buildNodeVrf(node *corev1.Node, revision *v
 
 		if crr.importMode == ImportModeStaticRoute {
 			c.Spec.ClusterVRF.StaticRoutes = appendImportsAsStaticRoutes(c.Spec.ClusterVRF.StaticRoutes, &vrfs[i])
+			dropStaticRouteImports(c.Spec.ClusterVRF.Redistribute, &vrfs[i])
 		}
 	}
 
@@ -88,6 +89,23 @@ func (crr *ConfigRevisionReconciler) createFabricVRF(vrf *v1alpha1.VRFRevision) 
 		fabricVrf.EVPNExportRouteTargets = append(fabricVrf.EVPNExportRouteTargets, rt)
 	}
 	return fabricVrf, nil
+}
+
+func createDefaultClusterVRF() *v1alpha1.VRF {
+	return &v1alpha1.VRF{
+		Redistribute: &v1alpha1.Redistribute{
+			Static: &v1alpha1.Filter{
+				DefaultAction: v1alpha1.Action{
+					Type: v1alpha1.Accept,
+				},
+			},
+			Connected: &v1alpha1.Filter{
+				DefaultAction: v1alpha1.Action{
+					Type: v1alpha1.Accept,
+				},
+			},
+		},
+	}
 }
 
 func updateFabricVRF(fabricVrf *v1alpha1.FabricVRF, vrf *v1alpha1.VRFRevision, defaultImportMap map[string]v1alpha1.VRFImport, importMode ImportMode) {
@@ -198,4 +216,25 @@ func appendImportsAsStaticRoutes(staticRoutes []v1alpha1.StaticRoute, vrf *v1alp
 		staticRoutes = append(staticRoutes, staticRoute)
 	}
 	return staticRoutes
+}
+
+func dropStaticRouteImports(redistribute *v1alpha1.Redistribute, vrf *v1alpha1.VRFRevision) {
+	for _, vrfImport := range vrf.Import {
+		if vrfImport.Action != permitRoute {
+			continue
+		}
+
+		filterItem := v1alpha1.FilterItem{
+			Matcher: v1alpha1.Matcher{
+				Prefix: &v1alpha1.PrefixMatcher{
+					Prefix: vrfImport.CIDR,
+				},
+			},
+			Action: v1alpha1.Action{
+				Type: v1alpha1.Reject,
+			},
+		}
+
+		redistribute.Static.Items = append(redistribute.Static.Items, filterItem)
+	}
 }

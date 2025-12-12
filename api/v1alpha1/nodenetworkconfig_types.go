@@ -83,6 +83,16 @@ type VRF struct {
 	PolicyRoutes []PolicyRoute `json:"policyRoutes,omitempty"`
 	// MirrorACLs is a list of mirror ACLs.
 	MirrorACLs []MirrorACL `json:"mirrorAcls,omitempty"`
+	// Redistribute is a config for BGP redistribution.
+	Redistribute *Redistribute `json:"redistribute,omitempty"`
+}
+
+// Redistribute represents a BGP redistribution configuration.
+type Redistribute struct {
+	// Connected indicates whether to redistribute connected routes.
+	Connected *Filter `json:"connected,omitempty"`
+	// Static indicates whether to redistribute static routes.
+	Static *Filter `json:"static,omitempty"`
 }
 
 // FabricVRF represents a fabric VRF configuration.

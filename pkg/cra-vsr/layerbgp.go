@@ -551,6 +551,41 @@ func (LayerBGP) setupBaseNeighbor(bgp *BGP, conf *config.Neighbor, isUnderlay bo
 	}
 }
 
+func (l *LayerBGP) setupRedistributeRtMap(
+	vrfName string,
+	bgp *BGP,
+	conf v1alpha1.Redistribute,
+) {
+	var bgpConnectedRtMap *string
+	var bgpStaticRtMap *string
+
+	if conf.Connected != nil {
+		rtmap := vrfName + "_redist_connected"
+		l.setupRouteMaps(rtmap, *conf.Connected)
+		bgpConnectedRtMap = types.ToPtr("rm_" + rtmap)
+	}
+
+	if conf.Static != nil {
+		rtmap := vrfName + "_redist_static"
+		l.setupRouteMaps(rtmap, *conf.Static)
+		bgpStaticRtMap = types.ToPtr("rm_" + rtmap)
+	}
+
+	for _, ucast := range []*BGPUcast{bgp.AF.UcastV4, bgp.AF.UcastV6} {
+		if ucast == nil {
+			continue
+		}
+		for i := range ucast.Redists {
+			if ucast.Redists[i].Protocol == BGPRedistConnect {
+				ucast.Redists[i].RouteMap = bgpConnectedRtMap
+			}
+			if ucast.Redists[i].Protocol == BGPRedistStatic {
+				ucast.Redists[i].RouteMap = bgpStaticRtMap
+			}
+		}
+	}
+}
+
 func (l *LayerBGP) setupLocalVRF(name string, conf *v1alpha1.VRF) error {
 	vrf := lookupVRF(l.ns, name)
 	if vrf == nil {
@@ -580,6 +615,10 @@ func (l *LayerBGP) setupLocalVRF(name string, conf *v1alpha1.VRF) error {
 				Protocol: BGPRedistStatic,
 			},
 		},
+	}
+
+	if conf.Redistribute != nil {
+		l.setupRedistributeRtMap(name, bgp, *conf.Redistribute)
 	}
 
 	for _, rt := range conf.StaticRoutes {
@@ -662,6 +701,10 @@ func (l *LayerBGP) setupFabricVRF(name string, conf *v1alpha1.FabricVRF) error {
 		bgp.AF.EVPN.Advertise.UcastV6.RouteMap = types.ToPtr("rm_" + rtmap)
 	}
 
+	if conf.Redistribute != nil {
+		l.setupRedistributeRtMap(name, bgp, *conf.Redistribute)
+	}
+
 	for _, rt := range conf.StaticRoutes {
 		l.mkStaticRoute(vrf.Routing, l.convStaticRoute(rt))
 	}
@@ -742,10 +785,15 @@ func (l *LayerBGP) setupClusterVRF() error {
 	}
 
 	if conf != nil {
+		if conf.Redistribute != nil {
+			l.setupRedistributeRtMap(name, bgp, *conf.Redistribute)
+		}
+
 		for _, rt := range conf.StaticRoutes {
 			l.mkStaticRoute(vrf.Routing, l.convStaticRoute(rt))
 		}
 	}
+
 	for _, cidr := range baseCfg.ExportCIDRs {
 		l.mkStaticRoute(vrf.Routing,
 			l.convStaticRoute(v1alpha1.StaticRoute{
@@ -861,6 +909,10 @@ func (l *LayerBGP) setupManagementVRF() error {
 
 	conf, ok := l.nodeCfg.FabricVRFs[name]
 	if ok {
+		if conf.Redistribute != nil {
+			l.setupRedistributeRtMap(name, bgp, *conf.Redistribute)
+		}
+
 		for _, rt := range conf.StaticRoutes {
 			l.mkStaticRoute(vrf.Routing, l.convStaticRoute(rt))
 		}
