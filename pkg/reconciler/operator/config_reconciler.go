@@ -14,9 +14,8 @@ import (
 )
 
 const (
-	defaultDebounceTime    = 1 * time.Second
-	DefaultTimeout         = "60s"
-	DefaultNodeUpdateLimit = 1
+	defaultDebounceTime = 1 * time.Second
+	DefaultTimeout      = "60s"
 )
 
 // ConfigReconciler is responsible for creating NetworkConfigRevision objects.
@@ -140,6 +139,57 @@ func (r *reconcileConfig) createRevision(ctx context.Context, revision *v1alpha1
 	return nil
 }
 
+//nolint:gocritic // slices.SortFunc comparator requires value params
+func lessLayer2(a, b v1alpha1.Layer2Revision) int {
+	if a.ID < b.ID {
+		return -1
+	}
+	if a.ID > b.ID {
+		return 1
+	}
+	return 0
+}
+
+//nolint:gocritic // slices.SortFunc comparator requires value params
+func lessLayer3(a, b v1alpha1.VRFRevision) int {
+	if a.Name < b.Name {
+		return -1
+	}
+	if a.Name > b.Name {
+		return 1
+	}
+	if a.Seq < b.Seq {
+		return -1
+	}
+	if a.Seq > b.Seq {
+		return 1
+	}
+	return 0
+}
+
+//nolint:gocritic // slices.SortFunc comparator requires value params
+func lessBgp(a, b v1alpha1.BGPRevision) int {
+	if a.Name < b.Name {
+		return -1
+	}
+	if a.Name > b.Name {
+		return 1
+	}
+	return 0
+}
+
+//nolint:gocritic // slices.SortFunc comparator requires value params
+func lessRevision(a, b v1alpha1.NetworkConfigRevision) int {
+	// Sort by Revision descending (latest first)
+	if a.Spec.Revision > b.Spec.Revision {
+		return -1
+	}
+	if a.Spec.Revision < b.Spec.Revision {
+		return 1
+	}
+	return 0
+}
+
 func (r *reconcileConfig) fetchLayer2(ctx context.Context) ([]v1alpha1.Layer2Revision, error) {
 	layer2List := &v1alpha1.Layer2NetworkConfigurationList{}
 	err := r.client.List(ctx, layer2List)
@@ -160,6 +210,8 @@ func (r *reconcileConfig) fetchLayer2(ctx context.Context) ([]v1alpha1.Layer2Rev
 		}
 	}
 
+	slices.SortFunc(l2vnis, lessLayer2)
+
 	return l2vnis, nil
 }
 
@@ -179,6 +231,8 @@ func (r *reconcileConfig) fetchLayer3(ctx context.Context) ([]v1alpha1.VRFRevisi
 		}
 	}
 
+	slices.SortFunc(l3vnis, lessLayer3)
+
 	return l3vnis, nil
 }
 
@@ -197,6 +251,8 @@ func (r *reconcileConfig) fetchBgp(ctx context.Context) ([]v1alpha1.BGPRevision,
 			BGPPeeringSpec: bgpConfigs.Items[i].Spec,
 		}
 	}
+
+	slices.SortFunc(bgps, lessBgp)
 
 	return bgps, nil
 }
@@ -230,12 +286,7 @@ func listRevisions(ctx context.Context, c client.Client) (*v1alpha1.NetworkConfi
 		return nil, fmt.Errorf("error listing NetworkConfigRevisions: %w", err)
 	}
 
-	// sort revisions by creation date ascending (newest first)
-	if len(revisions.Items) > 0 {
-		slices.SortFunc(revisions.Items, func(a, b v1alpha1.NetworkConfigRevision) int {
-			return b.GetCreationTimestamp().Compare(a.GetCreationTimestamp().Time) // newest first
-		})
-	}
+	slices.SortFunc(revisions.Items, lessRevision)
 
 	return revisions, nil
 }
