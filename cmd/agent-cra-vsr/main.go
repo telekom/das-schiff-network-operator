@@ -29,6 +29,7 @@ import (
 
 	controllervsr "github.com/telekom/das-schiff-network-operator/controllers/agent-cra-vsr"
 	reconcilervsr "github.com/telekom/das-schiff-network-operator/pkg/reconciler/agent-cra-vsr"
+	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/common"
 
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/pkg/cra-vsr"
@@ -212,7 +213,7 @@ func main() {
 	flag.StringVar(&healthAddr, "health-addr", ":7081", "bind address of health/readiness probes")
 	flag.StringVar(&metricsAddr, "metrics-addr", ":7080", "bind address of metrics endpoint")
 	flag.StringVar(&nodeNetworkConfigPath, "nodenetworkconfig-path",
-		reconcilervsr.DefaultNodeNetworkConfigPath,
+		common.DefaultNodeNetworkConfigPath,
 		"Path to store working node configuration.")
 	flag.Parse()
 
