@@ -32,15 +32,6 @@ const (
 	defaultRetries    = 3
 )
 
-var (
-	// InitTaints is a list of taints that are applied during initialisation of a node
-	// to prevent workloads being scheduled before the network stack is initialised.
-	InitTaints = []string{
-		"node.t-caas.telekom.com/uninitialized",
-		"node.cloudprovider.kubernetes.io/uninitialized",
-	}
-)
-
 // HealthChecker is a struct that holds data required for networking healthcheck.
 type HealthChecker struct {
 	client        client.Client
@@ -86,7 +77,7 @@ func (hc *HealthChecker) RemoveTaints(ctx context.Context) error {
 	}
 
 	updateNode := false
-	for _, t := range InitTaints {
+	for _, t := range hc.netConfig.Taints {
 		for i, v := range node.Spec.Taints {
 			if v.Key == t {
 				node.Spec.Taints = append(node.Spec.Taints[:i], node.Spec.Taints[i+1:]...)
@@ -191,6 +182,7 @@ type NetHealthcheckConfig struct {
 	Reachability []netReachabilityItem `yaml:"reachability,omitempty"`
 	Timeout      string                `yaml:"timeout,omitempty"`
 	Retries      int                   `yaml:"retries,omitempty"`
+	Taints       []string              `yaml:"taints,omitempty"`
 }
 
 type netReachabilityItem struct {

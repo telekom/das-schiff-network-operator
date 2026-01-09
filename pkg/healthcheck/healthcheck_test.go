@@ -23,11 +23,13 @@ import (
 
 const testHostname = "worker"
 
+const testTaint = "node.cloudprovider.kubernetes.io/uninitialized"
+const testTaint2 = "node.kubernetes.io/not-ready"
+
 var (
 	fakeNodesJSON = `{"items":[{"metadata":{"name":"` + testHostname + `"},"spec":{"taints":[{"effect":"NoSchedule",
-					"key":"` + InitTaints[0] + `"}]}}]}`
+					"key":"` + testTaint + `"},{"effect":"NoSchedule","key":"` + testTaint2 + `"}]}}]}`
 	fakeNodes *corev1.NodeList
-	tmpPath   string
 	ctrl      *gomock.Controller
 )
 
@@ -40,7 +42,7 @@ var _ = BeforeSuite(func() {
 func TestHealthCheck(t *testing.T) {
 	RegisterFailHandler(Fail)
 	t.Setenv(NodenameEnv, testHostname)
-	tmpPath = t.TempDir()
+	_ = t.TempDir()
 	ctrl = gomock.NewController(t)
 	defer ctrl.Finish()
 	RunSpecs(t,
@@ -83,7 +85,7 @@ var _ = Describe("RemoveTaints()", func() {
 	})
 	It("returns error when trying to remove taint (update node)", func() {
 		c := &updateErrorClient{}
-		nc := &NetHealthcheckConfig{}
+		nc := &NetHealthcheckConfig{Taints: []string{testTaint, testTaint2}}
 		hc, err := NewHealthChecker(c, nil, nc)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(hc).ToNot(BeNil())
@@ -91,10 +93,18 @@ var _ = Describe("RemoveTaints()", func() {
 		err = hc.RemoveTaints(context.Background())
 		Expect(err).To(HaveOccurred())
 		Expect(hc.TaintsRemoved()).To(BeFalse())
+
+		// Verify the node still has both taints since update failed
+		node := &corev1.Node{}
+		err = c.Get(context.Background(), types.NamespacedName{Name: testHostname}, node)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(node.Spec.Taints).To(HaveLen(2))
+		Expect(node.Spec.Taints[0].Key).To(Equal(testTaint))
+		Expect(node.Spec.Taints[1].Key).To(Equal(testTaint2))
 	})
 	It("remove taint and set isInitialized true", func() {
 		c := fake.NewClientBuilder().WithRuntimeObjects(fakeNodes).Build()
-		nc := &NetHealthcheckConfig{}
+		nc := &NetHealthcheckConfig{Taints: []string{testTaint, testTaint2}}
 		hc, err := NewHealthChecker(c, nil, nc)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(hc).ToNot(BeNil())
@@ -102,6 +112,12 @@ var _ = Describe("RemoveTaints()", func() {
 		err = hc.RemoveTaints(context.Background())
 		Expect(err).ToNot(HaveOccurred())
 		Expect(hc.TaintsRemoved()).To(BeTrue())
+
+		// Verify the actual node object
+		node := &corev1.Node{}
+		err = c.Get(context.Background(), types.NamespacedName{Name: testHostname}, node)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(node.Spec.Taints).To(BeEmpty())
 	})
 })
 var _ = Describe("CheckInterfaces()", func() {
@@ -324,11 +340,12 @@ func (*updateErrorClient) Get(_ context.Context, _ types.NamespacedName, o clien
 		return fmt.Errorf("error casting object %v as corev1.Node", o)
 	}
 	node.Name = testHostname
-	for _, t := range InitTaints {
-		node.Spec.Taints = append(node.Spec.Taints, corev1.Taint{
-			Key:    t,
-			Effect: corev1.TaintEffectNoSchedule,
-		})
-	}
+	node.Spec.Taints = append(node.Spec.Taints, corev1.Taint{
+		Key:    testTaint,
+		Effect: corev1.TaintEffectNoSchedule,
+	}, corev1.Taint{
+		Key:    testTaint2,
+		Effect: corev1.TaintEffectNoSchedule,
+	})
 	return nil
 }
