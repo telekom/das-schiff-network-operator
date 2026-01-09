@@ -421,7 +421,48 @@
           </neighbor>
         </bgp>
       </routing>
-      <interface xmlns="urn:6wind:vrouter/interface"></interface>
+      <interface xmlns="urn:6wind:vrouter/interface">
+        <gre xmlns="urn:6wind:vrouter/gre">
+          <name>gre.cluster4</name>
+          <local>2.2.2.1</local>
+          <remote>1.1.1.1</remote>
+          <mtu>1500</mtu>
+          <key>
+            <both>34</both>
+          </key>
+        </gre>
+        <gre xmlns="urn:6wind:vrouter/gre">
+          <name>gre.cluster6</name>
+          <local>dead:fb::3</local>
+          <remote>dead:fc::4</remote>
+          <mtu>1500</mtu>
+          <key>
+            <both>35</both>
+          </key>
+        </gre>
+        <gretap xmlns="urn:6wind:vrouter/gretap">
+          <name>gretap1</name>
+          <local>3.3.4.2</local>
+          <remote>3.3.3.1</remote>
+          <mtu>1500</mtu>
+        </gretap>
+        <loopback xmlns="urn:6wind:vrouter/loopback">
+          <name>lo.cluster</name>
+          <ipv4>
+            <address>
+              <ip>2.2.2.1</ip>
+            </address>
+            <address>
+              <ip>3.3.3.1</ip>
+            </address>
+          </ipv4>
+          <ipv6>
+            <address>
+              <ip>dead:fc::4</ip>
+            </address>
+          </ipv6>
+        </loopback>
+      </interface>
     </l3vrf>
     <l3vrf>
       <name>m2m</name>
@@ -820,6 +861,52 @@
       </routing>
       <interface xmlns="urn:6wind:vrouter/interface"></interface>
     </l3vrf>
+    <mirror-traffic xmlns="urn:6wind:vrouter/mirror-traffic">
+      <filter>
+        <name>vx.cluster-egress-gre.cluster6</name>
+        <rule>
+          <id>1</id>
+          <ipv6>
+            <destination-address>fe30:ff::1</destination-address>
+            <source-prefix>fe00:ff::/48</source-prefix>
+            <source-port>34001</source-port>
+            <destination-port>45001</destination-port>
+            <protocol>udp</protocol>
+          </ipv6>
+        </rule>
+        <rule>
+          <id>2</id>
+          <ipv4>
+            <source-address>76.4.0.4</source-address>
+          </ipv4>
+        </rule>
+      </filter>
+      <filter>
+        <name>vx.cluster-ingress-gre.cluster4</name>
+        <rule>
+          <id>1</id>
+          <ipv4>
+            <destination-address>68.54.1.3</destination-address>
+            <source-prefix>66.44.0.4/16</source-prefix>
+            <source-port>34000</source-port>
+            <destination-port>45000</destination-port>
+            <protocol>tcp</protocol>
+          </ipv4>
+        </rule>
+      </filter>
+      <rule>
+        <from>vx.cluster</from>
+        <direction>egress</direction>
+        <to>gre.cluster6</to>
+        <filter>vx.cluster-egress-gre.cluster6</filter>
+      </rule>
+      <rule>
+        <from>vx.cluster</from>
+        <direction>ingress</direction>
+        <to>gre.cluster4</to>
+        <filter>vx.cluster-ingress-gre.cluster4</filter>
+      </rule>
+    </mirror-traffic>
   </vrf>
   <routing xmlns="urn:6wind:vrouter/routing" nc:operation="replace">
     <route-map>
