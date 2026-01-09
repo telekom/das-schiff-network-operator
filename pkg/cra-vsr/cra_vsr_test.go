@@ -357,6 +357,60 @@ var _ = Describe("CRA-VSR", func() {
 				},
 			},
 		}
+		nodeConfig.Spec.ClusterVRF.GREs = map[string]v1alpha1.GRE{
+			"gre.cluster4": {
+				DestinationAddress: "1.1.1.1",
+				SourceAddress:      "2.2.2.1",
+				EncapsulationKey:   types.ToPtr(uint32(34)),
+			},
+			"gre.cluster6": {
+				Layer:              v1alpha1.GRELayer3,
+				DestinationAddress: "dead:fc::4",
+				SourceAddress:      "dead:fb::3",
+				EncapsulationKey:   types.ToPtr(uint32(35)),
+			},
+			"gretap1": {
+				Layer:              v1alpha1.GRELayer2,
+				DestinationAddress: "3.3.3.1",
+				SourceAddress:      "3.3.4.2",
+			},
+		}
+		nodeConfig.Spec.ClusterVRF.Loopbacks = map[string]v1alpha1.Loopback{
+			"lo.cluster": {
+				IPAddresses: []string{
+					"2.2.2.1", "dead:fc::4", "3.3.3.1",
+				},
+			},
+		}
+		nodeConfig.Spec.ClusterVRF.MirrorACLs = []v1alpha1.MirrorACL{
+			{
+				TrafficMatch: v1alpha1.TrafficMatch{
+					SrcPrefix: types.ToPtr("66.44.0.4/16"),
+					DstPrefix: types.ToPtr("68.54.1.3"),
+					SrcPort:   types.ToPtr(uint16(34000)),
+					DstPort:   types.ToPtr(uint16(45000)),
+					Protocol:  types.ToPtr("tcp"),
+				},
+				MirrorDestination: "gre.cluster4",
+				Direction:         v1alpha1.MirrorDirectionIngress,
+			}, {
+				TrafficMatch: v1alpha1.TrafficMatch{
+					SrcPrefix: types.ToPtr("fe00:ff::/48"),
+					DstPrefix: types.ToPtr("fe30:ff::1"),
+					SrcPort:   types.ToPtr(uint16(34001)),
+					DstPort:   types.ToPtr(uint16(45001)),
+					Protocol:  types.ToPtr("udp"),
+				},
+				MirrorDestination: "gre.cluster6",
+				Direction:         v1alpha1.MirrorDirectionEgress,
+			}, {
+				TrafficMatch: v1alpha1.TrafficMatch{
+					SrcPrefix: types.ToPtr("76.4.0.4"),
+				},
+				MirrorDestination: "gre.cluster6",
+				Direction:         v1alpha1.MirrorDirectionEgress,
+			},
+		}
 
 		generated, err := manager.makeVRouter(&nodeConfig.Spec)
 		Expect(err).ToNot(HaveOccurred())
