@@ -29,6 +29,7 @@ import (
 
 	controllervsr "github.com/telekom/das-schiff-network-operator/controllers/agent-cra-vsr"
 	reconcilervsr "github.com/telekom/das-schiff-network-operator/pkg/reconciler/agent-cra-vsr"
+	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/common"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -232,7 +233,7 @@ func main() {
 	flag.StringVar(&healthAddr, "health-addr", ":7081", "bind address of health/readiness probes")
 	flag.StringVar(&metricsAddr, "metrics-addr", ":7080", "bind address of metrics endpoint")
 	flag.StringVar(&nodeNetworkConfigPath, "nodenetworkconfig-path",
-		reconcilervsr.DefaultNodeNetworkConfigPath,
+		common.DefaultNodeNetworkConfigPath,
 		"Path to store working node configuration.")
 	flag.Parse()
 
