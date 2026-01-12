@@ -107,6 +107,9 @@ func NewNodeNetworkConfigReconciler(
 		logger,
 		configApplier,
 		nodeNetworkConfigPath,
+		common.ReconcilerOptions{
+			RestoreOnReconcileFailure: true, // FRR can partially apply invalid configs
+		},
 	)
 	if err != nil {
 		return nil, fmt.Errorf("error creating common reconciler: %w", err)

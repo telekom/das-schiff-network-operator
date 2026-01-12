@@ -61,6 +61,9 @@ func NewNodeNetworkConfigReconciler(
 		logger,
 		configApplier,
 		nodeNetworkConfigPath,
+		common.ReconcilerOptions{
+			RestoreOnReconcileFailure: false, // VSR cannot commit invalid configs
+		},
 	)
 	if err != nil {
 		return nil, fmt.Errorf("error creating common reconciler: %w", err)

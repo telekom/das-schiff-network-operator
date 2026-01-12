@@ -48,14 +48,24 @@ type ConfigApplier interface {
 	ApplyConfig(ctx context.Context, cfg *v1alpha1.NodeNetworkConfig) error
 }
 
+// ReconcilerOptions contains configuration options for the reconciler.
+type ReconcilerOptions struct {
+	// RestoreOnReconcileFailure controls whether to restore the previous config
+	// when reconciliation fails. Set to true for agents like FRR where invalid
+	// configs can be partially applied. Set to false for agents like VSR where
+	// invalid configs cannot be committed.
+	RestoreOnReconcileFailure bool
+}
+
 // NodeNetworkConfigReconciler handles the common reconciliation logic for NodeNetworkConfig.
 type NodeNetworkConfigReconciler struct {
-	client                client.Client
-	logger                logr.Logger
-	healthChecker         *healthcheck.HealthChecker
-	configApplier         ConfigApplier
-	NodeNetworkConfig     *v1alpha1.NodeNetworkConfig
-	NodeNetworkConfigPath string
+	client                    client.Client
+	logger                    logr.Logger
+	healthChecker             *healthcheck.HealthChecker
+	configApplier             ConfigApplier
+	NodeNetworkConfig         *v1alpha1.NodeNetworkConfig
+	NodeNetworkConfigPath     string
+	restoreOnReconcileFailure bool
 }
 
 // NewNodeNetworkConfigReconciler creates a new NodeNetworkConfigReconciler.
@@ -64,12 +74,14 @@ func NewNodeNetworkConfigReconciler(
 	logger logr.Logger,
 	configApplier ConfigApplier,
 	nodeNetworkConfigPath string,
+	opts ReconcilerOptions,
 ) (*NodeNetworkConfigReconciler, error) {
 	reconciler := &NodeNetworkConfigReconciler{
-		client:                clusterClient,
-		logger:                logger,
-		configApplier:         configApplier,
-		NodeNetworkConfigPath: nodeNetworkConfigPath,
+		client:                    clusterClient,
+		logger:                    logger,
+		configApplier:             configApplier,
+		NodeNetworkConfigPath:     nodeNetworkConfigPath,
+		restoreOnReconcileFailure: opts.RestoreOnReconcileFailure,
 	}
 
 	nc, err := healthcheck.LoadConfig(healthcheck.NetHealthcheckFile)
@@ -252,9 +264,18 @@ func (r *NodeNetworkConfigReconciler) processConfig(
 	// reconcile NodeNetworkConfig
 	if err := r.doReconciliation(ctx, cfg); err != nil {
 		// if reconciliation failed set NodeNetworkConfig's status as invalid
-		// no need to restore the config, the new one has not been applied
-		if err := r.invalidateNodeNetworkConfig(ctx, cfg, "reconciliation failed"); err != nil {
-			return fmt.Errorf("invalidate NodeNetworkConfig: %w", err)
+		if r.restoreOnReconcileFailure {
+			// restore last known working NodeNetworkConfig (for agents like FRR where
+			// invalid configs can be partially applied)
+			if restoreErr := r.invalidateAndRestore(ctx, cfg, "reconciliation failed"); restoreErr != nil {
+				return fmt.Errorf("error restoring NodeNetworkConfig: %w", restoreErr)
+			}
+		} else {
+			// no need to restore the config, the new one has not been applied
+			// (for agents like VSR where invalid configs cannot be committed)
+			if invalidateErr := r.invalidateNodeNetworkConfig(ctx, cfg, "reconciliation failed"); invalidateErr != nil {
+				return fmt.Errorf("error invalidating NodeNetworkConfig: %w", invalidateErr)
+			}
 		}
 
 		return fmt.Errorf("reconciler error: %w", err)
