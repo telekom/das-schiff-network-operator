@@ -18,17 +18,14 @@ package cra
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"io"
 	"net"
-	"net/http"
+	"strings"
 	"time"
 
-	"github.com/nemith/netconf"
 	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/pkg/config"
-	"golang.org/x/crypto/ssh"
+	"github.com/telekom/das-schiff-network-operator/pkg/helpers/types"
 )
 
 const (
@@ -50,15 +47,21 @@ const (
 )
 
 type Manager struct {
-	urls        []string
 	metricsUrls []string
-	sshConfig   ssh.ClientConfig
 	baseConfig  *config.BaseConfig
 	timeout     time.Duration
 	startupXML  []byte
-	workNS      string
+	WorkNS      string
 	running     *VRouter
-	nc          Netconf
+	nc          *Netconf
+}
+
+type Metrics struct {
+	State            VRouter
+	V4RouteSummaries map[string]ShowRouteSummaryOutput
+	V6RouteSummaries map[string]ShowRouteSummaryOutput
+	Neighbors        ShowNeighborsOutput
+	BridgeFDB        ShowBridgeFDBOutput
 }
 
 func NewManager(
@@ -67,17 +70,11 @@ func NewManager(
 	timeout time.Duration,
 ) (*Manager, error) {
 	m := &Manager{
-		urls:        urls,
 		timeout:     timeout,
 		metricsUrls: metricsUrls,
-		sshConfig: ssh.ClientConfig{
-			User: user,
-			Auth: []ssh.AuthMethod{
-				ssh.Password(password),
-			},
-			HostKeyCallback: ssh.InsecureIgnoreHostKey(), //nolint:gosec
-		},
+		nc:          NewNetconf(urls, user, password, timeout),
 	}
+	ctx := context.Background()
 
 	baseConfig, err := config.LoadBaseConfig(baseConfigPath)
 	if err != nil {
@@ -92,35 +89,28 @@ func NewManager(
 	}
 	m.baseConfig = baseConfig
 
-	if err := m.openSession(context.Background()); err != nil {
+	err = m.nc.Open(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	m.startupXML, err = m.nc.Get(ctx, Startup, "/config")
+	if err != nil {
+		return nil, err
+	}
+
+	m.running = &VRouter{}
+	err = m.nc.GetUnmarshal(ctx, Running, "/config", m.running)
+	if err != nil {
+		return nil, err
+	}
+
+	m.WorkNS, err = m.findWorkNS(m.running)
+	if err != nil {
 		return nil, err
 	}
 
 	return m, nil
-}
-
-func (m *Manager) openSession(ctx context.Context) error {
-	err := m.nc.openSession(ctx, m.urls, m.timeout, &m.sshConfig)
-	if err != nil {
-		return err
-	}
-
-	m.startupXML, err = m.nc.getConfig(ctx, netconf.Startup)
-	if err != nil {
-		return err
-	}
-
-	m.running, err = m.nc.getVRouter(ctx, netconf.Running)
-	if err != nil {
-		return err
-	}
-
-	m.workNS, err = m.findWorkNS(m.running)
-	if err != nil {
-		return err
-	}
-
-	return nil
 }
 
 func (m *Manager) findWorkNS(vrouter *VRouter) (string, error) {
@@ -152,26 +142,8 @@ func (m *Manager) ApplyConfiguration(
 	ctx context.Context,
 	nodeCfg *v1alpha1.NodeNetworkConfigSpec,
 ) error {
-	return m.applyNodeNetworkConfig(ctx, nodeCfg, false)
-}
-
-func (m *Manager) applyNodeNetworkConfig(
-	ctx context.Context,
-	nodeCfg *v1alpha1.NodeNetworkConfigSpec,
-	retry bool,
-) error {
-	if retry || m.nc.session == nil {
-		fmt.Println("netconf connection closed, re-open it")
-		if err := m.openSession(ctx); err != nil {
-			return fmt.Errorf("failed to re-open netconf session: %w", err)
-		}
-	}
-
-	err := m.nc.editConfig(ctx, m.startupXML, netconf.Candidate, netconf.ReplaceConfig)
+	err := m.nc.Edit(ctx, Candidate, Replace, m.startupXML)
 	if err != nil {
-		if !retry && errors.Is(err, io.EOF) {
-			return m.applyNodeNetworkConfig(ctx, nodeCfg, true)
-		}
 		return err
 	}
 
@@ -180,12 +152,12 @@ func (m *Manager) applyNodeNetworkConfig(
 		return err
 	}
 
-	err = m.nc.editVRouter(ctx, vrouter, netconf.Candidate, netconf.MergeConfig)
+	err = m.nc.Edit(ctx, Candidate, Merge, &VRouterConfig{VRouter: *vrouter})
 	if err != nil {
 		return err
 	}
 
-	err = m.nc.commit(ctx)
+	err = m.nc.Commit(ctx)
 	if err != nil {
 		return err
 	}
@@ -196,18 +168,17 @@ func (m *Manager) applyNodeNetworkConfig(
 
 func (m *Manager) makeVRouter(nodeCfg *v1alpha1.NodeNetworkConfigSpec) (*VRouter, error) {
 	vrouter := &VRouter{
-		XmlnsNCAttr: "urn:ietf:params:xml:ns:netconf:base:1.0",
 		Routing: &GlobalRouting{
-			NCOperation: netconf.ReplaceConfig,
+			NCOperation: Replace,
 			BGP:         &GlobalBGP{},
 		},
 	}
 
 	ns := Namespace{
-		Name:       m.workNS,
+		Name:       m.WorkNS,
 		Interfaces: &Interfaces{},
 		Routing: &Routing{
-			NCOperation: netconf.ReplaceConfig,
+			NCOperation: Replace,
 			BGP:         &BGP{},
 		},
 	}
@@ -232,34 +203,89 @@ func (m *Manager) makeVRouter(nodeCfg *v1alpha1.NodeNetworkConfigSpec) (*VRouter
 	return vrouter, nil
 }
 
-func (m *Manager) GetMetrics(ctx context.Context) ([]byte, error) {
-	for _, url := range m.metricsUrls {
-		client := http.Client{
-			Timeout: m.timeout,
-		}
-		url := fmt.Sprintf("%s/metrics", url)
+func (*Manager) xpath(prefix string, paths []string) string {
+	for i := range paths {
+		paths[i] = prefix + paths[i]
+	}
+	return strings.Join(paths, " | ")
+}
 
-		req, err := http.NewRequest(http.MethodGet, url, http.NoBody)
-		if err != nil {
-			return nil, fmt.Errorf("error creating request: %w", err)
-		}
-
-		res, err := client.Do(req.WithContext(ctx))
-		if err != nil {
-			fmt.Println(err)
-			continue
-		}
-
-		resBody, readErr := func() ([]byte, error) {
-			defer res.Body.Close()
-			return io.ReadAll(res.Body)
-		}()
-		if readErr != nil {
-			return nil, fmt.Errorf("error reading response body: %w", readErr)
-		}
-
-		return resBody, nil
+func (m *Manager) GetMetrics(ctx context.Context) (*Metrics, error) {
+	metrics := Metrics{
+		State:            VRouter{},
+		V4RouteSummaries: map[string]ShowRouteSummaryOutput{},
+		V6RouteSummaries: map[string]ShowRouteSummaryOutput{},
+		Neighbors:        ShowNeighborsOutput{},
+		BridgeFDB:        ShowBridgeFDBOutput{},
 	}
 
-	return nil, fmt.Errorf("all CRA URLs failed due to connection issues")
+	xpath := m.xpath("/state/vrf[name='"+m.WorkNS+"']", []string{
+		"/routing/evpn",
+		"/routing/bgp/as",
+		"/routing/bgp/neighbor",
+		"/routing/bgp/neighbor-group",
+		"/routing/bgp/unnumbered-neighbor",
+		"/l3vrf/table-id",
+		"/l3vrf/routing/evpn",
+		"/l3vrf/routing/bgp/as",
+		"/l3vrf/routing/bgp/neighbor",
+		"/l3vrf/routing/bgp/neighbor-group",
+		"/l3vrf/routing/bgp/unnumbered-neighbor",
+	})
+	err := m.nc.GetUnmarshal(ctx, Operational, xpath, &metrics.State)
+	if err != nil {
+		return nil, fmt.Errorf("get-state failed in metrics: %w", err)
+	}
+
+	workns := LookupNS(&metrics.State, m.WorkNS)
+	if workns == nil {
+		return nil, fmt.Errorf("work-ns not found in metrics state")
+	}
+
+	vrfList := []string{"default"}
+	for i := range workns.VRFs {
+		vrfList = append(vrfList, workns.VRFs[i].Name)
+	}
+
+	for _, name := range vrfList {
+		req4 := ShowIPv4RouteSummaryInput{
+			Namespace: &m.WorkNS,
+			VRF:       types.ToPtr(name),
+		}
+		out := ShowRouteSummaryOutput{}
+		if err := m.nc.RPC(ctx, &req4, &out); err != nil {
+			return nil, fmt.Errorf("show-ipv4-route-summary failed in metrics: %w", err)
+		}
+		metrics.V4RouteSummaries[name] = out
+
+		req6 := ShowIPv6RouteSummaryInput{
+			Namespace: &m.WorkNS,
+			VRF:       types.ToPtr(name),
+		}
+		out = ShowRouteSummaryOutput{}
+		if err := m.nc.RPC(ctx, &req6, &out); err != nil {
+			return nil, fmt.Errorf("show-ipv6-route-summary failed in metrics: %w", err)
+		}
+		metrics.V6RouteSummaries[name] = out
+	}
+
+	{
+		req := ShowNeighborsInput{
+			Namespace: &m.WorkNS,
+		}
+		if err := m.nc.RPC(ctx, &req, &metrics.Neighbors); err != nil {
+			return nil, fmt.Errorf("show-neighbors failed in metrics: %w", err)
+		}
+	}
+
+	{
+		req := ShowBridgeFDBInput{
+			Namespace: &m.WorkNS,
+		}
+		if err := m.nc.RPC(ctx, &req, &metrics.BridgeFDB); err != nil {
+			return nil, fmt.Errorf("show-bridge-fdb failed in metrics: %w", err)
+		}
+	}
+
+	return &metrics, nil
 }

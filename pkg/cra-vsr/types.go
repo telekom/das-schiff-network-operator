@@ -19,8 +19,6 @@ package cra
 import (
 	"encoding/xml"
 	"sort"
-
-	"github.com/nemith/netconf"
 )
 
 type NoStringType string
@@ -42,20 +40,28 @@ const (
 	DefaultCommunityListSeqNum int = 5
 )
 
+type VRouterConfig struct {
+	XMLName xml.Name `xml:"urn:6wind:vrouter config"`
+	VRouter
+}
+
+type VRouterState struct {
+	XMLName xml.Name `xml:"urn:6wind:vrouter state"`
+	VRouter
+}
+
 type VRouter struct {
-	XMLName     xml.Name       `xml:"urn:6wind:vrouter config"`
-	XmlnsNCAttr string         `xml:"xmlns:nc,attr,omitempty"`
-	Namespaces  []Namespace    `xml:"vrf,omitempty"`
-	Routing     *GlobalRouting `xml:"routing,omitempty"`
+	Namespaces []Namespace    `xml:"vrf,omitempty"`
+	Routing    *GlobalRouting `xml:"routing,omitempty"`
 }
 
 type GlobalRouting struct {
-	XMLName      xml.Name              `xml:"urn:6wind:vrouter/routing routing"`
-	NCOperation  netconf.MergeStrategy `xml:"nc:operation,attr,omitempty"`
-	RouteMaps    []RouteMap            `xml:"route-map,omitempty"`
-	PrefixListV4 []PrefixList          `xml:"ipv4-prefix-list,omitempty"`
-	PrefixListV6 []PrefixList          `xml:"ipv6-prefix-list,omitempty"`
-	BGP          *GlobalBGP            `xml:"bgp,omitempty"`
+	XMLName      xml.Name     `xml:"urn:6wind:vrouter/routing routing"`
+	NCOperation  Operation    `xml:"nc:operation,attr,omitempty"`
+	RouteMaps    []RouteMap   `xml:"route-map,omitempty"`
+	PrefixListV4 []PrefixList `xml:"ipv4-prefix-list,omitempty"`
+	PrefixListV6 []PrefixList `xml:"ipv6-prefix-list,omitempty"`
+	BGP          *GlobalBGP   `xml:"bgp,omitempty"`
 }
 
 type GlobalBGP struct {
@@ -162,11 +168,28 @@ type VRF struct {
 }
 
 type Routing struct {
-	XMLName     xml.Name              `xml:"urn:6wind:vrouter/routing routing"`
-	NCOperation netconf.MergeStrategy `xml:"nc:operation,attr,omitempty"`
-	Static      *StaticRouting        `xml:"static,omitempty"`
-	PBR         *PolicyBasedRouting   `xml:"policy-based-routing,omitempty"`
-	BGP         *BGP                  `xml:"bgp,omitempty"`
+	XMLName     xml.Name            `xml:"urn:6wind:vrouter/routing routing"`
+	NCOperation Operation           `xml:"nc:operation,attr,omitempty"`
+	Static      *StaticRouting      `xml:"static,omitempty"`
+	PBR         *PolicyBasedRouting `xml:"policy-based-routing,omitempty"`
+	BGP         *BGP                `xml:"bgp,omitempty"`
+	*RoutingState
+}
+
+type RoutingState struct {
+	EVPN EVPN `xml:"evpn,omitempty"`
+}
+
+type EVPN struct {
+	VNIs []VniEVPN `xml:"vni"`
+}
+
+type VniEVPN struct {
+	VNI   int    `xml:"vni"`
+	Type  string `xml:"type"`
+	VXLAN string `xml:"vxlan"`
+	SVI   string `xml:"svi"`
+	State string `xml:"state"`
 }
 
 type StaticRouting struct {
@@ -424,16 +447,14 @@ type BGPAdvertUcast struct {
 }
 
 type BGPNeighborGroup struct {
-	Name           string `xml:"name"`
-	EnforceFirstAS *bool  `xml:"enforce-first-as,omitempty"`
+	Name string `xml:"name"`
 	BGPNeighbor
 }
 
 type BGPNeighborIP struct {
-	Address        string  `xml:"neighbor-address"`
-	NeighGroup     *string `xml:"neighbor-group,omitempty"`
-	Interface      *string `xml:"interface,omitempty"`
-	EnforceFirstAS *bool   `xml:"enforce-first-as,omitempty"`
+	Address    string  `xml:"neighbor-address"`
+	NeighGroup *string `xml:"neighbor-group,omitempty"`
+	Interface  *string `xml:"interface,omitempty"`
 	BGPNeighbor
 }
 
@@ -441,17 +462,45 @@ type BGPNeighborIF struct {
 	Interface  string  `xml:"interface"`
 	NeighGroup *string `xml:"neighbor-group,omitempty"`
 	IPv6Only   *bool   `xml:"ipv6-only,omitempty"`
+	BGPNeighbor
 }
 
 type BGPNeighbor struct {
-	RemoteAS     *string          `xml:"remote-as,omitempty"`
-	LocalAS      *BGPNeighLocalAS `xml:"local-as,omitempty"`
-	Timers       *BGPNeighTimers  `xml:"timers,omitempty"`
-	AF           *BGPNeighAF      `xml:"address-family,omitempty"`
-	UpdateSrc    *string          `xml:"update-source,omitempty"`
-	EnforceMHops *bool            `xml:"enforce-multihop,omitempty"`
-	TTLSecHops   *int             `xml:"ttl-security-hops,omitempty"`
-	Track        *string          `xml:"track,omitempty"`
+	EnforceFirstAS *bool            `xml:"enforce-first-as,omitempty"`
+	RemoteAS       *string          `xml:"remote-as,omitempty"`
+	LocalAS        *BGPNeighLocalAS `xml:"local-as,omitempty"`
+	Timers         *BGPNeighTimers  `xml:"timers,omitempty"`
+	AF             *BGPNeighAF      `xml:"address-family,omitempty"`
+	UpdateSrc      *string          `xml:"update-source,omitempty"`
+	EnforceMHops   *bool            `xml:"enforce-multihop,omitempty"`
+	TTLSecHops     *int             `xml:"ttl-security-hops,omitempty"`
+	Track          *string          `xml:"track,omitempty"`
+	*BGPNeighborState
+}
+
+type BGPNeighborState struct {
+	State             string           `xml:"state"`
+	EstablishmentDate string           `xml:"established-date"`
+	Statistics        BGPNeighborStats `xml:"message-statistics"`
+}
+
+type BGPNeighborStats struct {
+	PacketWaitProcess int `xml:"packet-wait-process"`
+	PacketWaitWritten int `xml:"packet-wait-written"`
+	OpenSent          int `xml:"opent-sent"`
+	OpenRecv          int `xml:"opens-received"`
+	NotifSent         int `xml:"notifications-sent"`
+	NotificationRecv  int `xml:"notifications-received"`
+	UpdateSent        int `xml:"updates-sent"`
+	UpdateRecv        int `xml:"updates-received"`
+	KeepaliveSent     int `xml:"keepalives-sent"`
+	KeepaliveRecv     int `xml:"keepalives-received"`
+	RouteRefreshSent  int `xml:"route-refresh-sent"`
+	RouteRefreshRecv  int `xml:"route-refresh-received"`
+	CapabilitySent    int `xml:"capability-sent"`
+	CapabilityRecv    int `xml:"capability-received"`
+	TotalSent         int `xml:"total-sent"`
+	TotalRecv         int `xml:"total-received"`
 }
 
 type BGPNeighLocalAS struct {
@@ -473,11 +522,22 @@ type BGPNeighAF struct {
 	EVPN    *BGPNeighEVPN  `xml:"l2vpn-evpn,omitempty"`
 }
 
+type BGPNeighAFState struct {
+	UpdateGroupID         int    `xml:"update-group-id"`
+	SubGroupID            int    `xml:"sub-group-id"`
+	PacketQueueLength     int    `xml:"packet-queue-length"`
+	PrefixAccepted        int    `xml:"accepted-prefix"`
+	PrefixSent            int    `xml:"sent-prefixes"`
+	EbgpPolicyRequiredIn  string `xml:"inbound-ebgp-requires-policy"`
+	EbgpPolicyRequiredOut string `xml:"outbound-ebgp-requires-policy"`
+}
+
 type BGPNeighUcast struct {
 	AllowASIn   *int                 `xml:"allowas-in,omitempty"`
 	RouteMaps   []BGPNeighRouteMap   `xml:"route-map,omitempty"`
 	PrefixLists []BGPNeighPrefixList `xml:"prefix-list,omitempty"`
 	MaxPrefix   *BGPNeighMaxPrefix   `xml:"maximum-prefix,omitempty"`
+	*BGPNeighAFState
 }
 
 type BGPNeighMaxPrefix struct {
@@ -490,6 +550,7 @@ type BGPNeighMaxPrefix struct {
 type BGPNeighEVPN struct {
 	AllowASIn *int               `xml:"allowas-in,omitempty"`
 	RouteMaps []BGPNeighRouteMap `xml:"route-map,omitempty"`
+	*BGPNeighAFState
 }
 
 type BGPNeighRouteMap struct {
@@ -502,7 +563,76 @@ type BGPNeighPrefixList struct {
 	Direction IO     `xml:"update-direction"`
 }
 
-func lookupNS(vrouter *VRouter, name string) *Namespace {
+type ShowIPv4RouteSummaryInput struct {
+	XMLName   xml.Name `xml:"urn:6wind:vrouter/routing show-ipv4-routes-summary"`
+	Namespace *string  `xml:"vrf,omitempty"`
+	VRF       *string  `xml:"l3vrf,omitempty"`
+}
+
+type ShowIPv6RouteSummaryInput struct {
+	XMLName   xml.Name `xml:"urn:6wind:vrouter/routing show-ipv6-routes-summary"`
+	Namespace *string  `xml:"vrf,omitempty"`
+	VRF       *string  `xml:"l3vrf,omitempty"`
+}
+
+type ShowRouteSummaryOutput struct {
+	Total  ShowRouteSummaryTotal      `xml:"total"`
+	Routes []ShowRouteSummaryProtocol `xml:"route"`
+}
+
+type ShowRouteSummaryTotal struct {
+	RIB int `xml:"routes-in-rib"`
+	FIB int `xml:"routes-in-fib"`
+}
+
+type ShowRouteSummaryProtocol struct {
+	Protocol string `xml:"protocol"`
+	RIB      int    `xml:"routes-in-rib"`
+	FIB      int    `xml:"routes-in-fib"`
+}
+
+type ShowNeighborsInput struct {
+	XMLName   xml.Name `xml:"urn:6wind:vrouter/system show-neighbors"`
+	Namespace *string  `xml:"vrf,omitempty"`
+	Family    *string  `xml:"family,omitempty"`
+	Interface *string  `xml:"interface,omitempty"`
+}
+
+type ShowNeighborsOutput struct {
+	Neighbors []ShowNeighborEntry `xml:"neighbor,omitempty"`
+}
+
+type ShowNeighborEntry struct {
+	LinkLayerAddress string `xml:"link-layer-address"`
+	IPAddress        string `xml:"neighbor"`
+	Interface        string `xml:"interface"`
+	State            string `xml:"state"`
+	Origin           string `xml:"origin"`
+}
+
+type ShowBridgeFDBInput struct {
+	XMLName   xml.Name `xml:"urn:6wind:vrouter/bridge show-bridge-fdb"`
+	Namespace *string  `xml:"vrf,omitempty"`
+	Interface *string  `xml:"name,omitempty"`
+}
+
+type ShowBridgeFDBOutput struct {
+	Bridges []ShowBridgeFDBEntry `xml:"bridge,omitempty"`
+}
+
+type ShowBridgeFDBEntry struct {
+	Name      string                    `xml:"name"`
+	Neighbors []ShowBridgeFDBNeighEntry `xml:"fdb"`
+}
+
+type ShowBridgeFDBNeighEntry struct {
+	LinkLayerAddress string `xml:"link-layer-address"`
+	LinkInterface    string `xml:"link-interface"`
+	State            string `xml:"state"`
+	Origin           string `xml:"origin"`
+}
+
+func LookupNS(vrouter *VRouter, name string) *Namespace {
 	for i := range vrouter.Namespaces {
 		if vrouter.Namespaces[i].Name == name {
 			return &vrouter.Namespaces[i]
@@ -511,7 +641,7 @@ func lookupNS(vrouter *VRouter, name string) *Namespace {
 	return nil
 }
 
-func lookupVRF(ns *Namespace, name string) *VRF {
+func LookupVRF(ns *Namespace, name string) *VRF {
 	for i := range ns.VRFs {
 		if ns.VRFs[i].Name == name {
 			return &ns.VRFs[i]

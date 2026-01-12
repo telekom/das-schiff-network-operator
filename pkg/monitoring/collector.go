@@ -12,9 +12,11 @@ import (
 
 // Namespace defines the common namespace to be used by all metrics.
 const (
-	namespace       = "nwop"
-	defaultEnabled  = true
-	defaultDisabled = false
+	namespace        = "nwop"
+	defaultEnabled   = true
+	defaultDisabled  = false
+	defaultVRF       = "main"
+	defaultVRFIntern = "default"
 )
 
 var (

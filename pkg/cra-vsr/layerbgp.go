@@ -302,7 +302,7 @@ func (l *LayerBGP) setupPolicyRoute(i int, conf v1alpha1.PolicyRoute) error {
 		return fmt.Errorf("invalid policy-route without nexthop vrf")
 	}
 
-	nhVrf := lookupVRF(l.ns, *conf.NextHop.Vrf)
+	nhVrf := LookupVRF(l.ns, *conf.NextHop.Vrf)
 	if nhVrf == nil {
 		return fmt.Errorf("invalid policy-route nexthop vrf: %s", *conf.NextHop.Vrf)
 	}
@@ -352,14 +352,12 @@ func (l *LayerBGP) setupNeighbor(bgp *BGP, conf v1alpha1.BGPPeer) {
 	switch {
 	case conf.Address != nil:
 		bgp.NeighborIPs = append(bgp.NeighborIPs, BGPNeighborIP{
-			Address:        *conf.Address,
-			EnforceFirstAS: types.ToPtr(true),
+			Address: *conf.Address,
 		})
 		neigh = &bgp.NeighborIPs[len(bgp.NeighborIPs)-1].BGPNeighbor
 	case conf.ListenRange != nil:
 		bgp.NeighGroups = append(bgp.NeighGroups, BGPNeighborGroup{
-			Name:           name,
-			EnforceFirstAS: types.ToPtr(true),
+			Name: name,
 		})
 		neigh = &bgp.NeighGroups[len(bgp.NeighGroups)-1].BGPNeighbor
 		if bgp.Listen == nil {
@@ -373,6 +371,7 @@ func (l *LayerBGP) setupNeighbor(bgp *BGP, conf v1alpha1.BGPPeer) {
 		return
 	}
 
+	neigh.EnforceFirstAS = types.ToPtr(true)
 	neigh.RemoteAS = types.ToPtr(strconv.Itoa(int(conf.RemoteASN)))
 
 	if conf.KeepaliveTime != nil || conf.HoldTime != nil {
@@ -446,25 +445,20 @@ func (LayerBGP) setupBaseNeighbor(bgp *BGP, conf *config.Neighbor, isUnderlay bo
 	switch {
 	case conf.IP != nil:
 		bgp.NeighborIPs = append(bgp.NeighborIPs, BGPNeighborIP{
-			Address:        *conf.IP,
-			EnforceFirstAS: types.ToPtr(true),
+			Address: *conf.IP,
 		})
 		neigh = &bgp.NeighborIPs[len(bgp.NeighborIPs)-1].BGPNeighbor
 	case conf.Interface != nil:
 		bgp.NeighborIFs = append(bgp.NeighborIFs, BGPNeighborIF{
-			Interface:  *conf.Interface,
-			NeighGroup: types.ToPtr(*conf.Interface + "-leaf"),
-			IPv6Only:   types.ToPtr(false),
+			Interface: *conf.Interface,
+			IPv6Only:  types.ToPtr(false),
 		})
-		bgp.NeighGroups = append(bgp.NeighGroups, BGPNeighborGroup{
-			Name:           *conf.Interface + "-leaf",
-			EnforceFirstAS: types.ToPtr(true),
-		})
-		neigh = &bgp.NeighGroups[len(bgp.NeighGroups)-1].BGPNeighbor
+		neigh = &bgp.NeighborIFs[len(bgp.NeighborIFs)-1].BGPNeighbor
 	default:
 		return
 	}
 
+	neigh.EnforceFirstAS = types.ToPtr(true)
 	neigh.RemoteAS = &conf.RemoteASN
 	neigh.Timers = &BGPNeighTimers{
 		KeepAliveInterval: &conf.KeepaliveTime,
@@ -587,7 +581,7 @@ func (l *LayerBGP) setupRedistributeRtMap(
 }
 
 func (l *LayerBGP) setupLocalVRF(name string, conf *v1alpha1.VRF) error {
-	vrf := lookupVRF(l.ns, name)
+	vrf := LookupVRF(l.ns, name)
 	if vrf == nil {
 		return fmt.Errorf("vrf %s not found in netns %s", name, l.ns.Name)
 	}
@@ -647,7 +641,7 @@ func (l *LayerBGP) setupLocalVRF(name string, conf *v1alpha1.VRF) error {
 func (l *LayerBGP) setupFabricVRF(name string, conf *v1alpha1.FabricVRF) error {
 	vni := int(conf.VNI)
 
-	vrf := lookupVRF(l.ns, name)
+	vrf := LookupVRF(l.ns, name)
 	if vrf == nil {
 		return fmt.Errorf("vrf %s not found in netns %s", name, l.ns.Name)
 	}
@@ -735,7 +729,7 @@ func (l *LayerBGP) setupClusterVRF() error {
 	vni := baseCfg.ClusterVRF.VNI
 	conf := l.nodeCfg.ClusterVRF
 
-	vrf := lookupVRF(l.ns, name)
+	vrf := LookupVRF(l.ns, name)
 	if vrf == nil {
 		return fmt.Errorf("vrf %s not found in netns %s", name, l.ns.Name)
 	}
@@ -858,7 +852,7 @@ func (l *LayerBGP) setupManagementVRF() error {
 	name := baseCfg.ManagementVRF.Name
 	vni := baseCfg.ManagementVRF.VNI
 
-	vrf := lookupVRF(l.ns, name)
+	vrf := LookupVRF(l.ns, name)
 	if vrf == nil {
 		return fmt.Errorf("vrf %s not found in netns %s", name, l.ns.Name)
 	}

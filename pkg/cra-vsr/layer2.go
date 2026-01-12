@@ -133,7 +133,7 @@ func (l *Layer2) setup() error {
 		info := l.infos[i]
 		intfs := l.ns.Interfaces
 		if info.vrf != "" {
-			vrf := lookupVRF(l.ns, info.vrf)
+			vrf := LookupVRF(l.ns, info.vrf)
 			if vrf == nil {
 				return fmt.Errorf("vrf %s not found in netns %s",
 					info.vrf, l.ns.Name)

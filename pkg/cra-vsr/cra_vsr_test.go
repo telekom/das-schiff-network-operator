@@ -50,7 +50,7 @@ var oldConfigPath string
 var isConfigEnvExist bool
 
 var manager = &Manager{
-	workNS: "hbn",
+	WorkNS: "hbn",
 	running: &VRouter{
 		Namespaces: []Namespace{
 			{
@@ -361,7 +361,8 @@ var _ = Describe("CRA-VSR", func() {
 		generated, err := manager.makeVRouter(&nodeConfig.Spec)
 		Expect(err).ToNot(HaveOccurred())
 		generated.Sort()
-		generatedXML, err := xml.MarshalIndent(*generated, "", "  ")
+		generatedXML, err := xml.MarshalIndent(
+			VRouterConfig{VRouter: *generated}, "", "  ")
 		Expect(err).ToNot(HaveOccurred())
 
 		expectedXML, err := os.ReadFile("cra_vsr_test.xml")

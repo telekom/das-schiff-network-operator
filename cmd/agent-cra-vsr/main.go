@@ -30,6 +30,8 @@ import (
 	controllervsr "github.com/telekom/das-schiff-network-operator/controllers/agent-cra-vsr"
 	reconcilervsr "github.com/telekom/das-schiff-network-operator/pkg/reconciler/agent-cra-vsr"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/pkg/cra-vsr"
 	"github.com/telekom/das-schiff-network-operator/pkg/monitoring"
@@ -88,20 +90,26 @@ func initCollectors() error {
 	return nil
 }
 
-func handleCraMetrics(craManager *cra.Manager) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		craMetrics, err := craManager.GetMetrics(r.Context())
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
+func setupCraPrometheusRegistry(craManager *cra.Manager) (*prometheus.Registry, error) {
+	registry := prometheus.NewRegistry()
 
-		w.WriteHeader(http.StatusOK)
-		if _, err := w.Write(craMetrics); err != nil {
-			setupLog.Error(err, "Failed to write response")
-			return
-		}
+	collector, err := monitoring.NewDasSchiffNetworkOperatorCollector(
+		map[string]bool{
+			"netlink": false,
+			"frr":     false,
+			"vsr":     true,
+		})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create collector %w", err)
 	}
+
+	if v, ok := collector.Collectors["vsr"].(*monitoring.VSRCollector); ok {
+		v.CraManager = craManager
+	}
+
+	registry.MustRegister(collector)
+
+	return registry, nil
 }
 
 func updateManagerOptions(options *manager.Options, craManager *cra.Manager) error {
@@ -111,8 +119,20 @@ func updateManagerOptions(options *manager.Options, craManager *cra.Manager) err
 			return fmt.Errorf("unable to initialize metrics collectors: %w", err)
 		}
 
+		registry, err := setupCraPrometheusRegistry(craManager)
+		if err != nil {
+			return fmt.Errorf("failed to setup cra prometheus registry: %w", err)
+		}
+
 		options.Metrics.ExtraHandlers = map[string]http.Handler{
-			"/cra/metrics": handleCraMetrics(craManager),
+			"/cra/metrics": promhttp.HandlerFor(
+				registry,
+				promhttp.HandlerOpts{
+					// Opt into OpenMetrics to support exemplars.
+					EnableOpenMetrics: true,
+					Timeout:           time.Minute,
+				},
+			),
 		}
 	}
 
