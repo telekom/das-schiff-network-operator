@@ -32,6 +32,16 @@ const (
 	defaultRetries    = 3
 )
 
+// HealthCheckerInterface defines the interface for health checking operations.
+// This allows for easier testing by enabling mock implementations.
+type HealthCheckerInterface interface {
+	CheckInterfaces() error
+	CheckReachability() error
+	CheckAPIServer(ctx context.Context) error
+	TaintsRemoved() bool
+	RemoveTaints(ctx context.Context) error
+}
+
 // HealthChecker is a struct that holds data required for networking healthcheck.
 type HealthChecker struct {
 	client        client.Client

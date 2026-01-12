@@ -61,7 +61,7 @@ type ReconcilerOptions struct {
 type NodeNetworkConfigReconciler struct {
 	client                    client.Client
 	logger                    logr.Logger
-	healthChecker             *healthcheck.HealthChecker
+	healthChecker             healthcheck.HealthCheckerInterface
 	configApplier             ConfigApplier
 	NodeNetworkConfig         *v1alpha1.NodeNetworkConfig
 	NodeNetworkConfigPath     string
