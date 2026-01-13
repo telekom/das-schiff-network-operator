@@ -1,0 +1,2 @@
+taints:
+  - node.cloudprovider.kubernetes.io/uninitialized
