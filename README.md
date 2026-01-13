@@ -17,14 +17,15 @@ The project provides five components:
 
 ## Node readiness signalling
 
-During initialisation nodes are tainted with the following keys to prevent premature workload scheduling while the network stack is being prepared:
+During initialisation nodes may be tainted to prevent premature workload scheduling while the network stack is being prepared. The taints to be removed are configurable via the healthcheck configuration file (`/opt/network-operator/net-healthcheck-config.yaml`) using the `taints` field:
 
-```text
-node.t-caas.telekom.com/uninitialized
-node.cloudprovider.kubernetes.io/uninitialized
+```yaml
+taints:
+  - node.cloudprovider.kubernetes.io/uninitialized
+  - node.t-caas.telekom.com/uninitialized
 ```
 
-Once all health checks (interface state, reachability targets, API server access) pass, these taints are removed and a custom Node condition is (created or updated):
+Once all health checks (interface state, reachability targets, API server access) pass, these configured taints are removed and a custom Node condition is created or updated:
 
 ```text
 Type:    NetworkOperatorReady

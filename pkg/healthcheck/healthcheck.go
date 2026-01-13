@@ -122,6 +122,7 @@ func (hc *HealthChecker) RemoveTaints(ctx context.Context) error {
 	}
 
 	hc.taintsRemoved = true
+	RecordTaintsRemoved(true)
 
 	return nil
 }
@@ -170,12 +171,15 @@ func (hc *HealthChecker) UpdateReadinessCondition(ctx context.Context, status co
 		if err := hc.client.Status().Update(ctx, node); err != nil {
 			return fmt.Errorf("error updating node readiness condition: %w", err)
 		}
+		// Record the node readiness condition metric
+		RecordNodeReadinessCondition(status == corev1.ConditionTrue, reason)
 	}
 	return nil
 }
 
 // CheckInterfaces checks if all interfaces in the Interfaces slice are in UP state.
 func (hc *HealthChecker) CheckInterfaces() error {
+	start := time.Now()
 	issuesFound := false
 	for _, i := range hc.netConfig.Interfaces {
 		if err := hc.checkInterface(i); err != nil {
@@ -183,15 +187,19 @@ func (hc *HealthChecker) CheckInterfaces() error {
 			issuesFound = true
 		}
 	}
+	duration := time.Since(start)
 	if issuesFound {
+		RecordHealthCheckResult(HealthCheckTypeInterfaces, false, duration)
 		return errors.New("one or more problems with network interfaces found")
 	}
 
+	RecordHealthCheckResult(HealthCheckTypeInterfaces, true, duration)
 	return nil
 }
 
 // CheckReachability checks if all hosts in Reachability slice are reachable.
 func (hc *HealthChecker) CheckReachability() error {
+	start := time.Now()
 	for _, i := range hc.netConfig.Reachability {
 		if err := hc.checkReachabilityItemWithRetry(i); err != nil {
 			if strings.Contains(err.Error(), "refused") {
@@ -199,17 +207,22 @@ func (hc *HealthChecker) CheckReachability() error {
 				// just actively refuses connections (e.g. port is blocked)
 				continue
 			}
+			RecordHealthCheckResult(HealthCheckTypeReachability, false, time.Since(start))
 			return err
 		}
 	}
+	RecordHealthCheckResult(HealthCheckTypeReachability, true, time.Since(start))
 	return nil
 }
 
 // CheckAPIServer checks if Kubernetes Api server is reachable from the pod.
 func (hc HealthChecker) CheckAPIServer(ctx context.Context) error {
+	start := time.Now()
 	if err := hc.client.List(ctx, &corev1.NodeList{}); err != nil {
+		RecordHealthCheckResult(HealthCheckTypeAPIServer, false, time.Since(start))
 		return fmt.Errorf("unable to reach API server: %w", err)
 	}
+	RecordHealthCheckResult(HealthCheckTypeAPIServer, true, time.Since(start))
 	return nil
 }
 

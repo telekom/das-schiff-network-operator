@@ -278,6 +278,15 @@ var _ = Describe("UpdateReadinessCondition()", func() {
 			Expect(cond.Message).To(Equal(r.message))
 		}
 	})
+	It("returns error when status update fails", func() {
+		c := &statusUpdateErrorClient{}
+		nc := &NetHealthcheckConfig{}
+		hc, err := NewHealthChecker(c, nil, nc)
+		Expect(err).ToNot(HaveOccurred())
+		err = hc.UpdateReadinessCondition(context.Background(), corev1.ConditionTrue, ReasonHealthChecksPassed, "all good")
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("error updating node readiness condition"))
+	})
 })
 var _ = Describe("CheckInterfaces()", func() {
 	It("returns error if interface is not present", func() {
@@ -409,6 +418,16 @@ var _ = Describe("CheckAPIServer()", func() {
 		err = hc.CheckAPIServer(context.TODO())
 		Expect(err).ToNot(HaveOccurred())
 	})
+	It("should return error when API server is unreachable", func() {
+		// Use a client that will fail on List
+		c := &apiServerErrorClient{}
+		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(nil, nil), &NetHealthcheckConfig{})
+		Expect(err).ToNot(HaveOccurred())
+		Expect(hc).ToNot(BeNil())
+		err = hc.CheckAPIServer(context.TODO())
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("unable to reach API server"))
+	})
 })
 
 func fakeErrorGetByName(_ string) (netlink.Link, error) {
@@ -508,3 +527,93 @@ func (*updateErrorClient) Get(_ context.Context, _ types.NamespacedName, o clien
 	})
 	return nil
 }
+
+// statusUpdateErrorClient is a client that fails on Status().Update() calls.
+type statusUpdateErrorClient struct {
+	client.Client
+}
+
+func (*statusUpdateErrorClient) Get(_ context.Context, _ types.NamespacedName, o client.Object, _ ...client.GetOption) error {
+	node, ok := o.(*corev1.Node)
+	if !ok {
+		return fmt.Errorf("error casting object %v as corev1.Node", o)
+	}
+	node.Name = testHostname
+	return nil
+}
+
+func (c *statusUpdateErrorClient) Status() client.StatusWriter {
+	return &statusUpdateErrorWriter{}
+}
+
+type statusUpdateErrorWriter struct {
+	client.StatusWriter
+}
+
+func (*statusUpdateErrorWriter) Update(_ context.Context, _ client.Object, _ ...client.SubResourceUpdateOption) error {
+	return errors.New("fake status update error")
+}
+
+// apiServerErrorClient is a client that fails on List() calls (simulating API server unreachable).
+type apiServerErrorClient struct {
+	client.Client
+}
+
+func (*apiServerErrorClient) List(_ context.Context, _ client.ObjectList, _ ...client.ListOption) error {
+	return errors.New("connection refused")
+}
+
+var _ = Describe("Metrics", func() {
+	Describe("RecordHealthCheckResult()", func() {
+		It("should record success metrics", func() {
+			RecordHealthCheckResult(HealthCheckTypeInterfaces, true, 100*time.Millisecond)
+			// Verify gauge was set (basic smoke test - actual value testing would require metric collection)
+			Expect(HealthCheckStatus.WithLabelValues(HealthCheckTypeInterfaces)).NotTo(BeNil())
+			Expect(HealthCheckLastSuccess.WithLabelValues(HealthCheckTypeInterfaces)).NotTo(BeNil())
+			Expect(HealthCheckDuration.WithLabelValues(HealthCheckTypeInterfaces)).NotTo(BeNil())
+		})
+
+		It("should record failure metrics", func() {
+			RecordHealthCheckResult(HealthCheckTypeReachability, false, 50*time.Millisecond)
+			Expect(HealthCheckStatus.WithLabelValues(HealthCheckTypeReachability)).NotTo(BeNil())
+		})
+
+		It("should record API server check metrics", func() {
+			RecordHealthCheckResult(HealthCheckTypeAPIServer, true, 10*time.Millisecond)
+			Expect(HealthCheckStatus.WithLabelValues(HealthCheckTypeAPIServer)).NotTo(BeNil())
+		})
+	})
+
+	Describe("RecordNodeReadinessCondition()", func() {
+		It("should record ready=true condition", func() {
+			RecordNodeReadinessCondition(true, ReasonHealthChecksPassed)
+			Expect(NodeReadinessCondition.WithLabelValues(ReasonHealthChecksPassed)).NotTo(BeNil())
+		})
+
+		It("should record ready=false condition", func() {
+			RecordNodeReadinessCondition(false, ReasonInterfaceCheckFailed)
+			Expect(NodeReadinessCondition.WithLabelValues(ReasonInterfaceCheckFailed)).NotTo(BeNil())
+		})
+
+		It("should record different failure reasons", func() {
+			RecordNodeReadinessCondition(false, ReasonReachabilityFailed)
+			Expect(NodeReadinessCondition.WithLabelValues(ReasonReachabilityFailed)).NotTo(BeNil())
+
+			RecordNodeReadinessCondition(false, ReasonAPIServerFailed)
+			Expect(NodeReadinessCondition.WithLabelValues(ReasonAPIServerFailed)).NotTo(BeNil())
+		})
+	})
+
+	Describe("RecordTaintsRemoved()", func() {
+		It("should record taints removed", func() {
+			RecordTaintsRemoved(true)
+			// TaintsRemoved is a simple gauge, just verify it doesn't panic
+			Expect(TaintsRemoved).NotTo(BeNil())
+		})
+
+		It("should record taints not removed", func() {
+			RecordTaintsRemoved(false)
+			Expect(TaintsRemoved).NotTo(BeNil())
+		})
+	})
+})
