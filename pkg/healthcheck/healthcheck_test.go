@@ -155,6 +155,33 @@ var _ = Describe("External Config Sources", func() {
 		Expect(conf.Interfaces).To(Equal([]string{"eth0"}))
 		Expect(conf.Taints).To(Equal([]string{"taint1"}))
 	})
+	It("handles empty interfaces file (FileOrCreate fallback)", func() {
+		conf := &NetHealthcheckConfig{
+			Interfaces:     []string{"existing"},
+			InterfacesFile: "./testdata/empty.yaml",
+		}
+		err := conf.loadExternalSources()
+		Expect(err).ToNot(HaveOccurred())
+		Expect(conf.Interfaces).To(Equal([]string{"existing"}))
+	})
+	It("handles empty reachability file (FileOrCreate fallback)", func() {
+		conf := &NetHealthcheckConfig{
+			Reachability:     []netReachabilityItem{{Host: "existing", Port: 80}},
+			ReachabilityFile: "./testdata/empty.yaml",
+		}
+		err := conf.loadExternalSources()
+		Expect(err).ToNot(HaveOccurred())
+		Expect(len(conf.Reachability)).To(Equal(1))
+	})
+	It("handles empty taints file (FileOrCreate fallback)", func() {
+		conf := &NetHealthcheckConfig{
+			Taints:     []string{"existing-taint"},
+			TaintsFile: "./testdata/empty.yaml",
+		}
+		err := conf.loadExternalSources()
+		Expect(err).ToNot(HaveOccurred())
+		Expect(conf.Taints).To(Equal([]string{"existing-taint"}))
+	})
 })
 
 var _ = Describe("RemoveTaints()", func() {
