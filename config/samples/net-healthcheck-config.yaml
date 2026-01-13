@@ -1,0 +1,35 @@
+# Network Operator Health Check Configuration
+#
+# This file configures the health checks performed by the network operator agents.
+# Place this file at /opt/network-operator/net-healthcheck-config.yaml or set the
+# NET_HEALTHCHECK_CONFIG environment variable to a custom path.
+
+# interfaces: List of network interface names that must be in UP state.
+# The agent will check that each listed interface exists and has OperState=UP.
+interfaces:
+  - eth0
+  # - bond0
+  # - br-hbn
+
+# reachability: List of host:port targets that must be reachable via TCP.
+# The agent will attempt to establish a TCP connection to verify connectivity.
+reachability:
+  - host: kubernetes.default.svc
+    port: 443
+  # - host: 10.0.0.1
+  #   port: 179  # BGP
+
+# timeout: Connection timeout for reachability checks (Go duration format).
+# Default: 5s
+timeout: "5s"
+
+# retries: Number of retry attempts for failed reachability checks.
+# Default: 3
+retries: 3
+
+# taints: List of node taint keys to remove once all health checks pass.
+# These taints are typically applied during node initialization to prevent
+# workload scheduling before the network stack is ready.
+taints:
+  - node.cloudprovider.kubernetes.io/uninitialized
+  # - node.t-caas.telekom.com/uninitialized

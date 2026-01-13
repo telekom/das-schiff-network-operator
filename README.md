@@ -47,6 +47,12 @@ Agent-specific reasons:
 
 This allows cluster operators and higher level automation to rely on a standard Node condition instead of only watching for taint removal. When any health check fails the condition is set to `False` with the corresponding reason; taints are not re-applied (to avoid disruptive rescheduling) but the condition provides ongoing status.
 
+A sample healthcheck configuration file is provided at [config/samples/net-healthcheck-config.yaml](config/samples/net-healthcheck-config.yaml).
+
+## Prometheus metrics
+
+The network operator exposes Prometheus metrics for observability. See [docs/metrics.md](docs/metrics.md) for the complete list of metrics.
+
 ![schematic diagram of cra-frr and the host ns](./docs/cra-frr.png)
 
 ## Deploying the operator
