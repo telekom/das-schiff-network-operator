@@ -292,7 +292,7 @@ var _ = Describe("CheckInterfaces()", func() {
 	It("returns error if interface is not present", func() {
 		c := fake.NewClientBuilder().Build()
 		nc := &NetHealthcheckConfig{Interfaces: []string{"A", "B"}}
-		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(fakeErrorGetByName, &net.Dialer{Timeout: time.Duration(3)}), nc)
+		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(fakeErrorGetByName, nil, &net.Dialer{Timeout: time.Duration(3)}), nc)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(hc).ToNot(BeNil())
 		Expect(hc.TaintsRemoved()).To(BeFalse())
@@ -303,7 +303,7 @@ var _ = Describe("CheckInterfaces()", func() {
 	It("returns error if interface is not up", func() {
 		c := fake.NewClientBuilder().Build()
 		nc := &NetHealthcheckConfig{Interfaces: []string{"A", "B"}}
-		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(fakeDownGetByName, &net.Dialer{Timeout: time.Duration(3)}), nc)
+		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(fakeDownGetByName, nil, &net.Dialer{Timeout: time.Duration(3)}), nc)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(hc).ToNot(BeNil())
 		Expect(hc.TaintsRemoved()).To(BeFalse())
@@ -311,10 +311,10 @@ var _ = Describe("CheckInterfaces()", func() {
 		Expect(err).To(HaveOccurred())
 		Expect(hc.TaintsRemoved()).To(BeFalse())
 	})
-	It("returns error if all links are up", func() {
+	It("returns no error if all links are up", func() {
 		c := fake.NewClientBuilder().Build()
 		nc := &NetHealthcheckConfig{Interfaces: []string{"A", "B"}}
-		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(fakeUpGetByName, NewTCPDialer("")), nc)
+		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(fakeUpGetByName, nil, NewTCPDialer("")), nc)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(hc).ToNot(BeNil())
 		Expect(hc.TaintsRemoved()).To(BeFalse())
@@ -322,11 +322,98 @@ var _ = Describe("CheckInterfaces()", func() {
 		Expect(err).ToNot(HaveOccurred())
 		Expect(hc.TaintsRemoved()).To(BeFalse())
 	})
+
+	// Glob pattern tests
+	It("returns no error when glob pattern matches interfaces", func() {
+		c := fake.NewClientBuilder().Build()
+		nc := &NetHealthcheckConfig{Interfaces: []string{"eth*"}}
+		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(fakeUpGetByName, fakeLinkList, NewTCPDialer("")), nc)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(hc).ToNot(BeNil())
+		err = hc.CheckInterfaces()
+		Expect(err).ToNot(HaveOccurred())
+	})
+	It("returns no error when multiple glob patterns match", func() {
+		c := fake.NewClientBuilder().Build()
+		nc := &NetHealthcheckConfig{Interfaces: []string{"eth*", "bond*"}}
+		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(fakeUpGetByName, fakeLinkList, NewTCPDialer("")), nc)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(hc).ToNot(BeNil())
+		err = hc.CheckInterfaces()
+		Expect(err).ToNot(HaveOccurred())
+	})
+	It("returns no error when mixing glob and literal interface names", func() {
+		c := fake.NewClientBuilder().Build()
+		nc := &NetHealthcheckConfig{Interfaces: []string{"lo", "eth*"}}
+		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(fakeUpGetByName, fakeLinkList, NewTCPDialer("")), nc)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(hc).ToNot(BeNil())
+		err = hc.CheckInterfaces()
+		Expect(err).ToNot(HaveOccurred())
+	})
+	It("returns error when glob pattern matches no interfaces", func() {
+		c := fake.NewClientBuilder().Build()
+		nc := &NetHealthcheckConfig{Interfaces: []string{"nonexistent*"}}
+		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(fakeUpGetByName, fakeLinkList, NewTCPDialer("")), nc)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(hc).ToNot(BeNil())
+		err = hc.CheckInterfaces()
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("no interfaces matched the configured patterns"))
+	})
+	It("returns error when linkList fails during glob expansion", func() {
+		c := fake.NewClientBuilder().Build()
+		nc := &NetHealthcheckConfig{Interfaces: []string{"eth*"}}
+		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(fakeUpGetByName, fakeLinkListError, NewTCPDialer("")), nc)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(hc).ToNot(BeNil())
+		err = hc.CheckInterfaces()
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("error listing network interfaces"))
+	})
+	It("returns error for invalid glob pattern", func() {
+		c := fake.NewClientBuilder().Build()
+		nc := &NetHealthcheckConfig{Interfaces: []string{"eth["}}
+		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(fakeUpGetByName, fakeLinkList, NewTCPDialer("")), nc)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(hc).ToNot(BeNil())
+		err = hc.CheckInterfaces()
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("invalid glob pattern"))
+	})
+	It("handles single character wildcard pattern", func() {
+		c := fake.NewClientBuilder().Build()
+		nc := &NetHealthcheckConfig{Interfaces: []string{"eth?"}}
+		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(fakeUpGetByName, fakeLinkList, NewTCPDialer("")), nc)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(hc).ToNot(BeNil())
+		err = hc.CheckInterfaces()
+		Expect(err).ToNot(HaveOccurred())
+	})
+	It("handles character class pattern", func() {
+		c := fake.NewClientBuilder().Build()
+		nc := &NetHealthcheckConfig{Interfaces: []string{"eth[01]"}}
+		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(fakeUpGetByName, fakeLinkList, NewTCPDialer("")), nc)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(hc).ToNot(BeNil())
+		err = hc.CheckInterfaces()
+		Expect(err).ToNot(HaveOccurred())
+	})
+	It("returns empty list when no interfaces exist and glob used", func() {
+		c := fake.NewClientBuilder().Build()
+		nc := &NetHealthcheckConfig{Interfaces: []string{"eth*"}}
+		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(fakeUpGetByName, fakeEmptyLinkList, NewTCPDialer("")), nc)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(hc).ToNot(BeNil())
+		err = hc.CheckInterfaces()
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("no interfaces matched the configured patterns"))
+	})
 })
 var _ = Describe("NewTcpDialer()", func() {
 	It("should use dialer with 3s timeout", func() {
 		c := fake.NewClientBuilder().Build()
-		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(fakeUpGetByName, NewTCPDialer("")), &NetHealthcheckConfig{})
+		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(fakeUpGetByName, nil, NewTCPDialer("")), &NetHealthcheckConfig{})
 		Expect(err).ToNot(HaveOccurred())
 		Expect(hc).ToNot(BeNil())
 		Expect(hc.TaintsRemoved()).To(BeFalse())
@@ -335,7 +422,7 @@ var _ = Describe("NewTcpDialer()", func() {
 	})
 	It("should use dialer with 5s timeout", func() {
 		c := fake.NewClientBuilder().Build()
-		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(fakeUpGetByName, NewTCPDialer("5")), &NetHealthcheckConfig{})
+		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(fakeUpGetByName, nil, NewTCPDialer("5")), &NetHealthcheckConfig{})
 		Expect(err).ToNot(HaveOccurred())
 		Expect(hc).ToNot(BeNil())
 		Expect(hc.TaintsRemoved()).To(BeFalse())
@@ -344,7 +431,7 @@ var _ = Describe("NewTcpDialer()", func() {
 	})
 	It("should use dialer with 500ms timeout", func() {
 		c := fake.NewClientBuilder().Build()
-		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(fakeUpGetByName, NewTCPDialer("500ms")), &NetHealthcheckConfig{})
+		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(fakeUpGetByName, nil, NewTCPDialer("500ms")), &NetHealthcheckConfig{})
 		Expect(err).ToNot(HaveOccurred())
 		Expect(hc).ToNot(BeNil())
 		Expect(hc.TaintsRemoved()).To(BeFalse())
@@ -361,7 +448,7 @@ var _ = Describe("CheckReachability()", func() {
 			Reachability: []netReachabilityItem{{Host: "someHost", Port: 42}},
 		}
 		dialerMock.EXPECT().Dial("tcp", "someHost:42").Return(nil, errors.New("fake error")).Times(defaultRetries)
-		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(fakeUpGetByName, dialerMock), nc)
+		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(fakeUpGetByName, nil, dialerMock), nc)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(hc).ToNot(BeNil())
 		Expect(hc.TaintsRemoved()).To(BeFalse())
@@ -374,7 +461,7 @@ var _ = Describe("CheckReachability()", func() {
 			Reachability: []netReachabilityItem{{Host: "someHost", Port: 42}},
 		}
 		dialerMock.EXPECT().Dial("tcp", "someHost:42").Return(&fakeConn{}, nil).Times(1)
-		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(fakeUpGetByName, dialerMock), nc)
+		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(fakeUpGetByName, nil, dialerMock), nc)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(hc).ToNot(BeNil())
 		Expect(hc.TaintsRemoved()).To(BeFalse())
@@ -387,7 +474,7 @@ var _ = Describe("CheckReachability()", func() {
 			Reachability: []netReachabilityItem{{Host: "someHost", Port: 42}},
 		}
 		dialerMock.EXPECT().Dial("tcp", "someHost:42").Return(nil, errors.New("connect: connection refused")).Times(1)
-		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(fakeUpGetByName, dialerMock), nc)
+		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(fakeUpGetByName, nil, dialerMock), nc)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(hc).ToNot(BeNil())
 		Expect(hc.TaintsRemoved()).To(BeFalse())
@@ -401,7 +488,7 @@ var _ = Describe("CheckReachability()", func() {
 			Retries:      1,
 		}
 		dialerMock.EXPECT().Dial("tcp", "someHost:42").Return(&fakeConnCloseError{}, nil).Times(1)
-		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(fakeUpGetByName, dialerMock), nc)
+		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(fakeUpGetByName, nil, dialerMock), nc)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(hc).ToNot(BeNil())
 		Expect(hc.TaintsRemoved()).To(BeFalse())
@@ -412,7 +499,7 @@ var _ = Describe("CheckReachability()", func() {
 var _ = Describe("CheckAPIServer()", func() {
 	It("should return no error", func() {
 		c := fake.NewClientBuilder().Build()
-		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(nil, nil), &NetHealthcheckConfig{})
+		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(nil, nil, nil), &NetHealthcheckConfig{})
 		Expect(err).ToNot(HaveOccurred())
 		Expect(hc).ToNot(BeNil())
 		err = hc.CheckAPIServer(context.TODO())
@@ -421,7 +508,7 @@ var _ = Describe("CheckAPIServer()", func() {
 	It("should return error when API server is unreachable", func() {
 		// Use a client that will fail on List
 		c := &apiServerErrorClient{}
-		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(nil, nil), &NetHealthcheckConfig{})
+		hc, err := NewHealthChecker(c, NewHealthCheckToolkit(nil, nil, nil), &NetHealthcheckConfig{})
 		Expect(err).ToNot(HaveOccurred())
 		Expect(hc).ToNot(BeNil())
 		err = hc.CheckAPIServer(context.TODO())
@@ -440,6 +527,40 @@ func fakeDownGetByName(_ string) (netlink.Link, error) {
 
 func fakeUpGetByName(_ string) (netlink.Link, error) {
 	return fakeUpLink{}, nil
+}
+
+// fakeLinkList returns a list of fake links for glob testing.
+func fakeLinkList() ([]netlink.Link, error) {
+	return []netlink.Link{
+		fakeNamedLink{name: "eth0"},
+		fakeNamedLink{name: "eth1"},
+		fakeNamedLink{name: "bond0"},
+		fakeNamedLink{name: "br-hbn"},
+		fakeNamedLink{name: "lo"},
+	}, nil
+}
+
+func fakeEmptyLinkList() ([]netlink.Link, error) {
+	return []netlink.Link{}, nil
+}
+
+func fakeLinkListError() ([]netlink.Link, error) {
+	return nil, errors.New("failed to list links")
+}
+
+type fakeNamedLink struct {
+	name string
+}
+
+func (f fakeNamedLink) Attrs() *netlink.LinkAttrs {
+	return &netlink.LinkAttrs{
+		Name:      f.name,
+		OperState: netlink.OperUp,
+	}
+}
+
+func (fakeNamedLink) Type() string {
+	return ""
 }
 
 type fakeUpLink struct{}

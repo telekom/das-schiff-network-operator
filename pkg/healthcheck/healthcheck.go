@@ -178,10 +178,24 @@ func (hc *HealthChecker) UpdateReadinessCondition(ctx context.Context, status co
 }
 
 // CheckInterfaces checks if all interfaces in the Interfaces slice are in UP state.
+// Interface names support glob patterns (e.g., "eth*", "bond?", "br-*").
 func (hc *HealthChecker) CheckInterfaces() error {
 	start := time.Now()
 	issuesFound := false
-	for _, i := range hc.netConfig.Interfaces {
+
+	// Expand glob patterns and check each matching interface
+	interfaces, err := hc.expandInterfacePatterns(hc.netConfig.Interfaces)
+	if err != nil {
+		RecordHealthCheckResult(HealthCheckTypeInterfaces, false, time.Since(start))
+		return fmt.Errorf("error expanding interface patterns: %w", err)
+	}
+
+	if len(interfaces) == 0 && len(hc.netConfig.Interfaces) > 0 {
+		RecordHealthCheckResult(HealthCheckTypeInterfaces, false, time.Since(start))
+		return errors.New("no interfaces matched the configured patterns")
+	}
+
+	for _, i := range interfaces {
 		if err := hc.checkInterface(i); err != nil {
 			hc.Logger.Error(err, "problem with network interface "+i)
 			issuesFound = true
@@ -195,6 +209,56 @@ func (hc *HealthChecker) CheckInterfaces() error {
 
 	RecordHealthCheckResult(HealthCheckTypeInterfaces, true, duration)
 	return nil
+}
+
+// expandInterfacePatterns expands glob patterns in interface names to actual interface names.
+// If a pattern contains no glob characters, it is returned as-is.
+func (hc *HealthChecker) expandInterfacePatterns(patterns []string) ([]string, error) {
+	var result []string
+	seen := make(map[string]bool)
+
+	for _, pattern := range patterns {
+		// Check if pattern contains glob characters
+		if !containsGlobChar(pattern) {
+			// No glob, use as-is
+			if !seen[pattern] {
+				result = append(result, pattern)
+				seen[pattern] = true
+			}
+			continue
+		}
+
+		// Get all links and match against the pattern
+		links, err := hc.toolkit.linkList()
+		if err != nil {
+			return nil, fmt.Errorf("error listing network interfaces: %w", err)
+		}
+
+		matched := false
+		for _, link := range links {
+			name := link.Attrs().Name
+			match, err := filepath.Match(pattern, name)
+			if err != nil {
+				return nil, fmt.Errorf("invalid glob pattern %q: %w", pattern, err)
+			}
+			if match && !seen[name] {
+				result = append(result, name)
+				seen[name] = true
+				matched = true
+			}
+		}
+
+		if !matched {
+			hc.Logger.Info("glob pattern matched no interfaces", "pattern", pattern)
+		}
+	}
+
+	return result, nil
+}
+
+// containsGlobChar returns true if the string contains glob metacharacters.
+func containsGlobChar(s string) bool {
+	return strings.ContainsAny(s, "*?[")
 }
 
 // CheckReachability checks if all hosts in Reachability slice are reachable.
@@ -313,13 +377,15 @@ func LoadConfig(configFile string) (*NetHealthcheckConfig, error) {
 // Toolkit is a helper structure that holds interfaces and functions used by HealthChecker.
 type Toolkit struct {
 	linkByName func(name string) (netlink.Link, error)
+	linkList   func() ([]netlink.Link, error)
 	tcpDialer  TCPDialerInterface
 }
 
 // NewHealthCheckToolkit returns new HealthCheckToolkit.
-func NewHealthCheckToolkit(linkByName func(name string) (netlink.Link, error), tcpDialer TCPDialerInterface) *Toolkit {
+func NewHealthCheckToolkit(linkByName func(name string) (netlink.Link, error), linkList func() ([]netlink.Link, error), tcpDialer TCPDialerInterface) *Toolkit {
 	return &Toolkit{
 		linkByName: linkByName,
+		linkList:   linkList,
 		tcpDialer:  tcpDialer,
 	}
 }
@@ -343,7 +409,7 @@ func NewTCPDialer(dialerTimeout string) TCPDialerInterface {
 
 // NewDefaultHealthcheckToolkit returns.
 func NewDefaultHealthcheckToolkit(tcpDialer TCPDialerInterface) *Toolkit {
-	return NewHealthCheckToolkit(netlink.LinkByName, tcpDialer)
+	return NewHealthCheckToolkit(netlink.LinkByName, netlink.LinkList, tcpDialer)
 }
 
 type TCPDialerInterface interface {

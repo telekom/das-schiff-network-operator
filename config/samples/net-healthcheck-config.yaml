@@ -4,12 +4,18 @@
 # Place this file at /opt/network-operator/net-healthcheck-config.yaml or set the
 # NET_HEALTHCHECK_CONFIG environment variable to a custom path.
 
-# interfaces: List of network interface names that must be in UP state.
+# interfaces: List of network interface names or glob patterns that must be in UP state.
 # The agent will check that each listed interface exists and has OperState=UP.
+# Supported glob patterns:
+#   - * matches any sequence of characters (e.g., eth* matches eth0, eth1, etc.)
+#   - ? matches any single character (e.g., eth? matches eth0, eth1)
+#   - [abc] matches any character in the set (e.g., eth[01] matches eth0, eth1)
 interfaces:
   - eth0
-  # - bond0
-  # - br-hbn
+  # - eth*        # Match all interfaces starting with eth
+  # - bond*       # Match all bond interfaces
+  # - br-*        # Match all bridge interfaces
+  # - veth[0-9]*  # Match veth interfaces with numeric suffix
 
 # reachability: List of host:port targets that must be reachable via TCP.
 # The agent will attempt to establish a TCP connection to verify connectivity.

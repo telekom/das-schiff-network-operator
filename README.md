@@ -36,7 +36,7 @@ Message: Human readable description of the last evaluation.
 
 Common reasons:
 - `HealthChecksPassed` – all checks succeeded
-- `InterfaceCheckFailed` – one or more configured interfaces are not UP
+- `InterfaceCheckFailed` – one or more configured interfaces are not UP (supports glob patterns like `eth*`, `bond?`)
 - `ReachabilityCheckFailed` – a configured reachability target is unreachable
 - `APIServerCheckFailed` – cannot reach the Kubernetes API server
 
