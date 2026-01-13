@@ -172,6 +172,112 @@ var _ = Describe("UpdateReadinessCondition()", func() {
 		}
 		Expect(count).To(Equal(1))
 	})
+	It("returns error when node is not found", func() {
+		// No node in the fake client
+		c := fake.NewClientBuilder().WithStatusSubresource(&corev1.Node{}).Build()
+		nc := &NetHealthcheckConfig{}
+		hc, err := NewHealthChecker(c, nil, nc)
+		Expect(err).ToNot(HaveOccurred())
+		err = hc.UpdateReadinessCondition(context.Background(), corev1.ConditionTrue, ReasonHealthChecksPassed, "all good")
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("error retrieving node"))
+	})
+	It("does not change LastTransitionTime when status stays the same", func() {
+		// Use a fixed time in the past to avoid precision issues
+		fixedTime := metav1.NewTime(time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC))
+		node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: testHostname}, Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{{
+			Type:               NetworkOperatorReadyConditionType,
+			Status:             corev1.ConditionTrue,
+			LastHeartbeatTime:  fixedTime,
+			LastTransitionTime: fixedTime,
+			Reason:             ReasonHealthChecksPassed,
+			Message:            "previous message",
+		}}}}
+		c := fake.NewClientBuilder().WithRuntimeObjects(node).WithStatusSubresource(&corev1.Node{}).Build()
+		nc := &NetHealthcheckConfig{}
+		hc, err := NewHealthChecker(c, nil, nc)
+		Expect(err).ToNot(HaveOccurred())
+		// Update with same status but different message
+		err = hc.UpdateReadinessCondition(context.Background(), corev1.ConditionTrue, ReasonHealthChecksPassed, "updated message")
+		Expect(err).ToNot(HaveOccurred())
+		updated := &corev1.Node{}
+		Expect(c.Get(context.Background(), types.NamespacedName{Name: testHostname}, updated)).To(Succeed())
+		var cond *corev1.NodeCondition
+		for i := range updated.Status.Conditions {
+			if updated.Status.Conditions[i].Type == NetworkOperatorReadyConditionType {
+				cond = &updated.Status.Conditions[i]
+				break
+			}
+		}
+		Expect(cond).ToNot(BeNil())
+		// LastTransitionTime should NOT change when status stays the same (compare Unix timestamp)
+		Expect(cond.LastTransitionTime.Unix()).To(Equal(fixedTime.Unix()))
+		// But message should be updated
+		Expect(cond.Message).To(Equal("updated message"))
+	})
+	It("changes LastTransitionTime when status changes", func() {
+		oldTime := metav1.NewTime(metav1.Now().Add(-1 * time.Hour))
+		node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: testHostname}, Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{{
+			Type:               NetworkOperatorReadyConditionType,
+			Status:             corev1.ConditionFalse,
+			LastHeartbeatTime:  oldTime,
+			LastTransitionTime: oldTime,
+			Reason:             ReasonInterfaceCheckFailed,
+			Message:            "interface was down",
+		}}}}
+		c := fake.NewClientBuilder().WithRuntimeObjects(node).WithStatusSubresource(&corev1.Node{}).Build()
+		nc := &NetHealthcheckConfig{}
+		hc, err := NewHealthChecker(c, nil, nc)
+		Expect(err).ToNot(HaveOccurred())
+		// Update to new status
+		err = hc.UpdateReadinessCondition(context.Background(), corev1.ConditionTrue, ReasonHealthChecksPassed, "now healthy")
+		Expect(err).ToNot(HaveOccurred())
+		updated := &corev1.Node{}
+		Expect(c.Get(context.Background(), types.NamespacedName{Name: testHostname}, updated)).To(Succeed())
+		var cond *corev1.NodeCondition
+		for i := range updated.Status.Conditions {
+			if updated.Status.Conditions[i].Type == NetworkOperatorReadyConditionType {
+				cond = &updated.Status.Conditions[i]
+				break
+			}
+		}
+		Expect(cond).ToNot(BeNil())
+		Expect(cond.Status).To(Equal(corev1.ConditionTrue))
+		// LastTransitionTime SHOULD change when status changes
+		Expect(cond.LastTransitionTime.Time).ToNot(Equal(oldTime.Time))
+	})
+	It("handles all different failure reasons", func() {
+		failReasons := []struct {
+			reason  string
+			message string
+		}{
+			{ReasonInterfaceCheckFailed, "eth0 is down"},
+			{ReasonReachabilityFailed, "cannot ping 10.0.0.1"},
+			{ReasonAPIServerFailed, "api server timeout"},
+		}
+		for _, r := range failReasons {
+			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: testHostname}}
+			c := fake.NewClientBuilder().WithRuntimeObjects(node).WithStatusSubresource(&corev1.Node{}).Build()
+			nc := &NetHealthcheckConfig{}
+			hc, err := NewHealthChecker(c, nil, nc)
+			Expect(err).ToNot(HaveOccurred())
+			err = hc.UpdateReadinessCondition(context.Background(), corev1.ConditionFalse, r.reason, r.message)
+			Expect(err).ToNot(HaveOccurred())
+			updated := &corev1.Node{}
+			Expect(c.Get(context.Background(), types.NamespacedName{Name: testHostname}, updated)).To(Succeed())
+			var cond *corev1.NodeCondition
+			for i := range updated.Status.Conditions {
+				if updated.Status.Conditions[i].Type == NetworkOperatorReadyConditionType {
+					cond = &updated.Status.Conditions[i]
+					break
+				}
+			}
+			Expect(cond).ToNot(BeNil(), "condition should exist for reason: "+r.reason)
+			Expect(cond.Status).To(Equal(corev1.ConditionFalse))
+			Expect(cond.Reason).To(Equal(r.reason))
+			Expect(cond.Message).To(Equal(r.message))
+		}
+	})
 })
 var _ = Describe("CheckInterfaces()", func() {
 	It("returns error if interface is not present", func() {
