@@ -30,9 +30,20 @@ Once all health checks (interface state, reachability targets, API server access
 ```text
 Type:    NetworkOperatorReady
 Status:  True | False
-Reason:  HealthChecksPassed | InterfaceCheckFailed | ReachabilityCheckFailed | APIServerCheckFailed
+Reason:  <see below>
 Message: Human readable description of the last evaluation.
 ```
+
+Common reasons:
+- `HealthChecksPassed` – all checks succeeded
+- `InterfaceCheckFailed` – one or more configured interfaces are not UP
+- `ReachabilityCheckFailed` – a configured reachability target is unreachable
+- `APIServerCheckFailed` – cannot reach the Kubernetes API server
+
+Agent-specific reasons:
+- `NetplanInitializationFailed` / `NetplanApplyFailed` – netplan agent errors
+- `VLANReconcileFailed` / `LoopbackReconcileFailed` – hbn-l2 agent errors
+- `ConfigFetchFailed` – failed to fetch node configuration
 
 This allows cluster operators and higher level automation to rely on a standard Node condition instead of only watching for taint removal. When any health check fails the condition is set to `False` with the corresponding reason; taints are not re-applied (to avoid disruptive rescheduling) but the condition provides ongoing status.
 
