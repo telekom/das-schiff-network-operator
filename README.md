@@ -47,6 +47,8 @@ Agent-specific reasons:
 
 This allows cluster operators and higher level automation to rely on a standard Node condition instead of only watching for taint removal. When any health check fails the condition is set to `False` with the corresponding reason; taints are not re-applied (to avoid disruptive rescheduling) but the condition provides ongoing status.
 
+Configuration can also be split across multiple files using external sources (`interfacesFile`, `reachabilityFile`, `taintsFile`). This is useful for reading parts of the configuration from hostPath mounts or ConfigMaps. Missing files are silently ignored, enabling graceful fallback with `FileOrCreate` volume strategies.
+
 A sample healthcheck configuration file is provided at [config/samples/net-healthcheck-config.yaml](config/samples/net-healthcheck-config.yaml).
 
 ## Prometheus metrics
