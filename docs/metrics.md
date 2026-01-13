@@ -21,14 +21,14 @@ The `check` label can be `interfaces`, `reachability`, or `apiserver`.
 | `nwop_scrape_collector_duration_seconds` | Gauge | `collector` | Duration of a collector scrape |
 | `nwop_scrape_collector_success` | Gauge | `collector` | Whether a collector succeeded (1=yes, 0=no) |
 
-## Netlink collector metrics (enabled by default)
+## Netlink collector metrics (agent-cra-frr, frr-exporter)
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
 | `nwop_netlink_routes_fib` | Gauge | `table`, `vrf`, `protocol`, `address_family` | Number of routes in the Linux dataplane |
 | `nwop_netlink_neighbors` | Gauge | `interface`, `address_family`, `flags`, `status` | Number of neighbors in the Linux dataplane |
 
-## FRR collector metrics (disabled by default)
+## FRR collector metrics (agent-cra-frr, frr-exporter)
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
@@ -42,7 +42,7 @@ The `check` label can be `interfaces`, `reachability`, or `apiserver`.
 | `nwop_frr_bgp_messages_received_total` | Counter | (same as above) | Messages received from peer |
 | `nwop_frr_bgp_messages_transmitted_total` | Counter | (same as above) | Messages transmitted to peer |
 
-## VSR collector metrics (disabled by default)
+## VSR collector metrics (agent-cra-vsr)
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
