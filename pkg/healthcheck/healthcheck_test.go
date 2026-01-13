@@ -542,7 +542,7 @@ func (*statusUpdateErrorClient) Get(_ context.Context, _ types.NamespacedName, o
 	return nil
 }
 
-func (c *statusUpdateErrorClient) Status() client.StatusWriter {
+func (*statusUpdateErrorClient) Status() client.StatusWriter {
 	return &statusUpdateErrorWriter{}
 }
 

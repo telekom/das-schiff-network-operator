@@ -23,8 +23,8 @@ const (
 )
 
 var (
-	// HealthCheckStatus is a gauge that indicates the status of each health check.
-	// 1 = passing, 0 = failing
+	// HealthCheckStatus is a gauge that indicates the status of each health check
+	// (1 = passing, 0 = failing).
 	HealthCheckStatus = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: metricsNamespace,
@@ -58,8 +58,8 @@ var (
 		[]string{labelCheck},
 	)
 
-	// NodeReadinessCondition is a gauge that indicates the current node readiness condition.
-	// 1 = True, 0 = False, -1 = Unknown
+	// NodeReadinessCondition is a gauge that indicates the current node readiness condition
+	// (1 = True, 0 = False, -1 = Unknown).
 	NodeReadinessCondition = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: metricsNamespace,
@@ -70,8 +70,8 @@ var (
 		[]string{labelReason},
 	)
 
-	// TaintsRemoved is a gauge that indicates whether taints have been removed.
-	// 1 = removed, 0 = still present
+	// TaintsRemoved is a gauge that indicates whether taints have been removed
+	// (1 = removed, 0 = still present).
 	TaintsRemoved = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Namespace: metricsNamespace,
