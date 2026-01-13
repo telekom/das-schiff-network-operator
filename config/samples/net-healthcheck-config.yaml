@@ -39,3 +39,27 @@ retries: 3
 taints:
   - node.cloudprovider.kubernetes.io/uninitialized
   # - node.t-caas.telekom.com/uninitialized
+
+# External configuration sources
+# ================================
+# Configuration can be split across multiple files. External sources are merged
+# with inline configuration (external entries are appended to inline entries).
+# If an external file doesn't exist, it is silently ignored (graceful degradation).
+# This is useful for reading configuration from hostPath mounts or ConfigMaps.
+
+# interfacesFile: Path to a YAML file containing a list of interface names/patterns.
+# Example file content:
+#   - eth0
+#   - bond*
+# interfacesFile: /etc/network-operator/interfaces.yaml
+
+# reachabilityFile: Path to a YAML file containing reachability targets.
+# Example file content:
+#   - host: 10.0.0.1
+#     port: 179
+# reachabilityFile: /etc/network-operator/reachability.yaml
+
+# taintsFile: Path to a YAML file containing taint keys to remove.
+# Example file content:
+#   - custom-taint-key
+# taintsFile: /etc/network-operator/taints.yaml

@@ -72,6 +72,91 @@ var _ = Describe("LoadConfig()", func() {
 		Expect(conf).ToNot(BeNil())
 	})
 })
+
+var _ = Describe("External Config Sources", func() {
+	It("loads and merges interfaces from external file", func() {
+		conf, err := LoadConfig("./testdata/config-with-external.yaml")
+		Expect(err).ToNot(HaveOccurred())
+		Expect(conf.Interfaces).To(ContainElements("lo", "eth0", "eth1", "bond0"))
+		Expect(len(conf.Interfaces)).To(Equal(4))
+	})
+	It("loads and merges reachability from external file", func() {
+		conf, err := LoadConfig("./testdata/config-with-external.yaml")
+		Expect(err).ToNot(HaveOccurred())
+		Expect(len(conf.Reachability)).To(Equal(3))
+		Expect(conf.Reachability[0].Host).To(Equal("localhost"))
+		Expect(conf.Reachability[1].Host).To(Equal("external-host.example.com"))
+		Expect(conf.Reachability[2].Host).To(Equal("10.0.0.1"))
+	})
+	It("loads and merges taints from external file", func() {
+		conf, err := LoadConfig("./testdata/config-with-external.yaml")
+		Expect(err).ToNot(HaveOccurred())
+		Expect(conf.Taints).To(ContainElements("inline-taint", "node.kubernetes.io/not-ready", "custom-taint"))
+		Expect(len(conf.Taints)).To(Equal(3))
+	})
+	It("gracefully handles missing external interfaces file", func() {
+		conf := &NetHealthcheckConfig{
+			Interfaces:     []string{"existing"},
+			InterfacesFile: "/nonexistent/path/interfaces.yaml",
+		}
+		err := conf.loadExternalSources()
+		Expect(err).ToNot(HaveOccurred())
+		Expect(conf.Interfaces).To(Equal([]string{"existing"}))
+	})
+	It("gracefully handles missing external reachability file", func() {
+		conf := &NetHealthcheckConfig{
+			Reachability:     []netReachabilityItem{{Host: "existing", Port: 80}},
+			ReachabilityFile: "/nonexistent/path/reachability.yaml",
+		}
+		err := conf.loadExternalSources()
+		Expect(err).ToNot(HaveOccurred())
+		Expect(len(conf.Reachability)).To(Equal(1))
+	})
+	It("gracefully handles missing external taints file", func() {
+		conf := &NetHealthcheckConfig{
+			Taints:     []string{"existing-taint"},
+			TaintsFile: "/nonexistent/path/taints.yaml",
+		}
+		err := conf.loadExternalSources()
+		Expect(err).ToNot(HaveOccurred())
+		Expect(conf.Taints).To(Equal([]string{"existing-taint"}))
+	})
+	It("returns error for invalid interfaces file content", func() {
+		conf := &NetHealthcheckConfig{
+			InterfacesFile: "./testdata/invalid-list.yaml",
+		}
+		err := conf.loadExternalSources()
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("error loading interfaces"))
+	})
+	It("returns error for invalid reachability file content", func() {
+		conf := &NetHealthcheckConfig{
+			ReachabilityFile: "./testdata/invalid-list.yaml",
+		}
+		err := conf.loadExternalSources()
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("error loading reachability"))
+	})
+	It("returns error for invalid taints file content", func() {
+		conf := &NetHealthcheckConfig{
+			TaintsFile: "./testdata/invalid-list.yaml",
+		}
+		err := conf.loadExternalSources()
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("error loading taints"))
+	})
+	It("works with no external sources configured", func() {
+		conf := &NetHealthcheckConfig{
+			Interfaces: []string{"eth0"},
+			Taints:     []string{"taint1"},
+		}
+		err := conf.loadExternalSources()
+		Expect(err).ToNot(HaveOccurred())
+		Expect(conf.Interfaces).To(Equal([]string{"eth0"}))
+		Expect(conf.Taints).To(Equal([]string{"taint1"}))
+	})
+})
+
 var _ = Describe("RemoveTaints()", func() {
 	It("returns error about no nodes", func() {
 		c := fake.NewClientBuilder().Build()

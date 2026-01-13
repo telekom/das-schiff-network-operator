@@ -336,6 +336,13 @@ type NetHealthcheckConfig struct {
 	Timeout      string                `yaml:"timeout,omitempty"`
 	Retries      int                   `yaml:"retries,omitempty"`
 	Taints       []string              `yaml:"taints,omitempty"`
+
+	// External sources for configuration fields.
+	// These allow reading specific config sections from separate files (e.g., hostPath mounts).
+	// If the file doesn't exist, it is silently ignored (graceful degradation).
+	InterfacesFile   string `yaml:"interfacesFile,omitempty"`
+	ReachabilityFile string `yaml:"reachabilityFile,omitempty"`
+	TaintsFile       string `yaml:"taintsFile,omitempty"`
 }
 
 type netReachabilityItem struct {
@@ -343,7 +350,7 @@ type netReachabilityItem struct {
 	Port int    `yaml:"port"`
 }
 
-// LoadConfig loads healtcheck config from file.
+// LoadConfig loads healtcheck config from file and merges external sources.
 func LoadConfig(configFile string) (*NetHealthcheckConfig, error) {
 	config := &NetHealthcheckConfig{}
 
@@ -371,7 +378,91 @@ func LoadConfig(configFile string) (*NetHealthcheckConfig, error) {
 		}
 	}
 
+	// Load external sources and merge into config
+	if err := config.loadExternalSources(); err != nil {
+		return nil, err
+	}
+
 	return config, nil
+}
+
+// loadExternalSources reads configuration from external files and merges them into the config.
+// Missing files are silently ignored (graceful degradation).
+func (c *NetHealthcheckConfig) loadExternalSources() error {
+	// Load interfaces from external file
+	if c.InterfacesFile != "" {
+		interfaces, err := loadStringListFromFile(c.InterfacesFile)
+		if err != nil {
+			return fmt.Errorf("error loading interfaces from %s: %w", c.InterfacesFile, err)
+		}
+		if interfaces != nil {
+			c.Interfaces = append(c.Interfaces, interfaces...)
+		}
+	}
+
+	// Load reachability from external file
+	if c.ReachabilityFile != "" {
+		reachability, err := loadReachabilityFromFile(c.ReachabilityFile)
+		if err != nil {
+			return fmt.Errorf("error loading reachability from %s: %w", c.ReachabilityFile, err)
+		}
+		if reachability != nil {
+			c.Reachability = append(c.Reachability, reachability...)
+		}
+	}
+
+	// Load taints from external file
+	if c.TaintsFile != "" {
+		taints, err := loadStringListFromFile(c.TaintsFile)
+		if err != nil {
+			return fmt.Errorf("error loading taints from %s: %w", c.TaintsFile, err)
+		}
+		if taints != nil {
+			c.Taints = append(c.Taints, taints...)
+		}
+	}
+
+	return nil
+}
+
+// loadStringListFromFile reads a YAML file containing a string list.
+// Returns nil (not an error) if the file doesn't exist.
+func loadStringListFromFile(path string) ([]string, error) {
+	data, err := os.ReadFile(filepath.Clean(path))
+	if err != nil {
+		if os.IsNotExist(err) {
+			// File doesn't exist - graceful degradation
+			return nil, nil
+		}
+		return nil, fmt.Errorf("error reading file: %w", err)
+	}
+
+	var items []string
+	if err := yaml.Unmarshal(data, &items); err != nil {
+		return nil, fmt.Errorf("error unmarshalling file: %w", err)
+	}
+
+	return items, nil
+}
+
+// loadReachabilityFromFile reads a YAML file containing reachability items.
+// Returns nil (not an error) if the file doesn't exist.
+func loadReachabilityFromFile(path string) ([]netReachabilityItem, error) {
+	data, err := os.ReadFile(filepath.Clean(path))
+	if err != nil {
+		if os.IsNotExist(err) {
+			// File doesn't exist - graceful degradation
+			return nil, nil
+		}
+		return nil, fmt.Errorf("error reading file: %w", err)
+	}
+
+	var items []netReachabilityItem
+	if err := yaml.Unmarshal(data, &items); err != nil {
+		return nil, fmt.Errorf("error unmarshalling file: %w", err)
+	}
+
+	return items, nil
 }
 
 // Toolkit is a helper structure that holds interfaces and functions used by HealthChecker.
