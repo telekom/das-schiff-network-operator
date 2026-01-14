@@ -48,6 +48,8 @@ type NodeNetplanConfigReconciler struct {
 //+kubebuilder:rbac:groups=network.t-caas.telekom.com,resources=nodenetplanconfigs,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=network.t-caas.telekom.com,resources=nodenetplanconfigs/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=network.t-caas.telekom.com,resources=nodenetplanconfigs/finalizers,verbs=update
+//+kubebuilder:rbac:groups=core,resources=nodes,verbs=get;list;watch;update
+//+kubebuilder:rbac:groups=core,resources=nodes/status,verbs=get;update;patch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.

@@ -26,6 +26,14 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - nodes/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - ""
+  resources:
   - pods
   verbs:
   - list
