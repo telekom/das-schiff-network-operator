@@ -1,0 +1,13 @@
+# Config that references external sources
+interfaces:
+  - lo
+interfacesFile: ./testdata/interfaces.yaml
+reachability:
+  - host: localhost
+    port: 8080
+reachabilityFile: ./testdata/reachability.yaml
+taints:
+  - inline-taint
+taintsFile: ./testdata/taints.yaml
+timeout: 5s
+retries: 3

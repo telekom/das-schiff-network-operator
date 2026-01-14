@@ -1,0 +1,65 @@
+# Network Operator Health Check Configuration
+#
+# This file configures the health checks performed by the network operator agents.
+# Place this file at /opt/network-operator/net-healthcheck-config.yaml or set the
+# NET_HEALTHCHECK_CONFIG environment variable to a custom path.
+
+# interfaces: List of network interface names or glob patterns that must be in UP state.
+# The agent will check that each listed interface exists and has OperState=UP.
+# Supported glob patterns:
+#   - * matches any sequence of characters (e.g., eth* matches eth0, eth1, etc.)
+#   - ? matches any single character (e.g., eth? matches eth0, eth1)
+#   - [abc] matches any character in the set (e.g., eth[01] matches eth0, eth1)
+interfaces:
+  - eth0
+  # - eth*        # Match all interfaces starting with eth
+  # - bond*       # Match all bond interfaces
+  # - br-*        # Match all bridge interfaces
+  # - veth[0-9]*  # Match veth interfaces with numeric suffix
+
+# reachability: List of host:port targets that must be reachable via TCP.
+# The agent will attempt to establish a TCP connection to verify connectivity.
+reachability:
+  - host: kubernetes.default.svc
+    port: 443
+  # - host: 10.0.0.1
+  #   port: 179  # BGP
+
+# timeout: Connection timeout for reachability checks (Go duration format).
+# Default: 5s
+timeout: "5s"
+
+# retries: Number of retry attempts for failed reachability checks.
+# Default: 3
+retries: 3
+
+# taints: List of node taint keys to remove once all health checks pass.
+# These taints are typically applied during node initialization to prevent
+# workload scheduling before the network stack is ready.
+taints:
+  - node.cloudprovider.kubernetes.io/uninitialized
+  # - node.t-caas.telekom.com/uninitialized
+
+# External configuration sources
+# ================================
+# Configuration can be split across multiple files. External sources are merged
+# with inline configuration (external entries are appended to inline entries).
+# If an external file doesn't exist, it is silently ignored (graceful degradation).
+# This is useful for reading configuration from hostPath mounts or ConfigMaps.
+
+# interfacesFile: Path to a YAML file containing a list of interface names/patterns.
+# Example file content:
+#   - eth0
+#   - bond*
+# interfacesFile: /etc/network-operator/interfaces.yaml
+
+# reachabilityFile: Path to a YAML file containing reachability targets.
+# Example file content:
+#   - host: 10.0.0.1
+#     port: 179
+# reachabilityFile: /etc/network-operator/reachability.yaml
+
+# taintsFile: Path to a YAML file containing taint keys to remove.
+# Example file content:
+#   - custom-taint-key
+# taintsFile: /etc/network-operator/taints.yaml

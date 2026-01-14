@@ -10,6 +10,7 @@ import (
 	reflect "reflect"
 
 	gomock "go.uber.org/mock/gomock"
+	corev1 "k8s.io/api/core/v1"
 )
 
 // MockFRRInterface is a mock of FRRInterface interface.
@@ -180,4 +181,18 @@ func (m *MockHealthCheckerInterface) RemoveTaints(ctx context.Context) error {
 func (mr *MockHealthCheckerInterfaceMockRecorder) RemoveTaints(ctx interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RemoveTaints", reflect.TypeOf((*MockHealthCheckerInterface)(nil).RemoveTaints), ctx)
+}
+
+// UpdateReadinessCondition mocks base method.
+func (m *MockHealthCheckerInterface) UpdateReadinessCondition(ctx context.Context, status corev1.ConditionStatus, reason, message string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateReadinessCondition", ctx, status, reason, message)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// UpdateReadinessCondition indicates an expected call of UpdateReadinessCondition.
+func (mr *MockHealthCheckerInterfaceMockRecorder) UpdateReadinessCondition(ctx, status, reason, message interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateReadinessCondition", reflect.TypeOf((*MockHealthCheckerInterface)(nil).UpdateReadinessCondition), ctx, status, reason, message)
 }

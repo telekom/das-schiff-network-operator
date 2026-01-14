@@ -15,6 +15,46 @@ The project provides five components:
   - `agent-hbn-l2`: This is an alternative to `agent-netplan`, providing a very simple binary to apply the needed configuration, a subset of the `netplan` functionality and spec.
 - The _containerized routing agent_ (CRA), providing FRR and a small `cra-frr` configuration binary. This exposes an API to dynamically configure L2 and L3VNIs and reconfigure FRR.
 
+## Node readiness signalling
+
+During initialisation nodes may be tainted to prevent premature workload scheduling while the network stack is being prepared. The taints to be removed are configurable via the healthcheck configuration file (`/opt/network-operator/net-healthcheck-config.yaml`) using the `taints` field:
+
+```yaml
+taints:
+  - node.cloudprovider.kubernetes.io/uninitialized
+  - node.t-caas.telekom.com/uninitialized
+```
+
+Once all health checks (interface state, reachability targets, API server access) pass, these configured taints are removed and a custom Node condition is created or updated:
+
+```text
+Type:    NetworkOperatorReady
+Status:  True | False
+Reason:  <see below>
+Message: Human readable description of the last evaluation.
+```
+
+Common reasons:
+- `HealthChecksPassed` – all checks succeeded
+- `InterfaceCheckFailed` – one or more configured interfaces are not UP (supports glob patterns like `eth*`, `bond?`)
+- `ReachabilityCheckFailed` – a configured reachability target is unreachable
+- `APIServerCheckFailed` – cannot reach the Kubernetes API server
+
+Agent-specific reasons:
+- `NetplanInitializationFailed` / `NetplanApplyFailed` – netplan agent errors
+- `VLANReconcileFailed` / `LoopbackReconcileFailed` – hbn-l2 agent errors
+- `ConfigFetchFailed` – failed to fetch node configuration
+
+This allows cluster operators and higher level automation to rely on a standard Node condition instead of only watching for taint removal. When any health check fails the condition is set to `False` with the corresponding reason; taints are not re-applied (to avoid disruptive rescheduling) but the condition provides ongoing status.
+
+Configuration can also be split across multiple files using external sources (`interfacesFile`, `reachabilityFile`, `taintsFile`). This is useful for reading parts of the configuration from hostPath mounts or ConfigMaps. Missing files are silently ignored, enabling graceful fallback with `FileOrCreate` volume strategies.
+
+A sample healthcheck configuration file is provided at [config/samples/net-healthcheck-config.yaml](config/samples/net-healthcheck-config.yaml).
+
+## Prometheus metrics
+
+The network operator exposes Prometheus metrics for observability. See [docs/metrics.md](docs/metrics.md) for the complete list of metrics.
+
 ![schematic diagram of cra-frr and the host ns](./docs/cra-frr.png)
 
 ## Deploying the operator

@@ -16,6 +16,7 @@ import (
 	"github.com/vishvananda/netlink"
 	"gopkg.in/yaml.v2"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -26,6 +27,22 @@ const (
 	NetHealthcheckFile = "/opt/network-operator/net-healthcheck-config.yaml"
 	// NodenameEnv is an env variable that holds Kubernetes node's name.
 	NodenameEnv = "NODE_NAME"
+
+	// NetworkOperatorReadyConditionType is the custom Node condition type signalling
+	// that the network operator has successfully initialised networking on the node.
+	NetworkOperatorReadyConditionType corev1.NodeConditionType = "NetworkOperatorReady"
+
+	// Condition reasons.
+	ReasonHealthChecksPassed   = "HealthChecksPassed"
+	ReasonInterfaceCheckFailed = "InterfaceCheckFailed"
+	ReasonReachabilityFailed   = "ReachabilityCheckFailed"
+	ReasonAPIServerFailed      = "APIServerCheckFailed"
+	// Additional agent specific reasons.
+	ReasonNetplanInitFailed     = "NetplanInitializationFailed"
+	ReasonNetplanApplyFailed    = "NetplanApplyFailed"
+	ReasonVLANReconcileFailed   = "VLANReconcileFailed"
+	ReasonLoopbackReconcileFail = "LoopbackReconcileFailed"
+	ReasonConfigFetchFailed     = "ConfigFetchFailed"
 
 	configEnv         = "OPERATOR_NETHEALTHCHECK_CONFIG"
 	defaultTCPTimeout = 3
@@ -40,6 +57,7 @@ type HealthCheckerInterface interface {
 	CheckAPIServer(ctx context.Context) error
 	TaintsRemoved() bool
 	RemoveTaints(ctx context.Context) error
+	UpdateReadinessCondition(ctx context.Context, status corev1.ConditionStatus, reason, message string) error
 }
 
 // HealthChecker is a struct that holds data required for networking healthcheck.
@@ -104,28 +122,148 @@ func (hc *HealthChecker) RemoveTaints(ctx context.Context) error {
 	}
 
 	hc.taintsRemoved = true
+	RecordTaintsRemoved(true)
 
 	return nil
 }
 
+// UpdateReadinessCondition sets or updates the custom NetworkOperatorReady Node condition.
+// status: corev1.ConditionTrue or corev1.ConditionFalse
+// reason & message provide contextual information visible to users.
+func (hc *HealthChecker) UpdateReadinessCondition(ctx context.Context, status corev1.ConditionStatus, reason, message string) error {
+	node := &corev1.Node{}
+	if err := hc.client.Get(ctx, types.NamespacedName{Name: os.Getenv(NodenameEnv)}, node); err != nil {
+		return fmt.Errorf("error retrieving node to update readiness condition: %w", err)
+	}
+
+	now := metav1.Now()
+	updated := false
+	found := false
+	for i := range node.Status.Conditions {
+		c := &node.Status.Conditions[i]
+		if c.Type != NetworkOperatorReadyConditionType { // reduce nesting per gocritic suggestion
+			continue
+		}
+		found = true
+		// Transition time only changes if status changed
+		if c.Status != status {
+			c.LastTransitionTime = now
+		}
+		c.LastHeartbeatTime = now
+		c.Status = status
+		c.Reason = reason
+		c.Message = message
+		updated = true
+		break
+	}
+	if !found { // append new condition
+		node.Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
+			Type:               NetworkOperatorReadyConditionType,
+			Status:             status,
+			Reason:             reason,
+			Message:            message,
+			LastHeartbeatTime:  now,
+			LastTransitionTime: now,
+		})
+		updated = true
+	}
+	if updated {
+		if err := hc.client.Status().Update(ctx, node); err != nil {
+			return fmt.Errorf("error updating node readiness condition: %w", err)
+		}
+		// Record the node readiness condition metric
+		RecordNodeReadinessCondition(status == corev1.ConditionTrue, reason)
+	}
+	return nil
+}
+
 // CheckInterfaces checks if all interfaces in the Interfaces slice are in UP state.
+// Interface names support glob patterns (e.g., "eth*", "bond?", "br-*").
 func (hc *HealthChecker) CheckInterfaces() error {
+	start := time.Now()
 	issuesFound := false
-	for _, i := range hc.netConfig.Interfaces {
+
+	// Expand glob patterns and check each matching interface
+	interfaces, err := hc.expandInterfacePatterns(hc.netConfig.Interfaces)
+	if err != nil {
+		RecordHealthCheckResult(HealthCheckTypeInterfaces, false, time.Since(start))
+		return fmt.Errorf("error expanding interface patterns: %w", err)
+	}
+
+	if len(interfaces) == 0 && len(hc.netConfig.Interfaces) > 0 {
+		RecordHealthCheckResult(HealthCheckTypeInterfaces, false, time.Since(start))
+		return errors.New("no interfaces matched the configured patterns")
+	}
+
+	for _, i := range interfaces {
 		if err := hc.checkInterface(i); err != nil {
 			hc.Logger.Error(err, "problem with network interface "+i)
 			issuesFound = true
 		}
 	}
+	duration := time.Since(start)
 	if issuesFound {
+		RecordHealthCheckResult(HealthCheckTypeInterfaces, false, duration)
 		return errors.New("one or more problems with network interfaces found")
 	}
 
+	RecordHealthCheckResult(HealthCheckTypeInterfaces, true, duration)
 	return nil
+}
+
+// expandInterfacePatterns expands glob patterns in interface names to actual interface names.
+// If a pattern contains no glob characters, it is returned as-is.
+func (hc *HealthChecker) expandInterfacePatterns(patterns []string) ([]string, error) {
+	var result []string
+	seen := make(map[string]bool)
+
+	for _, pattern := range patterns {
+		// Check if pattern contains glob characters
+		if !containsGlobChar(pattern) {
+			// No glob, use as-is
+			if !seen[pattern] {
+				result = append(result, pattern)
+				seen[pattern] = true
+			}
+			continue
+		}
+
+		// Get all links and match against the pattern
+		links, err := hc.toolkit.linkList()
+		if err != nil {
+			return nil, fmt.Errorf("error listing network interfaces: %w", err)
+		}
+
+		matched := false
+		for _, link := range links {
+			name := link.Attrs().Name
+			match, err := filepath.Match(pattern, name)
+			if err != nil {
+				return nil, fmt.Errorf("invalid glob pattern %q: %w", pattern, err)
+			}
+			if match && !seen[name] {
+				result = append(result, name)
+				seen[name] = true
+				matched = true
+			}
+		}
+
+		if !matched {
+			hc.Logger.Info("glob pattern matched no interfaces", "pattern", pattern)
+		}
+	}
+
+	return result, nil
+}
+
+// containsGlobChar returns true if the string contains glob metacharacters.
+func containsGlobChar(s string) bool {
+	return strings.ContainsAny(s, "*?[")
 }
 
 // CheckReachability checks if all hosts in Reachability slice are reachable.
 func (hc *HealthChecker) CheckReachability() error {
+	start := time.Now()
 	for _, i := range hc.netConfig.Reachability {
 		if err := hc.checkReachabilityItemWithRetry(i); err != nil {
 			if strings.Contains(err.Error(), "refused") {
@@ -133,17 +271,22 @@ func (hc *HealthChecker) CheckReachability() error {
 				// just actively refuses connections (e.g. port is blocked)
 				continue
 			}
+			RecordHealthCheckResult(HealthCheckTypeReachability, false, time.Since(start))
 			return err
 		}
 	}
+	RecordHealthCheckResult(HealthCheckTypeReachability, true, time.Since(start))
 	return nil
 }
 
 // CheckAPIServer checks if Kubernetes Api server is reachable from the pod.
 func (hc HealthChecker) CheckAPIServer(ctx context.Context) error {
+	start := time.Now()
 	if err := hc.client.List(ctx, &corev1.NodeList{}); err != nil {
+		RecordHealthCheckResult(HealthCheckTypeAPIServer, false, time.Since(start))
 		return fmt.Errorf("unable to reach API server: %w", err)
 	}
+	RecordHealthCheckResult(HealthCheckTypeAPIServer, true, time.Since(start))
 	return nil
 }
 
@@ -193,6 +336,13 @@ type NetHealthcheckConfig struct {
 	Timeout      string                `yaml:"timeout,omitempty"`
 	Retries      int                   `yaml:"retries,omitempty"`
 	Taints       []string              `yaml:"taints,omitempty"`
+
+	// External sources for configuration fields.
+	// These allow reading specific config sections from separate files (e.g., hostPath mounts).
+	// If the file doesn't exist, it is silently ignored (graceful degradation).
+	InterfacesFile   string `yaml:"interfacesFile,omitempty"`
+	ReachabilityFile string `yaml:"reachabilityFile,omitempty"`
+	TaintsFile       string `yaml:"taintsFile,omitempty"`
 }
 
 type netReachabilityItem struct {
@@ -200,7 +350,7 @@ type netReachabilityItem struct {
 	Port int    `yaml:"port"`
 }
 
-// LoadConfig loads healtcheck config from file.
+// LoadConfig loads healtcheck config from file and merges external sources.
 func LoadConfig(configFile string) (*NetHealthcheckConfig, error) {
 	config := &NetHealthcheckConfig{}
 
@@ -228,19 +378,105 @@ func LoadConfig(configFile string) (*NetHealthcheckConfig, error) {
 		}
 	}
 
+	// Load external sources and merge into config
+	if err := config.loadExternalSources(); err != nil {
+		return nil, err
+	}
+
 	return config, nil
+}
+
+// loadExternalSources reads configuration from external files and merges them into the config.
+// Missing files are silently ignored (graceful degradation).
+func (c *NetHealthcheckConfig) loadExternalSources() error {
+	// Load interfaces from external file
+	if c.InterfacesFile != "" {
+		interfaces, err := loadStringListFromFile(c.InterfacesFile)
+		if err != nil {
+			return fmt.Errorf("error loading interfaces from %s: %w", c.InterfacesFile, err)
+		}
+		if interfaces != nil {
+			c.Interfaces = append(c.Interfaces, interfaces...)
+		}
+	}
+
+	// Load reachability from external file
+	if c.ReachabilityFile != "" {
+		reachability, err := loadReachabilityFromFile(c.ReachabilityFile)
+		if err != nil {
+			return fmt.Errorf("error loading reachability from %s: %w", c.ReachabilityFile, err)
+		}
+		if reachability != nil {
+			c.Reachability = append(c.Reachability, reachability...)
+		}
+	}
+
+	// Load taints from external file
+	if c.TaintsFile != "" {
+		taints, err := loadStringListFromFile(c.TaintsFile)
+		if err != nil {
+			return fmt.Errorf("error loading taints from %s: %w", c.TaintsFile, err)
+		}
+		if taints != nil {
+			c.Taints = append(c.Taints, taints...)
+		}
+	}
+
+	return nil
+}
+
+// loadStringListFromFile reads a YAML file containing a string list.
+// Returns nil (not an error) if the file doesn't exist.
+func loadStringListFromFile(path string) ([]string, error) {
+	data, err := os.ReadFile(filepath.Clean(path))
+	if err != nil {
+		if os.IsNotExist(err) {
+			// File doesn't exist - graceful degradation
+			return nil, nil
+		}
+		return nil, fmt.Errorf("error reading file: %w", err)
+	}
+
+	var items []string
+	if err := yaml.Unmarshal(data, &items); err != nil {
+		return nil, fmt.Errorf("error unmarshalling file: %w", err)
+	}
+
+	return items, nil
+}
+
+// loadReachabilityFromFile reads a YAML file containing reachability items.
+// Returns nil (not an error) if the file doesn't exist.
+func loadReachabilityFromFile(path string) ([]netReachabilityItem, error) {
+	data, err := os.ReadFile(filepath.Clean(path))
+	if err != nil {
+		if os.IsNotExist(err) {
+			// File doesn't exist - graceful degradation
+			return nil, nil
+		}
+		return nil, fmt.Errorf("error reading file: %w", err)
+	}
+
+	var items []netReachabilityItem
+	if err := yaml.Unmarshal(data, &items); err != nil {
+		return nil, fmt.Errorf("error unmarshalling file: %w", err)
+	}
+
+	return items, nil
 }
 
 // Toolkit is a helper structure that holds interfaces and functions used by HealthChecker.
 type Toolkit struct {
 	linkByName func(name string) (netlink.Link, error)
+	linkList   func() ([]netlink.Link, error)
 	tcpDialer  TCPDialerInterface
 }
 
 // NewHealthCheckToolkit returns new HealthCheckToolkit.
-func NewHealthCheckToolkit(linkByName func(name string) (netlink.Link, error), tcpDialer TCPDialerInterface) *Toolkit {
+func NewHealthCheckToolkit(linkByName func(name string) (netlink.Link, error), linkList func() ([]netlink.Link, error), tcpDialer TCPDialerInterface) *Toolkit {
 	return &Toolkit{
 		linkByName: linkByName,
+		linkList:   linkList,
 		tcpDialer:  tcpDialer,
 	}
 }
@@ -264,7 +500,7 @@ func NewTCPDialer(dialerTimeout string) TCPDialerInterface {
 
 // NewDefaultHealthcheckToolkit returns.
 func NewDefaultHealthcheckToolkit(tcpDialer TCPDialerInterface) *Toolkit {
-	return NewHealthCheckToolkit(netlink.LinkByName, tcpDialer)
+	return NewHealthCheckToolkit(netlink.LinkByName, netlink.LinkList, tcpDialer)
 }
 
 type TCPDialerInterface interface {

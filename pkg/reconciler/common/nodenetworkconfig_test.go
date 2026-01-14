@@ -13,10 +13,12 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
+	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
 	mock_healthcheck "github.com/telekom/das-schiff-network-operator/pkg/healthcheck/mock"
 	mock_common "github.com/telekom/das-schiff-network-operator/pkg/reconciler/common/mock"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/operator"
 	"go.uber.org/mock/gomock"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -112,6 +114,7 @@ func (m *mockReconciler) setupHealthyHealthCheck() {
 	m.mockHealthChecker.EXPECT().CheckInterfaces().Return(nil)
 	m.mockHealthChecker.EXPECT().CheckReachability().Return(nil)
 	m.mockHealthChecker.EXPECT().CheckAPIServer(gomock.Any()).Return(nil)
+	m.mockHealthChecker.EXPECT().UpdateReadinessCondition(gomock.Any(), corev1.ConditionTrue, healthcheck.ReasonHealthChecksPassed, gomock.Any()).Return(nil)
 	m.mockHealthChecker.EXPECT().TaintsRemoved().Return(true)
 }
 
@@ -120,6 +123,7 @@ func (m *mockReconciler) setupHealthyHealthCheckWithTaintRemoval() {
 	m.mockHealthChecker.EXPECT().CheckInterfaces().Return(nil)
 	m.mockHealthChecker.EXPECT().CheckReachability().Return(nil)
 	m.mockHealthChecker.EXPECT().CheckAPIServer(gomock.Any()).Return(nil)
+	m.mockHealthChecker.EXPECT().UpdateReadinessCondition(gomock.Any(), corev1.ConditionTrue, healthcheck.ReasonHealthChecksPassed, gomock.Any()).Return(nil)
 	m.mockHealthChecker.EXPECT().TaintsRemoved().Return(false)
 	m.mockHealthChecker.EXPECT().RemoveTaints(gomock.Any()).Return(nil)
 }
@@ -301,6 +305,7 @@ var _ = Describe("NodeNetworkConfigReconciler", func() {
 
 			r := newMockReconciler(mockCtrl, fakeClient, configPath, ReconcilerOptions{})
 			r.mockHealthChecker.EXPECT().CheckInterfaces().Return(errors.New("interface check failed"))
+			r.mockHealthChecker.EXPECT().UpdateReadinessCondition(gomock.Any(), corev1.ConditionFalse, healthcheck.ReasonInterfaceCheckFailed, gomock.Any()).Return(nil)
 
 			err := r.checkHealth(context.Background())
 			Expect(err).To(HaveOccurred())
@@ -315,6 +320,7 @@ var _ = Describe("NodeNetworkConfigReconciler", func() {
 			r := newMockReconciler(mockCtrl, fakeClient, configPath, ReconcilerOptions{})
 			r.mockHealthChecker.EXPECT().CheckInterfaces().Return(nil)
 			r.mockHealthChecker.EXPECT().CheckReachability().Return(errors.New("reachability check failed"))
+			r.mockHealthChecker.EXPECT().UpdateReadinessCondition(gomock.Any(), corev1.ConditionFalse, healthcheck.ReasonReachabilityFailed, gomock.Any()).Return(nil)
 
 			err := r.checkHealth(context.Background())
 			Expect(err).To(HaveOccurred())
@@ -330,6 +336,7 @@ var _ = Describe("NodeNetworkConfigReconciler", func() {
 			r.mockHealthChecker.EXPECT().CheckInterfaces().Return(nil)
 			r.mockHealthChecker.EXPECT().CheckReachability().Return(nil)
 			r.mockHealthChecker.EXPECT().CheckAPIServer(gomock.Any()).Return(errors.New("api server check failed"))
+			r.mockHealthChecker.EXPECT().UpdateReadinessCondition(gomock.Any(), corev1.ConditionFalse, healthcheck.ReasonAPIServerFailed, gomock.Any()).Return(nil)
 
 			err := r.checkHealth(context.Background())
 			Expect(err).To(HaveOccurred())
@@ -345,6 +352,7 @@ var _ = Describe("NodeNetworkConfigReconciler", func() {
 			r.mockHealthChecker.EXPECT().CheckInterfaces().Return(nil)
 			r.mockHealthChecker.EXPECT().CheckReachability().Return(nil)
 			r.mockHealthChecker.EXPECT().CheckAPIServer(gomock.Any()).Return(nil)
+			r.mockHealthChecker.EXPECT().UpdateReadinessCondition(gomock.Any(), corev1.ConditionTrue, healthcheck.ReasonHealthChecksPassed, gomock.Any()).Return(nil)
 			r.mockHealthChecker.EXPECT().TaintsRemoved().Return(false)
 			r.mockHealthChecker.EXPECT().RemoveTaints(gomock.Any()).Return(errors.New("remove taints failed"))
 
@@ -480,6 +488,7 @@ var _ = Describe("NodeNetworkConfigReconciler", func() {
 
 				// Health check fails
 				r.mockHealthChecker.EXPECT().CheckInterfaces().Return(errors.New("interface down"))
+				r.mockHealthChecker.EXPECT().UpdateReadinessCondition(gomock.Any(), corev1.ConditionFalse, healthcheck.ReasonInterfaceCheckFailed, gomock.Any()).Return(nil)
 
 				// Restore previous config
 				r.mockApplier.EXPECT().
@@ -511,6 +520,7 @@ var _ = Describe("NodeNetworkConfigReconciler", func() {
 
 				r.mockHealthChecker.EXPECT().CheckInterfaces().Return(nil)
 				r.mockHealthChecker.EXPECT().CheckReachability().Return(errors.New("cannot reach gateway"))
+				r.mockHealthChecker.EXPECT().UpdateReadinessCondition(gomock.Any(), corev1.ConditionFalse, healthcheck.ReasonReachabilityFailed, gomock.Any()).Return(nil)
 
 				r.mockApplier.EXPECT().
 					ApplyConfig(gomock.Any(), storedCfg).
@@ -542,6 +552,7 @@ var _ = Describe("NodeNetworkConfigReconciler", func() {
 				r.mockHealthChecker.EXPECT().CheckInterfaces().Return(nil)
 				r.mockHealthChecker.EXPECT().CheckReachability().Return(nil)
 				r.mockHealthChecker.EXPECT().CheckAPIServer(gomock.Any()).Return(errors.New("api server unreachable"))
+				r.mockHealthChecker.EXPECT().UpdateReadinessCondition(gomock.Any(), corev1.ConditionFalse, healthcheck.ReasonAPIServerFailed, gomock.Any()).Return(nil)
 
 				r.mockApplier.EXPECT().
 					ApplyConfig(gomock.Any(), storedCfg).
@@ -643,6 +654,86 @@ var _ = Describe("NodeNetworkConfigReconciler", func() {
 
 			_, err := r.fetchNodeConfig(context.Background())
 			Expect(err).To(HaveOccurred())
+		})
+	})
+
+	Context("UpdateReadinessCondition edge cases", func() {
+		It("should continue processing even if UpdateReadinessCondition fails on success path", func() {
+			fakeClient = fake.NewClientBuilder().
+				WithScheme(scheme).
+				Build()
+
+			r := newMockReconciler(mockCtrl, fakeClient, configPath, ReconcilerOptions{})
+			r.mockHealthChecker.EXPECT().CheckInterfaces().Return(nil)
+			r.mockHealthChecker.EXPECT().CheckReachability().Return(nil)
+			r.mockHealthChecker.EXPECT().CheckAPIServer(gomock.Any()).Return(nil)
+			// UpdateReadinessCondition fails, but should just log the error
+			r.mockHealthChecker.EXPECT().UpdateReadinessCondition(gomock.Any(), corev1.ConditionTrue, healthcheck.ReasonHealthChecksPassed, gomock.Any()).Return(errors.New("update condition failed"))
+			r.mockHealthChecker.EXPECT().TaintsRemoved().Return(true)
+
+			err := r.checkHealth(context.Background())
+			// Should still succeed even though updating condition failed
+			Expect(err).ToNot(HaveOccurred())
+		})
+
+		It("should still return error when health check fails even if UpdateReadinessCondition also fails", func() {
+			fakeClient = fake.NewClientBuilder().
+				WithScheme(scheme).
+				Build()
+
+			r := newMockReconciler(mockCtrl, fakeClient, configPath, ReconcilerOptions{})
+			r.mockHealthChecker.EXPECT().CheckInterfaces().Return(errors.New("interface down"))
+			// UpdateReadinessCondition also fails
+			r.mockHealthChecker.EXPECT().UpdateReadinessCondition(gomock.Any(), corev1.ConditionFalse, healthcheck.ReasonInterfaceCheckFailed, gomock.Any()).Return(errors.New("update condition failed"))
+
+			err := r.checkHealth(context.Background())
+			// Should still return the original health check error
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("interface down"))
+		})
+	})
+
+	Context("Reconcile edge cases", func() {
+		It("should skip invalid NodeNetworkConfig with same revision", func() {
+			cfg := createTestNodeNetworkConfig("1")
+			cfg.Status.ConfigStatus = operator.StatusInvalid
+			cfg.Status.LastAppliedRevision = "1"
+
+			fakeClient = fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithRuntimeObjects(cfg).
+				WithStatusSubresource(cfg).
+				Build()
+
+			r := newMockReconciler(mockCtrl, fakeClient, configPath, ReconcilerOptions{})
+			r.NodeNetworkConfig = nil // No stored config
+
+			err := r.Reconcile(context.Background())
+			Expect(err).ToNot(HaveOccurred())
+			// Should not have called any mocks since it skipped the invalid config
+		})
+
+		It("should process new revision even if previous was invalid", func() {
+			// Config on API server with new revision
+			cfg := createTestNodeNetworkConfig("2")
+			cfg.Status.ConfigStatus = operator.StatusInvalid
+			cfg.Status.LastAppliedRevision = "1" // Different from current revision
+
+			fakeClient = fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithRuntimeObjects(cfg).
+				WithStatusSubresource(cfg).
+				Build()
+
+			r := newMockReconciler(mockCtrl, fakeClient, configPath, ReconcilerOptions{})
+			r.NodeNetworkConfig = nil
+
+			// Should process the config since revision is different
+			r.mockApplier.EXPECT().ApplyConfig(gomock.Any(), gomock.Any()).Return(nil)
+			r.setupHealthyHealthCheck()
+
+			err := r.Reconcile(context.Background())
+			Expect(err).ToNot(HaveOccurred())
 		})
 	})
 })

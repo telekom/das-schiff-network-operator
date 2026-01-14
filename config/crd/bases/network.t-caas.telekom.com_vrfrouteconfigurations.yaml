@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.14.0
+    controller-gen.kubebuilder.io/version: v0.17.2
   name: vrfrouteconfigurations.network.t-caas.telekom.com
 spec:
   group: network.t-caas.telekom.com
@@ -89,6 +89,7 @@ spec:
                       type: integer
                   required:
                   - action
+                  - cidr
                   type: object
                 maxItems: 4294967295
                 type: array
@@ -119,6 +120,7 @@ spec:
                       type: integer
                   required:
                   - action
+                  - cidr
                   type: object
                 maxItems: 4294967295
                 type: array
@@ -192,6 +194,7 @@ spec:
             - export
             - import
             - seq
+            - vrf
             type: object
           status:
             description: VRFRouteConfigurationStatus defines the observed state of
