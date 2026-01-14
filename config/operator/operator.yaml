@@ -21,7 +21,7 @@ spec:
     spec:
       tolerations:
       - effect: NoSchedule
-        key: node.t-caas.telekom.com/uninitialized
+        key: node-role.kubernetes.io/control-plane
         operator: Exists
       - key: node.cloudprovider.kubernetes.io/uninitialized
         value: "true"

@@ -20,9 +20,6 @@ spec:
         - effect: NoSchedule
           key: node-role.kubernetes.io/control-plane
           operator: Exists
-        - effect: NoSchedule
-          key: node.t-caas.telekom.com/uninitialized
-          operator: Exists
         - key: node.cloudprovider.kubernetes.io/uninitialized
           value: "true"
           effect: NoSchedule
@@ -51,6 +48,8 @@ spec:
               value: admin
             - name: CRA_TIMEOUT
               value: 30s
+            - name: OPERATOR_NETHEALTHCHECK_CONFIG
+              value: /opt/healthcheck/config.yaml
             - name: HOST_IP
               valueFrom:
                 fieldRef:
@@ -90,6 +89,8 @@ spec:
           volumeMounts:
             - mountPath: /etc/cra/config/base-config.yaml
               name: base-config
+            - mountPath: /opt/healthcheck/
+              name: healthcheck-config
       terminationGracePeriodSeconds: 10
       serviceAccountName: controller-manager
       volumes:
@@ -97,3 +98,6 @@ spec:
             path: /etc/cra/base-config.yaml
             type: File
           name: base-config
+        - configMap:
+            name: healthcheck-config
+          name: healthcheck-config

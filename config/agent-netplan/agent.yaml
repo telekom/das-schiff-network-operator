@@ -20,9 +20,6 @@ spec:
         - effect: NoSchedule
           key: node-role.kubernetes.io/control-plane
           operator: Exists
-        - effect: NoSchedule
-          key: node.t-caas.telekom.com/uninitialized
-          operator: Exists
         - key: node.cloudprovider.kubernetes.io/uninitialized
           value: "true"
           effect: NoSchedule

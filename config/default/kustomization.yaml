@@ -49,6 +49,7 @@ resources:
 - ../cert
 - ../operator
 - ../webhook
+- ../healthcheck
 labels:
 - includeSelectors: true
   pairs:
