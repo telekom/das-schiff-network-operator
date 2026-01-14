@@ -5,19 +5,10 @@ metadata:
   name: manager-role
 rules:
 - apiGroups:
-  - admissionregistration.k8s.io
-  resources:
-  - mutatingwebhookconfigurations
-  - validatingwebhookconfigurations
-  verbs:
-  - get
-  - list
-  - update
-  - watch
-- apiGroups:
   - ""
   resources:
   - nodes
+  - secrets
   verbs:
   - get
   - list
@@ -40,151 +31,27 @@ rules:
 - apiGroups:
   - ""
   resources:
-  - secrets
-  verbs:
-  - get
-  - list
-  - update
-  - watch
-- apiGroups:
-  - ""
-  resources:
   - services
   verbs:
   - get
 - apiGroups:
+  - admissionregistration.k8s.io
+  resources:
+  - mutatingwebhookconfigurations
+  - validatingwebhookconfigurations
+  verbs:
+  - get
+  - list
+  - update
+  - watch
+- apiGroups:
   - network.t-caas.telekom.com
   resources:
   - bgppeerings
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - network.t-caas.telekom.com
-  resources:
-  - bgppeerings/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - network.t-caas.telekom.com
-  resources:
-  - bgppeerings/status
-  verbs:
-  - get
-  - patch
-  - update
-- apiGroups:
-  - network.t-caas.telekom.com
-  resources:
   - layer2networkconfigurations
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - network.t-caas.telekom.com
-  resources:
-  - layer2networkconfigurations/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - network.t-caas.telekom.com
-  resources:
-  - layer2networkconfigurations/status
-  verbs:
-  - get
-  - patch
-  - update
-- apiGroups:
-  - network.t-caas.telekom.com
-  resources:
   - networkconfigrevisions
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - network.t-caas.telekom.com
-  resources:
-  - networkconfigrevisions/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - network.t-caas.telekom.com
-  resources:
-  - networkconfigrevisions/status
-  verbs:
-  - get
-  - patch
-  - update
-- apiGroups:
-  - network.t-caas.telekom.com
-  resources:
   - nodenetplanconfigs
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - network.t-caas.telekom.com
-  resources:
-  - nodenetplanconfigs/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - network.t-caas.telekom.com
-  resources:
-  - nodenetplanconfigs/status
-  verbs:
-  - get
-  - patch
-  - update
-- apiGroups:
-  - network.t-caas.telekom.com
-  resources:
   - nodenetworkconfigs
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - network.t-caas.telekom.com
-  resources:
-  - nodenetworkconfigs/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - network.t-caas.telekom.com
-  resources:
-  - nodenetworkconfigs/status
-  verbs:
-  - get
-  - patch
-  - update
-- apiGroups:
-  - network.t-caas.telekom.com
-  resources:
   - vrfrouteconfigurations
   verbs:
   - create
@@ -197,12 +64,22 @@ rules:
 - apiGroups:
   - network.t-caas.telekom.com
   resources:
+  - bgppeerings/finalizers
+  - layer2networkconfigurations/finalizers
+  - networkconfigrevisions/finalizers
+  - nodenetplanconfigs/finalizers
+  - nodenetworkconfigs/finalizers
   - vrfrouteconfigurations/finalizers
   verbs:
   - update
 - apiGroups:
   - network.t-caas.telekom.com
   resources:
+  - bgppeerings/status
+  - layer2networkconfigurations/status
+  - networkconfigrevisions/status
+  - nodenetplanconfigs/status
+  - nodenetworkconfigs/status
   - vrfrouteconfigurations/status
   verbs:
   - get
