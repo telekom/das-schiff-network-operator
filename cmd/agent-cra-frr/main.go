@@ -188,7 +188,7 @@ func initComponents(mgr manager.Manager, nodeConfigPath string, craManager *cra.
 
 	// Trigger initial reconciliation.
 	if r != nil {
-		_ = r.Reconcile(context.Background())
+		_, _ = r.Reconcile(context.Background())
 	}
 
 	return nil
