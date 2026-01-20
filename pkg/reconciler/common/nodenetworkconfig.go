@@ -132,6 +132,14 @@ func (r *NodeNetworkConfigReconciler) Reconcile(ctx context.Context) error {
 				return fmt.Errorf("error setting NodeNetworkConfig status: %w", err)
 			}
 		}
+
+		// Attempt taint removal if not yet done (best-effort, don't fail on error)
+		if !r.healthChecker.TaintsRemoved() {
+			if err := r.healthChecker.RemoveTaints(ctx); err != nil {
+				r.logger.Error(err, "failed to remove taints from node, will retry on next reconciliation")
+			}
+		}
+
 		return nil
 	}
 
@@ -252,9 +260,11 @@ func (r *NodeNetworkConfigReconciler) checkHealth(ctx context.Context) error {
 		r.logger.Error(err, "failed to update network operator readiness condition")
 	}
 
+	// Taint removal is best-effort and should not fail the health check.
+	// If it fails, the taints will be removed on the next reconciliation.
 	if !r.healthChecker.TaintsRemoved() {
 		if err := r.healthChecker.RemoveTaints(ctx); err != nil {
-			return fmt.Errorf("error removing taint from the node: %w", err)
+			r.logger.Error(err, "failed to remove taints from node, will retry on next reconciliation")
 		}
 	}
 
