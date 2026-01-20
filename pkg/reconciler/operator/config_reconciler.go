@@ -180,14 +180,7 @@ func lessBgp(a, b v1alpha1.BGPRevision) int {
 
 //nolint:gocritic // slices.SortFunc comparator requires value params
 func lessRevision(a, b v1alpha1.NetworkConfigRevision) int {
-	// Sort by Revision descending (latest first)
-	if a.Spec.Revision > b.Spec.Revision {
-		return -1
-	}
-	if a.Spec.Revision < b.Spec.Revision {
-		return 1
-	}
-	return 0
+	return b.GetCreationTimestamp().Compare(a.GetCreationTimestamp().Time) // newest first
 }
 
 func (r *reconcileConfig) fetchLayer2(ctx context.Context) ([]v1alpha1.Layer2Revision, error) {
