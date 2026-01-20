@@ -282,7 +282,7 @@ var _ = Describe("NodeNetworkConfigReconciler", func() {
 			r := newMockReconciler(mockCtrl, fakeClient, configPath, ReconcilerOptions{})
 			r.setupHealthyHealthCheck()
 
-			err := r.checkHealth(context.Background())
+			_, err := r.checkHealth(context.Background())
 			Expect(err).ToNot(HaveOccurred())
 		})
 
@@ -294,7 +294,7 @@ var _ = Describe("NodeNetworkConfigReconciler", func() {
 			r := newMockReconciler(mockCtrl, fakeClient, configPath, ReconcilerOptions{})
 			r.setupHealthyHealthCheckWithTaintRemoval()
 
-			err := r.checkHealth(context.Background())
+			_, err := r.checkHealth(context.Background())
 			Expect(err).ToNot(HaveOccurred())
 		})
 
@@ -307,7 +307,7 @@ var _ = Describe("NodeNetworkConfigReconciler", func() {
 			r.mockHealthChecker.EXPECT().CheckInterfaces().Return(errors.New("interface check failed"))
 			r.mockHealthChecker.EXPECT().UpdateReadinessCondition(gomock.Any(), corev1.ConditionFalse, healthcheck.ReasonInterfaceCheckFailed, gomock.Any()).Return(nil)
 
-			err := r.checkHealth(context.Background())
+			_, err := r.checkHealth(context.Background())
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("interface check failed"))
 		})
@@ -322,7 +322,7 @@ var _ = Describe("NodeNetworkConfigReconciler", func() {
 			r.mockHealthChecker.EXPECT().CheckReachability().Return(errors.New("reachability check failed"))
 			r.mockHealthChecker.EXPECT().UpdateReadinessCondition(gomock.Any(), corev1.ConditionFalse, healthcheck.ReasonReachabilityFailed, gomock.Any()).Return(nil)
 
-			err := r.checkHealth(context.Background())
+			_, err := r.checkHealth(context.Background())
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("reachability check failed"))
 		})
@@ -338,12 +338,12 @@ var _ = Describe("NodeNetworkConfigReconciler", func() {
 			r.mockHealthChecker.EXPECT().CheckAPIServer(gomock.Any()).Return(errors.New("api server check failed"))
 			r.mockHealthChecker.EXPECT().UpdateReadinessCondition(gomock.Any(), corev1.ConditionFalse, healthcheck.ReasonAPIServerFailed, gomock.Any()).Return(nil)
 
-			err := r.checkHealth(context.Background())
+			_, err := r.checkHealth(context.Background())
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("api server check failed"))
 		})
 
-		It("should return error when RemoveTaints fails", func() {
+		It("should return requeue result when RemoveTaints fails", func() {
 			fakeClient = fake.NewClientBuilder().
 				WithScheme(scheme).
 				Build()
@@ -356,9 +356,9 @@ var _ = Describe("NodeNetworkConfigReconciler", func() {
 			r.mockHealthChecker.EXPECT().TaintsRemoved().Return(false)
 			r.mockHealthChecker.EXPECT().RemoveTaints(gomock.Any()).Return(errors.New("remove taints failed"))
 
-			err := r.checkHealth(context.Background())
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("remove taints failed"))
+			result, err := r.checkHealth(context.Background())
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result.RequeueAfter).To(Equal(TaintRemovalRequeueTime))
 		})
 	})
 
@@ -438,7 +438,7 @@ var _ = Describe("NodeNetworkConfigReconciler", func() {
 				// Expect health checks to pass
 				r.setupHealthyHealthCheck()
 
-				err := r.processConfig(context.Background(), cfg)
+				_, err := r.processConfig(context.Background(), cfg)
 				Expect(err).ToNot(HaveOccurred())
 				Expect(cfg.Status.ConfigStatus).To(Equal(operator.StatusProvisioned))
 			})
@@ -459,7 +459,7 @@ var _ = Describe("NodeNetworkConfigReconciler", func() {
 
 				r.setupHealthyHealthCheckWithTaintRemoval()
 
-				err := r.processConfig(context.Background(), cfg)
+				_, err := r.processConfig(context.Background(), cfg)
 				Expect(err).ToNot(HaveOccurred())
 				Expect(cfg.Status.ConfigStatus).To(Equal(operator.StatusProvisioned))
 			})
@@ -495,7 +495,7 @@ var _ = Describe("NodeNetworkConfigReconciler", func() {
 					ApplyConfig(gomock.Any(), storedCfg).
 					Return(nil)
 
-				err := r.processConfig(context.Background(), currentCfg)
+				_, err := r.processConfig(context.Background(), currentCfg)
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(ContainSubstring("healthcheck error"))
 				Expect(currentCfg.Status.ConfigStatus).To(Equal(operator.StatusInvalid))
@@ -526,7 +526,7 @@ var _ = Describe("NodeNetworkConfigReconciler", func() {
 					ApplyConfig(gomock.Any(), storedCfg).
 					Return(nil)
 
-				err := r.processConfig(context.Background(), currentCfg)
+				_, err := r.processConfig(context.Background(), currentCfg)
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(ContainSubstring("healthcheck error"))
 				Expect(currentCfg.Status.ConfigStatus).To(Equal(operator.StatusInvalid))
@@ -558,7 +558,7 @@ var _ = Describe("NodeNetworkConfigReconciler", func() {
 					ApplyConfig(gomock.Any(), storedCfg).
 					Return(nil)
 
-				err := r.processConfig(context.Background(), currentCfg)
+				_, err := r.processConfig(context.Background(), currentCfg)
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(ContainSubstring("healthcheck error"))
 				Expect(currentCfg.Status.ConfigStatus).To(Equal(operator.StatusInvalid))
@@ -592,7 +592,7 @@ var _ = Describe("NodeNetworkConfigReconciler", func() {
 						ApplyConfig(gomock.Any(), storedCfg).
 						Return(nil)
 
-					err := r.processConfig(context.Background(), currentCfg)
+					_, err := r.processConfig(context.Background(), currentCfg)
 					Expect(err).To(HaveOccurred())
 					Expect(err.Error()).To(ContainSubstring("reconciler error"))
 					Expect(currentCfg.Status.ConfigStatus).To(Equal(operator.StatusInvalid))
@@ -620,7 +620,7 @@ var _ = Describe("NodeNetworkConfigReconciler", func() {
 						ApplyConfig(gomock.Any(), currentCfg).
 						Return(errors.New("reconciliation failed"))
 
-					err := r.processConfig(context.Background(), currentCfg)
+					_, err := r.processConfig(context.Background(), currentCfg)
 					Expect(err).To(HaveOccurred())
 					Expect(err.Error()).To(ContainSubstring("reconciler error"))
 					Expect(currentCfg.Status.ConfigStatus).To(Equal(operator.StatusInvalid))
@@ -671,7 +671,7 @@ var _ = Describe("NodeNetworkConfigReconciler", func() {
 			r.mockHealthChecker.EXPECT().UpdateReadinessCondition(gomock.Any(), corev1.ConditionTrue, healthcheck.ReasonHealthChecksPassed, gomock.Any()).Return(errors.New("update condition failed"))
 			r.mockHealthChecker.EXPECT().TaintsRemoved().Return(true)
 
-			err := r.checkHealth(context.Background())
+			_, err := r.checkHealth(context.Background())
 			// Should still succeed even though updating condition failed
 			Expect(err).ToNot(HaveOccurred())
 		})
@@ -686,7 +686,7 @@ var _ = Describe("NodeNetworkConfigReconciler", func() {
 			// UpdateReadinessCondition also fails
 			r.mockHealthChecker.EXPECT().UpdateReadinessCondition(gomock.Any(), corev1.ConditionFalse, healthcheck.ReasonInterfaceCheckFailed, gomock.Any()).Return(errors.New("update condition failed"))
 
-			err := r.checkHealth(context.Background())
+			_, err := r.checkHealth(context.Background())
 			// Should still return the original health check error
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("interface down"))
@@ -708,7 +708,7 @@ var _ = Describe("NodeNetworkConfigReconciler", func() {
 			r := newMockReconciler(mockCtrl, fakeClient, configPath, ReconcilerOptions{})
 			r.NodeNetworkConfig = nil // No stored config
 
-			err := r.Reconcile(context.Background())
+			_, err := r.Reconcile(context.Background())
 			Expect(err).ToNot(HaveOccurred())
 			// Should not have called any mocks since it skipped the invalid config
 		})
@@ -732,7 +732,7 @@ var _ = Describe("NodeNetworkConfigReconciler", func() {
 			r.mockApplier.EXPECT().ApplyConfig(gomock.Any(), gomock.Any()).Return(nil)
 			r.setupHealthyHealthCheck()
 
-			err := r.Reconcile(context.Background())
+			_, err := r.Reconcile(context.Background())
 			Expect(err).ToNot(HaveOccurred())
 		})
 	})

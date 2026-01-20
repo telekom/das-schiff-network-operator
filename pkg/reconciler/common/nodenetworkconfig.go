@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
@@ -32,6 +33,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -40,6 +42,8 @@ const (
 	DefaultNodeNetworkConfigPath = "/opt/network-operator/current-config.yaml"
 	// NodeNetworkConfigFilePerm is the file permission for the config file.
 	NodeNetworkConfigFilePerm = 0o600
+	// TaintRemovalRequeueTime is the delay before retrying taint removal after a conflict.
+	TaintRemovalRequeueTime = 30 * time.Second
 )
 
 // ConfigApplier is an interface for applying network configuration.
@@ -108,49 +112,61 @@ func NewNodeNetworkConfigReconciler(
 }
 
 // Reconcile performs the main reconciliation logic for NodeNetworkConfig.
-func (r *NodeNetworkConfigReconciler) Reconcile(ctx context.Context) error {
+// Returns a Result indicating whether a requeue is needed (e.g., for retrying taint removal).
+func (r *NodeNetworkConfigReconciler) Reconcile(ctx context.Context) (ctrl.Result, error) {
 	// get NodeNetworkConfig from apiserver
 	cfg, err := r.fetchNodeConfig(ctx)
 	if err != nil {
 		// discard IsNotFound error
 		if apierrors.IsNotFound(err) {
-			return nil
+			return ctrl.Result{}, nil
 		}
-		return err
+		return ctrl.Result{}, err
 	}
 
 	if r.NodeNetworkConfig != nil && r.NodeNetworkConfig.Spec.Revision == cfg.Spec.Revision {
 		// replace in-memory working NodeNetworkConfig and store it on the disk
 		if err := r.storeConfig(cfg, r.NodeNetworkConfigPath); err != nil {
-			return fmt.Errorf("error saving NodeNetworkConfig status: %w", err)
+			return ctrl.Result{}, fmt.Errorf("error saving NodeNetworkConfig status: %w", err)
 		}
 
 		// current in-memory config has the same revision as the fetched one
 		// this means that NodeNetworkConfig was already provisioned - skip
 		if cfg.Status.ConfigStatus != operator.StatusProvisioned {
 			if err := SetStatus(ctx, r.client, cfg, operator.StatusProvisioned, r.logger); err != nil {
-				return fmt.Errorf("error setting NodeNetworkConfig status: %w", err)
+				return ctrl.Result{}, fmt.Errorf("error setting NodeNetworkConfig status: %w", err)
 			}
 		}
-		return nil
+
+		// Attempt taint removal if not yet done (best-effort, don't fail on error)
+		if !r.healthChecker.TaintsRemoved() {
+			if err := r.healthChecker.RemoveTaints(ctx); err != nil {
+				r.logger.Error(err, "failed to remove taints from node, will retry on next reconciliation")
+				// Requeue after a short delay to retry taint removal
+				return ctrl.Result{RequeueAfter: TaintRemovalRequeueTime}, nil
+			}
+		}
+
+		return ctrl.Result{}, nil
 	}
 
 	// NodeNetworkConfig is invalid - discard
 	if cfg.Spec.Revision == cfg.Status.LastAppliedRevision && cfg.Status.ConfigStatus == operator.StatusInvalid {
 		r.logger.Info("skipping invalid NodeNetworkConfig", "name", cfg.Name)
-		return nil
+		return ctrl.Result{}, nil
 	}
 
-	if err := r.processConfig(ctx, cfg); err != nil {
-		return fmt.Errorf("error while processing NodeNetworkConfig: %w", err)
+	result, err := r.processConfig(ctx, cfg)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("error while processing NodeNetworkConfig: %w", err)
 	}
 
 	// replace in-memory working NodeNetworkConfig and store it on the disk
 	if err := r.storeConfig(cfg, r.NodeNetworkConfigPath); err != nil {
-		return fmt.Errorf("error saving NodeNetworkConfig status: %w", err)
+		return ctrl.Result{}, fmt.Errorf("error saving NodeNetworkConfig status: %w", err)
 	}
 
-	return nil
+	return result, nil
 }
 
 func (r *NodeNetworkConfigReconciler) storeConfig(
@@ -231,20 +247,20 @@ func (r *NodeNetworkConfigReconciler) restoreNodeNetworkConfig(ctx context.Conte
 	return nil
 }
 
-func (r *NodeNetworkConfigReconciler) checkHealth(ctx context.Context) error {
+func (r *NodeNetworkConfigReconciler) checkHealth(ctx context.Context) (ctrl.Result, error) {
 	if err := r.healthChecker.CheckInterfaces(); err != nil {
 		_ = r.healthChecker.UpdateReadinessCondition(ctx, corev1.ConditionFalse, healthcheck.ReasonInterfaceCheckFailed, err.Error())
-		return fmt.Errorf("error checking network interfaces: %w", err)
+		return ctrl.Result{}, fmt.Errorf("error checking network interfaces: %w", err)
 	}
 
 	if err := r.healthChecker.CheckReachability(); err != nil {
 		_ = r.healthChecker.UpdateReadinessCondition(ctx, corev1.ConditionFalse, healthcheck.ReasonReachabilityFailed, err.Error())
-		return fmt.Errorf("error checking network reachability: %w", err)
+		return ctrl.Result{}, fmt.Errorf("error checking network reachability: %w", err)
 	}
 
 	if err := r.healthChecker.CheckAPIServer(ctx); err != nil {
 		_ = r.healthChecker.UpdateReadinessCondition(ctx, corev1.ConditionFalse, healthcheck.ReasonAPIServerFailed, err.Error())
-		return fmt.Errorf("error checking API Server reachability: %w", err)
+		return ctrl.Result{}, fmt.Errorf("error checking API Server reachability: %w", err)
 	}
 
 	// All checks passed - update condition to healthy
@@ -252,22 +268,25 @@ func (r *NodeNetworkConfigReconciler) checkHealth(ctx context.Context) error {
 		r.logger.Error(err, "failed to update network operator readiness condition")
 	}
 
+	// Taint removal is best-effort and should not fail the health check.
+	// If it fails, request a requeue to retry taint removal.
 	if !r.healthChecker.TaintsRemoved() {
 		if err := r.healthChecker.RemoveTaints(ctx); err != nil {
-			return fmt.Errorf("error removing taint from the node: %w", err)
+			r.logger.Error(err, "failed to remove taints from node, will retry on next reconciliation")
+			return ctrl.Result{RequeueAfter: TaintRemovalRequeueTime}, nil
 		}
 	}
 
-	return nil
+	return ctrl.Result{}, nil
 }
 
 func (r *NodeNetworkConfigReconciler) processConfig(
 	ctx context.Context,
 	cfg *v1alpha1.NodeNetworkConfig,
-) error {
+) (ctrl.Result, error) {
 	// set NodeNetworkConfig status as provisioning
 	if err := SetStatus(ctx, r.client, cfg, operator.StatusProvisioning, r.logger); err != nil {
-		return fmt.Errorf("error setting NodeNetworkConfig status %s: %w", operator.StatusProvisioning, err)
+		return ctrl.Result{}, fmt.Errorf("error setting NodeNetworkConfig status %s: %w", operator.StatusProvisioning, err)
 	}
 
 	// reconcile NodeNetworkConfig
@@ -277,36 +296,37 @@ func (r *NodeNetworkConfigReconciler) processConfig(
 			// restore last known working NodeNetworkConfig (for agents like FRR where
 			// invalid configs can be partially applied)
 			if restoreErr := r.invalidateAndRestore(ctx, cfg, "reconciliation failed"); restoreErr != nil {
-				return fmt.Errorf("error restoring NodeNetworkConfig: %w", restoreErr)
+				return ctrl.Result{}, fmt.Errorf("error restoring NodeNetworkConfig: %w", restoreErr)
 			}
 		} else {
 			// no need to restore the config, the new one has not been applied
 			// (for agents like VSR where invalid configs cannot be committed)
 			if invalidateErr := r.invalidateNodeNetworkConfig(ctx, cfg, "reconciliation failed"); invalidateErr != nil {
-				return fmt.Errorf("error invalidating NodeNetworkConfig: %w", invalidateErr)
+				return ctrl.Result{}, fmt.Errorf("error invalidating NodeNetworkConfig: %w", invalidateErr)
 			}
 		}
 
-		return fmt.Errorf("reconciler error: %w", err)
+		return ctrl.Result{}, fmt.Errorf("reconciler error: %w", err)
 	}
 
 	// check if node is healthy after reconciliation
-	if err := r.checkHealth(ctx); err != nil {
+	result, err := r.checkHealth(ctx)
+	if err != nil {
 		// if node is not healthy set NodeNetworkConfig's status as invalid
 		// and restore last known working NodeNetworkConfig
-		if err := r.invalidateAndRestore(ctx, cfg, "healthcheck failed"); err != nil {
-			return fmt.Errorf("failed to restore NodeNetworkConfig: %w", err)
+		if restoreErr := r.invalidateAndRestore(ctx, cfg, "healthcheck failed"); restoreErr != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to restore NodeNetworkConfig: %w", restoreErr)
 		}
 
-		return fmt.Errorf("healthcheck error (previous NodeNetworkConfig restored): %w", err)
+		return ctrl.Result{}, fmt.Errorf("healthcheck error (previous NodeNetworkConfig restored): %w", err)
 	}
 
 	// set NodeNetworkConfig status as provisioned (valid)
 	if err := SetStatus(ctx, r.client, cfg, operator.StatusProvisioned, r.logger); err != nil {
-		return fmt.Errorf("error setting NodeNetworkConfig status %s: %w", operator.StatusProvisioned, err)
+		return ctrl.Result{}, fmt.Errorf("error setting NodeNetworkConfig status %s: %w", operator.StatusProvisioned, err)
 	}
 
-	return nil
+	return result, nil
 }
 
 func (r *NodeNetworkConfigReconciler) doReconciliation(

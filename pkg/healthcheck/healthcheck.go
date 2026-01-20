@@ -95,6 +95,9 @@ func (hc *HealthChecker) TaintsRemoved() bool {
 }
 
 // RemoveTaints removes taint from the node.
+// If taint removal fails due to a conflict (node was modified by another process),
+// it logs a warning and returns nil - the taints will be removed on the next reconciliation.
+// This prevents transient conflicts from invalidating the NodeNetworkConfig.
 func (hc *HealthChecker) RemoveTaints(ctx context.Context) error {
 	node := &corev1.Node{}
 	err := hc.client.Get(ctx,
@@ -114,11 +117,23 @@ func (hc *HealthChecker) RemoveTaints(ctx context.Context) error {
 			}
 		}
 	}
-	if updateNode {
-		if err := hc.client.Update(ctx, node, &client.UpdateOptions{}); err != nil {
-			hc.Logger.Error(err, "")
-			return fmt.Errorf("error while updating node: %w", err)
+
+	if !updateNode {
+		// No taints to remove, mark as done
+		hc.taintsRemoved = true
+		RecordTaintsRemoved(true)
+		return nil
+	}
+
+	if err := hc.client.Update(ctx, node, &client.UpdateOptions{}); err != nil {
+		// Conflict errors are transient - the node was modified by another process.
+		// Don't fail the healthcheck; taints will be removed on next reconciliation.
+		if strings.Contains(err.Error(), "the object has been modified") {
+			hc.Logger.Info("node object was modified by another process, will retry taint removal on next reconciliation")
+			return nil
 		}
+		hc.Logger.Error(err, "error while updating node")
+		return fmt.Errorf("error while updating node: %w", err)
 	}
 
 	hc.taintsRemoved = true

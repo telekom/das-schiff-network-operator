@@ -60,8 +60,14 @@ func (r *NodeNetworkConfigReconciler) Reconcile(ctx context.Context, _ ctrl.Requ
 	_ = log.FromContext(ctx)
 
 	// Run ReconcileDebounced through debouncer
-	if err := r.Reconciler.Reconcile(ctx); err != nil {
+	result, err := r.Reconciler.Reconcile(ctx)
+	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("reconicliation error: %w", err)
+	}
+
+	// If the reconciler requested a specific requeue, use that
+	if result.RequeueAfter > 0 {
+		return result, nil
 	}
 
 	return ctrl.Result{RequeueAfter: requeueTime}, nil
