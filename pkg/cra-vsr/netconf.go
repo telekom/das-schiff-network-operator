@@ -146,8 +146,10 @@ func (nc *Netconf) Send(ctx context.Context, req, rep any) error {
 
 		if err == nil {
 			return nil
-		} else if !errors.Is(err, io.EOF) {
-			return fmt.Errorf("failed to send netconf message: %w", err)
+		}
+
+		if !errors.Is(err, io.EOF) && !errors.Is(err, netconf.ErrClosed) {
+			return fmt.Errorf("netconf request failed with: %w", err)
 		}
 
 		if i == 0 {
@@ -157,7 +159,12 @@ func (nc *Netconf) Send(ctx context.Context, req, rep any) error {
 		}
 	}
 
-	return fmt.Errorf("all netconf send attempt failed with EOF")
+	if nc.session != nil {
+		nc.session.Close(ctx)
+		nc.session = nil
+	}
+
+	return fmt.Errorf("all netconf request sending attempts failed")
 }
 
 func (nc *Netconf) Get(ctx context.Context, ds Datastore, filter string) ([]byte, error) {
