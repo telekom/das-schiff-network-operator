@@ -21,10 +21,9 @@ import (
 	"fmt"
 	"net"
 
-	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
@@ -34,7 +33,7 @@ const geLen = 8
 var vrfrouteconfigurationlog = logf.Log.WithName("vrfrouteconfiguration-resource")
 
 func (r *VRFRouteConfiguration) SetupWebhookWithManager(mgr ctrl.Manager) error {
-	if err := ctrl.NewWebhookManagedBy(mgr).For(r).WithValidator(r).Complete(); err != nil {
+	if err := builder.WebhookManagedBy(mgr, r).WithValidator(r).Complete(); err != nil {
 		return fmt.Errorf("error building webhook: %w", err)
 	}
 	return nil
@@ -45,15 +44,10 @@ func (r *VRFRouteConfiguration) SetupWebhookWithManager(mgr ctrl.Manager) error 
 // TODO(user): change verbs to "verbs=create;update;delete" if you want to enable deletion validation.
 //+kubebuilder:webhook:path=/validate-network-t-caas-telekom-com-v1alpha1-vrfrouteconfiguration,mutating=false,failurePolicy=fail,sideEffects=None,groups=network.t-caas.telekom.com,resources=vrfrouteconfigurations,verbs=create;update,versions=v1alpha1,name=vvrfrouteconfiguration.kb.io,admissionReviewVersions=v1
 
-var _ webhook.CustomValidator = &VRFRouteConfiguration{}
+var _ admission.Validator[*VRFRouteConfiguration] = &VRFRouteConfiguration{}
 
 // ValidateCreate implements webhook.Validator so a webhook will be registered for the type.
-func (*VRFRouteConfiguration) ValidateCreate(_ context.Context, o runtime.Object) (admission.Warnings, error) {
-	r, ok := o.(*VRFRouteConfiguration)
-	if !ok {
-		return nil, fmt.Errorf("received object is not of VRFRouteConfiguration type")
-	}
-
+func (*VRFRouteConfiguration) ValidateCreate(_ context.Context, r *VRFRouteConfiguration) (admission.Warnings, error) {
 	vrfrouteconfigurationlog.Info("validate create", "name", r.Name)
 
 	err := r.validateItems()
@@ -65,12 +59,7 @@ func (*VRFRouteConfiguration) ValidateCreate(_ context.Context, o runtime.Object
 }
 
 // ValidateUpdate implements webhook.Validator so a webhook will be registered for the type.
-func (*VRFRouteConfiguration) ValidateUpdate(_ context.Context, _, newObj runtime.Object) (admission.Warnings, error) {
-	r, ok := newObj.(*VRFRouteConfiguration)
-	if !ok {
-		return nil, fmt.Errorf("received object is not of VRFRouteConfiguration type")
-	}
-
+func (*VRFRouteConfiguration) ValidateUpdate(_ context.Context, _, r *VRFRouteConfiguration) (admission.Warnings, error) {
 	vrfrouteconfigurationlog.Info("validate update", "name", r.Name)
 
 	err := r.validateItems()
@@ -82,12 +71,7 @@ func (*VRFRouteConfiguration) ValidateUpdate(_ context.Context, _, newObj runtim
 }
 
 // ValidateDelete implements webhook.Validator so a webhook will be registered for the type.
-func (*VRFRouteConfiguration) ValidateDelete(_ context.Context, o runtime.Object) (admission.Warnings, error) {
-	r, ok := o.(*VRFRouteConfiguration)
-	if !ok {
-		return nil, fmt.Errorf("received object is not of VRFRouteConfiguration type")
-	}
-
+func (*VRFRouteConfiguration) ValidateDelete(_ context.Context, r *VRFRouteConfiguration) (admission.Warnings, error) {
 	vrfrouteconfigurationlog.Info("validate delete", "name", r.Name)
 
 	// TODO(user): fill in your validation logic upon object deletion.
