@@ -46,7 +46,7 @@ func (r *VRFRouteConfiguration) SetupWebhookWithManager(mgr ctrl.Manager) error 
 
 var _ admission.Validator[*VRFRouteConfiguration] = &VRFRouteConfiguration{}
 
-// ValidateCreate implements webhook.Validator so a webhook will be registered for the type.
+// ValidateCreate implements admission.Validator so a webhook will be registered for the type.
 func (*VRFRouteConfiguration) ValidateCreate(_ context.Context, r *VRFRouteConfiguration) (admission.Warnings, error) {
 	vrfrouteconfigurationlog.Info("validate create", "name", r.Name)
 
@@ -58,7 +58,7 @@ func (*VRFRouteConfiguration) ValidateCreate(_ context.Context, r *VRFRouteConfi
 	return nil, nil
 }
 
-// ValidateUpdate implements webhook.Validator so a webhook will be registered for the type.
+// ValidateUpdate implements admission.Validator so a webhook will be registered for the type.
 func (*VRFRouteConfiguration) ValidateUpdate(_ context.Context, _, r *VRFRouteConfiguration) (admission.Warnings, error) {
 	vrfrouteconfigurationlog.Info("validate update", "name", r.Name)
 
@@ -70,7 +70,7 @@ func (*VRFRouteConfiguration) ValidateUpdate(_ context.Context, _, r *VRFRouteCo
 	return nil, nil
 }
 
-// ValidateDelete implements webhook.Validator so a webhook will be registered for the type.
+// ValidateDelete implements admission.Validator so a webhook will be registered for the type.
 func (*VRFRouteConfiguration) ValidateDelete(_ context.Context, r *VRFRouteConfiguration) (admission.Warnings, error) {
 	vrfrouteconfigurationlog.Info("validate delete", "name", r.Name)
 
