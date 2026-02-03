@@ -31,17 +31,39 @@ jobs:
       - name: Create Licenses Report
         run: |
           make licenses-report
+
+      - name: Generate Release Notes
+        id: release-notes
+        run: |
+          # Get previous tag
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -z "$PREV_TAG" ]; then
+            echo "notes<<EOF" >> $GITHUB_OUTPUT
+            git log --pretty=format:"* %s (%h)" >> $GITHUB_OUTPUT
+            echo "" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          else
+            echo "notes<<EOF" >> $GITHUB_OUTPUT
+            echo "## Changes since $PREV_TAG" >> $GITHUB_OUTPUT
+            echo "" >> $GITHUB_OUTPUT
+            git log --pretty=format:"* %s (%h)" $PREV_TAG..HEAD >> $GITHUB_OUTPUT
+            echo "" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          fi
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           draft: true
           files: out/*.*
-          # body_path: _releasenotes/${{ env.RELEASE_TAG }}.md
+          body: ${{ steps.release-notes.outputs.notes }}
+          generate_release_notes: true
 
   build_image:
     name: Build and Push Release Image
     permissions:
       packages: write
+      id-token: write # For signing with cosign
     runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
@@ -109,6 +131,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       packages: write
+      id-token: write # For signing with cosign
     needs:
       - build_image
     strategy:
@@ -135,8 +158,37 @@ jobs:
         with:
           images: ghcr.io/telekom/${{ matrix.image }}
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Create manifest list and push
+        id: push
         working-directory: ${{ runner.temp }}/digests
         run: |
           docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
             $(printf 'ghcr.io/telekom/${{ matrix.image }}@sha256:%s ' *)
+          echo "digest=$(docker buildx imagetools inspect ghcr.io/telekom/${{ matrix.image }}:${{ github.ref_name }} --format '{{.Manifest.Digest}}')" >> $GITHUB_OUTPUT
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign container image (manifest list)
+        run: |
+          cosign sign --yes --recursive ghcr.io/telekom/${{ matrix.image }}@${{ steps.push.outputs.digest }}
+
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: ghcr.io/telekom/${{ matrix.image }}@${{ steps.push.outputs.digest }}
+          format: spdx-json
+          output-file: sbom-${{ matrix.image }}.spdx.json
+
+      - name: Attach SBOM to image
+        run: |
+          cosign attach sbom --sbom sbom-${{ matrix.image }}.spdx.json ghcr.io/telekom/${{ matrix.image }}@${{ steps.push.outputs.digest }}
+
+      - name: Upload SBOM as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-${{ matrix.image }}
+          path: sbom-${{ matrix.image }}.spdx.json

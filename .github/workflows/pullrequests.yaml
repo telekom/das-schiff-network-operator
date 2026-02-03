@@ -6,6 +6,13 @@ on:
 
 permissions: {}
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: "1.25"
+
 jobs:
   golangci:
     name: lint
@@ -14,8 +21,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
-          cache: false
+          go-version: ${{ env.GO_VERSION }}
       - name: Install packages
         run: sudo apt-get update && sudo apt-get install -y llvm clang libbpf-dev gcc-multilib linux-headers-$(uname -r)
       - name: run code generators
@@ -33,11 +39,16 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version: ${{ env.GO_VERSION }}
       - name: Install packages
         run: sudo apt-get update && sudo apt-get install -y llvm clang libbpf-dev gcc-multilib linux-headers-$(uname -r)
       - name: Run Tests
         run: make test
+      - name: Upload coverage report
+        uses: codecov/codecov-action@v5
+        with:
+          files: cover.out
+          fail_ci_if_error: false
 
   validate-generated:
     name: validate generated files
@@ -46,7 +57,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version: ${{ env.GO_VERSION }}
       - name: Install packages
         run: sudo apt-get update && sudo apt-get install -y llvm clang libbpf-dev gcc-multilib linux-headers-$(uname -r)
       - name: run code generators
@@ -55,3 +66,112 @@ jobs:
         run: make manifests
       - name: ensure no files changed
         run: git diff --exit-code || (echo "Generated files are out of sync. Please run 'make generate manifests' and commit the updated files."; exit 1)
+
+  build-images:
+    name: build container images
+    # Only run for non-fork PRs (has access to secrets)
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    needs: [golangci, test, validate-generated]
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - das-schiff-network-operator
+          - das-schiff-cra-frr
+          - das-schiff-nwop-agent-cra-frr
+          - das-schiff-nwop-agent-cra-vsr
+          - das-schiff-nwop-agent-netplan
+          - das-schiff-nwop-agent-hbn-l2
+        arch: ["amd64", "arm64"]
+        include:
+          - runner: ubuntu-latest
+            arch: "amd64"
+          - runner: ubuntu-24.04-arm
+            arch: "arm64"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Create Licenses Report
+        run: make licenses-report
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/telekom/${{ matrix.image }}
+          tags: |
+            type=ref,event=pr,suffix=-${{ matrix.arch }}
+
+      - name: Build and Push PR Image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.image }}.Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.image }}-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}-${{ matrix.arch }}
+
+  build-images-fork:
+    name: build container images (fork)
+    # Only run for fork PRs (no push, just validate the build)
+    if: github.event.pull_request.head.repo.full_name != github.repository
+    needs: [golangci, test, validate-generated]
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - das-schiff-network-operator
+          - das-schiff-cra-frr
+          - das-schiff-nwop-agent-cra-frr
+          - das-schiff-nwop-agent-cra-vsr
+          - das-schiff-nwop-agent-netplan
+          - das-schiff-nwop-agent-hbn-l2
+        arch: ["amd64", "arm64"]
+        include:
+          - runner: ubuntu-latest
+            arch: "amd64"
+          - runner: ubuntu-24.04-arm
+            arch: "arm64"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Create Licenses Report
+        run: make licenses-report
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.image }}.Dockerfile
+          push: false
+          cache-from: type=gha,scope=${{ matrix.image }}-${{ matrix.arch }}
