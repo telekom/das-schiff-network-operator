@@ -65,6 +65,7 @@ COPY ./docker/hosts /etc/hosts
 RUN systemctl enable frr-cra.service
 RUN systemctl enable fix-vrf-rules.service
 RUN systemctl enable prometheus-node-exporter.service
+RUN systemctl mask systemd-binfmt.service
 
 VOLUME ["/sys/fs/cgroup", "/tmp", "/run"]
 CMD ["/sbin/init"]
