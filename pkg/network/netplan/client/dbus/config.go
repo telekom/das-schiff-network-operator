@@ -124,7 +124,7 @@ func (config *Config) setProperty(hint, path string, value interface{}) error {
 		return fmt.Errorf("failed to store dbus set reply: %w", err)
 	}
 	if !setResult {
-		return fmt.Errorf("configration is not valid")
+		return fmt.Errorf("configuration is not valid")
 	}
 	return nil
 }
