@@ -1,0 +1,16 @@
+.git
+.github
+bin/
+out/
+config/
+docs/
+hack/
+*.md
+LICENSE
+NOTICE
+CODEOWNERS
+PROJECT
+Makefile
+.golangci.yml
+.dockerignore
+*.Dockerfile
