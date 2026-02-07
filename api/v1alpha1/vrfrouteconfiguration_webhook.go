@@ -115,7 +115,17 @@ func (r *VRFRouteConfiguration) validateItems() error {
 func findDuplicates(items []VrfRouteConfigurationPrefixItem) []string {
 	counter := map[string]int{}
 	for _, item := range items {
-		counter[item.CIDR]++
+		// Build a composite key from all fields that distinguish prefix-list entries.
+		// The same CIDR may appear multiple times with different action/ge/le values
+		// (e.g. ::/0 deny + ::/0 permit ge:44 le:128).
+		key := item.CIDR + "|" + item.Action
+		if item.GE != nil {
+			key += fmt.Sprintf("|ge:%d", *item.GE)
+		}
+		if item.LE != nil {
+			key += fmt.Sprintf("|le:%d", *item.LE)
+		}
+		counter[key]++
 	}
 
 	duplicates := []string{}
