@@ -14,7 +14,7 @@ jobs:
     name: Mark stale issues and PRs
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/stale@v9
+      - uses: actions/stale@997185467fa4f803885201cee163a9f38240193d # v10.1.1
         with:
           stale-issue-message: >
             This issue has been automatically marked as stale because it has not had
