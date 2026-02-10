@@ -8,6 +8,10 @@ updates:
       prefix: ":seedling:"
   labels:
     - "ok-to-test"
+  groups:
+    github-actions:
+      patterns:
+        - "*"
 - package-ecosystem: "gomod"
   directory: "/"
   schedule:
@@ -16,9 +20,29 @@ updates:
     prefix: ":seedling:"
   labels:
     - "ok-to-test"
+  groups:
+    go-dependencies:
+      patterns:
+        - "*"
+      exclude-patterns:
+        - "k8s.io/*"
+        - "go.etcd.io/*"
+        - "google.golang.org/grpc"
   ignore:
     # Ignore k8s and its transitives modules as they are upgraded manually
     # together with controller-runtime.
     - dependency-name: "k8s.io/*"
     - dependency-name: "go.etcd.io/*"
     - dependency-name: "google.golang.org/grpc"
+- package-ecosystem: "docker"
+  directory: "/"
+  schedule:
+    interval: "weekly"
+  commit-message:
+    prefix: ":seedling:"
+  labels:
+    - "ok-to-test"
+  groups:
+    docker-images:
+      patterns:
+        - "*"

@@ -22,7 +22,7 @@ jobs:
           - das-schiff-nwop-agent-hbn-l2
     steps:
       - name: Delete PR image tag
-        uses: actions/delete-package-versions@v5
+        uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5.0.0
         with:
           package-name: ${{ matrix.image }}
           package-type: container
@@ -30,3 +30,12 @@ jobs:
           min-versions-to-keep: 0
           ignore-versions: "^(?!pr-${{ github.event.pull_request.number }}$).*$"
         continue-on-error: true # Don't fail if image doesn't exist (e.g., fork PRs)
+
+      - name: Delete untagged versions (leftover digests)
+        uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5.0.0
+        with:
+          package-name: ${{ matrix.image }}
+          package-type: container
+          delete-only-untagged-versions: true
+          min-versions-to-keep: 0
+        continue-on-error: true

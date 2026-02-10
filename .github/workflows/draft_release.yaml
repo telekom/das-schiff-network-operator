@@ -9,18 +9,17 @@ jobs:
   draft_release:
     name: Create Draft Release
     permissions:
-      packages: write
       contents: write
     runs-on: ubuntu-latest
     steps:
       - name: Checkout the Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
       - name: Install Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5 # v6.2.0
         with:
-          go-version: "1.25"
+          go-version-file: go.mod
       - name: Install packages
         run: sudo apt-get update && sudo apt-get install -y llvm clang libbpf-dev gcc-multilib linux-headers-$(uname -r)
 
@@ -52,143 +51,21 @@ jobs:
           fi
 
       - name: Create Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2.5.0
         with:
           draft: true
           files: out/*.*
           body: ${{ steps.release-notes.outputs.notes }}
           generate_release_notes: true
 
-  build_image:
-    name: Build and Push Release Image
+  release-images:
     permissions:
+      contents: read
       packages: write
-      id-token: write # For signing with cosign
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      matrix:
-        image: ["das-schiff-network-operator", "das-schiff-cra-frr", "das-schiff-nwop-agent-cra-frr", "das-schiff-nwop-agent-cra-vsr", "das-schiff-nwop-agent-netplan", "das-schiff-nwop-agent-hbn-l2"]
-        arch: ["amd64", "arm64"]
-        include:
-          - runner: ubuntu-latest
-            arch: "amd64"
-          - runner: ubuntu-24.04-arm
-            arch: "arm64"
-    steps:
-      - name: Check out the repo
-        uses: actions/checkout@v4
-
-      - name: Install Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "^1.25"
-
-      - name: Create Licenses Report
-        run: |
-          make licenses-report
-
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v3.0.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract Metadata (tags, labels) for Docker
-        id: meta
-        uses: docker/metadata-action@v5.5.1
-        with:
-          images: ghcr.io/telekom/${{ matrix.image }}
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build and Push Docker Image
-        id: build
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          outputs: type=image,push-by-digest=true,name-canonical=true,push=true
-          tags: ghcr.io/telekom/${{ matrix.image }}
-          labels: ${{ steps.meta.outputs.labels }}
-          file: ${{ matrix.image }}.Dockerfile
-
-      - name: Export digest
-        run: |
-          mkdir -p ${{ runner.temp }}/digests-${{ matrix.image }}
-          digest="${{ steps.build.outputs.digest }}"
-          touch "${{ runner.temp }}/digests-${{ matrix.image }}/${digest#sha256:}"
-
-      - name: Upload digest
-        uses: actions/upload-artifact@v4
-        with:
-          name: digests-${{ matrix.image }}-${{ matrix.arch }}
-          path: ${{ runner.temp }}/digests-${{ matrix.image }}/*
-          if-no-files-found: error
-          retention-days: 1
-
-  release_image:
-    runs-on: ubuntu-latest
-    permissions:
-      packages: write
-      id-token: write # For signing with cosign
-    needs:
-      - build_image
-    strategy:
-      matrix:
-        image: ["das-schiff-network-operator", "das-schiff-cra-frr", "das-schiff-nwop-agent-cra-frr", "das-schiff-nwop-agent-cra-vsr", "das-schiff-nwop-agent-netplan", "das-schiff-nwop-agent-hbn-l2"]
-    steps:
-      - name: Download digests
-        uses: actions/download-artifact@v4
-        with:
-          path: ${{ runner.temp }}/digests
-          pattern: digests-${{ matrix.image }}-*
-          merge-multiple: true
-
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v3.0.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract Metadata (tags, labels) for Docker
-        id: meta
-        uses: docker/metadata-action@v5.5.1
-        with:
-          images: ghcr.io/telekom/${{ matrix.image }}
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Create manifest list and push
-        id: push
-        working-directory: ${{ runner.temp }}/digests
-        run: |
-          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(printf 'ghcr.io/telekom/${{ matrix.image }}@sha256:%s ' *)
-          echo "digest=$(docker buildx imagetools inspect ghcr.io/telekom/${{ matrix.image }}:${{ github.ref_name }} --format '{{.Manifest.Digest}}')" >> $GITHUB_OUTPUT
-
-      - name: Install Cosign
-        uses: sigstore/cosign-installer@v3
-
-      - name: Sign container image (manifest list)
-        run: |
-          cosign sign --yes --recursive ghcr.io/telekom/${{ matrix.image }}@${{ steps.push.outputs.digest }}
-
-      - name: Generate SBOM
-        uses: anchore/sbom-action@v0
-        with:
-          image: ghcr.io/telekom/${{ matrix.image }}@${{ steps.push.outputs.digest }}
-          format: spdx-json
-          output-file: sbom-${{ matrix.image }}.spdx.json
-
-      - name: Attach SBOM to image
-        run: |
-          cosign attach sbom --sbom sbom-${{ matrix.image }}.spdx.json ghcr.io/telekom/${{ matrix.image }}@${{ steps.push.outputs.digest }}
-
-      - name: Upload SBOM as artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: sbom-${{ matrix.image }}
-          path: sbom-${{ matrix.image }}.spdx.json
+      id-token: write
+    uses: ./.github/workflows/build-images.yaml
+    with:
+      push: true
+      sign: true
+      sign-recursive: true
+      sbom: true
