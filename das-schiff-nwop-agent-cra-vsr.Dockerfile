@@ -1,5 +1,6 @@
 # Build the manager binary
-FROM docker.io/library/golang:1.25-alpine AS builder
+ARG GO_VERSION=1.25
+FROM docker.io/library/golang:${GO_VERSION}-alpine AS builder
 
 
 WORKDIR /workspace
