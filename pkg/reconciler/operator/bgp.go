@@ -174,16 +174,16 @@ func buildNodeBgpPeers(node *corev1.Node, revision *v1alpha1.NetworkConfigRevisi
 				return fmt.Errorf("failed to build peering VLAN peer: %w", err)
 			}
 		case bgp[i].LoopbackPeer != nil && len(bgp[i].LoopbackPeer.IPAddresses) > 0:
-			for i := range bgp[i].LoopbackPeer.IPAddresses {
-				bgpPeer, err := buildBgpPeer(&bgp[i].LoopbackPeer.IPAddresses[i], nil, &bgp[i])
+			for j := range bgp[i].LoopbackPeer.IPAddresses {
+				bgpPeer, err := buildBgpPeer(&bgp[i].LoopbackPeer.IPAddresses[j], nil, &bgp[i])
 				if err != nil {
 					return fmt.Errorf("failed to build BGP peer: %w", err)
 				}
 				c.Spec.ClusterVRF.BGPPeers = append(c.Spec.ClusterVRF.BGPPeers, *bgpPeer)
 
-				ipAddr, err := convertIPToCIDR(bgp[i].LoopbackPeer.IPAddresses[i])
+				ipAddr, err := convertIPToCIDR(bgp[i].LoopbackPeer.IPAddresses[j])
 				if err != nil {
-					return fmt.Errorf("failed to convert IP address %s to CIDR: %w", bgp[i].LoopbackPeer.IPAddresses[i], err)
+					return fmt.Errorf("failed to convert IP address %s to CIDR: %w", bgp[i].LoopbackPeer.IPAddresses[j], err)
 				}
 
 				c.Spec.ClusterVRF.StaticRoutes = append(c.Spec.ClusterVRF.StaticRoutes, v1alpha1.StaticRoute{
