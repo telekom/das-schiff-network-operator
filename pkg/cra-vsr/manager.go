@@ -18,6 +18,7 @@ package cra
 
 import (
 	"context"
+	"encoding/xml"
 	"fmt"
 	"net"
 	"strings"
@@ -52,6 +53,8 @@ type Manager struct {
 	timeout     time.Duration
 	startupXML  []byte
 	WorkNS      string
+	KpiNSName   string
+	startup     *VRouter
 	running     *VRouter
 	nc          *Netconf
 }
@@ -99,16 +102,25 @@ func NewManager(
 		return nil, err
 	}
 
+	m.startup = &VRouter{}
+	if err := xml.Unmarshal(m.startupXML, m.startup); err != nil {
+		return nil, fmt.Errorf(
+			"failed to un-marshal startup config=%s: %w",
+			m.startupXML, err)
+	}
+
 	m.running = &VRouter{}
 	err = m.nc.GetUnmarshal(ctx, Running, "/config", m.running)
 	if err != nil {
 		return nil, err
 	}
 
-	m.WorkNS, err = m.findWorkNS(m.running)
+	m.WorkNS, err = m.findWorkNS(m.startup)
 	if err != nil {
 		return nil, err
 	}
+
+	m.KpiNSName = m.findKpiNSName(m.startup)
 
 	return m, nil
 }
@@ -132,6 +144,23 @@ func (m *Manager) findWorkNS(vrouter *VRouter) (string, error) {
 	}
 
 	return "", fmt.Errorf("failed to found working NetNS")
+}
+
+func (*Manager) findKpiNSName(vrouter *VRouter) string {
+	for _, ns := range vrouter.Namespaces {
+		if ns.KPI == nil {
+			continue
+		}
+		if ns.KPI.Telegraf == nil || !ns.KPI.Telegraf.Enabled {
+			continue
+		}
+		if ns.KPI.Telegraf.Metrics == nil || !ns.KPI.Telegraf.Metrics.Enabled {
+			continue
+		}
+		return ns.Name
+	}
+
+	return ""
 }
 
 func (m *Manager) isReservedVRF(name string) bool {
@@ -198,9 +227,86 @@ func (m *Manager) makeVRouter(nodeCfg *v1alpha1.NodeNetworkConfigSpec) (*VRouter
 		return nil, err
 	}
 
+	m.setupKPI(vrouter, &ns)
+
 	vrouter.Namespaces = append(vrouter.Namespaces, ns)
 
 	return vrouter, nil
+}
+
+func (m *Manager) setupKPI(vrouter *VRouter, newNS *Namespace) {
+	if m.KpiNSName == "" {
+		return
+	}
+
+	kpiNS := LookupNS(vrouter, m.KpiNSName)
+	if kpiNS == nil {
+		vrouter.Namespaces = append(vrouter.Namespaces, Namespace{
+			Name: m.KpiNSName,
+		})
+		kpiNS = LookupNS(vrouter, m.KpiNSName)
+	}
+
+	if kpiNS.KPI == nil {
+		kpiNS.KPI = &KPI{
+			Telegraf: &Telegraf{
+				Enabled: true,
+				Metrics: &TelegrafMetrics{
+					Enabled: true,
+				},
+			},
+		}
+	}
+
+	setupMonitoredIntfs := func(nsName string, intfs *Interfaces) {
+		if intfs == nil {
+			return
+		}
+
+		metrics := kpiNS.KPI.Telegraf.Metrics
+		for i := range intfs.Physicals {
+			phys := &intfs.Physicals[i]
+			metrics.MonitoredIntfs = append(metrics.MonitoredIntfs, MonitoredIntf{
+				Name:      phys.Name,
+				Namespace: nsName,
+			})
+		}
+		for i := range intfs.Bridges {
+			br := &intfs.Bridges[i]
+			metrics.MonitoredIntfs = append(metrics.MonitoredIntfs, MonitoredIntf{
+				Name:      br.Name,
+				Namespace: nsName,
+			})
+		}
+		for i := range intfs.VXLANs {
+			vx := &intfs.VXLANs[i]
+			metrics.MonitoredIntfs = append(metrics.MonitoredIntfs, MonitoredIntf{
+				Name:      vx.Name,
+				Namespace: nsName,
+			})
+		}
+		for i := range intfs.VLANs {
+			vl := &intfs.VLANs[i]
+			metrics.MonitoredIntfs = append(metrics.MonitoredIntfs, MonitoredIntf{
+				Name:      vl.Name,
+				Namespace: nsName,
+			})
+		}
+	}
+
+	for _, ns := range []*Namespace{
+		LookupNS(m.startup, "main"),
+		LookupNS(m.startup, m.WorkNS),
+		newNS,
+	} {
+		if ns == nil {
+			continue
+		}
+		setupMonitoredIntfs(ns.Name, ns.Interfaces)
+		for _, vrf := range ns.VRFs {
+			setupMonitoredIntfs(ns.Name, vrf.Interfaces)
+		}
+	}
 }
 
 func (*Manager) xpath(prefix string, paths []string) string {
