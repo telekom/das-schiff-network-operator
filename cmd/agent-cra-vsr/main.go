@@ -113,6 +113,22 @@ func setupCraPrometheusRegistry(craManager *cra.Manager) (*prometheus.Registry, 
 	return registry, nil
 }
 
+func httpHandlerForCraKPIs(craManager *cra.Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		craMetrics, err := craManager.GetKPIMetrics(r.Context())
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		if _, err := w.Write(craMetrics); err != nil {
+			setupLog.Error(err, "Failed to write response")
+			return
+		}
+	}
+}
+
 func updateManagerOptions(options *manager.Options, craManager *cra.Manager) error {
 	if options.Metrics.BindAddress != "0" && options.Metrics.BindAddress != "" {
 		err := initCollectors()
@@ -134,6 +150,7 @@ func updateManagerOptions(options *manager.Options, craManager *cra.Manager) err
 					Timeout:           time.Minute,
 				},
 			),
+			"/cra/kpi/metrics": httpHandlerForCraKPIs(craManager),
 		}
 	}
 

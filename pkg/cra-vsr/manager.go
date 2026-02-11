@@ -20,7 +20,9 @@ import (
 	"context"
 	"encoding/xml"
 	"fmt"
+	"io"
 	"net"
+	"net/http"
 	"strings"
 	"time"
 
@@ -392,4 +394,56 @@ func (m *Manager) GetMetrics(ctx context.Context) (*Metrics, error) {
 	}
 
 	return &metrics, nil
+}
+
+func (m *Manager) SendHttpRequest(ctx context.Context, url string) ([]byte, error) {
+	httpClient := http.Client{
+		Timeout: m.timeout,
+	}
+
+	req, err := http.NewRequest(http.MethodGet, url, http.NoBody)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	res, err := httpClient.Do(req.WithContext(ctx))
+	if err != nil {
+		return nil, fmt.Errorf("error when sending request: %w", err)
+	}
+
+	resBody, err := func() ([]byte, error) {
+		defer res.Body.Close()
+		return io.ReadAll(res.Body)
+	}()
+	if err != nil {
+		return nil, fmt.Errorf("error reading response body: %w", err)
+	}
+
+	return resBody, nil
+}
+
+func (m *Manager) GetKPIMetrics(ctx context.Context) ([]byte, error) {
+	if m.KpiNSName == "" {
+		return nil, fmt.Errorf("KPI metrics have not been enabled in vsr")
+	}
+
+	ns := LookupNS(m.startup, m.KpiNSName)
+	if len(ns.KPI.Telegraf.Clients) == 0 {
+		return nil, fmt.Errorf("KPI metrics are not exported by vsr")
+	}
+
+	for _, kpiClient := range ns.KPI.Telegraf.Clients {
+		//nolint:revive
+		url := fmt.Sprintf("http://%s:%d/metrics", kpiClient.Address, kpiClient.Port)
+
+		resBody, err := m.SendHttpRequest(ctx, url)
+		if err != nil {
+			fmt.Println(err)
+			continue
+		}
+
+		return resBody, nil
+	}
+
+	return nil, fmt.Errorf("all KPIs clients have failed to reply")
 }
