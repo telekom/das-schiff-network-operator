@@ -50,8 +50,8 @@ var oldConfigPath string
 var isConfigEnvExist bool
 
 var manager = &Manager{
-	WorkNS:    "hbn",
-	KpiNSName: "main",
+	WorkNSName: "hbn",
+	KpiNSName:  "main",
 	startup: &VRouter{
 		Namespaces: []Namespace{
 			{
@@ -344,7 +344,7 @@ var _ = AfterSuite(func() {
 
 var _ = Describe("CRA-VSR", func() {
 	It("Find working NetNS", func() {
-		ns, _ := manager.findWorkNS(manager.running)
+		ns, _ := manager.findWorkNSName(manager.running)
 		Expect(ns).To(Equal("hbn"))
 	})
 	It("Convert NodeNetworkConfig into VSR config", func() {

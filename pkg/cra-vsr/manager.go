@@ -52,7 +52,7 @@ type Manager struct {
 	baseConfig  *config.BaseConfig
 	timeout     time.Duration
 	startupXML  []byte
-	WorkNS      string
+	WorkNSName  string
 	KpiNSName   string
 	startup     *VRouter
 	running     *VRouter
@@ -115,7 +115,7 @@ func NewManager(
 		return nil, err
 	}
 
-	m.WorkNS, err = m.findWorkNS(m.startup)
+	m.WorkNSName, err = m.findWorkNSName(m.startup)
 	if err != nil {
 		return nil, err
 	}
@@ -125,7 +125,7 @@ func NewManager(
 	return m, nil
 }
 
-func (m *Manager) findWorkNS(vrouter *VRouter) (string, error) {
+func (m *Manager) findWorkNSName(vrouter *VRouter) (string, error) {
 	for _, ns := range vrouter.Namespaces {
 		if ns.Interfaces != nil {
 			for _, infra := range ns.Interfaces.Infras {
@@ -204,7 +204,7 @@ func (m *Manager) makeVRouter(nodeCfg *v1alpha1.NodeNetworkConfigSpec) (*VRouter
 	}
 
 	ns := Namespace{
-		Name:       m.WorkNS,
+		Name:       m.WorkNSName,
 		Interfaces: &Interfaces{},
 		Routing: &Routing{
 			NCOperation: Replace,
@@ -296,7 +296,7 @@ func (m *Manager) setupKPI(vrouter *VRouter, newNS *Namespace) {
 
 	for _, ns := range []*Namespace{
 		LookupNS(m.startup, "main"),
-		LookupNS(m.startup, m.WorkNS),
+		LookupNS(m.startup, m.WorkNSName),
 		newNS,
 	} {
 		if ns == nil {
@@ -325,7 +325,7 @@ func (m *Manager) GetMetrics(ctx context.Context) (*Metrics, error) {
 		BridgeFDB:        ShowBridgeFDBOutput{},
 	}
 
-	xpath := m.xpath("/state/vrf[name='"+m.WorkNS+"']", []string{
+	xpath := m.xpath("/state/vrf[name='"+m.WorkNSName+"']", []string{
 		"/routing/evpn",
 		"/routing/bgp/as",
 		"/routing/bgp/neighbor",
@@ -343,7 +343,7 @@ func (m *Manager) GetMetrics(ctx context.Context) (*Metrics, error) {
 		return nil, fmt.Errorf("get-state failed in metrics: %w", err)
 	}
 
-	workns := LookupNS(&metrics.State, m.WorkNS)
+	workns := LookupNS(&metrics.State, m.WorkNSName)
 	if workns == nil {
 		return nil, fmt.Errorf("work-ns not found in metrics state")
 	}
@@ -355,7 +355,7 @@ func (m *Manager) GetMetrics(ctx context.Context) (*Metrics, error) {
 
 	for _, name := range vrfList {
 		req4 := ShowIPv4RouteSummaryInput{
-			Namespace: &m.WorkNS,
+			Namespace: &m.WorkNSName,
 			VRF:       types.ToPtr(name),
 		}
 		out := ShowRouteSummaryOutput{}
@@ -365,7 +365,7 @@ func (m *Manager) GetMetrics(ctx context.Context) (*Metrics, error) {
 		metrics.V4RouteSummaries[name] = out
 
 		req6 := ShowIPv6RouteSummaryInput{
-			Namespace: &m.WorkNS,
+			Namespace: &m.WorkNSName,
 			VRF:       types.ToPtr(name),
 		}
 		out = ShowRouteSummaryOutput{}
@@ -377,7 +377,7 @@ func (m *Manager) GetMetrics(ctx context.Context) (*Metrics, error) {
 
 	{
 		req := ShowNeighborsInput{
-			Namespace: &m.WorkNS,
+			Namespace: &m.WorkNSName,
 		}
 		if err := m.nc.RPC(ctx, &req, &metrics.Neighbors); err != nil {
 			return nil, fmt.Errorf("show-neighbors failed in metrics: %w", err)
@@ -386,7 +386,7 @@ func (m *Manager) GetMetrics(ctx context.Context) (*Metrics, error) {
 
 	{
 		req := ShowBridgeFDBInput{
-			Namespace: &m.WorkNS,
+			Namespace: &m.WorkNSName,
 		}
 		if err := m.nc.RPC(ctx, &req, &metrics.BridgeFDB); err != nil {
 			return nil, fmt.Errorf("show-bridge-fdb failed in metrics: %w", err)
