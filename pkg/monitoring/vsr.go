@@ -224,7 +224,7 @@ func (c *VSRCollector) updateVRF(
 }
 
 func (c *VSRCollector) updateVRFs(ch chan<- prometheus.Metric, metrics *cra.Metrics) {
-	workns := cra.LookupNS(&metrics.State, c.CraManager.WorkNS)
+	workns := cra.LookupNS(&metrics.State, c.CraManager.WorkNSName)
 	if workns == nil {
 		return
 	}
@@ -367,7 +367,7 @@ func (c *VSRCollector) updateBGPNeighborAFs(
 }
 
 func (c *VSRCollector) updateBGPNeighbors(ch chan<- prometheus.Metric, metrics *cra.Metrics) {
-	workns := cra.LookupNS(&metrics.State, c.CraManager.WorkNS)
+	workns := cra.LookupNS(&metrics.State, c.CraManager.WorkNSName)
 	if workns == nil {
 		return
 	}
@@ -454,7 +454,7 @@ func (c *VSRCollector) updateRoute(
 }
 
 func (c *VSRCollector) updateRoutes(ch chan<- prometheus.Metric, metrics *cra.Metrics) {
-	workns := cra.LookupNS(&metrics.State, c.CraManager.WorkNS)
+	workns := cra.LookupNS(&metrics.State, c.CraManager.WorkNSName)
 	if workns == nil {
 		return
 	}
