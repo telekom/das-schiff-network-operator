@@ -13,6 +13,7 @@ require (
 	github.com/open-policy-agent/cert-controller v0.14.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/rackn/netwrangler v0.7.1
+	github.com/safchain/ethtool v0.7.0
 	github.com/sirupsen/logrus v1.9.3
 	github.com/vishvananda/netlink v1.3.1
 	go.uber.org/mock v0.6.0
