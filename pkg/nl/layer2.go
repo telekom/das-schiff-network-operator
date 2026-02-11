@@ -22,16 +22,17 @@ const (
 var procSysNetPath = "/proc/sys/net"
 
 type Layer2Information struct {
-	VlanID           int      `json:"vlanID"`
-	MTU              int      `json:"mtu"`
-	VNI              int      `json:"vni"`
-	VRF              string   `json:"vrf"`
-	AnycastMAC       *string  `json:"anycastMAC"`
-	AnycastGateways  []string `json:"anycastGateways"`
-	NeighSuppression *bool    `json:"neighSuppression"`
-	bridge           *netlink.Bridge
-	vxlan            *netlink.Vxlan
-	vlanInterface    *netlink.Vlan
+	VlanID              int      `json:"vlanID"`
+	MTU                 int      `json:"mtu"`
+	VNI                 int      `json:"vni"`
+	VRF                 string   `json:"vrf"`
+	AnycastMAC          *string  `json:"anycastMAC"`
+	AnycastGateways     []string `json:"anycastGateways"`
+	NeighSuppression    *bool    `json:"neighSuppression"`
+	DisableSegmentation bool     `json:"disableSegmentation"`
+	bridge              *netlink.Bridge
+	vxlan               *netlink.Vxlan
+	vlanInterface       *netlink.Vlan
 }
 
 type NeighborInformation struct {
@@ -326,6 +327,11 @@ func (n *Manager) ReconcileL2(current, desired *Layer2Information) error {
 		return err
 	}
 
+	// Reconcile disableSegmentation
+	if err := reconcileSegmentation(current.vlanInterface, desired.DisableSegmentation); err != nil {
+		return err
+	}
+
 	// Reconcile EUI Autogeneration
 	return n.reconcileEUIAutogeneration(bridgeName, current.bridge, desiredGateways)
 }
@@ -469,6 +475,21 @@ func (*Manager) configureBridge(intfName string) error {
 	// Ensure IPv6 Neighbor expiry is set to 30min
 	if err := os.WriteFile(fmt.Sprintf("%s/ipv6/neigh/%s/base_reachable_time_ms", procSysNetPath, intfName), []byte(baseTimer), neighFilePermissions); err != nil {
 		return fmt.Errorf("error setting ipv6 base_reachable_time_ms = %s for interface: %w", baseTimer, err)
+	}
+	return nil
+}
+
+func reconcileSegmentation(vlanInterface *netlink.Vlan, disableSegmentation bool) error {
+	eth, err := newEthtoolFunc()
+	if err != nil {
+		return fmt.Errorf("error creating ethtool client: %w", err)
+	}
+	defer eth.Close()
+
+	settingsMap := map[string]bool{"gro": !disableSegmentation, "gso": !disableSegmentation, "tso": !disableSegmentation}
+
+	if err := eth.Change(vlanInterface.Attrs().Name, settingsMap); err != nil {
+		return fmt.Errorf("error changing ethtool settings: %w", err)
 	}
 	return nil
 }

@@ -58,6 +58,10 @@ type Layer2NetworkConfigurationSpec struct {
 	// Enable ARP / ND suppression
 	NeighSuppression *bool `json:"neighSuppression,omitempty"`
 
+	// Disable segmentation offload on the VLAN, limiting the Linux packet size to the MTU.
+	// This might be required when you use AF_PACKET on the VLAN.
+	DisableSegmentation bool `json:"disableSegmentation,omitempty"`
+
 	// VRF to attach Layer2 network to, default if not set
 	VRF string `json:"vrf,omitempty"`
 
