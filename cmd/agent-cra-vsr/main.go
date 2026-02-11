@@ -146,11 +146,6 @@ func createCraManager() (*cra.Manager, error) {
 		return nil, fmt.Errorf("no CRA URL provided")
 	}
 
-	metricsUrls := strings.Split(os.Getenv("CRA_METRICS_URL"), ",")
-	if len(urls) == 0 {
-		return nil, fmt.Errorf("no CRA URL provided")
-	}
-
 	timeout, err := time.ParseDuration(os.Getenv("CRA_TIMEOUT"))
 	if err != nil {
 		return nil, fmt.Errorf("error parsing VSR timeout: %w", err)
@@ -166,7 +161,7 @@ func createCraManager() (*cra.Manager, error) {
 		return nil, fmt.Errorf("no CRA password provided")
 	}
 
-	craManager, err := cra.NewManager(urls, metricsUrls, user, pwd, timeout)
+	craManager, err := cra.NewManager(urls, user, pwd, timeout)
 	if err != nil {
 		return nil, fmt.Errorf("error creating CRA manager: %w", err)
 	}

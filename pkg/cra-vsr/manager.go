@@ -48,15 +48,14 @@ const (
 )
 
 type Manager struct {
-	metricsUrls []string
-	baseConfig  *config.BaseConfig
-	timeout     time.Duration
-	startupXML  []byte
-	WorkNSName  string
-	KpiNSName   string
-	startup     *VRouter
-	running     *VRouter
-	nc          *Netconf
+	baseConfig *config.BaseConfig
+	timeout    time.Duration
+	startupXML []byte
+	WorkNSName string
+	KpiNSName  string
+	startup    *VRouter
+	running    *VRouter
+	nc         *Netconf
 }
 
 type Metrics struct {
@@ -68,14 +67,13 @@ type Metrics struct {
 }
 
 func NewManager(
-	urls, metricsUrls []string,
+	urls []string,
 	user, password string,
 	timeout time.Duration,
 ) (*Manager, error) {
 	m := &Manager{
-		timeout:     timeout,
-		metricsUrls: metricsUrls,
-		nc:          NewNetconf(urls, user, password, timeout),
+		timeout: timeout,
+		nc:      NewNetconf(urls, user, password, timeout),
 	}
 	ctx := context.Background()
 
