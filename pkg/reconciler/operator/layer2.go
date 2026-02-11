@@ -18,7 +18,8 @@ func buildNodeLayer2(node *corev1.Node, revision *v1alpha1.NetworkConfigRevision
 		return layer2[i].ID < layer2[j].ID
 	})
 
-	for _, l2 := range layer2 {
+	for i := range layer2 {
+		l2 := &layer2[i]
 		if !matchSelector(node, l2.NodeSelector) {
 			continue
 		}
@@ -52,7 +53,8 @@ func buildNetplanVLANs(node *corev1.Node, revision *v1alpha1.NetworkConfigRevisi
 	sort.SliceStable(layer2, func(i, j int) bool {
 		return layer2[i].ID < layer2[j].ID
 	})
-	for _, l2 := range layer2 {
+	for i := range layer2 {
+		l2 := &layer2[i]
 		if !matchSelector(node, l2.NodeSelector) {
 			continue
 		}
