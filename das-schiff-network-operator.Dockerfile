@@ -1,7 +1,11 @@
 # Build the manager binary
 ARG GO_VERSION=1.25
-FROM docker.io/library/golang:${GO_VERSION}-alpine AS builder
+FROM --platform=$BUILDPLATFORM docker.io/library/golang:${GO_VERSION}-alpine AS builder
 
+ARG TARGETOS
+ARG TARGETARCH
+ARG VERSION=dev
+ARG COMMIT=unknown
 
 WORKDIR /workspace
 # Copy the Go Modules manifests
@@ -18,12 +22,23 @@ COPY controllers/ controllers/
 COPY pkg/ pkg/
 
 # Build
-RUN CGO_ENABLED=0 GOOS=linux go build -a -o manager main.go
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-$(go env GOARCH)} \
+    go build -trimpath -ldflags="-s -w" -o manager main.go
 
-FROM alpine:latest
+# Runtime stage (distroless)
+FROM gcr.io/distroless/static-debian12
+
+LABEL org.opencontainers.image.title="das-schiff-network-operator" \
+      org.opencontainers.image.description="Kubernetes network operator for das Schiff platform" \
+      org.opencontainers.image.url="https://github.com/telekom/das-schiff-network-operator" \
+      org.opencontainers.image.source="https://github.com/telekom/das-schiff-network-operator" \
+      org.opencontainers.image.vendor="Deutsche Telekom AG" \
+      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.base.name="gcr.io/distroless/static-debian12"
 
 WORKDIR /
 COPY --from=builder /workspace/manager .
+COPY LICENSE /licenses/LICENSE
 USER 65532:65532
 
 ENTRYPOINT ["/manager"]

@@ -1,24 +1,22 @@
-# Build the manager binary
+# Build the frr-cra binary
 ARG GO_VERSION=1.25
-FROM docker.io/library/golang:${GO_VERSION}-alpine AS builder
+FROM --platform=$BUILDPLATFORM docker.io/library/golang:${GO_VERSION}-alpine AS builder
 
+ARG TARGETOS
+ARG TARGETARCH
 
 WORKDIR /workspace
-# Copy the Go Modules manifests
 COPY go.mod go.mod
 COPY go.sum go.sum
-# cache deps before building and copying source so that we don't need to re-download as much
-# and so that source changes don't invalidate our downloaded layer
 RUN go mod download
 
-# Copy the go source
 COPY cmd/frr-cra/main.go main.go
 COPY api/ api/
 COPY controllers/ controllers/
 COPY pkg/ pkg/
 
-# Build
-RUN CGO_ENABLED=0 GOOS=linux go build -a -o frr-cra main.go
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-$(go env GOARCH)} \
+    go build -trimpath -ldflags="-s -w" -o frr-cra main.go
 
 FROM docker.io/library/ubuntu:25.10
 
@@ -60,12 +58,18 @@ COPY ./docker/daemons /etc/frr/daemons
 COPY ./docker/networkd.conf /etc/systemd/networkd.conf.d/cra.conf
 COPY ./docker/10-cra.conf /etc/sysctl.d/10-cra.conf
 COPY --from=builder /workspace/frr-cra /usr/local/bin/frr-cra
+COPY LICENSE /licenses/LICENSE
 COPY ./docker/frr-cra.env /etc/default/frr-cra
 COPY ./docker/prometheus-node-exporter.env /etc/default/prometheus-node-exporter
 COPY ./docker/hosts /etc/hosts
 RUN systemctl enable frr-cra.service
 RUN systemctl enable fix-vrf-rules.service
 RUN systemctl enable prometheus-node-exporter.service
+
+LABEL org.opencontainers.image.title="das-schiff-cra-frr" \
+      org.opencontainers.image.source="https://github.com/telekom/das-schiff-network-operator" \
+      org.opencontainers.image.vendor="Deutsche Telekom AG" \
+      org.opencontainers.image.licenses="Apache-2.0"
 
 VOLUME ["/sys/fs/cgroup", "/tmp", "/run"]
 CMD ["/sbin/init"]
