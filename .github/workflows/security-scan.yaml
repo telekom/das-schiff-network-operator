@@ -36,20 +36,26 @@ jobs:
       - name: Install packages
         run: sudo apt-get update && sudo apt-get install -y llvm clang libbpf-dev gcc-multilib linux-headers-$(uname -r)
 
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+
       - name: Run govulncheck
         # Informational only — stdlib vulns cannot be fixed in this repo.
-        # Setup/tool failures will still fail the job.
+        # Installation failures (above) will still fail the job.
         continue-on-error: true
-        run: |
-          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
-          govulncheck ./...
+        run: govulncheck ./...
 
   trivy-fs:
     name: Trivy Filesystem Scan
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      # security-events: write is needed for SARIF upload on push/schedule/workflow_dispatch.
+      # On pull_request the upload step is skipped via its 'if' condition,
+      # so the permission is unused but harmless.
       security-events: write
+      # actions: read is required by codeql-action/upload-sarif to resolve
+      # the workflow run context (ref, sha) for SARIF result correlation.
       actions: read
     steps:
       - name: Checkout
@@ -65,8 +71,7 @@ jobs:
 
       - name: Upload Trivy scan results
         uses: github/codeql-action/upload-sarif@f3a6ee42055dd5f618fb31d987aae7b94518f043 # v4.32.2
-        if: always()
-        continue-on-error: true
+        if: always() && (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
         with:
           sarif_file: 'trivy-fs-results.sarif'
 
