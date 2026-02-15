@@ -1,0 +1,57 @@
+# SPDX-FileCopyrightText: 2025 Deutsche Telekom AG
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# Configuration for the PR labeler action
+# Labels are applied based on which files are changed in the PR
+
+# API changes
+api:
+  - changed-files:
+      - any-glob-to-any-file: 'api/**'
+
+# Controller changes
+controller:
+  - changed-files:
+      - any-glob-to-any-file: 'controllers/**'
+
+# Documentation changes
+documentation:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'docs/**'
+          - '*.md'
+          - 'README*'
+
+# CI/CD changes
+ci:
+  - changed-files:
+      - any-glob-to-any-file:
+          - '.github/**'
+          - 'Makefile'
+          - '*.Dockerfile'
+          - 'hack/**'
+
+# Test changes
+tests:
+  - changed-files:
+      - any-glob-to-any-file:
+          - '**/*_test.go'
+
+# Dependencies
+dependencies:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'go.mod'
+          - 'go.sum'
+          - 'versions.env'
+
+# Configuration changes
+config:
+  - changed-files:
+      - any-glob-to-any-file: 'config/**'
+
+# Package / networking
+pkg:
+  - changed-files:
+      - any-glob-to-any-file: 'pkg/**'
