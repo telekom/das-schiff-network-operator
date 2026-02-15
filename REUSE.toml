@@ -1,0 +1,99 @@
+# SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+#
+# SPDX-License-Identifier: CC0-1.0
+
+# See https://reuse.software/spec-3.2/#reusetoml for specification
+version = 1
+
+# GitHub workflows - CC0-1.0
+[[annotations]]
+path = [".github/**/*.yml", ".github/**/*.yaml", ".github/**/*.md", ".github/ISSUE_TEMPLATE/**", ".github/CODEOWNERS"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Deutsche Telekom AG"
+SPDX-License-Identifier = "CC0-1.0"
+
+# Go source files - Apache-2.0
+[[annotations]]
+path = [
+  "cmd/**/*.go",
+  "api/**/*.go",
+  "internal/**/*.go",
+  "pkg/**/*.go",
+  "controllers/**/*.go",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Deutsche Telekom AG"
+SPDX-License-Identifier = "Apache-2.0"
+
+# Configuration files - CC0-1.0
+[[annotations]]
+path = [
+  ".dockerignore",
+  ".gitignore",
+  ".golangci.yml",
+  "*.Dockerfile",
+  "Makefile",
+  "PROJECT",
+  "go.mod",
+  "go.sum",
+  "REUSE.toml",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Deutsche Telekom AG"
+SPDX-License-Identifier = "CC0-1.0"
+
+# Kubernetes configuration - Apache-2.0
+[[annotations]]
+path = [
+  "config/**/*.yaml",
+  "config/**/*.yml",
+  "config/**/*.tpl",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Deutsche Telekom AG"
+SPDX-License-Identifier = "Apache-2.0"
+
+# Docker support files - CC0-1.0
+[[annotations]]
+path = ["docker/**"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Deutsche Telekom AG"
+SPDX-License-Identifier = "CC0-1.0"
+
+# Documentation - CC0-1.0
+[[annotations]]
+path = [
+  "README.md",
+  "CONTRIBUTING.md",
+  "CODE_OF_CONDUCT.md",
+  "NOTICE",
+  "CODEOWNERS",
+  "docs/**",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Deutsche Telekom AG"
+SPDX-License-Identifier = "CC0-1.0"
+
+# Hack scripts - Apache-2.0
+[[annotations]]
+path = ["hack/**"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Deutsche Telekom AG"
+SPDX-License-Identifier = "Apache-2.0"
+
+# Test fixtures and data - CC0-1.0
+[[annotations]]
+path = [
+  "pkg/**/testdata/**",
+  "pkg/**/*_test.xml",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Deutsche Telekom AG"
+SPDX-License-Identifier = "CC0-1.0"
+
+# Generated / vendor files - CC0-1.0
+[[annotations]]
+path = ["bin/**", "coverage.out", "coverage_hc.out"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Deutsche Telekom AG"
+SPDX-License-Identifier = "CC0-1.0"
