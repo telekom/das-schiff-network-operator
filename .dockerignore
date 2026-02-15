@@ -10,8 +10,6 @@ config/
 docs/
 hack/
 *.md
-LICENSE
-NOTICE
 CODEOWNERS
 PROJECT
 Makefile
@@ -22,4 +20,6 @@ Makefile
 .vscode/
 *.Dockerfile
 REUSE.toml
-LICENSES/
+
+# Keep license files available for Dockerfile COPY
+# (LICENSE, NOTICE, LICENSES/ are needed in the image)
