@@ -1,3 +1,10 @@
+# SPDX-FileCopyrightText: 2025 Deutsche Telekom AG
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# golangci-lint v2 configuration for das-schiff-network-operator
+# Aligned with t-caas team conventions (auth-operator reference config)
+
 version: "2"
 run:
   go: "1.25"
@@ -213,7 +220,15 @@ linters:
       # Exclude unhandled-error for test files
       - path: (.+)_test\.go
         text: 'unhandled-error:'
-      # Exclude new noctx patterns for existing code (v2 detects more patterns)
+      # Exclude prealloc for existing code
+      - linters:
+          - prealloc
+        path: pkg/cra-vsr/
+      - linters:
+          - prealloc
+        path: pkg/helpers/
+      # TODO: Fix noctx violations in production code (2 http.NewRequest, 1 net.Dial, 2 exec.Command)
+      # then remove these exclusions.
       - linters:
           - noctx
         text: 'net/http.NewRequest must not be called'
@@ -223,17 +238,10 @@ linters:
       - linters:
           - noctx
         text: 'os/exec.Command must not be called'
-      # Exclude prealloc for existing code
-      - linters:
-          - prealloc
-        path: pkg/cra-vsr/
-      - linters:
-          - prealloc
-        path: pkg/helpers/
     paths:
-      - third_party$
-      - builtin$
-      - examples$
+      - "zz_generated.*\\.go$"
+      - "_generated\\.go$"
+      - ".*\\.pb\\.go$"
 formatters:
   enable:
     - gci
@@ -241,6 +249,6 @@ formatters:
   exclusions:
     generated: lax
     paths:
-      - third_party$
-      - builtin$
-      - examples$
+      - "zz_generated.*\\.go$"
+      - "_generated\\.go$"
+      - ".*\\.pb\\.go$"
