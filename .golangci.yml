@@ -1,6 +1,8 @@
 version: "2"
 run:
+  go: "1.25"
   allow-parallel-runners: true
+  timeout: 10m
 linters:
   default: none
   enable:
