@@ -24,8 +24,6 @@ jobs:
   govulncheck:
     name: Go Vulnerability Check
     runs-on: ubuntu-latest
-    # Informational only — stdlib vulns cannot be fixed in this repo
-    continue-on-error: true
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -39,6 +37,9 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y llvm clang libbpf-dev gcc-multilib linux-headers-$(uname -r)
 
       - name: Run govulncheck
+        # Informational only — stdlib vulns cannot be fixed in this repo.
+        # Setup/tool failures will still fail the job.
+        continue-on-error: true
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
           govulncheck ./...
