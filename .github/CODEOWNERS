@@ -1,0 +1,14 @@
+# Default owners for everything in the repo
+* @telekom/t-caas
+
+# API definitions require additional review
+/api/ @telekom/t-caas
+
+# CI/CD changes
+/.github/ @telekom/t-caas
+
+# Documentation
+/docs/ @telekom/t-caas
+
+# Controllers
+/controllers/ @telekom/t-caas
