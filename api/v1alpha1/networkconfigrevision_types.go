@@ -60,6 +60,12 @@ type NetworkConfigRevisionStatus struct {
 	Queued int `json:"queued"`
 	// Total informs about how many nodes in total can be provisiined with a config derived from the revision.
 	Total int `json:"total"`
+	// FailedNode is the name of the node where provisioning failed, causing this revision to be invalidated.
+	FailedNode string `json:"failedNode,omitempty"`
+	// FailedMessage contains the error message from the failed provisioning attempt.
+	FailedMessage string `json:"failedMessage,omitempty"`
+	// FailedAt is when the failure occurred.
+	FailedAt *metav1.Time `json:"failedAt,omitempty"`
 }
 
 //+kubebuilder:object:root=true
