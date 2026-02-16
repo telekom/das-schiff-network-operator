@@ -27,16 +27,19 @@ jobs:
         run: |
           if [ ! -f versions.env ]; then
             echo "versions.env not found, skipping"
+            echo "skip=true" >> $GITHUB_OUTPUT
             exit 0
           fi
           set -a
           source versions.env
           set +a
+          echo "skip=false" >> $GITHUB_OUTPUT
           echo "kustomize=${KUSTOMIZE_VERSION}" >> $GITHUB_OUTPUT
           echo "controller_tools=${CONTROLLER_TOOLS_VERSION}" >> $GITHUB_OUTPUT
           echo "golangci_lint=${GOLANGCI_LINT_VERSION}" >> $GITHUB_OUTPUT
 
       - name: Check for updates
+        if: steps.versions.outputs.skip != 'true'
         id: check
         env:
           GH_TOKEN: ${{ github.token }}
@@ -49,28 +52,34 @@ jobs:
             if [ "$latest" != "unknown" ] && [ "$latest" != "$current" ]; then
               echo "  - **${name}**: ${current} → ${latest} ([releases](https://github.com/${repo}/releases))" >> updates.md
               echo "found=true" >> $GITHUB_OUTPUT
+              found_any=true
             fi
           }
 
-          echo "## Tool Update Report" > updates.md
-          echo "" >> updates.md
-          echo "The following tools have newer versions available:" >> updates.md
-          echo "" >> updates.md
+          found_any=false
 
           check_github_release "kubernetes-sigs/kustomize" "${{ steps.versions.outputs.kustomize }}" "kustomize"
           check_github_release "kubernetes-sigs/controller-tools" "${{ steps.versions.outputs.controller_tools }}" "controller-tools"
           check_github_release "golangci/golangci-lint" "${{ steps.versions.outputs.golangci_lint }}" "golangci-lint"
 
-          echo "" >> updates.md
-          echo "---" >> updates.md
-          echo "To update, edit \`versions.env\` and run \`make manifests generate\` to verify compatibility." >> updates.md
-
-          if [ -f updates.md ]; then
+          if [ "$found_any" = "true" ]; then
+            # Prepend header to updates.md
+            {
+              echo "## Tool Update Report"
+              echo ""
+              echo "The following tools have newer versions available:"
+              echo ""
+              cat updates.md
+              echo ""
+              echo "---"
+              echo "To update, edit \`versions.env\` and run \`make manifests generate\` to verify compatibility."
+            } > updates-final.md
+            mv updates-final.md updates.md
             cat updates.md
           fi
 
       - name: Create or update issue
-        if: steps.check.outputs.found == 'true'
+        if: steps.versions.outputs.skip != 'true' && steps.check.outputs.found == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
