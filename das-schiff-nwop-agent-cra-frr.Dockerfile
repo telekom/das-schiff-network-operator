@@ -28,6 +28,7 @@ LABEL org.opencontainers.image.title="das-schiff-nwop-agent-cra-frr" \
 WORKDIR /
 COPY --from=builder /workspace/agent .
 COPY LICENSE /licenses/LICENSE
+COPY NOTICE /licenses/NOTICE
 USER 65532:65532
 
 ENTRYPOINT ["/agent"]

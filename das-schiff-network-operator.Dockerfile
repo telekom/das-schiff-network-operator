@@ -4,8 +4,6 @@ FROM --platform=$BUILDPLATFORM docker.io/library/golang:${GO_VERSION}-alpine AS 
 
 ARG TARGETOS
 ARG TARGETARCH
-ARG VERSION=dev
-ARG COMMIT=unknown
 
 WORKDIR /workspace
 # Copy the Go Modules manifests
@@ -39,6 +37,7 @@ LABEL org.opencontainers.image.title="das-schiff-network-operator" \
 WORKDIR /
 COPY --from=builder /workspace/manager .
 COPY LICENSE /licenses/LICENSE
+COPY NOTICE /licenses/NOTICE
 USER 65532:65532
 
 ENTRYPOINT ["/manager"]

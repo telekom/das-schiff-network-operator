@@ -13,4 +13,5 @@ Makefile
 .dockerignore
 *.Dockerfile
 
-# Keep LICENSE and NOTICE for Dockerfile COPY compliance
+# Keep LICENSE and NOTICE — required by Dockerfile COPY instructions for
+# embedding legal files into the container image.

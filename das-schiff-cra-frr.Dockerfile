@@ -20,6 +20,11 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-$(go env GOARCH)}
 
 FROM docker.io/library/ubuntu:25.10
 
+LABEL org.opencontainers.image.title="das-schiff-cra-frr" \
+      org.opencontainers.image.source="https://github.com/telekom/das-schiff-network-operator" \
+      org.opencontainers.image.vendor="Deutsche Telekom AG" \
+      org.opencontainers.image.licenses="Apache-2.0"
+
 ENV FRRVER="frr-stable"
 ARG DEBIAN_FRONTEND=noninteractive
 
@@ -59,17 +64,13 @@ COPY ./docker/networkd.conf /etc/systemd/networkd.conf.d/cra.conf
 COPY ./docker/10-cra.conf /etc/sysctl.d/10-cra.conf
 COPY --from=builder /workspace/frr-cra /usr/local/bin/frr-cra
 COPY LICENSE /licenses/LICENSE
+COPY NOTICE /licenses/NOTICE
 COPY ./docker/frr-cra.env /etc/default/frr-cra
 COPY ./docker/prometheus-node-exporter.env /etc/default/prometheus-node-exporter
 COPY ./docker/hosts /etc/hosts
 RUN systemctl enable frr-cra.service
 RUN systemctl enable fix-vrf-rules.service
 RUN systemctl enable prometheus-node-exporter.service
-
-LABEL org.opencontainers.image.title="das-schiff-cra-frr" \
-      org.opencontainers.image.source="https://github.com/telekom/das-schiff-network-operator" \
-      org.opencontainers.image.vendor="Deutsche Telekom AG" \
-      org.opencontainers.image.licenses="Apache-2.0"
 
 VOLUME ["/sys/fs/cgroup", "/tmp", "/run"]
 CMD ["/sbin/init"]
