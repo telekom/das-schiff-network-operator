@@ -152,6 +152,8 @@ github.com/rackn/netwrangler v0.7.1 h1:LzvDBlBOZ7nMvt50HyLeBM9eapRLf8oXRLyn1shGs
 github.com/rackn/netwrangler v0.7.1/go.mod h1:hGj63TX3L7BRiZVZ3jIIsKTwy78VIpDHCoe1tkk//xI=
 github.com/rogpeppe/go-internal v1.14.1 h1:UQB4HGPB6osV0SQTLymcB4TgvyWu6ZyliaW0tI/otEQ=
 github.com/rogpeppe/go-internal v1.14.1/go.mod h1:MaRKkUm5W0goXpeCfT7UZI6fk/L7L7so1lCWt35ZSgc=
+github.com/safchain/ethtool v0.7.0 h1:rlJzfDetsVvT61uz8x1YIcFn12akMfuPulHtZjtb7Is=
+github.com/safchain/ethtool v0.7.0/go.mod h1:MenQKEjXdfkjD3mp2QdCk8B/hwvkrlOTm/FD4gTpFxQ=
 github.com/sirupsen/logrus v1.9.3 h1:dueUQJ1C2q9oE3F7wvmSGAaVtTmUizReu6fjN8uqzbQ=
 github.com/sirupsen/logrus v1.9.3/go.mod h1:naHLuLoDiP4jHNo9R0sCBMtWGeIprob74mVsIT4qYEQ=
 github.com/spf13/pflag v1.0.10 h1:4EBh2KAYBwaONj6b2Ye1GiHfwjqyROoF4RwYO+vPwFk=
