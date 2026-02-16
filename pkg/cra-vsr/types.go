@@ -19,6 +19,7 @@ package cra
 import (
 	"encoding/xml"
 	"sort"
+	"strconv"
 )
 
 type NoStringType string
@@ -157,7 +158,44 @@ type Namespace struct {
 	Name       string      `xml:"name"`
 	Routing    *Routing    `xml:"routing,omitempty"`
 	Interfaces *Interfaces `xml:"interface,omitempty"`
+	KPI        *KPI        `xml:"kpi,omitempty"`
 	VRFs       []VRF       `xml:"l3vrf,omitempty"`
+}
+
+type KPI struct {
+	XMLName  xml.Name  `xml:"urn:6wind:vrouter/kpi kpi"`
+	Telegraf *Telegraf `xml:"telegraf,omitempty"`
+}
+
+type Telegraf struct {
+	XMLName  xml.Name           `xml:"urn:6wind:vrouter/kpi/telegraf telegraf"`
+	Enabled  bool               `xml:"enabled"`
+	Interval *int               `xml:"interval,omitempty"`
+	Clients  []PrometheusClient `xml:"prometheus-client-output,omitempty"`
+	Metrics  *TelegrafMetrics   `xml:"metrics,omitempty"`
+}
+
+type PrometheusClient struct {
+	Address string `xml:"address"`
+	Port    int    `xml:"port"`
+}
+
+type TelegrafMetrics struct {
+	Enabled        bool             `xml:"enabled"`
+	MonitoredIntfs []MonitoredIntf  `xml:"monitored-interface,omitempty"`
+	Template       *string          `xml:"template,omitempty"`
+	Metrics        []TelegrafMetric `xml:"metric,omitempty"`
+}
+
+type MonitoredIntf struct {
+	Name      string `xml:"name"`
+	Namespace string `xml:"vrf"`
+}
+
+type TelegrafMetric struct {
+	Name    string `xml:"name"`
+	Enabled *bool  `xml:"enabled,omitempty"`
+	Period  *int   `xml:"period,omitempty"`
 }
 
 type VRF struct {
@@ -874,6 +912,32 @@ func (vrf *VRF) Sort() {
 	}
 }
 
+func (m *TelegrafMetrics) Sort() {
+	sort.Slice(m.MonitoredIntfs, func(i, j int) bool {
+		keyI := m.MonitoredIntfs[i].Name + "-" + m.MonitoredIntfs[i].Namespace
+		keyJ := m.MonitoredIntfs[j].Name + "-" + m.MonitoredIntfs[j].Namespace
+		return keyI < keyJ
+	})
+
+	sort.Slice(m.Metrics, func(i, j int) bool {
+		return m.Metrics[i].Name < m.Metrics[j].Name
+	})
+}
+
+func (telegraf *Telegraf) Sort() {
+	sort.Slice(telegraf.Clients, func(i, j int) bool {
+		clientI := telegraf.Clients[i]
+		clientJ := telegraf.Clients[j]
+		keyI := clientI.Address + "-" + strconv.Itoa(clientI.Port)
+		keyJ := clientJ.Address + "-" + strconv.Itoa(clientJ.Port)
+		return keyI < keyJ
+	})
+
+	if telegraf.Metrics != nil {
+		telegraf.Metrics.Sort()
+	}
+}
+
 func (ns *Namespace) Sort() {
 	sort.Slice(ns.VRFs, func(i, j int) bool {
 		return ns.VRFs[i].Name < ns.VRFs[j].Name
@@ -886,6 +950,9 @@ func (ns *Namespace) Sort() {
 	}
 	if ns.Interfaces != nil {
 		ns.Interfaces.Sort()
+	}
+	if ns.KPI != nil && ns.KPI.Telegraf != nil {
+		ns.KPI.Telegraf.Sort()
 	}
 }
 

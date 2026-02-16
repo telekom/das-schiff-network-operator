@@ -18,8 +18,11 @@ package cra
 
 import (
 	"context"
+	"encoding/xml"
 	"fmt"
+	"io"
 	"net"
+	"net/http"
 	"strings"
 	"time"
 
@@ -47,13 +50,14 @@ const (
 )
 
 type Manager struct {
-	metricsUrls []string
-	baseConfig  *config.BaseConfig
-	timeout     time.Duration
-	startupXML  []byte
-	WorkNS      string
-	running     *VRouter
-	nc          *Netconf
+	baseConfig *config.BaseConfig
+	timeout    time.Duration
+	startupXML []byte
+	WorkNSName string
+	KpiNSName  string
+	startup    *VRouter
+	running    *VRouter
+	nc         *Netconf
 }
 
 type Metrics struct {
@@ -65,14 +69,13 @@ type Metrics struct {
 }
 
 func NewManager(
-	urls, metricsUrls []string,
+	urls []string,
 	user, password string,
 	timeout time.Duration,
 ) (*Manager, error) {
 	m := &Manager{
-		timeout:     timeout,
-		metricsUrls: metricsUrls,
-		nc:          NewNetconf(urls, user, password, timeout),
+		timeout: timeout,
+		nc:      NewNetconf(urls, user, password, timeout),
 	}
 	ctx := context.Background()
 
@@ -99,21 +102,30 @@ func NewManager(
 		return nil, err
 	}
 
+	m.startup = &VRouter{}
+	if err := xml.Unmarshal(m.startupXML, m.startup); err != nil {
+		return nil, fmt.Errorf(
+			"failed to un-marshal startup config=%s: %w",
+			m.startupXML, err)
+	}
+
 	m.running = &VRouter{}
 	err = m.nc.GetUnmarshal(ctx, Running, "/config", m.running)
 	if err != nil {
 		return nil, err
 	}
 
-	m.WorkNS, err = m.findWorkNS(m.running)
+	m.WorkNSName, err = m.findWorkNSName(m.startup)
 	if err != nil {
 		return nil, err
 	}
 
+	m.KpiNSName = m.findKpiNSName(m.startup)
+
 	return m, nil
 }
 
-func (m *Manager) findWorkNS(vrouter *VRouter) (string, error) {
+func (m *Manager) findWorkNSName(vrouter *VRouter) (string, error) {
 	for _, ns := range vrouter.Namespaces {
 		if ns.Interfaces != nil {
 			for _, infra := range ns.Interfaces.Infras {
@@ -132,6 +144,23 @@ func (m *Manager) findWorkNS(vrouter *VRouter) (string, error) {
 	}
 
 	return "", fmt.Errorf("failed to found working NetNS")
+}
+
+func (*Manager) findKpiNSName(vrouter *VRouter) string {
+	for _, ns := range vrouter.Namespaces {
+		if ns.KPI == nil {
+			continue
+		}
+		if ns.KPI.Telegraf == nil || !ns.KPI.Telegraf.Enabled {
+			continue
+		}
+		if ns.KPI.Telegraf.Metrics == nil || !ns.KPI.Telegraf.Metrics.Enabled {
+			continue
+		}
+		return ns.Name
+	}
+
+	return ""
 }
 
 func (m *Manager) isReservedVRF(name string) bool {
@@ -175,7 +204,7 @@ func (m *Manager) makeVRouter(nodeCfg *v1alpha1.NodeNetworkConfigSpec) (*VRouter
 	}
 
 	ns := Namespace{
-		Name:       m.WorkNS,
+		Name:       m.WorkNSName,
 		Interfaces: &Interfaces{},
 		Routing: &Routing{
 			NCOperation: Replace,
@@ -198,9 +227,86 @@ func (m *Manager) makeVRouter(nodeCfg *v1alpha1.NodeNetworkConfigSpec) (*VRouter
 		return nil, err
 	}
 
+	m.setupKPI(vrouter, &ns)
+
 	vrouter.Namespaces = append(vrouter.Namespaces, ns)
 
 	return vrouter, nil
+}
+
+func (m *Manager) setupKPI(vrouter *VRouter, newNS *Namespace) {
+	if m.KpiNSName == "" {
+		return
+	}
+
+	kpiNS := LookupNS(vrouter, m.KpiNSName)
+	if kpiNS == nil {
+		vrouter.Namespaces = append(vrouter.Namespaces, Namespace{
+			Name: m.KpiNSName,
+		})
+		kpiNS = LookupNS(vrouter, m.KpiNSName)
+	}
+
+	if kpiNS.KPI == nil {
+		kpiNS.KPI = &KPI{
+			Telegraf: &Telegraf{
+				Enabled: true,
+				Metrics: &TelegrafMetrics{
+					Enabled: true,
+				},
+			},
+		}
+	}
+
+	setupMonitoredIntfs := func(nsName string, intfs *Interfaces) {
+		if intfs == nil {
+			return
+		}
+
+		metrics := kpiNS.KPI.Telegraf.Metrics
+		for i := range intfs.Physicals {
+			phys := &intfs.Physicals[i]
+			metrics.MonitoredIntfs = append(metrics.MonitoredIntfs, MonitoredIntf{
+				Name:      phys.Name,
+				Namespace: nsName,
+			})
+		}
+		for i := range intfs.Bridges {
+			br := &intfs.Bridges[i]
+			metrics.MonitoredIntfs = append(metrics.MonitoredIntfs, MonitoredIntf{
+				Name:      br.Name,
+				Namespace: nsName,
+			})
+		}
+		for i := range intfs.VXLANs {
+			vx := &intfs.VXLANs[i]
+			metrics.MonitoredIntfs = append(metrics.MonitoredIntfs, MonitoredIntf{
+				Name:      vx.Name,
+				Namespace: nsName,
+			})
+		}
+		for i := range intfs.VLANs {
+			vl := &intfs.VLANs[i]
+			metrics.MonitoredIntfs = append(metrics.MonitoredIntfs, MonitoredIntf{
+				Name:      vl.Name,
+				Namespace: nsName,
+			})
+		}
+	}
+
+	for _, ns := range []*Namespace{
+		LookupNS(m.startup, "main"),
+		LookupNS(m.startup, m.WorkNSName),
+		newNS,
+	} {
+		if ns == nil {
+			continue
+		}
+		setupMonitoredIntfs(ns.Name, ns.Interfaces)
+		for _, vrf := range ns.VRFs {
+			setupMonitoredIntfs(ns.Name, vrf.Interfaces)
+		}
+	}
 }
 
 func (*Manager) xpath(prefix string, paths []string) string {
@@ -219,7 +325,7 @@ func (m *Manager) GetMetrics(ctx context.Context) (*Metrics, error) {
 		BridgeFDB:        ShowBridgeFDBOutput{},
 	}
 
-	xpath := m.xpath("/state/vrf[name='"+m.WorkNS+"']", []string{
+	xpath := m.xpath("/state/vrf[name='"+m.WorkNSName+"']", []string{
 		"/routing/evpn",
 		"/routing/bgp/as",
 		"/routing/bgp/neighbor",
@@ -237,7 +343,7 @@ func (m *Manager) GetMetrics(ctx context.Context) (*Metrics, error) {
 		return nil, fmt.Errorf("get-state failed in metrics: %w", err)
 	}
 
-	workns := LookupNS(&metrics.State, m.WorkNS)
+	workns := LookupNS(&metrics.State, m.WorkNSName)
 	if workns == nil {
 		return nil, fmt.Errorf("work-ns not found in metrics state")
 	}
@@ -249,7 +355,7 @@ func (m *Manager) GetMetrics(ctx context.Context) (*Metrics, error) {
 
 	for _, name := range vrfList {
 		req4 := ShowIPv4RouteSummaryInput{
-			Namespace: &m.WorkNS,
+			Namespace: &m.WorkNSName,
 			VRF:       types.ToPtr(name),
 		}
 		out := ShowRouteSummaryOutput{}
@@ -259,7 +365,7 @@ func (m *Manager) GetMetrics(ctx context.Context) (*Metrics, error) {
 		metrics.V4RouteSummaries[name] = out
 
 		req6 := ShowIPv6RouteSummaryInput{
-			Namespace: &m.WorkNS,
+			Namespace: &m.WorkNSName,
 			VRF:       types.ToPtr(name),
 		}
 		out = ShowRouteSummaryOutput{}
@@ -271,7 +377,7 @@ func (m *Manager) GetMetrics(ctx context.Context) (*Metrics, error) {
 
 	{
 		req := ShowNeighborsInput{
-			Namespace: &m.WorkNS,
+			Namespace: &m.WorkNSName,
 		}
 		if err := m.nc.RPC(ctx, &req, &metrics.Neighbors); err != nil {
 			return nil, fmt.Errorf("show-neighbors failed in metrics: %w", err)
@@ -280,7 +386,7 @@ func (m *Manager) GetMetrics(ctx context.Context) (*Metrics, error) {
 
 	{
 		req := ShowBridgeFDBInput{
-			Namespace: &m.WorkNS,
+			Namespace: &m.WorkNSName,
 		}
 		if err := m.nc.RPC(ctx, &req, &metrics.BridgeFDB); err != nil {
 			return nil, fmt.Errorf("show-bridge-fdb failed in metrics: %w", err)
@@ -288,4 +394,56 @@ func (m *Manager) GetMetrics(ctx context.Context) (*Metrics, error) {
 	}
 
 	return &metrics, nil
+}
+
+func (m *Manager) SendHttpRequest(ctx context.Context, url string) ([]byte, error) {
+	httpClient := http.Client{
+		Timeout: m.timeout,
+	}
+
+	req, err := http.NewRequest(http.MethodGet, url, http.NoBody)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	res, err := httpClient.Do(req.WithContext(ctx))
+	if err != nil {
+		return nil, fmt.Errorf("error when sending request: %w", err)
+	}
+
+	resBody, err := func() ([]byte, error) {
+		defer res.Body.Close()
+		return io.ReadAll(res.Body)
+	}()
+	if err != nil {
+		return nil, fmt.Errorf("error reading response body: %w", err)
+	}
+
+	return resBody, nil
+}
+
+func (m *Manager) GetKPIMetrics(ctx context.Context) ([]byte, error) {
+	if m.KpiNSName == "" {
+		return nil, fmt.Errorf("KPI metrics have not been enabled in vsr")
+	}
+
+	ns := LookupNS(m.startup, m.KpiNSName)
+	if len(ns.KPI.Telegraf.Clients) == 0 {
+		return nil, fmt.Errorf("KPI metrics are not exported by vsr")
+	}
+
+	for _, kpiClient := range ns.KPI.Telegraf.Clients {
+		//nolint:revive
+		url := fmt.Sprintf("http://%s:%d/metrics", kpiClient.Address, kpiClient.Port)
+
+		resBody, err := m.SendHttpRequest(ctx, url)
+		if err != nil {
+			fmt.Println(err)
+			continue
+		}
+
+		return resBody, nil
+	}
+
+	return nil, fmt.Errorf("all KPIs clients have failed to reply")
 }

@@ -50,27 +50,52 @@ var oldConfigPath string
 var isConfigEnvExist bool
 
 var manager = &Manager{
-	WorkNS: "hbn",
-	running: &VRouter{
+	WorkNSName: "hbn",
+	KpiNSName:  "main",
+	startup: &VRouter{
 		Namespaces: []Namespace{
 			{
 				Name: "main",
+				KPI: &KPI{
+					Telegraf: &Telegraf{
+						Enabled: true,
+						Metrics: &TelegrafMetrics{
+							Enabled: true,
+						},
+					},
+				},
 			}, {
 				Name: "hbn",
+				Interfaces: &Interfaces{
+					Physicals: []Physical{
+						{Name: "ens3"},
+						{Name: "ens4"},
+					},
+					VXLANs: []VXLAN{
+						{Name: "vx.cluster"},
+						{Name: "vx.mgmt"},
+					},
+				},
 				VRFs: []VRF{
 					{
 						Name:    "cluster",
 						TableID: 10,
 						Interfaces: &Interfaces{
 							Infras: []Infrastructure{
-								{
-									Name: "hbn",
-								},
+								{Name: "hbn"},
+							},
+							Bridges: []Bridge{
+								{Name: "br.cluster"},
 							},
 						},
 					}, {
 						Name:    "mgmt",
 						TableID: 11,
+						Interfaces: &Interfaces{
+							Bridges: []Bridge{
+								{Name: "br.mgmt"},
+							},
+						},
 					},
 				},
 			},
@@ -303,6 +328,8 @@ var _ = BeforeSuite(func() {
 	content, _ := yaml.Marshal(config.Config{})
 	_, err = file.Write(content)
 	Expect(err).ToNot(HaveOccurred())
+
+	manager.running = manager.startup
 })
 
 var _ = AfterSuite(func() {
@@ -317,7 +344,7 @@ var _ = AfterSuite(func() {
 
 var _ = Describe("CRA-VSR", func() {
 	It("Find working NetNS", func() {
-		ns, _ := manager.findWorkNS(manager.running)
+		ns, _ := manager.findWorkNSName(manager.running)
 		Expect(ns).To(Equal("hbn"))
 	})
 	It("Convert NodeNetworkConfig into VSR config", func() {
