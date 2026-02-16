@@ -412,9 +412,10 @@ var _ = Describe("NodeNetworkConfigReconciler", func() {
 				ApplyConfig(gomock.Any(), storedCfg).
 				Return(nil)
 
-			err := r.invalidateAndRestore(context.Background(), currentCfg, "test reason")
+			err := r.invalidateAndRestore(context.Background(), currentCfg, "test reason", "test error message")
 			Expect(err).ToNot(HaveOccurred())
 			Expect(currentCfg.Status.ConfigStatus).To(Equal(operator.StatusInvalid))
+			Expect(currentCfg.Status.ErrorMessage).To(Equal("test error message"))
 		})
 	})
 

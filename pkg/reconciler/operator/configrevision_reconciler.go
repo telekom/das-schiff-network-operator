@@ -166,6 +166,9 @@ func getFirstValidRevision(revisions []v1alpha1.NetworkConfigRevision) *v1alpha1
 
 type counters struct {
 	ready, ongoing, invalid int
+	failedNode              string
+	failedMessage           string
+	failedAt                metav1.Time
 }
 
 func (crr *ConfigRevisionReconciler) processConfigsForRevision(ctx context.Context, configs []v1alpha1.NodeNetworkConfig, revision *v1alpha1.NetworkConfigRevision) (*counters, error) {
@@ -173,11 +176,10 @@ func (crr *ConfigRevisionReconciler) processConfigsForRevision(ctx context.Conte
 	if err != nil {
 		return nil, fmt.Errorf("failed to remove redundant configs: %w", err)
 	}
-	ready, ongoing, invalid := crr.getRevisionCounters(configs, revision)
-	cnt := &counters{ready: ready, ongoing: ongoing, invalid: invalid}
+	cnt := crr.getRevisionCounters(configs, revision)
 
-	if invalid > 0 {
-		if err := crr.invalidateRevision(ctx, revision, "NetworkConfigRevision results in invalid config"); err != nil {
+	if cnt.invalid > 0 {
+		if err := crr.invalidateRevision(ctx, revision, cnt.failedNode, cnt.failedMessage, cnt.failedAt); err != nil {
 			return cnt, fmt.Errorf("faild to invalidate revision %s: %w", revision.Name, err)
 		}
 	}
@@ -185,35 +187,48 @@ func (crr *ConfigRevisionReconciler) processConfigsForRevision(ctx context.Conte
 	return cnt, nil
 }
 
-func (crr *ConfigRevisionReconciler) getRevisionCounters(configs []v1alpha1.NodeNetworkConfig, revision *v1alpha1.NetworkConfigRevision) (ready, ongoing, invalid int) {
-	ready = 0
-	ongoing = 0
-	invalid = 0
+func (crr *ConfigRevisionReconciler) getRevisionCounters(configs []v1alpha1.NodeNetworkConfig, revision *v1alpha1.NetworkConfigRevision) *counters {
+	cnt := &counters{
+		ready:   0,
+		ongoing: 0,
+		invalid: 0,
+	}
 	for i := range configs {
 		if configs[i].Spec.Revision == revision.Spec.Revision {
 			timeout := crr.configTimeout
 			switch configs[i].Status.ConfigStatus {
 			case StatusProvisioned:
 				// Update ready counter
-				ready++
+				cnt.ready++
 			case StatusInvalid:
 				// Increase 'invalid' counter so we know that the revision results in invalid configs
-				invalid++
+				cnt.invalid++
+				// Capture the failure info (first one wins since rollout stops)
+				if cnt.failedNode == "" {
+					cnt.failedNode = configs[i].Name
+					cnt.failedMessage = configs[i].Status.ErrorMessage
+					cnt.failedAt = configs[i].Status.LastUpdate
+				}
 			case "":
 				// Set longer timeout if status was not yet updated
 				timeout = crr.preconfigTimeout
 				fallthrough
 			case StatusProvisioning:
 				// Update ongoing counter
-				ongoing++
+				cnt.ongoing++
 				if wasConfigTimeoutReached(&configs[i], timeout) {
-					// If timout was reached revision is invalid (but still counts as ongoing).
-					invalid++
+					// If timeout was reached revision is invalid (but still counts as ongoing).
+					cnt.invalid++
+					if cnt.failedNode == "" {
+						cnt.failedNode = configs[i].Name
+						cnt.failedMessage = "provisioning timeout reached"
+						cnt.failedAt = configs[i].Status.LastUpdate
+					}
 				}
 			}
 		}
 	}
-	return ready, ongoing, invalid
+	return cnt
 }
 
 func (crr *ConfigRevisionReconciler) removeRedundantConfigs(ctx context.Context, configs []v1alpha1.NodeNetworkConfig) ([]v1alpha1.NodeNetworkConfig, error) {
@@ -233,9 +248,15 @@ func (crr *ConfigRevisionReconciler) removeRedundantConfigs(ctx context.Context,
 	return cfg, nil
 }
 
-func (crr *ConfigRevisionReconciler) invalidateRevision(ctx context.Context, revision *v1alpha1.NetworkConfigRevision, reason string) error {
-	crr.logger.Info("invalidating revision", "name", revision.Name, "reason", reason)
+func (crr *ConfigRevisionReconciler) invalidateRevision(ctx context.Context, revision *v1alpha1.NetworkConfigRevision, failedNode, failedMessage string, failedAt metav1.Time) error {
+	crr.logger.Info("invalidating revision", "name", revision.Name, "failedNode", failedNode, "failedMessage", failedMessage)
 	revision.Status.IsInvalid = true
+	revision.Status.FailedNode = failedNode
+	revision.Status.FailedMessage = failedMessage
+	if !failedAt.IsZero() {
+		revision.Status.FailedAt = &failedAt
+	}
+
 	if err := crr.client.Status().Update(ctx, revision); err != nil {
 		return fmt.Errorf("failed to update revision status %s: %w", revision.Name, err)
 	}
