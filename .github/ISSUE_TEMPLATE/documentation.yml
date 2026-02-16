@@ -1,0 +1,46 @@
+name: Documentation
+description: 'Submit a documentation issue related to a docstring or the docs to improve our documentation.'
+title: '[DOCS] <Please write a short and informative title>'
+labels: ['documentation']
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for taking the time to file a documentation issue. Before creating a new documentation issue, please make 
+        sure to take a few minutes to check the issue tracker for existing documentation issues.
+
+  - type: dropdown
+    attributes:
+      label: To which part is the documentation issue related?
+      description: The issue is either related to a documentation within the code (docstring), or external docs
+      options: 
+        - Code comments / docstrings
+        - API reference docs
+        - README.md
+        - CONTRIBUTING.md
+        - Other documentation
+
+  - type: textarea
+    attributes:
+      label: What is the issue with the documentation?
+      description: | 
+        Tell us about the mistake, confusion, or enhancement.
+        Make sure to leave a reference to the documentation you are referring to.
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: What is a fix for the documentation issue?
+      description: |
+        Tell us how the documentation issue can be addressed.
+
+  - type: checkboxes
+    attributes:
+      label: Checklist
+      options:
+        - label: I've checked existing issues for similar documentation problems
+          required: true
+        - label: I've included a reference to the specific documentation
+          required: true
