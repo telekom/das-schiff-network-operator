@@ -6,11 +6,12 @@ config/
 docs/
 hack/
 *.md
-LICENSE
-NOTICE
 CODEOWNERS
 PROJECT
 Makefile
 .golangci.yml
 .dockerignore
 *.Dockerfile
+
+# Keep LICENSE and NOTICE — required by Dockerfile COPY instructions for
+# embedding legal files into the container image.
