@@ -11,9 +11,12 @@ The project provides five components:
 - A set of "agents" running as DaemonSets:
   - `agent-cra-frr`: Reading the `NodeNetworkConfig` for the respective node it is running on.
     It is responsible for configuring the so called _Containerized Routing Agent_ (CRA) of FRR.
+  - `agent-cra-vsr`: Reading the `NodeNetworkConfig` for the respective node it is running on.
+    It is responsible for configuring the so called _Containerized Routing Agent_ (CRA) of vSR.
   - `agent-netplan`: Taking the `NodeNetplanConfig` and applying it to the host network namespace.
   - `agent-hbn-l2`: This is an alternative to `agent-netplan`, providing a very simple binary to apply the needed configuration, a subset of the `netplan` functionality and spec.
 - The _containerized routing agent_ (CRA), providing FRR and a small `cra-frr` configuration binary. This exposes an API to dynamically configure L2 and L3VNIs and reconfigure FRR.
+- 6WIND vSR is not part of this repository but can be obtained through https://www.6wind.com
 
 ## Node readiness signalling
 
@@ -55,7 +58,7 @@ A sample healthcheck configuration file is provided at [config/samples/net-healt
 
 The network operator exposes Prometheus metrics for observability. See [docs/metrics.md](docs/metrics.md) for the complete list of metrics.
 
-![schematic diagram of cra-frr and the host ns](./docs/cra-frr.png)
+![schematic diagram of CRA and the host ns](./docs/cra-architecture.png)
 
 ## Deploying the operator
 There are two possibilities to deploy the operator:
