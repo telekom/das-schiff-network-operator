@@ -20,7 +20,7 @@ COPY pkg/ pkg/
 # Build
 RUN CGO_ENABLED=0 GOOS=linux go build -a -o frr-cra main.go
 
-FROM docker.io/library/ubuntu:25.10
+FROM docker.io/library/ubuntu:26.04
 
 ENV FRRVER="frr-stable"
 ARG DEBIAN_FRONTEND=noninteractive
