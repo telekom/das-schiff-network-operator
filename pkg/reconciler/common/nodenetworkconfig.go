@@ -205,10 +205,11 @@ func (r *NodeNetworkConfigReconciler) invalidateNodeNetworkConfig(
 	ctx context.Context,
 	cfg *v1alpha1.NodeNetworkConfig,
 	reason string,
+	errorMsg string,
 ) error {
-	r.logger.Info("invalidating NodeNetworkConfig", "name", cfg.Name, "reason", reason)
+	r.logger.Info("invalidating NodeNetworkConfig", "name", cfg.Name, "reason", reason, "error", errorMsg)
 
-	if err := SetStatus(ctx, r.client, cfg, operator.StatusInvalid, r.logger); err != nil {
+	if err := SetStatusWithError(ctx, r.client, cfg, operator.StatusInvalid, errorMsg, r.logger); err != nil {
 		return fmt.Errorf("error invalidating NodeNetworkConfig: %w", err)
 	}
 
@@ -219,8 +220,9 @@ func (r *NodeNetworkConfigReconciler) invalidateAndRestore(
 	ctx context.Context,
 	cfg *v1alpha1.NodeNetworkConfig,
 	reason string,
+	errorMsg string,
 ) error {
-	if err := r.invalidateNodeNetworkConfig(ctx, cfg, reason); err != nil {
+	if err := r.invalidateNodeNetworkConfig(ctx, cfg, reason, errorMsg); err != nil {
 		return err
 	}
 
@@ -291,17 +293,18 @@ func (r *NodeNetworkConfigReconciler) processConfig(
 
 	// reconcile NodeNetworkConfig
 	if err := r.doReconciliation(ctx, cfg); err != nil {
+		reconcileErrMsg := err.Error()
 		// if reconciliation failed set NodeNetworkConfig's status as invalid
 		if r.restoreOnReconcileFailure {
 			// restore last known working NodeNetworkConfig (for agents like FRR where
 			// invalid configs can be partially applied)
-			if restoreErr := r.invalidateAndRestore(ctx, cfg, "reconciliation failed"); restoreErr != nil {
+			if restoreErr := r.invalidateAndRestore(ctx, cfg, "reconciliation failed", reconcileErrMsg); restoreErr != nil {
 				return ctrl.Result{}, fmt.Errorf("error restoring NodeNetworkConfig: %w", restoreErr)
 			}
 		} else {
 			// no need to restore the config, the new one has not been applied
 			// (for agents like VSR where invalid configs cannot be committed)
-			if invalidateErr := r.invalidateNodeNetworkConfig(ctx, cfg, "reconciliation failed"); invalidateErr != nil {
+			if invalidateErr := r.invalidateNodeNetworkConfig(ctx, cfg, "reconciliation failed", reconcileErrMsg); invalidateErr != nil {
 				return ctrl.Result{}, fmt.Errorf("error invalidating NodeNetworkConfig: %w", invalidateErr)
 			}
 		}
@@ -312,9 +315,10 @@ func (r *NodeNetworkConfigReconciler) processConfig(
 	// check if node is healthy after reconciliation
 	result, err := r.checkHealth(ctx)
 	if err != nil {
+		healthErrMsg := err.Error()
 		// if node is not healthy set NodeNetworkConfig's status as invalid
 		// and restore last known working NodeNetworkConfig
-		if restoreErr := r.invalidateAndRestore(ctx, cfg, "healthcheck failed"); restoreErr != nil {
+		if restoreErr := r.invalidateAndRestore(ctx, cfg, "healthcheck failed", healthErrMsg); restoreErr != nil {
 			return ctrl.Result{}, fmt.Errorf("failed to restore NodeNetworkConfig: %w", restoreErr)
 		}
 
@@ -365,6 +369,18 @@ func SetStatus(
 	status string,
 	logger logr.Logger,
 ) error {
+	return SetStatusWithError(ctx, c, cfg, status, "", logger)
+}
+
+// SetStatusWithError updates the status of a NodeNetworkConfig with an optional error message.
+func SetStatusWithError(
+	ctx context.Context,
+	c client.Client,
+	cfg *v1alpha1.NodeNetworkConfig,
+	status string,
+	errorMsg string,
+	logger logr.Logger,
+) error {
 	logger.Info("setting NodeNetworkConfig status", "name", cfg.Name, "status", status)
 
 	cfg.Status.ConfigStatus = status
@@ -372,6 +388,13 @@ func SetStatus(
 
 	if status == operator.StatusProvisioned || status == operator.StatusInvalid {
 		cfg.Status.LastAppliedRevision = cfg.Spec.Revision
+	}
+
+	// Set or clear error message based on status
+	if status == operator.StatusInvalid {
+		cfg.Status.ErrorMessage = errorMsg
+	} else {
+		cfg.Status.ErrorMessage = ""
 	}
 
 	if err := c.Status().Update(ctx, cfg); err != nil {
