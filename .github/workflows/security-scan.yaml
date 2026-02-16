@@ -90,6 +90,9 @@ jobs:
       - name: Install packages
         run: sudo apt-get update && sudo apt-get install -y llvm clang libbpf-dev gcc-multilib linux-headers-$(uname -r)
 
+      # Note: This workflow intentionally uses go-licenses v2 for `check`.
+      # The Makefile still uses go-licenses v1 for other tasks (e.g. save/report),
+      # so both major versions coexist by design.
       - name: Install go-licenses
         run: go install github.com/google/go-licenses/v2@v2.0.1
 
