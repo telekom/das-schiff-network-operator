@@ -3,46 +3,79 @@ updates:
 - package-ecosystem: "github-actions"
   directory: "/"
   schedule:
-      interval: "weekly"
-  commit-message:
-      prefix: ":seedling:"
-  labels:
-    - "ok-to-test"
-  groups:
-    github-actions:
-      patterns:
-        - "*"
-- package-ecosystem: "gomod"
-  directory: "/"
-  schedule:
-    interval: "weekly"
+    interval: "daily"
   commit-message:
     prefix: ":seedling:"
   labels:
     - "ok-to-test"
   groups:
-    go-dependencies:
+    actions-major:
+      patterns:
+        - "*"
+      update-types:
+        - "major"
+    actions-minor-patch:
+      patterns:
+        - "*"
+      update-types:
+        - "minor"
+        - "patch"
+
+- package-ecosystem: "gomod"
+  directory: "/"
+  schedule:
+    interval: "daily"
+  commit-message:
+    prefix: ":seedling:"
+  labels:
+    - "ok-to-test"
+  groups:
+    kubernetes:
+      patterns:
+        - "k8s.io/*"
+        - "sigs.k8s.io/*"
+        - "go.etcd.io/*"
+        - "google.golang.org/grpc"
+    go-major:
       patterns:
         - "*"
       exclude-patterns:
         - "k8s.io/*"
+        - "sigs.k8s.io/*"
         - "go.etcd.io/*"
         - "google.golang.org/grpc"
-  ignore:
-    # Ignore k8s and its transitives modules as they are upgraded manually
-    # together with controller-runtime.
-    - dependency-name: "k8s.io/*"
-    - dependency-name: "go.etcd.io/*"
-    - dependency-name: "google.golang.org/grpc"
+      update-types:
+        - "major"
+    go-minor-patch:
+      patterns:
+        - "*"
+      exclude-patterns:
+        - "k8s.io/*"
+        - "sigs.k8s.io/*"
+        - "go.etcd.io/*"
+        - "google.golang.org/grpc"
+      update-types:
+        - "minor"
+        - "patch"
+  open-pull-requests-limit: 10
+
 - package-ecosystem: "docker"
   directory: "/"
   schedule:
-    interval: "weekly"
+    interval: "daily"
   commit-message:
     prefix: ":seedling:"
   labels:
     - "ok-to-test"
   groups:
-    docker-images:
+    docker-major:
       patterns:
         - "*"
+      update-types:
+        - "major"
+    docker-minor-patch:
+      patterns:
+        - "*"
+      update-types:
+        - "minor"
+        - "patch"
