@@ -39,11 +39,21 @@ updates:
     go-major:
       patterns:
         - "*"
+      exclude-patterns:
+        - "k8s.io/*"
+        - "sigs.k8s.io/*"
+        - "go.etcd.io/*"
+        - "google.golang.org/grpc"
       update-types:
         - "major"
     go-minor-patch:
       patterns:
         - "*"
+      exclude-patterns:
+        - "k8s.io/*"
+        - "sigs.k8s.io/*"
+        - "go.etcd.io/*"
+        - "google.golang.org/grpc"
       update-types:
         - "minor"
         - "patch"
