@@ -66,12 +66,13 @@ The `ConfigReconciler` watches all three CRDs, snapshots them into a `NetworkCon
 
 ### 3.1 New Intent-Driven CRDs
 
-We introduce nine new cluster-scoped CRDs under `network.t-caas.telekom.com/v1alpha1`:
+We introduce eleven new cluster-scoped CRDs under `network.t-caas.telekom.com/v1alpha1`:
 
 | CRD | Purpose |
 |---|---|
+| `VRF` | Backbone VRF metadata — name, VNI, route target, loopbacks. Defined once, referenced by `Destination` |
 | `Network` | Pool definition — CIDR, VLAN, VNI, allocation pool. Referenced by name from usage CRDs |
-| `Destination` | Reachability target (VRF) — defined once, referenced by label from attachments |
+| `Destination` | Routing target — prefixes + either `vrfRef` (VRF import) or `nextHop` (static route). Referenced by label from attachments |
 | `Layer2Attachment` | Attach a `Network` as L2 segment to nodes; supports HBN and non-HBN (physical/SR-IOV interfaces) |
 | `Inbound` | Allocate IPs from a `Network` for MetalLB pools + BGP/L2 advertisement; works with or without HBN |
 | `Outbound` | Allocate IPs from a `Network` for Coil NAT + Calico pools; works with or without HBN |
@@ -79,6 +80,7 @@ We introduce nine new cluster-scoped CRDs under `network.t-caas.telekom.com/v1al
 | `PodNetwork` | Allocate additional pod-level networks from a `Network` (CNI integration) |
 | `Collector` | GRE collector endpoint + mirror VRF binding — defined once, referenced by TrafficMirrors |
 | `TrafficMirror` | Declaratively mirror traffic from an attachment to a Collector |
+| `NodeNetworkStatus` | Per-node inventory: interfaces (excl. pod veths), routes, IPs — populated by agents for validation and observability |
 
 The design separates **pool definition** (`Network`) from **pool usage** (`Layer2Attachment`, `Inbound`, `Outbound`, `PodNetwork`). A `Network` is not per se L2 — it only becomes a Layer 2 segment when a `Layer2Attachment` attaches it to nodes. An `Inbound` or `Outbound` allocates IPs from the same `Network` pool without implying any L2 presence.
 
@@ -89,7 +91,7 @@ Ingress and egress connectivity were originally combined in a single `VRFAttachm
 3. **Non-HBN support** — an inbound connection without HBN is just a MetalLB pool + BGP/L2 advertisement (no VRF). Combining this with VRF-aware egress in one CRD would be awkward.
 4. **Simplicity** — users configure one CR per concern rather than a single large CR with an inline connection list.
 
-These CRDs describe **what** the user wants, not **how** to configure it. Crucially, `Network` separates pool definition from usage, and `Destination` decouples reachability targets from the resources that need them — see §3.5.
+These CRDs describe **what** the user wants, not **how** to configure it. Crucially, `Network` separates pool definition from usage, `VRF` centralises backbone VRF metadata, and `Destination` decouples routing targets from the resources that need them — see §3.5.
 
 ### 3.2 Controller Architecture — Tenant Cluster Only
 
@@ -136,7 +138,7 @@ The design targets four categories of deployment. The table below maps each to t
 | **UC 1** | **L2 ordering on the fly** — vSphere / OpenStack controller orders a network, attaches it to VMs, optionally assigns IPs | `Network` (with `allocationPool` for future auto-allocation, or user-specified CIDR/VLAN). Pure L2 (VLAN-only, no IPs) is valid. `Layer2Attachment` with `interfaceRef` + `nodeSelector` for L2 presence on nodes | A future management-cluster controller uses `allocationPool` to order from BM4X / vSphere / OpenStack and writes back CIDR + VLAN. "With IP assignment or not" is handled by the optional `ipv4`/`ipv6` fields on `Network` |
 | **UC 2** | **GitOps L2 configs** — bonds, VLANs on bonds (no IPs), SR-IOV VF provisioning | **Bond creation** and **VF provisioning** are out of scope (infrastructure-level; see note above). The operator *consumes* them: `Network` (VLAN-only, no IPs) + `Layer2Attachment` with `interfaceRef: bond2` + `nodeSelector` creates the VLAN sub-interface on the existing bond. Per-VLAN: one `Network` + one `Layer2Attachment` per VLAN | Example: 10 VLANs on `bond2` = 10 `Network` resources (each with `vlan: <id>`) + 10 `Layer2Attachment` resources (each with `networkRef`, `interfaceRef: bond2`, `nodeSelector`) |
 | **UC 3** | **SR-IOV ordering** — BM4X orders a network, VLAN gets assigned, worker pool needs config, bond already exists | `Network` (with `vlan` from BM4X, optionally `allocationPool`). `Layer2Attachment` with `interfaceRef: bond0` + `sriov.enabled: true` + `nodeSelector`. Bond is pre-existing | `sriov.enabled` creates SR-IOV policies for `NetworkAttachmentDefinition` with the VLAN ID from the referenced `Network` |
-| **UC 4** | **HBN use cases** — VXLAN tunnels, VRF routing, anycast gateways, MetalLB / Coil integration | `Network` (with CIDR + VLAN + VNI) + `Destination` (VRF). `Layer2Attachment` with `destinations` selector + `networkRef`. `Inbound`/`Outbound` for MetalLB/Coil integration. `BGPNeighbor`, `PodNetwork`, `Collector`, `TrafficMirror` for advanced use cases | This is the proposal's primary design centre — fully specified in §4–§6 |
+| **UC 4** | **HBN use cases** — VXLAN tunnels, VRF routing, anycast gateways, MetalLB / Coil integration | `Network` (with CIDR + VLAN + VNI) + `VRF` (metadata) + `Destination` (routing, `vrfRef`). `Layer2Attachment` with `destinations` selector + `networkRef`. `Inbound`/`Outbound` for MetalLB/Coil integration. `BGPNeighbor`, `PodNetwork`, `Collector`, `TrafficMirror` for advanced use cases | This is the proposal's primary design centre — fully specified in §4–§6 |
 
 **Non-HBN / pure L2 example** (mapping UC 2 — one of the 10 VLANs from the GitOps configs):
 
@@ -164,7 +166,7 @@ spec:
   # no destinations — pure L2, no VRF plumbing
 ```
 
-### 3.4 Integration with the Revision Pipeline — Open Design Question
+### 3.4 Integration with the Revision Pipeline — Resolved (Option A)
 
 A key architectural decision is **how the intent CRDs feed into the existing revision pipeline**. There are two viable approaches:
 
@@ -210,17 +212,15 @@ The `ConfigReconciler` is extended to **also watch** the intent CRDs. At revisio
 | Intent CRDs are the only user-facing API; low-level CRDs remain purely as an advanced/escape-hatch mechanism | Intent-to-revision translation logic is coupled with the revision pipeline rather than isolated |
 | Revision contains the merged view — easy to audit exactly what is deployed | The `NetworkConfigRevisionSpec` may need to record the source (intent vs. low-level) for debugging/audit |
 
-#### Recommendation
+#### Decision: Option A (D24)
 
-This decision is **still open**. Both options preserve the revision-based, gated rollout pipeline unchanged at the `NodeNetworkConfig` level.
+**Option A is chosen.** Intent CRDs generate standard low-level CRDs (`Layer2NetworkConfiguration`, `VRFRouteConfiguration`, `BGPPeering`). The existing `ConfigReconciler` picks these up unchanged. Low-level CRDs remain available as a direct-use escape hatch but are not the primary interface.
 
-**Option A** is simpler to implement first (no changes to the existing `ConfigReconciler`), but introduces a second layer of generated resources that may cause confusion.
+**Conflict handling (D32):** When intent-based CRDs are present for a given VRF/network scope, the operator rejects any manually created low-level CRDs for the same scope. Users must remove conflicting low-level CRDs before intent-based CRDs are processed. This avoids ambiguity from partial overlaps.
 
-**Option B** is architecturally cleaner long-term (single source of truth, no generated artifacts), but requires the `ConfigReconciler` to gain awareness of intent CRDs.
+A future migration to **Option B** remains possible once the API is stable and low-level CRDs can be phased out as user-facing resources.
 
-A possible migration path: start with **Option A** to validate the intent CRD API quickly, then move to **Option B** once the API is stable and the low-level CRDs can be phased out as user-facing resources.
-
-### 3.5 Destinations as a First-Class Concept — Decoupling Reachability from Attachments
+### 3.5 VRF + Destination — Separating Metadata from Routing
 
 #### The Problem with Inline VRF Lists
 
@@ -237,23 +237,60 @@ The initial intent CRD design embedded VRF lists **inline** in each attachment (
 3. **SBR complexity hidden:** Source-based routing (SBR) is needed when two different attachments on the same node reach different VRFs whose imported prefixes overlap — e.g. both "internet" and "m2m_enc" import `0.0.0.0/0`. The controller must auto-detect this overlap and generate intermediate VRFs (`s-<vrf>`) with policy routes. This is a cross-attachment concern that belongs in the controller, not on any single attachment's spec.
 4. **No shared connectivity:** A VRF like `m2m_enc` represents a backbone destination. Multiple attachments, connections, and pod networks may all need routes to/from it. It's a **shared concept**, not something each attachment should independently define.
 
-#### Solution: `Destination` as a Labeled, Referenceable Resource
+#### Solution: Two Complementary CRDs — `VRF` and `Destination`
 
-We introduce a `Destination` CRD that represents a reachability target — typically a VRF in the backbone. Destinations carry **labels** and are **referenced by label selector** from attachments and connections.
+We separate **VRF metadata** from **routing targets** into two distinct CRDs:
+
+- **`VRF`** — the backbone VRF identity. Carries the VRF name, VNI, route target, and optional loopback interfaces (for mirror VRFs). Defined once per VRF, referenced by name from `Destination` resources. This is pure metadata — it does not describe *what* is reachable, only *where* the VRF is in the overlay.
+
+- **`Destination`** — a routing target. Carries `prefixes` (what is reachable) plus either a `vrfRef` (HBN mode — VRF import routing) or a `nextHop` (non-HBN mode — static routing). Defined once, referenced by label selector from attachments and connections. This is pure routing — it does not carry VRF plumbing details.
 
 ```yaml
+# VRF: metadata — defined once per backbone VRF
+apiVersion: network.t-caas.telekom.com/v1alpha1
+kind: VRF
+metadata:
+  name: m2m-enc
+spec:
+  vrf: m2m_enc          # VRF name (≤12 chars)
+  vni: 10100            # VXLAN Network Identifier
+  routeTarget: "64500:10100"
+---
+# Destination: routing target — references the VRF
 apiVersion: network.t-caas.telekom.com/v1alpha1
 kind: Destination
 metadata:
-  name: m2m-enc
+  name: m2m-enc-routes
   labels:
     network.t-caas.telekom.com/vrf: m2m_enc
     network.t-caas.telekom.com/zone: secure
 spec:
-  vrf: m2m_enc
+  vrfRef: m2m-enc       # → VRF resource by name
+  prefixes:
+  - 198.51.100.0/27
+  - 192.0.2.0/24
 ```
 
-Attachments and connections then reference destinations via label selectors:
+A non-HBN Destination uses `nextHop` instead of `vrfRef`:
+
+```yaml
+# Destination without VRF — static routing via next-hop
+apiVersion: network.t-caas.telekom.com/v1alpha1
+kind: Destination
+metadata:
+  name: upstream-default
+  labels:
+    network.t-caas.telekom.com/zone: upstream
+spec:
+  nextHop:
+    ipv4: 198.51.100.1
+    ipv6: 2001:db8:100::1
+  prefixes:
+  - 0.0.0.0/0           # default route via next-hop
+  - ::/0
+```
+
+Attachments and connections reference destinations via label selectors:
 
 ```yaml
 # Layer2Attachment references destinations by label
@@ -264,8 +301,11 @@ spec:
 ```
 
 This means:
-- **Destinations are defined once, referenced many times.** No duplication.
-- **Import prefixes live on the Destination** — the subnets reachable through that VRF are defined once and inherited by every attachment that selects it. **Export prefixes are derived automatically** from each attachment's own subnet.
+- **VRF metadata is defined once on the `VRF` resource.** VNI, route target, and loopbacks are not duplicated across Destinations or attachments.
+- **Destinations are defined once, referenced many times.** No duplication of routing targets.
+- **Import prefixes live on the Destination** — the subnets reachable through that VRF (or next-hop) are defined once and inherited by every attachment that selects it. **Export prefixes are derived automatically** from each attachment's own subnet.
+- **Dual-mode routing:** A Destination with `vrfRef` triggers **HBN mode** — `prefixes` become VRF import entries, routing is handled by VXLAN/VRF. A Destination with `nextHop` triggers **non-HBN static routing** — the controller creates static routes for each prefix via the next-hop address on the VLAN sub-interface. A Destination with `prefixes: ["0.0.0.0/0"]` + `nextHop` acts as a default gateway — static routing is the general concept, default gw is a special case.
+- **`vrfRef` and `nextHop` are mutually exclusive** — a Destination uses one or the other, never both.
 - **Additional routes** can still be specified on the attachment side for edge cases (extra prefixes beyond what the Destination defines).
 - **SBR and intermediate VRFs** are auto-detected by the controller. When two or more attachments on the same node group reach destinations whose imported prefixes overlap, the controller automatically generates intermediate local VRFs (`s-<vrf>`) with policy routes to steer traffic by source subnet. This is transparent to the user — no SBR configuration appears on the intent API.
 - **Labels enable grouping.** An attachment can select all destinations in a zone, or a specific one.
@@ -284,20 +324,27 @@ Label selectors are standard Kubernetes practice and enable:
 
 #### Relationship to `VRFRouteConfiguration`
 
-`Destination` replaces the VRF-reference portion of the intent CRDs. It does **not** replace `VRFRouteConfiguration` — the low-level CRD remains available as an escape hatch and is still what gets produced in the revision pipeline. The intent controller translates `Destination` references + attachment routing specs into the equivalent `VRFRouteConfiguration` entries (or directly into revision data, depending on §3.4).
+`VRF` + `Destination` replace the VRF-reference portion of the intent CRDs. They do **not** replace `VRFRouteConfiguration` — the low-level CRD remains available as an escape hatch and is still what gets produced in the revision pipeline. The intent controller translates `Destination` references (resolving `vrfRef` → `VRF` metadata) + attachment routing specs into the equivalent `VRFRouteConfiguration` entries (or directly into revision data, depending on §3.4).
 
 Multiple attachments selecting the same `Destination` produce **merged** VRF config in the revision, just like multiple `VRFRouteConfiguration` resources do today.
 
 #### Diagram
 
 ```
-  Destination "m2m-enc"                 Destination "internet"
-  labels:                               labels:
-    zone: secure                          zone: public
-  spec:                                 spec:
-    vrf: m2m_enc                        vrf: internet
-    prefixes:                             prefixes:
-    - 192.0.2.0/24                          - 0.0.0.0/0
+  VRF "m2m-enc"                     VRF "internet"
+    vrf: m2m_enc                      vrf: internet
+    vni: 10100                        vni: 10200
+    routeTarget: 64500:10100          routeTarget: 64500:10200
+        ▲                                 ▲
+        │ vrfRef                          │ vrfRef
+        │                                 │
+  Destination "m2m-enc-routes"      Destination "internet-routes"
+  labels:                           labels:
+    zone: secure                      zone: public
+  spec:                             spec:
+    vrfRef: m2m-enc                   vrfRef: internet
+    prefixes:                         prefixes:
+    - 192.0.2.0/24                      - 0.0.0.0/0
     - 203.0.113.0/24
         ▲          ▲                          ▲
         │          │                          │
@@ -320,7 +367,7 @@ Multiple attachments selecting the same `Destination` produce **merged** VRF con
      from Destination)
 ```
 
-All three resources select the `m2m-enc` destination and inherit its prefixes (`192.0.2.0/24`, `203.0.113.0/24`). The controller merges each attachment's export requirements (its own subnets) into a single VRF configuration for `m2m_enc`, preserving the composability of today's model. Attachments can optionally specify additional routes beyond what the Destination defines.
+All three resources select the `m2m-enc-routes` destination and inherit its prefixes (`192.0.2.0/24`, `203.0.113.0/24`). The controller resolves `vrfRef: m2m-enc` → VRF metadata (VNI, RT) and merges each attachment's export requirements (its own subnets) into a single VRF configuration for `m2m_enc`, preserving the composability of today's model. Attachments can optionally specify additional routes beyond what the Destination defines.
 
 ### 3.6 Traffic Mirroring — Intent-Based Wrapper Around MirrorSelector / MirrorTarget
 
@@ -336,7 +383,7 @@ This is exactly the kind of multi-resource coordination that intent CRDs are des
 
 The same GRE collector (IP address, protocol, tunnel key) and mirror VRF are typically shared across many mirroring rules. Embedding collector config inline in every `TrafficMirror` would cause the same duplication that `Destination` solves for production VRFs. We therefore split mirroring into two CRDs:
 
-- **`Collector`** — defines *where* mirrored traffic goes: GRE endpoint properties + which `Destination` (mirror VRF) hosts the tunnel. Defined once, referenced by name from `TrafficMirror` resources.
+- **`Collector`** — defines *where* mirrored traffic goes: GRE endpoint properties + which `VRF` (mirror VRF) hosts the tunnel. Defined once, referenced by name from `TrafficMirror` resources.
 - **`TrafficMirror`** — defines *what* to mirror: source attachment, direction, traffic match, and a reference to a `Collector`. Lightweight and per-flow.
 
 ```
@@ -345,7 +392,7 @@ Collector "prod-collector"                TrafficMirror "capture-vlan100"
     address: 192.0.2.100                     source:
     protocol: l3gre                             kind: Layer2Attachment
     key: 1001                                   name: vlan100
-    mirrorDestination:                        collector: prod-collector
+    mirrorVRF:                                collector: prod-collector
       name: mirror-vrf                        direction: ingress
                                               trafficMatch:
         ▲                                       srcPrefix: 203.0.113.0/24
@@ -371,43 +418,33 @@ This mirrors (pun intended) the `Destination` pattern: shared infrastructure def
 
 In both cases, the low-level `MirrorSelector` / `MirrorTarget` CRDs remain available as an escape hatch for advanced use cases (e.g., custom GRE naming, multiple loopbacks per VRF, complex multi-target scenarios).
 
-#### Mirror VRF as a `Destination` CRD
+#### Mirror VRF as a `VRF` CRD
 
-The mirror VRF (where the GRE tunnel lives) is modeled as a `Destination` with a dedicated label (e.g., `network.t-caas.telekom.com/role: mirror`). This is consistent with the rest of the intent design — a VRF is a VRF, whether it carries production traffic or mirror traffic. The `Destination` for the mirror VRF carries:
+The mirror VRF (where the GRE tunnel lives) is modeled as a `VRF` resource with `loopbacks` configured. `Collector.mirrorVRF` references this `VRF` by name (D35). This is consistent with the rest of the intent design — a VRF is a VRF, whether it carries production traffic or mirror traffic. The `VRF` for mirroring carries:
 
 - `vrf`, `vni`, `routeTarget` — standard VRF properties.
 - `loopbacks` — with `poolRef` for per-node CAPI IPAM allocation (as designed in Proposal 01).
 
-Multiple `Collector` resources can reference the same mirror `Destination` (e.g., multiple collectors sharing one mirror VRF), and multiple `TrafficMirror` resources can reference the same `Collector`.
+Multiple `Collector` resources can reference the same mirror `VRF` (e.g., multiple collectors sharing one mirror VRF), and multiple `TrafficMirror` resources can reference the same `Collector`.
 
 ## 4. Resource Specifications
 
-### 4.1 Destination
+### 4.1 VRF
 
-`Destination` represents a reachability target — a VRF in the backbone or a routing domain. It is defined once and referenced by label selector from attachments and connections.
+`VRF` represents a backbone VRF identity — its name, overlay parameters (VNI, route target), and optional loopback interfaces. It is defined once per VRF and referenced by name from `Destination` resources.
 
 ```yaml
 apiVersion: network.t-caas.telekom.com/v1alpha1
-kind: Destination
+kind: VRF
 metadata:
   name: m2m-enc
-  labels:
-    network.t-caas.telekom.com/vrf: m2m_enc
-    network.t-caas.telekom.com/zone: secure
 spec:
   # VRF name in the backbone
   vrf: m2m_enc
-  # Subnets reachable via this destination.
-  # Defined once here, inherited by every attachment that selects this destination.
-  # Attachments do NOT need to repeat these prefixes.
-  prefixes:
-  - 198.51.100.0/27
-  - 192.0.2.0/24
-  # Optional: VNI and route target (if not derivable from operator config)
+  # VXLAN Network Identifier for the VRF
   vni: 10100
+  # BGP route target for the VRF
   routeTarget: "64500:10100"
-  # Optional: community to set on exported routes toward this destination
-  community: "64500:999"
   # Optional: Loopback interfaces with per-node IP allocation via CAPI IPAM.
   # Primarily used for mirror VRFs (GRE source IPs) but generic enough for
   # any VRF that needs per-node loopback addresses (e.g., BGP peering).
@@ -417,10 +454,84 @@ spec:
   #     apiGroup: ipam.cluster.x-k8s.io
   #     kind: InClusterIPPool
   #     name: mirror-source-ips
+```
+
+**Status:**
+```yaml
+status:
+  # How many Destinations reference this VRF
+  referenceCount: 2
+  conditions:
+  - type: Ready
+    status: "True"
+```
+
+**Validation Rules:**
+- `spec.vrf` is required and immutable.
+- VRF name must be ≤ 12 characters (HBR constraint).
+- `spec.vni` is optional — when omitted, the controller resolves it from operator config.
+- `spec.routeTarget` is optional — when omitted, the controller resolves it from operator config.
+
+### 4.2 Destination
+
+`Destination` represents a routing target — a set of prefixes reachable via either a VRF (HBN mode) or a static next-hop (non-HBN mode). It is defined once and referenced by label selector from attachments and connections.
+
+```yaml
+apiVersion: network.t-caas.telekom.com/v1alpha1
+kind: Destination
+metadata:
+  name: m2m-enc-routes
+  labels:
+    network.t-caas.telekom.com/vrf: m2m_enc
+    network.t-caas.telekom.com/zone: secure
+spec:
+  # --- VRF mode (HBN) ---
+  # References a VRF resource by name. The controller resolves VNI, RT,
+  # and loopback config from the VRF. Prefixes become VRF import entries.
+  vrfRef: m2m-enc
+  # Subnets reachable via this destination.
+  # Defined once here, inherited by every attachment that selects this destination.
+  # Attachments do NOT need to repeat these prefixes.
+  prefixes:
+  - 198.51.100.0/27
+  - 192.0.2.0/24
+  # Note: BGP communities are NOT on the Destination — they belong on the
+  # usage CRDs (Layer2Attachment, Inbound, Outbound, PodNetwork) because
+  # different attachments reaching the same VRF may need different communities.
+
+  # --- Static mode (non-HBN) ---
+  # Instead of vrfRef, a Destination can specify nextHop for static routing.
+  # When a Layer2Attachment (with interfaceRef) selects this Destination,
+  # the controller creates static routes for each prefix via the nextHop.
+  # vrfRef and nextHop are mutually exclusive.
+  #
+  # This generalises the "default gateway" pattern: a Destination with
+  # prefixes: ["0.0.0.0/0"] + nextHop becomes a default route.
+  # nextHop:
+  #   ipv4: 198.51.100.1
+  #   ipv6: 2001:db8:100::1
 
   # Note: SBR (source-based routing) is NOT configured here. It is
   # auto-detected by the controller when two attachments on the same
   # node group reach destinations with overlapping imported prefixes.
+```
+
+**Non-HBN Example** (static routing, no VRF):
+```yaml
+apiVersion: network.t-caas.telekom.com/v1alpha1
+kind: Destination
+metadata:
+  name: upstream-default
+  labels:
+    network.t-caas.telekom.com/zone: upstream
+spec:
+  # No vrfRef — static routing mode
+  nextHop:
+    ipv4: 198.51.100.1
+    ipv6: 2001:db8:100::1
+  prefixes:
+  - 0.0.0.0/0         # default route via next-hop
+  - ::/0
 ```
 
 **Status:**
@@ -434,11 +545,12 @@ status:
 ```
 
 **Validation Rules:**
-- `spec.vrf` is required and immutable.
-- VRF name must be ≤ 12 characters (HBR constraint).
+- `spec.vrfRef` and `spec.nextHop` are mutually exclusive — exactly one must be set.
+- When `spec.vrfRef` is set, it must reference an existing `VRF` resource.
 - `spec.prefixes` entries must be valid CIDR notation.
+- `spec.nextHop.ipv4` and `spec.nextHop.ipv6` must be valid IP addresses (not CIDR).
 
-### 4.2 Network
+### 4.3 Network
 
 `Network` is a pure pool definition — it describes a network segment (CIDR, VLAN, VNI) and how its addresses are allocated. It does **not** carry VRFs, node scope, or any usage semantics. Those belong on the resources that *consume* the network (`Layer2Attachment`, `Inbound`, `Outbound`, `PodNetwork`).
 
@@ -472,6 +584,13 @@ spec:
   # --- L2 Properties ---
   vlan: 234
   vni: 10234                     # VXLAN Network Identifier
+
+  # --- Managed flag ---
+  # When false, the operator treats this Network as a reference for IP/VLAN
+  # parameters only — it does not attempt to create or modify the underlying
+  # L2 segment. Use for pre-existing infrastructure-provided networks.
+  # Defaults to true.
+  # managed: false
 ```
 
 **Example — Pure L2 segment (VLAN only, no IP addresses):**
@@ -492,6 +611,7 @@ spec:
 - **No node scope.** `nodeSelector` belongs on the usage CRDs, not on the pool definition.
 - **Per-AF allocation.** `allocationPool.ipv4` and `allocationPool.ipv6` are independent — IPv4 and IPv6 addresses may come from different upstream pools (matching SchiffCluster's `Harmonization.Level` / `LevelV6`).
 - **`prefixLength`** on each AF determines the slice size allocated to each consumer. For example, a `/24` CIDR with `prefixLength: 28` yields up to 16 `/28` slices.
+- **`managed: false`** for pre-existing/external networks. The operator only reads parameters from the `Network` but does not provision or modify the underlying segment. Defaults to `true`.
 
 **Status:**
 ```yaml
@@ -516,12 +636,15 @@ status:
 - `ipv4.prefixLength` must be ≥ the CIDR prefix length (cannot allocate a larger block than the pool).
 - `vlan` must be in range 1–4094.
 - CRDs that require IP addresses (`Inbound`, `Outbound`) must not reference a `Network` that has no `ipv4`/`ipv6`.
+- When `managed` is `false`, the operator skips L2 provisioning for this network (reference-only mode).
+- When multiple usage CRDs reference the same `Network`, the controller validates that IP allocations do not overlap.
 
 **Controller Behavior:**
-- **Validation-only in this iteration.** The `Network` controller validates the spec, tracks reference count, and sets conditions. It does **not** allocate addresses — consumers specify their subnet directly and reference the `Network` by name.
+- **Validation and reference tracking in this iteration.** The `Network` controller validates the spec, tracks reference count, enforces no IP conflicts across consumers, and sets conditions. It does **not** allocate addresses — consumers specify their subnet directly and reference the `Network` by name.
+- **`managed: false`:** The controller skips any L2 provisioning and treats the `Network` as a parameter reference only.
 - **Future (automatic allocation):** When `allocationPool` is set and processed, the controller contacts the upstream IPAM (BM4X, OpenStack, vSphere) to carve out subnets of size `prefixLength` and writes them into the consumer's status.
 
-### 4.3 Layer2Attachment
+### 4.4 Layer2Attachment
 
 `Layer2Attachment` attaches a `Network` as a Layer 2 segment to a set of nodes selected by label. It supports two deployment modes:
 
@@ -588,6 +711,14 @@ spec:
   # routes:
   # - prefixes:
   #   - 198.51.100.64/26
+
+  # --- BGP Communities (optional) ---
+  # Communities to tag on routes exported from this attachment into matched Destination VRFs.
+  # Each attachment can set its own communities — different attachments reaching the same
+  # VRF may need different community values.
+  communities:
+  - "64500:999"
+  - "64500:1000"
 ```
 
 **Non-HBN Example** (physical interface, no VRF):
@@ -635,8 +766,9 @@ status:
 | **SR-IOV only** (no interfaceName) | Create policy allowing `NetworkAttachmentDefinition` with VLAN ID |
 | **Non-SRIOV** | Create host interface `l2.<interfaceName>` with VLAN, MTU, VNI, neighborSuppression; allocate anycast gateway (first address); set VRF on interface; configure HBR routes; if `nodeIP.enabled`: configure routes in default routing table |
 | **SR-IOV + interfaceName** (for macvlan/egress) | Create SR-IOV policies; create host interface `l2.<interfaceName>` attached to SR-IOV bridge; if `nodeIP.enabled`: configure routes |
+| **Non-HBN + destinations (with nextHop)** | Create VLAN sub-interface on `interfaceRef`; assign node IP; for each matched `Destination` that has `nextHop`, add static routes for its `prefixes` via the next-hop address on the sub-interface. A Destination with `prefixes: ["0.0.0.0/0"]` + `nextHop` becomes a default route |
 
-### 4.4 Inbound
+### 4.5 Inbound
 
 `Inbound` allocates IP addresses from a `Network` and exposes them as load-balanced service endpoints via MetalLB. It optionally exports those IPs as host routes into VRFs (in HBN mode).
 
@@ -688,6 +820,11 @@ spec:
 
   # --- Disable aggregation of the ingress network in VRF exports ---
   disableAggregation: false
+
+  # --- BGP Communities (optional) ---
+  # Communities to tag on routes exported from this inbound into matched Destination VRFs.
+  communities:
+  - "64500:999"
 ```
 
 **Status:**
@@ -717,10 +854,10 @@ status:
 
 | Mode | Actions |
 |---|---|
-| **HBN** (destinations set) | Resolve `networkRef` → read subnet from `Network` → allocate IPs → add as `/32` host exports to each matched VRF (with community) → create MetalLB `IPAddressPool` → create `BGPAdvertisement` or `L2Advertisement` |
+| **HBN** (destinations set) | Resolve `networkRef` → read subnet from `Network` → allocate IPs → add as `/32` host exports to each matched VRF (with communities from Inbound spec) → create MetalLB `IPAddressPool` → create `BGPAdvertisement` or `L2Advertisement` |
 | **Non-HBN** (no destinations) | Resolve `networkRef` → read subnet from `Network` → allocate IPs → create MetalLB `IPAddressPool` → create `BGPAdvertisement` or `L2Advertisement` |
 
-### 4.5 Outbound
+### 4.6 Outbound
 
 `Outbound` enables egress connectivity from pods to external networks via SNAT. It allocates IPs from a `Network` and produces Coil `Egress` resources, Calico `IPPool` and `NetworkPolicy` resources, and optionally VRF route exports (in HBN mode).
 
@@ -765,6 +902,11 @@ spec:
 
   # --- Disable aggregation of the egress network in VRF exports ---
   disableAggregation: false
+
+  # --- BGP Communities (optional) ---
+  # Communities to tag on routes exported from this outbound into matched Destination VRFs.
+  communities:
+  - "64500:999"
 ```
 
 **Status:**
@@ -794,7 +936,7 @@ status:
 | **HBN** (destinations set) | Resolve `networkRef` → read subnet from `Network` → allocate IPs → add as `/32` host exports to each matched VRF → create Coil `Egress` (replicas, IPs) → create Calico `IPPool` → create Calico `NetworkPolicy` for egress policy |
 | **Non-HBN** (no destinations) | Resolve `networkRef` → read subnet from `Network` → allocate IPs → create Coil `Egress` (replicas, IPs) → create Calico `IPPool` → create Calico `NetworkPolicy` |
 
-### 4.6 BGPNeighbor
+### 4.7 BGPNeighbor
 
 `BGPNeighbor` describes a BGP neighbor that applications can use to advertise routes to the backbone. A neighbor references one or more `Inbound` connections (which must have `disableLoadBalancer` semantics — i.e., no MetalLB pool is created for that address range).
 
@@ -831,7 +973,7 @@ status:
 - All referenced `Inbound` resources must exist.
 - All referenced `Inbound` resources must not have a MetalLB controller configured (BGP is handled by the workload, not MetalLB).
 
-### 4.7 PodNetwork
+### 4.8 PodNetwork
 
 `PodNetwork` allocates additional networks available to pods, configured through the CNI (Calico).
 
@@ -862,7 +1004,7 @@ spec:
 - Create appropriate network policies.
 - Set up routes toward specified VRFs.
 
-### 4.8 Collector
+### 4.9 Collector
 
 `Collector` defines a GRE collector endpoint and its binding to a mirror VRF. It is defined once and referenced by name from `TrafficMirror` resources. This is the intent-level equivalent of `MirrorTarget`.
 
@@ -881,10 +1023,10 @@ spec:
   key: 1001
 
   # --- Mirror VRF ---
-  # References a Destination CRD representing the mirror VRF.
+  # References a VRF CRD representing the mirror VRF.
   # The mirror VRF must have loopbacks with a poolRef for per-node
   # GRE source IP allocation via CAPI IPAM.
-  mirrorDestination:
+  mirrorVRF:
     name: mirror-vrf
 ```
 
@@ -905,19 +1047,19 @@ status:
 **Validation Rules:**
 - `spec.address` must be a valid IP address.
 - `spec.protocol` must be `l3gre` or `l2gre`.
-- `spec.mirrorDestination.name` must reference an existing `Destination` with `loopbacks` configured.
+- `spec.mirrorVRF.name` must reference an existing `VRF` with `loopbacks` configured.
 
 **Controller Behavior:**
 
 | Step | Action |
 |---|---|
-| 1. Resolve mirror destination | Look up the `Destination` → get mirror VRF name, VNI, RT, loopback config |
+| 1. Resolve mirror VRF | Look up the `VRF` → get mirror VRF name, VNI, RT, loopback config |
 | 2. Ensure per-node IPAM | For each node in scope: create/find `IPAddressClaim` for the mirror VRF loopback (CAPI IPAM) |
 | 3. Generate GRE tunnel | Create GRE interface entry in the mirror VRF on `NodeNetworkConfig` (src = allocated loopback IP, dst = collector address) |
 | 4. EVPN export filter | Auto-append `permit <loopback-ip>/32` to the mirror VRF's EVPN export filter |
 | 5. Track references | Count how many `TrafficMirror` resources reference this collector |
 
-### 4.9 TrafficMirror
+### 4.10 TrafficMirror
 
 `TrafficMirror` declaratively mirrors selected traffic from an attachment to a `Collector`. It is the intent-level equivalent of `MirrorSelector` — lightweight and per-flow.
 
@@ -975,13 +1117,84 @@ status:
 | 2. Resolve collector | Look up the `Collector` → get its GRE interface name and mirror VRF |
 | 3. Generate MirrorACL | Attach `MirrorACL` to the source L2 or VRF on `NodeNetworkConfig` (mirrorDestination = collector's GRE interface name) |
 
+### 4.11 NodeNetworkStatus
+
+`NodeNetworkStatus` provides a per-node inventory of network interfaces, routes, and IP addresses. It is populated by the CRA agents running on each node and serves two purposes:
+
+1. **Validation** — the operator validates `Layer2Attachment.interfaceRef` against the interfaces reported in `NodeNetworkStatus`, catching configuration errors before they reach the node.
+2. **Observability** — operators and GitOps tooling can inspect the actual network state of each node without SSH access.
+
+```yaml
+apiVersion: network.t-caas.telekom.com/v1alpha1
+kind: NodeNetworkStatus
+metadata:
+  name: worker-node-01    # matches the Kubernetes node name
+spec: {}                   # no user-configurable spec — agent-populated
+status:
+  # Interfaces present on the node (excluding pod veths and container-internal interfaces)
+  interfaces:
+  - name: eth0
+    mac: "aa:bb:cc:dd:ee:f0"
+    mtu: 9000
+    state: up
+    addresses:
+    - "192.168.1.10/24"
+    - "2001:db8::10/64"
+  - name: bond0
+    mac: "aa:bb:cc:dd:ee:f1"
+    mtu: 9000
+    state: up
+    type: bond
+    members: ["ens5f0np0", "ens5f1np1"]
+    addresses:
+    - "10.0.0.1/24"
+  - name: vlan.234
+    mac: "aa:bb:cc:dd:ee:f1"
+    mtu: 1500
+    state: up
+    type: vlan
+    parent: bond0
+    vlanID: 234
+    addresses:
+    - "198.51.100.1/24"
+
+  # Routes on the node (summary — excludes per-pod and link-local routes)
+  routes:
+  - destination: "0.0.0.0/0"
+    gateway: "192.168.1.1"
+    interface: eth0
+    table: main
+  - destination: "198.51.100.0/24"
+    interface: vlan.234
+    table: main
+
+  # Last update timestamp from the agent
+  lastUpdated: "2026-02-18T10:30:00Z"
+
+  conditions:
+  - type: Ready
+    status: "True"
+    message: "Agent reported network status"
+```
+
+**Key design points:**
+- **Agent-populated, not user-managed.** The `spec` is empty; all data lives in `status`, written by the node agent.
+- **Pod veths excluded.** Container-internal interfaces (veth pairs, cni0, etc.) are filtered out to keep the resource focused on host-level networking.
+- **One resource per node.** The resource name matches the Kubernetes node name.
+- **Bond and VLAN metadata.** Bond interfaces include `members`; VLAN interfaces include `parent` and `vlanID`. This enables rich validation (e.g., "does `bond0` exist on this node?").
+
+**Controller Behavior:**
+- The CRA agent on each node periodically updates the `NodeNetworkStatus` resource for that node.
+- The intent controllers (e.g., `Layer2Attachment` controller) read `NodeNetworkStatus` resources for nodes in the `nodeSelector` scope to validate `interfaceRef` references.
+- If a referenced interface does not exist on a target node, the controller sets a `InterfaceNotFound` condition on the attachment's status.
+
 ## 5. Implementation Plan
 
-> **Note:** The pipeline integration approach (Option A vs. Option B from §3.4) affects phases 2–5. The steps below describe the controller behavior for each intent CRD. Whether the controller generates intermediate low-level CRDs (Option A) or feeds directly into the `ConfigReconciler` (Option B) is an open decision.
+> **Note:** The pipeline integration uses **Option A** (§3.4, D24) — intent CRDs generate intermediate low-level CRDs. The existing `ConfigReconciler` remains unchanged.
 
 ### Phase 1 — Core CRD Types and Scaffolding
 
-1. **Define Go types** for `Network`, `Destination`, `Layer2Attachment`, `Inbound`, `Outbound`, `BGPNeighbor`, `PodNetwork`, `Collector`, `TrafficMirror` in `api/v1alpha1/`.
+1. **Define Go types** for `VRF`, `Network`, `Destination`, `Layer2Attachment`, `Inbound`, `Outbound`, `BGPNeighbor`, `PodNetwork`, `Collector`, `TrafficMirror`, `NodeNetworkStatus` in `api/v1alpha1/`.
 2. **Generate CRDs** via `controller-gen` and **deep-copy** methods.
 3. **Add webhook validation** for each new CRD with the rules described in §4.
 
@@ -1032,7 +1245,7 @@ This is the highest-value, most complex intent resource. Implementation steps:
 3. **Resolve `destinations` selector** (if set) — list all matching `Destination` resources.
 4. **Allocate IP addresses** from the network's subnet based on `count` or explicit `addresses`.
 5. **HBN mode** (destinations set):
-   - Add allocated IPs as `/32` host exports to each matched VRF (with community from Destination).
+   - Add allocated IPs as `/32` host exports to each matched VRF (with communities from the `Inbound` spec).
    - Support aggregation (unless `disableAggregation`).
 6. **Create MetalLB resources:** `IPAddressPool` with allocated addresses; `BGPAdvertisement` or `L2Advertisement` based on `advertisement.type`.
 7. **Update `Inbound.Status`** with assigned addresses, pool name, conditions.
@@ -1062,28 +1275,35 @@ This is the highest-value, most complex intent resource. Implementation steps:
 1. **Watch `PodNetwork`**.
 2. **Resolve `destinations` selector** — list all matching `Destination` resources.
 3. **Configure Calico** `IPPool` for the user-specified subnet.
-4. **Set up routes** toward each matched destination's VRF (approach depends on §3.4).
+4. **Set up routes** toward each matched destination's VRF (Option A — generate `VRFRouteConfiguration`, D24).
 
-### Phase 8 — Collector Controller
+### Phase 8 — NodeNetworkStatus Agent Integration
+
+1. **CRA agent extension** — each CRA agent reports its node's network interfaces, routes, and IP addresses to a `NodeNetworkStatus` resource.
+2. **Agent periodically updates** the `NodeNetworkStatus.status` with current data (excluding pod veths and container-internal interfaces).
+3. **Intent controllers read `NodeNetworkStatus`** for nodes in `nodeSelector` scope to validate `interfaceRef` references.
+4. **Set conditions** — `InterfaceNotFound` on the attachment if the referenced interface does not exist.
+
+### Phase 9 — Collector Controller
 
 1. **Watch `Collector`**.
-2. **Resolve `mirrorDestination`** — look up the `Destination` for the mirror VRF, validate it has loopbacks with a `poolRef`.
+2. **Resolve `mirrorVRF`** — look up the `VRF` for the mirror VRF, validate it has `loopbacks` with a `poolRef`.
 3. **CAPI IPAM integration** — for each node in scope (determined by the `TrafficMirror` resources that reference this collector):
    - Create or find an `IPAddressClaim` named `<mirror-vrf>-<loopback>-<node>` using the loopback's `poolRef`.
    - Wait for the IPAM provider to fulfil the claim → read `IPAddress.Spec.Address`.
-4. **Inject into `NodeNetworkConfig`** (or generate low-level CRDs, depending on §3.4):
-   - Mirror VRF: add loopback with allocated IP, GRE interface (src = loopback, dst = collector address), EVPN export filter entry.
+4. **Generate low-level CRDs** (Option A, D24):
+   - Mirror VRF: generate `VRFRouteConfiguration` with loopback + allocated IP, GRE interface (src = loopback, dst = collector address), EVPN export filter entry.
 5. **Update `Collector.Status`** with GRE interface name, reference count, active node count, conditions.
 
-### Phase 9 — TrafficMirror Controller
+### Phase 10 — TrafficMirror Controller
 
 1. **Watch `TrafficMirror`**.
 2. **Resolve `source`** — look up the referenced `Layer2Attachment`, `Inbound`, or `Outbound` to determine the source interface and `nodeSelector` (node scope).
 3. **Resolve `collector`** — look up the `Collector`, get its GRE interface name.
-4. **Generate `MirrorACL`** entries on the source L2 or VRF in `NodeNetworkConfig` (or generate `MirrorSelector` in Option A), with mirrorDestination = collector's GRE interface name.
+4. **Generate `MirrorSelector`** (Option A, D24) for the source L2 or VRF, with mirrorDestination = collector's GRE interface name.
 5. **Update `TrafficMirror.Status`** with active node count, conditions.
 
-### Phase 10 — Migration Path
+### Phase 11 — Migration Path
 
 1. **Coexistence:** Intent-based and low-level CRDs coexist. Both feed into the revision pipeline.
 2. **Adoption tool:** Provide a utility to generate `Layer2Attachment` / `Inbound` / `Outbound` from existing low-level CRDs and SchiffCluster configs, facilitating migration.
@@ -1103,10 +1323,16 @@ Network "secure-net"                      (pool definition)
     vlan: 234
     vni: 10234
 
-Destination "m2m-enc"                     (defined once)
-  labels: { zone: secure }
+VRF "m2m-enc"                             (VRF metadata — defined once)
   spec:
     vrf: m2m_enc
+    vni: 10100
+    routeTarget: "64500:10100"
+
+Destination "m2m-enc-routes"              (routing target — references VRF)
+  labels: { zone: secure }
+  spec:
+    vrfRef: m2m-enc                       ← resolves VNI/RT from VRF
     prefixes:                             ← subnets reachable via this VRF
     - 198.51.100.0/27
     - 192.0.2.0/24
@@ -1121,11 +1347,11 @@ Layer2Attachment "my-vlan"                Equivalent L2 + VRF config in revision
     nodeSelector:                             anycastMac: aa:bb:cc:dd:ee:ff
       matchLabels:                            anycastGateways: [2001:db8:100::1/64]
         worker-group: wg1                     neighSuppression: true
-    destinations:                             vrf: m2m_enc    ← from Destination
+    destinations:                             vrf: m2m_enc    ← from VRF via Destination
       matchLabels:                            nodeSelector:
         zone: secure                            worker-group: wg1
     # no routes needed — inherited       VRF:
-    # from Destination                      vrf: m2m_enc
+    # from Destination                      vrf: m2m_enc      ← from VRF
                                               import:           ← from Destination.prefixes
                                               - cidr: 198.51.100.0/27
                                                 action: permit
@@ -1141,8 +1367,15 @@ Layer2Attachment "my-vlan"                Equivalent L2 + VRF config in revision
 ### 6.2 Shared Destination — Multiple Attachments, Merged VRF Config
 
 ```
-Destination "m2m-enc"  ← selected by both:
+VRF "m2m-enc"          ← VRF metadata
   vrf: m2m_enc
+  vni: 10100
+  routeTarget: 64500:10100
+        ▲
+        │ vrfRef
+        │
+Destination "m2m-enc-routes"  ← selected by both:
+  vrfRef: m2m-enc
   prefixes:            ← defined once
   - 198.51.100.0/27
   - 192.0.2.0/24
@@ -1177,9 +1410,9 @@ Network "ingress-net"                     (pool definition)
     ipv4: { cidr: 203.0.113.0/28 }
     vlan: 300
 
-Destination "m2m-enc"                     (defined once)
+Destination "m2m-enc-routes"              (routing target)
   labels: { zone: secure }
-  spec: { vrf: m2m_enc }
+  spec: { vrfRef: m2m-enc }
                 ▲
                 │
 Inbound "ingress-1"
@@ -1199,7 +1432,7 @@ Inbound "ingress-1"
   │                                                          │
   │ VRF entry for "m2m_enc" in revision                   │
   │   export (hosts): 203.0.113.1/32, 203.0.113.2/32       │
-  │   community: <from Destination>                         │
+  │   communities: <from Inbound>                           │
   │                                                          │
   │ MetalLB IPAddressPool "ingress-1"                       │
   │   addresses: [203.0.113.1/32, 203.0.113.2/32]           │
@@ -1217,9 +1450,9 @@ Network "egress-net"                      (pool definition)
     ipv4: { cidr: 203.0.113.16/28 }
     vlan: 301
 
-Destination "m2m-enc"                     (defined once)
+Destination "m2m-enc-routes"              (routing target)
   labels: { zone: secure }
-  spec: { vrf: m2m_enc }
+  spec: { vrfRef: m2m-enc }
                 ▲
                 │
 Outbound "egress-1"
@@ -1320,9 +1553,9 @@ Layer2Attachment "vlan1522"               Same pattern for each VLAN.
 - No `destinations` → no VRF plumbing, no anycast. Pure L2 bridge only.
 - No `ipv4`/`ipv6` on the `Network` → no IP assignment. The VLAN is a pure L2 segment.
 
-## 7. Network CRD, Shared Types, and Go Type Definitions
+## 7. VRF, Network, Shared Types, and Go Type Definitions
 
-The `Network` CRD is the pool definition. Usage CRDs reference it by name via `networkRef`. Node scoping uses `nodeSelector` (a standard `metav1.LabelSelector`) instead of string arrays.
+The `VRF` CRD defines backbone VRF metadata (name, VNI, RT, loopbacks). The `Network` CRD is the pool definition (with `managed` flag for external networks). `Destination` is the routing target — referencing a `VRF` (HBN) or specifying a `nextHop` (non-HBN). Usage CRDs reference Networks by name via `networkRef` and Destinations by label selector via `destinations`. Node scoping uses `nodeSelector` (a standard `metav1.LabelSelector`) instead of string arrays. `NodeNetworkStatus` provides per-node interface/route/IP inventory populated by agents.
 
 ```go
 // --- Network CRD ---
@@ -1355,6 +1588,13 @@ type NetworkSpec struct {
     // VNI is the VXLAN Network Identifier.
     // +optional
     VNI *int `json:"vni,omitempty"`
+    // Managed indicates whether the operator should provision/manage the
+    // underlying L2 segment. When false, the Network is treated as a
+    // reference for IP/VLAN parameters only — no L2 provisioning is
+    // attempted. Use for pre-existing infrastructure-provided networks.
+    // Defaults to true.
+    // +optional
+    Managed *bool `json:"managed,omitempty"`
 }
 
 // IPNetwork describes an IP address pool for a single address family.
@@ -1406,6 +1646,13 @@ type Layer2AttachmentSpec struct {
     // SRIOV indicates whether this attachment uses SR-IOV VFs.
     // +optional
     SRIOV bool `json:"sriov,omitempty"`
+    // Communities is a list of BGP communities to set on routes exported
+    // from this attachment into matched Destination VRFs.
+    // +optional
+    Communities []string `json:"communities,omitempty"`
+    // Note: Static routing for non-HBN mode (next-hop addresses) is on the
+    // Destination CRD (NextHop field), not here. The controller reads
+    // Destination.nextHop when building routes for interfaceRef-based attachments.
 }
 
 // InboundSpec defines the desired state of Inbound.
@@ -1426,6 +1673,10 @@ type InboundSpec struct {
     Count int `json:"count"`
     // Advertisement configures how the allocated IPs are advertised.
     Advertisement AdvertisementConfig `json:"advertisement"`
+    // Communities is a list of BGP communities to set on routes exported
+    // from this inbound into matched Destination VRFs.
+    // +optional
+    Communities []string `json:"communities,omitempty"`
     // Note: Ingress controller orchestration (e.g. nginx) is intentionally
     // out of scope. The Inbound CRD stops at providing the MetalLB pool +
     // advertisement. Users deploy ingress controllers separately.
@@ -1462,6 +1713,10 @@ type OutboundSpec struct {
     // egress). These populate the Calico IPPool or similar routing rules.
     // +optional
     EgressDestinations []string `json:"egressDestinations,omitempty"`
+    // Communities is a list of BGP communities to set on routes exported
+    // from this outbound into matched Destination VRFs.
+    // +optional
+    Communities []string `json:"communities,omitempty"`
 }
 
 // PodNetworkSpec defines the desired state of PodNetwork.
@@ -1474,33 +1729,71 @@ type PodNetworkSpec struct {
     // NodeSelector selects which nodes receive this pod network.
     // +optional
     NodeSelector *metav1.LabelSelector `json:"nodeSelector,omitempty"`
+    // Communities is a list of BGP communities to set on routes exported
+    // from this pod network into matched Destination VRFs.
+    // +optional
+    Communities []string `json:"communities,omitempty"`
 }
 
-// DestinationSpec defines properties of a reachability target (VRF).
-type DestinationSpec struct {
-    // VRF is the name of the backbone VRF this destination represents.
+// --- VRF CRD ---
+
+// VRFSpec defines the desired state of VRF — backbone VRF metadata.
+type VRFSpec struct {
+    // VRF is the name of the backbone VRF.
     // +kubebuilder:validation:Required
     // +kubebuilder:validation:MaxLength=12
     VRF string `json:"vrf"`
-    // Prefixes lists the subnets reachable via this destination.
-    // These become import entries in the VRF configuration for every
-    // attachment that selects this destination — defined once, inherited everywhere.
-    // +optional
-    Prefixes []string `json:"prefixes,omitempty"`
     // VNI is the VXLAN Network Identifier for the VRF.
+    // When omitted, the controller resolves it from operator config.
     // +optional
     VNI *int `json:"vni,omitempty"`
     // RouteTarget is the BGP route target for the VRF.
+    // When omitted, the controller resolves it from operator config.
     // +optional
     RouteTarget *string `json:"routeTarget,omitempty"`
-    // Community is the BGP community to set on exported routes.
-    // +optional
-    Community *string `json:"community,omitempty"`
     // Loopbacks defines loopback interfaces for this VRF with optional
     // per-node IP allocation via Cluster API IPAM. Used for mirror VRFs
     // (GRE source IPs) and any VRF needing per-node loopback addresses.
     // +optional
-    Loopbacks []DestinationLoopback `json:"loopbacks,omitempty"`
+    Loopbacks []VRFLoopback `json:"loopbacks,omitempty"`
+}
+
+// VRFLoopback defines a loopback interface within a VRF.
+type VRFLoopback struct {
+    // Name is the loopback interface name (e.g. "lo.mir").
+    Name string `json:"name"`
+    // PoolRef references a Cluster API IPAM pool (e.g. InClusterIPPool, InfobloxIPPool).
+    // The operator creates an IPAddressClaim per node and uses the allocated IP.
+    PoolRef corev1.TypedObjectReference `json:"poolRef"`
+}
+
+// --- Destination CRD ---
+
+// DestinationSpec defines a routing target — prefixes reachable via
+// either a VRF (HBN) or a static next-hop (non-HBN).
+type DestinationSpec struct {
+    // VRFRef references a VRF resource by name.
+    // When set, the controller resolves VNI, RT, and loopback config from
+    // the VRF. Prefixes become VRF import entries.
+    // Mutually exclusive with NextHop.
+    // +optional
+    VRFRef *string `json:"vrfRef,omitempty"`
+    // Prefixes lists the subnets reachable via this destination.
+    // With vrfRef: these become import entries in the VRF configuration.
+    // With nextHop: these become static routes via the next-hop address.
+    // Defined once here, inherited by every attachment that selects this destination.
+    // +optional
+    Prefixes []string `json:"prefixes,omitempty"`
+    // NextHop specifies next-hop addresses for static routing in non-HBN mode.
+    // When a Layer2Attachment with interfaceRef selects this Destination,
+    // the controller creates static routes for each prefix via the next-hop.
+    // A Destination with prefixes: ["0.0.0.0/0"] + NextHop becomes a default route.
+    // Mutually exclusive with VRFRef.
+    // +optional
+    NextHop *NextHopConfig `json:"nextHop,omitempty"`
+    // Note: Community is NOT on Destination — it belongs on the usage CRDs
+    // (Layer2Attachment, Inbound, Outbound, PodNetwork) because different
+    // attachments may tag exports to the same VRF with different communities.
 
     // Note: SBR (source-based routing) is NOT part of the Destination API.
     // SBR is a cross-attachment concern — it's needed when two different
@@ -1513,18 +1806,22 @@ type DestinationSpec struct {
     // escape hatch for edge cases.
 }
 
-// DestinationLoopback defines a loopback interface within a destination's VRF.
-type DestinationLoopback struct {
-    // Name is the loopback interface name (e.g. "lo.mir").
-    Name string `json:"name"`
-    // PoolRef references a Cluster API IPAM pool (e.g. InClusterIPPool, InfobloxIPPool).
-    // The operator creates an IPAddressClaim per node and uses the allocated IP.
-    PoolRef corev1.TypedObjectReference `json:"poolRef"`
+// NextHopConfig specifies next-hop addresses for static routing.
+// Used in non-HBN mode: the controller creates static routes for each
+// Destination prefix via these addresses on the VLAN sub-interface.
+// At least one of IPv4 or IPv6 must be set.
+type NextHopConfig struct {
+    // IPv4 is the IPv4 next-hop address (e.g. "198.51.100.1").
+    // +optional
+    IPv4 *string `json:"ipv4,omitempty"`
+    // IPv6 is the IPv6 next-hop address (e.g. "2001:db8:100::1").
+    // +optional
+    IPv6 *string `json:"ipv6,omitempty"`
 }
 
 // CollectorSpec defines the desired state of Collector.
 // Collector is the intent-level equivalent of MirrorTarget —
-// it binds a GRE endpoint to a mirror VRF Destination.
+// it binds a GRE endpoint to a mirror VRF.
 type CollectorSpec struct {
     // Address is the remote collector's IP address.
     Address string `json:"address"`
@@ -1534,13 +1831,13 @@ type CollectorSpec struct {
     // Key is an optional GRE tunnel key.
     // +optional
     Key *uint32 `json:"key,omitempty"`
-    // MirrorDestination references the Destination CRD representing the mirror VRF.
-    MirrorDestination MirrorDestinationRef `json:"mirrorDestination"`
+    // MirrorVRF references the VRF CRD representing the mirror VRF.
+    MirrorVRF MirrorVRFRef `json:"mirrorVRF"`
 }
 
-// MirrorDestinationRef references a Destination CRD for the mirror VRF.
-type MirrorDestinationRef struct {
-    // Name of the Destination resource.
+// MirrorVRFRef references a VRF CRD for the mirror VRF.
+type MirrorVRFRef struct {
+    // Name of the VRF resource.
     Name string `json:"name"`
 }
 
@@ -1569,45 +1866,108 @@ type MirrorSource struct {
     // Name is the name of the attachment resource.
     Name string `json:"name"`
 }
+
+// --- NodeNetworkStatus CRD ---
+
+// NodeNetworkStatusStatus holds the agent-reported network inventory for a node.
+// The spec is empty — all data is agent-populated.
+type NodeNetworkStatusStatus struct {
+    // Interfaces lists the network interfaces on the node,
+    // excluding pod veths and container-internal interfaces.
+    Interfaces []NodeInterface `json:"interfaces,omitempty"`
+    // Routes lists the routes on the node (excluding per-pod and link-local routes).
+    Routes []NodeRoute `json:"routes,omitempty"`
+    // LastUpdated is the timestamp of the last agent report.
+    LastUpdated *metav1.Time `json:"lastUpdated,omitempty"`
+    // Conditions describe the current state of the node's network inventory.
+    Conditions []metav1.Condition `json:"conditions,omitempty"`
+}
+
+// NodeInterface describes a network interface on a node.
+type NodeInterface struct {
+    // Name is the interface name (e.g. "eth0", "bond0", "vlan.234").
+    Name string `json:"name"`
+    // MAC is the hardware address.
+    // +optional
+    MAC *string `json:"mac,omitempty"`
+    // MTU is the interface MTU.
+    // +optional
+    MTU *int `json:"mtu,omitempty"`
+    // State is the link state (e.g. "up", "down").
+    State string `json:"state"`
+    // Type is the interface type (e.g. "bond", "vlan", "physical").
+    // +optional
+    Type *string `json:"type,omitempty"`
+    // Members lists bonded member interfaces (for type=bond).
+    // +optional
+    Members []string `json:"members,omitempty"`
+    // Parent is the parent interface name (for type=vlan).
+    // +optional
+    Parent *string `json:"parent,omitempty"`
+    // VlanID is the VLAN ID (for type=vlan).
+    // +optional
+    VlanID *int `json:"vlanID,omitempty"`
+    // Addresses lists the IP addresses assigned to this interface.
+    // +optional
+    Addresses []string `json:"addresses,omitempty"`
+}
+
+// NodeRoute describes a route on a node.
+type NodeRoute struct {
+    // Destination is the route destination in CIDR notation.
+    Destination string `json:"destination"`
+    // Gateway is the next-hop gateway address.
+    // +optional
+    Gateway *string `json:"gateway,omitempty"`
+    // Interface is the outgoing interface name.
+    Interface string `json:"interface"`
+    // Table is the routing table name (e.g. "main").
+    // +optional
+    Table *string `json:"table,omitempty"`
+}
 ```
 
 ## 8. Open Questions
 
-1. **Pipeline integration approach (§3.4):** Should intent CRDs generate intermediate low-level CRDs (Option A) or feed directly into the `ConfigReconciler` alongside existing low-level CRDs (Option B)? This is the most impactful architectural decision and must be resolved before implementation.
+All open questions have been resolved. See the Decision Record (§10) for rationale.
 
-2. **Destination granularity:** `Destination` now carries `prefixes` (the subnets reachable via the VRF). Should it also carry route aggregation rules, default communities, or other policy? How much policy belongs on the `Destination` vs. the attachment?
+1. ~~**Pipeline integration approach (§3.4):**~~ **RESOLVED — Option A (keep low-level CRDs as an option).** Intent CRDs generate intermediate low-level CRDs. Low-level CRDs remain available as a direct-use escape hatch for advanced users but are not the primary interface. See D24.
 
-3. **SBR auto-detection implementation (resolved in principle):** SBR is needed when two different attachments on the same node reach different VRFs whose imported prefixes overlap. The controller must auto-detect this by comparing prefix sets across all resolved attachments per node group and generate intermediate VRFs (`s-<vrf>`) + policy routes automatically. **Remaining question:** Should the controller eagerly generate SBR whenever *any* prefix overlap exists, or only when the overlap is on default routes (`0.0.0.0/0`, `::/0`)? Eager detection is safer but generates more intermediate VRFs.
+2. ~~**Destination granularity:**~~ **RESOLVED — Aggregation is user-steerable; default is per-network.** Aggregation is a broader topic but should be controllable by the user. By default, aggregation happens for a whole network and does not extend beyond it. Per-attachment `disableAggregation` overrides this default. See D25.
 
-4. **Destination label conventions:** Should we define a standard set of labels (e.g., `network.t-caas.telekom.com/vrf`, `network.t-caas.telekom.com/zone`) or leave labeling entirely to users?
+3. ~~**SBR auto-detection implementation:**~~ **RESOLVED — Always auto-detect, always default to SBR.** The controller eagerly generates SBR whenever *any* prefix overlap exists across attachments on the same node group. This is the safest approach — it avoids subtle routing issues even if it generates more intermediate VRFs. The implementation will be "messy" but correctness trumps elegance. See D26.
 
-5. **Multi-destination selectors:** When a label selector matches multiple destinations, the controller must merge VRF imports/exports from all matched destinations. This is straightforward (same VRF merging as today's multi-`VRFRouteConfiguration`). SBR is orthogonal — it's triggered by cross-attachment prefix overlap, not by multi-destination selectors. Should the first iteration still restrict to single-destination selectors for simplicity, or is multi-destination safe to support from the start?
+4. ~~**Destination label conventions:**~~ **RESOLVED — Leave labelling to users, governed by internal docs.** No standard labels are mandated in the API. Internal documentation will provide recommended conventions (e.g., `network.t-caas.telekom.com/vrf`, `network.t-caas.telekom.com/zone`) but these are guidance, not enforcement. See D27.
 
-6. **`networkRef` optionality:** Should `networkRef` be optional for very simple cases (e.g., an `Inbound` that only needs a subnet range without VLAN/VNI)? Or should a `Network` CRD always be required, even for trivial cases?
+5. ~~**Multi-destination selectors:**~~ **RESOLVED — Multi-destination is required from the start.** Multi-destination support is needed for real-world use cases and must be available from the first iteration. See D28.
 
-7. **MetalLB / Coil integration details:** What version and configuration model of MetalLB and Coil are targeted? Are there existing CRDs we need to match?
+6. ~~**`networkRef` optionality:**~~ **RESOLVED — `networkRef` is always required.** The `Network` CRD assigns IPs (or at minimum defines the L2 segment), so a `networkRef` is always needed. Even trivial cases benefit from having the network defined as a separate resource. See D29.
 
-8. **Bidirectional connections:** The input document notes bidirectional connections are not in the first iteration. With the Inbound/Outbound split, bidirectional would mean a single resource combining both roles. What timeline and design is planned?
+7. ~~**MetalLB / Coil integration details:**~~ **RESOLVED — Target the latest current versions; partly decouple the logic.** The implementation targets the latest stable versions of MetalLB and Coil at the time of development. The integration logic should be partly decoupled from the core intent controller so that version-specific details can be updated independently. See D30.
 
-9. **Escape hatch interaction:** When a user creates both intent-based and low-level CRDs, how are conflicts detected and resolved? Should the operator reject low-level CRDs that configure the same VRF as an intent-produced (Inbound/Outbound/Layer2Attachment) config?
+8. ~~**Bidirectional connections:**~~ **RESOLVED — Bidirectional is Inbound + Outbound combined. Consider bundling into a `Gress` CRD.** A bidirectional connection is semantically an `Inbound` + `Outbound` on the same network. Rather than adding a separate `Bidirectional` CRD, a future `Gress` CRD could bundle both roles into a single resource for convenience. This is deferred — users can create an `Inbound` + `Outbound` pair for now. See D31.
 
-10. **VNI requirement on Layer2Attachment vs. Destination:** Should VNI be on the attachment (layer-2 specific), on the destination (VRF-level), or both? For L2 attachments the VNI is L2-specific (VXLAN for the bridge), while for destinations the VNI is L3 (VRF VXLAN). These are different VNIs.
+9. ~~**Escape hatch interaction:**~~ **RESOLVED — Reject low-level CRDs when high-level is configured.** When intent-based CRDs are present for a given VRF/network, the operator completely rejects conflicting low-level CRDs. Users must remove all low-level CRDs for that scope before the operator processes the intent-based ones. This avoids ambiguity and partial overlaps. See D32.
 
-11. **Collector / TrafficMirror and Proposal 01 coexistence:** `Collector` maps to `MirrorTarget` and `TrafficMirror` maps to `MirrorSelector`. When using Option A (§3.4), should the generated low-level mirror CRDs be visible to users or hidden? Should users be prevented from creating `MirrorTarget` / `MirrorSelector` resources that conflict with `Collector` / `TrafficMirror`-managed ones?
+10. ~~**VNI requirement on Layer2Attachment vs. Destination:**~~ **RESOLVED — L2 also needs a VNI; use a cluster VNI range for auto-assignment, or allow explicit configuration.** L2 VXLAN VNIs are distinct from L3/VRF VNIs. The `Network` CRD carries the L2 VNI (`spec.vni`). For automatic assignment, a cluster-level VNI range is defined and VNIs are allocated from it. When attaching to an existing L2 segment with a known VNI, the user configures it explicitly on the `Network`. See D33.
 
-12. **Mirror VRF Destination lifecycle:** Should the mirror `Destination` (VRF) be auto-created by the first `Collector` that needs it, or must the user always pre-create it? Auto-creation reduces boilerplate but means the operator must pick VNI/RT values.
+11. ~~**Collector / TrafficMirror and Proposal 01 coexistence:**~~ **RESOLVED — Low-level mirror CRDs co-exist.** `MirrorTarget` and `MirrorSelector` remain available for direct use (same principle as OQ 9). When intent-based mirror CRDs (`Collector` / `TrafficMirror`) are present for a given scope, conflicting low-level mirror CRDs are rejected. See D34.
 
-13. **GRE interface naming with multiple Collectors:** Multiple `Collector` resources may share the same mirror VRF but target different collector IPs. Each needs a unique GRE interface name (≤15 chars). Proposed: `gre.<hash>` / `gretap.<hash>`. Is this acceptable?
+12. ~~**Mirror VRF Destination lifecycle:**~~ **RESOLVED — Mirror VRF must select `vrfRef`.** The `Collector.mirrorVRF` must reference an existing `VRF` resource. The user pre-creates the mirror `VRF` (with loopbacks). Auto-creation is not supported — the user controls VRF metadata explicitly. See D35.
 
-14. **Collector node scope:** A `Collector` sets up GRE tunnels on nodes, but which nodes? The node scope is implicitly determined by which `TrafficMirror` resources reference the collector (and their source attachments' `nodeSelector`). Should the collector also support an explicit node selector, or is the implicit derivation sufficient?
+13. ~~**GRE interface naming with multiple Collectors:**~~ **RESOLVED — Hash-based naming is acceptable.** `gre.<hash>` / `gretap.<hash>` is the chosen naming scheme. See D36.
 
-15. **Non-HBN `interfaceRef` validation:** When `Layer2Attachment.spec.interfaceRef` is set, should the operator validate that the referenced interface actually exists on target nodes (via node inventory or reporting)? Or is it the user's responsibility to ensure the interface exists?
+14. ~~**Collector node scope:**~~ **RESOLVED — Implicit derivation only, configured when needed.** The collector's GRE tunnels are only configured on nodes where a `TrafficMirror` selects something. No explicit `nodeSelector` on `Collector` — the scope is fully determined by the union of `TrafficMirror` sources' `nodeSelector` values. See D37.
 
-16. **Non-HBN `Inbound`/`Outbound` without `destinations`:** When `destinations` is omitted, only MetalLB / Coil resources are produced with no VRF plumbing. Should the operator warn users if they omit `destinations` on a cluster that has HBN enabled, or is the non-HBN mode always valid regardless of cluster capabilities?
+15. ~~**Non-HBN `interfaceRef` validation:**~~ **RESOLVED — Add a `NodeNetworkStatus` CRD.** A new `NodeNetworkStatus` CRD is introduced (see §4.11). It is populated by agents and lists interfaces (excluding pod veths), routes, and IPs on each node. The operator validates `interfaceRef` against `NodeNetworkStatus` data. See D38.
 
-17. **Unmanaged / external networks:** Should `Network` support a `managed: false` flag for pre-existing networks (e.g., infrastructure-provided VLANs) where the operator should not attempt any L2 provisioning? Or is referencing such networks simply a matter of creating a `Network` CRD with the correct parameters and not attaching a `Layer2Attachment`?
+16. ~~**Non-HBN `Inbound`/`Outbound` without `destinations`:**~~ **RESOLVED — Do not reconcile; provide status info.** When `destinations` is omitted on a cluster that has HBN enabled, the operator does not reconcile VRF plumbing (as expected) and sets a status condition informing the user that no VRF configuration was generated. It does not reject the resource — non-HBN mode is always valid. See D39.
 
-18. **`Network` reuse across multiple attachment types:** A single `Network` may be referenced by a `Layer2Attachment` (for L2 presence) and an `Inbound` (for IP allocation) simultaneously. Should the controller enforce that these usages are compatible (e.g., same VLAN/VNI), or is it the user's responsibility to ensure consistency?
+17. ~~**Unmanaged / external networks:**~~ **RESOLVED — Yes, support unmanaged networks.** `Network` supports a `managed: false` flag for pre-existing infrastructure-provided networks where the operator should not attempt L2 provisioning. The operator treats the `Network` as a reference for IP/VLAN parameters only. See D40.
+
+18. ~~**`Network` reuse across multiple attachment types:**~~ **RESOLVED — Controller enforces no IP conflicts.** When a `Network` is referenced by multiple usage CRDs simultaneously (e.g., `Layer2Attachment` + `Inbound`), the controller must validate that IP allocations do not overlap. VLAN/VNI consistency is implicitly guaranteed (they come from the same `Network` resource). See D41.
+
+19. ~~**VRF configuration source (`vrfRef` vs. inline on `Destination`):**~~ **RESOLVED — Option (c).** Introduced a dedicated `VRF` CRD that holds VNI, route target, and loopbacks. `Destination` references it via `vrfRef` and carries only `prefixes` + routing mode (`vrfRef` or `nextHop`). See D22, D23.
 
 ## 9. Considerations
 
@@ -1627,20 +1987,22 @@ Given the breadth of the design, we prioritize delivery of value:
 
 | Priority | Component | Rationale |
 |---|---|---|
-| P0 | Resolve pipeline integration (§3.4) | Architectural foundation — must decide before implementation |
+| P0 | `VRF` CRD + controller | Foundation — holds VRF metadata (VNI, RT, loopbacks) referenced by Destinations |
 | P0 | `Network` CRD + controller | Foundation — all usage CRDs depend on it for pool definition |
-| P0 | `Destination` CRD + controller | Foundation — all other intent CRDs depend on it for VRF references |
-| P0 | `Layer2Attachment` (non-SRIOV, single destination, HBN) | Most common use case; highest ops burden today |
-| P0 | `Inbound` (single destination, HBN) | Load-balanced services are the primary connectivity need |
+| P0 | `Destination` CRD + controller | Foundation — all other intent CRDs depend on it for routing targets |
+| P0 | `Layer2Attachment` (non-SRIOV, multi-destination, HBN) | Most common use case; highest ops burden today. Multi-destination required from the start (D28) |
+| P0 | `Inbound` (multi-destination, HBN) | Load-balanced services are the primary connectivity need |
 | P0 | `Inbound` (non-HBN, MetalLB only) | Common non-HBN scenario — MetalLB pool + advertisement |
-| P1 | Multi-destination selector support | Required for complex multi-VRF topologies; SBR is auto-detected separately |
+| P0 | SBR auto-detection | Always on, always default (D26); must be part of the first delivery |
 | P1 | `Layer2Attachment` (SR-IOV) | SR-IOV specific logic |
 | P1 | `Layer2Attachment` (non-HBN, `interfaceRef`) | Physical interface / bond / SR-IOV VF without HBN |
 | P1 | `Outbound` (HBN) | Egress NAT is needed but less frequent |
 | P1 | `Outbound` (non-HBN) | Coil Egress without VRF plumbing |
+| P1 | `NodeNetworkStatus` CRD + agent reporting | Enables `interfaceRef` validation; operational visibility |
 | P2 | `BGPNeighbor` | Advanced use case, existing workarounds exist |
 | P2 | `PodNetwork` | Lower demand; Calico integration complexity |
 | P2 | `Collector` + `TrafficMirror` (single collector, single source) | Depends on Proposal 01 low-level implementation; high value for observability |
+| P2 | `Gress` convenience CRD (bundled Inbound + Outbound) | Deferred; users create Inbound + Outbound pair for now (D31) |
 | P3 | Automatic network allocation (mgmt cluster) | Can be manual/user-specified initially |
 | P3 | DNS integration | Can be manual initially |
 
@@ -1648,18 +2010,18 @@ Given the breadth of the design, we prioritize delivery of value:
 
 | # | Decision | Rationale |
 |---|---|---|
-| D1 | Introduce intent-based CRDs (`Network`, `Destination`, `Layer2Attachment`, `Inbound`, `Outbound`, `BGPNeighbor`, `PodNetwork`, `Collector`, `TrafficMirror`) | Reduce configuration complexity; enable tenant self-service |
+| D1 | Introduce intent-based CRDs (`VRF`, `Network`, `Destination`, `Layer2Attachment`, `Inbound`, `Outbound`, `BGPNeighbor`, `PodNetwork`, `Collector`, `TrafficMirror`, `NodeNetworkStatus`) | Reduce configuration complexity; enable tenant self-service; provide node network observability |
 | D2 | **`Destination` as a first-class, labeled, referenceable CRD** — VRFs are defined once and selected by label from attachments | Avoids VRF duplication across attachments; preserves composability of today's multi-`VRFRouteConfiguration` merging; enables grouping and loose coupling |
-| D3 | **OPEN** — Pipeline integration approach: Option A (Intent → Low-Level CRDs → Revision) vs. Option B (Intent + Low-Level CRDs → Revision directly) | See §3.4 — both preserve the revision-based rollout; trade-off is implementation simplicity vs. architectural cleanliness |
+| D3 | **RESOLVED — Pipeline integration: Option A** (Intent → Low-Level CRDs → Revision) — intent controllers generate `Layer2NetworkConfiguration`, `VRFRouteConfiguration`, `BGPPeering`; existing `ConfigReconciler` remains unchanged | Option A is simpler, preserves the existing pipeline, and allows generated low-level CRDs to be inspected. Low-level CRDs remain as an escape hatch. See D24 |
 | D4 | All controllers run in the **tenant cluster only** — no management cluster component in this iteration | Simplifies architecture; auto-allocation can be added later transparently |
 | D5 | All network parameters (VLAN, VNI, subnet, IPs) are **user-specified** — no automatic allocation | Reduces complexity; `allocationPool` fields are reserved in the `Network` CRD API |
 | D6 | **`Network` CRD as pure pool definition** — CIDR, VLAN, VNI, allocation pool. Referenced by name via `networkRef` from usage CRDs. No VRFs, no node scope. | Separates pool definition from pool usage. A `Network` is not per se L2 — it only becomes L2 when a `Layer2Attachment` attaches it. Mirrors SchiffCluster's `AdditionalNetwork` / `Ingress.fromAdditionalNetwork` pattern |
 | D7 | Coexistence of intent-based and low-level CRDs during migration | Non-disruptive adoption; escape hatch for edge cases |
-| D8 | Prioritize `Network` + `Destination` + `Layer2Attachment` (non-SRIOV) + `Inbound` for first iteration | Highest value, most common use cases, fastest ops burden reduction |
-| D9 | Bidirectional connections deferred to a later iteration | Reduces first-iteration scope; inbound + outbound cover the majority of use cases |
+| D8 | Prioritize `VRF` + `Network` + `Destination` + `Layer2Attachment` (non-SRIOV) + `Inbound` for first iteration | Highest value, most common use cases, fastest ops burden reduction |
+| D9 | Bidirectional = Inbound + Outbound combined; a convenience `Gress` CRD may bundle both roles in a future iteration | Reduces first-iteration scope; inbound + outbound cover the majority of use cases. See D31 |
 | D10 | Integrate intent controllers into the existing network-operator | Avoid deploying a separate controller; leverage existing RBAC, scheme, and manager setup |
 | D11 | **`Collector` + `TrafficMirror` split** — `Collector` (GRE endpoint + mirror VRF binding, defined once) and `TrafficMirror` (source + direction + filter, per-flow) | Same pattern as `Destination`: shared infrastructure defined once, referenced many times. Avoids duplicating collector config across mirror rules. Maps cleanly to low-level `MirrorTarget` / `MirrorSelector` |
-| D12 | **Mirror VRF modeled as a `Destination` with `loopbacks`** — consistent with production VRFs | Reuses existing Destination/label-selector patterns; loopback + IPAM allocation flows through the standard pipeline; multiple Collectors can share the same mirror Destination |
+| D12 | **Mirror VRF modeled as a `VRF` with `loopbacks`** — `Collector.mirrorVRF` references a `VRF` resource | Reuses existing VRF metadata patterns; loopback + IPAM allocation flows through the standard pipeline; multiple Collectors can share the same mirror VRF |
 | D13 | **Split `VRFAttachment` into `Inbound` + `Outbound`** — separate CRDs for ingress (MetalLB + optional controller) and egress (Coil + Calico) | Ingress and egress are semantically distinct (different IP allocation logic, different platform resources, different user intent). The SchiffCluster API already models them as separate top-level concepts (`network.ingress[]` vs `network.egress[]`). Splitting avoids a polymorphic `connections[]` array and keeps each CRD self-contained |
 | D14 | **Non-HBN support via optional `destinations`** — when `destinations` is omitted, only platform resources (MetalLB / Coil) are created without VRF plumbing. `Layer2Attachment.interfaceRef` enables attaching VLANs to physical interfaces | Enables use on clusters without HBN (e.g. MetalLB-only load balancing, physical NIC / bond / SR-IOV VF L2 networks). Keeps the same CRD API surface — HBN vs non-HBN is determined by presence of `destinations`, not a separate CRD |
 | D15 | **SBR is a controller implementation detail, not an API surface** — auto-detected when two attachments on the same node group reach destinations with overlapping imported prefixes | SBR is a cross-attachment concern: the user creating Inbound "web" may not know that Inbound "api" exists on the same nodes with overlapping prefixes. Making it user-configured would require global knowledge and leak infrastructure complexity into the intent layer. The low-level `VRFRouteConfiguration.sbrPrefixes` remains as an escape hatch |
@@ -1667,3 +2029,25 @@ Given the breadth of the design, we prioritize delivery of value:
 | D17 | **`nodeSelector` (Kubernetes label selector) replaces `workerGroups` (string array)** — all CRDs use `metav1.LabelSelector` for node scoping | More flexible than hardcoded worker group names. Supports arbitrary label combinations, set-based requirements, and standard Kubernetes selection semantics. Users can target nodes by role, zone, hardware type, or any custom label |
 | D18 | **`Network` supports pure L2 segments (IP-optional)** — `ipv4` and `ipv6` are both independently optional. A `Network` with only `vlan` (and no CIDRs) is valid. | Real-world non-HBN deployments commonly provision VLANs on bonds without any IP assignment (e.g., for vSphere / OpenStack VM attachment, or SR-IOV workloads that manage their own IPs). Requiring at least one IP AF would force artificial dummy CIDRs. CRDs that need IPs (`Inbound`, `Outbound`) validate at their level that the referenced `Network` has the required AF |
 | D19 | **Bond creation and SR-IOV VF provisioning are infrastructure-level concerns, out of scope** — the operator consumes existing bonds (`interfaceRef`) and VFs (`sriov.enabled`) but does not create them | Bond and VF lifecycle varies per platform (CaaS NetworkConfiguration, cloud-init, netplan, systemd-networkd) and is managed through GitOps or machine configuration. Mixing infrastructure provisioning with intent-based network configuration would conflate two different concerns and add platform-specific complexity |
+| D20 | **`communities` is a list on the usage CRDs, not a single string on `Destination`** — each `Layer2Attachment`, `Inbound`, `Outbound`, `PodNetwork` carries its own `communities: []string` | Different attachments reaching the same VRF may need different community tags (e.g., one attachment exports with `64500:999`, another with `64500:1000`). Putting community on the Destination would force all attachments to share the same value. This matches the low-level model where `VRFRouteConfiguration.community` is per-attachment, not per-VRF. A list (not a single string) supports multiple communities per export |
+| D21 | **`nextHop` on `Destination` for non-HBN static routing** — specifies per-AF next-hop addresses used to create static routes for the destination's prefixes | Non-HBN L2 segments may need routing to upstream networks without VRF plumbing. Placing `nextHop` on `Destination` (rather than a gateway on `Layer2Attachment`) generalises the concept: any prefix list + next-hop = static route. A default gateway is just `prefixes: ["0.0.0.0/0"]` + `nextHop`. In HBN mode, `nextHop` is ignored — VRF imports handle routing |
+| D22 | **RESOLVED — VRF configuration source: separate `VRF` CRD (option c)** — `VRF` holds backbone metadata (name, VNI, RT, loopbacks); `Destination` references it via `vrfRef` and carries only prefixes + routing mode | Separates VRF identity/metadata from routing targets. VRF metadata is defined once; multiple Destinations can reference the same VRF with different prefix sets. Resolves Open Question 19 |
+| D23 | **`VRF` CRD introduced; `Destination` split into routing-only** — `vrfRef` (HBN, VRF import routing) and `nextHop` (non-HBN, static routing) are mutually exclusive on `Destination` | VRF = metadata (*where* in the overlay), Destination = routing (*what* is reachable and *how* to reach it). This separation makes the model uniform: a Destination is always "prefixes + forwarding method", whether that method is a VRF or a static next-hop |
+| D24 | **Pipeline integration: Option A — intent CRDs generate low-level CRDs** — low-level CRDs remain available as a direct-use escape hatch | Keeps the existing `ConfigReconciler` unchanged; generated low-level CRDs can be inspected for debugging. Low-level CRDs are not the primary interface but remain an option for advanced users. Resolves OQ 1 |
+| D25 | **Aggregation is user-steerable, default per-network** — aggregation happens for a whole network by default and does not extend beyond it; per-attachment `disableAggregation` overrides | Sensible default: users should expect that their network's prefixes are aggregated. Cross-network aggregation would be surprising. The override provides an escape valve. Resolves OQ 2 |
+| D26 | **SBR is always auto-detected, always default** — the controller eagerly generates SBR whenever *any* prefix overlap exists across attachments on the same node group | Correctness trumps elegance. Missing SBR causes subtle routing failures; extra intermediate VRFs are harmless. The implementation may be complex but the user-facing API stays clean. Resolves OQ 3 |
+| D27 | **Label conventions are user-managed, governed by internal docs** — no standard labels mandated in the API | Labels are inherently organisation-specific. Mandating them in the API creates friction for teams with different naming conventions. Internal docs recommend patterns (e.g., `network.t-caas.telekom.com/vrf`, `…/zone`). Resolves OQ 4 |
+| D28 | **Multi-destination selector support from the start** — the first iteration supports selectors that match multiple `Destination` resources | Real-world topologies require multi-VRF connectivity. Restricting to single-destination would force users into workarounds. The merge logic mirrors today's multi-`VRFRouteConfiguration` merge. Resolves OQ 5 |
+| D29 | **`networkRef` is always required** — even trivial cases must reference a `Network` CRD | The `Network` CRD assigns IPs (or at minimum defines the L2 segment). Making it optional would create two code paths and complicate validation. A simple `Network` is trivial to create. Resolves OQ 6 |
+| D30 | **Target latest stable MetalLB / Coil versions; partly decouple integration logic** — version-specific details can be updated independently of the core intent controller | Avoids coupling the intent controller tightly to a specific MetalLB/Coil release. The integration layer can be swapped or updated as versions evolve. Resolves OQ 7 |
+| D31 | **Bidirectional = Inbound + Outbound combined; consider future `Gress` CRD** — users create an `Inbound` + `Outbound` pair for now; a convenience `Gress` CRD that bundles both may be added later | Adding a third CRD (`Gress`) now would increase scope without clear value. The Inbound + Outbound pair is functionally equivalent. If demand for a convenience resource emerges, it can be added without breaking the existing API. Resolves OQ 8 |
+| D32 | **Reject low-level CRDs when intent-based CRDs are configured for the same scope** — the operator completely rejects conflicting low-level CRDs until they are removed | Avoids ambiguity from partial overlaps. Clear ownership: either intent CRDs or low-level CRDs control a given VRF/network, never both simultaneously. Resolves OQ 9 |
+| D33 | **L2 VNI on `Network`; cluster VNI range for auto-assignment or explicit configuration** — L2 VXLAN VNIs are distinct from L3/VRF VNIs; a cluster-level range enables auto-assignment; explicit config for existing segments | L2 and L3 VNIs serve different purposes. Auto-assignment from a range reduces manual coordination; explicit config supports attaching to pre-existing L2 VXLAN segments. Resolves OQ 10 |
+| D34 | **Low-level mirror CRDs (`MirrorTarget`, `MirrorSelector`) co-exist with intent mirror CRDs** — same rejection rule as D32 applies per scope | Consistent with D32: intent-level and low-level can co-exist in the cluster, but not for the same scope. Resolves OQ 11 |
+| D35 | **Mirror VRF must be a pre-created `VRF` resource referenced via `Collector.mirrorVRF`** — no auto-creation of VRFs | Users control VRF metadata explicitly. Auto-creation would require the operator to pick VNI/RT values, which conflicts with the principle that all network parameters are user-specified (D5). Resolves OQ 12 |
+| D36 | **GRE interface naming: hash-based** — `gre.<hash>` / `gretap.<hash>` | Deterministic, unique, fits within the 15-char kernel limit. Resolves OQ 13 |
+| D37 | **Collector node scope: implicit only, configured when needed** — GRE tunnels are created only on nodes where a `TrafficMirror` selects something; no explicit `nodeSelector` on `Collector` | Avoids waste: tunnels only exist where mirroring is active. The implicit derivation (union of TrafficMirror sources' nodeSelectors) is correct by construction. Resolves OQ 14 |
+| D38 | **`NodeNetworkStatus` CRD introduced for node inventory** — lists interfaces (excluding pod veths), routes, and IPs per node; populated by agents | Enables `interfaceRef` validation against real node state. Also useful for debugging and operational visibility. Resolves OQ 15 |
+| D39 | **Non-HBN without `destinations`: do not reconcile VRF, provide informational status** — the operator sets a status condition but does not reject the resource | Non-HBN mode is always valid regardless of cluster capabilities. The status condition informs users that no VRF plumbing was generated, which may or may not be intentional. Resolves OQ 16 |
+| D40 | **`Network` supports `managed: false` for unmanaged/external networks** — the operator treats the `Network` as a reference for IP/VLAN parameters only, without attempting L2 provisioning | Pre-existing infrastructure-provided networks (e.g., VLANs from upstream platforms) should be referenceable without the operator trying to create or modify them. Resolves OQ 17 |
+| D41 | **Controller enforces no IP conflicts when `Network` is reused across attachment types** — VLAN/VNI consistency is implicit (same `Network`); IP allocations must not overlap | A `Network` is a shared pool. Multiple consumers can reference it, but the controller must ensure IP ranges don't collide. VLAN/VNI consistency is guaranteed by design since all consumers read from the same `Network` resource. Resolves OQ 18 |
