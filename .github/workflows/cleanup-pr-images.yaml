@@ -6,6 +6,7 @@ on:
 
 permissions:
   packages: write
+  pull-requests: read
 
 jobs:
   cleanup:
@@ -31,11 +32,89 @@ jobs:
           ignore-versions: "^(?!pr-${{ github.event.pull_request.number }}$).*$"
         continue-on-error: true # Don't fail if image doesn't exist (e.g., fork PRs)
 
-      - name: Delete untagged versions (leftover digests)
-        uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5.0.0
-        with:
-          package-name: ${{ matrix.image }}
-          package-type: container
-          delete-only-untagged-versions: true
-          min-versions-to-keep: 0
+      - name: Delete orphaned untagged versions
+        # Multi-arch builds push per-arch images by digest (untagged). Blindly
+        # deleting all untagged versions would break release manifest lists.
+        # Instead, we inspect tagged manifests via the OCI API and only delete
+        # untagged versions that are not referenced by any tagged manifest.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          PACKAGE_NAME="${{ matrix.image }}"
+          OWNER="${{ github.repository_owner }}"
+
+          echo "Building protected digest set from tagged manifests..."
+          PROTECTED=$(mktemp)
+
+          # Obtain a read-only OCI token for manifest inspection
+          OCI_TOKEN=$(curl -sf \
+            -u "token:${GH_TOKEN}" \
+            "https://ghcr.io/token?service=ghcr.io&scope=repository:${OWNER,,}/${PACKAGE_NAME}:pull" \
+            | jq -r '.token') || true
+
+          if [ -z "${OCI_TOKEN}" ] || [ "${OCI_TOKEN}" = "null" ]; then
+            echo "WARNING: Could not obtain OCI token — skipping untagged cleanup to avoid breaking manifest lists."
+            exit 0
+          fi
+
+          # Collect digests of all tagged versions
+          TAGGED_DIGESTS=$(gh api \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "/orgs/${OWNER}/packages/container/${PACKAGE_NAME}/versions" \
+            --paginate \
+            --jq '.[] | select(.metadata.container.tags | length > 0) | .name' 2>/dev/null || echo "")
+
+          # For each tagged manifest, resolve child digests (level 1)
+          for DIGEST in $TAGGED_DIGESTS; do
+            MANIFEST=$(curl -sf \
+              -H "Authorization: Bearer ${OCI_TOKEN}" \
+              -H "Accept: application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json" \
+              "https://ghcr.io/v2/${OWNER,,}/${PACKAGE_NAME}/manifests/${DIGEST}" 2>/dev/null) || continue
+            echo "$MANIFEST" | jq -r '(.manifests // [])[]?.digest // empty' >> "$PROTECTED" 2>/dev/null || true
+          done
+
+          # Level 2: children of children (nested indices with attestations/provenance)
+          if [ -s "$PROTECTED" ]; then
+            for DIGEST in $(sort -u "$PROTECTED"); do
+              MANIFEST=$(curl -sf \
+                -H "Authorization: Bearer ${OCI_TOKEN}" \
+                -H "Accept: application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json" \
+                "https://ghcr.io/v2/${OWNER,,}/${PACKAGE_NAME}/manifests/${DIGEST}" 2>/dev/null) || continue
+              echo "$MANIFEST" | jq -r '(.manifests // [])[]?.digest // empty' >> "$PROTECTED" 2>/dev/null || true
+            done
+          fi
+
+          sort -u -o "$PROTECTED" "$PROTECTED"
+          echo "Found $(wc -l < "$PROTECTED" | tr -d ' ') protected digests"
+
+          # Delete only truly orphaned untagged versions
+          UNTAGGED=$(gh api \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "/orgs/${OWNER}/packages/container/${PACKAGE_NAME}/versions" \
+            --paginate \
+            --jq '.[] | select(.metadata.container.tags | length == 0) | "\(.id) \(.name)"' 2>/dev/null || echo "")
+
+          if [ -z "$UNTAGGED" ]; then
+            echo "No untagged versions found."
+          else
+            echo "$UNTAGGED" | while read -r VERSION_ID VERSION_NAME; do
+              [ -z "$VERSION_ID" ] && continue
+              if grep -qF "$VERSION_NAME" "$PROTECTED" 2>/dev/null; then
+                echo "Keeping ${VERSION_NAME} (referenced by tagged manifest)"
+              else
+                echo "Deleting orphaned ${VERSION_NAME} (id: ${VERSION_ID})"
+                gh api --method DELETE \
+                  -H "Accept: application/vnd.github+json" \
+                  -H "X-GitHub-Api-Version: 2022-11-28" \
+                  "/orgs/${OWNER}/packages/container/${PACKAGE_NAME}/versions/${VERSION_ID}" \
+                  && echo "Deleted" || echo "Failed to delete"
+              fi
+            done
+          fi
+
+          rm -f "$PROTECTED"
         continue-on-error: true
