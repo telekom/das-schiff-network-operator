@@ -78,6 +78,7 @@ jobs:
         uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
         with:
           images: ghcr.io/telekom/${{ matrix.image }}
+          # NOTE: tag config is duplicated in the manifest job below — keep in sync.
           tags: |
             type=ref,event=branch
             type=ref,event=pr
@@ -165,6 +166,7 @@ jobs:
         uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
         with:
           images: ghcr.io/telekom/${{ matrix.image }}
+          # NOTE: tag config is duplicated in the build job above — keep in sync.
           tags: |
             type=ref,event=branch
             type=ref,event=pr
