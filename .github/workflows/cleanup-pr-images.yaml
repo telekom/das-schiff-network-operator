@@ -63,7 +63,7 @@ jobs:
           TAGGED_DIGESTS=$(gh api \
             -H "Accept: application/vnd.github+json" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
-            "/orgs/${OWNER}/packages/container/${PACKAGE_NAME}/versions" \
+            "/orgs/${OWNER,,}/packages/container/${PACKAGE_NAME}/versions" \
             --paginate \
             --jq '.[] | select(.metadata.container.tags | length > 0) | .name' 2>/dev/null || echo "")
 
@@ -94,7 +94,7 @@ jobs:
           UNTAGGED=$(gh api \
             -H "Accept: application/vnd.github+json" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
-            "/orgs/${OWNER}/packages/container/${PACKAGE_NAME}/versions" \
+            "/orgs/${OWNER,,}/packages/container/${PACKAGE_NAME}/versions" \
             --paginate \
             --jq '.[] | select(.metadata.container.tags | length == 0) | "\(.id) \(.name)"' 2>/dev/null || echo "")
 
@@ -110,7 +110,7 @@ jobs:
                 gh api --method DELETE \
                   -H "Accept: application/vnd.github+json" \
                   -H "X-GitHub-Api-Version: 2022-11-28" \
-                  "/orgs/${OWNER}/packages/container/${PACKAGE_NAME}/versions/${VERSION_ID}" \
+                  "/orgs/${OWNER,,}/packages/container/${PACKAGE_NAME}/versions/${VERSION_ID}" \
                   && echo "Deleted" || echo "Failed to delete"
               fi
             done

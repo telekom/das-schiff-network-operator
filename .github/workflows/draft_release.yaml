@@ -63,22 +63,24 @@ jobs:
             SET_IMAGE_ARGS+=("${REGISTRY}/${img}=${REGISTRY}/${img}:${VERSION}")
           done
 
+          KUSTOMIZE="${{ github.workspace }}/bin/kustomize"
+
           # --- Default install manifest (CRA-FRR, netplan, HBN-L2 agents) ---
           cd config/default
-          bin/kustomize edit set image "${SET_IMAGE_ARGS[@]}"
+          "${KUSTOMIZE}" edit set image "${SET_IMAGE_ARGS[@]}"
           cd "${{ github.workspace }}"
-          bin/kustomize build config/default > out/install.yaml
+          "${KUSTOMIZE}" build config/default > out/install.yaml
           echo "Generated install.yaml with $(wc -l < out/install.yaml) lines"
 
           # --- HBN standalone install manifest ---
           cd config/hbn-standalone
-          bin/kustomize edit set image "${SET_IMAGE_ARGS[@]}"
+          "${KUSTOMIZE}" edit set image "${SET_IMAGE_ARGS[@]}"
           cd "${{ github.workspace }}"
-          bin/kustomize build config/hbn-standalone > out/install-hbn-standalone.yaml
+          "${KUSTOMIZE}" build config/hbn-standalone > out/install-hbn-standalone.yaml
           echo "Generated install-hbn-standalone.yaml with $(wc -l < out/install-hbn-standalone.yaml) lines"
 
           # --- CRDs-only manifest ---
-          bin/kustomize build config/crd > out/crds.yaml
+          "${KUSTOMIZE}" build config/crd > out/crds.yaml
           echo "Generated crds.yaml with $(wc -l < out/crds.yaml) lines"
 
           # Restore kustomization files modified by 'kustomize edit set image'
@@ -98,7 +100,11 @@ jobs:
           # Add top-level LICENSE and NOTICE into the existing licenses archive
           # created by 'make licenses-report' (which contains third-party licenses).
           mkdir -p out/licenses-staging
-          tar -xf out/licenses.tar.gz -C out/licenses-staging 2>/dev/null || true
+          if [ -f out/licenses.tar.gz ]; then
+            tar -xf out/licenses.tar.gz -C out/licenses-staging
+          else
+            echo "::warning::out/licenses.tar.gz not found — bundling only project LICENSE and NOTICE"
+          fi
           cp LICENSE NOTICE out/licenses-staging/
           tar --sort=name --mtime='1970-01-01' --owner=0 --group=0 --numeric-owner \
             -cf - -C out/licenses-staging . | gzip -n > out/licenses.tar.gz
@@ -126,7 +132,7 @@ jobs:
       - name: Generate checksums
         run: |
           cd out
-          sha256sum *.yaml licenses.tar.gz > checksums.txt
+          sha256sum install.yaml install-hbn-standalone.yaml crds.yaml licenses.tar.gz > checksums.txt
           echo "Checksums:"
           cat checksums.txt
 
