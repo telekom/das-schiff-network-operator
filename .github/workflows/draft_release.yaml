@@ -31,6 +31,66 @@ jobs:
         run: |
           make licenses-report
 
+      - name: Determine version
+        id: version
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "tag=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
+
+      - name: Generate install manifests
+        run: |
+          make kustomize
+          TAG="${{ steps.version.outputs.tag }}"
+          REGISTRY="ghcr.io/telekom"
+
+          # All image targets to set version tags for
+          IMAGES=(
+            "das-schiff-network-operator"
+            "das-schiff-cra-frr"
+            "das-schiff-nwop-agent-cra-frr"
+            "das-schiff-nwop-agent-cra-vsr"
+            "das-schiff-nwop-agent-netplan"
+            "das-schiff-nwop-agent-hbn-l2"
+          )
+
+          # Build kustomize set-image args: match by image name, set release tag
+          SET_IMAGE_ARGS=()
+          for img in "${IMAGES[@]}"; do
+            SET_IMAGE_ARGS+=("${REGISTRY}/${img}=${REGISTRY}/${img}:${TAG}")
+          done
+
+          # --- Default install manifest (CRA-FRR, netplan, HBN-L2 agents) ---
+          cd config/default
+          $(git rev-parse --show-toplevel)/bin/kustomize edit set image "${SET_IMAGE_ARGS[@]}"
+          cd "${{ github.workspace }}"
+          bin/kustomize build config/default > out/install.yaml
+          echo "Generated install.yaml with $(wc -l < out/install.yaml) lines"
+
+          # --- HBN standalone install manifest ---
+          cd config/hbn-standalone
+          $(git rev-parse --show-toplevel)/bin/kustomize edit set image "${SET_IMAGE_ARGS[@]}"
+          cd "${{ github.workspace }}"
+          bin/kustomize build config/hbn-standalone > out/install-hbn-standalone.yaml
+          echo "Generated install-hbn-standalone.yaml with $(wc -l < out/install-hbn-standalone.yaml) lines"
+
+          # --- CRDs-only manifest ---
+          bin/kustomize build config/crd > out/crds.yaml
+          echo "Generated crds.yaml with $(wc -l < out/crds.yaml) lines"
+
+          # Verify no :latest images remain in generated manifests
+          for f in out/install.yaml out/install-hbn-standalone.yaml; do
+            if grep -q 'image:.*:latest' "$f"; then
+              echo "WARNING: $f still contains :latest image references:"
+              grep 'image:.*:latest' "$f"
+            fi
+          done
+
+      - name: Bundle project licenses
+        run: |
+          tar --sort=name --mtime='1970-01-01' --owner=0 --group=0 --numeric-owner \
+            -cf - LICENSE NOTICE | gzip -n > out/licenses.tar.gz
+
       - name: Generate Release Notes
         id: release-notes
         run: |
@@ -49,6 +109,13 @@ jobs:
             echo "" >> $GITHUB_OUTPUT
             echo "EOF" >> $GITHUB_OUTPUT
           fi
+
+      - name: Generate checksums
+        run: |
+          cd out
+          sha256sum *.yaml licenses.tar.gz > checksums.txt 2>/dev/null || sha256sum *.yaml > checksums.txt
+          echo "Checksums:"
+          cat checksums.txt
 
       - name: Create Release
         uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2.5.0
