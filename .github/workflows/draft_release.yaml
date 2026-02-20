@@ -40,6 +40,7 @@ jobs:
 
       - name: Generate install manifests
         run: |
+          set -euo pipefail
           make kustomize
           VERSION="${{ steps.version.outputs.version }}"
           REGISTRY="ghcr.io/telekom"
@@ -97,6 +98,7 @@ jobs:
 
       - name: Bundle project licenses
         run: |
+          set -euo pipefail
           # Add top-level LICENSE and NOTICE into the existing licenses archive
           # created by 'make licenses-report' (which contains third-party licenses).
           mkdir -p out/licenses-staging
@@ -131,8 +133,21 @@ jobs:
 
       - name: Generate checksums
         run: |
+          set -euo pipefail
           cd out
-          sha256sum install.yaml install-hbn-standalone.yaml crds.yaml licenses.tar.gz > checksums.txt
+          FILES="install.yaml install-hbn-standalone.yaml crds.yaml licenses.tar.gz"
+          MISSING=0
+          for f in $FILES; do
+            if [ ! -f "$f" ]; then
+              echo "::error::Required file '$f' not found; cannot generate checksums."
+              MISSING=1
+            fi
+          done
+          if [ "$MISSING" -ne 0 ]; then
+            echo "One or more required files are missing. Aborting checksum generation."
+            exit 1
+          fi
+          sha256sum $FILES > checksums.txt
           echo "Checksums:"
           cat checksums.txt
 
