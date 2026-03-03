@@ -4,26 +4,21 @@ FROM --platform=$BUILDPLATFORM docker.io/library/golang:${GO_VERSION}-alpine AS 
 
 ARG TARGETOS
 ARG TARGETARCH
+ARG ldflags="-s -w"
 
 WORKDIR /workspace
-# Copy the Go Modules manifests
 COPY go.mod go.mod
 COPY go.sum go.sum
-# cache deps before building and copying source so that we don't need to re-download as much
-# and so that source changes don't invalidate our downloaded layer
 RUN go mod download
 
-# Copy the go source
 COPY cmd/operator/main.go main.go
 COPY api/ api/
 COPY controllers/ controllers/
 COPY pkg/ pkg/
 
-# Build
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-$(go env GOARCH)} \
-    go build -trimpath -ldflags="-s -w" -o manager main.go
+    go build -trimpath -ldflags="${ldflags}" -o manager main.go
 
-# Runtime stage (distroless)
 FROM gcr.io/distroless/static-debian12
 
 LABEL org.opencontainers.image.title="das-schiff-network-operator" \
