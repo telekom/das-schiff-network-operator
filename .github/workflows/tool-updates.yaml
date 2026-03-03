@@ -49,6 +49,8 @@ jobs:
             local current=$2
             local name=$3
             latest=$(gh api "repos/${repo}/releases/latest" --jq '.tag_name' 2>/dev/null || echo "unknown")
+            # Strip tool-name prefix for monorepo tags (e.g., "kustomize/v5.8.0" → "v5.8.0")
+            latest="${latest##*/}"
             if [ "$latest" != "unknown" ] && [ "$latest" != "$current" ]; then
               echo "  - **${name}**: ${current} → ${latest} ([releases](https://github.com/${repo}/releases))" >> updates.md
               echo "found=true" >> $GITHUB_OUTPUT
@@ -84,7 +86,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           ISSUE_TITLE="🔧 Tool Updates Available"
-          EXISTING_ISSUE=$(gh issue list --label "dependencies" --label "automation" --state open --search "$ISSUE_TITLE" --json number --jq '.[0].number' || echo "")
+          EXISTING_ISSUE=$(gh issue list --label "dependencies" --label "automation" --state open --search "in:title $ISSUE_TITLE" --json number --jq '.[0].number' || echo "")
           if [ -n "$EXISTING_ISSUE" ]; then
             gh issue comment "$EXISTING_ISSUE" --body-file updates.md
             echo "Updated issue #${EXISTING_ISSUE}"
@@ -101,7 +103,9 @@ jobs:
         run: |
           echo "### Tool Update Check Complete" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          if [ -f updates.md ]; then
+          if [ "${{ steps.versions.outputs.skip }}" = "true" ]; then
+            echo "Tool update check was skipped (versions.env not found)." >> $GITHUB_STEP_SUMMARY
+          elif [ -f updates.md ]; then
             cat updates.md >> $GITHUB_STEP_SUMMARY
           else
             echo "All tools are up to date!" >> $GITHUB_STEP_SUMMARY

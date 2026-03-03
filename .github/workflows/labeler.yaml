@@ -4,6 +4,8 @@
 
 name: PR Labeler
 
+# Note: We use pull_request_target so labels can be applied to PRs from forks.
+# This workflow does NOT checkout or execute untrusted PR code.
 on:
   pull_request_target:
     types: [opened, synchronize, reopened]
