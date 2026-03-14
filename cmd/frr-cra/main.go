@@ -53,6 +53,10 @@ var (
 	neighborSyncer *neighborsync.NeighborSync
 )
 
+// sanitizeLog removes newlines and carriage returns from log messages
+// to prevent log injection attacks (CodeQL: Log entries created from user input).
+var logSanitizer = strings.NewReplacer("\n", "", "\r", "")
+
 func deleteLayer2(cfg nl.NetlinkConfiguration) error {
 	existing, err := nlManager.ListL2()
 	if err != nil {
@@ -130,7 +134,7 @@ func reconcileNeighborSync(cfg nl.NetlinkConfiguration) {
 		bridgeName := fmt.Sprintf("l2.%d", l2.VlanID)
 		bridge, err := netlink.LinkByName(bridgeName)
 		if err != nil {
-			log.Printf("neighborsync: bridge %s not found: %v", bridgeName, err)
+			log.Print(logSanitizer.Replace(fmt.Sprintf("neighborsync: bridge l2.%d not found: %v", l2.VlanID, err)))
 			continue
 		}
 		bridgeIdx := bridge.Attrs().Index
@@ -140,12 +144,12 @@ func reconcileNeighborSync(cfg nl.NetlinkConfiguration) {
 		vxlanName := fmt.Sprintf("vx.%d", l2.VNI)
 		vxlan, err := netlink.LinkByName(vxlanName)
 		if err != nil {
-			log.Printf("neighborsync: vxlan %s not found: %v", vxlanName, err)
+			log.Print(logSanitizer.Replace(fmt.Sprintf("neighborsync: vxlan vx.%d not found: %v", l2.VNI, err)))
 			continue
 		}
 
 		if err := neighborSyncer.EnsureNeighborSuppression(bridgeIdx, vxlan.Attrs().Index); err != nil {
-			log.Printf("neighborsync: failed to ensure neighbor suppression for bridge %s: %v", bridgeName, err)
+			log.Print(logSanitizer.Replace(fmt.Sprintf("neighborsync: failed to ensure neighbor suppression for bridge l2.%d: %v", l2.VlanID, err)))
 		}
 	}
 }
