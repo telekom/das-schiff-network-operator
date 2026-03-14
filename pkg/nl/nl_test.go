@@ -887,6 +887,9 @@ var _ = Describe("ReconcileL2()", func() {
 		acceptUntrackedNAIPv6 := fmt.Sprintf("%s/ipv6/conf/%s", procSysNetPath, vlanName)
 		createInterfaceFile(acceptUntrackedNAIPv6 + "/" + acceptUntrackedNA)
 
+		acceptDadIPv6 := fmt.Sprintf("%s/ipv6/conf/%s", procSysNetPath, sviName)
+		createInterfaceFile(acceptDadIPv6 + "/accept_dad")
+
 		err := nm.ReconcileL2(current, desired)
 		Expect(err).To(HaveOccurred())
 
@@ -951,6 +954,9 @@ var _ = Describe("ReconcileL2()", func() {
 
 		acceptUntrackedNAIPv6 := fmt.Sprintf("%s/ipv6/conf/%s", procSysNetPath, vlanName)
 		createInterfaceFile(acceptUntrackedNAIPv6 + "/" + acceptUntrackedNA)
+
+		acceptDadIPv6 := fmt.Sprintf("%s/ipv6/conf/%s", procSysNetPath, sviName)
+		createInterfaceFile(acceptDadIPv6 + "/accept_dad")
 
 		err := nm.ReconcileL2(current, desired)
 		Expect(err).To(HaveOccurred())
@@ -1017,6 +1023,9 @@ var _ = Describe("ReconcileL2()", func() {
 
 		acceptUntrackedNAIPv6 := fmt.Sprintf("%s/ipv6/conf/%s", procSysNetPath, vlanName)
 		createInterfaceFile(acceptUntrackedNAIPv6 + "/" + acceptUntrackedNA)
+
+		acceptDadIPv6 := fmt.Sprintf("%s/ipv6/conf/%s", procSysNetPath, sviName)
+		createInterfaceFile(acceptDadIPv6 + "/accept_dad")
 
 		err := nm.ReconcileL2(current, desired)
 		Expect(err).To(HaveOccurred())
@@ -1087,6 +1096,9 @@ var _ = Describe("ReconcileL2()", func() {
 		acceptUntrackedNAIPv6 := fmt.Sprintf("%s/ipv6/conf/%s", procSysNetPath, vlanName)
 		createInterfaceFile(acceptUntrackedNAIPv6 + "/" + acceptUntrackedNA)
 
+		acceptDadIPv6 := fmt.Sprintf("%s/ipv6/conf/%s", procSysNetPath, sviName)
+		createInterfaceFile(acceptDadIPv6 + "/accept_dad")
+
 		err := nm.ReconcileL2(current, desired)
 		Expect(err).To(HaveOccurred())
 
@@ -1156,6 +1168,9 @@ var _ = Describe("ReconcileL2()", func() {
 
 		acceptUntrackedNAIPv6 := fmt.Sprintf("%s/ipv6/conf/%s", procSysNetPath, vlanName)
 		createInterfaceFile(acceptUntrackedNAIPv6 + "/" + acceptUntrackedNA)
+
+		acceptDadIPv6 := fmt.Sprintf("%s/ipv6/conf/%s", procSysNetPath, sviName)
+		createInterfaceFile(acceptDadIPv6 + "/accept_dad")
 
 		err := nm.ReconcileL2(current, desired)
 		Expect(err).ToNot(HaveOccurred())
