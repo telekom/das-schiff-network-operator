@@ -61,10 +61,32 @@ jobs:
           docker exec nwop-control-plane kubectl \
             --kubeconfig=/etc/kubernetes/admin.conf get events -A \
             --sort-by='.lastTimestamp' > /tmp/e2e-logs/events.log 2>&1 || true
-          docker exec clab-nwop-leaf1 vtysh -c 'show bgp summary' \
-            > /tmp/e2e-logs/leaf1-bgp.log 2>&1 || true
-          docker exec clab-nwop-leaf1 vtysh -c 'show bgp l2vpn evpn' \
-            > /tmp/e2e-logs/leaf1-evpn.log 2>&1 || true
+          for rtr in leaf1 leaf2 dcgw1 dcgw2; do
+            docker exec "clab-nwop-${rtr}" vtysh -c 'show bgp summary' \
+              > "/tmp/e2e-logs/${rtr}-bgp.log" 2>&1 || true
+          done
+          for dcgw in dcgw1 dcgw2; do
+            docker exec "clab-nwop-${dcgw}" vtysh -c 'show bgp l2vpn evpn' \
+              > "/tmp/e2e-logs/${dcgw}-evpn.log" 2>&1 || true
+            docker exec "clab-nwop-${dcgw}" vtysh -c 'show evpn vni' \
+              > "/tmp/e2e-logs/${dcgw}-vni.log" 2>&1 || true
+            docker exec "clab-nwop-${dcgw}" ip route show table all \
+              > "/tmp/e2e-logs/${dcgw}-ip-routes.log" 2>&1 || true
+            docker exec "clab-nwop-${dcgw}" ip -6 route show table all \
+              > "/tmp/e2e-logs/${dcgw}-ip6-routes.log" 2>&1 || true
+          done
+          for node in nwop-control-plane nwop-worker nwop-worker2; do
+            docker exec "$node" bash -c \
+              'P=$(systemctl show cra.service -p MainPID --value 2>/dev/null); \
+               CRA_PID=$(cat /proc/$P/task/*/children 2>/dev/null | head -1 | tr -d " \n"); \
+               [ -n "$CRA_PID" ] && nsenter -t $CRA_PID -m -n -- vtysh -c "show bgp l2vpn evpn"' \
+              > "/tmp/e2e-logs/${node}-cra-evpn.log" 2>&1 || true
+            docker exec "$node" bash -c \
+              'P=$(systemctl show cra.service -p MainPID --value 2>/dev/null); \
+               CRA_PID=$(cat /proc/$P/task/*/children 2>/dev/null | head -1 | tr -d " \n"); \
+               [ -n "$CRA_PID" ] && nsenter -t $CRA_PID -m -n -- ip -6 route show table all' \
+              > "/tmp/e2e-logs/${node}-cra-ip6-routes.log" 2>&1 || true
+          done
 
       - name: Upload debug logs
         if: failure()
