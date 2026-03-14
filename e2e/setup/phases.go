@@ -235,7 +235,7 @@ func PhaseUnderlay(cluster *Cluster) error {
 		DockerExec(node.Name, "ip", "addr", "add", "fd00:7:caa5::1/127", "dev", "hbn", "preferred_lft", "0") //nolint:errcheck
 		DockerExec(node.Name, "ip", "addr", "add", node.IPv4+"/32", "dev", "hbn")                            //nolint:errcheck
 		DockerExec(node.Name, "ip", "addr", "add", node.IPv6+"/128", "dev", "hbn")                           //nolint:errcheck
-		if _, err := DockerExec(node.Name, "ip", "route", "add", "default", "via", "inet6", "fd00:7:caa5::", "dev", "hbn", "src", node.IPv4); err != nil {
+		if _, err := DockerExec(node.Name, "ip", "route", "add", "default", "src", node.IPv4, "via", "inet6", "fd00:7:caa5::", "dev", "hbn"); err != nil {
 			return fmt.Errorf("adding IPv4 default route on %s: %w", node.Name, err)
 		}
 		if _, err := DockerExec(node.Name, "ip", "-6", "route", "add", "default", "via", "fd00:7:caa5::", "dev", "hbn", "src", node.IPv6); err != nil {
