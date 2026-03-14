@@ -25,12 +25,15 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/telekom/das-schiff-network-operator/pkg/bpf"
 	"github.com/telekom/das-schiff-network-operator/pkg/config"
 	"github.com/telekom/das-schiff-network-operator/pkg/cra-frr"
 	"github.com/telekom/das-schiff-network-operator/pkg/frr"
 	"github.com/telekom/das-schiff-network-operator/pkg/monitoring"
+	"github.com/telekom/das-schiff-network-operator/pkg/neighborsync"
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
 	"github.com/telekom/das-schiff-network-operator/pkg/utils"
+	"github.com/vishvananda/netlink"
 )
 
 const (
@@ -45,8 +48,9 @@ const (
 )
 
 var (
-	frrManager *frr.Manager
-	nlManager  *nl.Manager
+	frrManager     *frr.Manager
+	nlManager      *nl.Manager
+	neighborSyncer *neighborsync.NeighborSync
 )
 
 func deleteLayer2(cfg nl.NetlinkConfiguration) error {
@@ -113,6 +117,39 @@ func createLayer2(cfg nl.NetlinkConfiguration) error {
 	return nil
 }
 
+func reconcileNeighborSync(cfg nl.NetlinkConfiguration) {
+	if neighborSyncer == nil {
+		return
+	}
+	for i := range cfg.Layer2s {
+		l2 := &cfg.Layer2s[i]
+		if len(l2.AnycastGateways) == 0 {
+			continue
+		}
+
+		bridgeName := fmt.Sprintf("l2.%d", l2.VlanID)
+		bridge, err := netlink.LinkByName(bridgeName)
+		if err != nil {
+			log.Printf("neighborsync: bridge %s not found: %v", bridgeName, err)
+			continue
+		}
+		bridgeIdx := bridge.Attrs().Index
+
+		neighborSyncer.EnsureARPRefresh(bridgeIdx)
+
+		vxlanName := fmt.Sprintf("vx.%d", l2.VNI)
+		vxlan, err := netlink.LinkByName(vxlanName)
+		if err != nil {
+			log.Printf("neighborsync: vxlan %s not found: %v", vxlanName, err)
+			continue
+		}
+
+		if err := neighborSyncer.EnsureNeighborSuppression(bridgeIdx, vxlan.Attrs().Index); err != nil {
+			log.Printf("neighborsync: failed to ensure neighbor suppression for bridge %s: %v", bridgeName, err)
+		}
+	}
+}
+
 func getVRFsToDelete(cfg nl.NetlinkConfiguration) ([]nl.VRFInformation, error) {
 	existing, err := nlManager.ListL3()
 	if err != nil {
@@ -123,13 +160,17 @@ func getVRFsToDelete(cfg nl.NetlinkConfiguration) ([]nl.VRFInformation, error) {
 
 	for i := range existing {
 		needsDeletion := true
+		localOnly := false
 		for j := range cfg.VRFs {
-			if cfg.VRFs[j].Name == existing[i].Name && cfg.VRFs[j].VNI == existing[i].VNI {
-				needsDeletion = false
+			if cfg.VRFs[j].Name == existing[i].Name {
+				if cfg.VRFs[j].LocalOnly || cfg.VRFs[j].VNI == existing[i].VNI {
+					needsDeletion = false
+					localOnly = cfg.VRFs[j].LocalOnly
+				}
 				break
 			}
 		}
-		if needsDeletion || existing[i].MarkForDelete {
+		if needsDeletion || (existing[i].MarkForDelete && !localOnly) {
 			toDelete = append(toDelete, existing[i])
 		}
 	}
@@ -146,7 +187,8 @@ func createVRFs(cfg nl.NetlinkConfiguration) error {
 	for i := range cfg.VRFs {
 		alreadyExists := false
 		for j := range existing {
-			if existing[j].Name == cfg.VRFs[i].Name && existing[j].VNI == cfg.VRFs[i].VNI && !existing[j].MarkForDelete {
+			if existing[j].Name == cfg.VRFs[i].Name &&
+				(cfg.VRFs[i].LocalOnly || (existing[j].VNI == cfg.VRFs[i].VNI && !existing[j].MarkForDelete)) {
 				alreadyExists = true
 				break
 			}
@@ -277,6 +319,9 @@ func applyConfig(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("Failed to reconcile Layer2: %v", err), http.StatusInternalServerError)
 		return
 	}
+
+	// Reconcile neighbor sync for ARP/NDP refresh
+	reconcileNeighborSync(craConfiguration.NetlinkConfiguration)
 
 	w.WriteHeader(http.StatusOK)
 }
@@ -446,6 +491,15 @@ func main() {
 
 	frrManager = frr.NewFRRManager()
 	nlManager = nl.NewManager(&nl.Toolkit{}, baseConfig)
+
+	// Initialize BPF and neighbor synchronization
+	if err := bpf.InitBPF(); err != nil {
+		log.Printf("WARNING: Failed to initialize BPF, neighbor sync disabled: %v", err)
+	} else {
+		neighborSyncer = neighborsync.NewNeighborSync()
+		neighborSyncer.StartNeighborSync()
+		log.Println("BPF and neighbor sync initialized")
+	}
 
 	registry, err := setupPrometheusRegistry()
 	if err != nil {

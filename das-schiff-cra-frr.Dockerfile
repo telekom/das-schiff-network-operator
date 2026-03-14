@@ -11,14 +11,22 @@ COPY go.sum go.sum
 # and so that source changes don't invalidate our downloaded layer
 RUN go mod download
 
+# Install BPF build tools
+RUN apk add llvm clang linux-headers libbpf-dev musl-dev
+
 # Copy the go source
 COPY cmd/frr-cra/main.go main.go
 COPY api/ api/
 COPY controllers/ controllers/
 COPY pkg/ pkg/
 
+# Compile BPF program from source
+COPY bpf/ bpf/
+RUN cd pkg/bpf/ && go generate
+
 # Build
-RUN CGO_ENABLED=0 GOOS=linux go build -a -o frr-cra main.go
+ARG ldflags
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags "${ldflags}" -a -o frr-cra main.go
 
 FROM docker.io/library/ubuntu:25.10
 
