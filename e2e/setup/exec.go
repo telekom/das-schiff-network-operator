@@ -33,7 +33,6 @@ func DockerExecInput(container string, input string, args ...string) error {
 	cmdArgs := append([]string{"exec", "-i", container}, args...)
 	cmd := exec.Command("docker", cmdArgs...)
 	cmd.Stdin = strings.NewReader(input)
-	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
 }

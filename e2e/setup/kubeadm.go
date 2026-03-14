@@ -138,6 +138,7 @@ func KubeadmInit(cluster *Cluster) error {
 	out, err := DockerExec(cp.Name,
 		"kubeadm", "init",
 		"--config=/tmp/kubeadm.conf",
+		"--ignore-preflight-errors=SystemVerification",
 		"--v=5",
 	)
 	if err != nil {
@@ -162,6 +163,7 @@ func KubeadmJoin(cluster *Cluster, node *Node) error {
 	out, err := DockerExec(node.Name,
 		"kubeadm", "join",
 		"--config=/tmp/kubeadm.conf",
+		"--ignore-preflight-errors=SystemVerification",
 		"--v=5",
 	)
 	if err != nil {
