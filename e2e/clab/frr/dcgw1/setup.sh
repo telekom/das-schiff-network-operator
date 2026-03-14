@@ -4,7 +4,6 @@ set -euo pipefail
 
 sysctl -w net.ipv4.ip_forward=1
 sysctl -w net.ipv6.conf.all.forwarding=1
-echo 0 > /proc/sys/net/ipv6/conf/hostgw/accept_ra
 
 ip addr add 192.0.2.1/32 dev lo
 
@@ -15,6 +14,7 @@ ip link add br.mgmt type bridge
 ip link set vx.mgmt master br.mgmt
 ip link set br.mgmt master vr.mgmt
 ip link set hostgw master vr.mgmt
+echo 0 > /proc/sys/net/ipv6/conf/hostgw/accept_ra
 ip link set br.mgmt up
 ip link set vx.mgmt up
 ip link set vr.mgmt up
