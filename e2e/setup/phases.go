@@ -220,13 +220,27 @@ func PhaseUnderlay(cluster *Cluster) error {
 			return err
 		}
 
+		// Wait for CRA to create the hbn veth pair
+		if err := WaitFor(fmt.Sprintf("hbn on %s", node.Name), 60*time.Second, 2*time.Second, func() (bool, error) {
+			_, err := DockerExec(node.Name, "ip", "link", "show", "hbn")
+			return err == nil, nil
+		}); err != nil {
+			return fmt.Errorf("waiting for hbn on %s: %w", node.Name, err)
+		}
+
 		// Configure host-side hbn veth
-		DockerExec(node.Name, "ip", "link", "set", "hbn", "up")                                                                 //nolint:errcheck
-		DockerExec(node.Name, "ip", "addr", "add", "fd00:7:caa5::1/127", "dev", "hbn", "preferred_lft", "0")                    //nolint:errcheck
-		DockerExec(node.Name, "ip", "addr", "add", node.IPv4+"/32", "dev", "hbn")                                               //nolint:errcheck
-		DockerExec(node.Name, "ip", "addr", "add", node.IPv6+"/128", "dev", "hbn")                                              //nolint:errcheck
-		DockerExec(node.Name, "ip", "route", "add", "default", "via", "inet6", "fd00:7:caa5::", "dev", "hbn", "src", node.IPv4) //nolint:errcheck
-		DockerExec(node.Name, "ip", "-6", "route", "add", "default", "via", "fd00:7:caa5::", "dev", "hbn", "src", node.IPv6)    //nolint:errcheck
+		if _, err := DockerExec(node.Name, "ip", "link", "set", "hbn", "up"); err != nil {
+			return fmt.Errorf("bringing up hbn on %s: %w", node.Name, err)
+		}
+		DockerExec(node.Name, "ip", "addr", "add", "fd00:7:caa5::1/127", "dev", "hbn", "preferred_lft", "0") //nolint:errcheck
+		DockerExec(node.Name, "ip", "addr", "add", node.IPv4+"/32", "dev", "hbn")                            //nolint:errcheck
+		DockerExec(node.Name, "ip", "addr", "add", node.IPv6+"/128", "dev", "hbn")                           //nolint:errcheck
+		if _, err := DockerExec(node.Name, "ip", "route", "add", "default", "via", "inet6", "fd00:7:caa5::", "dev", "hbn", "src", node.IPv4); err != nil {
+			return fmt.Errorf("adding IPv4 default route on %s: %w", node.Name, err)
+		}
+		if _, err := DockerExec(node.Name, "ip", "-6", "route", "add", "default", "via", "fd00:7:caa5::", "dev", "hbn", "src", node.IPv6); err != nil {
+			return fmt.Errorf("adding IPv6 default route on %s: %w", node.Name, err)
+		}
 	}
 
 	// Wait for BGP convergence
