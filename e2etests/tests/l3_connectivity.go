@@ -7,11 +7,10 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-
 	"github.com/telekom/das-schiff-network-operator/e2etests/framework"
 )
 
-// TC-02: L3 Connectivity (cross-VLAN, same VRF)
+// TC-02: L3 Connectivity (cross-VLAN, same VRF).
 var _ = Describe("L3 Connectivity", Label("l3", "smoke"), func() {
 	var (
 		f   *framework.Framework

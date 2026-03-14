@@ -6,14 +6,11 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-
 	"github.com/telekom/das-schiff-network-operator/e2etests/config"
 	"github.com/telekom/das-schiff-network-operator/e2etests/framework"
-
-	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
-
 	// Import test packages so their init() / Describe blocks register.
 	_ "github.com/telekom/das-schiff-network-operator/e2etests/tests"
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 )
 
 var f *framework.Framework

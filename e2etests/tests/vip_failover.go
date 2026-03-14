@@ -7,11 +7,10 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-
 	"github.com/telekom/das-schiff-network-operator/e2etests/framework"
 )
 
-// TC-11: VIP Failover with Gratuitous ARP/NA
+// TC-11: VIP Failover with Gratuitous ARP/NA.
 var _ = Describe("VIP Failover", Label("failover"), func() {
 	var (
 		f   *framework.Framework

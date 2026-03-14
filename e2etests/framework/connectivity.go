@@ -73,7 +73,7 @@ func (f *Framework) PingFromContainer(ctx context.Context, container, target str
 }
 
 // AssertConnectivity verifies bidirectional ping between two pods.
-func (f *Framework) AssertConnectivity(ctx context.Context, ns1, pod1, ns2, pod2, targetIP string, timeout time.Duration) error {
+func (f *Framework) AssertConnectivity(ctx context.Context, ns1, pod1, _, _, targetIP string, timeout time.Duration) error {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 

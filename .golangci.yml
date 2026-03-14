@@ -228,6 +228,24 @@ linters:
       - linters:
           - prealloc
         path: pkg/helpers/
+      # E2E test infrastructure: relax pedantic linters
+      - path: e2etests/
+        linters:
+          - mnd
+          - wrapcheck
+          - nilerr
+      - path: e2etests/tests/
+        linters:
+          - revive
+        text: 'dot-imports:'
+      - path: e2etests/tests/
+        linters:
+          - staticcheck
+        text: 'ST1001:'
+      - path: e2etests/
+        linters:
+          - revive
+        text: 'unsecure-url-scheme:'
     paths:
       - third_party$
       - builtin$

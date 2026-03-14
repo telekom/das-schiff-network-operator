@@ -30,7 +30,7 @@ type BGPPeerSummary struct {
 }
 
 // VtyshExec executes a vtysh command on a containerlab FRR node.
-func (f *Framework) VtyshExec(ctx context.Context, container string, command string) (string, error) {
+func (f *Framework) VtyshExec(ctx context.Context, container, command string) (string, error) {
 	stdout, stderr, err := f.DockerExec(ctx, container, []string{"vtysh", "-c", command})
 	if err != nil {
 		return "", fmt.Errorf("vtysh exec failed: stdout=%s stderr=%s err=%w", stdout, stderr, err)
@@ -39,7 +39,7 @@ func (f *Framework) VtyshExec(ctx context.Context, container string, command str
 }
 
 // VtyshExecOnKindNode executes a vtysh command on a CRA-FRR instance inside a kind node.
-func (f *Framework) VtyshExecOnKindNode(ctx context.Context, kindNode string, command string) (string, error) {
+func (f *Framework) VtyshExecOnKindNode(ctx context.Context, kindNode, command string) (string, error) {
 	stdout, stderr, err := f.DockerExec(ctx, kindNode,
 		[]string{"machinectl", "shell", "cra-frr", "/usr/bin/vtysh", "-c", command})
 	if err != nil {

@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/telekom/das-schiff-network-operator/e2etests/config"
-
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -18,8 +18,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 )
 
 // Global is the shared framework instance, set during BeforeSuite.
@@ -187,7 +185,8 @@ func (f *Framework) WaitForNodesReady(timeout time.Duration) error {
 		if len(nodes.Items) == 0 {
 			return false, nil
 		}
-		for _, node := range nodes.Items {
+		for i := range nodes.Items {
+			node := &nodes.Items[i]
 			ready := false
 			for _, cond := range node.Status.Conditions {
 				if cond.Type == corev1.NodeReady && cond.Status == corev1.ConditionTrue {

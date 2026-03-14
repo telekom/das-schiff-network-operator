@@ -6,11 +6,10 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-
 	"github.com/telekom/das-schiff-network-operator/e2etests/framework"
 )
 
-// TC-03: VRF Isolation
+// TC-03: VRF Isolation.
 var _ = Describe("VRF Isolation", Label("vrf"), func() {
 	var (
 		f   *framework.Framework

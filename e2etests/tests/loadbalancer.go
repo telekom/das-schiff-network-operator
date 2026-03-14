@@ -8,13 +8,11 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-
 	"github.com/telekom/das-schiff-network-operator/e2etests/framework"
-
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// TC-06: LoadBalancer Service
+// TC-06: LoadBalancer Service.
 var _ = Describe("LoadBalancer Service", Label("lb"), func() {
 	var (
 		f   *framework.Framework

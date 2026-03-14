@@ -5,11 +5,10 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-
 	"github.com/telekom/das-schiff-network-operator/e2etests/framework"
 )
 
-// TC-10: NAT64 Outbound
+// TC-10: NAT64 Outbound.
 var _ = Describe("NAT64 Outbound", Label("nat64"), func() {
 	var (
 		f   *framework.Framework

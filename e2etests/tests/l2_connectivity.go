@@ -9,11 +9,10 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-
 	"github.com/telekom/das-schiff-network-operator/e2etests/framework"
 )
 
-// TC-01: L2 Connectivity (same VLAN)
+// TC-01: L2 Connectivity (same VLAN).
 var _ = Describe("L2 Connectivity", Label("l2", "smoke"), func() {
 	var (
 		f   *framework.Framework

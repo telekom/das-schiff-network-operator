@@ -7,11 +7,10 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-
 	"github.com/telekom/das-schiff-network-operator/e2etests/framework"
 )
 
-// TC-04 & TC-05: VRF Gateway Connectivity
+// TC-04 & TC-05: VRF Gateway Connectivity.
 var _ = Describe("Gateway Connectivity", Label("gateway", "smoke"), func() {
 	var (
 		f   *framework.Framework

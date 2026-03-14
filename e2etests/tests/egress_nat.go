@@ -6,11 +6,10 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-
 	"github.com/telekom/das-schiff-network-operator/e2etests/framework"
 )
 
-// TC-08: Egress NAT
+// TC-08: Egress NAT.
 var _ = Describe("Egress NAT", Label("egress"), func() {
 	var (
 		f   *framework.Framework

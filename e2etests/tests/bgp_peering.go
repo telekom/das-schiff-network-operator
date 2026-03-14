@@ -7,11 +7,10 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-
 	"github.com/telekom/das-schiff-network-operator/e2etests/framework"
 )
 
-// TC-07: BGP Peering (BGPaaS)
+// TC-07: BGP Peering (BGPaaS).
 var _ = Describe("BGP Peering", Label("bgp"), func() {
 	var (
 		f   *framework.Framework

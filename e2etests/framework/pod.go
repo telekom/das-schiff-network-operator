@@ -177,7 +177,8 @@ func (f *Framework) WaitForPodReady(ctx context.Context, namespace, name string,
 		if pod.Status.Phase != corev1.PodRunning {
 			return false, nil
 		}
-		for _, cs := range pod.Status.ContainerStatuses {
+		for i := range pod.Status.ContainerStatuses {
+			cs := &pod.Status.ContainerStatuses[i]
 			if !cs.Ready {
 				return false, nil
 			}
@@ -209,7 +210,7 @@ func (f *Framework) DeletePod(ctx context.Context, namespace, name string) error
 }
 
 // ExecInPod executes a command in a running pod and returns stdout, stderr.
-func (f *Framework) ExecInPod(ctx context.Context, namespace, podName, containerName string, command []string) (string, string, error) {
+func (f *Framework) ExecInPod(ctx context.Context, namespace, podName, containerName string, command []string) (stdOut, stdErr string, err error) {
 	restCfg, err := clientcmd.BuildConfigFromFlags("", f.Config.Kubeconfig)
 	if err != nil {
 		return "", "", err
@@ -242,7 +243,7 @@ func (f *Framework) ExecInPod(ctx context.Context, namespace, podName, container
 }
 
 // DockerExec runs a command inside a docker container (for containerlab nodes).
-func (f *Framework) DockerExec(ctx context.Context, container string, command []string) (string, string, error) {
+func (*Framework) DockerExec(ctx context.Context, container string, command []string) (stdOut, stdErr string, err error) {
 	args := append([]string{"exec", container}, command...)
 	cmd := exec.CommandContext(ctx, "docker", args...)
 
@@ -250,7 +251,7 @@ func (f *Framework) DockerExec(ctx context.Context, container string, command []
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	err := cmd.Run()
+	err = cmd.Run()
 	return stdout.String(), stderr.String(), err
 }
 
