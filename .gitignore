@@ -30,9 +30,8 @@ pkg/*/testdata*
 *.swo
 *~
 
-# Compiler output (except BPF ELF objects which are embedded at build time)
+# BPF compiled objects (generated at build time)
 pkg/bpf/*.o
-!pkg/bpf/nwopbpf_*_bpfel.o
 
 # E2E runtime artifacts
 e2e/generated/
