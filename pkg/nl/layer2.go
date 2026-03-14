@@ -169,10 +169,7 @@ func (n *Manager) setupBridge(info *Layer2Information, masterIdx int) (*netlink.
 }
 
 func (n *Manager) setupVXLAN(info *Layer2Information, bridge *netlink.Bridge) error {
-	neighSuppression := os.Getenv("NWOP_NEIGH_SUPPRESSION") == "true"
-	if len(info.AnycastGateways) == 0 {
-		neighSuppression = false
-	}
+	neighSuppression := len(info.AnycastGateways) > 0
 	if info.NeighSuppression != nil {
 		neighSuppression = *info.NeighSuppression
 	}
@@ -401,10 +398,7 @@ func (n *Manager) reattachL2VNI(current *Layer2Information) error {
 }
 
 func (n *Manager) doNeighSuppression(current, desired *Layer2Information) error {
-	neighSuppression := os.Getenv("NWOP_NEIGH_SUPPRESSION") == "true"
-	if len(desired.AnycastGateways) == 0 {
-		neighSuppression = false
-	}
+	neighSuppression := len(desired.AnycastGateways) > 0
 	if desired.NeighSuppression != nil {
 		neighSuppression = *desired.NeighSuppression
 	}
@@ -455,6 +449,12 @@ func (*Manager) configureBridge(intfName string) error {
 		}
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("error checking if accept_untracked_na exists: %w", err)
+	}
+
+	// Disable duplicate address detection — anycast gateways share the same
+	// MAC + IP across nodes, so DAD would always flag a duplicate.
+	if err := os.WriteFile(fmt.Sprintf("%s/ipv6/conf/%s/accept_dad", procSysNetPath, intfName), []byte("0"), neighFilePermissions); err != nil {
+		return fmt.Errorf("error setting accept_dad = 0 for interface: %w", err)
 	}
 
 	baseTimer := os.Getenv("NWOP_NEIGH_BASE_REACHABLE_TIME")

@@ -122,7 +122,9 @@ neighbor {{ $peerIdentifier }} peer-group
 neighbor {{ $peerIdentifier }} remote-as {{ .RemoteASN }}
 bgp listen range {{ .ListenRange }} peer-group {{ $peerIdentifier }}
 {{ end }}
+{{ if and .KeepaliveTime .HoldTime }}
 neighbor {{ $peerIdentifier }} timers {{ .KeepaliveTime.Seconds }} {{ .HoldTime.Seconds }}
+{{ end }}
 {{ if .Multihop }}
 neighbor {{ $peerIdentifier }} ttl-security hops {{ .Multihop }}
 {{ end }}
@@ -144,7 +146,7 @@ exit-address-family
 
 
 {{ if .IPv6 }}
-address-family ipv4 unicast
+address-family ipv6 unicast
   neighbor {{ $peerIdentifier }} activate
   {{ if .IPv6.MaxPrefixes }}
   neighbor {{ $peerIdentifier }} maximum-prefix {{ .IPv6.MaxPrefixes }}
@@ -298,12 +300,20 @@ router bgp {{ $.Config.LocalASN }} vrf {{ $name }}
     redistribute connected
     redistribute static
     redistribute kernel
+    {{ range $vrfImport := $vrf.VRFImports }}
+    import vrf {{ $vrfImport.FromVRF }}
+    {{ end }}
+    import vrf route-map rm_{{ $name }}_import
   exit-address-family
 
   address-family ipv6 unicast
     redistribute connected
     redistribute static
     redistribute kernel
+    {{ range $vrfImport := $vrf.VRFImports }}
+    import vrf {{ $vrfImport.FromVRF }}
+    {{ end }}
+    import vrf route-map rm_{{ $name }}_import
   exit-address-family
 exit
 !
@@ -506,7 +516,7 @@ pbr-map hbn seq {{ add $i 1 }}
 {{ if $pbrRule.NextHop.Address }}
 set nexthop {{ $pbrRule.NextHop.Address }}
 {{ else if $pbrRule.NextHop.Vrf }}
-set nexthop {{ $pbrRule.NextHop.Vrf }} nexthop-vrf {{ $pbrRule.NextHop.Vrf }}
+set vrf {{ $pbrRule.NextHop.Vrf }}
 {{ end }}
 exit
 {{ end }}
