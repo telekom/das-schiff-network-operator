@@ -41,4 +41,7 @@ e2e/images/kind-node/cra-frr.tar
 e2e/setup/clab-nwop/
 e2e/setup/e2e/
 
+# FRR runtime artifacts
+*.conf.sav
+
 vendor/

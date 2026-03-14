@@ -13,8 +13,6 @@ ip link add vx.mgmt type vxlan id 20 dev lo local 192.0.2.1 dstport 4789 nolearn
 ip link add br.mgmt type bridge
 ip link set vx.mgmt master br.mgmt
 ip link set br.mgmt master vr.mgmt
-ip link set hostgw master vr.mgmt
-echo 0 > /proc/sys/net/ipv6/conf/hostgw/accept_ra
 ip link set br.mgmt up
 ip link set vx.mgmt up
 ip link set vr.mgmt up
