@@ -1,0 +1,11 @@
+# MetalLB IPAddressPool for m2m VRF
+# kube-vip (BGP mode) handles VIP announcement – no L2Advertisement needed.
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: m2m-pool
+  namespace: metallb-system
+spec:
+  addresses:
+    - 10.250.4.0/24
+    - fdbb:6b17:90ba::/64

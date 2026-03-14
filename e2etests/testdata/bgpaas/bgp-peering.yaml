@@ -1,0 +1,24 @@
+# BGPPeering CR for BGPaaS test
+apiVersion: network.t-caas.telekom.com/v1alpha1
+kind: BGPPeering
+metadata:
+  name: bgpaas-test
+spec:
+  peeringVlan:
+    name: vlan1
+  remoteASN: 65511
+  enableBFD: false
+  import:
+    - cidr: "10.250.3.0/24"
+      action: permit
+      seq: 10
+    - cidr: "fd75:2d70:f7f7::/64"
+      action: permit
+      seq: 20
+  export:
+    - cidr: "10.250.0.0/16"
+      action: permit
+      seq: 10
+    - cidr: "fd94:685b:30cf::/48"
+      action: permit
+      seq: 20

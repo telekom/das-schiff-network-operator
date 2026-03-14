@@ -1,0 +1,10 @@
+# MetalLB IPAddressPool for c2m VRF
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: c2m-pool
+  namespace: metallb-system
+spec:
+  addresses:
+    - 10.250.5.0/24
+    - fdb2:e3e1:fcbf::/64

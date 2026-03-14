@@ -1,0 +1,33 @@
+# c2m Egress NAT test manifests (Coil + test pod)
+#
+# Calico IPPools (c2m-egress-v4, c2m-egress-v6) provide dedicated source IPs
+# (10.250.6.0/30) that match PBR rules routing into VRF s-c2m.
+apiVersion: coil.cybozu.com/v2
+kind: Egress
+metadata:
+  name: c2m-egress
+  namespace: e2e-test-egress
+spec:
+  destinations:
+    - 10.102.1.0/24
+    - fda5:25c1:193d::/64
+  replicas: 1
+  template:
+    metadata:
+      annotations:
+        cni.projectcalico.org/ipv4pools: '["c2m-egress-v4"]'
+        cni.projectcalico.org/ipv6pools: '["c2m-egress-v6"]'
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: egress-via-nat-c2m-01
+  namespace: e2e-test-egress
+  annotations:
+    egress.coil.cybozu.com/e2e-test-egress: c2m-egress
+spec:
+  containers:
+    - name: tester
+      image: busybox:1.37
+      command: ["sleep", "infinity"]
+  restartPolicy: Never

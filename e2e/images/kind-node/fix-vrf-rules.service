@@ -1,0 +1,14 @@
+[Unit]
+Wants=network.target
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=ip -4 rule add pref 32765 table local
+ExecStart=ip -4 rule del pref 0
+ExecStart=ip -6 rule add pref 32765 table local
+ExecStart=ip -6 rule del pref 0
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,66 @@
+#!/bin/bash
+# Post-deploy setup for dcgw1 (matches vm-lab dcgw1 exec block)
+# Idempotent — safe to re-run.
+
+sysctl -w net.ipv4.ip_forward=1
+sysctl -w net.ipv6.conf.all.forwarding=1
+bash -c 'echo 0 > /proc/sys/net/ipv6/conf/hostgw/accept_ra' 2>/dev/null || true
+
+ip addr add 192.0.2.1/32 dev lo 2>/dev/null || true
+
+# VRF mgmt
+ip link add vr.mgmt type vrf table 100 2>/dev/null || true
+ip link add vx.mgmt type vxlan id 20 dev lo local 192.0.2.1 dstport 4789 nolearning 2>/dev/null || true
+ip link add br.mgmt type bridge 2>/dev/null || true
+ip link set vx.mgmt master br.mgmt 2>/dev/null || true
+ip link set br.mgmt master vr.mgmt 2>/dev/null || true
+ip link set hostgw master vr.mgmt 2>/dev/null || true
+ip link set br.mgmt up 2>/dev/null || true
+ip link set vx.mgmt up 2>/dev/null || true
+ip link set vr.mgmt up 2>/dev/null || true
+
+# Tester interface in mgmt VRF
+ip link set eth-tester master vr.mgmt 2>/dev/null || true
+ip addr add 10.200.0.1/24 dev eth-tester 2>/dev/null || true
+ip addr add fd00:200::1/64 dev eth-tester 2>/dev/null || true
+ip link set eth-tester up 2>/dev/null || true
+
+# VRF m2m
+ip link add vr.m2m type vrf table 2002026 2>/dev/null || true
+ip link add vx.m2m type vxlan id 2002026 dev lo local 192.0.2.1 dstport 4789 nolearning 2>/dev/null || true
+ip link add br.m2m type bridge 2>/dev/null || true
+ip link set vx.m2m master br.m2m 2>/dev/null || true
+ip link set br.m2m master vr.m2m 2>/dev/null || true
+ip link set m2mgw master vr.m2m 2>/dev/null || true
+ip link set br.m2m up 2>/dev/null || true
+ip link set vx.m2m up 2>/dev/null || true
+ip link set vr.m2m up 2>/dev/null || true
+ip addr add fdff:965f:f02a:1::/127 dev m2mgw 2>/dev/null || true
+
+# VRF c2m
+ip link add vr.c2m type vrf table 2002027 2>/dev/null || true
+ip link add vx.c2m type vxlan id 2002027 dev lo local 192.0.2.1 dstport 4789 nolearning 2>/dev/null || true
+ip link add br.c2m type bridge 2>/dev/null || true
+ip link set vx.c2m master br.c2m 2>/dev/null || true
+ip link set br.c2m master vr.c2m 2>/dev/null || true
+ip link set c2mgw master vr.c2m 2>/dev/null || true
+ip link set br.c2m up 2>/dev/null || true
+ip link set vx.c2m up 2>/dev/null || true
+ip link set vr.c2m up 2>/dev/null || true
+ip addr add fde9:9ec5:829e:1::/127 dev c2mgw 2>/dev/null || true
+
+# Static routes to m2mgw/c2mgw
+ip -4 route add 10.102.0.0/24 via inet6 fdff:965f:f02a:1::1 dev m2mgw vrf vr.m2m 2>/dev/null || true
+ip -6 route add fda5:25c1:193c::/64 via inet6 fdff:965f:f02a:1::1 dev m2mgw vrf vr.m2m 2>/dev/null || true
+ip -4 route add 10.102.1.0/24 via inet6 fde9:9ec5:829e:1::1 dev c2mgw vrf vr.c2m 2>/dev/null || true
+ip -6 route add fda5:25c1:193d::/64 via inet6 fde9:9ec5:829e:1::1 dev c2mgw vrf vr.c2m 2>/dev/null || true
+
+# NAT64 gateway
+ip link set eth-nat64 master vr.mgmt 2>/dev/null || true
+ip addr add fddf:64ff:9b00:1::/127 dev eth-nat64 2>/dev/null || true
+ip link set eth-nat64 up 2>/dev/null || true
+# Static routes to NAT64 in vr.mgmt
+ip -6 route add fda5:25c1:193e::1/128 via fddf:64ff:9b00:1::1 dev eth-nat64 vrf vr.mgmt 2>/dev/null || true
+ip -6 route add 64:ff9b::/96 via fddf:64ff:9b00:1::1 dev eth-nat64 vrf vr.mgmt 2>/dev/null || true
+
+echo "dcgw1 setup complete"

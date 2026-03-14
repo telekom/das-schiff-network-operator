@@ -1,0 +1,25 @@
+# NetworkAttachmentDefinition for VLAN 503 (c2m VRF, isolation test)
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: macvlan-vlan503
+  namespace: e2e-test
+  annotations:
+    k8s.v1.cni.cncf.io/resourceName: ""
+spec:
+  config: |
+    {
+      "cniVersion": "0.3.1",
+      "type": "macvlan",
+      "master": "vlan.503",
+      "mode": "bridge",
+      "ipam": {
+        "type": "static",
+        "routes": [
+          {"dst": "10.250.0.0/16", "gw": "10.250.30.1"},
+          {"dst": "10.102.0.0/16", "gw": "10.250.30.1"},
+          {"dst": "fd94:685b:30cf::/48", "gw": "fd94:685b:30cf:503::1"},
+          {"dst": "fda5:25c1:193d::/48", "gw": "fd94:685b:30cf:503::1"}
+        ]
+      }
+    }

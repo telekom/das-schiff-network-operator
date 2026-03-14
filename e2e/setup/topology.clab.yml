@@ -1,0 +1,139 @@
+# e2e/setup/topology.clab.yml
+# Containerlab topology: fabric + infra + k8s nodes (pre-created externally).
+# K8s nodes are created by the orchestrator (e2e/setup) with Docker flags that
+# containerlab can't express (--volume /var, --tmpfs /run, etc).
+# Containerlab wires them using ext-container + veth links.
+name: nwop
+
+mgmt:
+  network: nwop-mgmt
+  ipv4-subnet: 172.30.0.0/24
+
+topology:
+  kinds:
+    linux:
+      image: quay.io/frrouting/frr:10.3.1
+
+  nodes:
+    # ── Kubernetes nodes (pre-created by orchestrator, wired here) ──
+    nwop-control-plane:
+      kind: ext-container
+
+    nwop-worker:
+      kind: ext-container
+
+    nwop-worker2:
+      kind: ext-container
+
+    # ── EVPN Route Reflectors ──
+    dcgw1:
+      kind: linux
+      network-mode: none
+      binds:
+        - ../clab/frr/dcgw1:/etc/frr
+      exec:
+        - bash /etc/frr/setup.sh
+
+    dcgw2:
+      kind: linux
+      network-mode: none
+      binds:
+        - ../clab/frr/dcgw2:/etc/frr
+      exec:
+        - bash /etc/frr/setup.sh
+
+    # ── Leaf switches ──
+    leaf1:
+      kind: linux
+      network-mode: none
+      binds:
+        - ../clab/frr/leaf1:/etc/frr
+      exec:
+        - bash /etc/frr/setup.sh
+
+    leaf2:
+      kind: linux
+      network-mode: none
+      binds:
+        - ../clab/frr/leaf2:/etc/frr
+      exec:
+        - bash /etc/frr/setup.sh
+
+    # ── VRF gateways ──
+    m2mgw:
+      kind: linux
+      image: nicolaka/netshoot:latest
+      network-mode: none
+      exec:
+        - ip addr add fdff:965f:f02a:1::1/127 dev dcgw1
+        - ip addr add fdff:965f:f02a:2::1/127 dev dcgw2
+        - ip addr add 10.102.0.1/32 dev lo
+        - ip addr add fda5:25c1:193c::1/128 dev lo
+        - "ip -4 route add default src 10.102.0.1 nexthop via inet6 fdff:965f:f02a:1:: dev dcgw1 weight 1 nexthop via inet6 fdff:965f:f02a:2:: dev dcgw2 weight 1"
+        - "ip -6 route add default src fda5:25c1:193c::1 nexthop via inet6 fdff:965f:f02a:1:: dev dcgw1 weight 1 nexthop via inet6 fdff:965f:f02a:2:: dev dcgw2 weight 1"
+
+    c2mgw:
+      kind: linux
+      image: nicolaka/netshoot:latest
+      network-mode: none
+      exec:
+        - ip addr add fde9:9ec5:829e:1::1/127 dev dcgw1
+        - ip addr add fde9:9ec5:829e:2::1/127 dev dcgw2
+        - ip addr add 10.102.1.1/32 dev lo
+        - ip addr add fda5:25c1:193d::1/128 dev lo
+        - "ip -4 route add default src 10.102.1.1 nexthop via inet6 fde9:9ec5:829e:1:: dev dcgw1 weight 1 nexthop via inet6 fde9:9ec5:829e:2:: dev dcgw2 weight 1"
+        - "ip -6 route add default src fda5:25c1:193d::1 nexthop via inet6 fde9:9ec5:829e:1:: dev dcgw1 weight 1 nexthop via inet6 fde9:9ec5:829e:2:: dev dcgw2 weight 1"
+
+    # ── NAT64 gateway ──
+    nat64:
+      kind: linux
+      image: ${E2E_NAT64_IMAGE:-ghcr.io/telekom/das-schiff-nat64:latest}
+      binds:
+        - ../clab/nat64/tayga.conf:/etc/tayga.conf
+        - ../clab/nat64/unbound.conf:/etc/unbound/unbound.conf
+      exec:
+        - ip addr add fddf:64ff:9b00:1::1/127 dev eth1
+        - ip addr add fddf:64ff:9b00:2::1/127 dev eth2
+        - "ip -6 route add default src fda5:25c1:193e::1 nexthop via fddf:64ff:9b00:1:: dev eth1 weight 1 nexthop via fddf:64ff:9b00:2:: dev eth2 weight 1"
+
+    # ── Test runner ──
+    tester:
+      kind: linux
+      image: ${E2E_TESTER_IMAGE:-ghcr.io/telekom/das-schiff-e2e-tester:latest}
+      binds:
+        - ../..:/repo
+        - /var/run/docker.sock:/var/run/docker.sock:ro
+      exec:
+        - bash -c "mkdir -p /root/.kube"
+        - ip addr add 10.200.0.2/24 dev eth1
+        - ip addr add fd00:200::2/64 dev eth1
+        - ip route add 10.100.0.0/24 via 10.200.0.1 dev eth1
+        - ip -6 route add fdcb:f93c:3a3e::/64 via fd00:200::1 dev eth1
+
+  links:
+    # ── dcgw ↔ leaf (underlay p2p) ──
+    - endpoints: ["dcgw1:eth-leaf1", "leaf1:eth-dcgw1"]
+    - endpoints: ["dcgw1:eth-leaf2", "leaf2:eth-dcgw1"]
+    - endpoints: ["dcgw2:eth-leaf1", "leaf1:eth-dcgw2"]
+    - endpoints: ["dcgw2:eth-leaf2", "leaf2:eth-dcgw2"]
+
+    # ── leaf ↔ k8s nodes (server underlay, 2 uplinks each) ──
+    - endpoints: ["leaf1:eth-srv1", "nwop-control-plane:eth1"]
+    - endpoints: ["leaf2:eth-srv1", "nwop-control-plane:eth2"]
+    - endpoints: ["leaf1:eth-srv2", "nwop-worker:eth1"]
+    - endpoints: ["leaf2:eth-srv2", "nwop-worker:eth2"]
+    - endpoints: ["leaf1:eth-srv3", "nwop-worker2:eth1"]
+    - endpoints: ["leaf2:eth-srv3", "nwop-worker2:eth2"]
+
+    # ── dcgw ↔ VRF gateways ──
+    - endpoints: ["dcgw1:m2mgw", "m2mgw:dcgw1"]
+    - endpoints: ["dcgw2:m2mgw", "m2mgw:dcgw2"]
+    - endpoints: ["dcgw1:c2mgw", "c2mgw:dcgw1"]
+    - endpoints: ["dcgw2:c2mgw", "c2mgw:dcgw2"]
+
+    # ── dcgw ↔ NAT64 ──
+    - endpoints: ["dcgw1:eth-nat64", "nat64:eth1"]
+    - endpoints: ["dcgw2:eth-nat64", "nat64:eth2"]
+
+    # ── tester connectivity ──
+    - endpoints: ["dcgw1:eth-tester", "tester:eth1"]

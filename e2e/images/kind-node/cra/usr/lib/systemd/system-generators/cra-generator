@@ -1,0 +1,68 @@
+#!/bin/bash
+# systemd generator for CRA service.
+# Reads /etc/cra/interfaces and /etc/cra/flavour to create a systemd service unit.
+# Adapted from ansible hbn_node_deps role for e2e use (FRR flavour only).
+
+set -euo pipefail
+
+GENERATOR_DIR="$1"
+INTERFACES_FILE="/etc/cra/interfaces"
+FLAVOUR_FILE="/etc/cra/flavour"
+
+# Exit early if no interfaces file exists
+if [[ ! -f "$INTERFACES_FILE" ]]; then
+    exit 0
+fi
+
+# Read flavour (default to frr for e2e)
+FLAVOUR="frr"
+if [[ -f "$FLAVOUR_FILE" ]]; then
+    FLAVOUR=$(cat "$FLAVOUR_FILE" | tr -d '[:space:]')
+fi
+
+# Read interfaces and check if we have any
+mapfile -t INTERFACES < <(grep -v '^#' "$INTERFACES_FILE" | grep -v '^[[:space:]]*$' || true)
+
+if [[ ${#INTERFACES[@]} -eq 0 ]]; then
+    exit 0
+fi
+
+if [[ "$FLAVOUR" == "frr" ]]; then
+    # Build interface arguments for systemd-nspawn
+    IFACE_ARGS=""
+    for iface in "${INTERFACES[@]}"; do
+        IFACE_ARGS+=" --network-interface=$iface"
+    done
+
+    cat > "$GENERATOR_DIR/cra.service" <<EOF
+[Unit]
+Description=Container cra-frr
+Documentation=man:systemd-nspawn(1)
+Wants=modprobe@tun.service modprobe@loop.service modprobe@dm_mod.service
+PartOf=machines.target
+Before=machines.target
+After=network.target modprobe@tun.service modprobe@loop.service modprobe@dm_mod.service
+RequiresMountsFor=/var/lib/machines/cra-frr
+ConditionPathExists=/etc/cra/interfaces
+
+[Service]
+ExecStartPre=mkdir -p /etc/cra/certs
+ExecStartPre=mkdir -p /etc/cra/netplan
+ExecStartPre=mkdir -p /etc/cra/systemd-network
+ExecStartPre=cp -f /etc/cra/base-config.yaml /etc/cra/certs/base-config.yaml
+ExecStart=systemd-nspawn --quiet --ephemeral --bind=/etc/cra/certs:/etc/cra --bind=/etc/cra/frr.conf:/etc/frr/frr.conf --bind-ro=/etc/cra/netplan:/etc/netplan --bind-ro=/etc/cra/systemd-network:/etc/systemd/network --oci-bundle /var/lib/machines/cra-frr -M cra-frr --network-veth-extra=hbn$IFACE_ARGS --private-network --capability=CAP_BPF,CAP_SYS_RAWIO,CAP_DAC_OVERRIDE,CAP_SYS_ADMIN,CAP_NET_RAW --system-call-filter=bpf
+KillMode=mixed
+Type=notify
+RestartForceExitStatus=133
+SuccessExitStatus=133
+Slice=machine.slice
+Delegate=yes
+TasksMax=16384
+WatchdogSec=3min
+
+[Install]
+WantedBy=machines.target
+EOF
+fi
+
+exit 0

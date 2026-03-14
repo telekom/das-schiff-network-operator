@@ -1,0 +1,155 @@
+apiVersion: network.t-caas.telekom.com/v1alpha1
+kind: VRFRouteConfiguration
+metadata:
+  name: m2m-test-vrf
+spec:
+  export:
+  # VLAN 1
+  - cidr: 10.250.0.0/24
+    le: 32
+    action: permit
+  - cidr: fd94:685b:30cf:501::/64
+    le: 128
+    action: permit
+  # VLAN 2
+  - cidr: 10.250.1.0/24
+    le: 32
+    action: permit
+  - cidr: fd94:685b:30cf:502::/64
+    le: 128
+    action: permit
+  # egress nat
+  - cidr: 10.250.2.0/30
+    le: 32
+    action: permit
+  - cidr: fd90:4dbf:396d::/126
+    le: 128
+    action: permit
+  # bgpaas
+  - cidr: 10.250.3.0/24
+    le: 32
+    action: permit
+  - cidr: fd75:2d70:f7f7::/64
+    le: 128
+    action: permit
+  # ingress
+  - cidr: 10.250.4.0/24
+    le: 32
+    action: permit
+  - cidr: fdbb:6b17:90ba::/64
+    le: 128
+    action: permit
+  import:
+  # m2m test container
+  - cidr: 10.102.0.1/32
+    action: permit
+  - cidr: fda5:25c1:193c::/64
+    le: 128
+    action: permit
+  sbrPrefixes:
+  - 10.250.4.0/24
+  - fdbb:6b17:90ba::/64
+  - 10.250.2.0/30
+  - fd90:4dbf:396d::/126
+  aggregate:
+  - 10.250.2.0/30
+  - fd90:4dbf:396d::/126
+  - 10.250.3.0/24
+  - fd75:2d70:f7f7::/64
+  - 10.250.4.0/24
+  - fdbb:6b17:90ba::/64
+  seq: 10
+  vrf: m2m
+  vni: 2002026
+  routeTarget: 65188:2026
+---
+apiVersion: network.t-caas.telekom.com/v1alpha1
+kind: Layer2NetworkConfiguration
+metadata:
+  name: vlan1
+spec:
+  anycastGateways:
+  - 10.250.0.1/24
+  - fd94:685b:30cf:501::1/64
+  anycastMac: 1a:ee:cf:2f:a7:a8
+  id: 501
+  mtu: 1500
+  vni: 4000002
+  vrf: m2m
+---
+apiVersion: network.t-caas.telekom.com/v1alpha1
+kind: Layer2NetworkConfiguration
+metadata:
+  name: vlan2
+spec:
+  anycastGateways:
+  - 10.250.1.1/24
+  - fd94:685b:30cf:502::1/64
+  anycastMac: 1a:ee:cf:2f:a7:a9
+  id: 502
+  mtu: 1500
+  vni: 4000003
+  vrf: m2m
+---
+apiVersion: network.t-caas.telekom.com/v1alpha1
+kind: VRFRouteConfiguration
+metadata:
+  name: c2m-test-vrf
+spec:
+  export:
+  # VLAN 3
+  - cidr: 10.250.30.0/24
+    le: 32
+    action: permit
+  - cidr: fd94:685b:30cf:503::/64
+    le: 128
+    action: permit
+  # c2m egress nat
+  - cidr: 10.250.6.0/30
+    le: 32
+    action: permit
+  - cidr: fde8:e5cf:d314::/126
+    le: 128
+    action: permit
+  # c2m ingress (LB)
+  - cidr: 10.250.5.0/24
+    le: 32
+    action: permit
+  - cidr: fdb2:e3e1:fcbf::/64
+    le: 128
+    action: permit
+  import:
+  # c2m test container
+  - cidr: 10.102.1.1/32
+    action: permit
+  - cidr: fda5:25c1:193d::/64
+    le: 128
+    action: permit
+  sbrPrefixes:
+  - 10.250.5.0/24
+  - fdb2:e3e1:fcbf::/64
+  - 10.250.6.0/30
+  - fde8:e5cf:d314::/126
+  aggregate:
+  - 10.250.6.0/30
+  - fde8:e5cf:d314::/126
+  - 10.250.5.0/24
+  - fdb2:e3e1:fcbf::/64
+  seq: 10
+  vrf: c2m
+  vni: 2002027
+  routeTarget: 65188:2027
+---
+apiVersion: network.t-caas.telekom.com/v1alpha1
+kind: Layer2NetworkConfiguration
+metadata:
+  name: vlan3
+spec:
+  anycastGateways:
+  - 10.250.30.1/24
+  - fd94:685b:30cf:503::1/64
+  anycastMac: 1a:ee:cf:2f:a7:a8
+  id: 503
+  mtu: 1500
+  vni: 4000004
+  vrf: c2m
