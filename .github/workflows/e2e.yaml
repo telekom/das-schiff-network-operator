@@ -38,6 +38,11 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: system-level-dependencies
+        run: |
+          sudo apt update
+          sudo apt -y install linux-modules-extra-$(uname -r)
+
       - name: Set up E2E lab
         run: make e2e-up
 
