@@ -234,10 +234,9 @@ func buildDesiredRules(routes []cra.PolicyRoute) []netlink.Rule {
 			continue
 		}
 
-		base := netlink.Rule{
-			Priority: policyRoutePriority,
-			Table:    tableID,
-		}
+		base := netlink.NewRule()
+		base.Priority = policyRoutePriority
+		base.Table = tableID
 
 		if pr.SrcPrefix != nil {
 			base.Src = parsePrefixOrHost(*pr.SrcPrefix)
@@ -255,8 +254,8 @@ func buildDesiredRules(routes []cra.PolicyRoute) []netlink.Rule {
 			base.IPProto = protoNumber(*pr.Protocol)
 		}
 
-		setRuleFamily(&base)
-		rules = append(rules, base)
+		setRuleFamily(base)
+		rules = append(rules, *base)
 	}
 	return rules
 }
