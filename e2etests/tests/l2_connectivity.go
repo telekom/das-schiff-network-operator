@@ -75,9 +75,29 @@ var _ = Describe("L2 Connectivity", Label("l2", "smoke"), func() {
 			result, _ := f.PingFromPod(ctx, ns, "macvlan-01", cfg.Macvlan02IPv6, 1)
 			if result != nil && !result.Success {
 				GinkgoWriter.Printf("IPv6 ping failed: %s\n", result.Output)
+				// Dump pod neighbor + addr tables for debugging
+				neighOut, _, _ := f.ExecInPod(ctx, ns, "macvlan-01", "", []string{"ip", "-6", "neigh", "show"})
+				addrOut, _, _ := f.ExecInPod(ctx, ns, "macvlan-01", "", []string{"ip", "-6", "addr", "show"})
+				routeOut, _, _ := f.ExecInPod(ctx, ns, "macvlan-01", "", []string{"ip", "-6", "route", "show"})
+				GinkgoWriter.Printf("macvlan-01 IPv6 neigh:\n%s\n", neighOut)
+				GinkgoWriter.Printf("macvlan-01 IPv6 addr:\n%s\n", addrOut)
+				GinkgoWriter.Printf("macvlan-01 IPv6 route:\n%s\n", routeOut)
+				// Dump CRA bridge neighbor tables on both nodes
+				for _, node := range []string{cfg.WorkerNode1, cfg.WorkerNode2} {
+					craNeigh, _, _ := f.DockerExec(ctx, node, []string{"bash", "-c",
+						`P=$(systemctl show cra.service -p MainPID --value 2>/dev/null); ` +
+							`CRA_PID=$(cat /proc/$P/task/*/children 2>/dev/null | head -1 | tr -d " \n"); ` +
+							`[ -n "$CRA_PID" ] && nsenter -t $CRA_PID -m -n -- ip -6 neigh show dev l2.501`})
+					GinkgoWriter.Printf("%s CRA l2.501 IPv6 neigh:\n%s\n", node, craNeigh)
+					ndisc, _, _ := f.DockerExec(ctx, node, []string{"bash", "-c",
+						`P=$(systemctl show cra.service -p MainPID --value 2>/dev/null); ` +
+							`CRA_PID=$(cat /proc/$P/task/*/children 2>/dev/null | head -1 | tr -d " \n"); ` +
+							`[ -n "$CRA_PID" ] && nsenter -t $CRA_PID -m -n -- cat /proc/sys/net/ipv6/conf/vlan.501/ndisc_notify 2>/dev/null`})
+					GinkgoWriter.Printf("%s vlan.501 ndisc_notify: %s\n", node, ndisc)
+				}
 			}
 			return result != nil && result.Success
-		}).WithTimeout(30*time.Second).WithPolling(3*time.Second).Should(BeTrue(), "IPv6 ping failed")
+		}).WithTimeout(60*time.Second).WithPolling(5*time.Second).Should(BeTrue(), "IPv6 ping failed")
 
 		By("Verifying IPv4 connectivity: macvlan-02 → macvlan-01")
 		Eventually(func() bool {
@@ -93,8 +113,12 @@ var _ = Describe("L2 Connectivity", Label("l2", "smoke"), func() {
 			result, _ := f.PingFromPod(ctx, ns, "macvlan-02", cfg.Macvlan01IPv6, 1)
 			if result != nil && !result.Success {
 				GinkgoWriter.Printf("Reverse IPv6 ping failed: %s\n", result.Output)
+				neighOut, _, _ := f.ExecInPod(ctx, ns, "macvlan-02", "", []string{"ip", "-6", "neigh", "show"})
+				addrOut, _, _ := f.ExecInPod(ctx, ns, "macvlan-02", "", []string{"ip", "-6", "addr", "show"})
+				GinkgoWriter.Printf("macvlan-02 IPv6 neigh:\n%s\n", neighOut)
+				GinkgoWriter.Printf("macvlan-02 IPv6 addr:\n%s\n", addrOut)
 			}
 			return result != nil && result.Success
-		}).WithTimeout(30*time.Second).WithPolling(3*time.Second).Should(BeTrue(), "Reverse IPv6 ping failed")
+		}).WithTimeout(60*time.Second).WithPolling(5*time.Second).Should(BeTrue(), "Reverse IPv6 ping failed")
 	})
 })

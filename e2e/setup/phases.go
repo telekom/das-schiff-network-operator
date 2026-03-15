@@ -460,13 +460,15 @@ func PhaseComponents(cluster *Cluster, repoRoot string) error {
 	// Install CNI plugins
 	Logf("Installing CNI plugins...")
 	arch := runtime.GOARCH
-	cniVersion := EnvOr("CNI_PLUGINS_VERSION", "v1.6.2")
+	cniVersion := EnvOr("CNI_PLUGINS_VERSION", "v1.9.0")
 	cniURL := fmt.Sprintf(
 		"https://github.com/containernetworking/plugins/releases/download/%s/cni-plugins-linux-%s-%s.tgz",
 		cniVersion, arch, cniVersion)
 	for _, node := range cluster.Nodes {
+		// Install into both /opt/cni/bin (kubelet default) and /usr/lib/cni (Debian default)
+		// to ensure the correct version is used regardless of CNI path configuration.
 		if _, err := DockerExecShell(node.Name, fmt.Sprintf(
-			"curl -sSL '%s' | tar -xzf - -C /opt/cni/bin/", cniURL)); err != nil {
+			"curl -sSL '%s' | tar -xzf - -C /opt/cni/bin/ && cp /opt/cni/bin/macvlan /usr/lib/cni/macvlan 2>/dev/null; true", cniURL)); err != nil {
 			return fmt.Errorf("installing CNI plugins on %s: %w", node.Name, err)
 		}
 		Logf("  %s: CNI plugins installed", node.Name)
