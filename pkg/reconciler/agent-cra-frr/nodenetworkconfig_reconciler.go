@@ -28,7 +28,7 @@ type CRAFRRConfigApplier struct {
 // ApplyConfig applies the network configuration using CRA-FRR manager.
 func (a *CRAFRRConfigApplier) ApplyConfig(ctx context.Context, cfg *v1alpha1.NodeNetworkConfig) error {
 	netlinkConfig := a.convertNodeConfigToNetlink(cfg)
-	policyRoutes := a.convertPolicyRoutes(cfg)
+	policyRoutes := convertPolicyRoutes(cfg)
 
 	frrConfig, err := a.frrTemplate.TemplateFRR(a.baseConfig, &cfg.Spec)
 	if err != nil {
@@ -87,7 +87,7 @@ func (a *CRAFRRConfigApplier) convertNodeConfigToNetlink(nodeCfg *v1alpha1.NodeN
 	return netlinkConfig
 }
 
-func (a *CRAFRRConfigApplier) convertPolicyRoutes(nodeCfg *v1alpha1.NodeNetworkConfig) []cra.PolicyRoute {
+func convertPolicyRoutes(nodeCfg *v1alpha1.NodeNetworkConfig) []cra.PolicyRoute {
 	if nodeCfg.Spec.ClusterVRF == nil {
 		return nil
 	}
