@@ -118,13 +118,7 @@ spec:
   - cidr: fdb2:e3e1:fcbf::/64
     le: 128
     action: permit
-  import:
-  # c2m test container
-  - cidr: 10.102.1.1/32
-    action: permit
-  - cidr: fda5:25c1:193d::/64
-    le: 128
-    action: permit
+  import: []
   sbrPrefixes:
   - 10.250.5.0/24
   - fdb2:e3e1:fcbf::/64
