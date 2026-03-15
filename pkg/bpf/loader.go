@@ -3,6 +3,7 @@ package bpf
 import (
 	"fmt"
 	"log"
+	"runtime"
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
@@ -15,7 +16,7 @@ import (
 
 var (
 	nwopbpf    nwopbpfObjects
-	tcxLinkFds = map[int]*link.Link{}
+	tcxLinkFds = map[int]link.Link{}
 )
 
 // NeighborEvent mirrors the C struct neighbor_event in nwop-bpf.c.
@@ -74,7 +75,16 @@ func AttachNeighborHandlerToInterface(intf netlink.Link) error {
 	if err != nil {
 		return fmt.Errorf("error attaching TCX program to %s (index %d): %w", intf.Attrs().Name, intf.Attrs().Index, err)
 	}
-	tcxLinkFds[intf.Attrs().Index] = &tcxLink
+	// Verify the link is valid by querying its info.
+	info, infoErr := tcxLink.Info()
+	if infoErr != nil {
+		log.Printf("BPF: WARNING: TCX link Info() failed for %s (index %d): %v", intf.Attrs().Name, intf.Attrs().Index, infoErr)
+	} else {
+		log.Printf("BPF: TCX link verified for %s (index %d): linkID=%d progID=%d type=%d",
+			intf.Attrs().Name, intf.Attrs().Index, info.ID, info.Program, info.Type)
+	}
+	tcxLinkFds[intf.Attrs().Index] = tcxLink
+	runtime.KeepAlive(tcxLink)
 	log.Printf("BPF: TCX ingress attached successfully to %s (index %d)", intf.Attrs().Name, intf.Attrs().Index)
 	return nil
 }
@@ -87,7 +97,7 @@ func DetachNeighborHandlerFromInterface(intf netlink.Link) error {
 	if !ok {
 		return nil
 	}
-	if err := (*tcxLink).Close(); err != nil {
+	if err := tcxLink.Close(); err != nil {
 		return fmt.Errorf("error detaching TCX program: %w", err)
 	}
 	delete(tcxLinkFds, intf.Attrs().Index)
@@ -97,7 +107,7 @@ func DetachNeighborHandlerFromInterface(intf netlink.Link) error {
 // CleanupTCX closes all open TCX link file descriptors.
 func CleanupTCX() {
 	for _, tcxLink := range tcxLinkFds {
-		_ = (*tcxLink).Close()
+		_ = tcxLink.Close()
 	}
 }
 

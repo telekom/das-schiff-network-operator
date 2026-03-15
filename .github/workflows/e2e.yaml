@@ -80,6 +80,9 @@ jobs:
             docker exec "clab-nwop-${dcgw}" ip -6 route show table all \
               > "/tmp/e2e-logs/${dcgw}-ip6-routes.log" 2>&1 || true
           done
+          # Enable BPF stats to see program run counts
+          docker exec nwop-control-plane sysctl -w kernel.bpf_stats_enabled=1 2>/dev/null || true
+          sleep 2
           for node in nwop-control-plane nwop-worker nwop-worker2; do
             docker exec "$node" bash -c \
               'P=$(systemctl show cra.service -p MainPID --value 2>/dev/null); \
@@ -115,6 +118,10 @@ jobs:
               'P=$(systemctl show cra.service -p MainPID --value 2>/dev/null); \
                CRA_PID=$(cat /proc/$P/task/*/children 2>/dev/null | head -1 | tr -d " \n"); \
                if [ -n "$CRA_PID" ]; then \
+                 echo "=== bpftool link show (global) ===" ; \
+                 bpftool link show 2>&1 ; \
+                 echo "=== bpftool link show (CRA netns) ===" ; \
+                 nsenter -t $CRA_PID -n -- bpftool link show 2>&1 ; \
                  echo "=== tc filter on VXLAN interfaces ===" ; \
                  for dev in $(nsenter -t $CRA_PID -n -- ip -o link show | grep "vx\\." | awk -F: "{print \$2}" | tr -d " "); do \
                    echo "--- $dev ---" ; \
@@ -124,6 +131,8 @@ jobs:
                  nsenter -t $CRA_PID -n -- bpftool net show 2>&1 ; \
                  echo "=== bpftool prog ===" ; \
                  bpftool prog show 2>&1 ; \
+                 echo "=== CRA frr-cra service status ===" ; \
+                 nsenter -t $CRA_PID -m -- systemctl status frr-cra.service --no-pager 2>&1 ; \
                fi' \
               > "/tmp/e2e-logs/${node}-cra-bpf.log" 2>&1 || true
           done
