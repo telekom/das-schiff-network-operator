@@ -18,6 +18,21 @@ var _ = Describe("VIP Failover", Label("failover"), func() {
 		ns  = "e2e-test-failover"
 	)
 
+	// dumpNodeCRANeighbors dumps the CRA-internal bridge neighbor table for the given kind node.
+	dumpNodeCRANeighbors := func(node string) {
+		// nsenter into the CRA nspawn to see bridge neighbor table
+		out, _, _ := f.DockerExec(ctx, node, []string{"bash", "-c",
+			`P=$(systemctl show cra.service -p MainPID --value 2>/dev/null); ` +
+				`CRA_PID=$(cat /proc/$P/task/*/children 2>/dev/null | head -1 | tr -d " \n"); ` +
+				`[ -n "$CRA_PID" ] && nsenter -t $CRA_PID -m -n -- ip neigh show`})
+		GinkgoWriter.Printf("%s CRA neighbor table:\n%s\n", node, out)
+		out, _, _ = f.DockerExec(ctx, node, []string{"bash", "-c",
+			`P=$(systemctl show cra.service -p MainPID --value 2>/dev/null); ` +
+				`CRA_PID=$(cat /proc/$P/task/*/children 2>/dev/null | head -1 | tr -d " \n"); ` +
+				`[ -n "$CRA_PID" ] && nsenter -t $CRA_PID -m -n -- bridge fdb show | grep -v "permanent\|33:33:" | head -30`})
+		GinkgoWriter.Printf("%s CRA FDB (dynamic):\n%s\n", node, out)
+	}
+
 	BeforeEach(func() {
 		f = framework.Global
 		Expect(f).NotTo(BeNil())
@@ -122,11 +137,26 @@ var _ = Describe("VIP Failover", Label("failover"), func() {
 			"arping", "-c", "3", "-A", "-I", "net1", vipV4,
 		})
 
+		// Also send unsolicited Neighbor Advertisement for IPv6.
+		// ndisc6 is not available in busybox, so we use arping for IPv4 only
+		// and rely on kernel NDP for IPv6. Send a ping6 to all-nodes multicast
+		// from the VIP source address to trigger NDP on the remote side.
+		_, _, _ = f.ExecInPod(ctx, ns, "failover-src", "", []string{
+			"ping6", "-c", "1", "-W", "1", "-I", "net1", "ff02::1",
+		})
+
 		By("Verifying VIP IPv4 reachability after failover (from failover-dst, cross-node)")
 		Eventually(func() bool {
 			result, _ := f.PingFromPod(ctx, ns, "failover-dst", vipV4, 1)
 			if result != nil && !result.Success {
 				GinkgoWriter.Printf("VIP IPv4 failover ping failed: %s\n", result.Output)
+				// Pod-level diagnostics
+				out, _, _ := f.ExecInPod(ctx, ns, "failover-dst", "", []string{"ip", "neigh", "show"})
+				GinkgoWriter.Printf("failover-dst neighbor table:\n%s\n", out)
+				out, _, _ = f.ExecInPod(ctx, ns, "failover-src", "", []string{"ip", "addr", "show", "dev", "net1"})
+				GinkgoWriter.Printf("failover-src net1 addrs:\n%s\n", out)
+				// Node-level CRA diagnostics
+				dumpNodeCRANeighbors(cfg.WorkerNode2)
 			}
 			return result != nil && result.Success
 		}).WithTimeout(30*time.Second).WithPolling(2*time.Second).Should(BeTrue(), "VIP IPv4 not reachable after failover")
