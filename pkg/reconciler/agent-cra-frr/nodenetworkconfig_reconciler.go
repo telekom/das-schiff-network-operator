@@ -28,13 +28,14 @@ type CRAFRRConfigApplier struct {
 // ApplyConfig applies the network configuration using CRA-FRR manager.
 func (a *CRAFRRConfigApplier) ApplyConfig(ctx context.Context, cfg *v1alpha1.NodeNetworkConfig) error {
 	netlinkConfig := a.convertNodeConfigToNetlink(cfg)
+	policyRoutes := a.convertPolicyRoutes(cfg)
 
 	frrConfig, err := a.frrTemplate.TemplateFRR(a.baseConfig, &cfg.Spec)
 	if err != nil {
 		return fmt.Errorf("error templating FRR configuration: %w", err)
 	}
 
-	if err := a.craManager.ApplyConfiguration(ctx, &netlinkConfig, frrConfig); err != nil {
+	if err := a.craManager.ApplyConfiguration(ctx, &netlinkConfig, frrConfig, policyRoutes); err != nil {
 		return fmt.Errorf("error applying cra configuration: %w", err)
 	}
 
@@ -84,6 +85,28 @@ func (a *CRAFRRConfigApplier) convertNodeConfigToNetlink(nodeCfg *v1alpha1.NodeN
 	}
 
 	return netlinkConfig
+}
+
+func (a *CRAFRRConfigApplier) convertPolicyRoutes(nodeCfg *v1alpha1.NodeNetworkConfig) []cra.PolicyRoute {
+	if nodeCfg.Spec.ClusterVRF == nil {
+		return nil
+	}
+
+	var routes []cra.PolicyRoute
+	for _, pr := range nodeCfg.Spec.ClusterVRF.PolicyRoutes {
+		route := cra.PolicyRoute{
+			SrcPrefix: pr.TrafficMatch.SrcPrefix,
+			DstPrefix: pr.TrafficMatch.DstPrefix,
+			SrcPort:   pr.TrafficMatch.SrcPort,
+			DstPort:   pr.TrafficMatch.DstPort,
+			Protocol:  pr.TrafficMatch.Protocol,
+		}
+		if pr.NextHop.Vrf != nil {
+			route.Vrf = *pr.NextHop.Vrf
+		}
+		routes = append(routes, route)
+	}
+	return routes
 }
 
 // NodeNetworkConfigReconciler wraps the common reconciler with CRA-FRR specific logic.

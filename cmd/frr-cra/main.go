@@ -34,6 +34,7 @@ import (
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
 	"github.com/telekom/das-schiff-network-operator/pkg/utils"
 	"github.com/vishvananda/netlink"
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -51,6 +52,7 @@ var (
 	frrManager     *frr.Manager
 	nlManager      *nl.Manager
 	neighborSyncer *neighborsync.NeighborSync
+	baseConfig     *config.BaseConfig
 )
 
 // sanitizeLog removes newlines and carriage returns from log messages
@@ -151,6 +153,211 @@ func reconcileNeighborSync(cfg nl.NetlinkConfiguration) {
 		if err := neighborSyncer.EnsureNeighborSuppression(bridgeIdx, vlanIntf.Attrs().Index); err != nil {
 			log.Print(logSanitizer.Replace(fmt.Sprintf("neighborsync: failed to ensure neighbor suppression for bridge l2.%d: %v", l2.VlanID, err)))
 		}
+	}
+}
+
+const policyRoutePriority = 100
+
+// reconcilePolicyRoutes installs ip rules for source-based routing.
+// For each PolicyRoute, two rules are created:
+//   - IPv4: iif <trunk> (e.g. hbn) — matches IPv4 packets on the bridge
+//   - IPv6: iif <clusterVRF> (e.g. cluster) — required because the kernel's IPv6
+//     receive path sets flowi6_iif to the VRF device, not the original ingress interface
+func reconcilePolicyRoutes(routes []cra.PolicyRoute) error {
+	desired := buildDesiredRules(routes)
+
+	for _, family := range []int{unix.AF_INET, unix.AF_INET6} {
+		existing, err := netlink.RuleList(family)
+		if err != nil {
+			return fmt.Errorf("error listing rules for family %d: %w", family, err)
+		}
+
+		if err := deleteStaleRules(existing, desired); err != nil {
+			return err
+		}
+		if err := addMissingRules(existing, desired, family); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func deleteStaleRules(existing, desired []netlink.Rule) error {
+	for i := range existing {
+		if existing[i].Priority != policyRoutePriority {
+			continue
+		}
+		if !containsRule(desired, &existing[i]) {
+			if err := netlink.RuleDel(&existing[i]); err != nil {
+				log.Printf("policy-routes: failed to delete stale rule %v: %v", existing[i], err)
+			}
+		}
+	}
+	return nil
+}
+
+func addMissingRules(existing, desired []netlink.Rule, family int) error {
+	for i := range desired {
+		if desired[i].Family != family {
+			continue
+		}
+		if !containsRule(existing, &desired[i]) {
+			if err := netlink.RuleAdd(&desired[i]); err != nil {
+				return fmt.Errorf("error adding rule %v: %w", desired[i], err)
+			}
+			log.Printf("policy-routes: added rule %v", desired[i])
+		}
+	}
+	return nil
+}
+
+func containsRule(rules []netlink.Rule, target *netlink.Rule) bool {
+	for i := range rules {
+		if rulesEqual(&rules[i], target) {
+			return true
+		}
+	}
+	return false
+}
+
+func buildDesiredRules(routes []cra.PolicyRoute) []netlink.Rule {
+	var rules []netlink.Rule
+	for _, pr := range routes {
+		if pr.Vrf == "" {
+			continue
+		}
+
+		tableID, err := vrfTableID(pr.Vrf)
+		if err != nil {
+			log.Printf("policy-routes: cannot resolve VRF %q table: %v", pr.Vrf, err)
+			continue
+		}
+
+		base := netlink.Rule{
+			Priority: policyRoutePriority,
+			Table:    tableID,
+		}
+
+		if pr.SrcPrefix != nil {
+			base.Src = parsePrefixOrHost(*pr.SrcPrefix)
+		}
+		if pr.DstPrefix != nil {
+			base.Dst = parsePrefixOrHost(*pr.DstPrefix)
+		}
+		if pr.SrcPort != nil {
+			base.Sport = &netlink.RulePortRange{Start: *pr.SrcPort, End: *pr.SrcPort}
+		}
+		if pr.DstPort != nil {
+			base.Dport = &netlink.RulePortRange{Start: *pr.DstPort, End: *pr.DstPort}
+		}
+		if pr.Protocol != nil {
+			base.IPProto = protoNumber(*pr.Protocol)
+		}
+
+		setRuleFamily(&base)
+		rules = append(rules, base)
+	}
+	return rules
+}
+
+func setRuleFamily(rule *netlink.Rule) {
+	isIPv6 := (rule.Src != nil && rule.Src.IP.To4() == nil) ||
+		(rule.Dst != nil && rule.Dst.IP.To4() == nil)
+
+	if isIPv6 {
+		rule.Family = unix.AF_INET6
+		rule.IifName = baseConfig.ClusterVRF.Name
+	} else {
+		rule.Family = unix.AF_INET
+		rule.IifName = baseConfig.TrunkInterfaceName
+	}
+}
+
+func parsePrefixOrHost(s string) *net.IPNet {
+	_, cidr, err := net.ParseCIDR(s)
+	if err == nil {
+		return cidr
+	}
+	ip := net.ParseIP(s)
+	if ip == nil {
+		return nil
+	}
+	return hostRoute(ip)
+}
+
+func hostRoute(ip net.IP) *net.IPNet {
+	if ip.To4() != nil {
+		return &net.IPNet{IP: ip, Mask: net.CIDRMask(net.IPv4len*8, net.IPv4len*8)} //nolint:mnd
+	}
+	return &net.IPNet{IP: ip, Mask: net.CIDRMask(net.IPv6len*8, net.IPv6len*8)} //nolint:mnd
+}
+
+func vrfTableID(name string) (int, error) {
+	link, err := netlink.LinkByName(name)
+	if err != nil {
+		return 0, fmt.Errorf("VRF %q not found: %w", name, err)
+	}
+	vrf, ok := link.(*netlink.Vrf)
+	if !ok {
+		return 0, fmt.Errorf("%q is not a VRF device", name)
+	}
+	return int(vrf.Table), nil
+}
+
+func rulesEqual(a, b *netlink.Rule) bool {
+	if a.Family != b.Family || a.Priority != b.Priority || a.Table != b.Table {
+		return false
+	}
+	if a.IifName != b.IifName {
+		return false
+	}
+	if !ipNetsEqual(a.Src, b.Src) || !ipNetsEqual(a.Dst, b.Dst) {
+		return false
+	}
+	if !portRangesEqual(a.Sport, b.Sport) || !portRangesEqual(a.Dport, b.Dport) {
+		return false
+	}
+	if a.IPProto != b.IPProto {
+		return false
+	}
+	return true
+}
+
+func ipNetsEqual(a, b *net.IPNet) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return a.IP.Equal(b.IP) && a.Mask.String() == b.Mask.String()
+}
+
+func portRangesEqual(a, b *netlink.RulePortRange) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return a.Start == b.Start && a.End == b.End
+}
+
+func protoNumber(proto string) int {
+	switch strings.ToLower(proto) {
+	case "tcp":
+		return unix.IPPROTO_TCP
+	case "udp":
+		return unix.IPPROTO_UDP
+	case "icmp":
+		return unix.IPPROTO_ICMP
+	case "icmpv6":
+		return unix.IPPROTO_ICMPV6
+	case "sctp":
+		return unix.IPPROTO_SCTP
+	default:
+		return 0
 	}
 }
 
@@ -327,6 +534,13 @@ func applyConfig(w http.ResponseWriter, r *http.Request) {
 	// Reconcile neighbor sync for ARP/NDP refresh
 	reconcileNeighborSync(craConfiguration.NetlinkConfiguration)
 
+	// Reconcile SBR policy routes as ip rules
+	if err := reconcilePolicyRoutes(craConfiguration.PolicyRoutes); err != nil {
+		log.Println("Failed to reconcile policy routes", err)
+		http.Error(w, fmt.Sprintf("Failed to reconcile policy routes: %v", err), http.StatusInternalServerError)
+		return
+	}
+
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -488,7 +702,8 @@ func main() {
 		log.Fatal("Invalid IP")
 	}
 
-	baseConfig, err := config.LoadBaseConfig(baseConfigPath)
+	var err error
+	baseConfig, err = config.LoadBaseConfig(baseConfigPath)
 	if err != nil {
 		log.Fatal("Failed to load base config", err)
 	}

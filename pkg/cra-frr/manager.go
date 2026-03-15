@@ -96,10 +96,11 @@ func (m *Manager) postRequest(ctx context.Context, path string, body []byte) ([]
 	return nil, fmt.Errorf("all CRA URLs failed due to connection issues")
 }
 
-func (m *Manager) ApplyConfiguration(ctx context.Context, netlinkConfig *nl.NetlinkConfiguration, frrConfig string) error {
+func (m *Manager) ApplyConfiguration(ctx context.Context, netlinkConfig *nl.NetlinkConfiguration, frrConfig string, policyRoutes []PolicyRoute) error {
 	craConfig := Configuration{
 		NetlinkConfiguration: *netlinkConfig,
 		FRRConfiguration:     frrConfig,
+		PolicyRoutes:         policyRoutes,
 	}
 	jsonBody, err := json.Marshal(craConfig)
 	if err != nil {
