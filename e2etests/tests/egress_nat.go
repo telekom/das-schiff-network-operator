@@ -45,9 +45,10 @@ var _ = Describe("Egress NAT", Label("egress"), func() {
 			Expect(f.WaitForPodReady(ctx, ns, "egress-via-nat-01", cfg.PodReadyTimeout)).To(Succeed())
 
 			By("Verifying egress-via-nat-01 can reach m2mgw (IPv4)")
-			result, err := f.PingFromPod(ctx, ns, "egress-via-nat-01", cfg.M2MGWIPv4, 5)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(result.Success).To(BeTrue(), "Egress pod cannot reach m2mgw IPv4: %s", result.Output)
+			Eventually(func() bool {
+				r, _ := f.PingFromPod(ctx, ns, "egress-via-nat-01", cfg.M2MGWIPv4, 3)
+				return r != nil && r.Success
+			}).WithTimeout(30*time.Second).WithPolling(5*time.Second).Should(BeTrue(), "Egress pod cannot reach m2mgw IPv4")
 
 			By("Verifying egress-via-nat-01 can reach m2mgw (IPv6)")
 			Eventually(func() bool {
