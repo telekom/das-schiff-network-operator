@@ -230,7 +230,7 @@ func buildDesiredRules(routes []cra.PolicyRoute) []netlink.Rule {
 
 		tableID, err := vrfTableID(pr.Vrf)
 		if err != nil {
-			log.Printf("policy-routes: cannot resolve VRF %q table: %v", pr.Vrf, err)
+			log.Print(logSanitizer.Replace(fmt.Sprintf("policy-routes: cannot resolve VRF %q table: %v", pr.Vrf, err)))
 			continue
 		}
 
