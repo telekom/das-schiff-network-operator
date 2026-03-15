@@ -329,12 +329,14 @@ func (n *NeighborSync) runNeighborCheck() {
 }
 
 func (n *NeighborSync) runBpfNeighborSync() {
+	log.Println("BPF ringbuf reader goroutine started")
 	rd, err := ringbuf.NewReader(bpf.EbpfNeighborRingbuf())
 	if err != nil {
 		log.Printf("failed to open ringbuf reader: %v", err)
 		return
 	}
 	defer rd.Close()
+	log.Println("BPF ringbuf reader opened, waiting for events...")
 
 	for {
 		rec, err := rd.Read()

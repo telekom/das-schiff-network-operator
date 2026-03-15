@@ -61,18 +61,21 @@ func cleanupXDP(intf netlink.Link) {
 func AttachNeighborHandlerToInterface(intf netlink.Link) error {
 	cleanupXDP(intf)
 	if _, ok := tcxLinkFds[intf.Attrs().Index]; ok {
+		log.Printf("BPF: TCX already attached to %s (index %d), skipping", intf.Attrs().Name, intf.Attrs().Index)
 		return nil
 	}
 
+	log.Printf("BPF: attaching TCX ingress to %s (index %d)...", intf.Attrs().Name, intf.Attrs().Index)
 	tcxLink, err := link.AttachTCX(link.TCXOptions{
 		Interface: intf.Attrs().Index,
 		Program:   nwopbpf.HandleNeighborReplyTc,
 		Attach:    ebpf.AttachTCXIngress,
 	})
 	if err != nil {
-		return fmt.Errorf("error attaching TCX program: %w", err)
+		return fmt.Errorf("error attaching TCX program to %s (index %d): %w", intf.Attrs().Name, intf.Attrs().Index, err)
 	}
 	tcxLinkFds[intf.Attrs().Index] = &tcxLink
+	log.Printf("BPF: TCX ingress attached successfully to %s (index %d)", intf.Attrs().Name, intf.Attrs().Index)
 	return nil
 }
 

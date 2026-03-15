@@ -111,6 +111,21 @@ jobs:
                CRA_PID=$(cat /proc/$P/task/*/children 2>/dev/null | head -1 | tr -d " \n"); \
                [ -n "$CRA_PID" ] && nsenter -t $CRA_PID -m -n -- bridge fdb show' \
               > "/tmp/e2e-logs/${node}-cra-fdb.log" 2>&1 || true
+            docker exec "$node" bash -c \
+              'P=$(systemctl show cra.service -p MainPID --value 2>/dev/null); \
+               CRA_PID=$(cat /proc/$P/task/*/children 2>/dev/null | head -1 | tr -d " \n"); \
+               if [ -n "$CRA_PID" ]; then \
+                 echo "=== tc filter on VXLAN interfaces ===" ; \
+                 for dev in $(nsenter -t $CRA_PID -n -- ip -o link show | grep "vx\\." | awk -F: "{print \$2}" | tr -d " "); do \
+                   echo "--- $dev ---" ; \
+                   nsenter -t $CRA_PID -n -- tc filter show dev "$dev" ingress 2>&1 ; \
+                 done ; \
+                 echo "=== bpftool net ===" ; \
+                 nsenter -t $CRA_PID -n -- bpftool net show 2>&1 ; \
+                 echo "=== bpftool prog ===" ; \
+                 bpftool prog show 2>&1 ; \
+               fi' \
+              > "/tmp/e2e-logs/${node}-cra-bpf.log" 2>&1 || true
           done
 
       - name: Upload debug logs

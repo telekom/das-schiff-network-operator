@@ -14,6 +14,7 @@ RUN apt-get update && \
       mtr-tiny \
       iproute2 \
       bridge-utils \
+      bpftool \
       tcpdump && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
