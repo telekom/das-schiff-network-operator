@@ -74,6 +74,15 @@ func PhaseBuildImages(repoRoot string) error {
 		return fmt.Errorf("building agent-cra-frr: %w", err)
 	}
 
+	if err := RunCmd("docker", "build",
+		"--build-arg", "ldflags="+ldflags,
+		"-f", filepath.Join(repoRoot, "das-schiff-nwop-agent-hbn-l2.Dockerfile"),
+		"-t", imgBase+"/das-schiff-nwop-agent-hbn-l2:latest",
+		repoRoot,
+	); err != nil {
+		return fmt.Errorf("building agent-hbn-l2: %w", err)
+	}
+
 	// 4. Build NAT64 image
 	nat64Ctx := filepath.Join(repoRoot, "e2e", "images", "nat64")
 	Logf("  Building NAT64 image (%s)...", nat64Image)
