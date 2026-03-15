@@ -141,14 +141,14 @@ func reconcileNeighborSync(cfg nl.NetlinkConfiguration) {
 
 		neighborSyncer.EnsureARPRefresh(bridgeIdx)
 
-		vxlanName := fmt.Sprintf("vx.%d", l2.VNI)
-		vxlan, err := netlink.LinkByName(vxlanName)
+		vlanName := fmt.Sprintf("vlan.%d", l2.VlanID)
+		vlanIntf, err := netlink.LinkByName(vlanName)
 		if err != nil {
-			log.Print(logSanitizer.Replace(fmt.Sprintf("neighborsync: vxlan vx.%d not found: %v", l2.VNI, err)))
+			log.Print(logSanitizer.Replace(fmt.Sprintf("neighborsync: vlan interface %s not found: %v", vlanName, err)))
 			continue
 		}
 
-		if err := neighborSyncer.EnsureNeighborSuppression(bridgeIdx, vxlan.Attrs().Index); err != nil {
+		if err := neighborSyncer.EnsureNeighborSuppression(bridgeIdx, vlanIntf.Attrs().Index); err != nil {
 			log.Print(logSanitizer.Replace(fmt.Sprintf("neighborsync: failed to ensure neighbor suppression for bridge l2.%d: %v", l2.VlanID, err)))
 		}
 	}

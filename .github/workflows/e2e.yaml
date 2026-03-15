@@ -122,8 +122,8 @@ jobs:
                  bpftool link show 2>&1 ; \
                  echo "=== bpftool link show (CRA netns) ===" ; \
                  nsenter -t $CRA_PID -n -- bpftool link show 2>&1 ; \
-                 echo "=== tc filter on VXLAN interfaces ===" ; \
-                 for dev in $(nsenter -t $CRA_PID -n -- ip -o link show | grep "vx\\." | awk -F: "{print \$2}" | tr -d " "); do \
+                 echo "=== tc filter on VLAN interfaces ===" ; \
+                 for dev in $(nsenter -t $CRA_PID -n -- ip -o link show | grep "vlan\\." | awk -F: "{print \$2}" | tr -d " "); do \
                    echo "--- $dev ---" ; \
                    nsenter -t $CRA_PID -n -- tc filter show dev "$dev" ingress 2>&1 ; \
                  done ; \
