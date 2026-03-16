@@ -43,7 +43,7 @@ var _ = Describe("LoadBalancer Service", Label("lb"), func() {
 
 		AfterEach(func() {
 			app, _ := readTestdata("lb-service/app.yaml")
-			_ = f.DeleteManifest(ctx, app)
+			_ = f.DeleteManifestInNamespace(ctx, app, ns)
 		})
 
 		It("should be reachable via LoadBalancer VIP from m2mgw", func() {

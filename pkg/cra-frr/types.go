@@ -9,7 +9,7 @@ type PolicyRoute struct {
 	SrcPort   *uint16 `json:"srcPort,omitempty"`
 	DstPort   *uint16 `json:"dstPort,omitempty"`
 	Protocol  *string `json:"protocol,omitempty"`
-	Vrf       string  `json:"vrf"`
+	Vrf       string  `json:"vrf,omitempty"`
 }
 
 type Configuration struct {

@@ -94,15 +94,18 @@ func convertPolicyRoutes(nodeCfg *v1alpha1.NodeNetworkConfig) []cra.PolicyRoute 
 
 	var routes []cra.PolicyRoute
 	for _, pr := range nodeCfg.Spec.ClusterVRF.PolicyRoutes {
+		if pr.NextHop.Vrf == nil {
+			// ip rules require a VRF to resolve the routing table —
+			// address-only next hops are not supported for policy routes.
+			continue
+		}
 		route := cra.PolicyRoute{
 			SrcPrefix: pr.TrafficMatch.SrcPrefix,
 			DstPrefix: pr.TrafficMatch.DstPrefix,
 			SrcPort:   pr.TrafficMatch.SrcPort,
 			DstPort:   pr.TrafficMatch.DstPort,
 			Protocol:  pr.TrafficMatch.Protocol,
-		}
-		if pr.NextHop.Vrf != nil {
-			route.Vrf = *pr.NextHop.Vrf
+			Vrf:       *pr.NextHop.Vrf,
 		}
 		routes = append(routes, route)
 	}

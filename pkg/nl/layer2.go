@@ -453,8 +453,12 @@ func (*Manager) configureBridge(intfName string) error {
 
 	// Disable duplicate address detection — anycast gateways share the same
 	// MAC + IP across nodes, so DAD would always flag a duplicate.
-	if err := os.WriteFile(fmt.Sprintf("%s/ipv6/conf/%s/accept_dad", procSysNetPath, intfName), []byte("0"), neighFilePermissions); err != nil {
-		return fmt.Errorf("error setting accept_dad = 0 for interface: %w", err)
+	if _, err := os.Stat(fmt.Sprintf("%s/ipv6/conf/%s/accept_dad", procSysNetPath, intfName)); err == nil {
+		if err := os.WriteFile(fmt.Sprintf("%s/ipv6/conf/%s/accept_dad", procSysNetPath, intfName), []byte("0"), neighFilePermissions); err != nil {
+			return fmt.Errorf("error setting accept_dad = 0 for interface: %w", err)
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("error checking if accept_dad exists: %w", err)
 	}
 
 	baseTimer := os.Getenv("NWOP_NEIGH_BASE_REACHABLE_TIME")

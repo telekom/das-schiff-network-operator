@@ -174,12 +174,21 @@ func splitYAMLDocuments(data []byte) [][]byte {
 
 // DeleteManifest deletes a YAML manifest (supports multi-document) from the cluster.
 func (f *Framework) DeleteManifest(ctx context.Context, yamlData []byte) error {
+	return f.DeleteManifestInNamespace(ctx, yamlData, "")
+}
+
+// DeleteManifestInNamespace deletes a YAML manifest with a namespace override.
+// If ns is non-empty, it overrides metadata.namespace on each object before deletion.
+func (f *Framework) DeleteManifestInNamespace(ctx context.Context, yamlData []byte, ns string) error {
 	docs := splitYAMLDocuments(yamlData)
 	for _, doc := range docs {
 		obj := &unstructured.Unstructured{}
 		dec := yaml.NewDecodingSerializer(unstructured.UnstructuredJSONScheme)
 		if _, _, err := dec.Decode(doc, nil, obj); err != nil {
 			return fmt.Errorf("decode manifest: %w", err)
+		}
+		if ns != "" {
+			obj.SetNamespace(ns)
 		}
 		if err := client.IgnoreNotFound(f.Client.Delete(ctx, obj)); err != nil {
 			return err

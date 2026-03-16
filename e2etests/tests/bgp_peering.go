@@ -28,7 +28,7 @@ var _ = Describe("BGP Peering", Label("bgp"), func() {
 		By("Applying BGPPeering CR")
 		manifest, err := readTestdata("bgpaas/bgp-peering.yaml")
 		Expect(err).NotTo(HaveOccurred())
-		Expect(f.ApplyManifestInNamespace(ctx, manifest, ns)).To(Succeed())
+		Expect(f.ApplyManifest(ctx, manifest)).To(Succeed())
 
 		By("Applying Bird pod manifests (ConfigMap + NAD)")
 		birdManifest, err := readTestdata("bgpaas/bird-pod.yaml")
