@@ -1,0 +1,66 @@
+# Cluster-2 network configuration: VRFs + L2 networks for gateway pods.
+# These create the m2m and c2m VRF domains on cluster-2, with Layer2NetworkConfigurations
+# providing macvlan VLANs where gateway pods are attached.
+apiVersion: network.t-caas.telekom.com/v1alpha1
+kind: VRFRouteConfiguration
+metadata:
+  name: m2m-gw-vrf
+spec:
+  export:
+  - cidr: 10.102.0.0/24
+    le: 32
+    action: permit
+  - cidr: fda5:25c1:193c::/64
+    le: 128
+    action: permit
+  import: []
+  seq: 10
+  vrf: m2m
+  vni: 2002026
+  routeTarget: 65188:2026
+---
+apiVersion: network.t-caas.telekom.com/v1alpha1
+kind: VRFRouteConfiguration
+metadata:
+  name: c2m-gw-vrf
+spec:
+  export:
+  - cidr: 10.102.1.0/24
+    le: 32
+    action: permit
+  - cidr: fda5:25c1:193d::/64
+    le: 128
+    action: permit
+  import: []
+  seq: 10
+  vrf: c2m
+  vni: 2002027
+  routeTarget: 65188:2027
+---
+apiVersion: network.t-caas.telekom.com/v1alpha1
+kind: Layer2NetworkConfiguration
+metadata:
+  name: gw-vlan-m2m
+spec:
+  anycastGateways:
+  - 10.102.0.254/24
+  - fda5:25c1:193c::fe/64
+  anycastMac: 1a:ee:cf:2f:b7:a8
+  id: 601
+  mtu: 1500
+  vni: 5000002
+  vrf: m2m
+---
+apiVersion: network.t-caas.telekom.com/v1alpha1
+kind: Layer2NetworkConfiguration
+metadata:
+  name: gw-vlan-c2m
+spec:
+  anycastGateways:
+  - 10.102.1.254/24
+  - fda5:25c1:193d::fe/64
+  anycastMac: 1a:ee:cf:2f:b7:a9
+  id: 602
+  mtu: 1500
+  vni: 5000004
+  vrf: c2m
