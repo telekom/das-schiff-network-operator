@@ -10,7 +10,6 @@ import (
 	"github.com/telekom/das-schiff-network-operator/e2etests/framework"
 	// Import test packages so their init() / Describe blocks register.
 	_ "github.com/telekom/das-schiff-network-operator/e2etests/tests"
-	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 )
 
 var f *framework.Framework
@@ -39,10 +38,8 @@ var _ = BeforeSuite(func() {
 	// Export framework to tests
 	framework.Global = f
 
-	By("Setting webhook failurePolicy to Ignore (hostNetwork webhook unreachable via ClusterIP)")
-	Expect(f.PatchWebhookFailurePolicy(context.Background(),
-		"network-operator-validating-webhook-configuration",
-		admissionregistrationv1.Ignore)).To(Succeed())
+	By("Initializing cluster-2 client")
+	Expect(f.InitCluster2()).To(Succeed())
 
 	By("Applying network-operator CRs (VRFs + L2 networks)")
 	nwopConfigs, err := config.ReadManifest("network-operator-configs.yaml")

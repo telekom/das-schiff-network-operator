@@ -29,6 +29,9 @@ type Framework struct {
 	KubeClient kubernetes.Interface
 	Client     client.Client
 
+	// Cluster-2 (gateway cluster) clients — initialized when Cluster2Kubeconfig is set.
+	Cluster2KubeClient kubernetes.Interface
+
 	// Track namespaces created during tests for cleanup.
 	testNamespaces []string
 }
@@ -56,6 +59,19 @@ func New(cfg *config.Config) (*Framework, error) {
 		KubeClient: kubeClient,
 		Client:     c,
 	}, nil
+}
+
+// InitCluster2 initializes the cluster-2 kubernetes client.
+func (f *Framework) InitCluster2() error {
+	restCfg, err := clientcmd.BuildConfigFromFlags("", f.Config.Cluster2Kubeconfig)
+	if err != nil {
+		return fmt.Errorf("build cluster2 kubeconfig: %w", err)
+	}
+	f.Cluster2KubeClient, err = kubernetes.NewForConfig(restCfg)
+	if err != nil {
+		return fmt.Errorf("create cluster2 kubernetes client: %w", err)
+	}
+	return nil
 }
 
 // CreateNamespace creates a namespace and tracks it for cleanup.

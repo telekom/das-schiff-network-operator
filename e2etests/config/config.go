@@ -8,8 +8,9 @@ import (
 
 // Config holds all addressing and timeout configuration for E2E tests.
 type Config struct {
-	// Kubeconfig path
-	Kubeconfig string
+	// Kubeconfig paths
+	Kubeconfig         string
+	Cluster2Kubeconfig string
 
 	// Cluster nodes
 	WorkerNode1 string
@@ -62,10 +63,6 @@ type Config struct {
 	AnycastMAC        string
 	AnycastMACVlan502 string
 
-	// Containerlab node names (for docker exec)
-	ClabM2MGW string
-	ClabC2MGW string
-
 	// NAT64
 	NAT64DNS string
 
@@ -79,7 +76,8 @@ type Config struct {
 // LoadFromEnv loads configuration, using environment variables with sensible defaults.
 func LoadFromEnv() *Config {
 	return &Config{
-		Kubeconfig: envOr("KUBECONFIG", "/e2etests/.kubeconfig"),
+		Kubeconfig:         envOr("KUBECONFIG", "/e2etests/.kubeconfig"),
+		Cluster2Kubeconfig: envOr("KUBECONFIG_CLUSTER2", "/repo/e2etests/.kubeconfig-cluster2"),
 
 		WorkerNode1: "nwop-worker",
 		WorkerNode2: "nwop-worker2",
@@ -129,10 +127,6 @@ func LoadFromEnv() *Config {
 		AnycastV503Pod01IPv6: "fd94:685b:30cf:503::50",
 		AnycastV503Pod02IPv4: "10.250.30.60",
 		AnycastV503Pod02IPv6: "fd94:685b:30cf:503::60",
-
-		// Containerlab names
-		ClabM2MGW: "clab-nwop-m2mgw",
-		ClabC2MGW: "clab-nwop-c2mgw",
 
 		// NAT64
 		NAT64DNS: "fda5:25c1:193e::1",

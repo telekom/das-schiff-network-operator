@@ -255,6 +255,38 @@ func (*Framework) DockerExec(ctx context.Context, container string, command []st
 	return stdout.String(), stderr.String(), err
 }
 
+// ExecInCluster2Pod executes a command in a pod on cluster-2.
+func (f *Framework) ExecInCluster2Pod(ctx context.Context, namespace, podName string, command []string) (stdOut, stdErr string, err error) {
+	restCfg, err := clientcmd.BuildConfigFromFlags("", f.Config.Cluster2Kubeconfig)
+	if err != nil {
+		return "", "", err
+	}
+
+	req := f.Cluster2KubeClient.CoreV1().RESTClient().Post().
+		Resource("pods").
+		Name(podName).
+		Namespace(namespace).
+		SubResource("exec").
+		VersionedParams(&corev1.PodExecOptions{
+			Command: command,
+			Stdout:  true,
+			Stderr:  true,
+		}, scheme.ParameterCodec)
+
+	executor, err := remotecommand.NewSPDYExecutor(restCfg, "POST", req.URL())
+	if err != nil {
+		return "", "", fmt.Errorf("create SPDY executor: %w", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	err = executor.StreamWithContext(ctx, remotecommand.StreamOptions{
+		Stdout: &stdout,
+		Stderr: &stderr,
+	})
+
+	return stdout.String(), stderr.String(), err
+}
+
 // GetPodIP returns the pod's primary IP address.
 func (f *Framework) GetPodIP(ctx context.Context, namespace, name string) (string, error) {
 	pod, err := f.KubeClient.CoreV1().Pods(namespace).Get(ctx, name, metav1.GetOptions{})
