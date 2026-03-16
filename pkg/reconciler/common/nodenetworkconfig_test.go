@@ -214,6 +214,66 @@ var _ = Describe("NodeNetworkConfigReconciler", func() {
 		})
 	})
 
+	Context("SetStatusWithError", func() {
+		It("should set error message when status is invalid", func() {
+			cfg := createTestNodeNetworkConfig("1")
+			fakeClient = fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithRuntimeObjects(cfg).
+				WithStatusSubresource(cfg).
+				Build()
+
+			err := SetStatusWithError(context.Background(), fakeClient, cfg, operator.StatusInvalid, "something broke", logger)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(cfg.Status.ConfigStatus).To(Equal(operator.StatusInvalid))
+			Expect(cfg.Status.ErrorMessage).To(Equal("something broke"))
+		})
+
+		It("should clear error message when transitioning to provisioned", func() {
+			cfg := createTestNodeNetworkConfig("1")
+			cfg.Status.ErrorMessage = "previous error"
+			fakeClient = fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithRuntimeObjects(cfg).
+				WithStatusSubresource(cfg).
+				Build()
+
+			err := SetStatusWithError(context.Background(), fakeClient, cfg, operator.StatusProvisioned, "", logger)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(cfg.Status.ConfigStatus).To(Equal(operator.StatusProvisioned))
+			Expect(cfg.Status.ErrorMessage).To(BeEmpty())
+		})
+
+		It("should clear error message when transitioning to provisioning", func() {
+			cfg := createTestNodeNetworkConfig("1")
+			cfg.Status.ErrorMessage = "previous error"
+			fakeClient = fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithRuntimeObjects(cfg).
+				WithStatusSubresource(cfg).
+				Build()
+
+			err := SetStatusWithError(context.Background(), fakeClient, cfg, operator.StatusProvisioning, "", logger)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(cfg.Status.ConfigStatus).To(Equal(operator.StatusProvisioning))
+			Expect(cfg.Status.ErrorMessage).To(BeEmpty())
+		})
+
+		It("should clear error message via SetStatus wrapper", func() {
+			cfg := createTestNodeNetworkConfig("1")
+			cfg.Status.ErrorMessage = "stale error"
+			fakeClient = fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithRuntimeObjects(cfg).
+				WithStatusSubresource(cfg).
+				Build()
+
+			err := SetStatus(context.Background(), fakeClient, cfg, operator.StatusProvisioned, logger)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(cfg.Status.ErrorMessage).To(BeEmpty())
+		})
+	})
+
 	Context("storeConfig", func() {
 		It("should store config to file and update in-memory config", func() {
 			cfg := createTestNodeNetworkConfig("1")

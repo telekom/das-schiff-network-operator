@@ -500,14 +500,14 @@ spec:
                 type: integer
               queued:
                 description: Queued informs about how many nodes are currently waiting
-                  to be provisiined with a config derived from the revision.
+                  to be provisioned with a config derived from the revision.
                 type: integer
               ready:
                 description: Ready informs about how many nodes were already provisioned
                   with a config derived from the revision.
                 type: integer
               total:
-                description: Total informs about how many nodes in total can be provisiined
+                description: Total informs about how many nodes in total can be provisioned
                   with a config derived from the revision.
                 type: integer
             required:
