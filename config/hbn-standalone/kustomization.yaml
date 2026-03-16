@@ -8,7 +8,6 @@ resources:
   - NetworkAttachmentDefinition_bridge-hbn_kube-system.yaml
 patches:
   - path: delete-netplan-agent.yaml
-  - path: delete-netplan-configmap.yaml
   - patch: |-
       apiVersion: apps/v1
       kind: DaemonSet
