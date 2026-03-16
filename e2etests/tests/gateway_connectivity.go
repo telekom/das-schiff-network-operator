@@ -64,12 +64,12 @@ var _ = Describe("Gateway Connectivity", Label("gateway", "smoke"), func() {
 			}).WithTimeout(30*time.Second).WithPolling(5*time.Second).Should(BeTrue(), "Ping to m2mgw IPv6 failed")
 
 			By("Verifying m2mgw can ping macvlan-01 (IPv4)")
-			result, err = f.PingFromContainer(ctx, cfg.ClabM2MGW, cfg.Macvlan01IPv4, 5)
+			result, err = f.PingFromCluster2Pod(ctx, "e2e-gateways", "m2m-gateway", cfg.Macvlan01IPv4, 5)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result.Success).To(BeTrue(), "Reverse ping from m2mgw failed: %s", result.Output)
 
 			By("Verifying m2mgw can ping macvlan-01 (IPv6)")
-			result, err = f.PingFromContainer(ctx, cfg.ClabM2MGW, cfg.Macvlan01IPv6, 5)
+			result, err = f.PingFromCluster2Pod(ctx, "e2e-gateways", "m2m-gateway", cfg.Macvlan01IPv6, 5)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result.Success).To(BeTrue(), "Reverse ping from m2mgw IPv6 failed: %s", result.Output)
 		})
@@ -100,12 +100,12 @@ var _ = Describe("Gateway Connectivity", Label("gateway", "smoke"), func() {
 			}).WithTimeout(30*time.Second).WithPolling(5*time.Second).Should(BeTrue(), "Ping to c2mgw IPv6 failed")
 
 			By("Verifying c2mgw can ping macvlan-04 (IPv4)")
-			result, err = f.PingFromContainer(ctx, cfg.ClabC2MGW, cfg.Macvlan04IPv4, 5)
+			result, err = f.PingFromCluster2Pod(ctx, "e2e-gateways", "c2m-gateway", cfg.Macvlan04IPv4, 5)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result.Success).To(BeTrue(), "Reverse ping from c2mgw failed: %s", result.Output)
 
 			By("Verifying c2mgw can ping macvlan-04 (IPv6)")
-			result, err = f.PingFromContainer(ctx, cfg.ClabC2MGW, cfg.Macvlan04IPv6, 5)
+			result, err = f.PingFromCluster2Pod(ctx, "e2e-gateways", "c2m-gateway", cfg.Macvlan04IPv6, 5)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result.Success).To(BeTrue(), "Reverse ping from c2mgw IPv6 failed: %s", result.Output)
 		})
@@ -133,19 +133,19 @@ var _ = Describe("Gateway Connectivity", Label("gateway", "smoke"), func() {
 			Expect(f.WaitForPodReady(ctx, ns, "macvlan-04", cfg.PodReadyTimeout)).To(Succeed())
 
 			By("Verifying m2mgw CANNOT reach c2m pod macvlan-04 (IPv4)")
-			result, _ := f.PingFromContainer(ctx, cfg.ClabM2MGW, cfg.Macvlan04IPv4, 3)
+			result, _ := f.PingFromCluster2Pod(ctx, "e2e-gateways", "m2m-gateway", cfg.Macvlan04IPv4, 3)
 			Expect(result == nil || !result.Success).To(BeTrue(), "m2mgw should NOT reach c2m pod IPv4")
 
 			By("Verifying m2mgw CANNOT reach c2m pod macvlan-04 (IPv6)")
-			result, _ = f.PingFromContainer(ctx, cfg.ClabM2MGW, cfg.Macvlan04IPv6, 3)
+			result, _ = f.PingFromCluster2Pod(ctx, "e2e-gateways", "m2m-gateway", cfg.Macvlan04IPv6, 3)
 			Expect(result == nil || !result.Success).To(BeTrue(), "m2mgw should NOT reach c2m pod IPv6")
 
 			By("Verifying c2mgw CANNOT reach m2m pod macvlan-01 (IPv4)")
-			result, _ = f.PingFromContainer(ctx, cfg.ClabC2MGW, cfg.Macvlan01IPv4, 3)
+			result, _ = f.PingFromCluster2Pod(ctx, "e2e-gateways", "c2m-gateway", cfg.Macvlan01IPv4, 3)
 			Expect(result == nil || !result.Success).To(BeTrue(), "c2mgw should NOT reach m2m pod IPv4")
 
 			By("Verifying c2mgw CANNOT reach m2m pod macvlan-01 (IPv6)")
-			result, _ = f.PingFromContainer(ctx, cfg.ClabC2MGW, cfg.Macvlan01IPv6, 3)
+			result, _ = f.PingFromCluster2Pod(ctx, "e2e-gateways", "c2m-gateway", cfg.Macvlan01IPv6, 3)
 			Expect(result == nil || !result.Success).To(BeTrue(), "c2mgw should NOT reach m2m pod IPv6")
 		})
 	})

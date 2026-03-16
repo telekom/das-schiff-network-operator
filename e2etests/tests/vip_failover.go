@@ -173,13 +173,13 @@ var _ = Describe("VIP Failover", Label("failover"), func() {
 		// --- Phase 3: Verify from m2mgw (external L3 path) ---
 		By("Verifying VIP reachability from m2mgw after failover (IPv4)")
 		Eventually(func() bool {
-			result, _ := f.PingFromContainer(ctx, cfg.ClabM2MGW, vipV4, 1)
+			result, _ := f.PingFromCluster2Pod(ctx, "e2e-gateways", "m2m-gateway", vipV4, 1)
 			return result != nil && result.Success
 		}).WithTimeout(30*time.Second).WithPolling(2*time.Second).Should(BeTrue(), "VIP IPv4 not reachable from m2mgw after failover")
 
 		By("Verifying VIP reachability from m2mgw after failover (IPv6)")
 		Eventually(func() bool {
-			result, _ := f.PingFromContainer(ctx, cfg.ClabM2MGW, vipV6, 1)
+			result, _ := f.PingFromCluster2Pod(ctx, "e2e-gateways", "m2m-gateway", vipV6, 1)
 			return result != nil && result.Success
 		}).WithTimeout(30*time.Second).WithPolling(2*time.Second).Should(BeTrue(), "VIP IPv6 not reachable from m2mgw after failover")
 
