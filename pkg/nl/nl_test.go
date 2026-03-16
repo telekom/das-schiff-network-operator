@@ -991,11 +991,17 @@ var _ = Describe("ReconcileL2()", func() {
 
 		procSysNetPath = oldProcSysNetPath
 	})
-
 	It("returns no error", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
 		nm := NewManager(netlinkMock, &config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
 		oldProcSysNetPath := procSysNetPath
+
+		// Mock ethtool to avoid "no such device" error
+		oldNewEthtoolFunc := newEthtoolFunc
+		newEthtoolFunc = func() (EthtoolInterface, error) {
+			return &MockEthtool{}, nil
+		}
+		defer func() { newEthtoolFunc = oldNewEthtoolFunc }()
 
 		procSysNetPath = tmpDir
 		current := &Layer2Information{
@@ -1201,3 +1207,87 @@ func createInterfaceFile(path string) {
 	err = os.Chmod(path, 0o777)
 	Expect(err).ToNot(HaveOccurred())
 }
+
+var _ = Describe("reconcileSegmentation()", func() {
+	var originalNewEthtoolFunc func() (EthtoolInterface, error)
+
+	BeforeEach(func() {
+		originalNewEthtoolFunc = newEthtoolFunc
+	})
+
+	AfterEach(func() {
+		newEthtoolFunc = originalNewEthtoolFunc
+	})
+
+	It("returns error if creating ethtool client fails", func() {
+		newEthtoolFunc = func() (EthtoolInterface, error) {
+			return nil, errors.New("failed to create ethtool client")
+		}
+
+		vlanInterface := &netlink.Vlan{LinkAttrs: netlink.LinkAttrs{Name: "vlan100"}}
+		err := reconcileSegmentation(vlanInterface, false)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("error creating ethtool client"))
+	})
+
+	It("returns error if changing ethtool settings fails", func() {
+		mockEth := &MockEthtool{
+			ChangeFunc: func(_ string, _ map[string]bool) error {
+				return errors.New("failed to change settings")
+			},
+		}
+		newEthtoolFunc = func() (EthtoolInterface, error) {
+			return mockEth, nil
+		}
+
+		vlanInterface := &netlink.Vlan{LinkAttrs: netlink.LinkAttrs{Name: "vlan100"}}
+		err := reconcileSegmentation(vlanInterface, false)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("error changing ethtool settings"))
+		Expect(mockEth.Closed).To(BeTrue())
+	})
+
+	It("returns no error and disables segmentation offloading when disableSegmentation is true", func() {
+		var capturedIntf string
+		var capturedConfig map[string]bool
+		mockEth := &MockEthtool{
+			ChangeFunc: func(intf string, config map[string]bool) error {
+				capturedIntf = intf
+				capturedConfig = config
+				return nil
+			},
+		}
+		newEthtoolFunc = func() (EthtoolInterface, error) {
+			return mockEth, nil
+		}
+
+		vlanInterface := &netlink.Vlan{LinkAttrs: netlink.LinkAttrs{Name: "vlan100"}}
+		err := reconcileSegmentation(vlanInterface, true)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(capturedIntf).To(Equal("vlan100"))
+		Expect(capturedConfig).To(Equal(map[string]bool{"gro": false, "gso": false, "tso": false}))
+		Expect(mockEth.Closed).To(BeTrue())
+	})
+
+	It("returns no error and enables segmentation offloading when disableSegmentation is false", func() {
+		var capturedIntf string
+		var capturedConfig map[string]bool
+		mockEth := &MockEthtool{
+			ChangeFunc: func(intf string, config map[string]bool) error {
+				capturedIntf = intf
+				capturedConfig = config
+				return nil
+			},
+		}
+		newEthtoolFunc = func() (EthtoolInterface, error) {
+			return mockEth, nil
+		}
+
+		vlanInterface := &netlink.Vlan{LinkAttrs: netlink.LinkAttrs{Name: "vlan200"}}
+		err := reconcileSegmentation(vlanInterface, false)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(capturedIntf).To(Equal("vlan200"))
+		Expect(capturedConfig).To(Equal(map[string]bool{"gro": true, "gso": true, "tso": true}))
+		Expect(mockEth.Closed).To(BeTrue())
+	})
+})

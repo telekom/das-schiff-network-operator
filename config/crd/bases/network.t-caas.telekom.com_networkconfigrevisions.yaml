@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.17.2
+    controller-gen.kubebuilder.io/version: v0.20.0
   name: networkconfigrevisions.network.t-caas.telekom.com
 spec:
   group: network.t-caas.telekom.com
@@ -241,6 +241,11 @@ spec:
                       type: string
                     createMacVLANInterface:
                       description: Create MACVLAN attach interface
+                      type: boolean
+                    disableSegmentation:
+                      description: |-
+                        Disable segmentation offload on the VLAN, limiting the Linux packet size to the MTU.
+                        This might be required when you use AF_PACKET on the VLAN.
                       type: boolean
                     id:
                       description: VLAN Id of the layer 2 network

@@ -18,7 +18,8 @@ func buildNodeLayer2(node *corev1.Node, revision *v1alpha1.NetworkConfigRevision
 		return layer2[i].ID < layer2[j].ID
 	})
 
-	for _, l2 := range layer2 {
+	for i := range layer2 {
+		l2 := &layer2[i]
 		if !matchSelector(node, l2.NodeSelector) {
 			continue
 		}
@@ -28,9 +29,10 @@ func buildNodeLayer2(node *corev1.Node, revision *v1alpha1.NetworkConfigRevision
 		}
 
 		nodeL2 := v1alpha1.Layer2{
-			VNI:  uint32(l2.VNI), //nolint:gosec
-			VLAN: uint16(l2.ID),  //nolint:gosec
-			MTU:  uint16(l2.MTU), //nolint:gosec
+			VNI:                 uint32(l2.VNI), //nolint:gosec
+			VLAN:                uint16(l2.ID),  //nolint:gosec
+			MTU:                 uint16(l2.MTU), //nolint:gosec
+			DisableSegmentation: l2.DisableSegmentation,
 		}
 		if len(l2.AnycastGateways) > 0 {
 			irb := v1alpha1.IRB{
@@ -52,7 +54,8 @@ func buildNetplanVLANs(node *corev1.Node, revision *v1alpha1.NetworkConfigRevisi
 	sort.SliceStable(layer2, func(i, j int) bool {
 		return layer2[i].ID < layer2[j].ID
 	})
-	for _, l2 := range layer2 {
+	for i := range layer2 {
+		l2 := &layer2[i]
 		if !matchSelector(node, l2.NodeSelector) {
 			continue
 		}

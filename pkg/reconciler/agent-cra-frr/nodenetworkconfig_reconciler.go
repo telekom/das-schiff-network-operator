@@ -46,11 +46,12 @@ func (a *CRAFRRConfigApplier) convertNodeConfigToNetlink(nodeCfg *v1alpha1.NodeN
 		neighSuppression := false
 
 		nlLayer2 := nl.Layer2Information{
-			VlanID:           int(layer2.VLAN),
-			MTU:              int(layer2.MTU),
-			VNI:              int(layer2.VNI),
-			NeighSuppression: &neighSuppression,
-			AnycastMAC:       new(string),
+			VlanID:              int(layer2.VLAN),
+			MTU:                 int(layer2.MTU),
+			VNI:                 int(layer2.VNI),
+			NeighSuppression:    &neighSuppression,
+			AnycastMAC:          new(string),
+			DisableSegmentation: layer2.DisableSegmentation,
 		}
 
 		if layer2.IRB != nil {

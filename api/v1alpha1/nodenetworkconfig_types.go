@@ -55,6 +55,8 @@ type Layer2 struct {
 	IRB *IRB `json:"irb,omitempty"`
 	// MirrorACLs is a list of mirror ACLs.
 	MirrorACLs []MirrorACL `json:"mirrorAcls,omitempty"`
+	// DisableSegmentation indicates whether to disable segmentation for the Layer 2 network.
+	DisableSegmentation bool `json:"disableSegmentation,omitempty"`
 }
 
 // IRB represents the Integrated Routing and Bridging configuration.
