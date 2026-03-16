@@ -133,6 +133,10 @@ func PhaseCreateNodes(cluster *Cluster, repoRoot string) error {
 	for _, node := range cluster.Nodes {
 		shortName := node.Name // e.g. "nwop-control-plane"
 
+		// Clean up any stale container or network endpoint from a previous run
+		RunCmd("docker", "rm", "-f", shortName)                            //nolint:errcheck
+		RunCmd("docker", "network", "disconnect", "-f", "none", shortName) //nolint:errcheck
+
 		Logf("Creating container %s...", shortName)
 
 		args := []string{
@@ -178,7 +182,7 @@ func PhaseContainerlab(repoRoot string) error {
 	clabImage := EnvOr("CLAB_IMAGE", "ghcr.io/srl-labs/clab:0.74.0")
 
 	args := []string{
-		"run", "--rm", "-t",
+		"run", "--rm",
 		"--privileged",
 		"--network", "host",
 		"--pid", "host",
@@ -285,8 +289,8 @@ func PhaseUnderlay(cluster *Cluster) error {
 				established++
 			}
 		}
-		Logf("  BGP: %d/3 peers established on leaf1", established)
-		return established >= 3, nil
+		Logf("  BGP: %d/4 peers established on leaf1", established)
+		return established >= 4, nil
 	})
 }
 
@@ -485,6 +489,8 @@ func PhaseComponents(cluster *Cluster, repoRoot string) error {
 		"crd/felixconfigurations.crd.projectcalico.org",
 		"crd/ippools.crd.projectcalico.org",
 		"--timeout=60s")
+	// Re-apply after CRDs are established to create CR resources (IPPools, BGPPeers, etc.)
+	kubectl("apply", "-k", "/repo/e2e/calico") //nolint:errcheck
 
 	// Install Coil
 	Logf("Installing Coil...")
@@ -634,6 +640,15 @@ func PhaseFinalize(cluster *Cluster, repoRoot string) error {
 		"wait", "--for=condition=available", "deployment/network-operator-operator",
 		"-n", "kube-system", "--timeout=120s")
 
+	// Wait for webhook to be serving (operator needs time to generate self-signed cert)
+	Logf("Waiting for webhook to be ready...")
+	WaitFor("webhook ready", 120*time.Second, 5*time.Second, func() (bool, error) { //nolint:errcheck
+		out, err := DockerExec(cp.Name, "kubectl", "--kubeconfig="+kubeconfigPath,
+			"get", "endpoints", "network-operator-webhook-service", "-n", "kube-system",
+			"-o", "jsonpath={.subsets[0].addresses[0].ip}")
+		return err == nil && strings.TrimSpace(out) != "", nil
+	})
+
 	// Wait for agent DaemonSet
 	Logf("Waiting for agent DaemonSet...")
 	WaitFor("agent DaemonSet", 120*time.Second, 5*time.Second, func() (bool, error) { //nolint:errcheck
@@ -703,6 +718,227 @@ func importImage(container, image string) error {
 		return fmt.Errorf("ctr import on %s: %w", container, err)
 	}
 	DockerExec(container, "rm", "-f", "/var/tmp/image.tar") //nolint:errcheck
+	return nil
+}
+
+// PhaseCluster2 provisions the second (gateway) cluster end-to-end.
+// It is a simplified single-node cluster: no kube-vip, no Coil/MetalLB,
+// just CRA + underlay, kubeadm init, operator/agents, network configs + gateway pods.
+func PhaseCluster2(cluster2 *Cluster, repoRoot string) error {
+	Logf("=== Cluster-2 setup ===")
+	node := cluster2.Nodes[0]
+
+	// Phase C2-1: Underlay (CRA + hbn + BGP)
+	if err := PhaseUnderlay(cluster2); err != nil {
+		return fmt.Errorf("cluster2 underlay: %w", err)
+	}
+
+	// Phase C2-2: kubeadm init (single-node, no VIP, untaint control-plane)
+	Logf("Cluster-2: Running kubeadm init on %s...", node.Name)
+	if err := KubeadmInitSingleNode(cluster2); err != nil {
+		return fmt.Errorf("cluster2 kubeadm: %w", err)
+	}
+
+	// Configure DNS → NAT64 (needed for fetching remote manifests like Calico)
+	Logf("Cluster-2: Configuring DNS → NAT64 (%s)...", cluster2.NAT64DNS)
+	if _, err := DockerExecShell(node.Name,
+		fmt.Sprintf("printf 'nameserver %s\\n' > /etc/resolv.conf", cluster2.NAT64DNS),
+	); err != nil {
+		return fmt.Errorf("setting DNS on %s: %w", node.Name, err)
+	}
+
+	// Phase C2-3: Install components (images, CNI plugins, Calico, Multus, operator)
+	if err := PhaseCluster2Components(cluster2, repoRoot); err != nil {
+		return fmt.Errorf("cluster2 components: %w", err)
+	}
+
+	// Phase C2-4: Wait for operator, apply network configs, deploy gateway pods
+	if err := PhaseCluster2Gateway(cluster2, repoRoot); err != nil {
+		return fmt.Errorf("cluster2 gateway: %w", err)
+	}
+
+	// Extract kubeconfig for tests
+	if err := ExtractCluster2Kubeconfig(repoRoot, cluster2); err != nil {
+		return fmt.Errorf("cluster2 kubeconfig: %w", err)
+	}
+
+	Logf("=== Cluster-2 ready ===")
+	return nil
+}
+
+// PhaseCluster2Components installs minimal components on cluster-2.
+// No kube-vip, no Coil, no MetalLB — just operator + agents + Calico + Multus + CNI plugins.
+func PhaseCluster2Components(cluster *Cluster, repoRoot string) error {
+	Logf("Cluster-2: Installing components...")
+
+	cp := cluster.ControlPlane()
+	kubeconfigPath := "/etc/kubernetes/admin.conf"
+
+	kubectl := func(args ...string) error {
+		fullArgs := append([]string{"--kubeconfig=" + kubeconfigPath}, args...)
+		_, err := DockerExec(cp.Name, append([]string{"kubectl"}, fullArgs...)...)
+		return err
+	}
+
+	// Load images
+	imgBase := EnvOr("IMG_BASE", "ghcr.io/telekom")
+	images := []string{
+		imgBase + "/das-schiff-network-operator:latest",
+		imgBase + "/das-schiff-nwop-agent-cra-frr:latest",
+		imgBase + "/das-schiff-nwop-agent-hbn-l2:latest",
+	}
+	for _, img := range images {
+		Logf("  Loading %s on %s", filepath.Base(img), cp.Name)
+		if err := importImage(cp.Name, img); err != nil {
+			return fmt.Errorf("loading image %s: %w", img, err)
+		}
+	}
+
+	// CNI plugins
+	arch := runtime.GOARCH
+	cniVersion := EnvOr("CNI_PLUGINS_VERSION", "v1.9.0")
+	cniURL := fmt.Sprintf(
+		"https://github.com/containernetworking/plugins/releases/download/%s/cni-plugins-linux-%s-%s.tgz",
+		cniVersion, arch, cniVersion)
+	if _, err := DockerExecShell(cp.Name, fmt.Sprintf(
+		"curl -sSL '%s' | tar -xzf - -C /opt/cni/bin/ && cp /opt/cni/bin/macvlan /usr/lib/cni/macvlan 2>/dev/null; true", cniURL)); err != nil {
+		return fmt.Errorf("installing CNI plugins: %w", err)
+	}
+
+	// Calico (cluster-2 overlay: no coil CNI chain, different autodetection CIDRs)
+	kubectl("apply", "-k", "/repo/e2e/calico-cluster2") //nolint:errcheck
+	time.Sleep(3 * time.Second)                         //nolint:mnd
+	kubectl("apply", "-k", "/repo/e2e/calico-cluster2") //nolint:errcheck
+	kubectl("wait", "--for=condition=established",      //nolint:errcheck
+		"crd/bgppeers.crd.projectcalico.org",
+		"crd/bgpconfigurations.crd.projectcalico.org",
+		"crd/felixconfigurations.crd.projectcalico.org",
+		"crd/ippools.crd.projectcalico.org",
+		"--timeout=60s")
+	// Re-apply after CRDs are established to create CR resources (IPPools, BGPPeers, etc.)
+	kubectl("apply", "-k", "/repo/e2e/calico-cluster2") //nolint:errcheck
+
+	// Multus
+	multusVersion := EnvOr("MULTUS_VERSION", "v4.1.4")
+	kubectl("apply", "-f", //nolint:errcheck
+		fmt.Sprintf("https://raw.githubusercontent.com/k8snetworkplumbingwg/multus-cni/%s/deployments/multus-daemonset-thick.yml", multusVersion))
+	kubectl("-n", "kube-system", "patch", "daemonset", "kube-multus-ds", "--type=json", //nolint:errcheck
+		`-p=[{"op":"replace","path":"/spec/template/spec/containers/0/resources/limits/memory","value":"512Mi"},{"op":"replace","path":"/spec/template/spec/containers/0/resources/requests/memory","value":"512Mi"}]`)
+
+	// Operator + agents
+	if _, err := DockerExecShell(cp.Name, fmt.Sprintf(
+		"kubectl --kubeconfig=%s kustomize /repo/e2e/operator | kubectl --kubeconfig=%s apply -f -",
+		kubeconfigPath, kubeconfigPath)); err != nil {
+		return fmt.Errorf("installing operator: %w", err)
+	}
+
+	// Wait for operator
+	Logf("Cluster-2: Waiting for operator...")
+	DockerExec(cp.Name, "kubectl", "--kubeconfig="+kubeconfigPath, //nolint:errcheck
+		"wait", "--for=condition=available", "deployment/network-operator-operator",
+		"-n", "kube-system", "--timeout=120s")
+
+	// Wait for agent DaemonSet
+	WaitFor("cluster2 agent DaemonSet", 120*time.Second, 5*time.Second, func() (bool, error) { //nolint:errcheck
+		out, err := DockerExec(cp.Name, "kubectl", "--kubeconfig="+kubeconfigPath,
+			"get", "ds", "network-operator-agent-cra-frr", "-n", "kube-system",
+			"-o", "jsonpath={.status.desiredNumberScheduled},{.status.numberReady}")
+		if err != nil {
+			return false, err
+		}
+		parts := strings.Split(out, ",")
+		return len(parts) == 2 && parts[0] != "0" && parts[0] == parts[1], nil
+	})
+
+	return nil
+}
+
+// PhaseCluster2Gateway applies the gateway network configs and deploys gateway pods.
+func PhaseCluster2Gateway(cluster *Cluster, repoRoot string) error {
+	Logf("Cluster-2: Deploying gateway network configs + pods...")
+
+	cp := cluster.ControlPlane()
+	kubeconfigPath := "/etc/kubernetes/admin.conf"
+
+	// Apply cluster-2 network configs (VRFRouteConfigurations + Layer2NetworkConfigurations).
+	// Retry because the webhook may not be serving yet even though the operator pod is Ready
+	// (the readiness probe checks healthz, but the webhook cert generation takes a moment longer).
+	Logf("Cluster-2: Applying network configs (waiting for webhook)...")
+	if err := WaitFor("cluster2 network configs", 120*time.Second, 5*time.Second, func() (bool, error) {
+		_, err := DockerExecShell(cp.Name, fmt.Sprintf(
+			"kubectl --kubeconfig=%s apply -f /repo/e2etests/testdata/cluster2-network-configs.yaml",
+			kubeconfigPath))
+		return err == nil, nil
+	}); err != nil {
+		return fmt.Errorf("applying cluster2 network configs: %w", err)
+	}
+
+	// Wait for VLANs to be created by the operator
+	Logf("Cluster-2: Waiting for VLAN interfaces...")
+	if err := WaitFor("cluster2 VLANs", 120*time.Second, 5*time.Second, func() (bool, error) {
+		_, err := DockerExecShell(cp.Name,
+			`P=$(systemctl show cra.service -p MainPID --value); `+
+				`CRA_PID=$(cat /proc/$P/task/*/children | head -1 | tr -d " \n"); `+
+				`nsenter -t $CRA_PID -m -n -- ip link show vlan.601 2>/dev/null && `+
+				`nsenter -t $CRA_PID -m -n -- ip link show vlan.602 2>/dev/null`)
+		return err == nil, nil
+	}); err != nil {
+		return fmt.Errorf("waiting for cluster2 VLANs: %w", err)
+	}
+
+	// Apply gateway NADs + pods
+	if _, err := DockerExecShell(cp.Name, fmt.Sprintf(
+		"kubectl --kubeconfig=%s apply -f /repo/e2etests/testdata/cluster2-gateway-pods.yaml",
+		kubeconfigPath)); err != nil {
+		return fmt.Errorf("applying gateway pods: %w", err)
+	}
+
+	// Wait for gateway pods to be ready
+	Logf("Cluster-2: Waiting for gateway pods...")
+	for _, pod := range []string{"m2m-gateway", "c2m-gateway"} {
+		if err := WaitFor(fmt.Sprintf("cluster2 %s", pod), 120*time.Second, 5*time.Second, func() (bool, error) {
+			out, err := DockerExec(cp.Name, "kubectl", "--kubeconfig="+kubeconfigPath,
+				"get", "pod", pod, "-n", "e2e-gateways",
+				"-o", "jsonpath={.status.phase}")
+			if err != nil {
+				return false, nil
+			}
+			return strings.TrimSpace(out) == "Running", nil
+		}); err != nil {
+			return fmt.Errorf("waiting for %s pod: %w", pod, err)
+		}
+	}
+
+	Logf("Cluster-2: Gateway pods running")
+	return nil
+}
+
+// ExtractCluster2Kubeconfig extracts the kubeconfig from cluster-2 for test access.
+func ExtractCluster2Kubeconfig(repoRoot string, cluster *Cluster) error {
+	cp := cluster.ControlPlane()
+
+	Logf("Extracting cluster-2 kubeconfig...")
+	kubeconfig, err := DockerExec(cp.Name, "cat", "/etc/kubernetes/admin.conf")
+	if err != nil {
+		return fmt.Errorf("extracting cluster2 kubeconfig: %w", err)
+	}
+
+	// Replace server address with the node overlay IP (reachable from tester)
+	kubeconfig = strings.ReplaceAll(kubeconfig,
+		fmt.Sprintf("server: https://[%s]:6443", cp.IPv6),
+		fmt.Sprintf("server: https://%s:6443", cp.IPv4))
+	kubeconfig = strings.ReplaceAll(kubeconfig,
+		fmt.Sprintf("server: https://%s:6443", cluster.VIP),
+		fmt.Sprintf("server: https://%s:6443", cp.IPv4))
+
+	for _, rel := range []string{"e2etests/.kubeconfig-cluster2", "e2e/.kubeconfig-cluster2"} {
+		path := fmt.Sprintf("%s/%s", repoRoot, rel)
+		if err := os.WriteFile(path, []byte(kubeconfig), 0o644); err != nil {
+			return fmt.Errorf("writing %s: %w", rel, err)
+		}
+	}
+
+	Logf("Cluster-2 kubeconfig written")
 	return nil
 }
 

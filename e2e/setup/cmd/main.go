@@ -57,21 +57,25 @@ func findRepoRoot() string {
 func up(repoRoot string) error {
 	start := time.Now()
 	cluster := setup.DefaultCluster()
+	cluster2 := setup.Cluster2()
 
 	// Build images
 	if err := setup.PhaseBuildImages(repoRoot); err != nil {
 		return fmt.Errorf("build images: %w", err)
 	}
 
-	// Phase 0: Generate per-node configs
+	// Phase 0: Generate per-node configs (both clusters)
 	setup.Logf("Phase 0: Generating configs...")
-	if err := setup.GenerateNodeConfigs(repoRoot, cluster); err != nil {
+	if err := setup.GenerateNodeConfigs(repoRoot, cluster, cluster2); err != nil {
 		return fmt.Errorf("generating configs: %w", err)
 	}
 
-	// Phase 1a: Create k8s node containers with proper Docker flags
+	// Phase 1a: Create k8s node containers (both clusters)
 	if err := setup.PhaseCreateNodes(cluster, repoRoot); err != nil {
 		return fmt.Errorf("create nodes: %w", err)
+	}
+	if err := setup.PhaseCreateNodes(cluster2, repoRoot); err != nil {
+		return fmt.Errorf("create cluster2 nodes: %w", err)
 	}
 
 	// Phase 1b: Deploy containerlab (fabric/infra + wire k8s ext-containers)
@@ -104,6 +108,11 @@ func up(repoRoot string) error {
 		return fmt.Errorf("finalize: %w", err)
 	}
 
+	// Phase 7: Cluster-2 (gateway cluster)
+	if err := setup.PhaseCluster2(cluster2, repoRoot); err != nil {
+		return fmt.Errorf("cluster2: %w", err)
+	}
+
 	setup.Logf("E2E lab ready in %v", time.Since(start).Round(time.Second))
 	return nil
 }
@@ -112,12 +121,13 @@ func down(repoRoot string) error {
 	setup.Logf("Tearing down E2E lab...")
 
 	cluster := setup.DefaultCluster()
+	cluster2 := setup.Cluster2()
 	topoDir := filepath.Join(repoRoot, "e2e", "setup")
 	clabImage := setup.EnvOr("CLAB_IMAGE", "ghcr.io/srl-labs/clab:0.74.0")
 
 	// Destroy containerlab topology (removes fabric/infra containers)
 	setup.Logf("Destroying containerlab topology...")
-	setup.RunCmd("docker", "run", "--rm", "-t", //nolint:errcheck
+	setup.RunCmd("docker", "run", "--rm", //nolint:errcheck
 		"--privileged",
 		"--network", "host",
 		"--pid", "host",
@@ -131,8 +141,21 @@ func down(repoRoot string) error {
 	// Remove k8s node containers (ext-container, not managed by clab destroy)
 	setup.Logf("Removing k8s node containers...")
 	for _, node := range cluster.Nodes {
-		setup.RunCmd("docker", "rm", "-f", node.Name) //nolint:errcheck
+		setup.RunCmd("docker", "rm", "-f", node.Name)                            //nolint:errcheck
+		setup.RunCmd("docker", "network", "disconnect", "-f", "none", node.Name) //nolint:errcheck
 	}
+	for _, node := range cluster2.Nodes {
+		setup.RunCmd("docker", "rm", "-f", node.Name)                            //nolint:errcheck
+		setup.RunCmd("docker", "network", "disconnect", "-f", "none", node.Name) //nolint:errcheck
+	}
+
+	// Clean stale clab network endpoints
+	for _, name := range []string{"clab-nwop-leaf1", "clab-nwop-leaf2", "clab-nwop-dcgw1", "clab-nwop-dcgw2", "clab-nwop-nat64", "clab-nwop-tester"} {
+		setup.RunCmd("docker", "network", "disconnect", "-f", "none", name) //nolint:errcheck
+	}
+
+	// Prune anonymous volumes left by --volume /var
+	setup.RunCmd("docker", "volume", "prune", "-f") //nolint:errcheck
 
 	setup.Logf("E2E lab torn down.")
 	return nil

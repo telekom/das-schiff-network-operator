@@ -149,6 +149,42 @@ func KubeadmInit(cluster *Cluster) error {
 	return nil
 }
 
+// KubeadmInitSingleNode runs kubeadm init on a single-node cluster and untaints the control-plane.
+// No kube-vip, no separate VIP — advertises on the node's own IPv6.
+func KubeadmInitSingleNode(cluster *Cluster) error {
+	cp := cluster.ControlPlane()
+	config := kubeadmInitConfig(cluster)
+
+	Logf("Running kubeadm init (single-node) on %s...", cp.Name)
+
+	if err := DockerExecInput(cp.Name, config, "tee", "/tmp/kubeadm.conf"); err != nil {
+		return fmt.Errorf("writing kubeadm config: %w", err)
+	}
+
+	out, err := DockerExec(cp.Name,
+		"kubeadm", "init",
+		"--config=/tmp/kubeadm.conf",
+		"--ignore-preflight-errors=SystemVerification",
+		"--v=5",
+	)
+	if err != nil {
+		return fmt.Errorf("kubeadm init: %w\n%s", err, out)
+	}
+
+	// Install kube-proxy
+	if err := InstallKubeProxy(cluster); err != nil {
+		return err
+	}
+
+	// Untaint control-plane so workloads can schedule
+	Logf("Untainting control-plane on %s...", cp.Name)
+	DockerExec(cp.Name, "kubectl", "--kubeconfig=/etc/kubernetes/admin.conf", //nolint:errcheck
+		"taint", "nodes", "--all", "node-role.kubernetes.io/control-plane-")
+
+	Logf("kubeadm init (single-node) complete on %s", cp.Name)
+	return nil
+}
+
 // KubeadmJoin runs kubeadm join on a worker node.
 func KubeadmJoin(cluster *Cluster, node *Node) error {
 	config := kubeadmJoinConfig(cluster, node)
