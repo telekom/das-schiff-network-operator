@@ -55,18 +55,15 @@ The `ConfigReconciler` watches all three CRDs, snapshots them into a `NetworkCon
 3. **No SR-IOV orchestration** — SR-IOV / VTEP_LEAF configuration on BM4X requires manual coordination.
 4. **No simplified traffic mirroring** — configuring mirroring requires coordinating `MirrorSelector`, `MirrorTarget`, a dedicated mirror VRF (`VRFRouteConfiguration` with loopbacks + IPAM pool), and GRE tunnel parameters across multiple resources (see [Proposal 01](../01-traffic-mirroring/README.md)).
 
-> **Explicitly out of scope for this iteration:** automatic network allocation (BM4X / OpenStack / vSphere), DNS integration, and management-cluster cross-cluster reconciliation. Users specify all network parameters (VLAN IDs, VNIs, CIDRs) directly in `Network` resources.
+> **Explicitly out of scope for this iteration:** management-cluster provisioning pipeline (BM4X / OpenStack / vSphere → Network + VRF generation), DNS integration, and cross-cluster sync mechanisms. Users specify all network parameters (VLAN IDs, VNIs, CIDRs) directly in `Network` resources. The intended future flow mirrors SchiffCluster's ordering/usage split: a `NetworkBinding` controller provisions via BM4X and auto-generates `Network` + `VRF` CRDs (ordering output); teams author usage CRDs (`Destination`, `Inbound`, `Outbound`, `Layer2Attachment`, etc.) referencing those generated resources. All CRDs are synced to the tenant cluster. The tenant-cluster operator consumes them without needing upstream API access.
 
-> **Infrastructure-level provisioning is out of scope.** The operator **consumes** pre-existing host infrastructure — it does not create or manage it:
-> - **Bond creation** (e.g., creating `bond2` from `ens5f0np0` + `ens5f1np1`) is handled by external node-level tooling (e.g., `NetworkConfiguration` CRDs from the CaaS platform, cloud-init, netplan, or systemd-networkd). The operator references existing bonds via `Layer2Attachment.interfaceRef`.
-> - **SR-IOV VF provisioning** (e.g., setting VF count on physical NICs) is handled by the SR-IOV Network Device Plugin, the node's BIOS/OS configuration, or platform-specific tooling. The operator **uses** VFs via `Layer2Attachment.sriov.enabled`.
-> - This separation is intentional: bond and VF lifecycle is a node-infrastructure concern that varies per platform and is typically managed through GitOps or machine configuration, not by the network operator.
+> **Node-level interface provisioning** (bonds, SR-IOV VF counts, ethernet MTU) is expressed via the `InterfaceConfig` CRD (see §4.12). Users author an `InterfaceConfig` with a `nodeSelector` and a netplan-inspired device spec (ethernets, bonds). The operator resolves it per-node into `NodeNetplanConfig` resources, which the existing `agent-netplan` applies via netplan/DBus. This follows the same intent → per-node pattern as the other CRDs. `InterfaceConfig` configures the physical substrate ("make bond2 exist"), while `Layer2Attachment` configures what runs on top of it ("put VLAN 1520 on bond2").
 
 ## 3. Design Decisions
 
 ### 3.1 New Intent-Driven CRDs
 
-We introduce eleven new cluster-scoped CRDs under `network.t-caas.telekom.com/v1alpha1`:
+We introduce twelve new cluster-scoped CRDs under `network.t-caas.telekom.com/v1alpha1`:
 
 | CRD | Purpose |
 |---|---|
@@ -81,6 +78,7 @@ We introduce eleven new cluster-scoped CRDs under `network.t-caas.telekom.com/v1
 | `Collector` | GRE collector endpoint + mirror VRF binding — defined once, referenced by TrafficMirrors |
 | `TrafficMirror` | Declaratively mirror traffic from an attachment to a Collector |
 | `NodeNetworkStatus` | Per-node inventory: interfaces (excl. pod veths), routes, IPs — populated by agents for validation and observability |
+| `InterfaceConfig` | Node-level interface provisioning — bonds, ethernets (MTU, SR-IOV VF count). User-authored with `nodeSelector`; operator resolves per-node into `NodeNetplanConfig` for `agent-netplan` (D46) |
 
 The design separates **pool definition** (`Network`) from **pool usage** (`Layer2Attachment`, `Inbound`, `Outbound`, `PodNetwork`). A `Network` is not per se L2 — it only becomes a Layer 2 segment when a `Layer2Attachment` attaches it to nodes. An `Inbound` or `Outbound` allocates IPs from the same `Network` pool without implying any L2 presence.
 
@@ -127,7 +125,7 @@ All intent controllers run in the **tenant cluster**, integrated into the existi
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-All network parameters (VLAN IDs, VNIs, subnets, IP addresses) are specified directly in the `Network` CRDs by the user. Usage CRDs (`Layer2Attachment`, `Inbound`, `Outbound`, `PodNetwork`) reference a `Network` by name via `networkRef`. Automatic allocation through a management cluster controller can be added later as a transparent layer on top — the `Network` CRD API is designed to accommodate this (`allocationPool` fields are reserved but not processed in this iteration).
+All network parameters (VLAN IDs, VNIs, subnets, IP addresses) are specified directly in the `Network` CRDs. Usage CRDs (`Layer2Attachment`, `Inbound`, `Outbound`, `PodNetwork`) reference a `Network` by name via `networkRef`. In a future iteration, a management-cluster controller provisions networks via BM4X (or vSphere / OpenStack), resolves all parameters (CIDR, VLAN, VNI), and syncs the fully-populated intent CRDs down to the tenant cluster. The tenant-cluster operator consumes them as-is — it never contacts upstream APIs. This separation keeps the tenant-cluster operator stateless with respect to provisioning.
 
 ### 3.3 Use-Case Coverage
 
@@ -135,9 +133,9 @@ The design targets four categories of deployment. The table below maps each to t
 
 | # | Use Case | CRDs / Fields | Notes |
 |---|---|---|---|
-| **UC 1** | **L2 ordering on the fly** — vSphere / OpenStack controller orders a network, attaches it to VMs, optionally assigns IPs | `Network` (with `allocationPool` for future auto-allocation, or user-specified CIDR/VLAN). Pure L2 (VLAN-only, no IPs) is valid. `Layer2Attachment` with `interfaceRef` + `nodeSelector` for L2 presence on nodes | A future management-cluster controller uses `allocationPool` to order from BM4X / vSphere / OpenStack and writes back CIDR + VLAN. "With IP assignment or not" is handled by the optional `ipv4`/`ipv6` fields on `Network` |
-| **UC 2** | **GitOps L2 configs** — bonds, VLANs on bonds (no IPs), SR-IOV VF provisioning | **Bond creation** and **VF provisioning** are out of scope (infrastructure-level; see note above). The operator *consumes* them: `Network` (VLAN-only, no IPs) + `Layer2Attachment` with `interfaceRef: bond2` + `nodeSelector` creates the VLAN sub-interface on the existing bond. Per-VLAN: one `Network` + one `Layer2Attachment` per VLAN | Example: 10 VLANs on `bond2` = 10 `Network` resources (each with `vlan: <id>`) + 10 `Layer2Attachment` resources (each with `networkRef`, `interfaceRef: bond2`, `nodeSelector`) |
-| **UC 3** | **SR-IOV ordering** — BM4X orders a network, VLAN gets assigned, worker pool needs config, bond already exists | `Network` (with `vlan` from BM4X, optionally `allocationPool`). `Layer2Attachment` with `interfaceRef: bond0` + `sriov.enabled: true` + `nodeSelector`. Bond is pre-existing | `sriov.enabled` creates SR-IOV policies for `NetworkAttachmentDefinition` with the VLAN ID from the referenced `Network` |
+| **UC 1** | **L2 ordering on the fly** — vSphere / OpenStack controller orders a network, attaches it to VMs, optionally assigns IPs | `Network` (auto-generated from `NetworkBinding` after provisioning, or user-specified for pre-existing L2). Pure L2 (VLAN-only, no IPs) is valid. `Layer2Attachment` with `interfaceRef` + `nodeSelector` for L2 presence on nodes | A future mgmt-cluster `NetworkBinding` controller provisions via BM4X / vSphere / OpenStack and auto-generates `Network` + `VRF` CRDs with the provisioned values. Teams author usage CRDs (`Layer2Attachment`, `Inbound`, etc.) referencing the generated `Network`. For pre-existing L2 segments with a known VLAN, no `NetworkBinding` is needed — teams create `Network` + `Layer2Attachment` directly. "With IP assignment or not" is handled by the optional `ipv4`/`ipv6` fields on `Network` |
+| **UC 2** | **GitOps L2 configs** — bonds, VLANs on bonds (no IPs), SR-IOV VF provisioning | `InterfaceConfig` provisions the bond (`bond2`) and VFs with `nodeSelector`. `Network` (VLAN-only, no IPs) + `Layer2Attachment` with `interfaceRef: bond2` + `nodeSelector` creates the VLAN sub-interface on the bond. Per-VLAN: one `Network` + one `Layer2Attachment` per VLAN | Example: `InterfaceConfig` creates `bond2` + 32 VFs; 10 VLANs on `bond2` = 10 `Network` + 10 `Layer2Attachment` resources |
+| **UC 3** | **SR-IOV ordering** — BM4X orders a network, VLAN gets assigned, worker pool needs config, bond may need provisioning | `InterfaceConfig` provisions the bond and VFs with `nodeSelector` (if not already present). `Network` (with `vlan` from BM4X, synced from mgmt-cluster). `Layer2Attachment` with `interfaceRef: bond0` + `sriov.enabled: true` + `nodeSelector` | `sriov.enabled` creates SR-IOV policies for `NetworkAttachmentDefinition` with the VLAN ID from the referenced `Network`. The mgmt-cluster controller provisions via BM4X and syncs the resolved `Network` (with `vlan`, `vni`) to the tenant cluster |
 | **UC 4** | **HBN use cases** — VXLAN tunnels, VRF routing, anycast gateways, MetalLB / Coil integration | `Network` (with CIDR + VLAN + VNI) + `VRF` (metadata) + `Destination` (routing, `vrfRef`). `Layer2Attachment` with `destinations` selector + `networkRef`. `Inbound`/`Outbound` for MetalLB/Coil integration. `BGPNeighbor`, `PodNetwork`, `Collector`, `TrafficMirror` for advanced use cases | This is the proposal's primary design centre — fully specified in §4–§6 |
 
 **Non-HBN / pure L2 example** (mapping UC 2 — one of the 10 VLANs from the GitOps configs):
@@ -494,6 +492,17 @@ spec:
   prefixes:
   - 198.51.100.0/27
   - 192.0.2.0/24
+  # Optional: restrict allowed ports for traffic to these prefixes.
+  # When set, the ConfigReconciler generates Calico NetworkPolicy egress rules.
+  # When omitted, all ports are allowed (no NetworkPolicy restriction).
+  # Format mirrors K8s NetworkPolicy ports — single port or portRange.
+  ports:
+  - protocol: TCP
+    port: 8443
+  - protocol: TCP
+    portRange:
+      start: 8080
+      end: 8090
   # Note: BGP communities are NOT on the Destination — they belong on the
   # usage CRDs (Layer2Attachment, Inbound, Outbound, PodNetwork) because
   # different attachments reaching the same VRF may need different communities.
@@ -548,6 +557,8 @@ status:
 - When `spec.vrfRef` is set, it must reference an existing `VRF` resource.
 - `spec.prefixes` entries must be valid CIDR notation.
 - `spec.nextHop.ipv4` and `spec.nextHop.ipv6` must be valid IP addresses (not CIDR).
+- `spec.ports` is optional. When present, each entry must have `protocol` (TCP or UDP). Exactly one of `port` (integer, 1–65535) or `portRange` (with `start` ≤ `end`, both 1–65535) must be set per entry.
+- `spec.ports` is only meaningful for Destinations selected by an `Outbound` — the ConfigReconciler generates Calico NetworkPolicy egress rules from them.
 
 ### 4.3 Network
 
@@ -572,13 +583,12 @@ spec:
     cidr: 2001:db8:100::/48
     prefixLength: 64             # allocation slice size (e.g. /64 per attachment)
 
-  # --- Allocation Pool (per address family) ---
-  # Determines how prefixes are allocated from an upstream IPAM / BM4X.
-  # Separate per AF because IPv4 and IPv6 often come from different pools.
-  # Reserved for future automatic allocation — not processed in this iteration.
-  # allocationPool:
-  #   ipv4: "private/cndtag"     # e.g. BM4X harmonisation class for IPv4
-  #   ipv6: "global/cndtag"      # e.g. BM4X harmonisation class for IPv6
+  # --- Provenance ---
+  # All values (CIDR, VLAN, VNI) are explicit. In the mgmt-cluster flow,
+  # a controller provisions via BM4X (using harmonisation levels like
+  # "private/cndtag") and syncs the fully-resolved Network to the tenant
+  # cluster. The tenant-cluster operator never contacts BM4X — it only
+  # consumes the values present in this resource.
 
   # --- L2 Properties ---
   vlan: 234
@@ -608,7 +618,7 @@ spec:
 **Key design points:**
 - **No VRFs.** VRFs (`destinations`) belong on the usage CRDs that reference this network.
 - **No node scope.** `nodeSelector` belongs on the usage CRDs, not on the pool definition.
-- **Per-AF allocation.** `allocationPool.ipv4` and `allocationPool.ipv6` are independent — IPv4 and IPv6 addresses may come from different upstream pools (matching SchiffCluster's `Harmonization.Level` / `LevelV6`).
+- **No upstream API awareness.** The `Network` CRD holds explicit values only. Provisioning (BM4X harmonisation, IPAM allocation) happens in the management cluster; the resolved `Network` is synced to the tenant cluster with all fields populated. The tenant-cluster operator is stateless with respect to provisioning.
 - **`prefixLength`** on each AF determines the slice size allocated to each consumer. For example, a `/24` CIDR with `prefixLength: 28` yields up to 16 `/28` slices.
 - **`managed: false`** for pre-existing/external networks. The operator only reads parameters from the `Network` but does not provision or modify the underlying segment. Defaults to `true`.
 
@@ -617,11 +627,6 @@ spec:
 status:
   # How many attachments reference this network
   referenceCount: 4
-  # Allocated slices (future — when automatic allocation is implemented)
-  # allocatedSlices:
-  # - name: vlan100
-  #   ipv4: 198.51.100.0/28
-  #   ipv6: 2001:db8:100::/64
   conditions:
   - type: Ready
     status: "True"
@@ -641,7 +646,7 @@ status:
 **Controller Behavior:**
 - **Validation and reference tracking in this iteration.** The `Network` controller validates the spec, tracks reference count, enforces no IP conflicts across consumers, and sets conditions. It does **not** allocate addresses — consumers specify their subnet directly and reference the `Network` by name.
 - **`managed: false`:** The controller skips any L2 provisioning and treats the `Network` as a parameter reference only.
-- **Future (automatic allocation):** When `allocationPool` is set and processed, the controller contacts the upstream IPAM (BM4X, OpenStack, vSphere) to carve out subnets of size `prefixLength` and writes them into the consumer's status.
+- **Future (mgmt-cluster provisioning):** A management-cluster controller provisions networks via BM4X (using harmonisation levels, VRF selection, size requests) and syncs the fully-resolved intent CRDs — `Network` (with CIDR, VLAN, VNI), `VRF` (with VNI, RT), `Destination`, etc. — down to the tenant cluster. The tenant-cluster operator consumes them as-is, without contacting upstream APIs.
 
 ### 4.4 Layer2Attachment
 
@@ -703,6 +708,7 @@ spec:
   nodeIPs:
     enabled: true
     reservedForPods: 4     # validate enough IPs for pods + nodes
+    # Comment: Reserve based on range
 
   # --- Additional Routes (optional) ---
   # Extra prefixes to import/export beyond what the matched Destinations already define.
@@ -809,8 +815,7 @@ spec:
   # Optional: LoadBalancerClass for tenant-managed LB implementations (e.g., kube-vip)
   # tenantLoadBalancerClass: my-lb-class
   # Advertisement type: bgp (default) or l2
-  advertisement:
-    type: bgp                        # bgp | l2
+  advertisement: bgp                   # bgp | l2
 
   # Note: Ingress controller orchestration (e.g. nginx deployment) is
   # intentionally out of scope. The Inbound CRD stops at providing
@@ -892,12 +897,11 @@ spec:
   # addresses:
   #   ipv4: ["203.0.113.17", "203.0.113.18", "203.0.113.19"]
 
-  # --- Egress NAT Destinations (user-managed) ---
-  # CIDRs that should be reachable via this egress.
-  # These end up in the Coil egressNAT ConfigMap.
-  # egressDestinations:
-  # - 198.51.100.0/24
-  # - 203.0.113.0/24
+  # --- Egress NAT CIDRs (derived, not user-managed) ---
+  # The CIDRs for the Coil egressNAT ConfigMap are derived automatically
+  # from the union of prefixes in the matched Destination resources.
+  # No separate field needed — the Destination prefixes already express
+  # "what this VRF needs to reach", which is exactly the NAT target list.
 
   # --- Disable aggregation of the egress network in VRF exports ---
   disableAggregation: false
@@ -932,7 +936,7 @@ status:
 
 | Mode | Actions |
 |---|---|
-| **HBN** (destinations set) | Resolve `networkRef` → read subnet from `Network` → allocate IPs → add as `/32` host exports to each matched VRF → create Coil `Egress` (replicas, IPs) → create Calico `IPPool` → create Calico `NetworkPolicy` for egress policy |
+| **HBN** (destinations set) | Resolve `networkRef` → read subnet from `Network` → allocate IPs → add as `/32` host exports to each matched VRF → derive egressNAT CIDRs from union of matched Destination prefixes → create Coil `Egress` (replicas, IPs) → create Calico `IPPool` + `NetworkPolicy` (with per-Destination port rules from `Destination.spec.ports`, D43) |
 | **Non-HBN** (no destinations) | Resolve `networkRef` → read subnet from `Network` → allocate IPs → create Coil `Egress` (replicas, IPs) → create Calico `IPPool` → create Calico `NetworkPolicy` |
 
 ### 4.7 BGPNeighbor
@@ -1187,13 +1191,122 @@ status:
 - The intent controllers (e.g., `Layer2Attachment` controller) read `NodeNetworkStatus` resources for nodes in the `nodeSelector` scope to validate `interfaceRef` references.
 - If a referenced interface does not exist on a target node, the controller sets a `InterfaceNotFound` condition on the attachment's status.
 
+### 4.12 InterfaceConfig
+
+`InterfaceConfig` provisions node-level network infrastructure — bonds, ethernets (MTU, SR-IOV VF counts) — on a set of nodes selected by label. It uses a netplan-inspired device spec, but only exposes the subset of fields that real clusters actually need.
+
+The operator resolves each `InterfaceConfig` per-node into `NodeNetplanConfig` resources (an existing internal CRD), which `agent-netplan` applies via the netplan DBus API. Users never touch `NodeNetplanConfig` directly — it is an operator-internal per-node output, just like `NodeNetworkConfig`.
+
+**Relationship to other CRDs:**
+- `InterfaceConfig` provisions the substrate → `Layer2Attachment` consumes it via `interfaceRef`.
+- Example: `InterfaceConfig` creates `bond2` from `ens5f0np0` + `ens5f1np1` → `Layer2Attachment` references `interfaceRef: bond2` to attach VLANs.
+- The `Layer2Attachment` controller validates `interfaceRef` against `NodeNetworkStatus` — if the bond doesn't exist yet, it reports `InterfaceNotFound`.
+
+```yaml
+apiVersion: network.t-caas.telekom.com/v1alpha1
+kind: InterfaceConfig
+metadata:
+  name: cluster-b-workers
+spec:
+  # --- Node Scope ---
+  nodeSelector:
+    matchLabels:
+      node-role.kubernetes.io/worker: ""
+
+  # --- Ethernets ---
+  # Configure physical NICs: MTU, SR-IOV VF count.
+  # Each key is the interface name as seen by the OS.
+  ethernets:
+    ens5f0np0:
+      mtu: 9000
+    ens5f1np1:
+      mtu: 9000
+    # SR-IOV: set VF count on physical function
+    ens3f0np0:
+      mtu: 9000
+      virtualFunctionCount: 8
+    ens3f1np1:
+      mtu: 9000
+      virtualFunctionCount: 8
+
+  # --- Bonds ---
+  # Create link aggregation groups from ethernet members.
+  bonds:
+    bond2:
+      interfaces:
+        - ens5f0np0
+        - ens5f1np1
+      mtu: 9000
+      parameters:
+        mode: active-backup
+        miiMonitorInterval: 100
+        lacpRate: fast
+        upDelay: 0
+        downDelay: 0
+        transmitHashPolicy: layer2
+```
+
+**Status:**
+```yaml
+status:
+  conditions:
+  - type: Ready
+    status: "True"
+    message: "Applied to 3/3 nodes"
+  nodeStatuses:
+  - node: worker-01
+    applied: true
+  - node: worker-02
+    applied: true
+  - node: worker-03
+    applied: true
+```
+
+**Spec fields — Ethernet:**
+
+| Field | Type | Description |
+|---|---|---|
+| `mtu` | `int` | Interface MTU |
+| `virtualFunctionCount` | `int` | Number of SR-IOV VFs to create on this PF. Optional — omit for non-SR-IOV NICs |
+
+**Spec fields — Bond:**
+
+| Field | Type | Description |
+|---|---|---|
+| `interfaces` | `[]string` | Member ethernet interfaces |
+| `mtu` | `int` | Bond MTU |
+| `parameters.mode` | `string` | Bond mode: `active-backup`, `802.3ad`, `balance-rr`, etc. |
+| `parameters.miiMonitorInterval` | `int` | MII link monitoring interval (ms) |
+| `parameters.lacpRate` | `string` | LACP rate: `fast` or `slow` (802.3ad only) |
+| `parameters.upDelay` | `int` | Delay before enabling a recovered member (ms) |
+| `parameters.downDelay` | `int` | Delay before disabling a failed member (ms) |
+| `parameters.transmitHashPolicy` | `string` | Transmit hash: `layer2`, `layer3+4`, `layer2+3`, etc. |
+
+> **Why not expose the full netplan schema?** Netplan supports dozens of device properties (DHCP, routing, DNS, auth, etc.) that are irrelevant for infrastructure bond/VF provisioning. Exposing them would bloat the CRD and confuse users. The `InterfaceConfig` spec is deliberately minimal — it covers what real clusters actually configure. The internal `NodeNetplanConfig` (which uses an opaque `Device` type for full netplan compatibility) remains available for advanced use cases managed by platform tooling outside the intent model.
+
+**Validation Rules:**
+- `nodeSelector` is required.
+- Bond `interfaces` must reference ethernets defined in the same `InterfaceConfig` or already present on the node (validated against `NodeNetworkStatus`).
+- `virtualFunctionCount` must be > 0 when set.
+- Bond `mode` must be a valid Linux bonding mode.
+
+**Controller Behavior:**
+
+| Step | Action |
+|---|---|
+| 1. Watch | Watch `InterfaceConfig` resources |
+| 2. Resolve nodes | List nodes matching `nodeSelector` |
+| 3. Generate | For each matched node, produce/update a `NodeNetplanConfig` resource with the desired ethernets and bonds |
+| 4. Merge | If multiple `InterfaceConfig` resources target the same node, merge their device specs (reject conflicts) |
+| 5. Status | Update `InterfaceConfig.status` with per-node apply status from `NodeNetplanConfig` conditions |
+
 ## 5. Implementation Plan
 
 > **Note:** The pipeline integration uses **Option B** (§3.4, D24) — the `ConfigReconciler` is extended to watch intent CRDs directly. No intermediate low-level CRDs are generated. Low-level CRDs remain as a user-managed escape hatch.
 
 ### Phase 1 — Core CRD Types and Scaffolding
 
-1. **Define Go types** for `VRF`, `Network`, `Destination`, `Layer2Attachment`, `Inbound`, `Outbound`, `BGPNeighbor`, `PodNetwork`, `Collector`, `TrafficMirror`, `NodeNetworkStatus` in `api/v1alpha1/`.
+1. **Define Go types** for `VRF`, `Network`, `Destination`, `Layer2Attachment`, `Inbound`, `Outbound`, `BGPNeighbor`, `PodNetwork`, `Collector`, `TrafficMirror`, `NodeNetworkStatus`, `InterfaceConfig` in `api/v1alpha1/`. (`NodeNetplanConfig` already exists as the per-node output.)
 2. **Generate CRDs** via `controller-gen` and **deep-copy** methods.
 3. **Add webhook validation** for each new CRD with the rules described in §4.
 
@@ -1203,7 +1316,6 @@ status:
 2. **Validate** that at least one of `ipv4`, `ipv6`, or `vlan` is set; CIDR notation is valid when present; `prefixLength` constraints are met.
 3. **Track references** — count how many usage CRDs (`Layer2Attachment`, `Inbound`, `Outbound`, `PodNetwork`) reference this `Network`.
 4. **Update `Network.Status`** with reference count and conditions.
-5. **Future:** When `allocationPool` is processed, contact upstream IPAM to carve out subnets.
 
 ### Phase 3 — Destination Controller
 
@@ -1246,7 +1358,7 @@ This is the highest-value, most complex intent resource. Implementation steps:
 5. **HBN mode** (destinations set):
    - Add allocated IPs as `/32` host exports to each matched VRF (with communities from the `Inbound` spec).
    - Support aggregation (unless `disableAggregation`).
-6. **Create MetalLB resources:** `IPAddressPool` with allocated addresses; `BGPAdvertisement` or `L2Advertisement` based on `advertisement.type`.
+6. **Create MetalLB resources:** `IPAddressPool` with allocated addresses; `BGPAdvertisement` or `L2Advertisement` based on `advertisement`.
 7. **Update `Inbound.Status`** with assigned addresses, pool name, conditions.
 
 ### Phase 5b — Outbound Controller
@@ -1420,8 +1532,7 @@ Inbound "ingress-1"
     destinations:
       matchLabels: { zone: secure }
     count: 2
-    advertisement:
-      type: bgp
+    advertisement: bgp
 
         │
         ▼
@@ -1492,8 +1603,7 @@ Inbound "simple-lb"
     networkRef: simple-net
     # no destinations → no VRF plumbing
     count: 1
-    advertisement:
-      type: l2
+    advertisement: l2
 
         │
         ▼
@@ -1576,11 +1686,12 @@ type NetworkSpec struct {
     // IPv6 configures the IPv6 address pool.
     // +optional
     IPv6 *IPNetwork `json:"ipv6,omitempty"`
-    // AllocationPool determines how prefixes are allocated from upstream IPAM.
-    // Separate per AF because IPv4 and IPv6 often come from different pools.
-    // Reserved for future automatic allocation — not processed in this iteration.
-    // +optional
-    AllocationPool *AllocationPool `json:"allocationPool,omitempty"`
+    // Note: There is no AllocationPool field. Provisioning (BM4X harmonisation,
+    // IPAM allocation) happens in the management cluster. The mgmt-cluster
+    // controller resolves CIDR, VLAN, VNI and syncs the populated Network
+    // CRD to the tenant cluster. The tenant-cluster operator only consumes
+    // the explicit values present here.
+    //
     // VLAN is the VLAN ID for the network segment.
     // +optional
     VLAN *int `json:"vlan,omitempty"`
@@ -1604,17 +1715,6 @@ type IPNetwork struct {
     // Must be >= the CIDR prefix length.
     // +optional
     PrefixLength *int `json:"prefixLength,omitempty"`
-}
-
-// AllocationPool determines the upstream allocation class per address family.
-// Matches SchiffCluster's Harmonization (Level for IPv4, LevelV6 for IPv6).
-type AllocationPool struct {
-    // IPv4 is the allocation class for IPv4 (e.g. "private/cndtag").
-    // +optional
-    IPv4 *string `json:"ipv4,omitempty"`
-    // IPv6 is the allocation class for IPv6 (e.g. "global/cndtag").
-    // +optional
-    IPv6 *string `json:"ipv6,omitempty"`
 }
 
 // --- Usage CRDs ---
@@ -1707,11 +1807,8 @@ type OutboundSpec struct {
     // Replicas is the number of Coil egress pod replicas.
     // +optional
     Replicas *int32 `json:"replicas,omitempty"`
-    // EgressDestinations are external subnets that should be routed through
-    // this egress attachment (i.e., the subnets for which pods use NAT
-    // egress). These populate the Calico IPPool or similar routing rules.
-    // +optional
-    EgressDestinations []string `json:"egressDestinations,omitempty"`
+    // Note: The Coil egressNAT CIDRs are derived from the union of prefixes
+    // in the matched Destination resources. No separate field is needed.
     // Communities is a list of BGP communities to set on routes exported
     // from this outbound into matched Destination VRFs.
     // +optional
@@ -1790,6 +1887,12 @@ type DestinationSpec struct {
     // Mutually exclusive with VRFRef.
     // +optional
     NextHop *NextHopConfig `json:"nextHop,omitempty"`
+    // Ports restricts which ports are allowed for traffic to these prefixes.
+    // When set, the ConfigReconciler generates Calico NetworkPolicy egress
+    // rules from them. When omitted, all ports are allowed.
+    // Only meaningful for Destinations selected by an Outbound.
+    // +optional
+    Ports []DestinationPort `json:"ports,omitempty"`
     // Note: Community is NOT on Destination — it belongs on the usage CRDs
     // (Layer2Attachment, Inbound, Outbound, PodNetwork) because different
     // attachments may tag exports to the same VRF with different communities.
@@ -1816,6 +1919,30 @@ type NextHopConfig struct {
     // IPv6 is the IPv6 next-hop address (e.g. "2001:db8:100::1").
     // +optional
     IPv6 *string `json:"ipv6,omitempty"`
+}
+
+// DestinationPort describes a port (or port range) allowed for traffic
+// to a Destination's prefixes. Mirrors K8s NetworkPolicy port semantics.
+// Exactly one of Port or PortRange must be set per entry.
+type DestinationPort struct {
+    // Protocol is the network protocol (TCP or UDP).
+    Protocol corev1.Protocol `json:"protocol"`
+    // Port is a single port number (1–65535).
+    // Mutually exclusive with PortRange.
+    // +optional
+    Port *int32 `json:"port,omitempty"`
+    // PortRange specifies a contiguous range of ports.
+    // Mutually exclusive with Port.
+    // +optional
+    PortRange *PortRange `json:"portRange,omitempty"`
+}
+
+// PortRange defines an inclusive start–end port range.
+type PortRange struct {
+    // Start is the first port in the range (1–65535).
+    Start int32 `json:"start"`
+    // End is the last port in the range (≥ Start, 1–65535).
+    End int32 `json:"end"`
 }
 
 // CollectorSpec defines the desired state of Collector.
@@ -1970,15 +2097,224 @@ All open questions have been resolved. See the Decision Record (§10) for ration
 
 ## 9. Considerations
 
-### 9.1 Future: Automatic Network Allocation
+### 9.1 Future: Management-Cluster Provisioning Pipeline
 
-The `Network` CRD API reserves `allocationPool` fields (per-AF: `ipv4`, `ipv6`) that are not processed in this iteration. A future enhancement can add a management cluster controller that:
+The intended architecture is that all network provisioning happens in the **management cluster**, and the tenant cluster receives fully-resolved intent CRDs.
 
-- Watches `Network` CRDs across tenant clusters.
-- Allocates address ranges via BM4X, OpenStack, or vSphere APIs based on the `allocationPool` class.
-- Writes allocated CIDRs back into the `Network`'s `.status` or into a dedicated allocation resource.
+#### 9.1.1 NetworkBinding — the network request for a cluster
 
-This is a **transparent enhancement** — the `Network` CRD API does not change, only the controller gains the ability to fill in unspecified parameters from external allocators. For now, users must specify all network parameters (`ipv4.cidr`, `ipv6.cidr`, `vlan`, `vni`) directly in the `Network` resource.
+Today's `SchiffCluster` orchestrates network ordering automatically: teams declare which
+networks and VRFs a cluster needs, and the SchiffCluster controller creates the appropriate
+`BM4XNetwork` resources, including /127 helpers for VRFs that need routing info but have
+no real network. Removing SchiffCluster without a replacement would force teams to manage
+these BM4XNetworks by hand — a regression in usability.
+
+`NetworkBinding` replaces that role. It is the **input** CRD that declares what a cluster
+needs, and a controller creates the upstream provisioning resources from it. The direction
+is inverted compared to a simple pointer: **NetworkBinding → creates BM4XNetworks**, not
+BM4XNetwork → referenced by NetworkBinding.
+
+```yaml
+apiVersion: network.t-caas.telekom.com/v1alpha1
+kind: NetworkBinding
+metadata:
+  name: m2m                             # ← becomes Network.metadata.name on tenant
+  namespace: cluster-a                   # cluster association
+spec:
+  provider: bm4x                        # which backend provisions this network
+  vrfs:                                  # VRFs this cluster needs routing info for
+    - m2m                                #   primary VRF — real network ordered here
+    - m2m_enc                            #   additional VRF — /127 helper auto-created
+  # BM4X-specific network request parameters
+  sizeV4: 24
+  configurationType: VTEP_NODE
+  harmonization:
+    level: private/cndtag
+  # Intent-level overrides not derivable from upstream
+  mtu: 9000
+  managed: true
+```
+
+The `vrfs` list tells the controller which VRFs this cluster needs. The controller
+translates this into concrete upstream resources depending on the provider:
+
+**BM4X provider** — the controller creates `BM4XNetwork` resources:
+- The **first** VRF entry is the "primary" — the real network (with `sizeV4`, harmonization, etc.) is ordered in it.
+- **Additional** VRFs get a small /127 IPv6 `BM4XNetwork` each, purely to obtain VRF
+  routing metadata (VNI, RT). This mirrors what SchiffCluster does today.
+- When BM4X splits IPAM from Usage (§9.1.4), the /127 hack disappears and the controller
+  queries VRF metadata directly. The `vrfs` field stays the same — only the controller
+  implementation changes.
+
+**Netbox provider** (future) — the controller creates Netbox records instead of BM4XNetworks.
+The `vrfs` field has the same semantics; only the backend differs.
+
+A second example — a simple monitoring network with a single VRF:
+
+```yaml
+apiVersion: network.t-caas.telekom.com/v1alpha1
+kind: NetworkBinding
+metadata:
+  name: monitoring
+  namespace: cluster-a
+spec:
+  provider: bm4x
+  vrfs:
+    - monitoring
+  sizeV4: 28
+  configurationType: VTEP_NODE
+  harmonization:
+    level: private/cndtag
+  mtu: 9000
+```
+
+One VRF, one BM4XNetwork created. No /127 helpers needed.
+
+**Design points:**
+
+- **NetworkBinding is the input, not a pointer.** The controller creates and owns the upstream provisioning resources (BM4XNetworks, Netbox records). Teams author NetworkBindings; they never touch BM4XNetworks directly. This replaces SchiffCluster's auto-ordering behavior.
+- **`vrfs` is the source-of-truth list of VRFs a cluster needs.** This is *not* triple-bookkeeping: it is the input that *causes* BM4XNetwork.spec.vrf to be set (layer below) and is independent from `Destination.vrfRef` which expresses routing intent (layer above). Three distinct concerns at three distinct layers.
+- **`provider` selects the backend.** Today `bm4x`; tomorrow `netbox` or others. The provider determines which upstream resources the controller creates and how it reads back provisioned results. Provider-specific fields (harmonization, configurationType) live on the NetworkBinding spec — they are passed through to the created upstream resource.
+- **Name = intent name.** `NetworkBinding.metadata.name` is reused as the `Network` name on the tenant side. No separate `intentName` field — one name in both places reduces cognitive load.
+- **Namespace = cluster association.** The namespace (or a label) maps the binding to a tenant cluster, matching existing mgmt-cluster conventions.
+- **Cluster-infra networks are invisible.** Only networks declared via a `NetworkBinding` trigger upstream provisioning and auto-generate `Network` + `VRF` CRDs. Node-management, storage, or monitoring BM4XNetworks that exist outside this flow are not affected.
+- **NetworkBinding is optional — L2 works without it.** For networks that don't require upstream provisioning (e.g., a pre-existing L2 segment with a known VLAN), teams create `Network` + usage CRDs directly. NetworkBinding is only needed when BM4X (or another provider) must provision the network first.
+- **Ordering vs usage — same split as SchiffCluster.** NetworkBinding = ordering (`additionalNetworks`), auto-generates `Network` + `VRF`. Usage CRDs (`Destination`, `Inbound`, `Outbound`, `Layer2Attachment`) = team-authored intent referencing the generated resources, same as SchiffCluster's ingress/egress/worker-pool attachment.
+
+#### 9.1.2 What the controller generates — ordering vs usage
+
+The NetworkBinding controller mirrors SchiffCluster's ordering/usage split:
+
+- **Ordering output (auto-generated):** `Network` + `VRF` CRDs — these contain provisioned
+  facts (CIDR, VLAN, VNI, RT) that come back from BM4X. Teams don't author these;
+  the controller creates them from the provisioned result.
+- **Usage (team-authored):** `Destination`, `Inbound`, `Outbound`, `Layer2Attachment`,
+  `BGPNeighbor`, etc. — these express intent and are written by teams, referencing
+  the generated `Network` and `VRF` resources.
+
+When the upstream resource has a populated `.status.provisioned` (BM4X) or equivalent,
+the controller auto-generates:
+
+**Network CRD** (one per NetworkBinding, from the primary BM4XNetwork's provisioned result):
+
+| Upstream provisioned field | Intent `Network` field |
+|---|---|
+| `SubnetV4`, `SubnetV6` | `spec.ipv4.cidr`, `spec.ipv6.cidr` |
+| `VlanID` | `spec.vlan` |
+| `VNI` (L2 VNI) | `spec.vni` |
+| `NetworkBinding.spec.mtu` | `spec.mtu` |
+| `ConfigurationType` | *(informational — determines HBN vs non-HBN)* |
+| `GatewayV4`, `GatewayV6` | *(informational — available for nextHop Destinations)* |
+
+**VRF CRDs** (one per unique VRF name, deduplicated across all NetworkBindings in the namespace):
+
+| Source | Intent `VRF` field |
+|---|---|
+| `BM4XNetwork.spec.vrf` | `metadata.name` |
+| `BM4XNetwork.status.provisioned.VNI` (L3) | `spec.vni` |
+| `BM4XNetwork.status.provisioned.BGPRouteTarget` | `spec.rt` |
+
+VRFs are **deduplicated**: if multiple NetworkBindings list the same VRF, the controller
+creates only one `BM4XNetwork` for it (avoiding double-ordering) and only one `VRF` CRD
+on the tenant.
+
+**Usage CRDs are NOT generated.** `Destination`, `Outbound`, `Inbound`, `Layer2Attachment`,
+etc. express intent that lives above provisioning — they are authored by teams / onboarding
+and synced alongside the generated `Network` + `VRF` resources.
+
+For **L2-only use cases** without upstream provisioning, there is no NetworkBinding —
+teams author `Network` directly with known values (VLAN, optional CIDRs).
+
+#### 9.1.3 End-to-end flow
+
+```
+Mgmt Cluster                                  Tenant Cluster
+────────────                                  ──────────────
+
+═══ ORDERING (automatic) ═══════════════════════════════════
+
+NetworkBinding
+  (name: m2m, provider: bm4x,
+   vrfs: [m2m, m2m_enc],
+   sizeV4: 24, …)
+    │
+    ▼
+NetworkBinding controller
+  creates upstream resources:
+    │
+    ├── BM4XNetwork m2m-cluster-a
+    │     (vrf: m2m, sizeV4: 24, …)
+    │
+    └── BM4XNetwork m2m-enc-routing-cluster-a
+          (vrf: m2m_enc, /127 helper)
+    │
+    ▼
+bm4x-controller
+  (provisions via BM4X API)
+    │
+    ▼
+BM4XNetwork.status.provisioned
+  (SubnetV4, VlanID, VNI, BGPRouteTarget, …)
+    │
+    ▼
+NetworkBinding controller
+  reads back provisioned status,
+  auto-generates:
+    │
+    ├──→ Network  (CIDR, VLAN, VNI from .status)
+    ├──→ VRF      (m2m: VNI+RT, deduplicated)
+    └──→ VRF      (m2m_enc: VNI+RT, deduplicated)
+
+═══ USAGE (team-authored) ══════════════════════════════════
+
+Destination   (prefixes, ports, vrfRef)
+Outbound      (IPs, replicas, destinations)
+Inbound       (IPs, destinations)
+Layer2Attachment (nodeSelector, interfaceRef)
+
+════════════════════════════════════════════════════════════
+    │
+    ▼
+all CRDs                           ──sync──→   all CRDs
+(generated + authored)                         (consumed as-is)
+                                                     │
+                                                     ▼
+                                               ConfigReconciler
+                                                     │
+                                                     ▼
+                                               NetworkConfigRevision → CRA
+```
+
+This mirrors SchiffCluster's split:
+- **Ordering** = `NetworkBinding` → BM4XNetworks → `Network` + `VRF` (all automatic)
+- **Usage** = `Destination`, `Inbound`, `Outbound`, `Layer2Attachment` (team-authored, referencing the generated resources)
+
+The tenant-cluster operator **never contacts BM4X** — it only consumes the explicit values
+present in the CRDs. This keeps the tenant-cluster operator stateless with respect to
+provisioning and cleanly separates the "what to provision" concern (mgmt cluster) from
+the "how to configure the node" concern (tenant cluster).
+
+For **L2-only use cases** (pre-existing VLAN, no BM4X provisioning required), teams skip
+the NetworkBinding entirely and author the `Network` + usage CRDs directly with known values.
+
+#### 9.1.4 BM4X IPAM/Usage split and the /127 workaround
+
+Today's BM4X API bundles network provisioning and VRF metadata into one CRD. When a
+`NetworkBinding` lists multiple VRFs, the controller orders /127 helpers for the additional
+ones. This is the same workaround that SchiffCluster uses today — it is automated, not
+manual.
+
+BM4X is planning to split into separate IPAM and Usage concerns. Once VRF routing metadata
+becomes directly queryable (e.g., via a dedicated VRF or Fabric CRD), the /127 hack
+disappears. The `vrfs` field on NetworkBinding stays unchanged — only the controller
+implementation adapts:
+
+- Today (BM4X bundled): `vrfs: [m2m, m2m_enc]` → creates 1 real BM4XNetwork + 1 /127 helper
+- After split: `vrfs: [m2m, m2m_enc]` → creates 1 real Network + queries VRF metadata API for both VRFs directly
+- The `provider` field may change (e.g., `bm4x-v2`) or a new provider may be introduced, but the
+  NetworkBinding schema and the `vrfs` semantics remain stable.
+
+See D44, D45.
 
 ### 9.2 Incremental Delivery
 
@@ -2013,7 +2349,7 @@ Given the breadth of the design, we prioritize delivery of value:
 | D2 | **`Destination` as a first-class, labeled, referenceable CRD** — VRFs are defined once and selected by label from attachments | Avoids VRF duplication across attachments; preserves composability of today's multi-`VRFRouteConfiguration` merging; enables grouping and loose coupling |
 | D3 | **RESOLVED — Pipeline integration: Option B** (Intent CRDs + Low-Level CRDs → Revision directly) — the `ConfigReconciler` is extended to watch intent CRDs; no intermediate low-level CRDs are generated | Option B is architecturally cleaner: single layer, no generated artifacts, simpler debugging (intent CRD → revision → node config). Low-level CRDs remain as a user-managed escape hatch. See D24 |
 | D4 | All controllers run in the **tenant cluster only** — no management cluster component in this iteration | Simplifies architecture; auto-allocation can be added later transparently |
-| D5 | All network parameters (VLAN, VNI, subnet, IPs) are **user-specified** — no automatic allocation | Reduces complexity; `allocationPool` fields are reserved in the `Network` CRD API |
+| D5 | All network parameters (VLAN, VNI, subnet, IPs) are **explicit on the tenant-cluster `Network`** — no provisioning logic in the tenant operator | Reduces complexity; provisioning (BM4X harmonisation, IPAM allocation) is a management-cluster concern. The mgmt-cluster `NetworkBinding` controller provisions upstream and auto-generates `Network` + `VRF` CRDs with the resolved values. Teams author usage CRDs (`Destination`, `Inbound`, `Outbound`, etc.) and all are synced to the tenant. See D44 |
 | D6 | **`Network` CRD as pure pool definition** — CIDR, VLAN, VNI, allocation pool. Referenced by name via `networkRef` from usage CRDs. No VRFs, no node scope. | Separates pool definition from pool usage. A `Network` is not per se L2 — it only becomes L2 when a `Layer2Attachment` attaches it. Mirrors SchiffCluster's `AdditionalNetwork` / `Ingress.fromAdditionalNetwork` pattern |
 | D7 | Coexistence of intent-based and low-level CRDs during migration | Non-disruptive adoption; escape hatch for edge cases |
 | D8 | Prioritize `VRF` + `Network` + `Destination` + `Layer2Attachment` (non-SRIOV) + `Inbound` for first iteration | Highest value, most common use cases, fastest ops burden reduction |
@@ -2024,10 +2360,10 @@ Given the breadth of the design, we prioritize delivery of value:
 | D13 | **Split `VRFAttachment` into `Inbound` + `Outbound`** — separate CRDs for ingress (MetalLB + optional controller) and egress (Coil + Calico) | Ingress and egress are semantically distinct (different IP allocation logic, different platform resources, different user intent). The SchiffCluster API already models them as separate top-level concepts (`network.ingress[]` vs `network.egress[]`). Splitting avoids a polymorphic `connections[]` array and keeps each CRD self-contained |
 | D14 | **Non-HBN support via optional `destinations`** — when `destinations` is omitted, only platform resources (MetalLB / Coil) are created without VRF plumbing. `Layer2Attachment.interfaceRef` enables attaching VLANs to physical interfaces | Enables use on clusters without HBN (e.g. MetalLB-only load balancing, physical NIC / bond / SR-IOV VF L2 networks). Keeps the same CRD API surface — HBN vs non-HBN is determined by presence of `destinations`, not a separate CRD |
 | D15 | **SBR is a controller implementation detail, not an API surface** — auto-detected when two attachments on the same node group reach destinations with overlapping imported prefixes | SBR is a cross-attachment concern: the user creating Inbound "web" may not know that Inbound "api" exists on the same nodes with overlapping prefixes. Making it user-configured would require global knowledge and leak infrastructure complexity into the intent layer. The low-level `VRFRouteConfiguration.sbrPrefixes` remains as an escape hatch |
-| D16 | **`allocationPool` is independently configurable per address family** — `allocationPool.ipv4` and `allocationPool.ipv6` are separate fields | IPv4 and IPv6 addresses often come from different upstream pools (e.g. BM4X `private/cndtag` for IPv4, `global/cndtag` for IPv6). Matches SchiffCluster's `Harmonization.Level` / `LevelV6` pattern |
+| D16 | **Per-AF harmonisation is a management-cluster concern** — the bm4x-operator `Network` CRD has separate `Harmonization.Level` (IPv4) and `LevelV6` (IPv6) fields; the mgmt-cluster controller resolves them into concrete CIDRs before syncing the intent `Network` CRD to the tenant | IPv4 and IPv6 addresses often come from different upstream pools (e.g. BM4X `private/cndtag` for IPv4, `global/cndtag` for IPv6). The tenant-cluster `Network` CRD carries only resolved CIDRs. Superseded by D44 |
 | D17 | **`nodeSelector` (Kubernetes label selector) replaces `workerGroups` (string array)** — all CRDs use `metav1.LabelSelector` for node scoping | More flexible than hardcoded worker group names. Supports arbitrary label combinations, set-based requirements, and standard Kubernetes selection semantics. Users can target nodes by role, zone, hardware type, or any custom label |
 | D18 | **`Network` supports pure L2 segments (IP-optional)** — `ipv4` and `ipv6` are both independently optional. A `Network` with only `vlan` (and no CIDRs) is valid. | Real-world non-HBN deployments commonly provision VLANs on bonds without any IP assignment (e.g., for vSphere / OpenStack VM attachment, or SR-IOV workloads that manage their own IPs). Requiring at least one IP AF would force artificial dummy CIDRs. CRDs that need IPs (`Inbound`, `Outbound`) validate at their level that the referenced `Network` has the required AF |
-| D19 | **Bond creation and SR-IOV VF provisioning are infrastructure-level concerns, out of scope** — the operator consumes existing bonds (`interfaceRef`) and VFs (`sriov.enabled`) but does not create them | Bond and VF lifecycle varies per platform (CaaS NetworkConfiguration, cloud-init, netplan, systemd-networkd) and is managed through GitOps or machine configuration. Mixing infrastructure provisioning with intent-based network configuration would conflate two different concerns and add platform-specific complexity |
+| D19 | **~~Bond creation and SR-IOV VF provisioning are out of scope~~ → Covered by new `InterfaceConfig` CRD (D46)** — users author an `InterfaceConfig` with `nodeSelector` and a netplan-inspired device spec (ethernets, bonds). The operator resolves it per-node into `NodeNetplanConfig`, which `agent-netplan` applies. Same intent → per-node pattern as all other CRDs | The existing `NodeNetplanConfig` + `agent-netplan` already handles the apply side. What was missing was a user-facing intent CRD with `nodeSelector`. `InterfaceConfig` fills that gap. Bond and VF lifecycle is still *conceptually* separate from L2/L3 intent, but it is no longer "out of scope" — it is part of the intent-based stack |
 | D20 | **`communities` is a list on the usage CRDs, not a single string on `Destination`** — each `Layer2Attachment`, `Inbound`, `Outbound`, `PodNetwork` carries its own `communities: []string` | Different attachments reaching the same VRF may need different community tags (e.g., one attachment exports with `64500:999`, another with `64500:1000`). Putting community on the Destination would force all attachments to share the same value. This matches the low-level model where `VRFRouteConfiguration.community` is per-attachment, not per-VRF. A list (not a single string) supports multiple communities per export |
 | D21 | **`nextHop` on `Destination` for non-HBN static routing** — specifies per-AF next-hop addresses used to create static routes for the destination's prefixes | Non-HBN L2 segments may need routing to upstream networks without VRF plumbing. Placing `nextHop` on `Destination` (rather than a gateway on `Layer2Attachment`) generalises the concept: any prefix list + next-hop = static route. A default gateway is just `prefixes: ["0.0.0.0/0"]` + `nextHop`. In HBN mode, `nextHop` is ignored — VRF imports handle routing |
 | D22 | **RESOLVED — VRF configuration source: separate `VRF` CRD (option c)** — `VRF` holds backbone metadata (name, VNI, RT, loopbacks); `Destination` references it via `vrfRef` and carries only prefixes + routing mode | Separates VRF identity/metadata from routing targets. VRF metadata is defined once; multiple Destinations can reference the same VRF with different prefix sets. Resolves Open Question 19 |
@@ -2050,3 +2386,8 @@ Given the breadth of the design, we prioritize delivery of value:
 | D39 | **Non-HBN without `destinations`: do not reconcile VRF, provide informational status** — the operator sets a status condition but does not reject the resource | Non-HBN mode is always valid regardless of cluster capabilities. The status condition informs users that no VRF plumbing was generated, which may or may not be intentional. Resolves OQ 16 |
 | D40 | **`Network` supports `managed: false` for unmanaged/external networks** — the operator treats the `Network` as a reference for IP/VLAN parameters only, without attempting L2 provisioning | Pre-existing infrastructure-provided networks (e.g., VLANs from upstream platforms) should be referenceable without the operator trying to create or modify them. Resolves OQ 17 |
 | D41 | **Controller enforces no IP conflicts when `Network` is reused across attachment types** — VLAN/VNI consistency is implicit (same `Network`); IP allocations must not overlap | A `Network` is a shared pool. Multiple consumers can reference it, but the controller must ensure IP ranges don't collide. VLAN/VNI consistency is guaranteed by design since all consumers read from the same `Network` resource. Resolves OQ 18 |
+| D42 | **`egressDestinations` removed from Outbound — egressNAT CIDRs are derived from matched Destination prefixes** | The CIDRs that should be NATted through an egress gateway are the same CIDRs imported by the matched VRFs' Destinations. Maintaining a separate list is redundant and error-prone. The ConfigReconciler derives the Coil egressNAT entries from the union of prefixes in the Destination resources selected by `Outbound.spec.destinations`. Validated against a reference cluster: every egressDestination entry was identical to or a more-specific subnet of a matched Destination prefix |
+| D43 | **Optional `ports` on Destination — per-service port restrictions for egress NetworkPolicy** | Ports collapse the old `egressPolicy` (K8s NetworkPolicy-style port rules from the schiff-network ConfigMap) into the Destination itself, making each Destination a self-contained "service unit" (VRF + CIDRs + ports). When `ports` is set, the ConfigReconciler generates Calico NetworkPolicy egress rules; when omitted, all ports are allowed. Format mirrors K8s NetworkPolicy: `protocol` (TCP/UDP) + `port` (single) or `portRange` (`start`/`end`). Validated against a reference cluster: 9 per-service Destinations with ports replace 8 egressPolicy blocks + 25 flat egressDestination CIDRs |
+| D44 | **No `allocationPool` on `Network` — provisioning happens in management cluster, not tenant** | Network provisioning (BM4X harmonisation, IPAM allocation, VRF/VNI/RT assignment) is a management-cluster concern. A mgmt-cluster `NetworkBinding` controller provisions via BM4X and auto-generates `Network` + `VRF` CRDs with the provisioned values (CIDR, VLAN, VNI, RT). Teams author usage CRDs (`Destination`, `Inbound`, `Outbound`, etc.) referencing the generated resources. All CRDs are synced to the tenant cluster. The tenant-cluster operator consumes explicit values only — it never contacts upstream APIs. This removes the previously-reserved `allocationPool` field from `NetworkSpec` and the `AllocationPool` Go type. The bm4x-operator `Network` CRD (with `Harmonization`, `SizeV4`, `ConfigurationType`, etc.) is the **input** in the mgmt cluster; the intent `Network` CRD is the auto-generated **output** synced to the tenant |
+| D45 | **`NetworkBinding` CRD in mgmt cluster — ordering input, auto-generates `Network` + `VRF`** | Mirrors SchiffCluster's ordering/usage split. A `NetworkBinding` declares what a cluster needs (network parameters + VRFs); a controller creates upstream resources (BM4XNetworks for `provider: bm4x`, Netbox records for `provider: netbox`) and auto-generates `Network` + `VRF` CRDs from the provisioned result. Usage CRDs (`Destination`, `Inbound`, `Outbound`, `Layer2Attachment`, etc.) are team-authored and reference the generated resources. `metadata.name` becomes the tenant-side `Network` name. `vrfs` lists the VRFs the cluster needs routing info for — the first is the primary (real network ordered); additional VRFs get /127 helpers (BM4X) or equivalent, automated by the controller. This is not triple-bookkeeping: `vrfs` is the *input* that causes `BM4XNetwork.spec.vrf` to be set (below) and is independent from `Destination.vrfRef` which is routing intent (above). NetworkBinding is optional — L2 use cases with known VLANs author `Network` directly. VRFs are deduplicated across bindings. The /127 hack disappears when BM4X splits IPAM from Usage — only the controller changes, not the CRD |
+| D46 | **New `InterfaceConfig` CRD for node-level interface provisioning** — user-authored with `nodeSelector` and a netplan-inspired device spec (ethernets, bonds). The operator resolves it per-node into `NodeNetplanConfig` (existing internal CRD), which `agent-netplan` applies via netplan/DBus | Same intent → per-node pattern as the rest of the stack. Users don't touch `NodeNetplanConfig` directly — it's an operator-internal per-node resource (like `NodeNetworkConfig`). `InterfaceConfig` is the user-facing intent. The spec uses a netplan-compatible structure but only the commonly-needed subset: `ethernets` (MTU, `virtualFunctionCount`), `bonds` (members, mode, timers). Not all netplan flags are exposed — only what real clusters actually need |
