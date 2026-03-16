@@ -29,9 +29,10 @@ func buildNodeLayer2(node *corev1.Node, revision *v1alpha1.NetworkConfigRevision
 		}
 
 		nodeL2 := v1alpha1.Layer2{
-			VNI:  uint32(l2.VNI), //nolint:gosec
-			VLAN: uint16(l2.ID),  //nolint:gosec
-			MTU:  uint16(l2.MTU), //nolint:gosec
+			VNI:                 uint32(l2.VNI), //nolint:gosec
+			VLAN:                uint16(l2.ID),  //nolint:gosec
+			MTU:                 uint16(l2.MTU), //nolint:gosec
+			DisableSegmentation: l2.DisableSegmentation,
 		}
 		if len(l2.AnycastGateways) > 0 {
 			irb := v1alpha1.IRB{
