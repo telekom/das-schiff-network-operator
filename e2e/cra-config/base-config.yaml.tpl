@@ -3,8 +3,8 @@
 # Matches vm-lab: per-interface BGP unnumbered, hbn veth trunk.
 vtepLoopbackIP: "{{ .VtepIP }}"
 exportCIDRs:
-  - "10.100.0.0/24"
-  - "fdcb:f93c:3a3e::/64"
+  - "{{ .ExportCIDRv4 }}"
+  - "{{ .ExportCIDRv6 }}"
 localASN: 64497
 trunkInterfaceName: "hbn"
 underlayNeighbors:
@@ -65,9 +65,9 @@ clusterNeighbors:
     ipv4: true
 managementVRF:
   name: mgmt
-  vni: 20
-  evpnRouteTarget: "64497:20"
+  vni: {{ .MgmtVNI }}
+  evpnRouteTarget: "{{ .MgmtRT }}"
 clusterVRF:
   name: cluster
-  vni: 30
-  evpnRouteTarget: "64497:30"
+  vni: {{ .ClusterVNI }}
+  evpnRouteTarget: "{{ .ClusterRT }}"

@@ -44,7 +44,7 @@ network:
       mtu: 9000
       link-local: []
       link: dum.underlay
-      id: 20
+      id: {{ .MgmtVNI }}
       local: "{{ .VtepIP }}"
       port: 4789
       mac-learning: false
@@ -53,7 +53,7 @@ network:
       mtu: 9000
       link-local: []
       link: dum.underlay
-      id: 30
+      id: {{ .ClusterVNI }}
       local: "{{ .VtepIP }}"
       port: 4789
       mac-learning: false

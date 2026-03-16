@@ -4,12 +4,12 @@ log syslog informational
 service integrated-vtysh-config
 !
 vrf cluster
- vni 30
- ip route 10.100.0.0/24 blackhole
- ipv6 route fdcb:f93c:3a3e::/64 blackhole
+ vni {{ .ClusterVNI }}
+ ip route {{ .ExportCIDRv4 }} blackhole
+ ipv6 route {{ .ExportCIDRv6 }} blackhole
 !
 vrf mgmt
- vni 20
+ vni {{ .MgmtVNI }}
 !
 router bgp 64497
  bgp router-id {{ .VtepIP }}
@@ -100,8 +100,8 @@ router bgp 64497 vrf cluster
  address-family l2vpn evpn
   advertise ipv4 unicast route-map rm_export_local
   advertise ipv6 unicast route-map rm_export_local
-  route-target import 64497:30
-  route-target export 64497:30
+  route-target import {{ .ClusterRT }}
+  route-target export {{ .ClusterRT }}
  exit-address-family
 !
 router bgp 64497 vrf mgmt
@@ -128,12 +128,12 @@ router bgp 64497 vrf mgmt
  address-family l2vpn evpn
   advertise ipv4 unicast route-map rm_export_local
   advertise ipv6 unicast route-map rm_export_local
-  route-target import 64497:20
-  route-target export 64497:20
+  route-target import {{ .MgmtRT }}
+  route-target export {{ .MgmtRT }}
  exit-address-family
 !
-ip prefix-list pl_export_base permit 10.100.0.0/24 le 32
-ipv6 prefix-list pl_export_base permit fdcb:f93c:3a3e::/64 le 128
+ip prefix-list pl_export_base permit {{ .ExportCIDRv4 }} le 32
+ipv6 prefix-list pl_export_base permit {{ .ExportCIDRv6 }} le 128
 !
 ip prefix-list ANY permit any
 ipv6 prefix-list ANY permit any
