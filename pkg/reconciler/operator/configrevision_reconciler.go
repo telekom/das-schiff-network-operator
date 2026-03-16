@@ -179,8 +179,11 @@ func (crr *ConfigRevisionReconciler) processConfigsForRevision(ctx context.Conte
 	cnt := crr.getRevisionCounters(configs, revision)
 
 	if cnt.invalid > 0 {
-		if err := crr.invalidateRevision(ctx, revision, cnt.failedNode, cnt.failedMessage, cnt.failedAt); err != nil {
-			return cnt, fmt.Errorf("faild to invalidate revision %s: %w", revision.Name, err)
+		// Only invalidate on transition to invalid or when failure details are not yet set.
+		if !revision.Status.IsInvalid || revision.Status.FailedNode == "" {
+			if err := crr.invalidateRevision(ctx, revision, cnt.failedNode, cnt.failedMessage, cnt.failedAt); err != nil {
+				return cnt, fmt.Errorf("failed to invalidate revision %s: %w", revision.Name, err)
+			}
 		}
 	}
 
@@ -193,10 +196,14 @@ func (crr *ConfigRevisionReconciler) getRevisionCounters(configs []v1alpha1.Node
 		ongoing: 0,
 		invalid: 0,
 	}
-	for i := range configs {
-		if configs[i].Spec.Revision == revision.Spec.Revision {
+	sortedConfigs := slices.Clone(configs)
+	slices.SortFunc(sortedConfigs, func(a, b v1alpha1.NodeNetworkConfig) int {
+		return strings.Compare(a.Name, b.Name)
+	})
+	for i := range sortedConfigs {
+		if sortedConfigs[i].Spec.Revision == revision.Spec.Revision {
 			timeout := crr.configTimeout
-			switch configs[i].Status.ConfigStatus {
+			switch sortedConfigs[i].Status.ConfigStatus {
 			case StatusProvisioned:
 				// Update ready counter
 				cnt.ready++
@@ -205,9 +212,9 @@ func (crr *ConfigRevisionReconciler) getRevisionCounters(configs []v1alpha1.Node
 				cnt.invalid++
 				// Capture the failure info (first one wins since rollout stops)
 				if cnt.failedNode == "" {
-					cnt.failedNode = configs[i].Name
-					cnt.failedMessage = configs[i].Status.ErrorMessage
-					cnt.failedAt = configs[i].Status.LastUpdate
+					cnt.failedNode = sortedConfigs[i].Name
+					cnt.failedMessage = sortedConfigs[i].Status.ErrorMessage
+					cnt.failedAt = sortedConfigs[i].Status.LastUpdate
 				}
 			case "":
 				// Set longer timeout if status was not yet updated
@@ -216,13 +223,13 @@ func (crr *ConfigRevisionReconciler) getRevisionCounters(configs []v1alpha1.Node
 			case StatusProvisioning:
 				// Update ongoing counter
 				cnt.ongoing++
-				if wasConfigTimeoutReached(&configs[i], timeout) {
+				if wasConfigTimeoutReached(&sortedConfigs[i], timeout) {
 					// If timeout was reached revision is invalid (but still counts as ongoing).
 					cnt.invalid++
 					if cnt.failedNode == "" {
-						cnt.failedNode = configs[i].Name
+						cnt.failedNode = sortedConfigs[i].Name
 						cnt.failedMessage = "provisioning timeout reached"
-						cnt.failedAt = configs[i].Status.LastUpdate
+						cnt.failedAt = metav1.Now()
 					}
 				}
 			}
