@@ -193,26 +193,20 @@ func (n *Manager) setupVXLAN(info *Layer2Information, bridge *netlink.Bridge) er
 	}
 	info.vxlan = vxlan
 
-	if _, err := n.createVLAN(
+	vlanIface, err := n.createVLAN(
 		info.VlanID,
 		bridge.Attrs().Index,
-		info.MTU); err != nil {
+		info.MTU)
+	if err != nil {
 		return err
 	}
+	info.vlanInterface = vlanIface
 
 	if err := n.setUp(fmt.Sprintf("%s%d", vlanPrefix, info.VlanID)); err != nil {
 		return err
 	}
 
 	if info.DisableSegmentation {
-		vlanLink, err := n.toolkit.LinkByName(fmt.Sprintf("%s%d", vlanPrefix, info.VlanID))
-		if err != nil {
-			return fmt.Errorf("error getting vlan interface for segmentation: %w", err)
-		}
-		vlanIface, ok := vlanLink.(*netlink.Vlan)
-		if !ok {
-			return fmt.Errorf("interface %s is not a vlan", vlanLink.Attrs().Name)
-		}
 		if err := reconcileSegmentation(vlanIface, info.DisableSegmentation); err != nil {
 			return err
 		}
@@ -342,10 +336,8 @@ func (n *Manager) ReconcileL2(current, desired *Layer2Information) error {
 	}
 
 	// Reconcile disableSegmentation
-	if desired.DisableSegmentation {
-		if err := reconcileSegmentation(current.vlanInterface, desired.DisableSegmentation); err != nil {
-			return err
-		}
+	if err := reconcileSegmentation(current.vlanInterface, desired.DisableSegmentation); err != nil {
+		return err
 	}
 
 	// Reconcile EUI Autogeneration
@@ -496,16 +488,17 @@ func (*Manager) configureBridge(intfName string) error {
 }
 
 func reconcileSegmentation(vlanInterface *netlink.Vlan, disableSegmentation bool) error {
+	intfName := vlanInterface.Attrs().Name
 	eth, err := newEthtoolFunc()
 	if err != nil {
-		return fmt.Errorf("error creating ethtool client: %w", err)
+		return fmt.Errorf("error creating ethtool client for %s: %w", intfName, err)
 	}
 	defer eth.Close()
 
 	settingsMap := map[string]bool{"gro": !disableSegmentation, "gso": !disableSegmentation, "tso": !disableSegmentation}
 
-	if err := eth.Change(vlanInterface.Attrs().Name, settingsMap); err != nil {
-		return fmt.Errorf("error changing ethtool settings: %w", err)
+	if err := eth.Change(intfName, settingsMap); err != nil {
+		return fmt.Errorf("error changing ethtool settings for %s: %w", intfName, err)
 	}
 	return nil
 }
