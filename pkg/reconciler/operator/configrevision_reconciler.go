@@ -196,41 +196,40 @@ func (crr *ConfigRevisionReconciler) getRevisionCounters(configs []v1alpha1.Node
 		ongoing: 0,
 		invalid: 0,
 	}
-	sortedConfigs := slices.Clone(configs)
-	slices.SortFunc(sortedConfigs, func(a, b v1alpha1.NodeNetworkConfig) int {
-		return strings.Compare(a.Name, b.Name)
-	})
-	for i := range sortedConfigs {
-		if sortedConfigs[i].Spec.Revision == revision.Spec.Revision {
-			timeout := crr.configTimeout
-			switch sortedConfigs[i].Status.ConfigStatus {
-			case StatusProvisioned:
-				// Update ready counter
-				cnt.ready++
-			case StatusInvalid:
-				// Increase 'invalid' counter so we know that the revision results in invalid configs
+	for i := range configs {
+		cfg := &configs[i]
+		if cfg.Spec.Revision != revision.Spec.Revision {
+			continue
+		}
+
+		timeout := crr.configTimeout
+		switch cfg.Status.ConfigStatus {
+		case StatusProvisioned:
+			// Update ready counter
+			cnt.ready++
+		case StatusInvalid:
+			// Increase 'invalid' counter so we know that the revision results in invalid configs
+			cnt.invalid++
+			// Capture the failure info; choose lexicographically smallest node name for determinism.
+			if cnt.failedNode == "" || cfg.Name < cnt.failedNode {
+				cnt.failedNode = cfg.Name
+				cnt.failedMessage = cfg.Status.ErrorMessage
+				cnt.failedAt = cfg.Status.LastUpdate
+			}
+		case "":
+			// Set longer timeout if status was not yet updated
+			timeout = crr.preconfigTimeout
+			fallthrough
+		case StatusProvisioning:
+			// Update ongoing counter
+			cnt.ongoing++
+			if wasConfigTimeoutReached(cfg, timeout) {
+				// If timeout was reached revision is invalid (but still counts as ongoing).
 				cnt.invalid++
-				// Capture the failure info (first one wins since rollout stops)
-				if cnt.failedNode == "" {
-					cnt.failedNode = sortedConfigs[i].Name
-					cnt.failedMessage = sortedConfigs[i].Status.ErrorMessage
-					cnt.failedAt = sortedConfigs[i].Status.LastUpdate
-				}
-			case "":
-				// Set longer timeout if status was not yet updated
-				timeout = crr.preconfigTimeout
-				fallthrough
-			case StatusProvisioning:
-				// Update ongoing counter
-				cnt.ongoing++
-				if wasConfigTimeoutReached(&sortedConfigs[i], timeout) {
-					// If timeout was reached revision is invalid (but still counts as ongoing).
-					cnt.invalid++
-					if cnt.failedNode == "" {
-						cnt.failedNode = sortedConfigs[i].Name
-						cnt.failedMessage = "provisioning timeout reached"
-						cnt.failedAt = metav1.Now()
-					}
+				if cnt.failedNode == "" || cfg.Name < cnt.failedNode {
+					cnt.failedNode = cfg.Name
+					cnt.failedMessage = "provisioning timeout reached"
+					cnt.failedAt = metav1.Now()
 				}
 			}
 		}
