@@ -201,6 +201,20 @@ func (n *Manager) setupVXLAN(info *Layer2Information, bridge *netlink.Bridge) er
 		return err
 	}
 
+	if info.DisableSegmentation {
+		vlanLink, err := n.toolkit.LinkByName(fmt.Sprintf("%s%d", vlanPrefix, info.VlanID))
+		if err != nil {
+			return fmt.Errorf("error getting vlan interface for segmentation: %w", err)
+		}
+		vlanIface, ok := vlanLink.(*netlink.Vlan)
+		if !ok {
+			return fmt.Errorf("interface %s is not a vlan", vlanLink.Attrs().Name)
+		}
+		if err := reconcileSegmentation(vlanIface, info.DisableSegmentation); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -325,8 +339,10 @@ func (n *Manager) ReconcileL2(current, desired *Layer2Information) error {
 	}
 
 	// Reconcile disableSegmentation
-	if err := reconcileSegmentation(current.vlanInterface, desired.DisableSegmentation); err != nil {
-		return err
+	if desired.DisableSegmentation {
+		if err := reconcileSegmentation(current.vlanInterface, desired.DisableSegmentation); err != nil {
+			return err
+		}
 	}
 
 	// Reconcile EUI Autogeneration
