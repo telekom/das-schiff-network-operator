@@ -25,6 +25,10 @@ topology:
     nwop-worker2:
       kind: ext-container
 
+    # ── Cluster-2 node (gateway cluster, pre-created by orchestrator) ──
+    nwop2-worker:
+      kind: ext-container
+
     # ── EVPN Route Reflectors ──
     dcgw1:
       kind: linux
@@ -59,31 +63,6 @@ topology:
       exec:
         - bash /etc/frr/setup.sh
 
-    # ── VRF gateways ──
-    m2mgw:
-      kind: linux
-      image: nicolaka/netshoot:latest
-      network-mode: none
-      exec:
-        - ip addr add fdff:965f:f02a:1::1/127 dev dcgw1
-        - ip addr add fdff:965f:f02a:2::1/127 dev dcgw2
-        - ip addr add 10.102.0.1/32 dev lo
-        - ip addr add fda5:25c1:193c::1/128 dev lo
-        - "ip -4 route add default src 10.102.0.1 nexthop via inet6 fdff:965f:f02a:1:: dev dcgw1 weight 1 nexthop via inet6 fdff:965f:f02a:2:: dev dcgw2 weight 1"
-        - "ip -6 route add default src fda5:25c1:193c::1 nexthop via inet6 fdff:965f:f02a:1:: dev dcgw1 weight 1 nexthop via inet6 fdff:965f:f02a:2:: dev dcgw2 weight 1"
-
-    c2mgw:
-      kind: linux
-      image: nicolaka/netshoot:latest
-      network-mode: none
-      exec:
-        - ip addr add fde9:9ec5:829e:1::1/127 dev dcgw1
-        - ip addr add fde9:9ec5:829e:2::1/127 dev dcgw2
-        - ip addr add 10.102.1.1/32 dev lo
-        - ip addr add fda5:25c1:193d::1/128 dev lo
-        - "ip -4 route add default src 10.102.1.1 nexthop via inet6 fde9:9ec5:829e:1:: dev dcgw1 weight 1 nexthop via inet6 fde9:9ec5:829e:2:: dev dcgw2 weight 1"
-        - "ip -6 route add default src fda5:25c1:193d::1 nexthop via inet6 fde9:9ec5:829e:1:: dev dcgw1 weight 1 nexthop via inet6 fde9:9ec5:829e:2:: dev dcgw2 weight 1"
-
     # ── NAT64 gateway ──
     nat64:
       kind: linux
@@ -108,7 +87,9 @@ topology:
         - ip addr add 10.200.0.2/24 dev eth1
         - ip addr add fd00:200::2/64 dev eth1
         - ip route add 10.100.0.0/24 via 10.200.0.1 dev eth1
+        - ip route add 10.100.1.0/24 via 10.200.0.1 dev eth1
         - ip -6 route add fdcb:f93c:3a3e::/64 via fd00:200::1 dev eth1
+        - ip -6 route add fdcb:f93c:3a3e:1::/64 via fd00:200::1 dev eth1
 
   links:
     # ── dcgw ↔ leaf (underlay p2p) ──
@@ -125,11 +106,9 @@ topology:
     - endpoints: ["leaf1:eth-srv3", "nwop-worker2:eth1"]
     - endpoints: ["leaf2:eth-srv3", "nwop-worker2:eth2"]
 
-    # ── dcgw ↔ VRF gateways ──
-    - endpoints: ["dcgw1:m2mgw", "m2mgw:dcgw1"]
-    - endpoints: ["dcgw2:m2mgw", "m2mgw:dcgw2"]
-    - endpoints: ["dcgw1:c2mgw", "c2mgw:dcgw1"]
-    - endpoints: ["dcgw2:c2mgw", "c2mgw:dcgw2"]
+    # ── leaf ↔ cluster-2 node (2 uplinks) ──
+    - endpoints: ["leaf1:eth-srv4", "nwop2-worker:eth1"]
+    - endpoints: ["leaf2:eth-srv4", "nwop2-worker:eth2"]
 
     # ── dcgw ↔ NAT64 ──
     - endpoints: ["dcgw1:eth-nat64", "nat64:eth1"]
