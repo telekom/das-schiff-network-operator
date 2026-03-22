@@ -93,7 +93,7 @@ var _ = Describe("ListL3()", func() {
 		Expect(err).ToNot(HaveOccurred())
 		Expect(result).To(BeEmpty())
 	})
-	It("returns no error error if cannot get bridge, vxlan and vrf links by name", func() {
+	It("returns no error if cannot get bridge, vxlan and vrf links by name", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
 		nm := NewManager(netlinkMock, &config.BaseConfig{})
 		netlinkMock.EXPECT().LinkList().Return([]netlink.Link{&netlink.Vrf{LinkAttrs: netlink.LinkAttrs{Name: dummyIntf}}}, nil)

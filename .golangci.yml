@@ -1,16 +1,41 @@
+# SPDX-FileCopyrightText: 2025 Deutsche Telekom AG
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# golangci-lint v2 configuration for das-schiff-network-operator
+# Aligned with t-caas team conventions (auth-operator reference config)
+
 version: "2"
 run:
+  go: "1.25"
   allow-parallel-runners: true
+  timeout: 10m
+  modules-download-mode: readonly
+  relative-path-mode: gomod
+
+output:
+  formats:
+    text:
+      path: stderr
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
 linters:
   default: none
   enable:
+    - asasalint
     - asciicheck
     - bodyclose
     - containedctx
     - contextcheck
+    - copyloopvar
     - cyclop
     - decorder
     - dogsled
+    - dupword
+    - durationcheck
     - errcheck
     - errorlint
     - funlen
@@ -25,17 +50,20 @@ linters:
     - govet
     - importas
     - ineffassign
+    - loggercheck
     - misspell
     - mnd
     - nakedret
     - nilerr
     - noctx
+    - nosprintfhostport
     - prealloc
     - predeclared
     - revive
     - rowserrcheck
     - staticcheck
     - thelper
+    - tparallel
     - unconvert
     - unparam
     - unused
@@ -158,9 +186,19 @@ linters:
     staticcheck:
       checks:
         - all
-        - -ST1003
-        - -QF1001
-        - -QF1008
+        # Disable quick-fix suggestions (style preferences)
+        - -QF1001   # Apply De Morgan's law
+        - -QF1002   # Convert untagged switch to tagged switch
+        - -QF1003   # Convert if/else-if chain to tagged switch
+        - -QF1008   # Omit embedded fields from selector expression
+        - -QF1011   # Omit redundant type from declaration
+        # Disable style checks (too noisy for existing codebase)
+        - -ST1003   # Underscores in names (unix/nl constants)
+        - -ST1005   # Error string capitalization
+        - -ST1016   # Method receiver names
+        - -ST1020   # Function comment format
+        - -ST1021   # Type comment format
+        - -ST1022   # Variable comment format
   exclusions:
     generated: lax
     presets:
@@ -211,16 +249,6 @@ linters:
       # Exclude unhandled-error for test files
       - path: (.+)_test\.go
         text: 'unhandled-error:'
-      # Exclude new noctx patterns for existing code (v2 detects more patterns)
-      - linters:
-          - noctx
-        text: 'net/http.NewRequest must not be called'
-      - linters:
-          - noctx
-        text: 'net.Dial must not be called'
-      - linters:
-          - noctx
-        text: 'os/exec.Command must not be called'
       # Exclude prealloc for existing code
       - linters:
           - prealloc
@@ -228,17 +256,27 @@ linters:
       - linters:
           - prealloc
         path: pkg/helpers/
+      # TODO: Fix remaining noctx violations (1 net.Dial in pkg/frr/vty/socket.go,
+      # 2 exec.Command in pkg/network/netplan/client/direct/client.go).
+      # These require adding context.Context to internal APIs and their interfaces.
+      - linters:
+          - noctx
+        text: 'net.Dial must not be called'
+      - linters:
+          - noctx
+        text: 'os/exec.Command must not be called'
     paths:
-      - third_party$
-      - builtin$
-      - examples$
+      - "zz_generated.*\\.go$"
+      - "_generated\\.go$"
+      - ".*\\.pb\\.go$"
 formatters:
   enable:
     - gci
     - gofmt
+    - goimports
   exclusions:
     generated: lax
     paths:
-      - third_party$
-      - builtin$
-      - examples$
+      - "zz_generated.*\\.go$"
+      - "_generated\\.go$"
+      - ".*\\.pb\\.go$"
