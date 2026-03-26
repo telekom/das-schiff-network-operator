@@ -1,0 +1,13 @@
+[Unit]
+Description=Add node overlay IPs to loopback
+DefaultDependencies=no
+Before=kubelet.service
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/setup-node-network.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

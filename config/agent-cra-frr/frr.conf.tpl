@@ -122,7 +122,9 @@ neighbor {{ $peerIdentifier }} peer-group
 neighbor {{ $peerIdentifier }} remote-as {{ .RemoteASN }}
 bgp listen range {{ .ListenRange }} peer-group {{ $peerIdentifier }}
 {{ end }}
+{{ if and .KeepaliveTime .HoldTime }}
 neighbor {{ $peerIdentifier }} timers {{ .KeepaliveTime.Seconds }} {{ .HoldTime.Seconds }}
+{{ end }}
 {{ if .Multihop }}
 neighbor {{ $peerIdentifier }} ttl-security hops {{ .Multihop }}
 {{ end }}
@@ -144,7 +146,7 @@ exit-address-family
 
 
 {{ if .IPv6 }}
-address-family ipv4 unicast
+address-family ipv6 unicast
   neighbor {{ $peerIdentifier }} activate
   {{ if .IPv6.MaxPrefixes }}
   neighbor {{ $peerIdentifier }} maximum-prefix {{ .IPv6.MaxPrefixes }}
@@ -298,12 +300,20 @@ router bgp {{ $.Config.LocalASN }} vrf {{ $name }}
     redistribute connected
     redistribute static
     redistribute kernel
+    {{ range $vrfImport := $vrf.VRFImports }}
+    import vrf {{ $vrfImport.FromVRF }}
+    {{ end }}
+    import vrf route-map rm_{{ $name }}_import
   exit-address-family
 
   address-family ipv6 unicast
     redistribute connected
     redistribute static
     redistribute kernel
+    {{ range $vrfImport := $vrf.VRFImports }}
+    import vrf {{ $vrfImport.FromVRF }}
+    {{ end }}
+    import vrf route-map rm_{{ $name }}_import
   exit-address-family
 exit
 !
@@ -494,27 +504,6 @@ exit
 {{ $vrf := index $.NodeConfig.FabricVRFs $.Config.ManagementVRF.Name }}
 {{ template "vrfFilters" dict "Vrf" $.Config.ManagementVRF.Name "Imports" $vrf.VRFImports "BGPPeers" $vrf.BGPPeers }}
 {{ end }}
-!
-{{ if $.NodeConfig.ClusterVRF }}
-{{ range $i, $pbrRule := $.NodeConfig.ClusterVRF.PolicyRoutes }}
-pbr-map hbn seq {{ add $i 1 }}
-{{ if $pbrRule.TrafficMatch.SrcPrefix }}match src-ip {{ $pbrRule.TrafficMatch.SrcPrefix }}{{ end }}
-{{ if $pbrRule.TrafficMatch.DstPrefix }}match dst-ip {{ $pbrRule.TrafficMatch.DstPrefix }}{{ end }}
-{{ if $pbrRule.TrafficMatch.SrcPort }}match src-port {{ $pbrRule.TrafficMatch.SrcPort }}{{ end }}
-{{ if $pbrRule.TrafficMatch.DstPort }}match dst-port {{ $pbrRule.TrafficMatch.DstPort }}{{ end }}
-{{ if $pbrRule.TrafficMatch.Protocol }}match ip-protocol {{ $pbrRule.TrafficMatch.Protocol }}{{ end }}
-{{ if $pbrRule.NextHop.Address }}
-set nexthop {{ $pbrRule.NextHop.Address }}
-{{ else if $pbrRule.NextHop.Vrf }}
-set nexthop {{ $pbrRule.NextHop.Vrf }} nexthop-vrf {{ $pbrRule.NextHop.Vrf }}
-{{ end }}
-exit
-{{ end }}
-{{ end }}
-!
-interface hbn
-  pbr-policy hbn
-exit
 !
 route-map TAG-FABRIC-IN permit 10
   set community 65169:200 additive

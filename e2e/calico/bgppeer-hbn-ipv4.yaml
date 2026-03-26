@@ -1,0 +1,7 @@
+apiVersion: crd.projectcalico.org/v1
+kind: BGPPeer
+metadata:
+  name: hbn-ipv4
+spec:
+  peerIP: '169.254.100.100'
+  asNumber: 65169

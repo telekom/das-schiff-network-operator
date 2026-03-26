@@ -28,13 +28,14 @@ type CRAFRRConfigApplier struct {
 // ApplyConfig applies the network configuration using CRA-FRR manager.
 func (a *CRAFRRConfigApplier) ApplyConfig(ctx context.Context, cfg *v1alpha1.NodeNetworkConfig) error {
 	netlinkConfig := a.convertNodeConfigToNetlink(cfg)
+	policyRoutes := convertPolicyRoutes(cfg)
 
 	frrConfig, err := a.frrTemplate.TemplateFRR(a.baseConfig, &cfg.Spec)
 	if err != nil {
 		return fmt.Errorf("error templating FRR configuration: %w", err)
 	}
 
-	if err := a.craManager.ApplyConfiguration(ctx, &netlinkConfig, frrConfig); err != nil {
+	if err := a.craManager.ApplyConfiguration(ctx, &netlinkConfig, frrConfig, policyRoutes); err != nil {
 		return fmt.Errorf("error applying cra configuration: %w", err)
 	}
 
@@ -43,14 +44,11 @@ func (a *CRAFRRConfigApplier) ApplyConfig(ctx context.Context, cfg *v1alpha1.Nod
 
 func (a *CRAFRRConfigApplier) convertNodeConfigToNetlink(nodeCfg *v1alpha1.NodeNetworkConfig) (netlinkConfig nl.NetlinkConfiguration) {
 	for _, layer2 := range nodeCfg.Spec.Layer2s {
-		neighSuppression := false
-
 		nlLayer2 := nl.Layer2Information{
-			VlanID:           int(layer2.VLAN),
-			MTU:              int(layer2.MTU),
-			VNI:              int(layer2.VNI),
-			NeighSuppression: &neighSuppression,
-			AnycastMAC:       new(string),
+			VlanID:     int(layer2.VLAN),
+			MTU:        int(layer2.MTU),
+			VNI:        int(layer2.VNI),
+			AnycastMAC: new(string),
 		}
 
 		if layer2.IRB != nil {
@@ -76,7 +74,42 @@ func (a *CRAFRRConfigApplier) convertNodeConfigToNetlink(nodeCfg *v1alpha1.NodeN
 
 		netlinkConfig.VRFs = append(netlinkConfig.VRFs, nlVrf)
 	}
+
+	for name := range nodeCfg.Spec.LocalVRFs {
+		nlVrf := nl.VRFInformation{
+			Name:      name,
+			MTU:       nl.DefaultMtu,
+			LocalOnly: true,
+		}
+		netlinkConfig.VRFs = append(netlinkConfig.VRFs, nlVrf)
+	}
+
 	return netlinkConfig
+}
+
+func convertPolicyRoutes(nodeCfg *v1alpha1.NodeNetworkConfig) []cra.PolicyRoute {
+	if nodeCfg.Spec.ClusterVRF == nil {
+		return nil
+	}
+
+	var routes []cra.PolicyRoute
+	for _, pr := range nodeCfg.Spec.ClusterVRF.PolicyRoutes {
+		if pr.NextHop.Vrf == nil {
+			// ip rules require a VRF to resolve the routing table —
+			// address-only next hops are not supported for policy routes.
+			continue
+		}
+		route := cra.PolicyRoute{
+			SrcPrefix: pr.TrafficMatch.SrcPrefix,
+			DstPrefix: pr.TrafficMatch.DstPrefix,
+			SrcPort:   pr.TrafficMatch.SrcPort,
+			DstPort:   pr.TrafficMatch.DstPort,
+			Protocol:  pr.TrafficMatch.Protocol,
+			Vrf:       *pr.NextHop.Vrf,
+		}
+		routes = append(routes, route)
+	}
+	return routes
 }
 
 // NodeNetworkConfigReconciler wraps the common reconciler with CRA-FRR specific logic.

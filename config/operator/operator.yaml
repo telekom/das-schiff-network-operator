@@ -9,6 +9,7 @@ spec:
   replicas: 1
   selector:
     matchLabels:
+      app.kubernetes.io/name: network-operator
       app.kubernetes.io/component: operator
   strategy:
     type: Recreate
@@ -17,6 +18,7 @@ spec:
       annotations:
         kubectl.kubernetes.io/default-container: operator
       labels:
+        app.kubernetes.io/name: network-operator
         app.kubernetes.io/component: operator
     spec:
       tolerations:

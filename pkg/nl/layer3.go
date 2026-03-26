@@ -20,6 +20,7 @@ type VRFInformation struct {
 	vrfID    int
 
 	MarkForDelete bool
+	LocalOnly     bool
 }
 
 type Loopback struct {
@@ -43,6 +44,10 @@ func (n *Manager) CreateL3(info VRFInformation) error {
 		return err
 	}
 
+	if info.LocalOnly {
+		return nil
+	}
+
 	bridge, err := n.createBridge(bridgePrefix+info.Name, nil, vrf.Attrs().Index, DefaultMtu, true, false)
 	if err != nil {
 		return err
@@ -57,6 +62,9 @@ func (n *Manager) CreateL3(info VRFInformation) error {
 
 // UpL3 will set all interfaces up. This is done after the FRR reload to not have a L2VNI for a short period of time.
 func (n *Manager) UpL3(info VRFInformation) error {
+	if info.LocalOnly {
+		return nil
+	}
 	if err := n.setUp(bridgePrefix + info.Name); err != nil {
 		return err
 	}

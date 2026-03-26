@@ -1,0 +1,98 @@
+# Cluster-2 gateway pods: NADs + namespace + pods.
+# These pods sit in the m2m/c2m VRF via macvlan, providing the gateway IPs
+# that cluster-1 tests ping/curl against.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: e2e-gateways
+---
+# NAD for VLAN 601 (m2m gateway)
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: macvlan-vlan601
+  namespace: e2e-gateways
+spec:
+  config: |
+    {
+      "cniVersion": "0.3.1",
+      "type": "macvlan",
+      "master": "vlan.601",
+      "mode": "bridge",
+      "ipam": {
+        "type": "static",
+        "routes": [
+          {"dst": "10.250.0.0/16", "gw": "10.102.0.254"},
+          {"dst": "fd94:685b:30cf::/48", "gw": "fda5:25c1:193c::fe"},
+          {"dst": "fda5:25c1:193c::/48", "gw": "fda5:25c1:193c::fe"},
+          {"dst": "fdbb:6b17:90ba::/64", "gw": "fda5:25c1:193c::fe"},
+          {"dst": "fd90:4dbf:396d::/126", "gw": "fda5:25c1:193c::fe"},
+          {"dst": "fd75:2d70:f7f7::/64", "gw": "fda5:25c1:193c::fe"}
+        ]
+      }
+    }
+---
+# NAD for VLAN 602 (c2m gateway)
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: macvlan-vlan602
+  namespace: e2e-gateways
+spec:
+  config: |
+    {
+      "cniVersion": "0.3.1",
+      "type": "macvlan",
+      "master": "vlan.602",
+      "mode": "bridge",
+      "ipam": {
+        "type": "static",
+        "routes": [
+          {"dst": "10.250.0.0/16", "gw": "10.102.1.254"},
+          {"dst": "fd94:685b:30cf::/48", "gw": "fda5:25c1:193d::fe"},
+          {"dst": "fda5:25c1:193d::/48", "gw": "fda5:25c1:193d::fe"},
+          {"dst": "fdb2:e3e1:fcbf::/64", "gw": "fda5:25c1:193d::fe"},
+          {"dst": "fde8:e5cf:d314::/126", "gw": "fda5:25c1:193d::fe"}
+        ]
+      }
+    }
+---
+# m2m gateway pod — provides 10.102.0.1 / fda5:25c1:193c::1
+apiVersion: v1
+kind: Pod
+metadata:
+  name: m2m-gateway
+  namespace: e2e-gateways
+  annotations:
+    k8s.v1.cni.cncf.io/networks: |
+      [{"name": "macvlan-vlan601", "ips": ["10.102.0.1/24", "fda5:25c1:193c::1/64"]}]
+spec:
+  containers:
+  - name: gw
+    image: busybox:1.37
+    command: ["sleep", "86400"]
+  restartPolicy: Never
+  tolerations:
+  - key: node-role.kubernetes.io/control-plane
+    operator: Exists
+    effect: NoSchedule
+---
+# c2m gateway pod — provides 10.102.1.1 / fda5:25c1:193d::1
+apiVersion: v1
+kind: Pod
+metadata:
+  name: c2m-gateway
+  namespace: e2e-gateways
+  annotations:
+    k8s.v1.cni.cncf.io/networks: |
+      [{"name": "macvlan-vlan602", "ips": ["10.102.1.1/24", "fda5:25c1:193d::1/64"]}]
+spec:
+  containers:
+  - name: gw
+    image: busybox:1.37
+    command: ["sleep", "86400"]
+  restartPolicy: Never
+  tolerations:
+  - key: node-role.kubernetes.io/control-plane
+    operator: Exists
+    effect: NoSchedule

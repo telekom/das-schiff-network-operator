@@ -47,7 +47,7 @@ manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and Cust
 	$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
 
 .PHONY: generate
-generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
+generate: controller-gen bpf-generate ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
 	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./..."
 
 .PHONY: fmt
@@ -60,7 +60,7 @@ vet: ## Run go vet against code.
 
 .PHONY: test
 test: manifests generate fmt vet envtest ## Run tests.
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" go test ./... -coverprofile cover.out
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" go test $(shell go list ./... 2>/dev/null | grep -v -e /e2etests -e /e2e/ || true) -coverprofile cover.out
 
 ##@ Build
 
@@ -71,6 +71,10 @@ build: generate fmt vet ## Build manager binary.
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
 	go run -ldflags "$(LDFLAGS)" ./cmd/operator/main.go
+
+.PHONY: bpf-generate
+bpf-generate: ## Run go generate for the BPF program (builds it as well)
+	cd pkg/bpf/ && go generate
 
 .PHONY: docker-build
 docker-build: #test ## Build docker image with the manager.
@@ -141,6 +145,42 @@ deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in
 .PHONY: undeploy
 undeploy: ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
 	$(KUSTOMIZE) build config/default | kubectl delete --ignore-not-found=$(ignore-not-found) -f -
+
+##@ E2E Testing
+
+KIND_NODE_VERSION ?= v1.35.2
+E2E_NODE_IMAGE ?= $(IMG_BASE)/das-schiff-kind-node:$(KIND_NODE_VERSION)
+E2E_NAT64_IMAGE ?= $(IMG_BASE)/das-schiff-nat64:latest
+E2E_TESTER_IMAGE ?= $(IMG_BASE)/das-schiff-e2e-tester:latest
+
+.PHONY: e2e-build-cra-frr
+e2e-build-cra-frr: ## Build the CRA-FRR image.
+	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-cra-frr.Dockerfile -t das-schiff-cra-frr:latest .
+
+.PHONY: e2e-build-node-image
+e2e-build-node-image: e2e-build-cra-frr ## Build kind node image with CRA-FRR baked in.
+	docker save das-schiff-cra-frr:latest -o e2e/images/kind-node/cra-frr.tar
+	docker build \
+	  --build-arg KIND_NODE_VERSION=$(KIND_NODE_VERSION) \
+	  -t $(E2E_NODE_IMAGE) \
+	  -f e2e/images/kind-node/Dockerfile \
+	  e2e/images/kind-node/
+	rm -f e2e/images/kind-node/cra-frr.tar
+
+.PHONY: e2e-up
+e2e-up: ## Stand up the full E2E lab (containerlab + CRA + kubeadm + components).
+	cd e2e/setup && E2E_NODE_IMAGE=$(E2E_NODE_IMAGE) E2E_NAT64_IMAGE=$(E2E_NAT64_IMAGE) E2E_TESTER_IMAGE=$(E2E_TESTER_IMAGE) go run ./cmd up
+
+.PHONY: e2e-down
+e2e-down: ## Tear down the E2E lab.
+	cd e2e/setup && go run ./cmd down
+
+.PHONY: e2e-test
+e2e-test: ## Run all E2E tests.
+	docker exec clab-nwop-tester bash -c \
+	  'cd /repo && KUBECONFIG=/repo/e2etests/.kubeconfig go test -v -count=1 -timeout=30m ./e2etests/...'
+
+##@ Build Dependencies
 
 CONTROLLER_GEN = $(shell pwd)/bin/controller-gen
 .PHONY: controller-gen

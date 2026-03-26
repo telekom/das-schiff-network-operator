@@ -1,0 +1,150 @@
+name: E2E Tests
+
+on:
+  workflow_dispatch: {}
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - "api/**"
+      - "cmd/**"
+      - "controllers/**"
+      - "pkg/**"
+      - "config/**"
+      - "e2e/**"
+      - "e2etests/**"
+      - "go.mod"
+      - "go.sum"
+      - "bpf/**"
+      - "*.Dockerfile"
+      - "Makefile"
+
+permissions: {}
+
+concurrency:
+  group: e2e-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5 # v6.2.0
+        with:
+          go-version-file: go.mod
+
+      - name: system-level-dependencies
+        run: |
+          sudo apt update
+          sudo apt -y install linux-modules-extra-$(uname -r)
+
+      - name: Set up E2E lab
+        run: make e2e-up
+
+      - name: Run E2E tests
+        run: make e2e-test
+
+      - name: Collect debug logs
+        if: failure()
+        run: |
+          mkdir -p /tmp/e2e-logs
+          for node in nwop-control-plane nwop-worker nwop-worker2; do
+            docker logs "$node" > "/tmp/e2e-logs/${node}-docker.log" 2>&1 || true
+            docker exec "$node" journalctl -u cra.service --no-pager \
+              > "/tmp/e2e-logs/${node}-cra.log" 2>&1 || true
+            docker exec "$node" journalctl -u kubelet.service --no-pager \
+              > "/tmp/e2e-logs/${node}-kubelet.log" 2>&1 || true
+          done
+          docker exec nwop-control-plane kubectl \
+            --kubeconfig=/etc/kubernetes/admin.conf get pods -A -o wide \
+            > /tmp/e2e-logs/pods.log 2>&1 || true
+          docker exec nwop-control-plane kubectl \
+            --kubeconfig=/etc/kubernetes/admin.conf get events -A \
+            --sort-by='.lastTimestamp' > /tmp/e2e-logs/events.log 2>&1 || true
+          for rtr in leaf1 leaf2 dcgw1 dcgw2; do
+            docker exec "clab-nwop-${rtr}" vtysh -c 'show bgp summary' \
+              > "/tmp/e2e-logs/${rtr}-bgp.log" 2>&1 || true
+          done
+          for dcgw in dcgw1 dcgw2; do
+            docker exec "clab-nwop-${dcgw}" vtysh -c 'show bgp l2vpn evpn' \
+              > "/tmp/e2e-logs/${dcgw}-evpn.log" 2>&1 || true
+            docker exec "clab-nwop-${dcgw}" vtysh -c 'show evpn vni' \
+              > "/tmp/e2e-logs/${dcgw}-vni.log" 2>&1 || true
+            docker exec "clab-nwop-${dcgw}" ip route show table all \
+              > "/tmp/e2e-logs/${dcgw}-ip-routes.log" 2>&1 || true
+            docker exec "clab-nwop-${dcgw}" ip -6 route show table all \
+              > "/tmp/e2e-logs/${dcgw}-ip6-routes.log" 2>&1 || true
+          done
+          # Enable BPF stats to see program run counts
+          docker exec nwop-control-plane sysctl -w kernel.bpf_stats_enabled=1 2>/dev/null || true
+          sleep 2
+          for node in nwop-control-plane nwop-worker nwop-worker2; do
+            docker exec "$node" bash -c \
+              'P=$(systemctl show cra.service -p MainPID --value 2>/dev/null); \
+               CRA_PID=$(cat /proc/$P/task/*/children 2>/dev/null | head -1 | tr -d " \n"); \
+               [ -n "$CRA_PID" ] && nsenter -t $CRA_PID -m -n -- vtysh -c "show bgp l2vpn evpn"' \
+              > "/tmp/e2e-logs/${node}-cra-evpn.log" 2>&1 || true
+            docker exec "$node" bash -c \
+              'P=$(systemctl show cra.service -p MainPID --value 2>/dev/null); \
+               CRA_PID=$(cat /proc/$P/task/*/children 2>/dev/null | head -1 | tr -d " \n"); \
+               [ -n "$CRA_PID" ] && nsenter -t $CRA_PID -m -n -- ip -6 route show table all' \
+              > "/tmp/e2e-logs/${node}-cra-ip6-routes.log" 2>&1 || true
+            docker exec "$node" bash -c \
+              'P=$(systemctl show cra.service -p MainPID --value 2>/dev/null); \
+               CRA_PID=$(cat /proc/$P/task/*/children 2>/dev/null | head -1 | tr -d " \n"); \
+               [ -n "$CRA_PID" ] && nsenter -t $CRA_PID -m -- journalctl -u frr-cra.service --no-pager' \
+              > "/tmp/e2e-logs/${node}-cra-frr-cra.log" 2>&1 || true
+            docker exec "$node" bash -c \
+              'P=$(systemctl show cra.service -p MainPID --value 2>/dev/null); \
+               CRA_PID=$(cat /proc/$P/task/*/children 2>/dev/null | head -1 | tr -d " \n"); \
+               [ -n "$CRA_PID" ] && nsenter -t $CRA_PID -m -n -- ip link show' \
+              > "/tmp/e2e-logs/${node}-cra-links.log" 2>&1 || true
+            docker exec "$node" bash -c \
+              'P=$(systemctl show cra.service -p MainPID --value 2>/dev/null); \
+               CRA_PID=$(cat /proc/$P/task/*/children 2>/dev/null | head -1 | tr -d " \n"); \
+               [ -n "$CRA_PID" ] && nsenter -t $CRA_PID -m -n -- ip neigh show' \
+              > "/tmp/e2e-logs/${node}-cra-neigh.log" 2>&1 || true
+            docker exec "$node" bash -c \
+              'P=$(systemctl show cra.service -p MainPID --value 2>/dev/null); \
+               CRA_PID=$(cat /proc/$P/task/*/children 2>/dev/null | head -1 | tr -d " \n"); \
+               [ -n "$CRA_PID" ] && nsenter -t $CRA_PID -m -n -- bridge fdb show' \
+              > "/tmp/e2e-logs/${node}-cra-fdb.log" 2>&1 || true
+            docker exec "$node" bash -c \
+              'P=$(systemctl show cra.service -p MainPID --value 2>/dev/null); \
+               CRA_PID=$(cat /proc/$P/task/*/children 2>/dev/null | head -1 | tr -d " \n"); \
+               if [ -n "$CRA_PID" ]; then \
+                 echo "=== bpftool link show (global) ===" ; \
+                 bpftool link show 2>&1 ; \
+                 echo "=== bpftool link show (CRA netns) ===" ; \
+                 nsenter -t $CRA_PID -n -- bpftool link show 2>&1 ; \
+                 echo "=== tc filter on VLAN interfaces ===" ; \
+                 for dev in $(nsenter -t $CRA_PID -n -- ip -o link show | grep "vlan\\." | awk -F: "{print \$2}" | tr -d " "); do \
+                   echo "--- $dev ---" ; \
+                   nsenter -t $CRA_PID -n -- tc filter show dev "$dev" ingress 2>&1 ; \
+                 done ; \
+                 echo "=== bpftool net ===" ; \
+                 nsenter -t $CRA_PID -n -- bpftool net show 2>&1 ; \
+                 echo "=== bpftool prog ===" ; \
+                 bpftool prog show 2>&1 ; \
+                 echo "=== CRA frr-cra service status ===" ; \
+                 nsenter -t $CRA_PID -m -- systemctl status frr-cra.service --no-pager 2>&1 ; \
+               fi' \
+              > "/tmp/e2e-logs/${node}-cra-bpf.log" 2>&1 || true
+          done
+
+      - name: Upload debug logs
+        if: failure()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: e2e-debug-logs
+          path: /tmp/e2e-logs/
+          retention-days: 7
+
+      - name: Tear down E2E lab
+        if: always()
+        run: make e2e-down

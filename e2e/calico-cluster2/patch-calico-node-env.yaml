@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: calico-node
+  namespace: kube-system
+spec:
+  template:
+    spec:
+      containers:
+        - name: calico-node
+          env:
+            - name: IP
+              value: autodetect
+            - name: IP_AUTODETECTION_METHOD
+              value: "cidr=10.100.1.0/24"
+            - name: IP6
+              value: autodetect
+            - name: IP6_AUTODETECTION_METHOD
+              value: "cidr=fdcb:f93c:3a3e:1::/64"
+            - name: CALICO_IPV4POOL_IPIP
+              value: Never
+            - name: NO_DEFAULT_POOLS
+              value: "true"

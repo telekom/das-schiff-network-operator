@@ -30,7 +30,20 @@ pkg/*/testdata*
 *.swo
 *~
 
-# Compiler output
+# BPF compiled objects (generated at build time)
 pkg/bpf/*.o
+
+# E2E runtime artifacts
+e2e/generated/
+e2e/.kubeconfig
+e2e/.kubeconfig-cluster2
+e2etests/.kubeconfig
+e2etests/.kubeconfig-cluster2
+e2e/images/kind-node/cra-frr.tar
+e2e/setup/clab-nwop/
+e2e/setup/e2e/
+
+# FRR runtime artifacts
+*.conf.sav
 
 vendor/

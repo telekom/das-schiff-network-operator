@@ -1,0 +1,195 @@
+# Coil RBAC for egress-only mode
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  labels:
+    app.kubernetes.io/name: coil
+  name: coild
+  namespace: kube-system
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  labels:
+    app.kubernetes.io/name: coil
+  name: coil-egress-controller
+  namespace: kube-system
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  labels:
+    app.kubernetes.io/name: coil
+  name: coil-router
+  namespace: kube-system
+---
+# coild ClusterRole (egress-only — no IPAM CRDs)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: coil
+  name: coild
+rules:
+  - apiGroups: [""]
+    resources: [namespaces, pods, services]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [nodes]
+    verbs: [get]
+  - apiGroups: [coil.cybozu.com]
+    resources: [egresses]
+    verbs: [get, list, watch]
+---
+# coil-egress-controller ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: coil
+  name: coil-egress-controller
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [get, list, update, watch]
+  - apiGroups: [""]
+    resources: [serviceaccounts, services]
+    verbs: [create, get, list, patch, update, watch]
+  - apiGroups: [admissionregistration.k8s.io]
+    resources: [mutatingwebhookconfigurations, validatingwebhookconfigurations]
+    verbs: [get, list, update, watch]
+  - apiGroups: [apps]
+    resources: [deployments]
+    verbs: [create, get, list, patch, update, watch]
+  - apiGroups: [coil.cybozu.com]
+    resources: [egresses]
+    verbs: [get, list, watch]
+  - apiGroups: [coil.cybozu.com]
+    resources: [egresses/status]
+    verbs: [get, patch, update]
+  - apiGroups: [policy]
+    resources: [poddisruptionbudgets]
+    verbs: [create, delete, get, list, patch, update, watch]
+  - apiGroups: [rbac.authorization.k8s.io]
+    resources: [clusterrolebindings]
+    verbs: [get, list, patch, update, watch]
+---
+# coil-router ClusterRole (simplified — no AddressBlocks)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: coil
+  name: coil-router
+rules:
+  - apiGroups: [""]
+    resources: [nodes]
+    verbs: [list]
+---
+# coil-egress ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: coil
+  name: coil-egress
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch]
+---
+# ClusterRoleBindings
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  labels:
+    app.kubernetes.io/name: coil
+  name: coild
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: coild
+subjects:
+  - kind: ServiceAccount
+    name: coild
+    namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  labels:
+    app.kubernetes.io/name: coil
+  name: coil-egress-controller
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: coil-egress-controller
+subjects:
+  - kind: ServiceAccount
+    name: coil-egress-controller
+    namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  labels:
+    app.kubernetes.io/name: coil
+  name: coil-router
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: coil-router
+subjects:
+  - kind: ServiceAccount
+    name: coil-router
+    namespace: kube-system
+---
+# coil-egress CRB - egress controller will patch this to add
+# per-Egress ServiceAccounts as subjects.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  labels:
+    app.kubernetes.io/name: coil
+  name: coil-egress
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: coil-egress
+subjects: []
+---
+# Leader election Role + RoleBinding (egress-controller only)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  labels:
+    app.kubernetes.io/name: coil
+  name: coil-leader-election
+  namespace: kube-system
+rules:
+  - apiGroups: ["", coordination.k8s.io]
+    resources: [configmaps, leases]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [create, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  labels:
+    app.kubernetes.io/name: coil
+  name: coil-leader-election
+  namespace: kube-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: coil-leader-election
+subjects:
+  - kind: ServiceAccount
+    name: coil-egress-controller
+    namespace: kube-system

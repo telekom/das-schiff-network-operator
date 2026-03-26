@@ -1,0 +1,11 @@
+apiVersion: crd.projectcalico.org/v1
+kind: IPPool
+metadata:
+  name: default-ipv4-ippool
+spec:
+  blockSize: 26
+  cidr: 10.244.0.0/16
+  ipipMode: Never
+  vxlanMode: Never
+  natOutgoing: true
+  nodeSelector: all()

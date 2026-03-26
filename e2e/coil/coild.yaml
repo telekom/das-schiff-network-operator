@@ -1,0 +1,133 @@
+# coild DaemonSet — egress-only mode (no IPAM)
+# Matches vm-lab's kust-coil-fd + addons/only-egress configuration.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+    app.kubernetes.io/name: coil
+  name: coil-config
+  namespace: kube-system
+data:
+  # In egress-only mode, coil's own CNI config is not used.
+  # Meta-cni / Calico conflist chains the coil plugin instead.
+  cni_netconf: |
+    {
+      "cniVersion": "0.4.0",
+      "name": "k8s-pod-network",
+      "plugins": [
+        {
+          "type": "coil",
+          "socket": "/run/coild.sock"
+        }
+      ]
+    }
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  labels:
+    app.kubernetes.io/component: coild
+    app.kubernetes.io/name: coil
+  name: coild
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: coild
+      app.kubernetes.io/name: coil
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: coild
+        app.kubernetes.io/name: coil
+    spec:
+      containers:
+        - name: coild
+          image: ghcr.io/cybozu-go/coil:2.11.1
+          command: [coild]
+          args:
+            - --zap-stacktrace-level=panic
+            - --compat-calico
+            - --enable-ipam=false
+            - --enable-egress=true
+            - --pod-table-id=255
+            - --protocol-id=2
+            - --metrics-addr=:9384
+            - --health-addr=localhost:9385
+          env:
+            - name: COIL_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          ports:
+            - containerPort: 9384
+              name: metrics
+              protocol: TCP
+            - containerPort: 9385
+              name: health
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              host: localhost
+              path: /healthz
+              port: health
+          readinessProbe:
+            httpGet:
+              host: localhost
+              path: /readyz
+              port: health
+          resources:
+            requests:
+              cpu: 100m
+              memory: 200Mi
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - mountPath: /run
+              mountPropagation: HostToContainer
+              name: run
+            - mountPath: /lib/modules
+              name: modules
+              readOnly: true
+      hostNetwork: true
+      hostPID: true
+      initContainers:
+        - name: coil-installer
+          image: ghcr.io/cybozu-go/coil:2.11.1
+          command: [coil-installer]
+          env:
+            - name: CNI_NETCONF
+              valueFrom:
+                configMapKeyRef:
+                  key: cni_netconf
+                  name: coil-config
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - mountPath: /host/opt/cni/bin
+              name: cni-bin-dir
+            # emptyDir — do NOT write coil's own conflist to host
+            - mountPath: /host/etc/cni/net.d
+              name: cni-net-dir
+      priorityClassName: system-node-critical
+      serviceAccountName: coild
+      terminationGracePeriodSeconds: 1
+      tolerations:
+        - effect: NoSchedule
+          operator: Exists
+        - effect: NoExecute
+          operator: Exists
+      volumes:
+        - hostPath:
+            path: /run
+          name: run
+        - hostPath:
+            path: /lib/modules
+          name: modules
+        - hostPath:
+            path: /opt/cni/bin
+          name: cni-bin-dir
+        # emptyDir so coil-installer does NOT overwrite host CNI config
+        - emptyDir: {}
+          name: cni-net-dir

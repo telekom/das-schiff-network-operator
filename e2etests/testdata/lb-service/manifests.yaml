@@ -1,0 +1,58 @@
+# MetalLB IPAddressPool for m2m VRF
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: m2m-pool
+  namespace: metallb-system
+spec:
+  addresses:
+    - 10.250.4.0/24
+    - fdbb:6b17:90ba::/64
+---
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: m2m-l2adv
+  namespace: metallb-system
+spec:
+  ipAddressPools:
+    - m2m-pool
+---
+# Simple test deployment + LoadBalancer Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: podinfo
+  namespace: e2e-test
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: podinfo
+  template:
+    metadata:
+      labels:
+        app: podinfo
+    spec:
+      containers:
+        - name: podinfo
+          image: stefanprodan/podinfo:6.7.1
+          ports:
+            - containerPort: 9898
+              name: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: podinfo-lb
+  namespace: e2e-test
+  annotations:
+    metallb.universe.tf/address-pool: m2m-pool
+spec:
+  type: LoadBalancer
+  ports:
+    - port: 80
+      targetPort: 9898
+      protocol: TCP
+  selector:
+    app: podinfo
