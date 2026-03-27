@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+#
+# SPDX-License-Identifier: CC0-1.0
+
 .git
 .github
 bin/
@@ -6,11 +10,16 @@ config/
 docs/
 hack/
 *.md
-LICENSE
-NOTICE
 CODEOWNERS
 PROJECT
 Makefile
 .golangci.yml
+.editorconfig
 .dockerignore
+.gitignore
+.vscode/
 *.Dockerfile
+REUSE.toml
+
+# Keep license files available for Dockerfile COPY
+# (LICENSE, NOTICE, LICENSES/ are needed in the image)
