@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.17.2
+    controller-gen.kubebuilder.io/version: v0.20.0
   name: networkconfigrevisions.network.t-caas.telekom.com
 spec:
   group: network.t-caas.telekom.com
@@ -478,6 +478,18 @@ spec:
             type: object
           status:
             properties:
+              failedAt:
+                description: FailedAt is when the failure occurred.
+                format: date-time
+                type: string
+              failedMessage:
+                description: FailedMessage contains the error message from the failed
+                  provisioning attempt.
+                type: string
+              failedNode:
+                description: FailedNode is the name of the node where provisioning
+                  failed, causing this revision to be invalidated.
+                type: string
               isInvalid:
                 description: IsInvalid determines if NetworkConfigRevision results
                   in misconfigured nodes (invalid configuration).
@@ -488,14 +500,14 @@ spec:
                 type: integer
               queued:
                 description: Queued informs about how many nodes are currently waiting
-                  to be provisiined with a config derived from the revision.
+                  to be provisioned with a config derived from the revision.
                 type: integer
               ready:
                 description: Ready informs about how many nodes were already provisioned
                   with a config derived from the revision.
                 type: integer
               total:
-                description: Total informs about how many nodes in total can be provisiined
+                description: Total informs about how many nodes in total can be provisioned
                   with a config derived from the revision.
                 type: integer
             required:
