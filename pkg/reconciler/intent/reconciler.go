@@ -76,6 +76,7 @@ func NewReconciler(clusterClient client.Client, logger logr.Logger, timeout time
 			builder.NewCollectorBuilder(),
 			builder.NewMirrorBuilder(),
 			builder.NewAnnouncementBuilder(),
+			builder.NewSBRBuilder(),
 		},
 		finalizerManager: finalizer.NewManager(clusterClient, logger),
 		statusUpdater:    status.NewUpdater(clusterClient, logger),
