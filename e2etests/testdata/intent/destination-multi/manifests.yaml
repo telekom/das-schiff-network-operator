@@ -1,0 +1,27 @@
+# Tests multiple destinations in the same VRF (m2m).
+# dest-dcgw already exists in base-configs with prefixes 10.102.0.0/16.
+# This adds a second destination also pointing at vrf-m2m but with different prefixes.
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Destination
+metadata:
+  name: dest-internal-m2m
+  namespace: default
+  labels:
+    type: gateway
+    zone: internal
+spec:
+  vrfRef: "vrf-m2m"
+  prefixes:
+    - "172.16.0.0/16"
+---
+# L2A that targets BOTH destinations via broad label selector
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Layer2Attachment
+metadata:
+  name: l2a-multi-dest
+  namespace: default
+spec:
+  networkRef: "net-vlan501"
+  destinations:
+    matchLabels:
+      type: gateway

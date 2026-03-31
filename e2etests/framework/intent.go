@@ -216,3 +216,51 @@ func (f *Framework) WaitForIntentNNCs(ctx context.Context, timeout time.Duration
 func (f *Framework) IsIntentMode() bool {
 	return f.Config.IntentMode
 }
+
+// GetNNC fetches a NodeNetworkConfig by node name and returns it as unstructured.
+func (f *Framework) GetNNC(ctx context.Context, nodeName string) (*unstructured.Unstructured, error) {
+	nnc := &unstructured.Unstructured{}
+	nnc.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   nncGroup,
+		Version: nncVersion,
+		Kind:    "NodeNetworkConfig",
+	})
+	if err := f.Client.Get(ctx, types.NamespacedName{Name: nodeName}, nnc); err != nil {
+		return nil, err
+	}
+	return nnc, nil
+}
+
+// NNCHasFabricVRF checks if a NNC has a fabricVRF entry with the given name.
+func NNCHasFabricVRF(nnc *unstructured.Unstructured, vrfName string) bool {
+	fabricVRFs, found, err := unstructured.NestedMap(nnc.Object, "spec", "fabricVRFs", vrfName)
+	return err == nil && found && fabricVRFs != nil
+}
+
+// NNCHasLayer2 checks if a NNC has a layer2 entry with the given key.
+func NNCHasLayer2(nnc *unstructured.Unstructured, l2Key string) bool {
+	l2, found, err := unstructured.NestedMap(nnc.Object, "spec", "layer2s", l2Key)
+	return err == nil && found && l2 != nil
+}
+
+// NNCFabricVRFHasVRFImport checks if a FabricVRF has a VRFImport from the given source VRF.
+func NNCFabricVRFHasVRFImport(nnc *unstructured.Unstructured, vrfName, fromVRF string) bool {
+	imports, found, err := unstructured.NestedSlice(nnc.Object, "spec", "fabricVRFs", vrfName, "vrfImports")
+	if err != nil || !found {
+		return false
+	}
+	for _, imp := range imports {
+		if m, ok := imp.(map[string]interface{}); ok {
+			if m["fromVrf"] == fromVRF {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// NNCRevision returns the revision string from a NNC spec.
+func NNCRevision(nnc *unstructured.Unstructured) string {
+	rev, _, _ := unstructured.NestedString(nnc.Object, "spec", "revision")
+	return rev
+}
