@@ -26,6 +26,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 	corev1 "k8s.io/api/core/v1"
@@ -111,29 +113,21 @@ func mapKeys[K comparable, V any](m map[K]V) []K {
 func createNode(t *testing.T, ctx context.Context, name string, nodeLabels map[string]string) {
 	t.Helper()
 	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: nodeLabels}}
-	if err := k8sClient.Create(ctx, node); err != nil {
-		t.Fatalf("create node %s: %v", name, err)
-	}
+	require.NoError(t, k8sClient.Create(ctx, node), "create node %s", name)
 	t.Cleanup(func() { _ = k8sClient.Delete(context.Background(), node) })
 }
 
 func createObj(t *testing.T, ctx context.Context, obj client.Object) {
 	t.Helper()
-	if err := k8sClient.Create(ctx, obj); err != nil {
-		t.Fatalf("create %T %s: %v", obj, obj.GetName(), err)
-	}
+	require.NoError(t, k8sClient.Create(ctx, obj), "create %T %s", obj, obj.GetName())
 	t.Cleanup(func() { _ = k8sClient.Delete(context.Background(), obj) })
 }
 
 func reconcileAndGetNNC(t *testing.T, ctx context.Context, nodeName string) *networkv1alpha1.NodeNetworkConfig {
 	t.Helper()
-	if err := reconciler.ReconcileDebounced(ctx); err != nil {
-		t.Fatalf("reconcile failed: %v", err)
-	}
+	require.NoError(t, reconciler.ReconcileDebounced(ctx), "reconcile failed")
 	nnc := &networkv1alpha1.NodeNetworkConfig{}
-	if err := k8sClient.Get(ctx, client.ObjectKey{Name: nodeName}, nnc); err != nil {
-		t.Fatalf("get NNC %s: %v", nodeName, err)
-	}
+	require.NoError(t, k8sClient.Get(ctx, client.ObjectKey{Name: nodeName}, nnc), "get NNC %s", nodeName)
 	t.Cleanup(func() { _ = k8sClient.Delete(context.Background(), nnc) })
 	return nnc
 }
@@ -252,41 +246,21 @@ func TestL2APipeline(t *testing.T) {
 
 	// Verify Layer2
 	l2, ok := nnc.Spec.Layer2s["501"]
-	if !ok {
-		t.Fatal("expected Layer2 entry for key '501'")
-	}
-	if l2.VNI != 4000002 {
-		t.Errorf("expected VNI 4000002, got %d", l2.VNI)
-	}
-	if l2.VLAN != 501 {
-		t.Errorf("expected VLAN 501, got %d", l2.VLAN)
-	}
-	if l2.MTU != 9000 {
-		t.Errorf("expected MTU 9000, got %d", l2.MTU)
-	}
-	if l2.IRB == nil {
-		t.Fatal("expected IRB to be set")
-	}
-	if l2.IRB.VRF != "vrf-l2a" {
-		t.Errorf("expected IRB.VRF 'vrf-l2a', got %q", l2.IRB.VRF)
-	}
-	if len(l2.IRB.IPAddresses) == 0 {
-		t.Fatal("expected IRB.IPAddresses to be non-empty")
-	}
+	require.True(t, ok, "expected Layer2 entry for key '501'")
+	assert.Equal(t, uint32(4000002), l2.VNI)
+	assert.Equal(t, uint16(501), l2.VLAN)
+	assert.Equal(t, uint16(9000), l2.MTU)
+	require.NotNil(t, l2.IRB, "expected IRB to be set")
+	assert.Equal(t, "vrf-l2a", l2.IRB.VRF)
+	assert.NotEmpty(t, l2.IRB.IPAddresses)
 
 	// Verify FabricVRF (keyed by VRF CRD name, not backbone VRF name)
 	fvrf, ok := nnc.Spec.FabricVRFs["vrf-l2a"]
-	if !ok {
-		t.Fatalf("expected FabricVRF entry for key 'vrf-l2a', got keys: %v", mapKeys(nnc.Spec.FabricVRFs))
-	}
-	if fvrf.VNI != 2002026 {
-		t.Errorf("expected FabricVRF VNI 2002026, got %d", fvrf.VNI)
-	}
+	require.True(t, ok, "expected FabricVRF entry for key 'vrf-l2a', got keys: %v", mapKeys(nnc.Spec.FabricVRFs))
+	assert.Equal(t, uint32(2002026), fvrf.VNI)
 
 	// Verify revision is set
-	if nnc.Spec.Revision == "" {
-		t.Error("expected revision to be set")
-	}
+	assert.NotEmpty(t, nnc.Spec.Revision)
 }
 
 func TestL2ANodeSelector(t *testing.T) {
@@ -302,31 +276,23 @@ func TestL2ANodeSelector(t *testing.T) {
 	createObj(t, ctx, makeL2A("l2a-sel", "net-sel-501", destSelector("type", "sel"),
 		&metav1.LabelSelector{MatchLabels: map[string]string{"role": "worker"}}))
 
-	if err := reconciler.ReconcileDebounced(ctx); err != nil {
-		t.Fatalf("reconcile: %v", err)
-	}
+	require.NoError(t, reconciler.ReconcileDebounced(ctx))
 
 	// Worker node should have L2
 	workerNNC := &networkv1alpha1.NodeNetworkConfig{}
-	if err := k8sClient.Get(ctx, client.ObjectKey{Name: workerNode}, workerNNC); err != nil {
-		t.Fatalf("get worker NNC: %v", err)
-	}
+	require.NoError(t, k8sClient.Get(ctx, client.ObjectKey{Name: workerNode}, workerNNC))
 	t.Cleanup(func() { _ = k8sClient.Delete(context.Background(), workerNNC) })
 
-	if _, ok := workerNNC.Spec.Layer2s["501"]; !ok {
-		t.Error("expected worker NNC to have Layer2 '501'")
-	}
+	_, ok := workerNNC.Spec.Layer2s["501"]
+	assert.True(t, ok, "expected worker NNC to have Layer2 '501'")
 
 	// CP node should have NNC but no L2 from this L2A
 	cpNNC := &networkv1alpha1.NodeNetworkConfig{}
-	if err := k8sClient.Get(ctx, client.ObjectKey{Name: cpNode}, cpNNC); err != nil {
-		t.Fatalf("get cp NNC: %v", err)
-	}
+	require.NoError(t, k8sClient.Get(ctx, client.ObjectKey{Name: cpNode}, cpNNC))
 	t.Cleanup(func() { _ = k8sClient.Delete(context.Background(), cpNNC) })
 
-	if _, ok := cpNNC.Spec.Layer2s["501"]; ok {
-		t.Error("expected control-plane NNC to NOT have Layer2 '501'")
-	}
+	_, ok = cpNNC.Spec.Layer2s["501"]
+	assert.False(t, ok, "expected control-plane NNC to NOT have Layer2 '501'")
 }
 
 func TestInboundPipeline(t *testing.T) {
@@ -343,15 +309,11 @@ func TestInboundPipeline(t *testing.T) {
 
 	// Verify FabricVRF exists for the VRF
 	fvrf, ok := nnc.Spec.FabricVRFs["vrf-ib"]
-	if !ok {
-		t.Fatalf("expected FabricVRF 'vrf-ib', got keys: %v", mapKeys(nnc.Spec.FabricVRFs))
-	}
+	require.True(t, ok, "expected FabricVRF 'vrf-ib', got keys: %v", mapKeys(nnc.Spec.FabricVRFs))
 
 	// Should have static routes or redistribute for the inbound IPs
-	hasContent := len(fvrf.StaticRoutes) > 0 || fvrf.Redistribute != nil
-	if !hasContent {
-		t.Error("expected FabricVRF to have static routes or redistribute config")
-	}
+	assert.True(t, len(fvrf.StaticRoutes) > 0 || fvrf.Redistribute != nil,
+		"expected FabricVRF to have static routes or redistribute config")
 }
 
 func TestOutboundPipeline(t *testing.T) {
@@ -367,14 +329,10 @@ func TestOutboundPipeline(t *testing.T) {
 	nnc := reconcileAndGetNNC(t, ctx, nodeName)
 
 	fvrf, ok := nnc.Spec.FabricVRFs["vrf-ob"]
-	if !ok {
-		t.Fatalf("expected FabricVRF 'vrf-ob', got keys: %v", mapKeys(nnc.Spec.FabricVRFs))
-	}
+	require.True(t, ok, "expected FabricVRF 'vrf-ob', got keys: %v", mapKeys(nnc.Spec.FabricVRFs))
 
-	hasContent := len(fvrf.StaticRoutes) > 0 || len(fvrf.PolicyRoutes) > 0
-	if !hasContent {
-		t.Error("expected FabricVRF to have static routes or policy routes for outbound")
-	}
+	assert.True(t, len(fvrf.StaticRoutes) > 0 || len(fvrf.PolicyRoutes) > 0,
+		"expected FabricVRF to have static routes or policy routes for outbound")
 }
 
 func TestPodNetworkPipeline(t *testing.T) {
@@ -391,14 +349,10 @@ func TestPodNetworkPipeline(t *testing.T) {
 	nnc := reconcileAndGetNNC(t, ctx, nodeName)
 
 	fvrf, ok := nnc.Spec.FabricVRFs["vrf-pn"]
-	if !ok {
-		t.Fatalf("expected FabricVRF 'vrf-pn', got keys: %v", mapKeys(nnc.Spec.FabricVRFs))
-	}
+	require.True(t, ok, "expected FabricVRF 'vrf-pn', got keys: %v", mapKeys(nnc.Spec.FabricVRFs))
 
-	hasContent := fvrf.Redistribute != nil || len(fvrf.StaticRoutes) > 0
-	if !hasContent {
-		t.Error("expected FabricVRF to have redistribute or static routes for pod network")
-	}
+	assert.True(t, fvrf.Redistribute != nil || len(fvrf.StaticRoutes) > 0,
+		"expected FabricVRF to have redistribute or static routes for pod network")
 }
 
 func TestSBRSingleVRF(t *testing.T) {
@@ -414,23 +368,16 @@ func TestSBRSingleVRF(t *testing.T) {
 	nnc := reconcileAndGetNNC(t, ctx, nodeName)
 
 	// SBR should create intermediate LocalVRF "s-sbrm"
-	if _, ok := nnc.Spec.LocalVRFs["s-sbrm"]; !ok {
-		t.Error("expected LocalVRF 's-sbrm' (SBR intermediate VRF)")
-	}
+	_, ok := nnc.Spec.LocalVRFs["s-sbrm"]
+	assert.True(t, ok, "expected LocalVRF 's-sbrm' (SBR intermediate VRF)")
 
 	// ClusterVRF should have PolicyRoutes for SBR
-	if nnc.Spec.ClusterVRF == nil {
-		t.Fatal("expected ClusterVRF to be set for SBR")
-	}
-	if len(nnc.Spec.ClusterVRF.PolicyRoutes) == 0 {
-		t.Error("expected ClusterVRF to have PolicyRoutes for SBR")
-	}
+	require.NotNil(t, nnc.Spec.ClusterVRF, "expected ClusterVRF to be set for SBR")
+	assert.NotEmpty(t, nnc.Spec.ClusterVRF.PolicyRoutes, "expected ClusterVRF to have PolicyRoutes for SBR")
 
 	// Single VRF case: PolicyRoutes should have SrcPrefix
 	for _, pr := range nnc.Spec.ClusterVRF.PolicyRoutes {
-		if pr.TrafficMatch.SrcPrefix == nil || *pr.TrafficMatch.SrcPrefix == "" {
-			t.Error("expected SBR PolicyRoute to have TrafficMatch.SrcPrefix")
-		}
+		assert.NotNil(t, pr.TrafficMatch.SrcPrefix, "expected SBR PolicyRoute to have TrafficMatch.SrcPrefix")
 	}
 }
 
@@ -466,17 +413,13 @@ func TestSBRMultiVRF(t *testing.T) {
 	nnc := reconcileAndGetNNC(t, ctx, nodeName)
 
 	// Should have 2 intermediate LocalVRFs
-	if _, ok := nnc.Spec.LocalVRFs["s-vrfa"]; !ok {
-		t.Error("expected LocalVRF 's-vrfa'")
-	}
-	if _, ok := nnc.Spec.LocalVRFs["s-vrfb"]; !ok {
-		t.Error("expected LocalVRF 's-vrfb'")
-	}
+	_, okA := nnc.Spec.LocalVRFs["s-vrfa"]
+	_, okB := nnc.Spec.LocalVRFs["s-vrfb"]
+	assert.True(t, okA, "expected LocalVRF 's-vrfa'")
+	assert.True(t, okB, "expected LocalVRF 's-vrfb'")
 
 	// ClusterVRF should have PolicyRoutes with src+dst for multi-VRF
-	if nnc.Spec.ClusterVRF == nil {
-		t.Fatal("expected ClusterVRF")
-	}
+	require.NotNil(t, nnc.Spec.ClusterVRF, "expected ClusterVRF")
 	hasDstPrefix := false
 	for _, pr := range nnc.Spec.ClusterVRF.PolicyRoutes {
 		if pr.TrafficMatch.DstPrefix != nil && *pr.TrafficMatch.DstPrefix != "" {
@@ -484,9 +427,7 @@ func TestSBRMultiVRF(t *testing.T) {
 			break
 		}
 	}
-	if !hasDstPrefix {
-		t.Error("expected multi-VRF SBR PolicyRoutes to have DstPrefix for disambiguation")
-	}
+	assert.True(t, hasDstPrefix, "expected multi-VRF SBR PolicyRoutes to have DstPrefix for disambiguation")
 }
 
 func TestLifecycleUpdate(t *testing.T) {
@@ -503,51 +444,26 @@ func TestLifecycleUpdate(t *testing.T) {
 
 	nnc1 := reconcileAndGetNNC(t, ctx, nodeName)
 	rev1 := nnc1.Spec.Revision
-
-	if rev1 == "" {
-		t.Fatal("expected initial revision to be set")
-	}
+	require.NotEmpty(t, rev1, "expected initial revision to be set")
 
 	// Update the Network — change IPv4 CIDR
-	if err := k8sClient.Get(ctx, client.ObjectKey{Name: "net-lc-upd", Namespace: testNamespace}, net); err != nil {
-		t.Fatalf("get network: %v", err)
-	}
+	require.NoError(t, k8sClient.Get(ctx, client.ObjectKey{Name: "net-lc-upd", Namespace: testNamespace}, net))
 	net.Spec.IPv4 = &nc.IPNetwork{CIDR: "10.250.11.0/24"}
-	if err := k8sClient.Update(ctx, net); err != nil {
-		t.Fatalf("update network: %v", err)
-	}
+	require.NoError(t, k8sClient.Update(ctx, net))
 
 	// Reconcile again
-	if err := reconciler.ReconcileDebounced(ctx); err != nil {
-		t.Fatalf("reconcile: %v", err)
-	}
+	require.NoError(t, reconciler.ReconcileDebounced(ctx))
 
 	nnc2 := &networkv1alpha1.NodeNetworkConfig{}
-	if err := k8sClient.Get(ctx, client.ObjectKey{Name: nodeName}, nnc2); err != nil {
-		t.Fatalf("get NNC: %v", err)
-	}
+	require.NoError(t, k8sClient.Get(ctx, client.ObjectKey{Name: nodeName}, nnc2))
 
-	if nnc2.Spec.Revision == rev1 {
-		t.Error("expected revision to change after Network update")
-	}
+	assert.NotEqual(t, rev1, nnc2.Spec.Revision, "expected revision to change after Network update")
 
 	// Verify updated CIDR in IRB
 	l2, ok := nnc2.Spec.Layer2s["510"]
-	if !ok {
-		t.Fatal("expected Layer2 '510' after update")
-	}
-	if l2.IRB == nil {
-		t.Fatal("expected IRB after update")
-	}
-	found := false
-	for _, ip := range l2.IRB.IPAddresses {
-		if ip == "10.250.11.0/24" {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("expected updated CIDR 10.250.11.0/24 in IRB.IPAddresses, got %v", l2.IRB.IPAddresses)
-	}
+	require.True(t, ok, "expected Layer2 '510' after update")
+	require.NotNil(t, l2.IRB, "expected IRB after update")
+	assert.Contains(t, l2.IRB.IPAddresses, "10.250.11.0/24")
 }
 
 func TestLifecycleDelete(t *testing.T) {
@@ -563,28 +479,20 @@ func TestLifecycleDelete(t *testing.T) {
 	createObj(t, ctx, l2a)
 
 	nnc := reconcileAndGetNNC(t, ctx, nodeName)
-	if _, ok := nnc.Spec.Layer2s["520"]; !ok {
-		t.Fatal("expected Layer2 '520' before delete")
-	}
+	_, ok := nnc.Spec.Layer2s["520"]
+	require.True(t, ok, "expected Layer2 '520' before delete")
 
 	// Delete the L2A
-	if err := k8sClient.Delete(ctx, l2a); err != nil {
-		t.Fatalf("delete L2A: %v", err)
-	}
+	require.NoError(t, k8sClient.Delete(ctx, l2a), "delete L2A")
 
 	// Reconcile after delete
-	if err := reconciler.ReconcileDebounced(ctx); err != nil {
-		t.Fatalf("reconcile after delete: %v", err)
-	}
+	require.NoError(t, reconciler.ReconcileDebounced(ctx))
 
 	nnc2 := &networkv1alpha1.NodeNetworkConfig{}
-	if err := k8sClient.Get(ctx, client.ObjectKey{Name: nodeName}, nnc2); err != nil {
-		t.Fatalf("get NNC after delete: %v", err)
-	}
+	require.NoError(t, k8sClient.Get(ctx, client.ObjectKey{Name: nodeName}, nnc2))
 
-	if _, ok := nnc2.Spec.Layer2s["520"]; ok {
-		t.Error("expected Layer2 '520' to be removed after L2A delete")
-	}
+	_, ok = nnc2.Spec.Layer2s["520"]
+	assert.False(t, ok, "expected Layer2 '520' to be removed after L2A delete")
 }
 
 func TestMultiNodeAssembly(t *testing.T) {
@@ -600,21 +508,15 @@ func TestMultiNodeAssembly(t *testing.T) {
 	// No nodeSelector → should apply to all 3 nodes
 	createObj(t, ctx, makeL2A("l2a-multi", "net-multi", destSelector("type", "multi"), nil))
 
-	if err := reconciler.ReconcileDebounced(ctx); err != nil {
-		t.Fatalf("reconcile: %v", err)
-	}
+	require.NoError(t, reconciler.ReconcileDebounced(ctx))
 
 	for _, n := range nodes {
 		nnc := &networkv1alpha1.NodeNetworkConfig{}
-		if err := k8sClient.Get(ctx, client.ObjectKey{Name: n}, nnc); err != nil {
-			t.Errorf("expected NNC for node %s: %v", n, err)
-			continue
-		}
+		require.NoError(t, k8sClient.Get(ctx, client.ObjectKey{Name: n}, nnc), "expected NNC for node %s", n)
 		t.Cleanup(func() { _ = k8sClient.Delete(context.Background(), nnc) })
 
-		if _, ok := nnc.Spec.Layer2s["530"]; !ok {
-			t.Errorf("expected node %s NNC to have Layer2 '530'", n)
-		}
+		_, ok := nnc.Spec.Layer2s["530"]
+		assert.True(t, ok, "expected node %s NNC to have Layer2 '530'", n)
 	}
 }
 
@@ -662,21 +564,229 @@ func TestRevisionStableOnNoChange(t *testing.T) {
 	rv1 := nnc1.ResourceVersion
 
 	// Reconcile again with no changes
-	if err := reconciler.ReconcileDebounced(ctx); err != nil {
-		t.Fatalf("reconcile: %v", err)
-	}
+	require.NoError(t, reconciler.ReconcileDebounced(ctx))
 
 	nnc2 := &networkv1alpha1.NodeNetworkConfig{}
-	if err := k8sClient.Get(ctx, client.ObjectKey{Name: nodeName}, nnc2); err != nil {
-		t.Fatalf("get NNC: %v", err)
-	}
+	require.NoError(t, k8sClient.Get(ctx, client.ObjectKey{Name: nodeName}, nnc2))
 
-	if nnc2.Spec.Revision != rev1 {
-		t.Errorf("expected revision to stay %q, got %q", rev1, nnc2.Spec.Revision)
-	}
+	assert.Equal(t, rev1, nnc2.Spec.Revision, "expected revision to stay stable")
 
 	// ResourceVersion should NOT have changed (no API server update)
-	if nnc2.ResourceVersion != rv1 {
-		t.Errorf("expected ResourceVersion to stay %q (no-op update), got %q", rv1, nnc2.ResourceVersion)
+	assert.Equal(t, rv1, nnc2.ResourceVersion, "expected ResourceVersion to stay stable (no-op update)")
+}
+
+// --- BGPPeering Tests ---
+
+func TestBGPPeeringListenRange(t *testing.T) {
+	ctx := context.Background()
+	nodeName := "node-bgp-lr"
+
+	createNode(t, ctx, nodeName, nil)
+	createObj(t, ctx, makeVRF("vrf-bgp-lr", "bgplr", 2002090, "65188:2090"))
+	createObj(t, ctx, makeNetwork("net-bgp-lr", 560, 4600001, "10.250.60.0/24", "fd96::1/64"))
+	createObj(t, ctx, makeDestination("dest-bgp-lr", "vrf-bgp-lr", map[string]string{"type": "bgp-lr"}, []string{"10.102.0.0/16"}))
+	createObj(t, ctx, makeL2A("l2a-bgp-lr", "net-bgp-lr", destSelector("type", "bgp-lr"), nil))
+	createObj(t, ctx, makeInbound("ib-bgp-lr", "net-bgp-lr", destSelector("type", "bgp-lr"), []string{"10.250.60.10/32"}))
+
+	// BGPPeering in listenRange mode referencing the L2A
+	bgpPeering := &nc.BGPPeering{
+		ObjectMeta: metav1.ObjectMeta{Name: "bgpp-listen", Namespace: testNamespace},
+		Spec: nc.BGPPeeringSpec{
+			Mode: nc.BGPPeeringModeListenRange,
+			Ref: nc.BGPPeeringRef{
+				AttachmentRef: ptr("l2a-bgp-lr"),
+				InboundRefs:   []string{"ib-bgp-lr"},
+			},
+			WorkloadAS: ptr(int64(65100)),
+		},
 	}
+	createObj(t, ctx, bgpPeering)
+
+	nnc := reconcileAndGetNNC(t, ctx, nodeName)
+
+	// Verify FabricVRF has BGPPeers with ListenRange from Network CIDRs
+	fvrf, ok := nnc.Spec.FabricVRFs["vrf-bgp-lr"]
+	require.True(t, ok, "expected FabricVRF 'vrf-bgp-lr', got keys: %v", mapKeys(nnc.Spec.FabricVRFs))
+	require.NotEmpty(t, fvrf.BGPPeers, "expected BGPPeers in FabricVRF")
+
+	// Should have peers with ListenRange from the dual-stack Network
+	hasListenRange := false
+	for _, peer := range fvrf.BGPPeers {
+		if peer.ListenRange != nil {
+			hasListenRange = true
+			assert.Equal(t, uint32(65100), peer.RemoteASN, "expected WorkloadAS as RemoteASN")
+		}
+	}
+	assert.True(t, hasListenRange, "expected at least one BGPPeer with ListenRange")
+}
+
+func TestBGPPeeringLoopbackPeer(t *testing.T) {
+	ctx := context.Background()
+	nodeName := "node-bgp-lb"
+
+	createNode(t, ctx, nodeName, nil)
+	createObj(t, ctx, makeVRF("vrf-bgp-lb", "bgplb", 2002091, "65188:2091"))
+	createObj(t, ctx, makeNetwork("net-bgp-lb", 561, 4600002, "10.250.61.0/24", ""))
+	createObj(t, ctx, makeDestination("dest-bgp-lb", "vrf-bgp-lb", map[string]string{"type": "bgp-lb"}, []string{"10.102.0.0/16"}))
+	createObj(t, ctx, makeInbound("ib-bgp-lb", "net-bgp-lb", destSelector("type", "bgp-lb"), []string{"10.250.61.10/32"}))
+
+	// BGPPeering in loopbackPeer mode (no attachmentRef)
+	bgpPeering := &nc.BGPPeering{
+		ObjectMeta: metav1.ObjectMeta{Name: "bgpp-loopback", Namespace: testNamespace},
+		Spec: nc.BGPPeeringSpec{
+			Mode: nc.BGPPeeringModeLoopbackPeer,
+			Ref: nc.BGPPeeringRef{
+				InboundRefs: []string{"ib-bgp-lb"},
+			},
+			WorkloadAS:      ptr(int64(65200)),
+			AddressFamilies: []nc.BGPAddressFamily{nc.BGPAddressFamilyIPv4Unicast, nc.BGPAddressFamilyIPv6Unicast},
+		},
+	}
+	createObj(t, ctx, bgpPeering)
+
+	nnc := reconcileAndGetNNC(t, ctx, nodeName)
+
+	// Loopback mode should set BGPPeers on ClusterVRF
+	require.NotNil(t, nnc.Spec.ClusterVRF, "expected ClusterVRF for loopbackPeer BGPPeering")
+	require.NotEmpty(t, nnc.Spec.ClusterVRF.BGPPeers, "expected BGPPeers on ClusterVRF")
+
+	peer := nnc.Spec.ClusterVRF.BGPPeers[0]
+	assert.Equal(t, uint32(65200), peer.RemoteASN, "expected WorkloadAS as RemoteASN")
+
+	// Dual-stack address families should be set
+	assert.NotNil(t, peer.IPv4, "expected IPv4 address family")
+	assert.NotNil(t, peer.IPv6, "expected IPv6 address family")
+}
+
+// --- TrafficMirror Tests ---
+
+func TestTrafficMirrorL2ASource(t *testing.T) {
+	ctx := context.Background()
+	nodeName := "node-mirror"
+
+	createNode(t, ctx, nodeName, nil)
+	createObj(t, ctx, makeVRF("vrf-mir", "mirm2m", 2002100, "65188:2100"))
+	createObj(t, ctx, makeVRF("vrf-mir-col", "mircol", 2002101, "65188:2101"))
+	createObj(t, ctx, makeNetwork("net-mir", 570, 4700001, "10.250.70.0/24", ""))
+	createObj(t, ctx, makeDestination("dest-mir", "vrf-mir", map[string]string{"type": "mir"}, []string{"10.102.0.0/16"}))
+	createObj(t, ctx, makeL2A("l2a-mir", "net-mir", destSelector("type", "mir"), nil))
+
+	// Collector with mirror VRF
+	collector := &nc.Collector{
+		ObjectMeta: metav1.ObjectMeta{Name: "col-test", Namespace: testNamespace},
+		Spec: nc.CollectorSpec{
+			Address:  "192.168.100.1",
+			Protocol: "l3gre",
+			MirrorVRF: nc.MirrorVRFRef{
+				Name: "vrf-mir-col",
+				Loopback: nc.LoopbackConfig{
+					Name: "lo.mir",
+					PoolRef: corev1.TypedLocalObjectReference{
+						APIGroup: ptr("ipam.cluster.x-k8s.io"),
+						Kind:     "InClusterIPPool",
+						Name:     "mirror-pool",
+					},
+				},
+			},
+		},
+	}
+	createObj(t, ctx, collector)
+
+	// TrafficMirror sourcing from the L2A
+	mirror := &nc.TrafficMirror{
+		ObjectMeta: metav1.ObjectMeta{Name: "tmir-test", Namespace: testNamespace},
+		Spec: nc.TrafficMirrorSpec{
+			Source: nc.MirrorSource{
+				Kind: "Layer2Attachment",
+				Name: "l2a-mir",
+			},
+			Collector: "col-test",
+			Direction: "ingress",
+			TrafficMatch: &nc.TrafficMatch{
+				SrcPrefix: ptr("10.0.0.0/8"),
+				Protocol:  ptr("TCP"),
+			},
+		},
+	}
+	createObj(t, ctx, mirror)
+
+	nnc := reconcileAndGetNNC(t, ctx, nodeName)
+
+	// MirrorACL should appear on the Layer2 entry (keyed by VLAN)
+	l2, ok := nnc.Spec.Layer2s["570"]
+	require.True(t, ok, "expected Layer2 '570', got keys: %v", mapKeys(nnc.Spec.Layer2s))
+	require.NotEmpty(t, l2.MirrorACLs, "expected MirrorACLs on Layer2")
+
+	acl := l2.MirrorACLs[0]
+	assert.Equal(t, "192.168.100.1", acl.DestinationAddress)
+	assert.Equal(t, "vrf-mir-col", acl.DestinationVrf)
+	assert.Equal(t, networkv1alpha1.EncapsulationTypeGRE, acl.EncapsulationType)
+
+	// TrafficMatch should be converted
+	require.NotNil(t, acl.TrafficMatch.Protocol)
+	assert.Equal(t, "TCP", *acl.TrafficMatch.Protocol)
+	require.NotNil(t, acl.TrafficMatch.SrcPrefix)
+	assert.Equal(t, "10.0.0.0/8", *acl.TrafficMatch.SrcPrefix)
+
+	// Collector builder should also create a loopback on the mirror VRF
+	mirVRF, ok := nnc.Spec.FabricVRFs["vrf-mir-col"]
+	require.True(t, ok, "expected FabricVRF 'vrf-mir-col' from Collector builder")
+	require.NotNil(t, mirVRF.Loopbacks, "expected Loopbacks in mirror VRF")
+	lo, ok := mirVRF.Loopbacks["lo.mir"]
+	require.True(t, ok, "expected Loopback 'lo.mir'")
+	assert.Contains(t, lo.IPAddresses, "192.168.100.1")
+}
+
+// --- AnnouncementPolicy Tests ---
+
+func TestAnnouncementPolicyHostRoutesAndAggregate(t *testing.T) {
+	ctx := context.Background()
+	nodeName := "node-annpol"
+
+	createNode(t, ctx, nodeName, nil)
+	createObj(t, ctx, makeVRF("vrf-annpol", "apm2m", 2002110, "65188:2110"))
+
+	// AnnouncementPolicy with host route communities + enabled aggregate
+	annPol := &nc.AnnouncementPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "ap-test", Namespace: testNamespace},
+		Spec: nc.AnnouncementPolicySpec{
+			VRFRef: "vrf-annpol",
+			HostRoutes: &nc.RouteAnnouncementConfig{
+				Communities: []string{"65000:100", "65000:200"},
+			},
+			Aggregate: &nc.AggregateConfig{
+				Enabled:     ptr(true),
+				Communities: []string{"65000:300"},
+			},
+		},
+	}
+	createObj(t, ctx, annPol)
+
+	nnc := reconcileAndGetNNC(t, ctx, nodeName)
+
+	fvrf, ok := nnc.Spec.FabricVRFs["vrf-annpol"]
+	require.True(t, ok, "expected FabricVRF 'vrf-annpol', got keys: %v", mapKeys(nnc.Spec.FabricVRFs))
+	require.NotNil(t, fvrf.EVPNExportFilter, "expected EVPNExportFilter from AnnouncementPolicy")
+
+	filter := fvrf.EVPNExportFilter
+	// Host routes (/32 IPv4 + /128 IPv6) + aggregate (le31 IPv4 + le127 IPv6) = 4 filter items
+	require.Len(t, filter.Items, 4, "expected 4 filter items (2 host + 2 aggregate)")
+
+	// All items should be Accept actions
+	for _, item := range filter.Items {
+		assert.Equal(t, networkv1alpha1.Accept, item.Action.Type, "expected Accept action")
+		require.NotNil(t, item.Action.ModifyRoute, "expected ModifyRoute on filter item")
+		assert.NotEmpty(t, item.Action.ModifyRoute.AddCommunities, "expected communities on filter item")
+	}
+
+	// Verify host route item has correct communities
+	hostItem := filter.Items[0]
+	assert.Equal(t, []string{"65000:100", "65000:200"}, hostItem.Action.ModifyRoute.AddCommunities)
+
+	// Verify aggregate item has correct communities
+	aggItem := filter.Items[2]
+	assert.Equal(t, []string{"65000:300"}, aggItem.Action.ModifyRoute.AddCommunities)
+
+	// Default action should be Accept
+	assert.Equal(t, networkv1alpha1.Accept, filter.DefaultAction.Type)
 }

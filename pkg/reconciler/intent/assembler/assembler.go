@@ -43,9 +43,29 @@ func Assemble(contributions []*builder.NodeContribution) (*AssembleResult, error
 			continue
 		}
 
-		// Merge Layer2s by key.
+		// Merge Layer2s by key, appending MirrorACLs.
 		for k, v := range c.Layer2s {
-			spec.Layer2s[k] = v
+			existing, ok := spec.Layer2s[k]
+			if !ok {
+				spec.Layer2s[k] = v
+				continue
+			}
+			// Prefer non-zero scalar fields (the L2A builder sets VLAN/VNI/MTU,
+			// while the mirror builder may contribute only MirrorACLs).
+			if v.VLAN != 0 {
+				existing.VLAN = v.VLAN
+			}
+			if v.VNI != 0 {
+				existing.VNI = v.VNI
+			}
+			if v.MTU != 0 {
+				existing.MTU = v.MTU
+			}
+			if v.IRB != nil {
+				existing.IRB = v.IRB
+			}
+			existing.MirrorACLs = append(existing.MirrorACLs, v.MirrorACLs...)
+			spec.Layer2s[k] = existing
 		}
 
 		// Merge FabricVRFs by key, appending nested slices.
@@ -65,6 +85,16 @@ func Assemble(contributions []*builder.NodeContribution) (*AssembleResult, error
 			}
 			for lk, lv := range v.Loopbacks {
 				existing.Loopbacks[lk] = lv
+			}
+			if v.EVPNExportFilter != nil {
+				if existing.EVPNExportFilter == nil {
+					existing.EVPNExportFilter = v.EVPNExportFilter
+				} else {
+					existing.EVPNExportFilter.Items = append(existing.EVPNExportFilter.Items, v.EVPNExportFilter.Items...)
+				}
+			}
+			if v.Redistribute != nil && existing.Redistribute == nil {
+				existing.Redistribute = v.Redistribute
 			}
 			spec.FabricVRFs[k] = existing
 		}

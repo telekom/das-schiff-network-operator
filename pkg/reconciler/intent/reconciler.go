@@ -177,6 +177,20 @@ func (r *Reconciler) ReconcileDebounced(ctx context.Context) error {
 	return nil
 }
 
+// filterActive returns only items without a DeletionTimestamp (not being deleted).
+func filterActive[T any, PT interface {
+	*T
+	GetDeletionTimestamp() *metav1.Time
+}](items []T) []T {
+	active := make([]T, 0, len(items))
+	for i := range items {
+		if PT(&items[i]).GetDeletionTimestamp() == nil {
+			active = append(active, items[i])
+		}
+	}
+	return active
+}
+
 func (r *Reconciler) fetchAll(ctx context.Context) (*resolver.FetchedResources, error) {
 	f := &resolver.FetchedResources{}
 
@@ -192,77 +206,77 @@ func (r *Reconciler) fetchAll(ctx context.Context) (*resolver.FetchedResources, 
 	if err := r.client.List(ctx, vrfList); err != nil {
 		return nil, fmt.Errorf("error listing VRFs: %w", err)
 	}
-	f.VRFs = vrfList.Items
+	f.VRFs = filterActive(vrfList.Items)
 
 	// Fetch Networks.
 	networkList := &nc.NetworkList{}
 	if err := r.client.List(ctx, networkList); err != nil {
 		return nil, fmt.Errorf("error listing Networks: %w", err)
 	}
-	f.Networks = networkList.Items
+	f.Networks = filterActive(networkList.Items)
 
 	// Fetch Destinations.
 	destList := &nc.DestinationList{}
 	if err := r.client.List(ctx, destList); err != nil {
 		return nil, fmt.Errorf("error listing Destinations: %w", err)
 	}
-	f.Destinations = destList.Items
+	f.Destinations = filterActive(destList.Items)
 
 	// Fetch Layer2Attachments.
 	l2aList := &nc.Layer2AttachmentList{}
 	if err := r.client.List(ctx, l2aList); err != nil {
 		return nil, fmt.Errorf("error listing Layer2Attachments: %w", err)
 	}
-	f.Layer2Attachments = l2aList.Items
+	f.Layer2Attachments = filterActive(l2aList.Items)
 
 	// Fetch Inbounds.
 	inboundList := &nc.InboundList{}
 	if err := r.client.List(ctx, inboundList); err != nil {
 		return nil, fmt.Errorf("error listing Inbounds: %w", err)
 	}
-	f.Inbounds = inboundList.Items
+	f.Inbounds = filterActive(inboundList.Items)
 
 	// Fetch Outbounds.
 	outboundList := &nc.OutboundList{}
 	if err := r.client.List(ctx, outboundList); err != nil {
 		return nil, fmt.Errorf("error listing Outbounds: %w", err)
 	}
-	f.Outbounds = outboundList.Items
+	f.Outbounds = filterActive(outboundList.Items)
 
 	// Fetch PodNetworks.
 	podNetworkList := &nc.PodNetworkList{}
 	if err := r.client.List(ctx, podNetworkList); err != nil {
 		return nil, fmt.Errorf("error listing PodNetworks: %w", err)
 	}
-	f.PodNetworks = podNetworkList.Items
+	f.PodNetworks = filterActive(podNetworkList.Items)
 
 	// Fetch BGPPeerings.
 	bgpList := &nc.BGPPeeringList{}
 	if err := r.client.List(ctx, bgpList); err != nil {
 		return nil, fmt.Errorf("error listing BGPPeerings: %w", err)
 	}
-	f.BGPPeerings = bgpList.Items
+	f.BGPPeerings = filterActive(bgpList.Items)
 
 	// Fetch Collectors.
 	collectorList := &nc.CollectorList{}
 	if err := r.client.List(ctx, collectorList); err != nil {
 		return nil, fmt.Errorf("error listing Collectors: %w", err)
 	}
-	f.Collectors = collectorList.Items
+	f.Collectors = filterActive(collectorList.Items)
 
 	// Fetch TrafficMirrors.
 	mirrorList := &nc.TrafficMirrorList{}
 	if err := r.client.List(ctx, mirrorList); err != nil {
 		return nil, fmt.Errorf("error listing TrafficMirrors: %w", err)
 	}
-	f.TrafficMirrors = mirrorList.Items
+	f.TrafficMirrors = filterActive(mirrorList.Items)
 
 	// Fetch AnnouncementPolicies.
 	policyList := &nc.AnnouncementPolicyList{}
 	if err := r.client.List(ctx, policyList); err != nil {
 		return nil, fmt.Errorf("error listing AnnouncementPolicies: %w", err)
 	}
-	f.AnnouncementPolicies = policyList.Items
+	f.AnnouncementPolicies = filterActive(policyList.Items)
 
 	return f, nil
 }
