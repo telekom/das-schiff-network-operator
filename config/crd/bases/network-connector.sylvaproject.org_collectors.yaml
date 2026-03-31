@@ -1,0 +1,219 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.0
+  name: collectors.network-connector.sylvaproject.org
+spec:
+  group: network-connector.sylvaproject.org
+  names:
+    kind: Collector
+    listKind: CollectorList
+    plural: collectors
+    shortNames:
+    - col
+    singular: collector
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.address
+      name: Address
+      type: string
+    - jsonPath: .spec.protocol
+      name: Protocol
+      type: string
+    - jsonPath: .spec.mirrorVRF.name
+      name: MirrorVRF
+      type: string
+    - jsonPath: .status.referenceCount
+      name: RefCount
+      type: integer
+    - jsonPath: .status.conditions[?(@.type=="Ready")].status
+      name: Ready
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: networkconnector
+    schema:
+      openAPIV3Schema:
+        description: Collector defines a GRE collector endpoint and mirror VRF binding.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: CollectorSpec defines the desired state of Collector.
+            properties:
+              address:
+                description: Address is the remote collector IP address.
+                type: string
+              key:
+                description: Key is the GRE tunnel key.
+                format: int32
+                type: integer
+              mirrorVRF:
+                description: MirrorVRF references a VRF for the mirror VRF.
+                properties:
+                  loopback:
+                    description: |-
+                      Loopback defines a loopback interface backed by a CAPI IPAM pool for per-node
+                      GRE source IP allocation. The controller provisions IPAddressClaims from the
+                      referenced pool on each node in scope.
+                    properties:
+                      name:
+                        description: Name is the loopback interface name (e.g. "lo.mir").
+                        minLength: 1
+                        type: string
+                      poolRef:
+                        description: |-
+                          PoolRef references a Cluster API IPAM pool for per-node IP allocation.
+                          On the workload cluster this references an InClusterIPPool or similar.
+                          Must reference a resource in the same namespace (cross-namespace not supported).
+                        properties:
+                          apiGroup:
+                            description: |-
+                              APIGroup is the group for the resource being referenced.
+                              If APIGroup is not specified, the specified Kind must be in the core API group.
+                              For any other third-party types, APIGroup is required.
+                            type: string
+                          kind:
+                            description: Kind is the type of resource being referenced
+                            type: string
+                          name:
+                            description: Name is the name of resource being referenced
+                            type: string
+                        required:
+                        - kind
+                        - name
+                        type: object
+                        x-kubernetes-map-type: atomic
+                    required:
+                    - name
+                    - poolRef
+                    type: object
+                  name:
+                    description: Name of the VRF resource.
+                    minLength: 1
+                    type: string
+                required:
+                - loopback
+                - name
+                type: object
+              protocol:
+                description: Protocol is the GRE encapsulation type.
+                enum:
+                - l3gre
+                - l2gre
+                type: string
+            required:
+            - address
+            - mirrorVRF
+            - protocol
+            type: object
+            x-kubernetes-validations:
+            - message: protocol is immutable
+              rule: self.protocol == oldSelf.protocol
+          status:
+            description: CollectorStatus defines the observed state of Collector.
+            properties:
+              activeNodes:
+                description: ActiveNodes is the number of nodes where the collector
+                  is active.
+                format: int32
+                type: integer
+              conditions:
+                description: Conditions represent the latest available observations
+                  of the Collector's state.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              greInterface:
+                description: GREInterface is the GRE interface name generated.
+                type: string
+              observedGeneration:
+                description: ObservedGeneration is the most recent generation observed
+                  by the controller.
+                format: int64
+                type: integer
+              referenceCount:
+                description: ReferenceCount is the number of TrafficMirrors referencing
+                  this Collector.
+                format: int32
+                type: integer
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
