@@ -29,7 +29,11 @@ import (
 	"github.com/telekom/das-schiff-network-operator/pkg/debounce"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/assembler"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/builder"
+	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/finalizer"
+	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/ipam"
+	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/legacy"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/resolver"
+	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/status"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -46,11 +50,15 @@ const (
 // Reconciler is the intent-based reconciler that watches all intent CRDs
 // and produces NodeNetworkConfig objects per node.
 type Reconciler struct {
-	logger    logr.Logger
-	debouncer *debounce.Debouncer
-	client    client.Client
-	timeout   time.Duration
-	builders  []builder.Builder
+	logger           logr.Logger
+	debouncer        *debounce.Debouncer
+	client           client.Client
+	timeout          time.Duration
+	builders         []builder.Builder
+	finalizerManager *finalizer.Manager
+	statusUpdater    *status.Updater
+	ipamAllocator    *ipam.Allocator
+	legacyDetector   *legacy.Detector
 }
 
 // NewReconciler creates a new intent reconciler.
@@ -69,6 +77,10 @@ func NewReconciler(clusterClient client.Client, logger logr.Logger, timeout time
 			builder.NewMirrorBuilder(),
 			builder.NewAnnouncementBuilder(),
 		},
+		finalizerManager: finalizer.NewManager(clusterClient, logger),
+		statusUpdater:    status.NewUpdater(clusterClient, logger),
+		ipamAllocator:    ipam.NewAllocator(clusterClient, logger),
+		legacyDetector:   legacy.NewDetector(clusterClient, logger),
 	}
 
 	r.debouncer = debounce.NewDebouncer(r.ReconcileDebounced, defaultDebounceTime, logger)
@@ -88,18 +100,38 @@ func (r *Reconciler) ReconcileDebounced(ctx context.Context) error {
 	timeoutCtx, cancel := context.WithTimeout(ctx, r.timeout)
 	defer cancel()
 
+	// 0. Detect legacy CRD conflicts (non-blocking).
+	if conflicts, err := r.legacyDetector.DetectConflicts(timeoutCtx); err != nil {
+		r.logger.Error(err, "legacy conflict detection failed")
+	} else if len(conflicts) > 0 {
+		r.logger.Info("legacy CRDs detected — reconciliation continues", "conflicts", len(conflicts))
+	}
+
 	// 1. Fetch all intent CRDs + nodes.
 	fetched, err := r.fetchAll(timeoutCtx)
 	if err != nil {
 		return fmt.Errorf("failed to fetch intent resources: %w", err)
 	}
 
-	// 2. Resolve references (VRF, Network, Destination name → data).
+	// 2. Reconcile in-use finalizers.
+	if err := r.finalizerManager.ReconcileFinalizers(timeoutCtx, fetched); err != nil {
+		r.logger.Error(err, "finalizer reconciliation failed")
+		// Continue — finalizer failures should not block config generation.
+	}
+
+	// 3. Resolve references (VRF, Network, Destination name → data).
 	resolved, err := resolver.ResolveAll(fetched)
 	if err != nil {
 		return fmt.Errorf("failed to resolve references: %w", err)
 	}
-	// 3. Run all builders → per-node contributions.
+
+	// 4. IPAM allocation for count-mode Inbound/Outbound (before builders).
+	if err := r.ipamAllocator.ReconcileAllocations(timeoutCtx, fetched, resolved.Networks); err != nil {
+		r.logger.Error(err, "IPAM allocation failed")
+		// Continue — partial allocation is acceptable.
+	}
+
+	// 5. Run all builders → per-node contributions.
 	contributions := make(map[string][]*builder.NodeContribution) // nodeName → contributions
 	for _, b := range r.builders {
 		nodeContribs, err := b.Build(ctx, resolved)
@@ -112,7 +144,7 @@ func (r *Reconciler) ReconcileDebounced(ctx context.Context) error {
 		}
 	}
 
-	// 4. Assemble NNC spec per node.
+	// 6. Assemble NNC spec per node.
 	for _, node := range fetched.Nodes {
 		nncSpec, err := assembler.Assemble(contributions[node.Name])
 		if err != nil {
@@ -128,11 +160,16 @@ func (r *Reconciler) ReconcileDebounced(ctx context.Context) error {
 		}
 		nncSpec.Revision = revision
 
-		// 5. Create or update NNC.
+		// 7. Create or update NNC.
 		if err := r.applyNNC(timeoutCtx, &node, nncSpec); err != nil {
 			r.logger.Error(err, "failed to apply NodeNetworkConfig", "node", node.Name)
 			continue
 		}
+	}
+
+	// 8. Update status conditions on all intent CRDs.
+	if err := r.statusUpdater.UpdateConditions(timeoutCtx, fetched, resolved); err != nil {
+		r.logger.Error(err, "status condition update failed")
 	}
 
 	r.logger.Info("intent reconciliation complete")
