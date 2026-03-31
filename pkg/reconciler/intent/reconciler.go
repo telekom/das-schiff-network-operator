@@ -61,6 +61,13 @@ func NewReconciler(clusterClient client.Client, logger logr.Logger, timeout time
 		client:  clusterClient,
 		builders: []builder.Builder{
 			builder.NewL2ABuilder(),
+			builder.NewInboundBuilder(),
+			builder.NewOutboundBuilder(),
+			builder.NewPodNetworkBuilder(),
+			builder.NewBGPPeeringBuilder(),
+			builder.NewCollectorBuilder(),
+			builder.NewMirrorBuilder(),
+			builder.NewAnnouncementBuilder(),
 		},
 	}
 
