@@ -24,15 +24,15 @@ import (
 )
 
 func TestAssemble_Nil(t *testing.T) {
-	spec, err := Assemble(nil)
+	result, err := Assemble(nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(spec.Layer2s) != 0 {
-		t.Errorf("expected empty Layer2s, got %d", len(spec.Layer2s))
+	if len(result.Spec.Layer2s) != 0 {
+		t.Errorf("expected empty Layer2s, got %d", len(result.Spec.Layer2s))
 	}
-	if len(spec.FabricVRFs) != 0 {
-		t.Errorf("expected empty FabricVRFs, got %d", len(spec.FabricVRFs))
+	if len(result.Spec.FabricVRFs) != 0 {
+		t.Errorf("expected empty FabricVRFs, got %d", len(result.Spec.FabricVRFs))
 	}
 }
 
@@ -52,23 +52,23 @@ func TestAssemble_SingleContribution(t *testing.T) {
 		},
 	}
 
-	spec, err := Assemble([]*builder.NodeContribution{c})
+	result, err := Assemble([]*builder.NodeContribution{c})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(spec.Layer2s) != 1 {
-		t.Fatalf("expected 1 Layer2, got %d", len(spec.Layer2s))
+	if len(result.Spec.Layer2s) != 1 {
+		t.Fatalf("expected 1 Layer2, got %d", len(result.Spec.Layer2s))
 	}
-	l2 := spec.Layer2s["100"]
+	l2 := result.Spec.Layer2s["100"]
 	if l2.VNI != 10100 {
 		t.Errorf("expected VNI 10100, got %d", l2.VNI)
 	}
 
-	if len(spec.FabricVRFs) != 1 {
-		t.Fatalf("expected 1 FabricVRF, got %d", len(spec.FabricVRFs))
+	if len(result.Spec.FabricVRFs) != 1 {
+		t.Fatalf("expected 1 FabricVRF, got %d", len(result.Spec.FabricVRFs))
 	}
-	fvrf := spec.FabricVRFs["tenant-a"]
+	fvrf := result.Spec.FabricVRFs["tenant-a"]
 	if len(fvrf.BGPPeers) != 1 {
 		t.Errorf("expected 1 BGPPeer, got %d", len(fvrf.BGPPeers))
 	}
@@ -102,12 +102,12 @@ func TestAssemble_MergeFabricVRFs(t *testing.T) {
 		},
 	}
 
-	spec, err := Assemble([]*builder.NodeContribution{c1, c2})
+	result, err := Assemble([]*builder.NodeContribution{c1, c2})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	fvrf := spec.FabricVRFs["vrf-a"]
+	fvrf := result.Spec.FabricVRFs["vrf-a"]
 	if fvrf.VNI != 1001 {
 		t.Errorf("expected VNI 1001 (from first contribution), got %d", fvrf.VNI)
 	}
@@ -137,19 +137,19 @@ func TestAssemble_MergeClusterVRF(t *testing.T) {
 		},
 	}
 
-	spec, err := Assemble([]*builder.NodeContribution{c1, c2})
+	result, err := Assemble([]*builder.NodeContribution{c1, c2})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if spec.ClusterVRF == nil {
+	if result.Spec.ClusterVRF == nil {
 		t.Fatal("expected ClusterVRF to be set")
 	}
-	if len(spec.ClusterVRF.BGPPeers) != 2 {
-		t.Errorf("expected 2 merged BGPPeers, got %d", len(spec.ClusterVRF.BGPPeers))
+	if len(result.Spec.ClusterVRF.BGPPeers) != 2 {
+		t.Errorf("expected 2 merged BGPPeers, got %d", len(result.Spec.ClusterVRF.BGPPeers))
 	}
-	if len(spec.ClusterVRF.StaticRoutes) != 1 {
-		t.Errorf("expected 1 StaticRoute, got %d", len(spec.ClusterVRF.StaticRoutes))
+	if len(result.Spec.ClusterVRF.StaticRoutes) != 1 {
+		t.Errorf("expected 1 StaticRoute, got %d", len(result.Spec.ClusterVRF.StaticRoutes))
 	}
 }
 
@@ -157,12 +157,12 @@ func TestAssemble_SkipsNilContributions(t *testing.T) {
 	c := builder.NewNodeContribution()
 	c.Layer2s["100"] = networkv1alpha1.Layer2{VNI: 100, VLAN: 100, MTU: 9000}
 
-	spec, err := Assemble([]*builder.NodeContribution{nil, c, nil})
+	result, err := Assemble([]*builder.NodeContribution{nil, c, nil})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(spec.Layer2s) != 1 {
-		t.Errorf("expected 1 Layer2, got %d", len(spec.Layer2s))
+	if len(result.Spec.Layer2s) != 1 {
+		t.Errorf("expected 1 Layer2, got %d", len(result.Spec.Layer2s))
 	}
 }
 
@@ -186,12 +186,12 @@ func TestAssemble_MergeLoopbacks(t *testing.T) {
 		},
 	}
 
-	spec, err := Assemble([]*builder.NodeContribution{c1, c2})
+	result, err := Assemble([]*builder.NodeContribution{c1, c2})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	fvrf := spec.FabricVRFs["vrf-a"]
+	fvrf := result.Spec.FabricVRFs["vrf-a"]
 	if len(fvrf.Loopbacks) != 2 {
 		t.Errorf("expected 2 merged loopbacks, got %d", len(fvrf.Loopbacks))
 	}
@@ -214,12 +214,12 @@ func TestAssemble_MergeLocalVRFs(t *testing.T) {
 		StaticRoutes: []networkv1alpha1.StaticRoute{{Prefix: "172.16.0.0/12"}},
 	}
 
-	spec, err := Assemble([]*builder.NodeContribution{c1, c2})
+	result, err := Assemble([]*builder.NodeContribution{c1, c2})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	local := spec.LocalVRFs["sbr-1"]
+	local := result.Spec.LocalVRFs["sbr-1"]
 	if len(local.StaticRoutes) != 2 {
 		t.Errorf("expected 2 merged static routes, got %d", len(local.StaticRoutes))
 	}

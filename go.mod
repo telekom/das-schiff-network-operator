@@ -18,6 +18,7 @@ require (
 	github.com/prometheus/client_golang v1.23.2
 	github.com/rackn/netwrangler v0.7.1
 	github.com/sirupsen/logrus v1.9.3
+	github.com/spf13/cobra v1.10.0
 	github.com/stretchr/testify v1.11.1
 	github.com/vishvananda/netlink v1.3.1
 	go.uber.org/mock v0.6.0
@@ -66,6 +67,7 @@ require (
 	github.com/google/pprof v0.0.0-20250403155104-27863c87afa6 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674 // indirect
+	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/josharian/native v1.1.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/compress v1.18.1 // indirect

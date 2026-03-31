@@ -30,6 +30,9 @@ type NodeContribution struct {
 	FabricVRFs map[string]networkv1alpha1.FabricVRF
 	LocalVRFs  map[string]networkv1alpha1.VRF
 	ClusterVRF *networkv1alpha1.VRF
+	// Origins maps NNC section keys to their source intent CRDs
+	// (e.g., "layer2s/prod-vlan100" → "Layer2Attachment/my-l2a").
+	Origins map[string]string
 }
 
 // NewNodeContribution creates an initialized NodeContribution.
@@ -38,7 +41,16 @@ func NewNodeContribution() *NodeContribution {
 		Layer2s:    make(map[string]networkv1alpha1.Layer2),
 		FabricVRFs: make(map[string]networkv1alpha1.FabricVRF),
 		LocalVRFs:  make(map[string]networkv1alpha1.VRF),
+		Origins:    make(map[string]string),
 	}
+}
+
+// SetOrigin records the source CRD for an NNC section key.
+func (nc *NodeContribution) SetOrigin(sectionKey, source string) {
+	if nc.Origins == nil {
+		nc.Origins = make(map[string]string)
+	}
+	nc.Origins[sectionKey] = source
 }
 
 // Builder is the interface for concern-area builders.

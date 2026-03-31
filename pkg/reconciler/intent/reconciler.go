@@ -147,22 +147,22 @@ func (r *Reconciler) ReconcileDebounced(ctx context.Context) error {
 
 	// 6. Assemble NNC spec per node.
 	for _, node := range fetched.Nodes {
-		nncSpec, err := assembler.Assemble(contributions[node.Name])
+		result, err := assembler.Assemble(contributions[node.Name])
 		if err != nil {
 			r.logger.Error(err, "assembly failed", "node", node.Name)
 			continue
 		}
 
 		// Compute revision hash.
-		revision, err := computeRevision(nncSpec)
+		revision, err := computeRevision(result.Spec)
 		if err != nil {
 			r.logger.Error(err, "revision hash failed", "node", node.Name)
 			continue
 		}
-		nncSpec.Revision = revision
+		result.Spec.Revision = revision
 
 		// 7. Create or update NNC.
-		if err := r.applyNNC(timeoutCtx, &node, nncSpec); err != nil {
+		if err := r.applyNNC(timeoutCtx, &node, result.Spec, result.Origins); err != nil {
 			r.logger.Error(err, "failed to apply NodeNetworkConfig", "node", node.Name)
 			continue
 		}
@@ -267,9 +267,11 @@ func (r *Reconciler) fetchAll(ctx context.Context) (*resolver.FetchedResources, 
 	return f, nil
 }
 
+const originsAnnotation = "network-connector.sylvaproject.org/origins"
+
 // applyNNC creates or updates a NodeNetworkConfig for a node.
 // It skips nodes that are currently provisioning (rolling update gate).
-func (r *Reconciler) applyNNC(ctx context.Context, node *corev1.Node, spec *networkv1alpha1.NodeNetworkConfigSpec) error {
+func (r *Reconciler) applyNNC(ctx context.Context, node *corev1.Node, spec *networkv1alpha1.NodeNetworkConfigSpec, origins map[string]string) error {
 	existing := &networkv1alpha1.NodeNetworkConfig{}
 	err := r.client.Get(ctx, client.ObjectKey{Name: node.Name}, existing)
 
@@ -290,6 +292,7 @@ func (r *Reconciler) applyNNC(ctx context.Context, node *corev1.Node, spec *netw
 		}
 
 		existing.Spec = *spec
+		setOriginsAnnotation(existing, origins)
 		return r.client.Update(ctx, existing)
 	}
 
@@ -300,12 +303,28 @@ func (r *Reconciler) applyNNC(ctx context.Context, node *corev1.Node, spec *netw
 		},
 		Spec: *spec,
 	}
+	setOriginsAnnotation(nnc, origins)
 
 	if err := controllerutil.SetOwnerReference(node, nnc, r.client.Scheme()); err != nil {
 		return fmt.Errorf("error setting owner reference for NNC %s: %w", node.Name, err)
 	}
 
 	return r.client.Create(ctx, nnc)
+}
+
+// setOriginsAnnotation writes the origins map as a JSON annotation on the NNC.
+func setOriginsAnnotation(nnc *networkv1alpha1.NodeNetworkConfig, origins map[string]string) {
+	if len(origins) == 0 {
+		return
+	}
+	data, err := json.Marshal(origins)
+	if err != nil {
+		return
+	}
+	if nnc.Annotations == nil {
+		nnc.Annotations = make(map[string]string)
+	}
+	nnc.Annotations[originsAnnotation] = string(data)
 }
 
 // computeRevision computes a SHA256 hash of the NNC spec for change detection.

@@ -68,6 +68,10 @@ test: manifests generate fmt vet envtest ## Run tests.
 build: generate fmt vet ## Build manager binary.
 	go build -ldflags "$(LDFLAGS)" -o bin/manager cmd/operator/main.go
 
+.PHONY: kubectl-nnc
+kubectl-nnc: ## Build kubectl-nnc plugin binary.
+	go build -ldflags "$(LDFLAGS)" -o bin/kubectl-nnc ./cmd/kubectl-nnc/
+
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
 	go run -ldflags "$(LDFLAGS)" ./cmd/operator/main.go

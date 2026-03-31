@@ -21,15 +21,22 @@ import (
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/builder"
 )
 
+// AssembleResult contains the assembled NNC spec and merged origin tracking data.
+type AssembleResult struct {
+	Spec    *networkv1alpha1.NodeNetworkConfigSpec
+	Origins map[string]string
+}
+
 // Assemble merges multiple NodeContributions into a single NodeNetworkConfigSpec.
 // Contributions are merged deterministically: Layer2s and VRFs are merged by key,
-// ClusterVRF BGPPeers and routes are appended.
-func Assemble(contributions []*builder.NodeContribution) (*networkv1alpha1.NodeNetworkConfigSpec, error) {
+// ClusterVRF BGPPeers and routes are appended. Origins are merged for traceability.
+func Assemble(contributions []*builder.NodeContribution) (*AssembleResult, error) {
 	spec := &networkv1alpha1.NodeNetworkConfigSpec{
 		Layer2s:    make(map[string]networkv1alpha1.Layer2),
 		FabricVRFs: make(map[string]networkv1alpha1.FabricVRF),
 		LocalVRFs:  make(map[string]networkv1alpha1.VRF),
 	}
+	origins := make(map[string]string)
 
 	for _, c := range contributions {
 		if c == nil {
@@ -87,7 +94,12 @@ func Assemble(contributions []*builder.NodeContribution) (*networkv1alpha1.NodeN
 				spec.ClusterVRF.VRFImports = append(spec.ClusterVRF.VRFImports, c.ClusterVRF.VRFImports...)
 			}
 		}
+
+		// Merge origins.
+		for k, v := range c.Origins {
+			origins[k] = v
+		}
 	}
 
-	return spec, nil
+	return &AssembleResult{Spec: spec, Origins: origins}, nil
 }
