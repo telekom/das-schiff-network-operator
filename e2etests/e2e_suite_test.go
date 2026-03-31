@@ -2,7 +2,6 @@ package e2etests
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 

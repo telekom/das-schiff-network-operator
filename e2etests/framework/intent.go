@@ -100,20 +100,27 @@ func (f *Framework) ensureIntentRBAC(ctx context.Context) error {
 
 // deleteLegacyConfigs removes VRFRouteConfigurations and Layer2NetworkConfigurations.
 func (f *Framework) deleteLegacyConfigs(ctx context.Context) error {
-	for _, resource := range []string{"vrfrouteconfigurations", "layer2networkconfigurations"} {
+	legacyKinds := []struct {
+		kind     string
+		listKind string
+	}{
+		{kind: "VRFRouteConfiguration", listKind: "VRFRouteConfigurationList"},
+		{kind: "Layer2NetworkConfiguration", listKind: "Layer2NetworkConfigurationList"},
+	}
+	for _, lk := range legacyKinds {
 		list := &unstructured.UnstructuredList{}
 		list.SetGroupVersionKind(schema.GroupVersionKind{
 			Group:   "network.t-caas.telekom.com",
 			Version: "v1alpha1",
-			Kind:    resource,
+			Kind:    lk.listKind,
 		})
 		if err := f.Client.List(ctx, list); err != nil {
-			// GVK might not exist, skip.
+			// CRD might not be installed, skip.
 			continue
 		}
 		for i := range list.Items {
 			if err := f.Client.Delete(ctx, &list.Items[i]); err != nil && !apierrors.IsNotFound(err) {
-				return fmt.Errorf("delete %s/%s: %w", resource, list.Items[i].GetName(), err)
+				return fmt.Errorf("delete %s/%s: %w", lk.kind, list.Items[i].GetName(), err)
 			}
 		}
 	}

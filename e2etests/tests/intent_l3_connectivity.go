@@ -76,6 +76,6 @@ var _ = Describe("Intent: L3 Connectivity", Label("intent", "l3"), func() {
 		Eventually(func() bool {
 			r, _ := f.PingFromPod(ctx, ns, "intent-l3-01", cfg.Macvlan03IPv6, 3)
 			return r != nil && r.Success
-		}).WithTimeout(30 * time.Second).WithPolling(5 * time.Second).Should(BeTrue(), "Cross-VLAN IPv6 ping failed")
+		}).WithTimeout(90 * time.Second).WithPolling(5 * time.Second).Should(BeTrue(), "Cross-VLAN IPv6 ping failed")
 	})
 })

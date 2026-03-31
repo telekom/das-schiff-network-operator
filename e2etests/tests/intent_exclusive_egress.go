@@ -7,6 +7,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/telekom/das-schiff-network-operator/e2etests/framework"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // Intent-Exclusive Egress NAT test using Outbound CRD.
@@ -40,8 +41,8 @@ var _ = Describe("Intent-Exclusive: Egress NAT", Label("intent-exclusive", "egre
 		Expect(err).NotTo(HaveOccurred())
 		Expect(f.ApplyManifest(ctx, manifest)).To(Succeed())
 
-		By("Applying Coil egress + test pod (intent-specific)")
-		egressManifest, err := readTestdata("intent/egress/coil-egress.yaml")
+		By("Applying Coil egress + test pod (intent-exclusive)")
+		egressManifest, err := readTestdata("intent/egress/coil-egress-exclusive.yaml")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(f.ApplyManifestInNamespace(ctx, egressManifest, ns)).To(Succeed())
 
@@ -50,7 +51,7 @@ var _ = Describe("Intent-Exclusive: Egress NAT", Label("intent-exclusive", "egre
 	})
 
 	AfterEach(func() {
-		egressManifest, _ := readTestdata("intent/egress/coil-egress.yaml")
+		egressManifest, _ := readTestdata("intent/egress/coil-egress-exclusive.yaml")
 		_ = f.DeleteManifestInNamespace(ctx, egressManifest, ns)
 		manifest, _ := readTestdata("intent/egress/manifests.yaml")
 		_ = f.DeleteManifest(ctx, manifest)
@@ -60,28 +61,48 @@ var _ = Describe("Intent-Exclusive: Egress NAT", Label("intent-exclusive", "egre
 		It("should NAT egress traffic to m2mgw through intent-based Outbound", func() {
 			cfg := f.Config
 
-			By("Waiting for egress pod to be ready")
-			Expect(f.WaitForPodReady(ctx, ns, "egress-intent-01", cfg.PodReadyTimeout)).To(Succeed())
-
-			By("Verifying egress-intent-01 can reach m2mgw (IPv4)")
+			By("Waiting for Coil egress gateway to be provisioned")
 			Eventually(func() bool {
-				r, _ := f.PingFromPod(ctx, ns, "egress-intent-01", cfg.M2MGWIPv4, 3)
+				pods, err := f.KubeClient.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{})
+				if err != nil {
+					return false
+				}
+				for _, pod := range pods.Items {
+					// Coil egress gateway pods are named after the Egress CR
+					if pod.Name != "egress-excl-01" {
+						for _, cs := range pod.Status.ContainerStatuses {
+							if cs.Ready {
+								return true
+							}
+						}
+					}
+				}
+				return false
+			}).WithTimeout(3*time.Minute).WithPolling(5*time.Second).Should(BeTrue(),
+				"Coil egress gateway should be running in namespace")
+
+			By("Waiting for egress pod to be ready")
+			Expect(f.WaitForPodReady(ctx, ns, "egress-excl-01", cfg.PodReadyTimeout)).To(Succeed())
+
+			By("Verifying egress-excl-01 can reach m2mgw (IPv4)")
+			Eventually(func() bool {
+				r, _ := f.PingFromPod(ctx, ns, "egress-excl-01", cfg.M2MGWIPv4, 3)
 				return r != nil && r.Success
 			}).WithTimeout(90*time.Second).WithPolling(5*time.Second).Should(BeTrue(),
 				"Intent-exclusive: Egress pod should reach m2mgw IPv4 via intent pipeline")
 
-			By("Verifying egress-intent-01 can reach m2mgw (IPv6)")
+			By("Verifying egress-excl-01 can reach m2mgw (IPv6)")
 			Eventually(func() bool {
-				r, _ := f.PingFromPod(ctx, ns, "egress-intent-01", cfg.M2MGWIPv6, 3)
+				r, _ := f.PingFromPod(ctx, ns, "egress-excl-01", cfg.M2MGWIPv6, 3)
 				return r != nil && r.Success
 			}).WithTimeout(90*time.Second).WithPolling(5*time.Second).Should(BeTrue(),
 				"Intent-exclusive: Egress pod should reach m2mgw IPv6 via intent pipeline")
 
-			By("Verifying egress-intent-01 CANNOT reach c2mgw (wrong VRF, IPv4)")
-			Expect(f.AssertNoConnectivity(ctx, ns, "egress-intent-01", cfg.C2MGWIPv4)).To(Succeed())
+			By("Verifying egress-excl-01 CANNOT reach c2mgw (wrong VRF, IPv4)")
+			Expect(f.AssertNoConnectivity(ctx, ns, "egress-excl-01", cfg.C2MGWIPv4)).To(Succeed())
 
-			By("Verifying egress-intent-01 CANNOT reach c2mgw (wrong VRF, IPv6)")
-			Expect(f.AssertNoConnectivity(ctx, ns, "egress-intent-01", cfg.C2MGWIPv6)).To(Succeed())
+			By("Verifying egress-excl-01 CANNOT reach c2mgw (wrong VRF, IPv6)")
+			Expect(f.AssertNoConnectivity(ctx, ns, "egress-excl-01", cfg.C2MGWIPv6)).To(Succeed())
 		})
 	})
 })
