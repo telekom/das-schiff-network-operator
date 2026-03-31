@@ -66,6 +66,9 @@ type Config struct {
 	// NAT64
 	NAT64DNS string
 
+	// Intent mode: when true, operator uses intent reconciler instead of legacy.
+	IntentMode bool
+
 	// Timeouts
 	NodeReadyTimeout      time.Duration
 	ComponentReadyTimeout time.Duration
@@ -130,6 +133,9 @@ func LoadFromEnv() *Config {
 
 		// NAT64
 		NAT64DNS: "fda5:25c1:193e::1",
+
+		// Intent mode
+		IntentMode: os.Getenv("E2E_INTENT_MODE") == "true",
 
 		// Timeouts
 		NodeReadyTimeout:      5 * time.Minute,

@@ -114,6 +114,11 @@ func (r *Reconciler) ReconcileDebounced(ctx context.Context) error {
 		return fmt.Errorf("failed to fetch intent resources: %w", err)
 	}
 
+	// 1b. Clean up orphaned NNCs (nodes that no longer exist).
+	if err := r.cleanupOrphanedNNCs(timeoutCtx, fetched.Nodes); err != nil {
+		r.logger.Error(err, "orphaned NNC cleanup failed")
+	}
+
 	// 2. Reconcile in-use finalizers.
 	if err := r.finalizerManager.ReconcileFinalizers(timeoutCtx, fetched); err != nil {
 		r.logger.Error(err, "finalizer reconciliation failed")
@@ -295,7 +300,7 @@ func (r *Reconciler) applyNNC(ctx context.Context, node *corev1.Node, spec *netw
 
 	if err == nil {
 		// NNC exists — check if update needed.
-		if existing.Spec.Revision == spec.Revision {
+		if existing.Spec.Revision == spec.Revision && hasIntentManagedLabel(existing) {
 			return nil // no change
 		}
 
@@ -305,6 +310,9 @@ func (r *Reconciler) applyNNC(ctx context.Context, node *corev1.Node, spec *netw
 			return nil
 		}
 
+		// Strip legacy owner refs (NetworkConfigRevision) and ensure only Node owner.
+		r.stripLegacyOwnerRefs(existing, node)
+		setIntentManagedLabel(existing)
 		existing.Spec = *spec
 		setOriginsAnnotation(existing, origins)
 		return r.client.Update(ctx, existing)
@@ -317,6 +325,7 @@ func (r *Reconciler) applyNNC(ctx context.Context, node *corev1.Node, spec *netw
 		},
 		Spec: *spec,
 	}
+	setIntentManagedLabel(nnc)
 	setOriginsAnnotation(nnc, origins)
 
 	if err := controllerutil.SetOwnerReference(node, nnc, r.client.Scheme()); err != nil {
@@ -354,4 +363,65 @@ func computeRevision(spec *networkv1alpha1.NodeNetworkConfigSpec) (string, error
 
 	hash := sha256.Sum256(data)
 	return fmt.Sprintf("%x", hash), nil
+}
+
+const intentManagedLabel = "network-connector.sylvaproject.org/managed-by"
+
+// setIntentManagedLabel marks an NNC as managed by the intent reconciler.
+func setIntentManagedLabel(nnc *networkv1alpha1.NodeNetworkConfig) {
+	if nnc.Labels == nil {
+		nnc.Labels = make(map[string]string)
+	}
+	nnc.Labels[intentManagedLabel] = "intent"
+}
+
+// hasIntentManagedLabel returns true if the NNC is already marked as intent-managed.
+func hasIntentManagedLabel(nnc *networkv1alpha1.NodeNetworkConfig) bool {
+	return nnc.Labels != nil && nnc.Labels[intentManagedLabel] == "intent"
+}
+
+// stripLegacyOwnerRefs removes owner references that are not the Node.
+// Legacy NNCs have 2 owner refs (Node + NetworkConfigRevision); intent uses Node only.
+func (r *Reconciler) stripLegacyOwnerRefs(nnc *networkv1alpha1.NodeNetworkConfig, node *corev1.Node) {
+	filtered := make([]metav1.OwnerReference, 0, 1)
+	for _, ref := range nnc.OwnerReferences {
+		if ref.UID == node.UID {
+			filtered = append(filtered, ref)
+		} else {
+			r.logger.Info("stripping legacy owner reference", "nnc", nnc.Name,
+				"ownerKind", ref.Kind, "ownerName", ref.Name)
+		}
+	}
+	nnc.OwnerReferences = filtered
+
+	// Ensure Node owner ref exists.
+	if err := controllerutil.SetOwnerReference(node, nnc, r.client.Scheme()); err != nil {
+		r.logger.Error(err, "failed to set Node owner reference", "nnc", nnc.Name)
+	}
+}
+
+// cleanupOrphanedNNCs deletes NNCs that don't correspond to any current node.
+func (r *Reconciler) cleanupOrphanedNNCs(ctx context.Context, nodes []corev1.Node) error {
+	nodeNames := make(map[string]struct{}, len(nodes))
+	for i := range nodes {
+		nodeNames[nodes[i].Name] = struct{}{}
+	}
+
+	nncList := &networkv1alpha1.NodeNetworkConfigList{}
+	if err := r.client.List(ctx, nncList); err != nil {
+		return fmt.Errorf("error listing NodeNetworkConfigs: %w", err)
+	}
+
+	for i := range nncList.Items {
+		nnc := &nncList.Items[i]
+		if _, exists := nodeNames[nnc.Name]; exists {
+			continue
+		}
+		// Only clean up NNCs managed by intent (or legacy ones during takeover).
+		r.logger.Info("deleting orphaned NodeNetworkConfig", "name", nnc.Name)
+		if err := r.client.Delete(ctx, nnc); err != nil && !apierrors.IsNotFound(err) {
+			r.logger.Error(err, "failed to delete orphaned NNC", "name", nnc.Name)
+		}
+	}
+	return nil
 }

@@ -2,7 +2,9 @@ package e2etests
 
 import (
 	"context"
+	"fmt"
 	"testing"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -41,10 +43,23 @@ var _ = BeforeSuite(func() {
 	By("Initializing cluster-2 client")
 	Expect(f.InitCluster2()).To(Succeed())
 
-	By("Applying network-operator CRs (VRFs + L2 networks)")
-	nwopConfigs, err := config.ReadManifest("network-operator-configs.yaml")
-	Expect(err).NotTo(HaveOccurred())
-	Expect(f.ApplyManifest(context.Background(), nwopConfigs)).To(Succeed())
+	if cfg.IntentMode {
+		By("Intent mode: enabling intent reconciler on operator")
+		Expect(f.EnableIntentReconciler(context.Background())).To(Succeed())
+
+		By("Intent mode: applying intent base-configs (VRFs, Networks, Destinations)")
+		intentConfigs, err := config.ReadManifest("intent/base-configs.yaml")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(f.ApplyManifest(context.Background(), intentConfigs)).To(Succeed())
+
+		By("Intent mode: waiting for intent reconciler to produce NNCs")
+		Expect(f.WaitForIntentNNCs(context.Background(), 60*time.Second)).To(Succeed())
+	} else {
+		By("Applying network-operator CRs (VRFs + L2 networks)")
+		nwopConfigs, err := config.ReadManifest("network-operator-configs.yaml")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(f.ApplyManifest(context.Background(), nwopConfigs)).To(Succeed())
+	}
 })
 
 var _ = AfterSuite(func() {
