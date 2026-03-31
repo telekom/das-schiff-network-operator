@@ -41,6 +41,7 @@ import (
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	networkconnector "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 	intentctrl "github.com/telekom/das-schiff-network-operator/controllers/intent"
+	"github.com/telekom/das-schiff-network-operator/controllers/platform"
 	intentreconciler "github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent"
 	"github.com/telekom/das-schiff-network-operator/pkg/version"
 
@@ -298,6 +299,31 @@ func setupIntentReconciler(mgr manager.Manager, apiTimeout time.Duration, cfg *o
 		Reconciler: ir,
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("unable to create intent controller: %w", err)
+	}
+
+	// Platform controllers (MetalLB, Coil, InterfaceConfig).
+	if err = (&platform.MetalLBReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+		Log:    mgr.GetLogger().WithName("MetalLBReconciler"),
+	}).SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to create MetalLB controller: %w", err)
+	}
+
+	if err = (&platform.CoilReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+		Log:    mgr.GetLogger().WithName("CoilReconciler"),
+	}).SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to create Coil controller: %w", err)
+	}
+
+	if err = (&platform.InterfaceConfigReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+		Log:    mgr.GetLogger().WithName("InterfaceConfigReconciler"),
+	}).SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to create InterfaceConfig controller: %w", err)
 	}
 
 	setupLog.Info("intent reconciler enabled — legacy ConfigReconciler disabled")
