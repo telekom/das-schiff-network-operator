@@ -40,6 +40,8 @@ import (
 
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	networkconnector "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
+	intentctrl "github.com/telekom/das-schiff-network-operator/controllers/intent"
+	intentreconciler "github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent"
 	"github.com/telekom/das-schiff-network-operator/pkg/version"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.) //nolint:gci
@@ -75,11 +77,15 @@ type operatorConfig struct {
 	disableCertRotation          bool
 	disableRestartOnCertRefresh  bool
 	processImportsAsStaticRoutes bool
+	enableIntentReconciler       bool
 	healthAddr                   string
 	metricsAddr                  string
 	webhookAddr                  string
 	leaderElectionID             string
 	zapOpts                      zap.Options
+
+	// setupFinished is set at runtime (not via flags).
+	setupFinished chan struct{}
 }
 
 func parseFlags() *operatorConfig {
@@ -103,6 +109,8 @@ func parseFlags() *operatorConfig {
 		"Disables operator's restart after certificates refresh was performed.")
 	flag.BoolVar(&cfg.processImportsAsStaticRoutes, "process-imports-as-static-routes", false,
 		"If set to true, the operator will process imports as static routes.")
+	flag.BoolVar(&cfg.enableIntentReconciler, "enable-intent-reconciler", false,
+		"Enable the intent-based reconciler (network-connector.sylvaproject.org CRDs). Disables legacy ConfigReconciler when active.")
 	flag.StringVar(&cfg.healthAddr, "health-addr", ":7085",
 		"bind address of health/readiness probes")
 	flag.StringVar(&cfg.metricsAddr, "metrics-addr", ":7084",
@@ -178,10 +186,12 @@ func main() {
 		}
 	}
 
+	cfg.setupFinished = setupFinished
+
 	setupErr := make(chan error)
 
 	go func() {
-		setupErr <- setupReconcilers(mgr, cfg.apiTimeout, cfg.configTimeout, cfg.preconfigTimeout, cfg.maxUpdating, cfg.processImportsAsStaticRoutes, setupFinished)
+		setupErr <- setupReconcilers(mgr, cfg)
 		close(setupErr)
 	}()
 
@@ -258,39 +268,70 @@ func setupRotator(mgr ctrl.Manager, disableRestartOnCertRefresh bool) (chan stru
 	return setupFinished, nil
 }
 
-func setupReconcilers(mgr manager.Manager, apiTimeout, configTimeout, preconfigTimeout string, maxUpdating int, processImportsAsStaticRoutes bool, setupFinished chan struct{}) error {
-	apiTimoutVal, err := time.ParseDuration(apiTimeout)
+func setupReconcilers(mgr manager.Manager, cfg *operatorConfig) error {
+	apiTimoutVal, err := time.ParseDuration(cfg.apiTimeout)
 	if err != nil {
-		return fmt.Errorf("error parsing API timeout value %s: %w", apiTimeout, err)
+		return fmt.Errorf("error parsing API timeout value %s: %w", cfg.apiTimeout, err)
 	}
 
-	configTimeoutVal, err := time.ParseDuration(configTimeout)
-	if err != nil {
-		return fmt.Errorf("error parsing config timeout value %s: %w", configTimeout, err)
+	if cfg.enableIntentReconciler {
+		return setupIntentReconciler(mgr, apiTimoutVal, cfg)
 	}
 
-	preconfigTimeoutVal, err := time.ParseDuration(preconfigTimeout)
-	if err != nil {
-		return fmt.Errorf("error parsing preconfig timeout value %s: %w", preconfigTimeout, err)
+	return setupLegacyReconcilers(mgr, apiTimoutVal, cfg)
+}
+
+func setupIntentReconciler(mgr manager.Manager, apiTimeout time.Duration, cfg *operatorConfig) error {
+	if cfg.setupFinished != nil {
+		<-cfg.setupFinished
+		setupLog.Info("cert setup finished")
 	}
 
-	cr, err := operator.NewConfigReconciler(mgr.GetClient(), mgr.GetLogger().WithName("ConfigReconciler"), apiTimoutVal)
+	ir, err := intentreconciler.NewReconciler(mgr.GetClient(), mgr.GetLogger().WithName("IntentReconciler"), apiTimeout)
+	if err != nil {
+		return fmt.Errorf("unable to create intent reconciler: %w", err)
+	}
+
+	if err = (&intentctrl.IntentReconciler{
+		Client:     mgr.GetClient(),
+		Scheme:     mgr.GetScheme(),
+		Reconciler: ir,
+	}).SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to create intent controller: %w", err)
+	}
+
+	setupLog.Info("intent reconciler enabled — legacy ConfigReconciler disabled")
+	return nil
+}
+
+func setupLegacyReconcilers(mgr manager.Manager, apiTimeout time.Duration, cfg *operatorConfig) error {
+	configTimeoutVal, err := time.ParseDuration(cfg.configTimeout)
+	if err != nil {
+		return fmt.Errorf("error parsing config timeout value %s: %w", cfg.configTimeout, err)
+	}
+
+	preconfigTimeoutVal, err := time.ParseDuration(cfg.preconfigTimeout)
+	if err != nil {
+		return fmt.Errorf("error parsing preconfig timeout value %s: %w", cfg.preconfigTimeout, err)
+	}
+
+	cr, err := operator.NewConfigReconciler(mgr.GetClient(), mgr.GetLogger().WithName("ConfigReconciler"), apiTimeout)
 	if err != nil {
 		return fmt.Errorf("unable to create config reconciler reconciler: %w", err)
 	}
 
 	importMode := operator.ImportModeImport
-	if processImportsAsStaticRoutes {
+	if cfg.processImportsAsStaticRoutes {
 		importMode = operator.ImportModeStaticRoute
 	}
 
-	ncr, err := operator.NewNodeConfigReconciler(mgr.GetClient(), mgr.GetLogger().WithName("NodeConfigReconciler"), apiTimoutVal, configTimeoutVal, preconfigTimeoutVal, mgr.GetScheme(), maxUpdating, importMode)
+	ncr, err := operator.NewNodeConfigReconciler(mgr.GetClient(), mgr.GetLogger().WithName("NodeConfigReconciler"), apiTimeout, configTimeoutVal, preconfigTimeoutVal, mgr.GetScheme(), cfg.maxUpdating, importMode)
 	if err != nil {
 		return fmt.Errorf("unable to create node reconciler: %w", err)
 	}
 
-	if setupFinished != nil {
-		<-setupFinished
+	if cfg.setupFinished != nil {
+		<-cfg.setupFinished
 		setupLog.Info("cert setup finished")
 	}
 
