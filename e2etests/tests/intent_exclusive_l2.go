@@ -50,7 +50,7 @@ var _ = Describe("Intent-Exclusive: L2 Connectivity", Label("intent-exclusive", 
 		cfg := f.Config
 
 		By("Applying L2 NADs for macvlan pods (VLAN 501)")
-		nadManifest, err := readTestdata("l2-nads.yaml")
+		nadManifest, err := readTestdata("l2-connectivity/nad.yaml")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(f.ApplyManifestInNamespace(ctx, nadManifest, ns)).To(Succeed())
 
