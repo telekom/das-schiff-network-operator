@@ -35,7 +35,7 @@ spec:
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
-    name: networkconnector
+    name: v1alpha1
     schema:
       openAPIV3Schema:
         description: Inbound allocates IPs from a Network for MetalLB pools and BGP/L2

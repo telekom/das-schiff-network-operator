@@ -29,7 +29,7 @@ spec:
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
-    name: networkconnector
+    name: v1alpha1
     schema:
       openAPIV3Schema:
         description: Destination is the Schema for the destinations API.

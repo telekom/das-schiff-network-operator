@@ -21,4 +21,5 @@ limitations under the License.
 //
 // +kubebuilder:object:generate=true
 // +groupName=network-connector.sylvaproject.org
+// +versionName=v1alpha1
 package networkconnector
