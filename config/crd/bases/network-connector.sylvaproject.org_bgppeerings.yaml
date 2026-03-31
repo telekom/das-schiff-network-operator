@@ -140,21 +140,21 @@ spec:
                   attachmentRef:
                     description: |-
                       AttachmentRef references a Layer2Attachment by name.
-                      Used with listenRange mode — the BGP session peers with workloads on this L2 segment.
+                      Required for listenRange mode — identifies the L2 segment for the BGP listen-range.
+                      Must not be set for loopbackPeer mode.
                     type: string
                   inboundRefs:
                     description: |-
-                      InboundRefs references Inbound resources whose IP pools are advertised.
-                      Used with loopbackPeer mode — the tenant workload advertises VIPs from these pools.
+                      InboundRefs references Inbound resources whose IP pools are accepted/advertised.
+                      Required for both modes: listenRange uses them as prefix filters,
+                      loopbackPeer advertises VIPs from these pools.
                     items:
                       type: string
                     minItems: 1
                     type: array
+                required:
+                - inboundRefs
                 type: object
-                x-kubernetes-validations:
-                - message: exactly one of attachmentRef or inboundRefs must be set
-                  rule: (has(self.attachmentRef) && !has(self.inboundRefs)) || (!has(self.attachmentRef)
-                    && has(self.inboundRefs))
               workloadAS:
                 description: |-
                   WorkloadAS is the autonomous system number for the workload/tenant side.
@@ -171,6 +171,10 @@ spec:
             x-kubernetes-validations:
             - message: mode is immutable
               rule: self.mode == oldSelf.mode
+            - message: attachmentRef is required for listenRange mode and forbidden
+                for loopbackPeer mode
+              rule: 'self.mode == ''listenRange'' ? has(self.ref.attachmentRef) :
+                !has(self.ref.attachmentRef)'
           status:
             description: BGPPeeringStatus defines the observed state of BGPPeering.
             properties:

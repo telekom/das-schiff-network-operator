@@ -36,24 +36,27 @@ const (
 	BGPPeeringModeLoopbackPeer BGPPeeringMode = "loopbackPeer"
 )
 
-// BGPPeeringRef identifies the resource this peering session is for.
-// Exactly one of attachmentRef or inboundRefs must be set.
-// +kubebuilder:validation:XValidation:rule="(has(self.attachmentRef) && !has(self.inboundRefs)) || (!has(self.attachmentRef) && has(self.inboundRefs))",message="exactly one of attachmentRef or inboundRefs must be set"
+// BGPPeeringRef identifies the resources this peering session relates to.
+// inboundRefs is always required (both modes need IP pools).
+// attachmentRef is required for listenRange mode only.
 type BGPPeeringRef struct {
 	// AttachmentRef references a Layer2Attachment by name.
-	// Used with listenRange mode — the BGP session peers with workloads on this L2 segment.
+	// Required for listenRange mode — identifies the L2 segment for the BGP listen-range.
+	// Must not be set for loopbackPeer mode.
 	// +optional
 	AttachmentRef *string `json:"attachmentRef,omitempty"`
 
-	// InboundRefs references Inbound resources whose IP pools are advertised.
-	// Used with loopbackPeer mode — the tenant workload advertises VIPs from these pools.
-	// +optional
+	// InboundRefs references Inbound resources whose IP pools are accepted/advertised.
+	// Required for both modes: listenRange uses them as prefix filters,
+	// loopbackPeer advertises VIPs from these pools.
+	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinItems=1
-	InboundRefs []string `json:"inboundRefs,omitempty"`
+	InboundRefs []string `json:"inboundRefs"`
 }
 
 // BGPPeeringSpec defines the desired state of BGPPeering.
 // +kubebuilder:validation:XValidation:rule="self.mode == oldSelf.mode",message="mode is immutable"
+// +kubebuilder:validation:XValidation:rule="self.mode == 'listenRange' ? has(self.ref.attachmentRef) : !has(self.ref.attachmentRef)",message="attachmentRef is required for listenRange mode and forbidden for loopbackPeer mode"
 type BGPPeeringSpec struct {
 	// Mode selects the peering type: listenRange (L2 attachment BGP) or loopbackPeer (BGPaaS).
 	// Immutable after creation.
