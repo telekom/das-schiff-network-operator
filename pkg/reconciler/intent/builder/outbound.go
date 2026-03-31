@@ -92,6 +92,15 @@ func (b *OutboundBuilder) Build(_ context.Context, data *resolver.ResolvedData) 
 			fvrf.StaticRoutes = append(fvrf.StaticRoutes, staticRoutes...)
 			fvrf.PolicyRoutes = append(fvrf.PolicyRoutes, policyRoutes...)
 
+			// Add allocated addresses to EVPN export filter + cluster VRFImport.
+			filterItems := addressFilterItems(addresses)
+			if fvrf.EVPNExportFilter != nil {
+				fvrf.EVPNExportFilter.Items = append(fvrf.EVPNExportFilter.Items, filterItems...)
+			}
+			if len(fvrf.VRFImports) > 0 {
+				fvrf.VRFImports[0].Filter.Items = append(fvrf.VRFImports[0].Filter.Items, filterItems...)
+			}
+
 			contrib.FabricVRFs[vrfName] = fvrf
 		}
 	}

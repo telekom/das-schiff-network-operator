@@ -78,8 +78,11 @@ func Assemble(contributions []*builder.NodeContribution) (*AssembleResult, error
 			existing.BGPPeers = append(existing.BGPPeers, v.BGPPeers...)
 			existing.StaticRoutes = append(existing.StaticRoutes, v.StaticRoutes...)
 			existing.PolicyRoutes = append(existing.PolicyRoutes, v.PolicyRoutes...)
-			existing.VRFImports = append(existing.VRFImports, v.VRFImports...)
 			existing.MirrorACLs = append(existing.MirrorACLs, v.MirrorACLs...)
+
+			// Merge VRFImports: deduplicate by FromVRF, merge filter items.
+			existing.VRFImports = mergeVRFImports(existing.VRFImports, v.VRFImports)
+
 			if len(v.Loopbacks) > 0 && existing.Loopbacks == nil {
 				existing.Loopbacks = make(map[string]networkv1alpha1.Loopback)
 			}
@@ -93,8 +96,16 @@ func Assemble(contributions []*builder.NodeContribution) (*AssembleResult, error
 					existing.EVPNExportFilter.Items = append(existing.EVPNExportFilter.Items, v.EVPNExportFilter.Items...)
 				}
 			}
+			// Merge EVPN route targets (deduplicated).
+			existing.EVPNExportRouteTargets = mergeStringSlice(existing.EVPNExportRouteTargets, v.EVPNExportRouteTargets)
+			existing.EVPNImportRouteTargets = mergeStringSlice(existing.EVPNImportRouteTargets, v.EVPNImportRouteTargets)
+
 			if v.Redistribute != nil && existing.Redistribute == nil {
 				existing.Redistribute = v.Redistribute
+			}
+			// Preserve VNI (non-zero wins).
+			if existing.VNI == 0 && v.VNI != 0 {
+				existing.VNI = v.VNI
 			}
 			spec.FabricVRFs[k] = existing
 		}
@@ -132,4 +143,40 @@ func Assemble(contributions []*builder.NodeContribution) (*AssembleResult, error
 	}
 
 	return &AssembleResult{Spec: spec, Origins: origins}, nil
+}
+
+// mergeStringSlice merges two string slices, deduplicating entries.
+func mergeStringSlice(a, b []string) []string {
+	if len(b) == 0 {
+		return a
+	}
+	seen := make(map[string]struct{}, len(a))
+	for _, s := range a {
+		seen[s] = struct{}{}
+	}
+	for _, s := range b {
+		if _, exists := seen[s]; !exists {
+			a = append(a, s)
+			seen[s] = struct{}{}
+		}
+	}
+	return a
+}
+
+// mergeVRFImports merges VRFImport slices, deduplicating by FromVRF and merging filter items.
+func mergeVRFImports(existing, incoming []networkv1alpha1.VRFImport) []networkv1alpha1.VRFImport {
+	byVRF := make(map[string]int) // FromVRF → index in result
+	for i, imp := range existing {
+		byVRF[imp.FromVRF] = i
+	}
+	for _, imp := range incoming {
+		if idx, ok := byVRF[imp.FromVRF]; ok {
+			// Same FromVRF — merge filter items.
+			existing[idx].Filter.Items = append(existing[idx].Filter.Items, imp.Filter.Items...)
+		} else {
+			byVRF[imp.FromVRF] = len(existing)
+			existing = append(existing, imp)
+		}
+	}
+	return existing
 }

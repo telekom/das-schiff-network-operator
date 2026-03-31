@@ -95,6 +95,15 @@ func (b *InboundBuilder) Build(_ context.Context, data *resolver.ResolvedData) (
 				fvrf.Redistribute = mergeRedistribute(fvrf.Redistribute, redistribute)
 			}
 
+			// Add allocated addresses to EVPN export filter + cluster VRFImport.
+			filterItems := addressFilterItems(addresses)
+			if fvrf.EVPNExportFilter != nil {
+				fvrf.EVPNExportFilter.Items = append(fvrf.EVPNExportFilter.Items, filterItems...)
+			}
+			if len(fvrf.VRFImports) > 0 {
+				fvrf.VRFImports[0].Filter.Items = append(fvrf.VRFImports[0].Filter.Items, filterItems...)
+			}
+
 			contrib.FabricVRFs[vrfName] = fvrf
 		}
 	}

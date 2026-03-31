@@ -19,6 +19,7 @@ package builder
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
@@ -83,11 +84,15 @@ func (b *L2ABuilder) Build(_ context.Context, data *resolver.ResolvedData) (map[
 			}
 			contrib.Layer2s[mapKey] = *layer2
 
-			// If VRF is resolved, ensure the FabricVRF entry exists.
+			// If VRF is resolved, ensure the FabricVRF entry exists and
+			// add network subnets to EVPN export filter + cluster VRFImport.
 			if vrfName != "" && vrfSpec != nil {
-				if _, exists := contrib.FabricVRFs[vrfName]; !exists {
-					contrib.FabricVRFs[vrfName] = buildFabricVRF(vrfSpec)
+				fvrf, exists := contrib.FabricVRFs[vrfName]
+				if !exists {
+					fvrf = buildFabricVRF(vrfSpec)
 				}
+				fvrf = addNetworkToFabricVRF(fvrf, net)
+				contrib.FabricVRFs[vrfName] = fvrf
 			}
 		}
 	}
@@ -201,11 +206,22 @@ func (b *L2ABuilder) routeTarget(net *resolver.ResolvedNetwork, vrfSpec *nc.VRFS
 	return ""
 }
 
-// buildFabricVRF creates a minimal FabricVRF entry for a resolved VRF.
+// buildFabricVRF creates a FabricVRF entry for a resolved VRF.
+// Includes the cluster VRFImport required for fabric-to-cluster routing.
 func buildFabricVRF(vrfSpec *nc.VRFSpec) networkv1alpha1.FabricVRF {
 	fvrf := networkv1alpha1.FabricVRF{
 		EVPNExportFilter: &networkv1alpha1.Filter{
-			DefaultAction: networkv1alpha1.Action{Type: networkv1alpha1.Accept},
+			DefaultAction: networkv1alpha1.Action{Type: networkv1alpha1.Reject},
+		},
+		VRF: networkv1alpha1.VRF{
+			VRFImports: []networkv1alpha1.VRFImport{
+				{
+					FromVRF: "cluster",
+					Filter: networkv1alpha1.Filter{
+						DefaultAction: networkv1alpha1.Action{Type: networkv1alpha1.Reject},
+					},
+				},
+			},
 		},
 	}
 
@@ -219,6 +235,82 @@ func buildFabricVRF(vrfSpec *nc.VRFSpec) networkv1alpha1.FabricVRF {
 	}
 
 	return fvrf
+}
+
+// addNetworkToFabricVRF adds a Network's CIDRs to the FabricVRF's EVPN export filter
+// and cluster VRFImport filter. This ensures subnets are exported via EVPN and
+// imported from the cluster VRF into the fabric VRF.
+func addNetworkToFabricVRF(fvrf networkv1alpha1.FabricVRF, net *resolver.ResolvedNetwork) networkv1alpha1.FabricVRF {
+	items := networkCIDRFilterItems(net)
+	if len(items) == 0 {
+		return fvrf
+	}
+
+	// Add to EVPN export filter.
+	if fvrf.EVPNExportFilter == nil {
+		fvrf.EVPNExportFilter = &networkv1alpha1.Filter{
+			DefaultAction: networkv1alpha1.Action{Type: networkv1alpha1.Reject},
+		}
+	}
+	fvrf.EVPNExportFilter.Items = append(fvrf.EVPNExportFilter.Items, items...)
+
+	// Add to cluster VRFImport filter (first import is always "cluster").
+	if len(fvrf.VRFImports) > 0 {
+		fvrf.VRFImports[0].Filter.Items = append(fvrf.VRFImports[0].Filter.Items, items...)
+	}
+
+	return fvrf
+}
+
+// networkCIDRFilterItems creates FilterItems for a Network's IPv4 and IPv6 CIDRs.
+func networkCIDRFilterItems(net *resolver.ResolvedNetwork) []networkv1alpha1.FilterItem {
+	var items []networkv1alpha1.FilterItem
+	if net.Spec.IPv4 != nil && net.Spec.IPv4.CIDR != "" {
+		le := 32
+		items = append(items, networkv1alpha1.FilterItem{
+			Action: networkv1alpha1.Action{Type: networkv1alpha1.Accept},
+			Matcher: networkv1alpha1.Matcher{
+				Prefix: &networkv1alpha1.PrefixMatcher{
+					Prefix: net.Spec.IPv4.CIDR,
+					Le:     &le,
+				},
+			},
+		})
+	}
+	if net.Spec.IPv6 != nil && net.Spec.IPv6.CIDR != "" {
+		le := 128
+		items = append(items, networkv1alpha1.FilterItem{
+			Action: networkv1alpha1.Action{Type: networkv1alpha1.Accept},
+			Matcher: networkv1alpha1.Matcher{
+				Prefix: &networkv1alpha1.PrefixMatcher{
+					Prefix: net.Spec.IPv6.CIDR,
+					Le:     &le,
+				},
+			},
+		})
+	}
+	return items
+}
+
+// addressFilterItems creates FilterItems for a list of CIDR addresses.
+func addressFilterItems(addresses []string) []networkv1alpha1.FilterItem {
+	var items []networkv1alpha1.FilterItem
+	for _, addr := range addresses {
+		le := 32
+		if strings.Contains(addr, ":") {
+			le = 128
+		}
+		items = append(items, networkv1alpha1.FilterItem{
+			Action: networkv1alpha1.Action{Type: networkv1alpha1.Accept},
+			Matcher: networkv1alpha1.Matcher{
+				Prefix: &networkv1alpha1.PrefixMatcher{
+					Prefix: addr,
+					Le:     &le,
+				},
+			},
+		})
+	}
+	return items
 }
 
 // matchNodes returns nodes matching a label selector. If selector is nil, all nodes match.
