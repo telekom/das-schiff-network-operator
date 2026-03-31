@@ -1,5 +1,4 @@
 # Layer2Attachments for VLAN 501 and 502 (same m2m VRF) for cross-VLAN routing
----
 apiVersion: network-connector.sylvaproject.org/v1alpha1
 kind: Layer2Attachment
 metadata:

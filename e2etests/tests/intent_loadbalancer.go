@@ -3,6 +3,7 @@ package tests
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -12,6 +13,9 @@ import (
 )
 
 // Intent-based LoadBalancer Service (Tier 2).
+// Validates that the intent CRD pipeline does not break LB functionality.
+// Uses CurlFromCluster2Pod (DCGW) to verify VIP reachability, matching
+// the existing LB test pattern.
 var _ = Describe("Intent LoadBalancer Service", Label("intent", "lb"), func() {
 	var (
 		f   *framework.Framework
@@ -36,20 +40,18 @@ var _ = Describe("Intent LoadBalancer Service", Label("intent", "lb"), func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(f.ApplyManifest(ctx, lbManifest)).To(Succeed())
 
+		By("Applying MetalLB m2m pool configuration")
+		metallb, err := readTestdata("lb-service/metallb.yaml")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(f.ApplyManifest(ctx, metallb)).To(Succeed())
+
 		By("Applying intent LB app manifests (Deployment, Service)")
 		app, err := readTestdata("intent/lb/app.yaml")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(f.ApplyManifestInNamespace(ctx, app, ns)).To(Succeed())
-
-		By("Applying macvlan NAD for VLAN 501")
-		nad501, err := readTestdata("l2-connectivity/nad.yaml")
-		Expect(err).NotTo(HaveOccurred())
-		Expect(f.ApplyManifestInNamespace(ctx, nad501, ns)).To(Succeed())
 	})
 
 	AfterEach(func() {
-		_ = f.DeletePod(ctx, ns, "macvlan-intent-lb")
-
 		app, _ := readTestdata("intent/lb/app.yaml")
 		_ = f.DeleteManifestInNamespace(ctx, app, ns)
 
@@ -58,7 +60,7 @@ var _ = Describe("Intent LoadBalancer Service", Label("intent", "lb"), func() {
 	})
 
 	Context("m2m VRF LB via Inbound CRD", func() {
-		It("should be reachable via LoadBalancer VIP from a macvlan pod", func() {
+		It("should be reachable via LoadBalancer VIP from DCGW", func() {
 			cfg := f.Config
 
 			By("Waiting for intent-lb-app pods to be ready")
@@ -91,35 +93,26 @@ var _ = Describe("Intent LoadBalancer Service", Label("intent", "lb"), func() {
 					return err
 				}
 				for _, ingress := range svc.Status.LoadBalancer.Ingress {
-					if ingress.IP != "" {
+					if ingress.IP != "" && !strings.Contains(ingress.IP, ":") {
 						lbIPv4 = ingress.IP
 					}
 				}
 				if lbIPv4 == "" {
-					return fmt.Errorf("LB IP not ready yet (v4=%q)", lbIPv4)
+					return fmt.Errorf("LB IPv4 not ready yet")
 				}
 				return nil
 			}).WithTimeout(2 * time.Minute).WithPolling(5 * time.Second).Should(Succeed())
 
-			By("Creating macvlan-intent-lb on worker-1 (VLAN 501, m2m)")
-			Expect(f.CreateTestPod(ctx, ns, "macvlan-intent-lb", cfg.WorkerNode1, map[string]string{
-				"k8s.v1.cni.cncf.io/networks": fmt.Sprintf(
-					`[{"name": "macvlan-vlan501", "ips": ["%s/24"]}]`,
-					cfg.Macvlan02IPv4),
-			})).To(Succeed())
+			By("Waiting for route convergence")
+			time.Sleep(15 * time.Second)
 
-			Expect(f.WaitForPodReady(ctx, ns, "macvlan-intent-lb", cfg.PodReadyTimeout)).To(Succeed())
-
-			By("Waiting for BGP route propagation")
-			time.Sleep(10 * time.Second)
-
-			By(fmt.Sprintf("Verifying macvlan pod can curl LB VIP %s (IPv4)", lbIPv4))
+			By(fmt.Sprintf("Verifying m2mgw can curl LB VIP %s (IPv4)", lbIPv4))
 			Eventually(func() string {
-				code, _ := f.CurlFromPod(ctx, ns, "macvlan-intent-lb",
+				code, _ := f.CurlFromCluster2Pod(ctx, "e2e-gateways", "m2m-gateway",
 					fmt.Sprintf("http://%s:80", lbIPv4))
 				return code
 			}).WithTimeout(cfg.BGPTimeout).WithPolling(5 * time.Second).Should(
-				Equal("200"), "Expected HTTP 200 from intent LB VIP IPv4")
+				Equal("200"), "Expected HTTP 200 from intent LB VIP via m2mgw")
 		})
 	})
 })

@@ -1,4 +1,3 @@
----
 apiVersion: network-connector.sylvaproject.org/v1alpha1
 kind: Outbound
 metadata:

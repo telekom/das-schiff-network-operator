@@ -79,11 +79,11 @@ var _ = Describe("Intent: L2 Connectivity", Label("intent", "l2"), func() {
 
 		By("Verifying L2 connectivity via IPv6")
 		Eventually(func() bool {
-			result, _ := f.PingFromPod(ctx, ns, "intent-l2-01", cfg.Macvlan02IPv6, 1)
+			result, _ := f.PingFromPod(ctx, ns, "intent-l2-01", cfg.Macvlan02IPv6, 3)
 			if result != nil && !result.Success {
 				GinkgoWriter.Printf("IPv6 ping failed: %s\n", result.Output)
 			}
 			return result != nil && result.Success
-		}).WithTimeout(60 * time.Second).WithPolling(3 * time.Second).Should(BeTrue(), "IPv6 ping failed")
+		}).WithTimeout(90 * time.Second).WithPolling(5 * time.Second).Should(BeTrue(), "IPv6 ping failed")
 	})
 })

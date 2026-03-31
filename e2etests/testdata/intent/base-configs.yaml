@@ -1,6 +1,5 @@
 # Base VRFs, Networks, and Destinations for E2E intent tests.
 # These mirror the existing e2e network-operator-configs.yaml but using intent CRDs.
----
 apiVersion: network-connector.sylvaproject.org/v1alpha1
 kind: VRF
 metadata:

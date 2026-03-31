@@ -1,5 +1,4 @@
 # Layer2Attachments in DIFFERENT VRFs (m2m and c2m) for isolation test
----
 apiVersion: network-connector.sylvaproject.org/v1alpha1
 kind: Layer2Attachment
 metadata:

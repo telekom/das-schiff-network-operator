@@ -1,0 +1,30 @@
+# Intent egress: Coil Egress + test pod
+# Namespace is set by ApplyManifestInNamespace, so annotations use
+# the target namespace (e2e-test-intent-egress).
+apiVersion: coil.cybozu.com/v2
+kind: Egress
+metadata:
+  name: m2m-intent-egress
+spec:
+  destinations:
+    - 10.102.0.0/24
+    - fda5:25c1:193c::/64
+  replicas: 1
+  template:
+    metadata:
+      annotations:
+        cni.projectcalico.org/ipv4pools: '["m2m-egress-v4"]'
+        cni.projectcalico.org/ipv6pools: '["m2m-egress-v6"]'
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: egress-intent-01
+  annotations:
+    egress.coil.cybozu.com/e2e-test-intent-egress: m2m-intent-egress
+spec:
+  containers:
+    - name: tester
+      image: busybox:1.37
+      command: ["sleep", "infinity"]
+  restartPolicy: Never
