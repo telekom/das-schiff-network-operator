@@ -1,0 +1,16 @@
+---
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Inbound
+metadata:
+  name: ib-lb
+  namespace: default
+spec:
+  networkRef: "net-vlan501"
+  destinations:
+    matchLabels:
+      type: gateway
+  addresses:
+    ipv4:
+      - "10.250.4.20/32"
+  advertisement:
+    type: bgp

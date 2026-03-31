@@ -1,0 +1,33 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: intent-lb-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: intent-lb-app
+  template:
+    metadata:
+      labels:
+        app: intent-lb-app
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:alpine
+          ports:
+            - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: intent-lb-svc
+spec:
+  type: LoadBalancer
+  loadBalancerIP: "10.250.4.20"
+  selector:
+    app: intent-lb-app
+  ports:
+    - port: 80
+      targetPort: 80

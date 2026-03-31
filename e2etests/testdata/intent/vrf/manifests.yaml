@@ -1,0 +1,23 @@
+# Layer2Attachments in DIFFERENT VRFs (m2m and c2m) for isolation test
+---
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Layer2Attachment
+metadata:
+  name: l2a-vrf-vlan501
+  namespace: default
+spec:
+  networkRef: "net-vlan501"
+  destinations:
+    matchLabels:
+      type: gateway
+---
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Layer2Attachment
+metadata:
+  name: l2a-vrf-vlan503
+  namespace: default
+spec:
+  networkRef: "net-vlan503"
+  destinations:
+    matchLabels:
+      type: gateway-c2m

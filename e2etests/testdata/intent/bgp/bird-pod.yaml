@@ -1,0 +1,81 @@
+# Bird BGP speaker pod for intent-based BGP E2E test.
+# Peers with CRA-FRR on VLAN 501 (m2m VRF) as AS 65100,
+# announces loopback routes 10.250.3.1/32 and fd75:2d70:f7f7::1/128.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bird-config-bgpaas
+data:
+  bird.conf: |
+    log syslog all;
+
+    router id 10.250.0.50;
+
+    protocol direct {
+      ipv4;
+      ipv6;
+    }
+
+    protocol device {
+      scan time 10;
+    }
+
+    protocol kernel {
+      ipv4 {
+        import all;
+        export where proto = "rr_v4";
+      };
+      learn;
+      merge paths on;
+    }
+
+    protocol kernel {
+      ipv6 {
+        import all;
+        export where proto = "rr_v6";
+      };
+      learn;
+      merge paths on;
+    }
+
+    protocol bgp rr_v4 {
+      local as 65100;
+      neighbor 10.250.0.1 as 64497;
+
+      ipv4 {
+        import all;
+        export where net ~ [ 10.250.3.1/32 ];
+        next hop self;
+      };
+    }
+
+    protocol bgp rr_v6 {
+      local as 65100;
+      neighbor fd94:685b:30cf:501::1 as 64497;
+
+      ipv6 {
+        import all;
+        export where net ~ [ fd75:2d70:f7f7::1/128 ];
+        next hop self;
+      };
+    }
+---
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: macvlan-intent-bgp
+spec:
+  config: |
+    {
+      "cniVersion": "0.3.1",
+      "type": "macvlan",
+      "master": "vlan.501",
+      "mode": "bridge",
+      "ipam": {
+        "type": "static",
+        "routes": [
+          {"dst": "10.250.0.0/16", "gw": "10.250.0.1"},
+          {"dst": "fd94:685b:30cf::/48", "gw": "fd94:685b:30cf:501::1"}
+        ]
+      }
+    }

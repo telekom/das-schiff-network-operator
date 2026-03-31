@@ -1,0 +1,23 @@
+# Layer2Attachments for VLAN 501 and 502 (same m2m VRF) for cross-VLAN routing
+---
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Layer2Attachment
+metadata:
+  name: l2a-l3-vlan501
+  namespace: default
+spec:
+  networkRef: "net-vlan501"
+  destinations:
+    matchLabels:
+      type: gateway
+---
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Layer2Attachment
+metadata:
+  name: l2a-l3-vlan502
+  namespace: default
+spec:
+  networkRef: "net-vlan502"
+  destinations:
+    matchLabels:
+      type: gateway

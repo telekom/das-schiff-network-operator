@@ -1,0 +1,14 @@
+---
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Outbound
+metadata:
+  name: ob-egress
+  namespace: default
+spec:
+  networkRef: "net-vlan501"
+  destinations:
+    matchLabels:
+      type: gateway
+  addresses:
+    ipv4:
+      - "10.250.4.30/32"

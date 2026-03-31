@@ -1,0 +1,40 @@
+---
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Layer2Attachment
+metadata:
+  name: l2a-bgp
+  namespace: default
+spec:
+  networkRef: "net-vlan501"
+  destinations:
+    matchLabels:
+      type: gateway
+---
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Inbound
+metadata:
+  name: ib-bgp
+  namespace: default
+spec:
+  networkRef: "net-vlan501"
+  destinations:
+    matchLabels:
+      type: gateway
+  addresses:
+    ipv4:
+      - "10.250.0.50/32"
+  advertisement:
+    type: bgp
+---
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: BGPPeering
+metadata:
+  name: bgpp-e2e
+  namespace: default
+spec:
+  mode: listenRange
+  ref:
+    attachmentRef: "l2a-bgp"
+    inboundRefs:
+      - "ib-bgp"
+  workloadAS: 65100
