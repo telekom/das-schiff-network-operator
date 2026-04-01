@@ -19,6 +19,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -53,6 +54,7 @@ var (
 	nlManager      *nl.Manager
 	neighborSyncer *neighborsync.NeighborSync
 	baseConfig     *config.BaseConfig
+	applyMu        sync.Mutex // serializes applyConfig to prevent concurrent FRR/netlink races
 )
 
 // sanitizeLog removes newlines and carriage returns from log messages
@@ -430,15 +432,10 @@ func reconcileLayer3(cfg nl.NetlinkConfiguration) error {
 		}
 	}
 
-	if len(vrfsToDelete) > 0 {
-		err := reloadFRR()
-		if err != nil {
-			return fmt.Errorf("error reloading FRR: %w", err)
-		}
-	}
-
-	time.Sleep(defaultSleep)
-
+	// Create VRFs and L3 VNI bridges BEFORE FRR reload.
+	// FRR derives EVPN Router-MAC from bridge hardware addresses. If FRR is
+	// reloaded while bridges do not yet exist it records 00:00:00:00:00:00
+	// as the RMAC, which breaks IPv6 VXLAN forwarding permanently.
 	if err := createVRFs(cfg); err != nil {
 		return fmt.Errorf("error creating VRFs: %w", err)
 	}
@@ -466,6 +463,11 @@ func applyConfig(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+
+	// Serialize config applications — concurrent requests race on FRR/netlink state.
+	applyMu.Lock()
+	defer applyMu.Unlock()
+
 	// Parse Body into NetlinkConfiguration
 	var craConfiguration cra.Configuration
 	body, err := io.ReadAll(r.Body)
@@ -483,7 +485,7 @@ func applyConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Write FRR config
+	// Write FRR config (do NOT reload yet — bridges must exist first)
 	file, err := os.OpenFile(frrConfigPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600) //nolint:mnd
 	if err != nil {
 		log.Println("Failed to open FRR config file", err)
@@ -498,14 +500,6 @@ func applyConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Reload FRR
-	err = reloadFRR()
-	if err != nil {
-		log.Println("Failed to reload FRR", err)
-		http.Error(w, fmt.Sprintf("Failed to reload FRR: %v", err), http.StatusInternalServerError)
-		return
-	}
-
 	// Delete Layer2
 	err = deleteLayer2(craConfiguration.NetlinkConfiguration)
 	if err != nil {
@@ -514,13 +508,30 @@ func applyConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Reconcile Layer3
+	// Reconcile Layer3 — creates VRF bridges before FRR sees the config
 	err = reconcileLayer3(craConfiguration.NetlinkConfiguration)
 	if err != nil {
 		log.Println("Failed to reconcile Layer3", err)
 		http.Error(w, fmt.Sprintf("Failed to reconcile Layer3: %v", err), http.StatusInternalServerError)
 		return
 	}
+
+	// Let zebra process netlink events for newly created bridges before
+	// reloading FRR config. Without this delay, FRR may not yet see the
+	// bridge hardware addresses and will record zero EVPN Router-MACs.
+	time.Sleep(defaultSleep)
+
+	// Reload FRR AFTER L3 bridges exist so FRR derives correct EVPN Router-MACs.
+	// Previously this ran before reconcileLayer3, causing FRR to record
+	// 00:00:00:00:00:00 as RMAC for VNIs whose bridges had not been created yet.
+	err = reloadFRR()
+	if err != nil {
+		log.Println("Failed to reload FRR", err)
+		http.Error(w, fmt.Sprintf("Failed to reload FRR: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	time.Sleep(defaultSleep)
 
 	// Recreate Layer2
 	err = createLayer2(craConfiguration.NetlinkConfiguration)
