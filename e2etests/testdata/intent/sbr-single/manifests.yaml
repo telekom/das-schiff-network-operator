@@ -1,0 +1,28 @@
+# Single-VRF SBR test: Outbound with destination selector targeting m2m only.
+# Should produce LocalVRF "s-m2m" + ClusterVRF PolicyRoute (src-only).
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Layer2Attachment
+metadata:
+  name: l2a-sbr-single
+  namespace: default
+spec:
+  networkRef: "net-vlan501"
+  destinations:
+    matchLabels:
+      type: gateway
+---
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Outbound
+metadata:
+  name: ob-sbr-single
+  namespace: default
+spec:
+  networkRef: "net-vlan501"
+  destinations:
+    matchLabels:
+      type: gateway
+  addresses:
+    ipv4:
+      - "10.250.4.40/32"
+    ipv6:
+      - "fd94:685b:30cf:501::40/128"

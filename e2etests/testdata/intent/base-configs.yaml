@@ -83,3 +83,4 @@ spec:
   vrfRef: "vrf-c2m"
   prefixes:
     - "10.103.0.0/16"
+    - "fda5:25c1:193d::/48"

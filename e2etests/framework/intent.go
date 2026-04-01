@@ -280,6 +280,106 @@ func NNCHasNoStaticRoutes(nnc *unstructured.Unstructured, vrfName string) bool {
 	return len(routes) == 0
 }
 
+// NNCHasLocalVRF checks if a NNC has a localVRF entry with the given name.
+func NNCHasLocalVRF(nnc *unstructured.Unstructured, vrfName string) bool {
+	vrf, found, err := unstructured.NestedMap(nnc.Object, "spec", "localVRFs", vrfName)
+	return err == nil && found && vrf != nil
+}
+
+// NNCLocalVRFNames returns all localVRF names from the NNC spec.
+func NNCLocalVRFNames(nnc *unstructured.Unstructured) []string {
+	vrfs, found, err := unstructured.NestedMap(nnc.Object, "spec", "localVRFs")
+	if err != nil || !found {
+		return nil
+	}
+	names := make([]string, 0, len(vrfs))
+	for k := range vrfs {
+		names = append(names, k)
+	}
+	return names
+}
+
+// NNCLocalVRFStaticRouteTarget checks if a localVRF has a static route for the given
+// prefix pointing to the expected target VRF via nextHop.vrf.
+func NNCLocalVRFStaticRouteTarget(nnc *unstructured.Unstructured, localVRFName, prefix, targetVRF string) bool {
+	routes, found, err := unstructured.NestedSlice(nnc.Object, "spec", "localVRFs", localVRFName, "staticRoutes")
+	if err != nil || !found {
+		return false
+	}
+	for _, r := range routes {
+		m, ok := r.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if m["prefix"] != prefix {
+			continue
+		}
+		nh, ok := m["nextHop"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if nh["vrf"] == targetVRF {
+			return true
+		}
+	}
+	return false
+}
+
+// NNCClusterVRFHasPolicyRoute checks if the clusterVRF has a policy route with
+// the given source prefix pointing to the given target VRF.
+func NNCClusterVRFHasPolicyRoute(nnc *unstructured.Unstructured, srcPrefix, targetVRF string) bool {
+	routes, found, err := unstructured.NestedSlice(nnc.Object, "spec", "clusterVRF", "policyRoutes")
+	if err != nil || !found {
+		return false
+	}
+	for _, r := range routes {
+		m, ok := r.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		tm, ok := m["trafficMatch"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		nh, ok := m["nextHop"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if tm["srcPrefix"] == srcPrefix && nh["vrf"] == targetVRF {
+			return true
+		}
+	}
+	return false
+}
+
+// NNCClusterVRFPolicyRouteDstPrefix returns the dstPrefix from a policy route matching
+// the given srcPrefix (nil if no dstPrefix or not found).
+func NNCClusterVRFPolicyRouteDstPrefix(nnc *unstructured.Unstructured, srcPrefix string) *string {
+	routes, found, err := unstructured.NestedSlice(nnc.Object, "spec", "clusterVRF", "policyRoutes")
+	if err != nil || !found {
+		return nil
+	}
+	for _, r := range routes {
+		m, ok := r.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		tm, ok := m["trafficMatch"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if tm["srcPrefix"] != srcPrefix {
+			continue
+		}
+		dst, ok := tm["dstPrefix"].(string)
+		if ok {
+			return &dst
+		}
+		return nil
+	}
+	return nil
+}
+
 // NNCFabricVRFImportHasPrefix checks that a VRFImport filter contains a specific prefix.
 func NNCFabricVRFImportHasPrefix(nnc *unstructured.Unstructured, vrfName, fromVRF, prefix string) bool {
 	imports, found, err := unstructured.NestedSlice(nnc.Object, "spec", "fabricVRFs", vrfName, "vrfImports")
