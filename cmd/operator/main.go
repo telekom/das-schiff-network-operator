@@ -301,23 +301,9 @@ func setupIntentReconciler(mgr manager.Manager, apiTimeout time.Duration, cfg *o
 		return fmt.Errorf("unable to create intent controller: %w", err)
 	}
 
-	// Platform controllers (MetalLB, Coil, InterfaceConfig).
-	if err = (&platform.MetalLBReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-		Log:    mgr.GetLogger().WithName("MetalLBReconciler"),
-	}).SetupWithManager(mgr); err != nil {
-		return fmt.Errorf("unable to create MetalLB controller: %w", err)
-	}
-
-	if err = (&platform.CoilReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-		Log:    mgr.GetLogger().WithName("CoilReconciler"),
-	}).SetupWithManager(mgr); err != nil {
-		return fmt.Errorf("unable to create Coil controller: %w", err)
-	}
-
+	// InterfaceConfig controller stays in the operator — it produces
+	// NodeNetplanConfig resources which are our own CRD, not opinionated.
+	// MetalLB and Coil controllers are separate binaries (cmd/platform-*/).
 	if err = (&platform.InterfaceConfigReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
