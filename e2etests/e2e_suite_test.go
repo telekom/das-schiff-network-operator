@@ -53,6 +53,9 @@ var _ = BeforeSuite(func() {
 
 		By("Intent mode: waiting for intent reconciler to produce NNCs")
 		Expect(f.WaitForIntentNNCs(context.Background(), 60*time.Second)).To(Succeed())
+
+		By("Intent mode: waiting for NNCs to contain both m2m and c2m VRFs (CRA convergence)")
+		Expect(f.WaitForNNCVRFs(context.Background(), cfg.WorkerNode1, []string{"m2m", "c2m"}, 120*time.Second)).To(Succeed())
 	} else {
 		By("Applying network-operator CRs (VRFs + L2 networks)")
 		nwopConfigs, err := config.ReadManifest("network-operator-configs.yaml")

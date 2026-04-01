@@ -45,6 +45,29 @@ var _ = Describe("Intent: Destination Gateway Validation", Label("intent", "dest
 		nad503, err := readTestdata("l2-connectivity/nad-c2m.yaml")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(f.ApplyManifestInNamespace(ctx, nad503, ns)).To(Succeed())
+
+		By("Waiting for c2m VRF to appear in NNC (intent reconciler convergence)")
+		cfg := f.Config
+		Eventually(func() bool {
+			nnc, err := f.GetNNC(ctx, cfg.WorkerNode1)
+			if err != nil {
+				return false
+			}
+			return framework.NNCHasFabricVRF(nnc, "c2m")
+		}).WithTimeout(cfg.BGPTimeout).WithPolling(5 * time.Second).Should(BeTrue(),
+			"c2m VRF did not appear in NNC within timeout")
+
+		By("Waiting for NNCs to be provisioned by CRA-FRR")
+		for _, node := range []string{cfg.WorkerNode1, cfg.WorkerNode2} {
+			Eventually(func() bool {
+				nnc, err := f.GetNNC(ctx, node)
+				if err != nil {
+					return false
+				}
+				return framework.NNCIsProvisioned(nnc)
+			}).WithTimeout(cfg.BGPTimeout).WithPolling(5 * time.Second).Should(BeTrue(),
+				fmt.Sprintf("NNC for %s not provisioned", node))
+		}
 	})
 
 	AfterEach(func() {
@@ -68,30 +91,33 @@ var _ = Describe("Intent: Destination Gateway Validation", Label("intent", "dest
 			Expect(f.WaitForPodReady(ctx, ns, "dest-gw-m2m", cfg.PodReadyTimeout)).To(Succeed())
 
 			By("Verifying pod → m2m-gateway (IPv4)")
-			result, err := f.PingFromPod(ctx, ns, "dest-gw-m2m", cfg.M2MGWIPv4, 5)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(result.Success).To(BeTrue(), "Pod → m2mgw IPv4 failed: %s", result.Output)
+			Eventually(func() bool {
+				r, _ := f.PingFromPod(ctx, ns, "dest-gw-m2m", cfg.M2MGWIPv4, 3)
+				return r != nil && r.Success
+			}).WithTimeout(cfg.BGPTimeout).WithPolling(5*time.Second).Should(BeTrue(),
+				"Pod → m2mgw IPv4 failed")
 
 			By("Verifying pod → m2m-gateway (IPv6)")
 			Eventually(func() bool {
 				r, _ := f.PingFromPod(ctx, ns, "dest-gw-m2m", cfg.M2MGWIPv6, 3)
 				return r != nil && r.Success
-			}).WithTimeout(60*time.Second).WithPolling(5*time.Second).Should(BeTrue(),
+			}).WithTimeout(cfg.BGPTimeout).WithPolling(5*time.Second).Should(BeTrue(),
 				"Pod → m2mgw IPv6 failed")
 
 			By("Verifying m2m-gateway → pod (IPv4, reverse direction)")
-			result, err = f.PingFromCluster2Pod(ctx, "e2e-gateways", "m2m-gateway",
-				cfg.Macvlan01IPv4, 5)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(result.Success).To(BeTrue(),
-				"m2mgw → pod IPv4 failed (destination prefixes may not produce correct static routes): %s", result.Output)
+			Eventually(func() bool {
+				r, _ := f.PingFromCluster2Pod(ctx, "e2e-gateways", "m2m-gateway",
+					cfg.Macvlan01IPv4, 3)
+				return r != nil && r.Success
+			}).WithTimeout(cfg.BGPTimeout).WithPolling(5*time.Second).Should(BeTrue(),
+				"m2mgw → pod IPv4 failed (destination prefixes may not produce correct static routes)")
 
 			By("Verifying m2m-gateway → pod (IPv6, reverse direction)")
 			Eventually(func() bool {
 				r, _ := f.PingFromCluster2Pod(ctx, "e2e-gateways", "m2m-gateway",
 					cfg.Macvlan01IPv6, 3)
 				return r != nil && r.Success
-			}).WithTimeout(60*time.Second).WithPolling(5*time.Second).Should(BeTrue(),
+			}).WithTimeout(cfg.BGPTimeout).WithPolling(5*time.Second).Should(BeTrue(),
 				"m2mgw → pod IPv6 failed")
 		})
 	})
@@ -110,30 +136,33 @@ var _ = Describe("Intent: Destination Gateway Validation", Label("intent", "dest
 			Expect(f.WaitForPodReady(ctx, ns, "dest-gw-c2m", cfg.PodReadyTimeout)).To(Succeed())
 
 			By("Verifying pod → c2m-gateway (IPv4)")
-			result, err := f.PingFromPod(ctx, ns, "dest-gw-c2m", cfg.C2MGWIPv4, 5)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(result.Success).To(BeTrue(), "Pod → c2mgw IPv4 failed: %s", result.Output)
+			Eventually(func() bool {
+				r, _ := f.PingFromPod(ctx, ns, "dest-gw-c2m", cfg.C2MGWIPv4, 3)
+				return r != nil && r.Success
+			}).WithTimeout(cfg.BGPTimeout).WithPolling(5*time.Second).Should(BeTrue(),
+				"Pod → c2mgw IPv4 failed")
 
 			By("Verifying pod → c2m-gateway (IPv6)")
 			Eventually(func() bool {
 				r, _ := f.PingFromPod(ctx, ns, "dest-gw-c2m", cfg.C2MGWIPv6, 3)
 				return r != nil && r.Success
-			}).WithTimeout(60*time.Second).WithPolling(5*time.Second).Should(BeTrue(),
+			}).WithTimeout(cfg.BGPTimeout).WithPolling(5*time.Second).Should(BeTrue(),
 				"Pod → c2mgw IPv6 failed")
 
 			By("Verifying c2m-gateway → pod (IPv4, reverse direction)")
-			result, err = f.PingFromCluster2Pod(ctx, "e2e-gateways", "c2m-gateway",
-				cfg.Macvlan04IPv4, 5)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(result.Success).To(BeTrue(),
-				"c2mgw → pod IPv4 failed (c2m destination prefixes not working): %s", result.Output)
+			Eventually(func() bool {
+				r, _ := f.PingFromCluster2Pod(ctx, "e2e-gateways", "c2m-gateway",
+					cfg.Macvlan04IPv4, 3)
+				return r != nil && r.Success
+			}).WithTimeout(cfg.BGPTimeout).WithPolling(5*time.Second).Should(BeTrue(),
+				"c2mgw → pod IPv4 failed (c2m destination prefixes not working)")
 
 			By("Verifying c2m-gateway → pod (IPv6, reverse direction)")
 			Eventually(func() bool {
 				r, _ := f.PingFromCluster2Pod(ctx, "e2e-gateways", "c2m-gateway",
 					cfg.Macvlan04IPv6, 3)
 				return r != nil && r.Success
-			}).WithTimeout(60*time.Second).WithPolling(5*time.Second).Should(BeTrue(),
+			}).WithTimeout(cfg.BGPTimeout).WithPolling(5*time.Second).Should(BeTrue(),
 				"c2mgw → pod IPv6 failed")
 		})
 	})

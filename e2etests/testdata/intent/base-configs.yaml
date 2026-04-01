@@ -29,9 +29,9 @@ spec:
   vlan: 501
   vni: 4000002
   ipv4:
-    cidr: "10.250.0.0/24"
+    cidr: "10.250.0.1/24"
   ipv6:
-    cidr: "fd94:685b:30cf:501::/64"
+    cidr: "fd94:685b:30cf:501::1/64"
 ---
 apiVersion: network-connector.sylvaproject.org/v1alpha1
 kind: Network
@@ -42,9 +42,9 @@ spec:
   vlan: 502
   vni: 4000003
   ipv4:
-    cidr: "10.250.1.0/24"
+    cidr: "10.250.1.1/24"
   ipv6:
-    cidr: "fd94:685b:30cf:502::/64"
+    cidr: "fd94:685b:30cf:502::1/64"
 ---
 apiVersion: network-connector.sylvaproject.org/v1alpha1
 kind: Network
@@ -55,9 +55,9 @@ spec:
   vlan: 503
   vni: 4000004
   ipv4:
-    cidr: "10.250.2.0/24"
+    cidr: "10.250.30.1/24"
   ipv6:
-    cidr: "fd94:685b:30cf:503::/64"
+    cidr: "fd94:685b:30cf:503::1/64"
 ---
 apiVersion: network-connector.sylvaproject.org/v1alpha1
 kind: Destination
@@ -84,3 +84,28 @@ spec:
   prefixes:
     - "10.103.0.0/16"
     - "fda5:25c1:193d::/48"
+---
+# Base L2As: ensure both VRFs have at least one L2A so the intent reconciler
+# creates fabricVRF entries from the start.  Tests that need specific L2A
+# combinations apply their own on top of these.
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Layer2Attachment
+metadata:
+  name: l2a-base-vlan501
+  namespace: default
+spec:
+  networkRef: "net-vlan501"
+  destinations:
+    matchLabels:
+      type: gateway
+---
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Layer2Attachment
+metadata:
+  name: l2a-base-vlan503
+  namespace: default
+spec:
+  networkRef: "net-vlan503"
+  destinations:
+    matchLabels:
+      type: gateway-c2m

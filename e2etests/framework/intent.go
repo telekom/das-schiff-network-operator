@@ -243,6 +243,25 @@ func NNCHasLayer2(nnc *unstructured.Unstructured, l2Key string) bool {
 	return err == nil && found && l2 != nil
 }
 
+// WaitForNNCVRFs waits until the NNC for the given node contains all specified fabricVRFs.
+func (f *Framework) WaitForNNCVRFs(ctx context.Context, nodeName string, vrfNames []string, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	return Poll(ctx, 5*time.Second, func() (bool, error) {
+		nnc, err := f.GetNNC(ctx, nodeName)
+		if err != nil {
+			return false, nil
+		}
+		for _, name := range vrfNames {
+			if !NNCHasFabricVRF(nnc, name) {
+				return false, nil
+			}
+		}
+		return true, nil
+	})
+}
+
 // NNCFabricVRFHasVRFImport checks if a FabricVRF has a VRFImport from the given source VRF.
 func NNCFabricVRFHasVRFImport(nnc *unstructured.Unstructured, vrfName, fromVRF string) bool {
 	imports, found, err := unstructured.NestedSlice(nnc.Object, "spec", "fabricVRFs", vrfName, "vrfImports")

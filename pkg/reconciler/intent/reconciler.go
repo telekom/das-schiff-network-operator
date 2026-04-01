@@ -306,6 +306,22 @@ const originsAnnotation = "network-connector.sylvaproject.org/origins"
 // applyNNC creates or updates a NodeNetworkConfig for a node.
 // It skips nodes that are currently provisioning (rolling update gate).
 func (r *Reconciler) applyNNC(ctx context.Context, node *corev1.Node, spec *networkv1alpha1.NodeNetworkConfigSpec, origins map[string]string) error {
+	const maxRetries = 5
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		err := r.tryApplyNNC(ctx, node, spec, origins)
+		if err == nil {
+			return nil
+		}
+		if !apierrors.IsConflict(err) {
+			return err
+		}
+		r.logger.Info("NNC update conflict, retrying", "node", node.Name, "attempt", attempt+1)
+		time.Sleep(200 * time.Millisecond)
+	}
+	return fmt.Errorf("NNC update for node %s failed after %d retries due to conflicts", node.Name, maxRetries)
+}
+
+func (r *Reconciler) tryApplyNNC(ctx context.Context, node *corev1.Node, spec *networkv1alpha1.NodeNetworkConfigSpec, origins map[string]string) error {
 	existing := &networkv1alpha1.NodeNetworkConfig{}
 	err := r.client.Get(ctx, client.ObjectKey{Name: node.Name}, existing)
 

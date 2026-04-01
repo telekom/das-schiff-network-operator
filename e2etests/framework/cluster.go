@@ -76,6 +76,24 @@ func (f *Framework) InitCluster2() error {
 
 // CreateNamespace creates a namespace and tracks it for cleanup.
 func (f *Framework) CreateNamespace(ctx context.Context, name string) error {
+	// If namespace is terminating from a previous test, wait for it to be gone.
+	for i := 0; i < 60; i++ {
+		existing := &corev1.Namespace{}
+		if err := f.Client.Get(ctx, types.NamespacedName{Name: name}, existing); err != nil {
+			if apierrors.IsNotFound(err) {
+				break
+			}
+			return err
+		}
+		if existing.Status.Phase == corev1.NamespaceTerminating {
+			time.Sleep(1 * time.Second)
+			continue
+		}
+		// Namespace exists and is active — reuse it.
+		f.testNamespaces = append(f.testNamespaces, name)
+		return nil
+	}
+
 	ns := &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{Name: name},
 	}

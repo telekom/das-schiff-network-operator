@@ -19,10 +19,12 @@ package status
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/go-logr/logr"
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/resolver"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -40,6 +42,32 @@ func NewUpdater(c client.Client, logger logr.Logger) *Updater {
 		client: c,
 		logger: logger.WithName("status-updater"),
 	}
+}
+
+// statusUpdateWithRetry performs a status update with conflict retry.
+// On conflict, it re-fetches the object and reapplies the update function.
+func (u *Updater) statusUpdateWithRetry(ctx context.Context, obj client.Object, applyStatus func(obj client.Object)) error {
+	const maxRetries = 3
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		if attempt > 0 {
+			// Re-fetch to get current resourceVersion.
+			fresh := obj.DeepCopyObject().(client.Object)
+			if err := u.client.Get(ctx, client.ObjectKeyFromObject(obj), fresh); err != nil {
+				return err
+			}
+			obj = fresh
+		}
+		applyStatus(obj)
+		err := u.client.Status().Update(ctx, obj)
+		if err == nil {
+			return nil
+		}
+		if !apierrors.IsConflict(err) {
+			return err
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return fmt.Errorf("status update conflict after %d retries for %s/%s", maxRetries, obj.GetObjectKind().GroupVersionKind().Kind, obj.GetName())
 }
 
 // UpdateConditions sets Ready/Resolved conditions on intent CRDs.
@@ -77,10 +105,12 @@ func (u *Updater) UpdateConditions(ctx context.Context, fetched *resolver.Fetche
 func (u *Updater) updateVRFConditions(ctx context.Context, fetched *resolver.FetchedResources) error {
 	for i := range fetched.VRFs {
 		vrf := &fetched.VRFs[i]
-		setCondition(&vrf.Status.Conditions, nc.ConditionTypeResolved, metav1.ConditionTrue, "AllResolved", "VRF has no external references to resolve", vrf.Generation)
-		setCondition(&vrf.Status.Conditions, nc.ConditionTypeReady, metav1.ConditionTrue, "Ready", "VRF is ready", vrf.Generation)
-		vrf.Status.ObservedGeneration = vrf.Generation
-		if err := u.client.Status().Update(ctx, vrf); err != nil {
+		if err := u.statusUpdateWithRetry(ctx, vrf, func(obj client.Object) {
+			v := obj.(*nc.VRF)
+			setCondition(&v.Status.Conditions, nc.ConditionTypeResolved, metav1.ConditionTrue, "AllResolved", "VRF has no external references to resolve", v.Generation)
+			setCondition(&v.Status.Conditions, nc.ConditionTypeReady, metav1.ConditionTrue, "Ready", "VRF is ready", v.Generation)
+			v.Status.ObservedGeneration = v.Generation
+		}); err != nil {
 			return fmt.Errorf("updating VRF %q status: %w", vrf.Name, err)
 		}
 	}
@@ -90,10 +120,12 @@ func (u *Updater) updateVRFConditions(ctx context.Context, fetched *resolver.Fet
 func (u *Updater) updateNetworkConditions(ctx context.Context, fetched *resolver.FetchedResources) error {
 	for i := range fetched.Networks {
 		net := &fetched.Networks[i]
-		setCondition(&net.Status.Conditions, nc.ConditionTypeResolved, metav1.ConditionTrue, "AllResolved", "Network has no external references to resolve", net.Generation)
-		setCondition(&net.Status.Conditions, nc.ConditionTypeReady, metav1.ConditionTrue, "Ready", "Network is ready", net.Generation)
-		net.Status.ObservedGeneration = net.Generation
-		if err := u.client.Status().Update(ctx, net); err != nil {
+		if err := u.statusUpdateWithRetry(ctx, net, func(obj client.Object) {
+			n := obj.(*nc.Network)
+			setCondition(&n.Status.Conditions, nc.ConditionTypeResolved, metav1.ConditionTrue, "AllResolved", "Network has no external references to resolve", n.Generation)
+			setCondition(&n.Status.Conditions, nc.ConditionTypeReady, metav1.ConditionTrue, "Ready", "Network is ready", n.Generation)
+			n.Status.ObservedGeneration = n.Generation
+		}); err != nil {
 			return fmt.Errorf("updating Network %q status: %w", net.Name, err)
 		}
 	}
@@ -115,15 +147,18 @@ func (u *Updater) updateDestinationConditions(ctx context.Context, fetched *reso
 			}
 		}
 
-		setCondition(&dest.Status.Conditions, nc.ConditionTypeResolved, resolvedStatus, resolvedReason, resolvedMsg, dest.Generation)
 		readyStatus := resolvedStatus
 		readyMsg := "Destination is ready"
 		if resolvedStatus != metav1.ConditionTrue {
 			readyMsg = resolvedMsg
 		}
-		setCondition(&dest.Status.Conditions, nc.ConditionTypeReady, readyStatus, resolvedReason, readyMsg, dest.Generation)
-		dest.Status.ObservedGeneration = dest.Generation
-		if err := u.client.Status().Update(ctx, dest); err != nil {
+
+		if err := u.statusUpdateWithRetry(ctx, dest, func(obj client.Object) {
+			d := obj.(*nc.Destination)
+			setCondition(&d.Status.Conditions, nc.ConditionTypeResolved, resolvedStatus, resolvedReason, resolvedMsg, d.Generation)
+			setCondition(&d.Status.Conditions, nc.ConditionTypeReady, readyStatus, resolvedReason, readyMsg, d.Generation)
+			d.Status.ObservedGeneration = d.Generation
+		}); err != nil {
 			return fmt.Errorf("updating Destination %q status: %w", dest.Name, err)
 		}
 	}
@@ -135,15 +170,18 @@ func (u *Updater) updateInboundConditions(ctx context.Context, fetched *resolver
 		inb := &fetched.Inbounds[i]
 		resolvedStatus, resolvedReason, resolvedMsg := checkNetworkRef(inb.Spec.NetworkRef, resolved)
 
-		setCondition(&inb.Status.Conditions, nc.ConditionTypeResolved, resolvedStatus, resolvedReason, resolvedMsg, inb.Generation)
 		readyStatus := resolvedStatus
 		readyMsg := "Inbound is ready"
 		if resolvedStatus != metav1.ConditionTrue {
 			readyMsg = resolvedMsg
 		}
-		setCondition(&inb.Status.Conditions, nc.ConditionTypeReady, readyStatus, resolvedReason, readyMsg, inb.Generation)
-		inb.Status.ObservedGeneration = inb.Generation
-		if err := u.client.Status().Update(ctx, inb); err != nil {
+
+		if err := u.statusUpdateWithRetry(ctx, inb, func(obj client.Object) {
+			in := obj.(*nc.Inbound)
+			setCondition(&in.Status.Conditions, nc.ConditionTypeResolved, resolvedStatus, resolvedReason, resolvedMsg, in.Generation)
+			setCondition(&in.Status.Conditions, nc.ConditionTypeReady, readyStatus, resolvedReason, readyMsg, in.Generation)
+			in.Status.ObservedGeneration = in.Generation
+		}); err != nil {
 			return fmt.Errorf("updating Inbound %q status: %w", inb.Name, err)
 		}
 	}
@@ -155,15 +193,18 @@ func (u *Updater) updateOutboundConditions(ctx context.Context, fetched *resolve
 		outb := &fetched.Outbounds[i]
 		resolvedStatus, resolvedReason, resolvedMsg := checkNetworkRef(outb.Spec.NetworkRef, resolved)
 
-		setCondition(&outb.Status.Conditions, nc.ConditionTypeResolved, resolvedStatus, resolvedReason, resolvedMsg, outb.Generation)
 		readyStatus := resolvedStatus
 		readyMsg := "Outbound is ready"
 		if resolvedStatus != metav1.ConditionTrue {
 			readyMsg = resolvedMsg
 		}
-		setCondition(&outb.Status.Conditions, nc.ConditionTypeReady, readyStatus, resolvedReason, readyMsg, outb.Generation)
-		outb.Status.ObservedGeneration = outb.Generation
-		if err := u.client.Status().Update(ctx, outb); err != nil {
+
+		if err := u.statusUpdateWithRetry(ctx, outb, func(obj client.Object) {
+			o := obj.(*nc.Outbound)
+			setCondition(&o.Status.Conditions, nc.ConditionTypeResolved, resolvedStatus, resolvedReason, resolvedMsg, o.Generation)
+			setCondition(&o.Status.Conditions, nc.ConditionTypeReady, readyStatus, resolvedReason, readyMsg, o.Generation)
+			o.Status.ObservedGeneration = o.Generation
+		}); err != nil {
 			return fmt.Errorf("updating Outbound %q status: %w", outb.Name, err)
 		}
 	}
@@ -175,15 +216,18 @@ func (u *Updater) updateLayer2AttachmentConditions(ctx context.Context, fetched 
 		l2a := &fetched.Layer2Attachments[i]
 		resolvedStatus, resolvedReason, resolvedMsg := checkNetworkRef(l2a.Spec.NetworkRef, resolved)
 
-		setCondition(&l2a.Status.Conditions, nc.ConditionTypeResolved, resolvedStatus, resolvedReason, resolvedMsg, l2a.Generation)
 		readyStatus := resolvedStatus
 		readyMsg := "Layer2Attachment is ready"
 		if resolvedStatus != metav1.ConditionTrue {
 			readyMsg = resolvedMsg
 		}
-		setCondition(&l2a.Status.Conditions, nc.ConditionTypeReady, readyStatus, resolvedReason, readyMsg, l2a.Generation)
-		l2a.Status.ObservedGeneration = l2a.Generation
-		if err := u.client.Status().Update(ctx, l2a); err != nil {
+
+		if err := u.statusUpdateWithRetry(ctx, l2a, func(obj client.Object) {
+			la := obj.(*nc.Layer2Attachment)
+			setCondition(&la.Status.Conditions, nc.ConditionTypeResolved, resolvedStatus, resolvedReason, resolvedMsg, la.Generation)
+			setCondition(&la.Status.Conditions, nc.ConditionTypeReady, readyStatus, resolvedReason, readyMsg, la.Generation)
+			la.Status.ObservedGeneration = la.Generation
+		}); err != nil {
 			return fmt.Errorf("updating Layer2Attachment %q status: %w", l2a.Name, err)
 		}
 	}
@@ -195,15 +239,18 @@ func (u *Updater) updatePodNetworkConditions(ctx context.Context, fetched *resol
 		pn := &fetched.PodNetworks[i]
 		resolvedStatus, resolvedReason, resolvedMsg := checkNetworkRef(pn.Spec.NetworkRef, resolved)
 
-		setCondition(&pn.Status.Conditions, nc.ConditionTypeResolved, resolvedStatus, resolvedReason, resolvedMsg, pn.Generation)
 		readyStatus := resolvedStatus
 		readyMsg := "PodNetwork is ready"
 		if resolvedStatus != metav1.ConditionTrue {
 			readyMsg = resolvedMsg
 		}
-		setCondition(&pn.Status.Conditions, nc.ConditionTypeReady, readyStatus, resolvedReason, readyMsg, pn.Generation)
-		pn.Status.ObservedGeneration = pn.Generation
-		if err := u.client.Status().Update(ctx, pn); err != nil {
+
+		if err := u.statusUpdateWithRetry(ctx, pn, func(obj client.Object) {
+			p := obj.(*nc.PodNetwork)
+			setCondition(&p.Status.Conditions, nc.ConditionTypeResolved, resolvedStatus, resolvedReason, resolvedMsg, p.Generation)
+			setCondition(&p.Status.Conditions, nc.ConditionTypeReady, readyStatus, resolvedReason, readyMsg, p.Generation)
+			p.Status.ObservedGeneration = p.Generation
+		}); err != nil {
 			return fmt.Errorf("updating PodNetwork %q status: %w", pn.Name, err)
 		}
 	}
@@ -213,10 +260,12 @@ func (u *Updater) updatePodNetworkConditions(ctx context.Context, fetched *resol
 func (u *Updater) updateCollectorConditions(ctx context.Context, fetched *resolver.FetchedResources) error {
 	for i := range fetched.Collectors {
 		col := &fetched.Collectors[i]
-		setCondition(&col.Status.Conditions, nc.ConditionTypeResolved, metav1.ConditionTrue, "AllResolved", "Collector references resolved", col.Generation)
-		setCondition(&col.Status.Conditions, nc.ConditionTypeReady, metav1.ConditionTrue, "Ready", "Collector is ready", col.Generation)
-		col.Status.ObservedGeneration = col.Generation
-		if err := u.client.Status().Update(ctx, col); err != nil {
+		if err := u.statusUpdateWithRetry(ctx, col, func(obj client.Object) {
+			c := obj.(*nc.Collector)
+			setCondition(&c.Status.Conditions, nc.ConditionTypeResolved, metav1.ConditionTrue, "AllResolved", "Collector references resolved", c.Generation)
+			setCondition(&c.Status.Conditions, nc.ConditionTypeReady, metav1.ConditionTrue, "Ready", "Collector is ready", c.Generation)
+			c.Status.ObservedGeneration = c.Generation
+		}); err != nil {
 			return fmt.Errorf("updating Collector %q status: %w", col.Name, err)
 		}
 	}
@@ -241,15 +290,18 @@ func (u *Updater) updateTrafficMirrorConditions(ctx context.Context, fetched *re
 			resolvedMsg = fmt.Sprintf("referenced Collector %q not found", tm.Spec.Collector)
 		}
 
-		setCondition(&tm.Status.Conditions, nc.ConditionTypeResolved, resolvedStatus, resolvedReason, resolvedMsg, tm.Generation)
 		readyStatus := resolvedStatus
 		readyMsg := "TrafficMirror is ready"
 		if resolvedStatus != metav1.ConditionTrue {
 			readyMsg = resolvedMsg
 		}
-		setCondition(&tm.Status.Conditions, nc.ConditionTypeReady, readyStatus, resolvedReason, readyMsg, tm.Generation)
-		tm.Status.ObservedGeneration = tm.Generation
-		if err := u.client.Status().Update(ctx, tm); err != nil {
+
+		if err := u.statusUpdateWithRetry(ctx, tm, func(obj client.Object) {
+			t := obj.(*nc.TrafficMirror)
+			setCondition(&t.Status.Conditions, nc.ConditionTypeResolved, resolvedStatus, resolvedReason, resolvedMsg, t.Generation)
+			setCondition(&t.Status.Conditions, nc.ConditionTypeReady, readyStatus, resolvedReason, readyMsg, t.Generation)
+			t.Status.ObservedGeneration = t.Generation
+		}); err != nil {
 			return fmt.Errorf("updating TrafficMirror %q status: %w", tm.Name, err)
 		}
 	}
