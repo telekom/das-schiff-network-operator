@@ -18,10 +18,13 @@ package platform
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/go-logr/logr"
+	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
+	"github.com/telekom/das-schiff-network-operator/pkg/network/netplan"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -40,10 +43,6 @@ const (
 
 // InterfaceConfigReconciler watches InterfaceConfig and Node resources,
 // producing per-node NodeNetplanConfig resources for the netplan agent.
-//
-// This is a scaffold — NodeNetplanConfig types already exist in the operator
-// (api/v1alpha1). The reconciler creates per-node configs matching
-// the InterfaceConfig's nodeSelector.
 type InterfaceConfigReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
@@ -54,6 +53,7 @@ type InterfaceConfigReconciler struct {
 //+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=interfaceconfigs/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=interfaceconfigs/finalizers,verbs=update
 //+kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch
+//+kubebuilder:rbac:groups=network.t-caas.telekom.com,resources=nodenetplanconfigs,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile handles InterfaceConfig create/update/delete events.
 func (r *InterfaceConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -78,15 +78,11 @@ func (r *InterfaceConfigReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		}
 	}
 
-	// List matching nodes.
 	nodes, err := r.matchingNodes(ctx, ifconfig)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("error matching nodes: %w", err)
 	}
 
-	// For each matching node, create/update a ConfigMap placeholder
-	// for the netplan config. When NodeNetplanConfig types are wired,
-	// this will produce proper typed resources.
 	for i := range nodes {
 		if err := r.reconcileNodeConfig(ctx, ifconfig, &nodes[i], logger); err != nil {
 			logger.Error(err, "error reconciling node config", "node", nodes[i].Name)
@@ -121,37 +117,49 @@ func (r *InterfaceConfigReconciler) matchingNodes(ctx context.Context, ifconfig 
 	return matched, nil
 }
 
+// reconcileNodeConfig creates or updates a NodeNetplanConfig for a specific node.
+// The agent watches NodeNetplanConfigs by node name and applies the desired state.
 func (r *InterfaceConfigReconciler) reconcileNodeConfig(ctx context.Context, ifconfig *nc.InterfaceConfig, node *corev1.Node, logger logr.Logger) error {
-	cmName := fmt.Sprintf("netplan-%s-%s", ifconfig.Name, node.Name)
+	ethernets, err := buildNetplanEthernets(ifconfig.Spec.Ethernets)
+	if err != nil {
+		return fmt.Errorf("building netplan ethernets: %w", err)
+	}
+	bonds, err := buildNetplanBonds(ifconfig.Spec.Bonds)
+	if err != nil {
+		return fmt.Errorf("building netplan bonds: %w", err)
+	}
 
-	cm := &corev1.ConfigMap{
+	desired := &networkv1alpha1.NodeNetplanConfig{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      cmName,
-			Namespace: ifconfig.Namespace,
+			Name: node.Name,
 			Labels: map[string]string{
 				"app.kubernetes.io/managed-by":           "network-connector",
 				"network-connector.sylvaproject.org/type": "nodenetplanconfig",
-				"network-connector.sylvaproject.org/node": node.Name,
 			},
 		},
-		Data: map[string]string{
-			"interfaceConfig": ifconfig.Name,
-			"node":            node.Name,
+		Spec: networkv1alpha1.NodeNetplanConfigSpec{
+			DesiredState: netplan.State{
+				Network: netplan.NetworkState{
+					Version:   2,
+					Ethernets: ethernets,
+					Bonds:     bonds,
+				},
+			},
 		},
 	}
 
-	existing := &corev1.ConfigMap{}
-	err := r.Get(ctx, client.ObjectKeyFromObject(cm), existing)
+	existing := &networkv1alpha1.NodeNetplanConfig{}
+	err = r.Get(ctx, client.ObjectKeyFromObject(desired), existing)
 	if apierrors.IsNotFound(err) {
-		logger.Info("creating NodeNetplanConfig placeholder", "name", cmName, "node", node.Name)
-		return r.Create(ctx, cm)
+		logger.Info("creating NodeNetplanConfig", "node", node.Name)
+		return r.Create(ctx, desired)
 	}
 	if err != nil {
-		return fmt.Errorf("error getting ConfigMap: %w", err)
+		return fmt.Errorf("error getting NodeNetplanConfig: %w", err)
 	}
 
-	existing.Data = cm.Data
-	existing.Labels = cm.Labels
+	existing.Spec = desired.Spec
+	existing.Labels = desired.Labels
 	return r.Update(ctx, existing)
 }
 
@@ -160,27 +168,94 @@ func (r *InterfaceConfigReconciler) handleDeletion(ctx context.Context, ifconfig
 		return ctrl.Result{}, nil
 	}
 
-	// Delete all placeholder ConfigMaps for this InterfaceConfig.
-	cmList := &corev1.ConfigMapList{}
-	if err := r.List(ctx, cmList, client.InNamespace(ifconfig.Namespace),
-		client.MatchingLabels{
-			"network-connector.sylvaproject.org/type": "nodenetplanconfig",
-			"app.kubernetes.io/managed-by":            "network-connector",
-		}); err != nil {
-		return ctrl.Result{}, fmt.Errorf("error listing ConfigMaps: %w", err)
+	// Delete NodeNetplanConfigs for matching nodes.
+	nodes, err := r.matchingNodes(ctx, ifconfig)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("error matching nodes: %w", err)
 	}
 
-	for i := range cmList.Items {
-		if cmList.Items[i].Data["interfaceConfig"] == ifconfig.Name {
-			if err := r.Delete(ctx, &cmList.Items[i]); err != nil && !apierrors.IsNotFound(err) {
-				return ctrl.Result{}, fmt.Errorf("error deleting ConfigMap %s: %w", cmList.Items[i].Name, err)
-			}
-			logger.Info("deleted NodeNetplanConfig placeholder", "name", cmList.Items[i].Name)
+	for i := range nodes {
+		nnpc := &networkv1alpha1.NodeNetplanConfig{
+			ObjectMeta: metav1.ObjectMeta{Name: nodes[i].Name},
 		}
+		if err := r.Delete(ctx, nnpc); err != nil && !apierrors.IsNotFound(err) {
+			return ctrl.Result{}, fmt.Errorf("error deleting NodeNetplanConfig %s: %w", nodes[i].Name, err)
+		}
+		logger.Info("deleted NodeNetplanConfig", "node", nodes[i].Name)
 	}
 
 	controllerutil.RemoveFinalizer(ifconfig, ifconfigFinalizer)
 	return ctrl.Result{}, r.Update(ctx, ifconfig)
+}
+
+// buildNetplanEthernets converts InterfaceConfig ethernets to netplan Device map.
+func buildNetplanEthernets(ethernets map[string]nc.EthernetConfig) (map[string]netplan.Device, error) {
+	if len(ethernets) == 0 {
+		return nil, nil
+	}
+
+	result := make(map[string]netplan.Device, len(ethernets))
+	for name, cfg := range ethernets {
+		dev := make(map[string]interface{})
+		if cfg.Mtu != nil {
+			dev["mtu"] = *cfg.Mtu
+		}
+		if cfg.VirtualFunctionCount != nil {
+			dev["virtual-function-count"] = *cfg.VirtualFunctionCount
+		}
+
+		raw, err := json.Marshal(dev)
+		if err != nil {
+			return nil, fmt.Errorf("marshaling ethernet %q: %w", name, err)
+		}
+		result[name] = netplan.Device{Raw: raw}
+	}
+	return result, nil
+}
+
+// buildNetplanBonds converts InterfaceConfig bonds to netplan Device map.
+func buildNetplanBonds(bonds map[string]nc.BondConfig) (map[string]netplan.Device, error) {
+	if len(bonds) == 0 {
+		return nil, nil
+	}
+
+	result := make(map[string]netplan.Device, len(bonds))
+	for name, cfg := range bonds {
+		dev := map[string]interface{}{
+			"interfaces": cfg.Interfaces,
+		}
+		if cfg.Mtu != nil {
+			dev["mtu"] = *cfg.Mtu
+		}
+		if cfg.Parameters != nil {
+			params := map[string]interface{}{
+				"mode": cfg.Parameters.Mode,
+			}
+			if cfg.Parameters.MiiMonitorInterval != nil {
+				params["mii-monitor-interval"] = *cfg.Parameters.MiiMonitorInterval
+			}
+			if cfg.Parameters.LacpRate != nil {
+				params["lacp-rate"] = *cfg.Parameters.LacpRate
+			}
+			if cfg.Parameters.UpDelay != nil {
+				params["up-delay"] = *cfg.Parameters.UpDelay
+			}
+			if cfg.Parameters.DownDelay != nil {
+				params["down-delay"] = *cfg.Parameters.DownDelay
+			}
+			if cfg.Parameters.TransmitHashPolicy != nil {
+				params["transmit-hash-policy"] = *cfg.Parameters.TransmitHashPolicy
+			}
+			dev["parameters"] = params
+		}
+
+		raw, err := json.Marshal(dev)
+		if err != nil {
+			return nil, fmt.Errorf("marshaling bond %q: %w", name, err)
+		}
+		result[name] = netplan.Device{Raw: raw}
+	}
+	return result, nil
 }
 
 // SetupWithManager registers the InterfaceConfig controller.
