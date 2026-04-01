@@ -7,6 +7,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/telekom/das-schiff-network-operator/e2etests/framework"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
 // Intent Destination NNC Validation — checks that Destinations produce correct
@@ -38,18 +39,20 @@ var _ = Describe("Intent: Destination NNC Validation", Label("intent", "destinat
 			Expect(err).NotTo(HaveOccurred())
 			Expect(f.ApplyManifest(ctx, manifest)).To(Succeed())
 
-			By("Waiting for NNC to reconcile")
-			time.Sleep(15 * time.Second)
+			By("Waiting for NNC to be provisioned")
+			var nnc *unstructured.Unstructured
+			Eventually(func() bool {
+				var getErr error
+				nnc, getErr = f.GetNNC(ctx, cfg.WorkerNode1)
+				return getErr == nil && framework.NNCIsProvisioned(nnc) && framework.NNCHasFabricVRF(nnc, "m2m")
+			}).WithTimeout(60*time.Second).WithPolling(5*time.Second).Should(BeTrue(),
+				"NNC should be provisioned with fabricVRF 'm2m'")
 
-			By("Checking NNC on worker-1 has FabricVRF for m2m")
-			nnc, err := f.GetNNC(ctx, cfg.WorkerNode1)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(framework.NNCHasFabricVRF(nnc, "vrf-m2m")).To(BeTrue(),
-				"NNC should have fabricVRF 'm2m' from dest-dcgw → vrf-m2m")
-
-			By("Verifying FabricVRF has VRFImport from cluster VRF")
-			Expect(framework.NNCFabricVRFHasVRFImport(nnc, "vrf-m2m", "cluster")).To(BeTrue(),
+			By("Verifying FabricVRF has VRFImport from cluster VRF (not static routes)")
+			Expect(framework.NNCFabricVRFHasVRFImport(nnc, "m2m", "cluster")).To(BeTrue(),
 				"FabricVRF m2m should import from cluster VRF")
+			Expect(framework.NNCHasNoStaticRoutes(nnc, "m2m")).To(BeTrue(),
+				"FabricVRF m2m should have no static routes — routing uses vrfImport from cluster")
 
 			By("Checking NNC has Layer2 entry")
 			Expect(framework.NNCHasLayer2(nnc, "501")).To(BeTrue(),
@@ -68,14 +71,12 @@ var _ = Describe("Intent: Destination NNC Validation", Label("intent", "destinat
 			Expect(err).NotTo(HaveOccurred())
 			Expect(f.ApplyManifest(ctx, manifest)).To(Succeed())
 
-			By("Waiting for NNC to reconcile")
-			time.Sleep(15 * time.Second)
-
-			By("Checking NNC on worker-1 has FabricVRF for m2m")
-			nnc, err := f.GetNNC(ctx, cfg.WorkerNode1)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(framework.NNCHasFabricVRF(nnc, "vrf-m2m")).To(BeTrue(),
-				"NNC should have fabricVRF 'm2m' with merged routes from both destinations")
+			By("Waiting for NNC to be provisioned with FabricVRF")
+			Eventually(func() bool {
+				nnc, getErr := f.GetNNC(ctx, cfg.WorkerNode1)
+				return getErr == nil && framework.NNCIsProvisioned(nnc) && framework.NNCHasFabricVRF(nnc, "m2m")
+			}).WithTimeout(60*time.Second).WithPolling(5*time.Second).Should(BeTrue(),
+				"NNC should be provisioned with fabricVRF 'm2m' with merged routes")
 
 			_ = f.DeleteManifest(ctx, manifest)
 		})
@@ -89,8 +90,13 @@ var _ = Describe("Intent: Destination NNC Validation", Label("intent", "destinat
 			cleanupManifest, err := readTestdata("intent/destination-lifecycle/manifests.yaml")
 			Expect(err).NotTo(HaveOccurred())
 			_ = f.DeleteManifest(ctx, cleanupManifest)
-			// Wait for any prior cleanup to settle.
-			time.Sleep(10 * time.Second)
+
+			By("Waiting for NNC to be provisioned without VLAN 504")
+			Eventually(func() bool {
+				nnc, getErr := f.GetNNC(ctx, cfg.WorkerNode1)
+				return getErr == nil && framework.NNCIsProvisioned(nnc) && !framework.NNCHasLayer2(nnc, "504")
+			}).WithTimeout(60*time.Second).WithPolling(5*time.Second).Should(BeTrue(),
+				"NNC should be provisioned and Layer2 504 should be absent before test")
 
 			By("Capturing NNC state before adding L2A")
 			nncBefore, err := f.GetNNC(ctx, cfg.WorkerNode1)
@@ -100,19 +106,18 @@ var _ = Describe("Intent: Destination NNC Validation", Label("intent", "destinat
 			By("Applying lifecycle L2A for VLAN 504 (m2m VRF)")
 			Expect(f.ApplyManifest(ctx, cleanupManifest)).To(Succeed())
 
-			By("Waiting for NNC revision to change (L2A added)")
+			By("Waiting for NNC to be provisioned with new revision")
 			Eventually(func() bool {
-				nnc, err := f.GetNNC(ctx, cfg.WorkerNode1)
-				if err != nil {
-					return false
-				}
-				return framework.NNCRevision(nnc) != revBefore
+				nnc, getErr := f.GetNNC(ctx, cfg.WorkerNode1)
+				return getErr == nil && framework.NNCIsProvisioned(nnc) && framework.NNCRevision(nnc) != revBefore
 			}).WithTimeout(60*time.Second).WithPolling(5*time.Second).Should(BeTrue(),
-				"NNC revision should change after L2A creation")
+				"NNC should be provisioned with changed revision after L2A creation")
 
-			By("Capturing post-creation state")
+			By("Verifying Layer2 504 exists and NNC is provisioned")
 			nncAfterCreate, err := f.GetNNC(ctx, cfg.WorkerNode1)
 			Expect(err).NotTo(HaveOccurred())
+			Expect(framework.NNCIsProvisioned(nncAfterCreate)).To(BeTrue(),
+				"NNC must be provisioned (CRA accepted it)")
 			Expect(framework.NNCHasLayer2(nncAfterCreate, "504")).To(BeTrue(),
 				"NNC should have Layer2 '504' after L2A creation")
 			revAfterCreate := framework.NNCRevision(nncAfterCreate)
@@ -120,15 +125,12 @@ var _ = Describe("Intent: Destination NNC Validation", Label("intent", "destinat
 			By("Deleting the lifecycle L2A")
 			Expect(f.DeleteManifest(ctx, cleanupManifest)).To(Succeed())
 
-			By("Waiting for NNC revision to change again (L2A removed)")
+			By("Waiting for NNC to be provisioned with updated revision")
 			Eventually(func() bool {
-				nnc, err := f.GetNNC(ctx, cfg.WorkerNode1)
-				if err != nil {
-					return false
-				}
-				return framework.NNCRevision(nnc) != revAfterCreate
+				nnc, getErr := f.GetNNC(ctx, cfg.WorkerNode1)
+				return getErr == nil && framework.NNCIsProvisioned(nnc) && framework.NNCRevision(nnc) != revAfterCreate
 			}).WithTimeout(60*time.Second).WithPolling(5*time.Second).Should(BeTrue(),
-				"NNC revision should change after L2A deletion")
+				"NNC should be provisioned with changed revision after L2A deletion")
 
 			By("Verifying Layer2 504 is removed from NNC")
 			nncAfterDelete, err := f.GetNNC(ctx, cfg.WorkerNode1)
@@ -147,16 +149,15 @@ var _ = Describe("Intent: Destination NNC Validation", Label("intent", "destinat
 			Expect(err).NotTo(HaveOccurred())
 			Expect(f.ApplyManifest(ctx, manifest)).To(Succeed())
 
-			By("Waiting for NNC to reconcile")
-			time.Sleep(15 * time.Second)
-
-			By("Checking NNC has both FabricVRFs")
-			nnc, err := f.GetNNC(ctx, cfg.WorkerNode1)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(framework.NNCHasFabricVRF(nnc, "vrf-m2m")).To(BeTrue(),
-				"NNC should have fabricVRF 'm2m'")
-			Expect(framework.NNCHasFabricVRF(nnc, "vrf-c2m")).To(BeTrue(),
-				"NNC should have fabricVRF 'c2m'")
+			By("Waiting for NNC to be provisioned with both VRFs")
+			var nnc *unstructured.Unstructured
+			Eventually(func() bool {
+				var getErr error
+				nnc, getErr = f.GetNNC(ctx, cfg.WorkerNode1)
+				return getErr == nil && framework.NNCIsProvisioned(nnc) &&
+					framework.NNCHasFabricVRF(nnc, "m2m") && framework.NNCHasFabricVRF(nnc, "c2m")
+			}).WithTimeout(60*time.Second).WithPolling(5*time.Second).Should(BeTrue(),
+				"NNC should be provisioned with both fabricVRFs")
 
 			By("Verifying both Layer2s present")
 			Expect(framework.NNCHasLayer2(nnc, "501")).To(BeTrue())
@@ -175,16 +176,15 @@ var _ = Describe("Intent: Destination NNC Validation", Label("intent", "destinat
 			Expect(err).NotTo(HaveOccurred())
 			Expect(f.ApplyManifest(ctx, manifest)).To(Succeed())
 
-			By("Waiting for NNC to reconcile")
-			time.Sleep(15 * time.Second)
-
-			By("Checking NNC has FabricVRF for both m2m and c2m")
-			nnc, err := f.GetNNC(ctx, cfg.WorkerNode1)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(framework.NNCHasFabricVRF(nnc, "vrf-m2m")).To(BeTrue(),
-				"NNC should have fabricVRF 'vrf-m2m' from dest-dcgw")
-			Expect(framework.NNCHasFabricVRF(nnc, "vrf-c2m")).To(BeTrue(),
-				"NNC should have fabricVRF 'vrf-c2m' from dest-dcgw-c2m + dest-extra-c2m")
+			By("Waiting for NNC to be provisioned with both VRFs")
+			var nnc *unstructured.Unstructured
+			Eventually(func() bool {
+				var getErr error
+				nnc, getErr = f.GetNNC(ctx, cfg.WorkerNode1)
+				return getErr == nil && framework.NNCIsProvisioned(nnc) &&
+					framework.NNCHasFabricVRF(nnc, "m2m") && framework.NNCHasFabricVRF(nnc, "c2m")
+			}).WithTimeout(60*time.Second).WithPolling(5*time.Second).Should(BeTrue(),
+				"NNC should be provisioned with both FabricVRFs")
 
 			By("Verifying Layer2 entries for both VLANs")
 			Expect(framework.NNCHasLayer2(nnc, "501")).To(BeTrue(),
@@ -192,11 +192,15 @@ var _ = Describe("Intent: Destination NNC Validation", Label("intent", "destinat
 			Expect(framework.NNCHasLayer2(nnc, "503")).To(BeTrue(),
 				"NNC should have Layer2 for VLAN 503 (c2m)")
 
-			By("Verifying VRFImport from cluster exists in both VRFs")
-			Expect(framework.NNCFabricVRFHasVRFImport(nnc, "vrf-m2m", "cluster")).To(BeTrue(),
-				"FabricVRF vrf-m2m should import from cluster VRF")
-			Expect(framework.NNCFabricVRFHasVRFImport(nnc, "vrf-c2m", "cluster")).To(BeTrue(),
-				"FabricVRF vrf-c2m should import from cluster VRF")
+			By("Verifying VRFImport from cluster exists in both VRFs (no static routes)")
+			Expect(framework.NNCFabricVRFHasVRFImport(nnc, "m2m", "cluster")).To(BeTrue(),
+				"FabricVRF m2m should import from cluster VRF")
+			Expect(framework.NNCFabricVRFHasVRFImport(nnc, "c2m", "cluster")).To(BeTrue(),
+				"FabricVRF c2m should import from cluster VRF")
+			Expect(framework.NNCHasNoStaticRoutes(nnc, "m2m")).To(BeTrue(),
+				"FabricVRF m2m should use vrfImport, not static routes")
+			Expect(framework.NNCHasNoStaticRoutes(nnc, "c2m")).To(BeTrue(),
+				"FabricVRF c2m should use vrfImport, not static routes")
 
 			_ = f.DeleteManifest(ctx, manifest)
 		})

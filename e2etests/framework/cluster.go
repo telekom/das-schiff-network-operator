@@ -144,18 +144,26 @@ func (f *Framework) applySingleObject(ctx context.Context, yamlData []byte, ns s
 		obj.SetNamespace(ns)
 	}
 
-	// Try to get existing object first; if it exists, update it.
-	existing := obj.DeepCopy()
 	key := types.NamespacedName{
 		Name:      obj.GetName(),
 		Namespace: obj.GetNamespace(),
 	}
-	if err := f.Client.Get(ctx, key, existing); err == nil {
-		obj.SetResourceVersion(existing.GetResourceVersion())
-		return f.Client.Update(ctx, obj)
-	}
 
-	return f.Client.Create(ctx, obj)
+	// Retry on conflict (operator may update resource version concurrently).
+	for attempt := 0; attempt < 5; attempt++ {
+		existing := obj.DeepCopy()
+		if err := f.Client.Get(ctx, key, existing); err == nil {
+			obj.SetResourceVersion(existing.GetResourceVersion())
+			err = f.Client.Update(ctx, obj)
+			if apierrors.IsConflict(err) {
+				time.Sleep(500 * time.Millisecond)
+				continue
+			}
+			return err
+		}
+		return f.Client.Create(ctx, obj)
+	}
+	return fmt.Errorf("failed to apply %s/%s after retries: conflict", obj.GetKind(), obj.GetName())
 }
 
 // splitYAMLDocuments splits multi-document YAML into individual documents.
@@ -179,12 +187,14 @@ func (f *Framework) DeleteManifest(ctx context.Context, yamlData []byte) error {
 
 // DeleteManifestInNamespace deletes a YAML manifest with a namespace override.
 // If ns is non-empty, it overrides metadata.namespace on each object before deletion.
+// Deletes in reverse order to respect dependency ordering (dependents before parents).
 func (f *Framework) DeleteManifestInNamespace(ctx context.Context, yamlData []byte, ns string) error {
 	docs := splitYAMLDocuments(yamlData)
-	for _, doc := range docs {
+	// Delete in reverse order so dependents are removed before their references.
+	for i := len(docs) - 1; i >= 0; i-- {
 		obj := &unstructured.Unstructured{}
 		dec := yaml.NewDecodingSerializer(unstructured.UnstructuredJSONScheme)
-		if _, _, err := dec.Decode(doc, nil, obj); err != nil {
+		if _, _, err := dec.Decode(docs[i], nil, obj); err != nil {
 			return fmt.Errorf("decode manifest: %w", err)
 		}
 		if ns != "" {

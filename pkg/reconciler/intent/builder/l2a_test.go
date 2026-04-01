@@ -229,17 +229,17 @@ func TestL2ABuilder_WithDestinationVRF(t *testing.T) {
 	if l2.IRB == nil {
 		t.Fatal("expected IRB to be set when destinations have VRF")
 	}
-	if l2.IRB.VRF != "prod-vrf" {
-		t.Errorf("expected IRB VRF 'prod-vrf', got %q", l2.IRB.VRF)
+	if l2.IRB.VRF != "prod" {
+		t.Errorf("expected IRB VRF 'prod', got %q", l2.IRB.VRF)
 	}
 	if len(l2.IRB.IPAddresses) != 1 || l2.IRB.IPAddresses[0] != "10.100.0.0/24" {
 		t.Errorf("expected IRB IP [10.100.0.0/24], got %v", l2.IRB.IPAddresses)
 	}
 
 	// FabricVRF should have been created.
-	fvrf, ok := contrib.FabricVRFs["prod-vrf"]
+	fvrf, ok := contrib.FabricVRFs["prod"]
 	if !ok {
-		t.Fatal("expected FabricVRF 'prod-vrf'")
+		t.Fatal("expected FabricVRF 'prod'")
 	}
 	if fvrf.VNI != 5001 {
 		t.Errorf("expected FabricVRF VNI 5001, got %d", fvrf.VNI)
@@ -347,8 +347,8 @@ func TestL2ABuilder_DefaultMTU(t *testing.T) {
 	}
 
 	l2 := result["node-1"].Layer2s["10"]
-	if l2.MTU != 9000 {
-		t.Errorf("expected default MTU 9000, got %d", l2.MTU)
+	if l2.MTU != 1500 {
+		t.Errorf("expected default MTU 1500, got %d", l2.MTU)
 	}
 }
 

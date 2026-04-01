@@ -264,3 +264,58 @@ func NNCRevision(nnc *unstructured.Unstructured) string {
 	rev, _, _ := unstructured.NestedString(nnc.Object, "spec", "revision")
 	return rev
 }
+
+// NNCIsProvisioned checks if a NNC has configStatus "provisioned".
+func NNCIsProvisioned(nnc *unstructured.Unstructured) bool {
+	status, _, _ := unstructured.NestedString(nnc.Object, "status", "configStatus")
+	return status == "provisioned"
+}
+
+// NNCHasNoStaticRoutes checks that a FabricVRF has no static routes (they should use vrfImport instead).
+func NNCHasNoStaticRoutes(nnc *unstructured.Unstructured, vrfName string) bool {
+	routes, found, err := unstructured.NestedSlice(nnc.Object, "spec", "fabricVRFs", vrfName, "staticRoutes")
+	if err != nil || !found {
+		return true // no staticRoutes field at all
+	}
+	return len(routes) == 0
+}
+
+// NNCFabricVRFImportHasPrefix checks that a VRFImport filter contains a specific prefix.
+func NNCFabricVRFImportHasPrefix(nnc *unstructured.Unstructured, vrfName, fromVRF, prefix string) bool {
+	imports, found, err := unstructured.NestedSlice(nnc.Object, "spec", "fabricVRFs", vrfName, "vrfImports")
+	if err != nil || !found {
+		return false
+	}
+	for _, imp := range imports {
+		m, ok := imp.(map[string]interface{})
+		if !ok || m["fromVrf"] != fromVRF {
+			continue
+		}
+		filter, ok := m["filter"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		items, ok := filter["items"].([]interface{})
+		if !ok {
+			continue
+		}
+		for _, item := range items {
+			im, ok := item.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			matcher, ok := im["matcher"].(map[string]interface{})
+			if !ok {
+				continue
+			}
+			pfx, ok := matcher["prefix"].(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if pfx["prefix"] == prefix {
+				return true
+			}
+		}
+	}
+	return false
+}

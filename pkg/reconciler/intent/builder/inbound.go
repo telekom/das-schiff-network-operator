@@ -27,7 +27,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 )
 
-// InboundBuilder transforms Inbound intent CRDs into FabricVRF static routes and redistribute config.
+// InboundBuilder transforms Inbound intent CRDs into FabricVRF vrfImport and redistribute config.
 type InboundBuilder struct{}
 
 // NewInboundBuilder creates a new InboundBuilder.
@@ -63,16 +63,8 @@ func (b *InboundBuilder) Build(_ context.Context, data *resolver.ResolvedData) (
 			continue // no VRF plumbing requested
 		}
 
-		// Collect allocated addresses for static routes.
+		// Collect allocated addresses for EVPN export and cluster vrfImport filters.
 		addresses := b.collectAddresses(ib)
-
-		// Build static routes from explicit addresses.
-		var staticRoutes []networkv1alpha1.StaticRoute
-		for _, addr := range addresses {
-			staticRoutes = append(staticRoutes, networkv1alpha1.StaticRoute{
-				Prefix: addr,
-			})
-		}
 
 		// Build redistribute connected filter for Inbound CIDRs.
 		redistribute := b.buildRedistribute(net)
@@ -90,12 +82,13 @@ func (b *InboundBuilder) Build(_ context.Context, data *resolver.ResolvedData) (
 				fvrf = buildFabricVRF(vrfSpec)
 			}
 
-			fvrf.StaticRoutes = append(fvrf.StaticRoutes, staticRoutes...)
 			if redistribute != nil {
 				fvrf.Redistribute = mergeRedistribute(fvrf.Redistribute, redistribute)
 			}
 
-			// Add allocated addresses to EVPN export filter + cluster VRFImport.
+			// Add allocated addresses to EVPN export filter and cluster vrfImport.
+			// Routing to these IPs happens dynamically via vrfImport from cluster,
+			// NOT via static routes.
 			filterItems := addressFilterItems(addresses)
 			if fvrf.EVPNExportFilter != nil {
 				fvrf.EVPNExportFilter.Items = append(fvrf.EVPNExportFilter.Items, filterItems...)
@@ -127,7 +120,7 @@ func (b *InboundBuilder) resolveDestinationVRF(ib *nc.Inbound, data *resolver.Re
 		if selector.Matches(labels.Set(rawDest.Labels)) {
 			resolved, ok := data.Destinations[rawDest.Name]
 			if ok && resolved.VRFSpec != nil && resolved.Spec.VRFRef != nil {
-				return *resolved.Spec.VRFRef, resolved.VRFSpec, nil
+				return resolved.VRFSpec.VRF, resolved.VRFSpec, nil
 			}
 		}
 	}

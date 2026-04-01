@@ -118,7 +118,10 @@ func (b *L2ABuilder) resolveDestinationVRF(l2a *nc.Layer2Attachment, data *resol
 		if selector.Matches(labels.Set(rawDest.Labels)) {
 			resolved, ok := data.Destinations[rawDest.Name]
 			if ok && resolved.VRFSpec != nil && resolved.Spec.VRFRef != nil {
-				return *resolved.Spec.VRFRef, resolved.VRFSpec, nil
+				// Return the backbone VRF name (spec.vrf), not the CRD name.
+				// The CRA agent uses this as the FabricVRF map key to create
+				// VRF links named "s-<key>", so it must match legacy format.
+				return resolved.VRFSpec.VRF, resolved.VRFSpec, nil
 			}
 		}
 	}
@@ -190,12 +193,12 @@ func (b *L2ABuilder) vniValue(net *resolver.ResolvedNetwork) int32 {
 	return 0
 }
 
-// mtu extracts the MTU from a Layer2Attachment, defaulting to 9000.
+// mtu extracts the MTU from a Layer2Attachment, defaulting to 1500.
 func (b *L2ABuilder) mtu(l2a *nc.Layer2Attachment) uint16 {
 	if l2a.Spec.MTU != nil {
 		return uint16(*l2a.Spec.MTU)
 	}
-	return 9000
+	return 1500
 }
 
 // routeTarget derives a route target. If the VRF has one, use it; otherwise empty.

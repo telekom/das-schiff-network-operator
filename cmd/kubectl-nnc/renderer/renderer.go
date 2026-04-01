@@ -297,13 +297,26 @@ func (r *Renderer) renderVRFDetails(prefix string, vrf *networkv1alpha1.VRF, ori
 
 	if len(vrf.VRFImports) > 0 {
 		fmt.Fprintf(r.w, "%sVRFImports:\n", indent)
-		tw := tabwriter.NewWriter(r.w, 0, 2, 2, ' ', 0)
-		fmt.Fprintf(tw, "%s  FROM\tFILTER\n", indent)
 		for _, imp := range vrf.VRFImports {
-			filter := string(imp.Filter.DefaultAction.Type)
-			fmt.Fprintf(tw, "%s  %s\t%s\n", indent, imp.FromVRF, filter)
+			fmt.Fprintf(r.w, "%s  from %s (default: %s)\n", indent,
+				r.cyan(imp.FromVRF), string(imp.Filter.DefaultAction.Type))
+			if len(imp.Filter.Items) > 0 {
+				tw := tabwriter.NewWriter(r.w, 0, 2, 2, ' ', 0)
+				fmt.Fprintf(tw, "%s    ACTION\tPREFIX\n", indent)
+				for _, item := range imp.Filter.Items {
+					action := string(item.Action.Type)
+					prefix := "-"
+					if item.Matcher.Prefix != nil {
+						prefix = item.Matcher.Prefix.Prefix
+						if item.Matcher.Prefix.Le != nil {
+							prefix += fmt.Sprintf(" le %d", *item.Matcher.Prefix.Le)
+						}
+					}
+					fmt.Fprintf(tw, "%s    %s\t%s\n", indent, action, prefix)
+				}
+				tw.Flush()
+			}
 		}
-		tw.Flush()
 	}
 
 	if vrf.Redistribute != nil {

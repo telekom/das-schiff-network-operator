@@ -20,14 +20,13 @@ import (
 	"context"
 	"fmt"
 
-	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/resolver"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 )
 
-// OutboundBuilder transforms Outbound intent CRDs into FabricVRF static routes and policy routes for SNAT.
+// OutboundBuilder transforms Outbound intent CRDs into FabricVRF vrfImport and policy routes for SNAT.
 type OutboundBuilder struct{}
 
 // NewOutboundBuilder creates a new OutboundBuilder.
@@ -62,19 +61,12 @@ func (b *OutboundBuilder) Build(_ context.Context, data *resolver.ResolvedData) 
 			continue // no VRF plumbing requested
 		}
 
-		// Collect allocated addresses for static routes.
+		// Collect allocated addresses for EVPN export and cluster vrfImport filters.
 		addresses := b.collectAddresses(ob)
 
-		// Build static routes from explicit addresses.
-		var staticRoutes []networkv1alpha1.StaticRoute
-		for _, addr := range addresses {
-			staticRoutes = append(staticRoutes, networkv1alpha1.StaticRoute{
-				Prefix: addr,
-			})
-		}
-
-		// Build policy routes for SNAT from destination prefixes.
-		policyRoutes := b.buildPolicyRoutes(ob, data)
+		// Note: SNAT routing is handled by the SBR builder which creates:
+		//   ClusterVRF policyRoutes (srcPrefix→s-<vrf>) + LocalVRF static routes (→fabricVRF).
+		// The FabricVRF only needs EVPN export + vrfImport for the allocated addresses.
 
 		// Outbound applies to all nodes (no nodeSelector).
 		for _, node := range data.Nodes {
@@ -89,10 +81,9 @@ func (b *OutboundBuilder) Build(_ context.Context, data *resolver.ResolvedData) 
 				fvrf = buildFabricVRF(vrfSpec)
 			}
 
-			fvrf.StaticRoutes = append(fvrf.StaticRoutes, staticRoutes...)
-			fvrf.PolicyRoutes = append(fvrf.PolicyRoutes, policyRoutes...)
-
-			// Add allocated addresses to EVPN export filter + cluster VRFImport.
+			// Add allocated addresses to EVPN export filter and cluster vrfImport.
+			// Routing to these IPs happens dynamically via vrfImport from cluster,
+			// NOT via static routes.
 			filterItems := addressFilterItems(addresses)
 			if fvrf.EVPNExportFilter != nil {
 				fvrf.EVPNExportFilter.Items = append(fvrf.EVPNExportFilter.Items, filterItems...)
@@ -124,7 +115,7 @@ func (b *OutboundBuilder) resolveDestinationVRF(ob *nc.Outbound, data *resolver.
 		if selector.Matches(labels.Set(rawDest.Labels)) {
 			resolved, ok := data.Destinations[rawDest.Name]
 			if ok && resolved.VRFSpec != nil && resolved.Spec.VRFRef != nil {
-				return *resolved.Spec.VRFRef, resolved.VRFSpec, nil
+				return resolved.VRFSpec.VRF, resolved.VRFSpec, nil
 			}
 		}
 	}
@@ -141,38 +132,4 @@ func (b *OutboundBuilder) collectAddresses(ob *nc.Outbound) []string {
 	addrs = append(addrs, ob.Spec.Addresses.IPv4...)
 	addrs = append(addrs, ob.Spec.Addresses.IPv6...)
 	return addrs
-}
-
-// buildPolicyRoutes creates policy routes for SNAT from destination prefixes.
-func (b *OutboundBuilder) buildPolicyRoutes(ob *nc.Outbound, data *resolver.ResolvedData) []networkv1alpha1.PolicyRoute {
-	if ob.Spec.Destinations == nil {
-		return nil
-	}
-
-	selector, err := metav1.LabelSelectorAsSelector(ob.Spec.Destinations)
-	if err != nil {
-		return nil
-	}
-
-	var routes []networkv1alpha1.PolicyRoute
-	for i := range data.RawDestinations {
-		rawDest := &data.RawDestinations[i]
-		if !selector.Matches(labels.Set(rawDest.Labels)) {
-			continue
-		}
-		resolved, ok := data.Destinations[rawDest.Name]
-		if !ok {
-			continue
-		}
-		for _, prefix := range resolved.Spec.Prefixes {
-			routes = append(routes, networkv1alpha1.PolicyRoute{
-				TrafficMatch: networkv1alpha1.TrafficMatch{
-					DstPrefix: &prefix,
-				},
-				NextHop: networkv1alpha1.NextHop{},
-			})
-		}
-	}
-
-	return routes
 }
