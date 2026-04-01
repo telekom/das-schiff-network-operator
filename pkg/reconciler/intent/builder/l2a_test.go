@@ -452,3 +452,31 @@ func TestL2ABuilder_SameNetworkDifferentNodes(t *testing.T) {
 		t.Errorf("expected 2 node contributions, got %d", len(result))
 	}
 }
+
+func TestL2ABuilder_DuplicateInterfaceNameOnSameNode(t *testing.T) {
+	b := NewL2ABuilder()
+	vlan501 := int32(501)
+	vlan502 := int32(502)
+	vni501 := int32(10501)
+	vni502 := int32(10502)
+	ifName := "bond0"
+	data := &resolver.ResolvedData{
+		Nodes: []corev1.Node{{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}}},
+		Networks: map[string]*resolver.ResolvedNetwork{
+			"net-vlan501": {Name: "net-vlan501", Spec: nc.NetworkSpec{VLAN: &vlan501, VNI: &vni501, IPv4: &nc.IPNetwork{CIDR: "10.0.1.1/24"}}},
+			"net-vlan502": {Name: "net-vlan502", Spec: nc.NetworkSpec{VLAN: &vlan502, VNI: &vni502, IPv4: &nc.IPNetwork{CIDR: "10.0.2.1/24"}}},
+		},
+		Layer2Attachments: []nc.Layer2Attachment{
+			{ObjectMeta: metav1.ObjectMeta{Name: "l2a-a"}, Spec: nc.Layer2AttachmentSpec{NetworkRef: "net-vlan501", InterfaceName: &ifName}},
+			{ObjectMeta: metav1.ObjectMeta{Name: "l2a-b"}, Spec: nc.Layer2AttachmentSpec{NetworkRef: "net-vlan502", InterfaceName: &ifName}},
+		},
+	}
+
+	_, err := b.Build(context.Background(), data)
+	if err == nil {
+		t.Fatal("expected error for duplicate interface name on same node, got nil")
+	}
+	if !strings.Contains(err.Error(), "both claim interface name") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}

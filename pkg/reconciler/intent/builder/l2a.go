@@ -48,6 +48,9 @@ func (b *L2ABuilder) Build(_ context.Context, data *resolver.ResolvedData) (map[
 	// Track which L2A owns each VLAN key per node to detect overlaps.
 	// Key: "node/vlanKey", value: L2A name.
 	l2aOwner := make(map[string]string)
+	// Track which L2A owns each interface name per node.
+	// Key: "node/ifName", value: L2A name.
+	ifOwner := make(map[string]string)
 
 	for i := range data.Layer2Attachments {
 		l2a := &data.Layer2Attachments[i]
@@ -85,6 +88,14 @@ func (b *L2ABuilder) Build(_ context.Context, data *resolver.ResolvedData) (map[
 				return nil, fmt.Errorf("Layer2Attachments %q and %q both target Network VLAN %s on node %q", prev, l2a.Name, mapKey, node.Name)
 			}
 			l2aOwner[ownerKey] = l2a.Name
+
+			if l2a.Spec.InterfaceName != nil && *l2a.Spec.InterfaceName != "" {
+				ifKey := node.Name + "/" + *l2a.Spec.InterfaceName
+				if prev, exists := ifOwner[ifKey]; exists {
+					return nil, fmt.Errorf("Layer2Attachments %q and %q both claim interface name %q on node %q", prev, l2a.Name, *l2a.Spec.InterfaceName, node.Name)
+				}
+				ifOwner[ifKey] = l2a.Name
+			}
 
 			contrib, ok := result[node.Name]
 			if !ok {
