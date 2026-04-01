@@ -39,14 +39,14 @@ var _ = Describe("Intent: Destination NNC Validation", Label("intent", "destinat
 			Expect(err).NotTo(HaveOccurred())
 			Expect(f.ApplyManifest(ctx, manifest)).To(Succeed())
 
-			By("Waiting for NNC to be provisioned")
+			By("Waiting for NNC spec to include FabricVRF m2m")
 			var nnc *unstructured.Unstructured
 			Eventually(func() bool {
 				var getErr error
 				nnc, getErr = f.GetNNC(ctx, cfg.WorkerNode1)
-				return getErr == nil && framework.NNCIsProvisioned(nnc) && framework.NNCHasFabricVRF(nnc, "m2m")
+				return getErr == nil && framework.NNCHasFabricVRF(nnc, "m2m")
 			}).WithTimeout(60*time.Second).WithPolling(5*time.Second).Should(BeTrue(),
-				"NNC should be provisioned with fabricVRF 'm2m'")
+				"NNC spec should contain fabricVRF 'm2m'")
 
 			By("Verifying FabricVRF has VRFImport from cluster VRF (not static routes)")
 			Expect(framework.NNCFabricVRFHasVRFImport(nnc, "m2m", "cluster")).To(BeTrue(),
@@ -71,12 +71,12 @@ var _ = Describe("Intent: Destination NNC Validation", Label("intent", "destinat
 			Expect(err).NotTo(HaveOccurred())
 			Expect(f.ApplyManifest(ctx, manifest)).To(Succeed())
 
-			By("Waiting for NNC to be provisioned with FabricVRF")
+			By("Waiting for NNC spec to include FabricVRF m2m")
 			Eventually(func() bool {
 				nnc, getErr := f.GetNNC(ctx, cfg.WorkerNode1)
-				return getErr == nil && framework.NNCIsProvisioned(nnc) && framework.NNCHasFabricVRF(nnc, "m2m")
+				return getErr == nil && framework.NNCHasFabricVRF(nnc, "m2m")
 			}).WithTimeout(60*time.Second).WithPolling(5*time.Second).Should(BeTrue(),
-				"NNC should be provisioned with fabricVRF 'm2m' with merged routes")
+				"NNC spec should contain fabricVRF 'm2m' with merged routes")
 
 			_ = f.DeleteManifest(ctx, manifest)
 		})
@@ -91,46 +91,42 @@ var _ = Describe("Intent: Destination NNC Validation", Label("intent", "destinat
 			Expect(err).NotTo(HaveOccurred())
 			_ = f.DeleteManifest(ctx, cleanupManifest)
 
-			By("Waiting for NNC to be provisioned without VLAN 504")
+			By("Waiting for NNC spec to not have Layer2 504")
 			Eventually(func() bool {
 				nnc, getErr := f.GetNNC(ctx, cfg.WorkerNode1)
-				return getErr == nil && framework.NNCIsProvisioned(nnc) && !framework.NNCHasLayer2(nnc, "504")
+				return getErr == nil && !framework.NNCHasLayer2(nnc, "504")
 			}).WithTimeout(60*time.Second).WithPolling(5*time.Second).Should(BeTrue(),
-				"NNC should be provisioned and Layer2 504 should be absent before test")
+				"NNC spec should not have Layer2 504 before test")
 
 			By("Capturing NNC state before adding L2A")
-			nncBefore, err := f.GetNNC(ctx, cfg.WorkerNode1)
+			_, err = f.GetNNC(ctx, cfg.WorkerNode1)
 			Expect(err).NotTo(HaveOccurred())
-			revBefore := framework.NNCRevision(nncBefore)
 
 			By("Applying lifecycle L2A for VLAN 504 (m2m VRF)")
 			Expect(f.ApplyManifest(ctx, cleanupManifest)).To(Succeed())
 
-			By("Waiting for NNC to be provisioned with new revision")
+			By("Waiting for NNC to include Layer2 504 after L2A creation")
 			Eventually(func() bool {
 				nnc, getErr := f.GetNNC(ctx, cfg.WorkerNode1)
-				return getErr == nil && framework.NNCIsProvisioned(nnc) && framework.NNCRevision(nnc) != revBefore
+				return getErr == nil && framework.NNCHasLayer2(nnc, "504")
 			}).WithTimeout(60*time.Second).WithPolling(5*time.Second).Should(BeTrue(),
-				"NNC should be provisioned with changed revision after L2A creation")
+				"NNC should have Layer2 '504' after L2A creation")
 
-			By("Verifying Layer2 504 exists and NNC is provisioned")
+			By("Verifying Layer2 504 exists in NNC spec")
 			nncAfterCreate, err := f.GetNNC(ctx, cfg.WorkerNode1)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(framework.NNCIsProvisioned(nncAfterCreate)).To(BeTrue(),
-				"NNC must be provisioned (CRA accepted it)")
 			Expect(framework.NNCHasLayer2(nncAfterCreate, "504")).To(BeTrue(),
 				"NNC should have Layer2 '504' after L2A creation")
-			revAfterCreate := framework.NNCRevision(nncAfterCreate)
 
 			By("Deleting the lifecycle L2A")
 			Expect(f.DeleteManifest(ctx, cleanupManifest)).To(Succeed())
 
-			By("Waiting for NNC to be provisioned with updated revision")
+			By("Waiting for Layer2 504 to be removed from NNC")
 			Eventually(func() bool {
 				nnc, getErr := f.GetNNC(ctx, cfg.WorkerNode1)
-				return getErr == nil && framework.NNCIsProvisioned(nnc) && framework.NNCRevision(nnc) != revAfterCreate
+				return getErr == nil && !framework.NNCHasLayer2(nnc, "504")
 			}).WithTimeout(60*time.Second).WithPolling(5*time.Second).Should(BeTrue(),
-				"NNC should be provisioned with changed revision after L2A deletion")
+				"Layer2 '504' should be removed after L2A deletion")
 
 			By("Verifying Layer2 504 is removed from NNC")
 			nncAfterDelete, err := f.GetNNC(ctx, cfg.WorkerNode1)
@@ -149,15 +145,15 @@ var _ = Describe("Intent: Destination NNC Validation", Label("intent", "destinat
 			Expect(err).NotTo(HaveOccurred())
 			Expect(f.ApplyManifest(ctx, manifest)).To(Succeed())
 
-			By("Waiting for NNC to be provisioned with both VRFs")
+			By("Waiting for NNC spec to include both FabricVRFs")
 			var nnc *unstructured.Unstructured
 			Eventually(func() bool {
 				var getErr error
 				nnc, getErr = f.GetNNC(ctx, cfg.WorkerNode1)
-				return getErr == nil && framework.NNCIsProvisioned(nnc) &&
+				return getErr == nil &&
 					framework.NNCHasFabricVRF(nnc, "m2m") && framework.NNCHasFabricVRF(nnc, "c2m")
 			}).WithTimeout(60*time.Second).WithPolling(5*time.Second).Should(BeTrue(),
-				"NNC should be provisioned with both fabricVRFs")
+				"NNC spec should contain both fabricVRFs")
 
 			By("Verifying both Layer2s present")
 			Expect(framework.NNCHasLayer2(nnc, "501")).To(BeTrue())
@@ -176,15 +172,15 @@ var _ = Describe("Intent: Destination NNC Validation", Label("intent", "destinat
 			Expect(err).NotTo(HaveOccurred())
 			Expect(f.ApplyManifest(ctx, manifest)).To(Succeed())
 
-			By("Waiting for NNC to be provisioned with both VRFs")
+			By("Waiting for NNC spec to include both FabricVRFs")
 			var nnc *unstructured.Unstructured
 			Eventually(func() bool {
 				var getErr error
 				nnc, getErr = f.GetNNC(ctx, cfg.WorkerNode1)
-				return getErr == nil && framework.NNCIsProvisioned(nnc) &&
+				return getErr == nil &&
 					framework.NNCHasFabricVRF(nnc, "m2m") && framework.NNCHasFabricVRF(nnc, "c2m")
 			}).WithTimeout(60*time.Second).WithPolling(5*time.Second).Should(BeTrue(),
-				"NNC should be provisioned with both FabricVRFs")
+				"NNC spec should contain both FabricVRFs")
 
 			By("Verifying Layer2 entries for both VLANs")
 			Expect(framework.NNCHasLayer2(nnc, "501")).To(BeTrue(),

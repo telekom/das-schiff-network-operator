@@ -316,9 +316,12 @@ func TestL2ABuilder_UnknownNetwork(t *testing.T) {
 		},
 	}
 
-	_, err := b.Build(context.Background(), data)
-	if err == nil {
-		t.Fatal("expected error for unknown network reference")
+	result, err := b.Build(context.Background(), data)
+	if err != nil {
+		t.Fatalf("unknown network should be skipped, not fatal: %v", err)
+	}
+	if len(result) != 0 {
+		t.Fatalf("expected empty result when L2A references unknown network, got %d entries", len(result))
 	}
 }
 

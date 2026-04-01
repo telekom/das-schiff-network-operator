@@ -128,8 +128,8 @@ var _ = Describe("Intent: SBR NNC Validation", Label("intent", "sbr", "nnc"), fu
 		It("should add and remove v4+v6 policy routes when Outbound is created/deleted", func() {
 			cfg := f.Config
 
-			By("Ensuring SBR manifests are not present")
-			manifest, err := readTestdata("intent/sbr-single/manifests.yaml")
+			By("Ensuring SBR lifecycle manifests are not present")
+			manifest, err := readTestdata("intent/sbr-lifecycle/manifests.yaml")
 			Expect(err).NotTo(HaveOccurred())
 			_ = f.DeleteManifest(ctx, manifest)
 
@@ -137,8 +137,8 @@ var _ = Describe("Intent: SBR NNC Validation", Label("intent", "sbr", "nnc"), fu
 			Eventually(func() bool {
 				nnc, getErr := f.GetNNC(ctx, cfg.WorkerNode1)
 				return getErr == nil &&
-					!framework.NNCClusterVRFHasPolicyRoute(nnc, "10.250.4.40/32", "s-m2m") &&
-					!framework.NNCClusterVRFHasPolicyRoute(nnc, "fd94:685b:30cf:501::40/128", "s-m2m")
+					!framework.NNCClusterVRFHasPolicyRoute(nnc, "10.250.4.99/32", "s-m2m") &&
+					!framework.NNCClusterVRFHasPolicyRoute(nnc, "fd94:685b:30cf:501::99/128", "s-m2m")
 			}).WithTimeout(90*time.Second).WithPolling(5*time.Second).Should(BeTrue(),
 				"NNC spec should not contain policy routes for our addresses before test")
 
@@ -155,8 +155,8 @@ var _ = Describe("Intent: SBR NNC Validation", Label("intent", "sbr", "nnc"), fu
 				nnc, getErr := f.GetNNC(ctx, cfg.WorkerNode1)
 				return getErr == nil &&
 					framework.NNCRevision(nnc) != revBefore &&
-					framework.NNCClusterVRFHasPolicyRoute(nnc, "10.250.4.40/32", "s-m2m") &&
-					framework.NNCClusterVRFHasPolicyRoute(nnc, "fd94:685b:30cf:501::40/128", "s-m2m")
+					framework.NNCClusterVRFHasPolicyRoute(nnc, "10.250.4.99/32", "s-m2m") &&
+					framework.NNCClusterVRFHasPolicyRoute(nnc, "fd94:685b:30cf:501::99/128", "s-m2m")
 			}).WithTimeout(90*time.Second).WithPolling(5*time.Second).Should(BeTrue(),
 				"NNC spec should have v4+v6 policy routes after Outbound creation")
 
@@ -173,8 +173,8 @@ var _ = Describe("Intent: SBR NNC Validation", Label("intent", "sbr", "nnc"), fu
 				nnc, getErr := f.GetNNC(ctx, cfg.WorkerNode1)
 				return getErr == nil &&
 					framework.NNCRevision(nnc) != revAfterCreate &&
-					!framework.NNCClusterVRFHasPolicyRoute(nnc, "10.250.4.40/32", "s-m2m") &&
-					!framework.NNCClusterVRFHasPolicyRoute(nnc, "fd94:685b:30cf:501::40/128", "s-m2m")
+					!framework.NNCClusterVRFHasPolicyRoute(nnc, "10.250.4.99/32", "s-m2m") &&
+					!framework.NNCClusterVRFHasPolicyRoute(nnc, "fd94:685b:30cf:501::99/128", "s-m2m")
 			}).WithTimeout(90*time.Second).WithPolling(5*time.Second).Should(BeTrue(),
 				"NNC spec should no longer have our policy routes after Outbound deletion")
 		})

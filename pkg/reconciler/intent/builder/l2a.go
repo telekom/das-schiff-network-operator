@@ -27,6 +27,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 // L2ABuilder transforms Layer2Attachment intent CRDs into NNC Layer2 configs.
@@ -43,7 +44,8 @@ func (b *L2ABuilder) Name() string {
 }
 
 // Build produces per-node Layer2 configurations from Layer2Attachment resources.
-func (b *L2ABuilder) Build(_ context.Context, data *resolver.ResolvedData) (map[string]*NodeContribution, error) {
+func (b *L2ABuilder) Build(ctx context.Context, data *resolver.ResolvedData) (map[string]*NodeContribution, error) {
+	logger := log.FromContext(ctx).WithName("l2a-builder")
 	result := make(map[string]*NodeContribution)
 	// Track which L2A owns each interface name per node.
 	// Key: "node/ifName", value: L2A name.
@@ -52,16 +54,20 @@ func (b *L2ABuilder) Build(_ context.Context, data *resolver.ResolvedData) (map[
 	for i := range data.Layer2Attachments {
 		l2a := &data.Layer2Attachments[i]
 
-		// Resolve the referenced Network.
+		// Resolve the referenced Network — skip L2As with dangling refs.
 		net, ok := data.Networks[l2a.Spec.NetworkRef]
 		if !ok {
-			return nil, fmt.Errorf("Layer2Attachment %q references unknown Network %q", l2a.Name, l2a.Spec.NetworkRef)
+			logger.Info("skipping Layer2Attachment with unknown Network reference",
+				"l2a", l2a.Name, "networkRef", l2a.Spec.NetworkRef)
+			continue
 		}
 
-		// Resolve destinations to find VRF for IRB.
+		// Resolve destinations to find VRF for IRB — skip on resolution errors.
 		vrfName, vrfSpec, err := b.resolveDestinationVRF(l2a, data)
 		if err != nil {
-			return nil, fmt.Errorf("Layer2Attachment %q destination resolution failed: %w", l2a.Name, err)
+			logger.Info("skipping Layer2Attachment with unresolvable destinations",
+				"l2a", l2a.Name, "error", err.Error())
+			continue
 		}
 
 		// Compute the map key (VLAN ID as string, matching legacy format).

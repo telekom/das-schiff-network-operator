@@ -37,6 +37,13 @@ type FetchedResources struct {
 	Collectors           []nc.Collector
 	TrafficMirrors       []nc.TrafficMirror
 	AnnouncementPolicies []nc.AnnouncementPolicy
+
+	// AllNetworks, AllVRFs, AllDestinations include items being deleted
+	// (DeletionTimestamp set). The finalizer manager needs these to remove
+	// finalizers and unblock deletion.
+	AllNetworks     []nc.Network
+	AllVRFs         []nc.VRF
+	AllDestinations []nc.Destination
 }
 
 // ResolveAll resolves all cross-references from fetched resources into a ResolvedData.

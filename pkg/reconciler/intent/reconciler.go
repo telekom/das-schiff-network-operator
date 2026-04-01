@@ -211,6 +211,7 @@ func (r *Reconciler) fetchAll(ctx context.Context) (*resolver.FetchedResources, 
 	if err := r.client.List(ctx, vrfList); err != nil {
 		return nil, fmt.Errorf("error listing VRFs: %w", err)
 	}
+	f.AllVRFs = vrfList.Items
 	f.VRFs = filterActive(vrfList.Items)
 
 	// Fetch Networks.
@@ -218,6 +219,7 @@ func (r *Reconciler) fetchAll(ctx context.Context) (*resolver.FetchedResources, 
 	if err := r.client.List(ctx, networkList); err != nil {
 		return nil, fmt.Errorf("error listing Networks: %w", err)
 	}
+	f.AllNetworks = networkList.Items
 	f.Networks = filterActive(networkList.Items)
 
 	// Fetch Destinations.
@@ -225,6 +227,7 @@ func (r *Reconciler) fetchAll(ctx context.Context) (*resolver.FetchedResources, 
 	if err := r.client.List(ctx, destList); err != nil {
 		return nil, fmt.Errorf("error listing Destinations: %w", err)
 	}
+	f.AllDestinations = destList.Items
 	f.Destinations = filterActive(destList.Items)
 
 	// Fetch Layer2Attachments.

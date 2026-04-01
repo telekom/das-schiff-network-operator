@@ -70,8 +70,8 @@ func (m *Manager) reconcileVRFFinalizers(ctx context.Context, fetched *resolver.
 		}
 	}
 
-	for i := range fetched.VRFs {
-		vrf := &fetched.VRFs[i]
+	for i := range fetched.AllVRFs {
+		vrf := &fetched.AllVRFs[i]
 		if referencedVRFs[vrf.Name] {
 			if !controllerutil.ContainsFinalizer(vrf, nc.FinalizerVRFInUse) {
 				controllerutil.AddFinalizer(vrf, nc.FinalizerVRFInUse)
@@ -111,8 +111,8 @@ func (m *Manager) reconcileNetworkFinalizers(ctx context.Context, fetched *resol
 		referencedNetworks[fetched.PodNetworks[i].Spec.NetworkRef] = true
 	}
 
-	for i := range fetched.Networks {
-		net := &fetched.Networks[i]
+	for i := range fetched.AllNetworks {
+		net := &fetched.AllNetworks[i]
 		if referencedNetworks[net.Name] {
 			if !controllerutil.ContainsFinalizer(net, nc.FinalizerNetworkInUse) {
 				controllerutil.AddFinalizer(net, nc.FinalizerNetworkInUse)
@@ -139,8 +139,8 @@ func (m *Manager) reconcileNetworkFinalizers(ctx context.Context, fetched *resol
 func (m *Manager) reconcileDestinationFinalizers(ctx context.Context, fetched *resolver.FetchedResources) error {
 	selectors := collectDestinationSelectors(fetched)
 
-	for i := range fetched.Destinations {
-		dest := &fetched.Destinations[i]
+	for i := range fetched.AllDestinations {
+		dest := &fetched.AllDestinations[i]
 		selected := isSelectedByAny(dest.Labels, selectors)
 
 		if selected {
