@@ -22,11 +22,9 @@ import (
 
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/resolver"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
 )
 
-// OutboundBuilder transforms Outbound intent CRDs into FabricVRF vrfImport and policy routes for SNAT.
+// OutboundBuilder transforms Outbound intent CRDs into FabricVRF vrfImport config.
 type OutboundBuilder struct{}
 
 // NewOutboundBuilder creates a new OutboundBuilder.
@@ -40,6 +38,8 @@ func (b *OutboundBuilder) Name() string {
 }
 
 // Build produces per-node FabricVRF contributions from Outbound resources.
+// A single Outbound may select multiple Destinations across different VRFs
+// via its label selector — FabricVRF entries are produced for each matched VRF.
 func (b *OutboundBuilder) Build(_ context.Context, data *resolver.ResolvedData) (map[string]*NodeContribution, error) {
 	result := make(map[string]*NodeContribution)
 
@@ -51,76 +51,69 @@ func (b *OutboundBuilder) Build(_ context.Context, data *resolver.ResolvedData) 
 			return nil, fmt.Errorf("Outbound %q references unknown Network %q", ob.Name, ob.Spec.NetworkRef)
 		}
 
-		// Resolve destinations to find VRF.
-		vrfName, vrfSpec, err := b.resolveDestinationVRF(ob, data)
-		if err != nil {
-			return nil, fmt.Errorf("Outbound %q destination resolution failed: %w", ob.Name, err)
+		if ob.Spec.Destinations == nil {
+			continue
 		}
 
-		if vrfName == "" || vrfSpec == nil {
-			continue // no VRF plumbing requested
+		// Resolve ALL matching destinations, grouped by VRF.
+		grouped := groupDestinationsByVRF(ob.Spec.Destinations, data)
+		if len(grouped) == 0 {
+			continue
 		}
 
 		// Collect allocated addresses for EVPN export and cluster vrfImport filters.
 		addresses := b.collectAddresses(ob)
+		filterItems := addressFilterItems(addresses)
 
-		// Note: SNAT routing is handled by the SBR builder which creates:
-		//   ClusterVRF policyRoutes (srcPrefix→s-<vrf>) + LocalVRF static routes (→fabricVRF).
+		// SNAT routing chain is handled by the SBR builder:
+		//   ClusterVRF policyRoutes (src→s-<vrf>) + LocalVRF static routes (→fabricVRF).
 		// The FabricVRF only needs EVPN export + vrfImport for the allocated addresses.
 
-		// Outbound applies to all nodes (no nodeSelector).
-		for _, node := range data.Nodes {
-			contrib, ok := result[node.Name]
-			if !ok {
-				contrib = NewNodeContribution()
-				result[node.Name] = contrib
+		// Produce FabricVRF contributions for each matched VRF.
+		for vrfName, dests := range grouped {
+			vrfSpec := b.resolveVRFSpec(dests, data)
+			if vrfSpec == nil {
+				continue
 			}
 
-			fvrf, exists := contrib.FabricVRFs[vrfName]
-			if !exists {
-				fvrf = buildFabricVRF(vrfSpec)
-			}
+			// Outbound applies to all nodes (no nodeSelector).
+			for _, node := range data.Nodes {
+				contrib, ok := result[node.Name]
+				if !ok {
+					contrib = NewNodeContribution()
+					result[node.Name] = contrib
+				}
 
-			// Add allocated addresses to EVPN export filter and cluster vrfImport.
-			// Routing to these IPs happens dynamically via vrfImport from cluster,
-			// NOT via static routes.
-			filterItems := addressFilterItems(addresses)
-			if fvrf.EVPNExportFilter != nil {
-				fvrf.EVPNExportFilter.Items = append(fvrf.EVPNExportFilter.Items, filterItems...)
-			}
-			if len(fvrf.VRFImports) > 0 {
-				fvrf.VRFImports[0].Filter.Items = append(fvrf.VRFImports[0].Filter.Items, filterItems...)
-			}
+				fvrf, exists := contrib.FabricVRFs[vrfName]
+				if !exists {
+					fvrf = buildFabricVRF(vrfSpec)
+				}
 
-			contrib.FabricVRFs[vrfName] = fvrf
+				if fvrf.EVPNExportFilter != nil {
+					fvrf.EVPNExportFilter.Items = append(fvrf.EVPNExportFilter.Items, filterItems...)
+				}
+				if len(fvrf.VRFImports) > 0 {
+					fvrf.VRFImports[0].Filter.Items = append(fvrf.VRFImports[0].Filter.Items, filterItems...)
+				}
+
+				contrib.FabricVRFs[vrfName] = fvrf
+			}
 		}
 	}
 
 	return result, nil
 }
 
-// resolveDestinationVRF finds the VRF for an Outbound by matching its destination selector.
-func (b *OutboundBuilder) resolveDestinationVRF(ob *nc.Outbound, data *resolver.ResolvedData) (string, *nc.VRFSpec, error) {
-	if ob.Spec.Destinations == nil {
-		return "", nil, nil
+// resolveVRFSpec finds the VRFSpec from a set of destinations for the same VRF.
+func (b *OutboundBuilder) resolveVRFSpec(dests []nc.Destination, data *resolver.ResolvedData) *nc.VRFSpec {
+	if len(dests) == 0 {
+		return nil
 	}
-
-	selector, err := metav1.LabelSelectorAsSelector(ob.Spec.Destinations)
-	if err != nil {
-		return "", nil, fmt.Errorf("invalid destination selector: %w", err)
+	resolved, ok := data.Destinations[dests[0].Name]
+	if !ok || resolved.VRFSpec == nil {
+		return nil
 	}
-
-	for i := range data.RawDestinations {
-		rawDest := &data.RawDestinations[i]
-		if selector.Matches(labels.Set(rawDest.Labels)) {
-			resolved, ok := data.Destinations[rawDest.Name]
-			if ok && resolved.VRFSpec != nil && resolved.Spec.VRFRef != nil {
-				return resolved.VRFSpec.VRF, resolved.VRFSpec, nil
-			}
-		}
-	}
-
-	return "", nil, nil
+	return resolved.VRFSpec
 }
 
 // collectAddresses gathers explicit addresses from the Outbound spec.

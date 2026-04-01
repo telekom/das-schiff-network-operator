@@ -18,6 +18,7 @@ package builder
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
@@ -194,23 +195,93 @@ func TestSBRBuilder_MultiVRFConsumer(t *testing.T) {
 
 	contrib := result["worker-1"]
 
-	// Should have TWO intermediate LocalVRFs.
-	require.Contains(t, contrib.LocalVRFs, "s-internet")
-	require.Contains(t, contrib.LocalVRFs, "s-private")
+	// Multi-VRF consumer → ONE combo intermediate VRF (hashed name).
+	require.Len(t, contrib.LocalVRFs, 1)
 
-	// s-internet static route should point to "internet" VRF.
-	assert.Equal(t, "internet", *contrib.LocalVRFs["s-internet"].StaticRoutes[0].NextHop.Vrf)
-	// s-private static route should point to "private" VRF.
-	assert.Equal(t, "private", *contrib.LocalVRFs["s-private"].StaticRoutes[0].NextHop.Vrf)
-
-	// PolicyRoutes should use src+dst matching (multi-VRF consumer).
-	require.NotNil(t, contrib.ClusterVRF)
-	// 1 source × 1 dest per VRF = 2 PolicyRoutes.
-	require.Len(t, contrib.ClusterVRF.PolicyRoutes, 2)
-	for _, pr := range contrib.ClusterVRF.PolicyRoutes {
-		assert.NotNil(t, pr.TrafficMatch.SrcPrefix, "multi-VRF should have src")
-		assert.NotNil(t, pr.TrafficMatch.DstPrefix, "multi-VRF should have dst")
+	// Find the combo VRF (name starts with "s-" and is a hash).
+	var comboName string
+	var comboVRF networkv1alpha1.VRF
+	for name, vrf := range contrib.LocalVRFs {
+		comboName = name
+		comboVRF = vrf
 	}
+	assert.True(t, strings.HasPrefix(comboName, "s-"), "combo VRF name should start with s-")
+
+	// Combo VRF has static routes to BOTH fabric VRFs (LPM does disambiguation).
+	require.Len(t, comboVRF.StaticRoutes, 2)
+	routesByPrefix := map[string]string{}
+	for _, sr := range comboVRF.StaticRoutes {
+		routesByPrefix[sr.Prefix] = *sr.NextHop.Vrf
+	}
+	assert.Equal(t, "internet", routesByPrefix["0.0.0.0/0"])
+	assert.Equal(t, "private", routesByPrefix["10.0.0.0/8"])
+
+	// ClusterVRF: source-only policy routes (no dst matching needed — LPM handles it).
+	require.NotNil(t, contrib.ClusterVRF)
+	require.Len(t, contrib.ClusterVRF.PolicyRoutes, 1)
+	pr := contrib.ClusterVRF.PolicyRoutes[0]
+	assert.Equal(t, "198.51.100.10/32", *pr.TrafficMatch.SrcPrefix)
+	assert.Nil(t, pr.TrafficMatch.DstPrefix, "combo VRF uses LPM, not dst matching in policy routes")
+	assert.Equal(t, comboName, *pr.NextHop.Vrf)
+}
+
+// Two consumers selecting the same destination set share a single combo VRF.
+func TestSBRBuilder_MultiVRFComboDedup(t *testing.T) {
+	data := baseSBRData()
+
+	// Add a second VRF + destination.
+	data.VRFs["private-vrf"] = &resolver.ResolvedVRF{
+		Name: "private-vrf", Spec: nc.VRFSpec{VRF: "private", VNI: ptrInt32(2000)},
+	}
+	data.Destinations["priv-dest"] = &resolver.ResolvedDestination{
+		Name:    "priv-dest",
+		Spec:    nc.DestinationSpec{VRFRef: ptrString("private-vrf"), Prefixes: []string{"10.0.0.0/8"}},
+		VRFSpec: &nc.VRFSpec{VRF: "private", VNI: ptrInt32(2000)},
+	}
+	data.RawDestinations = append(data.RawDestinations, nc.Destination{
+		ObjectMeta: metav1.ObjectMeta{Name: "priv-dest", Labels: map[string]string{"role": "external", "zone": "private"}},
+		Spec:       nc.DestinationSpec{VRFRef: ptrString("private-vrf"), Prefixes: []string{"10.0.0.0/8"}},
+	})
+
+	// Two different consumers both select role=external (same destination set).
+	data.Inbounds = []nc.Inbound{
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "lb-vip"},
+			Spec: nc.InboundSpec{
+				NetworkRef:   "svc-net",
+				Addresses:    &nc.AddressAllocation{IPv4: []string{"198.51.100.1"}},
+				Destinations: &metav1.LabelSelector{MatchLabels: map[string]string{"role": "external"}},
+			},
+		},
+	}
+	data.Outbounds = []nc.Outbound{
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "egress"},
+			Spec: nc.OutboundSpec{
+				NetworkRef:   "svc-net",
+				Addresses:    &nc.AddressAllocation{IPv4: []string{"198.51.100.10"}},
+				Destinations: &metav1.LabelSelector{MatchLabels: map[string]string{"role": "external"}},
+			},
+		},
+	}
+
+	b := NewSBRBuilder()
+	result, err := b.Build(context.Background(), data)
+	require.NoError(t, err)
+
+	contrib := result["worker-1"]
+
+	// Same destination set → ONE shared combo VRF, with BOTH source prefixes.
+	require.Len(t, contrib.LocalVRFs, 1)
+	require.Len(t, contrib.ClusterVRF.PolicyRoutes, 2)
+
+	sources := map[string]bool{}
+	for _, pr := range contrib.ClusterVRF.PolicyRoutes {
+		sources[*pr.TrafficMatch.SrcPrefix] = true
+		assert.Nil(t, pr.TrafficMatch.DstPrefix, "combo VRF — no dst matching needed")
+	}
+	assert.True(t, sources["198.51.100.1/32"])
+	assert.True(t, sources["198.51.100.10/32"])
 }
 
 func TestSBRBuilder_MultiConsumerMerge(t *testing.T) {

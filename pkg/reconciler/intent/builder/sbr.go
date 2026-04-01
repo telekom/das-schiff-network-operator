@@ -18,8 +18,10 @@ package builder
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"sort"
+	"strings"
 
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
@@ -30,6 +32,12 @@ import (
 
 // SBRBuilder auto-detects cross-VRF routing needs and produces intermediate
 // LocalVRFs with static routes + ClusterVRF PolicyRoutes for source-based routing.
+//
+// Single-VRF consumers get a LocalVRF named "s-<vrf>" with source-only policy routes.
+// Multi-VRF consumers get a single combo LocalVRF named "s-<hash>" that contains
+// static routes for all destination prefixes, each pointing to the correct FabricVRF.
+// This avoids policy-route ordering issues: ClusterVRF uses src-only policy routes
+// and the combo VRF uses regular LPM routing to pick the right FabricVRF.
 //
 // Legacy equivalent: pkg/reconciler/operator/vrf.go → updateLocalVRFs().
 type SBRBuilder struct{}
@@ -44,17 +52,20 @@ func (b *SBRBuilder) Name() string {
 	return "sbr"
 }
 
-// sbrEntry tracks source prefixes and destination prefixes per destination VRF.
-type sbrEntry struct {
-	vrfName        string   // the FabricVRF name (from VRFSpec.VRF)
-	sourcePrefixes []string // consumer addresses that need SBR
-	destPrefixes   []string // Destination.spec.prefixes reachable via this VRF
+// sbrGroup tracks a unique destination set targeted by one or more consumers.
+// Consumers resolving to the same set of Destination resources share a single
+// intermediate LocalVRF, avoiding duplicate VRFs.
+type sbrGroup struct {
+	key            string              // sorted destination names joined by "+" (dedup key)
+	vrfRoutes      map[string][]string // vrfName → destination prefixes
+	sourcePrefixes []string            // consumer source addresses that need SBR
 }
 
 // Build produces per-node LocalVRFs and ClusterVRF PolicyRoutes for SBR.
 func (b *SBRBuilder) Build(_ context.Context, data *resolver.ResolvedData) (map[string]*NodeContribution, error) {
-	// Collect all SBR needs: map[vrfName]*sbrEntry.
-	entries := make(map[string]*sbrEntry)
+	// groups maps a VRF-set key → sbrGroup.
+	// Consumers targeting the same VRF combination share a group.
+	groups := make(map[string]*sbrGroup)
 
 	// Scan Inbound consumers.
 	for i := range data.Inbounds {
@@ -63,7 +74,7 @@ func (b *SBRBuilder) Build(_ context.Context, data *resolver.ResolvedData) (map[
 		if len(sources) == 0 {
 			continue
 		}
-		b.addConsumerEntries(inb.Spec.Destinations, sources, data, entries)
+		b.addConsumerToGroups(inb.Spec.Destinations, sources, data, groups)
 	}
 
 	// Scan Outbound consumers.
@@ -73,7 +84,7 @@ func (b *SBRBuilder) Build(_ context.Context, data *resolver.ResolvedData) (map[
 		if len(sources) == 0 {
 			continue
 		}
-		b.addConsumerEntries(outb.Spec.Destinations, sources, data, entries)
+		b.addConsumerToGroups(outb.Spec.Destinations, sources, data, groups)
 	}
 
 	// Scan PodNetwork consumers.
@@ -83,29 +94,25 @@ func (b *SBRBuilder) Build(_ context.Context, data *resolver.ResolvedData) (map[
 		if len(sources) == 0 {
 			continue
 		}
-		b.addConsumerEntries(pnet.Spec.Destinations, sources, data, entries)
+		b.addConsumerToGroups(pnet.Spec.Destinations, sources, data, groups)
 	}
 
-	if len(entries) == 0 {
+	if len(groups) == 0 {
 		return nil, nil
 	}
-
-	// Determine if any consumer targets multiple VRFs (requires src+dst matching).
-	multiVRFConsumers := b.detectMultiVRFConsumers(data)
 
 	// Build per-node contributions.
 	result := make(map[string]*NodeContribution)
 	for _, node := range data.Nodes {
 		contrib := NewNodeContribution()
 
-		for _, entry := range sortedEntries(entries) {
-			intermediateName := fmt.Sprintf("s-%s", entry.vrfName)
+		for _, group := range sortedGroups(groups) {
+			intermediateName := intermediateVRFName(group)
 
-			// LocalVRF: static routes to destination prefixes via FabricVRF + cluster import.
-			localVRF := b.buildIntermediateVRF(entry)
+			// LocalVRF: static routes to destination prefixes via respective FabricVRFs + cluster import.
+			localVRF := b.buildComboVRF(group)
 			existing, ok := contrib.LocalVRFs[intermediateName]
 			if ok {
-				// Merge static routes and VRFImports if already exists.
 				existing.StaticRoutes = append(existing.StaticRoutes, localVRF.StaticRoutes...)
 				existing.VRFImports = deduplicateVRFImports(append(existing.VRFImports, localVRF.VRFImports...))
 				contrib.LocalVRFs[intermediateName] = existing
@@ -113,12 +120,20 @@ func (b *SBRBuilder) Build(_ context.Context, data *resolver.ResolvedData) (map[
 				contrib.LocalVRFs[intermediateName] = localVRF
 			}
 
-			// ClusterVRF PolicyRoutes: steer source traffic to intermediate VRF.
-			policyRoutes := b.buildPolicyRoutes(entry, intermediateName, multiVRFConsumers)
+			// ClusterVRF PolicyRoutes: source-only matching.
+			// Destination disambiguation is handled by LPM inside the combo VRF.
 			if contrib.ClusterVRF == nil {
 				contrib.ClusterVRF = &networkv1alpha1.VRF{}
 			}
-			contrib.ClusterVRF.PolicyRoutes = append(contrib.ClusterVRF.PolicyRoutes, policyRoutes...)
+			for _, src := range group.sourcePrefixes {
+				srcCopy := src
+				contrib.ClusterVRF.PolicyRoutes = append(contrib.ClusterVRF.PolicyRoutes, networkv1alpha1.PolicyRoute{
+					TrafficMatch: networkv1alpha1.TrafficMatch{
+						SrcPrefix: &srcCopy,
+					},
+					NextHop: networkv1alpha1.NextHop{Vrf: &intermediateName},
+				})
+			}
 		}
 
 		if len(contrib.LocalVRFs) > 0 || contrib.ClusterVRF != nil {
@@ -129,65 +144,98 @@ func (b *SBRBuilder) Build(_ context.Context, data *resolver.ResolvedData) (map[
 	return result, nil
 }
 
-// addConsumerEntries resolves a consumer's destination selector and adds SBR entries
-// for each destination VRF found.
-func (b *SBRBuilder) addConsumerEntries(
+// addConsumerToGroups resolves a consumer's destination selector and adds its
+// source prefixes to the appropriate sbrGroup.
+//
+// Single-VRF consumers get a dedicated group keyed by VRF name → "s-<vrf>".
+// Multi-VRF consumers get a combo group keyed by sorted destination names → "s-<hash>".
+// Two consumers selecting the same destinations share the same combo group.
+func (b *SBRBuilder) addConsumerToGroups(
 	destSelector *metav1.LabelSelector,
 	sourcePrefixes []string,
 	data *resolver.ResolvedData,
-	entries map[string]*sbrEntry,
+	groups map[string]*sbrGroup,
 ) {
 	if destSelector == nil {
 		return
 	}
 
 	grouped := groupDestinationsByVRF(destSelector, data)
-	for vrfName, dests := range grouped {
-		entry, ok := entries[vrfName]
-		if !ok {
-			entry = &sbrEntry{vrfName: vrfName}
-			entries[vrfName] = entry
-		}
-		entry.sourcePrefixes = appendUnique(entry.sourcePrefixes, sourcePrefixes...)
-		for _, d := range dests {
-			entry.destPrefixes = appendUnique(entry.destPrefixes, d.Spec.Prefixes...)
-		}
+	if len(grouped) == 0 {
+		return
 	}
-}
 
-// detectMultiVRFConsumers checks if any single consumer targets destinations in
-// multiple VRFs. Returns a set of VRF names involved in multi-VRF consumers.
-func (b *SBRBuilder) detectMultiVRFConsumers(data *resolver.ResolvedData) map[string]bool {
-	multiVRF := make(map[string]bool)
-
-	checkSelector := func(sel *metav1.LabelSelector) {
-		if sel == nil {
-			return
-		}
-		grouped := groupDestinationsByVRF(sel, data)
-		if len(grouped) > 1 {
-			for vrfName := range grouped {
-				multiVRF[vrfName] = true
+	if len(grouped) == 1 {
+		// Single VRF — use the VRF name as key for a simple "s-<vrf>" intermediate.
+		for vrfName, dests := range grouped {
+			group, ok := groups[vrfName]
+			if !ok {
+				group = &sbrGroup{
+					key:       vrfName,
+					vrfRoutes: make(map[string][]string),
+				}
+				groups[vrfName] = group
+			}
+			group.sourcePrefixes = appendUnique(group.sourcePrefixes, sourcePrefixes...)
+			for _, d := range dests {
+				group.vrfRoutes[vrfName] = appendUnique(group.vrfRoutes[vrfName], d.Spec.Prefixes...)
 			}
 		}
+		return
 	}
 
-	for i := range data.Inbounds {
-		checkSelector(data.Inbounds[i].Spec.Destinations)
-	}
-	for i := range data.Outbounds {
-		checkSelector(data.Outbounds[i].Spec.Destinations)
-	}
-	for i := range data.PodNetworks {
-		checkSelector(data.PodNetworks[i].Spec.Destinations)
+	// Multi-VRF — key by sorted destination names so consumers selecting the
+	// same set of destinations share a single combo VRF.
+	key := destinationSetKey(destSelector, data)
+	group, ok := groups[key]
+	if !ok {
+		group = &sbrGroup{
+			key:       key,
+			vrfRoutes: make(map[string][]string),
+		}
+		groups[key] = group
 	}
 
-	return multiVRF
+	group.sourcePrefixes = appendUnique(group.sourcePrefixes, sourcePrefixes...)
+	for vrfName, dests := range grouped {
+		for _, d := range dests {
+			group.vrfRoutes[vrfName] = appendUnique(group.vrfRoutes[vrfName], d.Spec.Prefixes...)
+		}
+	}
 }
 
-// buildIntermediateVRF creates the LocalVRF for SBR with static routes to destination
-// prefixes via the FabricVRF and a cluster VRF import for cluster-internal reachability.
-func (b *SBRBuilder) buildIntermediateVRF(entry *sbrEntry) networkv1alpha1.VRF {
+// destinationSetKey produces a deterministic key from the sorted names of all
+// Destination resources matched by a selector.
+func destinationSetKey(sel *metav1.LabelSelector, data *resolver.ResolvedData) string {
+	selector, err := metav1.LabelSelectorAsSelector(sel)
+	if err != nil {
+		return ""
+	}
+	var names []string
+	for i := range data.RawDestinations {
+		if selector.Matches(labels.Set(data.RawDestinations[i].Labels)) {
+			names = append(names, data.RawDestinations[i].Name)
+		}
+	}
+	sort.Strings(names)
+	return strings.Join(names, "+")
+}
+
+// intermediateVRFName returns the LocalVRF name for a group.
+// Single-VRF: "s-<vrf>" (backward compatible, human-readable).
+// Multi-VRF:  "s-<8-char-hash>" (deterministic, compact).
+func intermediateVRFName(group *sbrGroup) string {
+	if !strings.Contains(group.key, "+") {
+		return fmt.Sprintf("s-%s", group.key)
+	}
+	h := sha256.Sum256([]byte(group.key))
+	return fmt.Sprintf("s-%x", h[:4]) // 8 hex chars
+}
+
+// buildComboVRF creates the intermediate LocalVRF for a group.
+// It contains static routes for ALL destination prefixes from ALL VRFs in the set,
+// each pointing to the correct FabricVRF via NextHop.Vrf. LPM does the disambiguation.
+func (b *SBRBuilder) buildComboVRF(group *sbrGroup) networkv1alpha1.VRF {
 	vrf := networkv1alpha1.VRF{
 		VRFImports: []networkv1alpha1.VRFImport{
 			{
@@ -201,55 +249,26 @@ func (b *SBRBuilder) buildIntermediateVRF(entry *sbrEntry) networkv1alpha1.VRF {
 		},
 	}
 
-	// Static routes to destination prefixes — route lookup in the FabricVRF.
-	for _, prefix := range entry.destPrefixes {
-		vrfName := entry.vrfName
-		vrf.StaticRoutes = append(vrf.StaticRoutes, networkv1alpha1.StaticRoute{
-			Prefix:  prefix,
-			NextHop: &networkv1alpha1.NextHop{Vrf: &vrfName},
-		})
+	// Sorted iteration for deterministic output.
+	vrfNames := make([]string, 0, len(group.vrfRoutes))
+	for name := range group.vrfRoutes {
+		vrfNames = append(vrfNames, name)
 	}
+	sort.Strings(vrfNames)
 
-	return vrf
-}
-
-// buildPolicyRoutes creates ClusterVRF PolicyRoutes that steer source traffic
-// to the intermediate VRF.
-//
-// Single-VRF consumer: source-only match (legacy-compatible).
-// Multi-VRF consumer: source+destination match (disambiguation required).
-func (b *SBRBuilder) buildPolicyRoutes(entry *sbrEntry, intermediateName string, multiVRF map[string]bool) []networkv1alpha1.PolicyRoute {
-	var routes []networkv1alpha1.PolicyRoute
-
-	if multiVRF[entry.vrfName] {
-		// Multi-VRF case: need src+dst matching for disambiguation.
-		for _, src := range entry.sourcePrefixes {
-			for _, dst := range entry.destPrefixes {
-				srcCopy := src
-				dstCopy := dst
-				routes = append(routes, networkv1alpha1.PolicyRoute{
-					TrafficMatch: networkv1alpha1.TrafficMatch{
-						SrcPrefix: &srcCopy,
-						DstPrefix: &dstCopy,
-					},
-					NextHop: networkv1alpha1.NextHop{Vrf: &intermediateName},
-				})
-			}
-		}
-	} else {
-		// Single-VRF case: source-only match (legacy-compatible).
-		for _, src := range entry.sourcePrefixes {
-			srcCopy := src
-			routes = append(routes, networkv1alpha1.PolicyRoute{
-				TrafficMatch: networkv1alpha1.TrafficMatch{
-					SrcPrefix: &srcCopy,
-				},
-				NextHop: networkv1alpha1.NextHop{Vrf: &intermediateName},
+	for _, vrfName := range vrfNames {
+		prefixes := group.vrfRoutes[vrfName]
+		sort.Strings(prefixes)
+		for _, prefix := range prefixes {
+			vn := vrfName
+			vrf.StaticRoutes = append(vrf.StaticRoutes, networkv1alpha1.StaticRoute{
+				Prefix:  prefix,
+				NextHop: &networkv1alpha1.NextHop{Vrf: &vn},
 			})
 		}
 	}
 
-	return routes
+	return vrf
 }
 
 // groupDestinationsByVRF resolves a label selector against raw destinations and
@@ -368,17 +387,17 @@ func deduplicateVRFImports(imports []networkv1alpha1.VRFImport) []networkv1alpha
 	return result
 }
 
-// sortedEntries returns SBR entries in deterministic order (sorted by VRF name).
-func sortedEntries(entries map[string]*sbrEntry) []*sbrEntry {
-	names := make([]string, 0, len(entries))
-	for name := range entries {
-		names = append(names, name)
+// sortedGroups returns SBR groups in deterministic order (sorted by key).
+func sortedGroups(groups map[string]*sbrGroup) []*sbrGroup {
+	keys := make([]string, 0, len(groups))
+	for k := range groups {
+		keys = append(keys, k)
 	}
-	sort.Strings(names)
+	sort.Strings(keys)
 
-	result := make([]*sbrEntry, 0, len(names))
-	for _, name := range names {
-		result = append(result, entries[name])
+	result := make([]*sbrGroup, 0, len(keys))
+	for _, k := range keys {
+		result = append(result, groups[k])
 	}
 	return result
 }
