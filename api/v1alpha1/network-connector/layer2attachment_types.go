@@ -121,6 +121,11 @@ type Layer2AttachmentStatus struct {
 	// +optional
 	Anycast *AnycastStatus `json:"anycast,omitempty"`
 
+	// NodeAddresses holds per-node IP addresses allocated when nodeIPs.enabled is true.
+	// Key is node name, value contains the allocated addresses.
+	// +optional
+	NodeAddresses map[string]AddressAllocation `json:"nodeAddresses,omitempty"`
+
 	// Conditions represent the latest available observations of the resource's state.
 	// +optional
 	// +listType=map

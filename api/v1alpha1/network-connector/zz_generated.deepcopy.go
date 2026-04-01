@@ -1226,6 +1226,13 @@ func (in *Layer2AttachmentStatus) DeepCopyInto(out *Layer2AttachmentStatus) {
 		*out = new(AnycastStatus)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.NodeAddresses != nil {
+		in, out := &in.NodeAddresses, &out.NodeAddresses
+		*out = make(map[string]AddressAllocation, len(*in))
+		for key, val := range *in {
+			(*out)[key] = *val.DeepCopy()
+		}
+	}
 	if in.Conditions != nil {
 		in, out := &in.Conditions, &out.Conditions
 		*out = make([]v1.Condition, len(*in))

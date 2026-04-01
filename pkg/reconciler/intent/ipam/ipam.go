@@ -25,6 +25,7 @@ import (
 	"github.com/go-logr/logr"
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/resolver"
+	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -51,6 +52,7 @@ type networkPool struct {
 
 // ReconcileAllocations checks Inbound/Outbound resources with count mode
 // and allocates IPs from their referenced Network's CIDR.
+// It also allocates per-node IPs for Layer2Attachments with nodeIPs.enabled.
 // Allocated IPs are written to the resource's status.addresses field.
 func (a *Allocator) ReconcileAllocations(ctx context.Context, fetched *resolver.FetchedResources, networks map[string]*resolver.ResolvedNetwork) error {
 	pools := make(map[string]*networkPool)
@@ -98,6 +100,17 @@ func (a *Allocator) ReconcileAllocations(ctx context.Context, fetched *resolver.
 		a.logger.Info("allocated addresses for Outbound", "outbound", outb.Name, "addresses", addrs)
 	}
 
+	// Allocate per-node IPs for Layer2Attachments with nodeIPs.enabled.
+	for i := range fetched.Layer2Attachments {
+		l2a := &fetched.Layer2Attachments[i]
+		if l2a.Spec.NodeIPs == nil || !l2a.Spec.NodeIPs.Enabled {
+			continue
+		}
+		if err := a.reconcileNodeIPs(ctx, l2a, fetched.Nodes, networks, pools); err != nil {
+			a.logger.Error(err, "node IP allocation failed for Layer2Attachment", "l2a", l2a.Name)
+		}
+	}
+
 	return nil
 }
 
@@ -121,6 +134,13 @@ func (a *Allocator) seedExistingAllocations(fetched *resolver.FetchedResources, 
 	}
 	for i := range fetched.Outbounds {
 		collectAddresses(fetched.Outbounds[i].Spec.NetworkRef, fetched.Outbounds[i].Status.Addresses)
+	}
+	// Seed from L2A per-node allocations.
+	for i := range fetched.Layer2Attachments {
+		l2a := &fetched.Layer2Attachments[i]
+		for _, addrs := range l2a.Status.NodeAddresses {
+			collectAddresses(l2a.Spec.NetworkRef, &addrs)
+		}
 	}
 }
 
@@ -173,6 +193,37 @@ func compareIPs(a, b net.IP) int {
 		}
 	}
 	return 0
+}
+
+// reconcileNodeIPs allocates one IP per node for an L2A with nodeIPs.enabled.
+// Existing allocations are preserved; new nodes get the next available IP.
+func (a *Allocator) reconcileNodeIPs(ctx context.Context, l2a *nc.Layer2Attachment, nodes []corev1.Node, networks map[string]*resolver.ResolvedNetwork, pools map[string]*networkPool) error {
+	if l2a.Status.NodeAddresses == nil {
+		l2a.Status.NodeAddresses = make(map[string]nc.AddressAllocation)
+	}
+
+	changed := false
+	for i := range nodes {
+		nodeName := nodes[i].Name
+		if _, exists := l2a.Status.NodeAddresses[nodeName]; exists {
+			continue // already allocated
+		}
+
+		addrs, err := a.allocate(l2a.Spec.NetworkRef, 1, networks, pools)
+		if err != nil {
+			return fmt.Errorf("allocating node IP for %q on network %q: %w", nodeName, l2a.Spec.NetworkRef, err)
+		}
+		l2a.Status.NodeAddresses[nodeName] = *addrs
+		changed = true
+		a.logger.Info("allocated node IP", "l2a", l2a.Name, "node", nodeName, "addresses", addrs)
+	}
+
+	if changed {
+		if err := a.client.Status().Update(ctx, l2a); err != nil {
+			return fmt.Errorf("updating Layer2Attachment %q status: %w", l2a.Name, err)
+		}
+	}
+	return nil
 }
 
 // allocate allocates count IPs from the given network's CIDR pool.

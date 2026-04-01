@@ -317,6 +317,25 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              nodeAddresses:
+                additionalProperties:
+                  description: AddressAllocation holds allocated IP addresses in status.
+                  properties:
+                    ipv4:
+                      description: IPv4 lists allocated IPv4 addresses.
+                      items:
+                        type: string
+                      type: array
+                    ipv6:
+                      description: IPv6 lists allocated IPv6 addresses.
+                      items:
+                        type: string
+                      type: array
+                  type: object
+                description: |-
+                  NodeAddresses holds per-node IP addresses allocated when nodeIPs.enabled is true.
+                  Key is node name, value contains the allocated addresses.
+                type: object
               observedGeneration:
                 description: ObservedGeneration is the most recent generation observed
                   by the controller.
