@@ -45,9 +45,6 @@ func (b *L2ABuilder) Name() string {
 // Build produces per-node Layer2 configurations from Layer2Attachment resources.
 func (b *L2ABuilder) Build(_ context.Context, data *resolver.ResolvedData) (map[string]*NodeContribution, error) {
 	result := make(map[string]*NodeContribution)
-	// Track which L2A owns each VLAN key per node to detect overlaps.
-	// Key: "node/vlanKey", value: L2A name.
-	l2aOwner := make(map[string]string)
 	// Track which L2A owns each interface name per node.
 	// Key: "node/ifName", value: L2A name.
 	ifOwner := make(map[string]string)
@@ -67,12 +64,6 @@ func (b *L2ABuilder) Build(_ context.Context, data *resolver.ResolvedData) (map[
 			return nil, fmt.Errorf("Layer2Attachment %q destination resolution failed: %w", l2a.Name, err)
 		}
 
-		// Build the Layer2 config from Network + L2A fields.
-		layer2, err := b.buildLayer2(l2a, net, vrfName, vrfSpec)
-		if err != nil {
-			return nil, fmt.Errorf("Layer2Attachment %q config build failed: %w", l2a.Name, err)
-		}
-
 		// Compute the map key (VLAN ID as string, matching legacy format).
 		mapKey := fmt.Sprintf("%d", b.vlanID(net))
 
@@ -83,18 +74,18 @@ func (b *L2ABuilder) Build(_ context.Context, data *resolver.ResolvedData) (map[
 		}
 
 		for _, node := range matchingNodes {
-			ownerKey := node.Name + "/" + mapKey
-			if prev, exists := l2aOwner[ownerKey]; exists {
-				return nil, fmt.Errorf("Layer2Attachments %q and %q both target Network VLAN %s on node %q", prev, l2a.Name, mapKey, node.Name)
-			}
-			l2aOwner[ownerKey] = l2a.Name
-
 			if l2a.Spec.InterfaceName != nil && *l2a.Spec.InterfaceName != "" {
 				ifKey := node.Name + "/" + *l2a.Spec.InterfaceName
 				if prev, exists := ifOwner[ifKey]; exists {
 					return nil, fmt.Errorf("Layer2Attachments %q and %q both claim interface name %q on node %q", prev, l2a.Name, *l2a.Spec.InterfaceName, node.Name)
 				}
 				ifOwner[ifKey] = l2a.Name
+			}
+
+			// Build Layer2 config from Network + L2A fields.
+			layer2, err := b.buildLayer2(l2a, net, vrfName, vrfSpec)
+			if err != nil {
+				return nil, fmt.Errorf("Layer2Attachment %q config build failed: %w", l2a.Name, err)
 			}
 
 			contrib, ok := result[node.Name]

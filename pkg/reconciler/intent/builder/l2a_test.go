@@ -390,33 +390,6 @@ func TestMatchNodes_WithSelector(t *testing.T) {
 	}
 }
 
-func TestL2ABuilder_DuplicateNetworkOnSameNode(t *testing.T) {
-	b := NewL2ABuilder()
-	vlan := int32(501)
-	vni := int32(10501)
-	data := &resolver.ResolvedData{
-		Nodes: []corev1.Node{{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}}},
-		Networks: map[string]*resolver.ResolvedNetwork{
-			"net-vlan501": {
-				Name: "net-vlan501",
-				Spec: nc.NetworkSpec{VLAN: &vlan, VNI: &vni, IPv4: &nc.IPNetwork{CIDR: "10.0.1.1/24"}},
-			},
-		},
-		Layer2Attachments: []nc.Layer2Attachment{
-			{ObjectMeta: metav1.ObjectMeta{Name: "l2a-first"}, Spec: nc.Layer2AttachmentSpec{NetworkRef: "net-vlan501"}},
-			{ObjectMeta: metav1.ObjectMeta{Name: "l2a-second"}, Spec: nc.Layer2AttachmentSpec{NetworkRef: "net-vlan501"}},
-		},
-	}
-
-	_, err := b.Build(context.Background(), data)
-	if err == nil {
-		t.Fatal("expected error for duplicate L2As on same Network/node, got nil")
-	}
-	if !strings.Contains(err.Error(), "both target Network VLAN") {
-		t.Errorf("unexpected error message: %v", err)
-	}
-}
-
 func TestL2ABuilder_SameNetworkDifferentNodes(t *testing.T) {
 	b := NewL2ABuilder()
 	vlan := int32(501)
@@ -478,5 +451,62 @@ func TestL2ABuilder_DuplicateInterfaceNameOnSameNode(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "both claim interface name") {
 		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func TestL2ABuilder_NodeIPs_NotInIRB(t *testing.T) {
+	b := NewL2ABuilder()
+	vlan := int32(501)
+	vni := int32(10501)
+	data := &resolver.ResolvedData{
+		Nodes: []corev1.Node{
+			{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
+		},
+		Networks: map[string]*resolver.ResolvedNetwork{
+			"net-vlan501": {Name: "net-vlan501", Spec: nc.NetworkSpec{
+				VLAN: &vlan, VNI: &vni,
+				IPv4: &nc.IPNetwork{CIDR: "10.0.1.1/24"},
+			}},
+		},
+		RawDestinations: []nc.Destination{
+			{ObjectMeta: metav1.ObjectMeta{Name: "dest-gw", Labels: map[string]string{"type": "gateway"}},
+				Spec: nc.DestinationSpec{VRFRef: ptr("vrf-m2m")}},
+		},
+		Destinations: map[string]*resolver.ResolvedDestination{
+			"dest-gw": {Name: "dest-gw", Spec: nc.DestinationSpec{VRFRef: ptr("vrf-m2m")}, VRFSpec: &nc.VRFSpec{VRF: "m2m", VNI: ptr(int32(100))}},
+		},
+		Layer2Attachments: []nc.Layer2Attachment{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "l2a-nodeips"},
+				Spec: nc.Layer2AttachmentSpec{
+					NetworkRef:   "net-vlan501",
+					Destinations: &metav1.LabelSelector{MatchLabels: map[string]string{"type": "gateway"}},
+					NodeIPs:      &nc.NodeIPConfig{Enabled: true},
+				},
+				Status: nc.Layer2AttachmentStatus{
+					NodeAddresses: map[string]nc.AddressAllocation{
+						"node-1": {IPv4: []string{"10.0.1.10"}},
+					},
+				},
+			},
+		},
+	}
+
+	result, err := b.Build(context.Background(), data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Node IPs are host-side (NodeNetplanConfig), NOT on IRB.
+	// IRB should only have the anycast gateway.
+	n1Layer2 := result["node-1"].Layer2s["501"]
+	if n1Layer2.IRB == nil {
+		t.Fatal("node-1 Layer2 IRB is nil")
+	}
+	if len(n1Layer2.IRB.IPAddresses) != 1 {
+		t.Errorf("IRB should only have anycast gateway (1 IP), got %d: %v", len(n1Layer2.IRB.IPAddresses), n1Layer2.IRB.IPAddresses)
+	}
+	if n1Layer2.IRB.IPAddresses[0] != "10.0.1.1/24" {
+		t.Errorf("IRB IP should be anycast 10.0.1.1/24, got %s", n1Layer2.IRB.IPAddresses[0])
 	}
 }
