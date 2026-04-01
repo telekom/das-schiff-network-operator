@@ -18,6 +18,7 @@ package builder
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
@@ -386,5 +387,68 @@ func TestMatchNodes_WithSelector(t *testing.T) {
 	}
 	if matched[0].Name != "gpu-1" {
 		t.Errorf("expected gpu-1, got %s", matched[0].Name)
+	}
+}
+
+func TestL2ABuilder_DuplicateNetworkOnSameNode(t *testing.T) {
+	b := NewL2ABuilder()
+	vlan := int32(501)
+	vni := int32(10501)
+	data := &resolver.ResolvedData{
+		Nodes: []corev1.Node{{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}}},
+		Networks: map[string]*resolver.ResolvedNetwork{
+			"net-vlan501": {
+				Name: "net-vlan501",
+				Spec: nc.NetworkSpec{VLAN: &vlan, VNI: &vni, IPv4: &nc.IPNetwork{CIDR: "10.0.1.1/24"}},
+			},
+		},
+		Layer2Attachments: []nc.Layer2Attachment{
+			{ObjectMeta: metav1.ObjectMeta{Name: "l2a-first"}, Spec: nc.Layer2AttachmentSpec{NetworkRef: "net-vlan501"}},
+			{ObjectMeta: metav1.ObjectMeta{Name: "l2a-second"}, Spec: nc.Layer2AttachmentSpec{NetworkRef: "net-vlan501"}},
+		},
+	}
+
+	_, err := b.Build(context.Background(), data)
+	if err == nil {
+		t.Fatal("expected error for duplicate L2As on same Network/node, got nil")
+	}
+	if !strings.Contains(err.Error(), "both target Network VLAN") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func TestL2ABuilder_SameNetworkDifferentNodes(t *testing.T) {
+	b := NewL2ABuilder()
+	vlan := int32(501)
+	vni := int32(10501)
+	data := &resolver.ResolvedData{
+		Nodes: []corev1.Node{
+			{ObjectMeta: metav1.ObjectMeta{Name: "node-1", Labels: map[string]string{"zone": "a"}}},
+			{ObjectMeta: metav1.ObjectMeta{Name: "node-2", Labels: map[string]string{"zone": "b"}}},
+		},
+		Networks: map[string]*resolver.ResolvedNetwork{
+			"net-vlan501": {
+				Name: "net-vlan501",
+				Spec: nc.NetworkSpec{VLAN: &vlan, VNI: &vni, IPv4: &nc.IPNetwork{CIDR: "10.0.1.1/24"}},
+			},
+		},
+		Layer2Attachments: []nc.Layer2Attachment{
+			{ObjectMeta: metav1.ObjectMeta{Name: "l2a-zone-a"}, Spec: nc.Layer2AttachmentSpec{
+				NetworkRef:   "net-vlan501",
+				NodeSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"zone": "a"}},
+			}},
+			{ObjectMeta: metav1.ObjectMeta{Name: "l2a-zone-b"}, Spec: nc.Layer2AttachmentSpec{
+				NetworkRef:   "net-vlan501",
+				NodeSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"zone": "b"}},
+			}},
+		},
+	}
+
+	result, err := b.Build(context.Background(), data)
+	if err != nil {
+		t.Fatalf("expected no error for same Network on different nodes, got: %v", err)
+	}
+	if len(result) != 2 {
+		t.Errorf("expected 2 node contributions, got %d", len(result))
 	}
 }

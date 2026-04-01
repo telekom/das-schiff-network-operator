@@ -45,6 +45,9 @@ func (b *L2ABuilder) Name() string {
 // Build produces per-node Layer2 configurations from Layer2Attachment resources.
 func (b *L2ABuilder) Build(_ context.Context, data *resolver.ResolvedData) (map[string]*NodeContribution, error) {
 	result := make(map[string]*NodeContribution)
+	// Track which L2A owns each VLAN key per node to detect overlaps.
+	// Key: "node/vlanKey", value: L2A name.
+	l2aOwner := make(map[string]string)
 
 	for i := range data.Layer2Attachments {
 		l2a := &data.Layer2Attachments[i]
@@ -77,6 +80,12 @@ func (b *L2ABuilder) Build(_ context.Context, data *resolver.ResolvedData) (map[
 		}
 
 		for _, node := range matchingNodes {
+			ownerKey := node.Name + "/" + mapKey
+			if prev, exists := l2aOwner[ownerKey]; exists {
+				return nil, fmt.Errorf("Layer2Attachments %q and %q both target Network VLAN %s on node %q", prev, l2a.Name, mapKey, node.Name)
+			}
+			l2aOwner[ownerKey] = l2a.Name
+
 			contrib, ok := result[node.Name]
 			if !ok {
 				contrib = NewNodeContribution()
