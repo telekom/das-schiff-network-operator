@@ -390,12 +390,17 @@ func getVRFsToDelete(cfg nl.NetlinkConfiguration) ([]nl.VRFInformation, error) {
 	return toDelete, nil
 }
 
-func createVRFs(cfg nl.NetlinkConfiguration) error {
+// createVRFs creates VRF devices, L3VNI bridges, and VXLAN interfaces but
+// leaves bridges/VXLANs DOWN.  Callers must invoke upNewVRFs after FRR reload
+// so that the SVI-up event makes FRR read the bridge hardware address as the
+// EVPN Router-MAC (see zebra_vxlan_svi_up → process_l3vni_oper_up in FRR).
+func createVRFs(cfg nl.NetlinkConfiguration) ([]nl.VRFInformation, error) {
 	existing, err := nlManager.ListL3()
 	if err != nil {
-		return fmt.Errorf("error listing L3 VRF information: %w", err)
+		return nil, fmt.Errorf("error listing L3 VRF information: %w", err)
 	}
 
+	var created []nl.VRFInformation
 	for i := range cfg.VRFs {
 		alreadyExists := false
 		for j := range existing {
@@ -408,39 +413,58 @@ func createVRFs(cfg nl.NetlinkConfiguration) error {
 		if !alreadyExists {
 			log.Println("Creating VRF", cfg.VRFs[i].Name)
 			if err := nlManager.CreateL3(cfg.VRFs[i]); err != nil {
-				return fmt.Errorf("error creating L3 (VRF: %s): %w", cfg.VRFs[i].Name, err)
+				return created, fmt.Errorf("error creating L3 (VRF: %s): %w", cfg.VRFs[i].Name, err)
 			}
-			if err := nlManager.UpL3(cfg.VRFs[i]); err != nil {
-				return fmt.Errorf("error setting up L3 (VRF: %s): %w", cfg.VRFs[i].Name, err)
-			}
+			created = append(created, cfg.VRFs[i])
 		}
 	}
 
+	return created, nil
+}
+
+// upNewVRFs brings up bridges/VXLANs that were created by createVRFs.
+// Must be called AFTER FRR reload so that FRR already knows the L3VNI→VRF
+// mapping.  The SVI-up netlink event causes zebra to read the bridge MAC and
+// advertise the correct EVPN Router-MAC.
+func upNewVRFs(vrfs []nl.VRFInformation) error {
+	for i := range vrfs {
+		log.Println("Bringing up VRF interfaces", vrfs[i].Name)
+		if err := nlManager.UpL3(vrfs[i]); err != nil {
+			return fmt.Errorf("error setting up L3 (VRF: %s): %w", vrfs[i].Name, err)
+		}
+	}
 	return nil
 }
 
-func reconcileLayer3(cfg nl.NetlinkConfiguration) error {
+// reconcileLayer3 deletes stale VRFs and creates new ones (bridges/VXLANs
+// DOWN).  Returns the list of newly created VRFs so the caller can bring them
+// UP after FRR reload.
+func reconcileLayer3(cfg nl.NetlinkConfiguration) ([]nl.VRFInformation, error) {
 	vrfsToDelete, err := getVRFsToDelete(cfg)
 	if err != nil {
-		return fmt.Errorf("error getting VRFs to delete: %w", err)
+		return nil, fmt.Errorf("error getting VRFs to delete: %w", err)
 	}
 
 	for i := range vrfsToDelete {
 		errors := nlManager.CleanupL3(vrfsToDelete[i].Name)
 		if len(errors) > 0 {
-			return fmt.Errorf("error cleaning up L3 (VRF: %s): %v", vrfsToDelete[i].Name, errors)
+			return nil, fmt.Errorf("error cleaning up L3 (VRF: %s): %v", vrfsToDelete[i].Name, errors)
 		}
 	}
 
-	// Create VRFs and L3 VNI bridges BEFORE FRR reload.
-	// FRR derives EVPN Router-MAC from bridge hardware addresses. If FRR is
-	// reloaded while bridges do not yet exist it records 00:00:00:00:00:00
-	// as the RMAC, which breaks IPv6 VXLAN forwarding permanently.
-	if err := createVRFs(cfg); err != nil {
-		return fmt.Errorf("error creating VRFs: %w", err)
+	// Create VRFs and L3 VNI bridges but keep DOWN.
+	// FRR reads the bridge hardware address as the EVPN Router-MAC only when
+	// the SVI comes UP (zebra_vxlan_svi_up).  Bringing bridges UP before FRR
+	// knows the L3VNI→VRF mapping would cause FRR to treat them as L2VNI
+	// (broadcast storm with hairpin).  Bringing them UP after reload ensures
+	// FRR has the VNI config and the SVI-up event triggers correct RMAC
+	// advertisement.
+	created, err := createVRFs(cfg)
+	if err != nil {
+		return created, fmt.Errorf("error creating VRFs: %w", err)
 	}
 
-	return nil
+	return created, nil
 }
 
 func reloadFRR() error {
@@ -456,6 +480,46 @@ func reloadFRR() error {
 	}
 	log.Println("Reloaded FRR config")
 	return nil
+}
+
+const (
+	vniPollInterval = 500 * time.Millisecond
+	vniPollTimeout  = 10 * time.Second
+)
+
+// waitForL3VNIs polls FRR's "show vrf vni" until all newly created L3VNIs
+// appear in the output.  This ensures zebra has processed the reload config
+// and registered the VNI→VRF mappings before we bring bridges UP.
+func waitForL3VNIs(vrfs []nl.VRFInformation) {
+	// Collect non-local VNIs we need to see.
+	needed := map[int]bool{}
+	for _, v := range vrfs {
+		if !v.LocalOnly && v.VNI != 0 {
+			needed[v.VNI] = true
+		}
+	}
+	if len(needed) == 0 {
+		return
+	}
+
+	deadline := time.Now().Add(vniPollTimeout)
+	for time.Now().Before(deadline) {
+		vrfVni, err := frrManager.Cli.ShowVRFVnis()
+		if err == nil {
+			found := 0
+			for _, spec := range vrfVni.Vrfs {
+				if needed[spec.Vni] {
+					found++
+				}
+			}
+			if found >= len(needed) {
+				log.Printf("All %d L3VNIs registered in FRR", found)
+				return
+			}
+		}
+		time.Sleep(vniPollInterval)
+	}
+	log.Printf("Warning: timed out waiting for L3VNIs in FRR (needed %d)", len(needed))
 }
 
 func applyConfig(w http.ResponseWriter, r *http.Request) {
@@ -508,27 +572,42 @@ func applyConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Reconcile Layer3 — creates VRF bridges before FRR sees the config
-	err = reconcileLayer3(craConfiguration.NetlinkConfiguration)
+	// Phase 1: Create VRF devices and L3VNI bridges/VXLANs (DOWN).
+	// Bridges must exist (with correct MAC) before FRR reload so zebra can
+	// map VNI→SVI, but must stay DOWN to avoid L2VNI broadcast storms.
+	newVRFs, err := reconcileLayer3(craConfiguration.NetlinkConfiguration)
 	if err != nil {
 		log.Println("Failed to reconcile Layer3", err)
 		http.Error(w, fmt.Sprintf("Failed to reconcile Layer3: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	// Let zebra process netlink events for newly created bridges before
-	// reloading FRR config. Without this delay, FRR may not yet see the
-	// bridge hardware addresses and will record zero EVPN Router-MACs.
-	time.Sleep(defaultSleep)
-
-	// Reload FRR AFTER L3 bridges exist so FRR derives correct EVPN Router-MACs.
-	// Previously this ran before reconcileLayer3, causing FRR to record
-	// 00:00:00:00:00:00 as RMAC for VNIs whose bridges had not been created yet.
+	// Phase 2: Reload FRR so it learns VNI→VRF mapping from the config file.
+	// At this point bridges exist (zebra knows the interfaces) but are DOWN,
+	// so is_l3vni_oper_up() is false and no RMAC is advertised yet.
 	err = reloadFRR()
 	if err != nil {
 		log.Println("Failed to reload FRR", err)
 		http.Error(w, fmt.Sprintf("Failed to reload FRR: %v", err), http.StatusInternalServerError)
 		return
+	}
+
+	// Give zebra time to process the reload and learn VNI→VRF mappings.
+	// Without this, the SVI-up event from Phase 3 may arrive before zebra
+	// has associated the L3VNI, causing it to treat the VNI as L2.
+	if len(newVRFs) > 0 {
+		waitForL3VNIs(newVRFs)
+	}
+
+	// Phase 3: Bring new bridges/VXLANs UP.  The SVI-up netlink event makes
+	// zebra call zebra_vxlan_svi_up → process_l3vni_oper_up which reads the
+	// bridge hardware address and advertises the correct EVPN Router-MAC.
+	if len(newVRFs) > 0 {
+		if err := upNewVRFs(newVRFs); err != nil {
+			log.Println("Failed to bring up new VRFs", err)
+			http.Error(w, fmt.Sprintf("Failed to bring up new VRFs: %v", err), http.StatusInternalServerError)
+			return
+		}
 	}
 
 	time.Sleep(defaultSleep)

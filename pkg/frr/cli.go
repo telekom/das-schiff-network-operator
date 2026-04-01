@@ -91,7 +91,7 @@ func (frr *Cli) ShowBGPSummary(vrf string) (BGPVrfSummary, error) {
 	return bgpSummary, nil
 }
 
-func (frr *Cli) showVRFVnis() (VrfVni, error) {
+func (frr *Cli) ShowVRFVnis() (VrfVni, error) {
 	vrfInfo := VrfVni{}
 	vrfVniData := frr.ExecuteWithJSON([]string{
 		"show",
@@ -143,7 +143,7 @@ func parseVRFS(data string) ([]map[string]string, error) {
 }
 
 func (frr *Cli) ShowVRFs(vrfName string) (VrfVni, error) {
-	vrfInfo, err := frr.showVRFVnis()
+	vrfInfo, err := frr.ShowVRFVnis()
 	if err != nil {
 		return vrfInfo, fmt.Errorf("cannot get vrf vni mapping from frr: %w", err)
 	}
