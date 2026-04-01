@@ -37,6 +37,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	k8syaml "sigs.k8s.io/yaml"
 )
 
 var (
@@ -130,6 +131,14 @@ func reconcileAndGetNNC(t *testing.T, ctx context.Context, nodeName string) *net
 	require.NoError(t, k8sClient.Get(ctx, client.ObjectKey{Name: nodeName}, nnc), "get NNC %s", nodeName)
 	t.Cleanup(func() { _ = k8sClient.Delete(context.Background(), nnc) })
 	return nnc
+}
+
+func getNetplanConfig(t *testing.T, ctx context.Context, nodeName string) *networkv1alpha1.NodeNetplanConfig {
+	t.Helper()
+	npc := &networkv1alpha1.NodeNetplanConfig{}
+	require.NoError(t, k8sClient.Get(ctx, client.ObjectKey{Name: nodeName}, npc), "get NodeNetplanConfig %s", nodeName)
+	t.Cleanup(func() { _ = k8sClient.Delete(context.Background(), npc) })
+	return npc
 }
 
 // makeVRF creates a VRF intent CRD.
@@ -789,4 +798,92 @@ func TestAnnouncementPolicyHostRoutesAndAggregate(t *testing.T) {
 
 	// Default action should be Accept
 	assert.Equal(t, networkv1alpha1.Accept, filter.DefaultAction.Type)
+}
+
+func TestBuildNetplanState(t *testing.T) {
+	t.Run("empty spec produces empty state", func(t *testing.T) {
+		spec := &networkv1alpha1.NodeNetworkConfigSpec{
+			Layer2s: map[string]networkv1alpha1.Layer2{},
+		}
+		state := buildNetplanState(spec)
+		assert.Empty(t, state.Network.VLans)
+	})
+
+	t.Run("nil spec produces empty state", func(t *testing.T) {
+		state := buildNetplanState(nil)
+		assert.Empty(t, state.Network.VLans)
+	})
+
+	t.Run("Layer2s produce netplan VLANs", func(t *testing.T) {
+		spec := &networkv1alpha1.NodeNetworkConfigSpec{
+			Layer2s: map[string]networkv1alpha1.Layer2{
+				"501": {VLAN: 501, VNI: 10501, MTU: 9000},
+				"502": {VLAN: 502, VNI: 10502, MTU: 1500},
+			},
+		}
+		state := buildNetplanState(spec)
+		require.Len(t, state.Network.VLans, 2)
+
+		// Check vlan.501
+		v501, ok := state.Network.VLans["vlan.501"]
+		require.True(t, ok, "expected vlan.501 in netplan VLans")
+		var vlan501 map[string]interface{}
+		require.NoError(t, json.Unmarshal(v501.Raw, &vlan501))
+		assert.Equal(t, float64(501), vlan501["id"])
+		assert.Equal(t, "hbn", vlan501["link"])
+		assert.Equal(t, float64(9000), vlan501["mtu"])
+
+		// Check vlan.502
+		v502, ok := state.Network.VLans["vlan.502"]
+		require.True(t, ok, "expected vlan.502 in netplan VLans")
+		var vlan502 map[string]interface{}
+		require.NoError(t, json.Unmarshal(v502.Raw, &vlan502))
+		assert.Equal(t, float64(502), vlan502["id"])
+		assert.Equal(t, "hbn", vlan502["link"])
+		assert.Equal(t, float64(1500), vlan502["mtu"])
+	})
+
+	t.Run("Layer2 with zero VLAN is skipped", func(t *testing.T) {
+		spec := &networkv1alpha1.NodeNetworkConfigSpec{
+			Layer2s: map[string]networkv1alpha1.Layer2{
+				"0": {VLAN: 0, VNI: 100, MTU: 1500},
+			},
+		}
+		state := buildNetplanState(spec)
+		assert.Empty(t, state.Network.VLans)
+	})
+}
+
+func TestReconcileCreatesNodeNetplanConfig(t *testing.T) {
+	ctx := context.Background()
+	nodeName := "netplan-test-node"
+
+	createNode(t, ctx, nodeName, map[string]string{"node-role": "worker"})
+	createObj(t, ctx, makeVRF("vrf-np", "m2m", 100, "65000:100"))
+	createObj(t, ctx, makeNetwork("net-np", 501, 10501, "10.0.1.0/24", ""))
+	createObj(t, ctx, makeDestination("dest-np", "vrf-np", map[string]string{"role": "dcgw"}, nil))
+	createObj(t, ctx, makeL2A("l2a-np", "net-np", &metav1.LabelSelector{
+		MatchLabels: map[string]string{"role": "dcgw"},
+	}, nil))
+
+	// Reconcile should create both NNC and NodeNetplanConfig.
+	nnc := reconcileAndGetNNC(t, ctx, nodeName)
+	require.NotEmpty(t, nnc.Spec.Layer2s, "NNC should have Layer2s")
+
+	npc := getNetplanConfig(t, ctx, nodeName)
+	require.NotNil(t, npc)
+
+	// Verify NodeNetplanConfig has the VLAN.
+	vlan, ok := npc.Spec.DesiredState.Network.VLans["vlan.501"]
+	require.True(t, ok, "expected vlan.501 in NodeNetplanConfig, got keys: %v", mapKeys(npc.Spec.DesiredState.Network.VLans))
+
+	// After API round-trip, Device.Raw is YAML (UnmarshalJSON converts JSON→YAML).
+	var vlanData map[string]interface{}
+	require.NoError(t, k8syaml.Unmarshal(vlan.Raw, &vlanData))
+	// YAML numbers may deserialize as float64 or int64 depending on the parser.
+	assert.InDelta(t, 501, vlanData["id"], 0.1)
+	assert.Equal(t, "hbn", vlanData["link"])
+
+	// Verify intent-managed label.
+	assert.Equal(t, "intent", npc.Labels[intentManagedLabel])
 }

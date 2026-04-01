@@ -21,12 +21,14 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/go-logr/logr"
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 	"github.com/telekom/das-schiff-network-operator/pkg/debounce"
+	"github.com/telekom/das-schiff-network-operator/pkg/network/netplan"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/assembler"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/builder"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/finalizer"
@@ -114,9 +116,12 @@ func (r *Reconciler) ReconcileDebounced(ctx context.Context) error {
 		return fmt.Errorf("failed to fetch intent resources: %w", err)
 	}
 
-	// 1b. Clean up orphaned NNCs (nodes that no longer exist).
+	// 1b. Clean up orphaned NNCs and NodeNetplanConfigs (nodes that no longer exist).
 	if err := r.cleanupOrphanedNNCs(timeoutCtx, fetched.Nodes); err != nil {
 		r.logger.Error(err, "orphaned NNC cleanup failed")
+	}
+	if err := r.cleanupOrphanedNetplanConfigs(timeoutCtx, fetched.Nodes); err != nil {
+		r.logger.Error(err, "orphaned NodeNetplanConfig cleanup failed")
 	}
 
 	// 2. Reconcile in-use finalizers.
@@ -171,9 +176,16 @@ func (r *Reconciler) ReconcileDebounced(ctx context.Context) error {
 			r.logger.Error(err, "failed to apply NodeNetworkConfig", "node", node.Name)
 			continue
 		}
+
+		// 8. Create or update NodeNetplanConfig (host-side VLANs for HBN-L2 agent).
+		netplanState := buildNetplanState(result.Spec)
+		if err := r.applyNetplanConfig(timeoutCtx, &node, netplanState); err != nil {
+			r.logger.Error(err, "failed to apply NodeNetplanConfig", "node", node.Name)
+			continue
+		}
 	}
 
-	// 8. Update status conditions on all intent CRDs.
+	// 9. Update status conditions on all intent CRDs.
 	if err := r.statusUpdater.UpdateConditions(timeoutCtx, fetched, resolved); err != nil {
 		r.logger.Error(err, "status condition update failed")
 	}
@@ -424,6 +436,128 @@ func (r *Reconciler) cleanupOrphanedNNCs(ctx context.Context, nodes []corev1.Nod
 		r.logger.Info("deleting orphaned NodeNetworkConfig", "name", nnc.Name)
 		if err := r.client.Delete(ctx, nnc); err != nil && !apierrors.IsNotFound(err) {
 			r.logger.Error(err, "failed to delete orphaned NNC", "name", nnc.Name)
+		}
+	}
+	return nil
+}
+
+// buildNetplanState derives a netplan State from the assembled NNC spec.
+// It creates VLAN devices from the NNC Layer2 entries (host-side config for HBN-L2 agent).
+func buildNetplanState(spec *networkv1alpha1.NodeNetworkConfigSpec) *netplan.State {
+	state := netplan.NewEmptyState()
+
+	if spec == nil || len(spec.Layer2s) == 0 {
+		return &state
+	}
+
+	// Sort VLAN keys for deterministic output.
+	keys := make([]string, 0, len(spec.Layer2s))
+	for k := range spec.Layer2s {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	for _, k := range keys {
+		l2 := spec.Layer2s[k]
+		if l2.VLAN == 0 {
+			continue
+		}
+
+		vlan := map[string]interface{}{
+			"id":   l2.VLAN,
+			"link": "hbn",
+			"mtu":  l2.MTU,
+		}
+
+		rawVlan, err := json.Marshal(vlan)
+		if err != nil {
+			continue
+		}
+
+		state.Network.VLans[fmt.Sprintf("vlan.%d", l2.VLAN)] = netplan.Device{
+			Raw: rawVlan,
+		}
+	}
+
+	return &state
+}
+
+// applyNetplanConfig creates or updates a NodeNetplanConfig for a node.
+func (r *Reconciler) applyNetplanConfig(ctx context.Context, node *corev1.Node, state *netplan.State) error {
+	existing := &networkv1alpha1.NodeNetplanConfig{}
+	err := r.client.Get(ctx, client.ObjectKey{Name: node.Name}, existing)
+
+	desiredSpec := networkv1alpha1.NodeNetplanConfigSpec{
+		DesiredState: *state,
+	}
+
+	if err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("error getting NodeNetplanConfig for node %s: %w", node.Name, err)
+	}
+
+	if err == nil {
+		// Exists — check if update needed.
+		if existing.Spec.DesiredState.Equals(state) && hasIntentManagedNetplanLabel(existing) {
+			return nil // no change
+		}
+
+		setIntentManagedNetplanLabel(existing)
+		existing.Spec = desiredSpec
+		return r.client.Update(ctx, existing)
+	}
+
+	// Does not exist — create.
+	npc := &networkv1alpha1.NodeNetplanConfig{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: node.Name,
+		},
+		Spec: desiredSpec,
+	}
+	setIntentManagedNetplanLabel(npc)
+
+	if err := controllerutil.SetOwnerReference(node, npc, r.client.Scheme()); err != nil {
+		return fmt.Errorf("error setting owner reference for NodeNetplanConfig %s: %w", node.Name, err)
+	}
+
+	return r.client.Create(ctx, npc)
+}
+
+// setIntentManagedNetplanLabel marks a NodeNetplanConfig as managed by the intent reconciler.
+func setIntentManagedNetplanLabel(npc *networkv1alpha1.NodeNetplanConfig) {
+	if npc.Labels == nil {
+		npc.Labels = make(map[string]string)
+	}
+	npc.Labels[intentManagedLabel] = "intent"
+}
+
+// hasIntentManagedNetplanLabel returns true if the NodeNetplanConfig is already managed by intent.
+func hasIntentManagedNetplanLabel(npc *networkv1alpha1.NodeNetplanConfig) bool {
+	return npc.Labels != nil && npc.Labels[intentManagedLabel] == "intent"
+}
+
+// cleanupOrphanedNetplanConfigs deletes NodeNetplanConfigs that don't correspond to any current node.
+func (r *Reconciler) cleanupOrphanedNetplanConfigs(ctx context.Context, nodes []corev1.Node) error {
+	nodeNames := make(map[string]struct{}, len(nodes))
+	for i := range nodes {
+		nodeNames[nodes[i].Name] = struct{}{}
+	}
+
+	npcList := &networkv1alpha1.NodeNetplanConfigList{}
+	if err := r.client.List(ctx, npcList); err != nil {
+		return fmt.Errorf("error listing NodeNetplanConfigs: %w", err)
+	}
+
+	for i := range npcList.Items {
+		npc := &npcList.Items[i]
+		if _, exists := nodeNames[npc.Name]; exists {
+			continue
+		}
+		if !hasIntentManagedNetplanLabel(npc) {
+			continue // not ours
+		}
+		r.logger.Info("deleting orphaned NodeNetplanConfig", "name", npc.Name)
+		if err := r.client.Delete(ctx, npc); err != nil && !apierrors.IsNotFound(err) {
+			r.logger.Error(err, "failed to delete orphaned NodeNetplanConfig", "name", npc.Name)
 		}
 	}
 	return nil

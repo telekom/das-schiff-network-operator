@@ -105,12 +105,12 @@ var _ = Describe("Intent: Destination NNC Validation", Label("intent", "destinat
 			By("Applying lifecycle L2A for VLAN 504 (m2m VRF)")
 			Expect(f.ApplyManifest(ctx, cleanupManifest)).To(Succeed())
 
-			By("Waiting for NNC to include Layer2 504 after L2A creation")
+			By("Waiting for NNC spec to include Layer2 504")
 			Eventually(func() bool {
 				nnc, getErr := f.GetNNC(ctx, cfg.WorkerNode1)
 				return getErr == nil && framework.NNCHasLayer2(nnc, "504")
 			}).WithTimeout(60*time.Second).WithPolling(5*time.Second).Should(BeTrue(),
-				"NNC should have Layer2 '504' after L2A creation")
+				"NNC spec should have Layer2 '504' after L2A creation")
 
 			By("Verifying Layer2 504 exists in NNC spec")
 			nncAfterCreate, err := f.GetNNC(ctx, cfg.WorkerNode1)
@@ -121,12 +121,12 @@ var _ = Describe("Intent: Destination NNC Validation", Label("intent", "destinat
 			By("Deleting the lifecycle L2A")
 			Expect(f.DeleteManifest(ctx, cleanupManifest)).To(Succeed())
 
-			By("Waiting for Layer2 504 to be removed from NNC")
+			By("Waiting for NNC spec to not have Layer2 504")
 			Eventually(func() bool {
 				nnc, getErr := f.GetNNC(ctx, cfg.WorkerNode1)
 				return getErr == nil && !framework.NNCHasLayer2(nnc, "504")
 			}).WithTimeout(60*time.Second).WithPolling(5*time.Second).Should(BeTrue(),
-				"Layer2 '504' should be removed after L2A deletion")
+				"NNC spec should not have Layer2 '504' after L2A deletion")
 
 			By("Verifying Layer2 504 is removed from NNC")
 			nncAfterDelete, err := f.GetNNC(ctx, cfg.WorkerNode1)

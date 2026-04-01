@@ -315,6 +315,15 @@ var _ = Describe("CleanupL3()", func() {
 		err := nm.CleanupL3("name")
 		Expect(err).To(BeEmpty())
 	})
+	It("ignores EINVAL and ENODEV errors (link already gone)", func() {
+		mockctrl := gomock.NewController(GinkgoT())
+		defer mockctrl.Finish()
+		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
+		nm := NewManager(netlinkMock, &config.BaseConfig{})
+		netlinkMock.EXPECT().LinkDel(gomock.Any()).Return(unix.EINVAL).Times(3)
+		err := nm.CleanupL3("name")
+		Expect(err).To(BeEmpty())
+	})
 })
 
 var _ = Describe("UpL3()", func() {
