@@ -1,0 +1,102 @@
+# Cluster-2 intent CRDs: VRFs, Networks, L2As for gateway pods.
+# Creates the m2m/c2m VRF domains on cluster-2 with VLANs 601/602
+# where gateway pods are attached via macvlan.
+---
+# VRFs — same as cluster1 (same EVPN fabric)
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: VRF
+metadata:
+  name: vrf-m2m
+  namespace: default
+spec:
+  vrf: "m2m"
+  vni: 2002026
+  routeTarget: "65188:2026"
+---
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: VRF
+metadata:
+  name: vrf-c2m
+  namespace: default
+spec:
+  vrf: "c2m"
+  vni: 2002027
+  routeTarget: "65188:2027"
+---
+# Networks for gateway VLANs.
+# CIDR is used directly as the anycast gateway IP by the L2A builder.
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Network
+metadata:
+  name: net-gw-vlan601
+  namespace: default
+spec:
+  vlan: 601
+  vni: 5000002
+  ipv4:
+    cidr: "10.102.0.254/24"
+  ipv6:
+    cidr: "fda5:25c1:193c::fe/64"
+---
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Network
+metadata:
+  name: net-gw-vlan602
+  namespace: default
+spec:
+  vlan: 602
+  vni: 5000004
+  ipv4:
+    cidr: "10.102.1.254/24"
+  ipv6:
+    cidr: "fda5:25c1:193d::fe/64"
+---
+# Destinations — export gateway subnets from cluster2 into the EVPN fabric
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Destination
+metadata:
+  name: dest-gw-m2m
+  namespace: default
+  labels:
+    type: gateway-export
+spec:
+  vrfRef: "vrf-m2m"
+  prefixes:
+    - "10.102.0.0/24"
+    - "fda5:25c1:193c::/64"
+---
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Destination
+metadata:
+  name: dest-gw-c2m
+  namespace: default
+  labels:
+    type: gateway-export-c2m
+spec:
+  vrfRef: "vrf-c2m"
+  prefixes:
+    - "10.102.1.0/24"
+    - "fda5:25c1:193d::/64"
+---
+# Layer2Attachments — attach gateway VLANs to the m2m/c2m VRFs
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Layer2Attachment
+metadata:
+  name: l2a-gw-vlan601
+  namespace: default
+spec:
+  networkRef: "net-gw-vlan601"
+  destinations:
+    matchLabels:
+      type: gateway-export
+---
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Layer2Attachment
+metadata:
+  name: l2a-gw-vlan602
+  namespace: default
+spec:
+  networkRef: "net-gw-vlan602"
+  destinations:
+    matchLabels:
+      type: gateway-export-c2m
