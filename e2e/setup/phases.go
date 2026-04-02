@@ -860,13 +860,13 @@ func PhaseCluster2Gateway(cluster *Cluster, repoRoot string) error {
 	cp := cluster.ControlPlane()
 	kubeconfigPath := "/etc/kubernetes/admin.conf"
 
-	// Apply cluster-2 network configs (VRFRouteConfigurations + Layer2NetworkConfigurations).
+	// Apply cluster-2 intent CRDs (VRFs, Networks, Destinations, L2Attachments).
 	// Retry because the webhook may not be serving yet even though the operator pod is Ready
 	// (the readiness probe checks healthz, but the webhook cert generation takes a moment longer).
 	Logf("Cluster-2: Applying network configs (waiting for webhook)...")
 	if err := WaitFor("cluster2 network configs", 120*time.Second, 5*time.Second, func() (bool, error) {
 		_, err := DockerExecShell(cp.Name, fmt.Sprintf(
-			"kubectl --kubeconfig=%s apply -f /repo/e2etests/testdata/cluster2-network-configs.yaml",
+			"kubectl --kubeconfig=%s apply -f /repo/e2etests/testdata/intent/cluster2-configs.yaml",
 			kubeconfigPath))
 		return err == nil, nil
 	}); err != nil {

@@ -148,10 +148,20 @@ func (b *L2ABuilder) resolveDestinationVRF(l2a *nc.Layer2Attachment, data *resol
 
 // buildLayer2 creates a NNC Layer2 from a Layer2Attachment and its resolved Network.
 func (b *L2ABuilder) buildLayer2(l2a *nc.Layer2Attachment, net *resolver.ResolvedNetwork, vrfName string, vrfSpec *nc.VRFSpec) (*networkv1alpha1.Layer2, error) {
+	rt := b.routeTarget(net, vrfSpec)
+
+	// Guard: L2 VNI must never share a route target with the L3 VRF.
+	// A shared RT causes FRR to import link-local type-2 routes (which lack
+	// RMAC) into the VRF, corrupting nexthop router MACs for EVPN type-5.
+	if rt != "" && vrfSpec != nil && vrfSpec.RouteTarget != nil && rt == *vrfSpec.RouteTarget {
+		return nil, fmt.Errorf("Layer2Attachment %q: L2 VNI route target %q must not equal VRF %q route target — this causes EVPN RMAC corruption",
+			l2a.Name, rt, vrfSpec.VRF)
+	}
+
 	layer2 := &networkv1alpha1.Layer2{
 		VNI:         uint32(b.vniValue(net)),
 		VLAN:        uint16(b.vlanID(net)),
-		RouteTarget: b.routeTarget(net, vrfSpec),
+		RouteTarget: rt,
 		MTU:         b.mtu(l2a),
 	}
 
@@ -218,11 +228,12 @@ func (b *L2ABuilder) mtu(l2a *nc.Layer2Attachment) uint16 {
 	return 1500
 }
 
-// routeTarget derives a route target. If the VRF has one, use it; otherwise empty.
-func (b *L2ABuilder) routeTarget(net *resolver.ResolvedNetwork, vrfSpec *nc.VRFSpec) string {
-	if vrfSpec != nil && vrfSpec.RouteTarget != nil {
-		return *vrfSpec.RouteTarget
-	}
+// routeTarget returns an empty string so that FRR auto-derives the L2 VNI's
+// route target. The L3 VRF RT is injected automatically by FRR for non-link-local
+// type-2 routes via build_evpn_route_extcomm — setting the L2 VNI RT to the
+// VRF's RT would cause link-local type-2 routes (which lack RMAC) to be imported
+// into the VRF, corrupting the nexthop router MAC.
+func (b *L2ABuilder) routeTarget(_ *resolver.ResolvedNetwork, _ *nc.VRFSpec) string {
 	return ""
 }
 

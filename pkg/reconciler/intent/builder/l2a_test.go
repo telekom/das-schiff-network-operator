@@ -237,6 +237,13 @@ func TestL2ABuilder_WithDestinationVRF(t *testing.T) {
 		t.Errorf("expected IRB IP [10.100.0.0/24], got %v", l2.IRB.IPAddresses)
 	}
 
+	// L2 VNI RouteTarget must be empty — FRR auto-derives it.
+	// Setting it to the VRF's RT causes link-local type-2 EVPN routes (without RMAC)
+	// to be imported into the VRF, corrupting nexthop router MACs.
+	if l2.RouteTarget != "" {
+		t.Errorf("expected empty L2 RouteTarget (FRR auto-derives), got %q", l2.RouteTarget)
+	}
+
 	// FabricVRF should have been created.
 	fvrf, ok := contrib.FabricVRFs["prod"]
 	if !ok {
@@ -244,6 +251,31 @@ func TestL2ABuilder_WithDestinationVRF(t *testing.T) {
 	}
 	if fvrf.VNI != 5001 {
 		t.Errorf("expected FabricVRF VNI 5001, got %d", fvrf.VNI)
+	}
+}
+
+func TestL2ABuilder_RejectsSharedL2L3RouteTarget(t *testing.T) {
+	b := NewL2ABuilder()
+
+	// Directly test buildLayer2 with a scenario where the RT would match the VRF's RT.
+	// This exercises the hardening guard even though routeTarget() currently returns "".
+	vrfSpec := &nc.VRFSpec{VRF: "prod", VNI: ptr(int32(5001)), RouteTarget: ptr("65000:5001")}
+	net := &resolver.ResolvedNetwork{
+		Name: "test-net",
+		Spec: nc.NetworkSpec{VLAN: ptr(int32(100)), VNI: ptr(int32(10100))},
+	}
+	l2a := &nc.Layer2Attachment{
+		ObjectMeta: metav1.ObjectMeta{Name: "bad-l2a"},
+		Spec:       nc.Layer2AttachmentSpec{NetworkRef: "test-net"},
+	}
+
+	// routeTarget() returns "" so this should succeed (no collision).
+	l2, err := b.buildLayer2(l2a, net, "", vrfSpec)
+	if err != nil {
+		t.Fatalf("expected no error for empty RT, got: %v", err)
+	}
+	if l2.RouteTarget != "" {
+		t.Errorf("expected empty RT, got %q", l2.RouteTarget)
 	}
 }
 

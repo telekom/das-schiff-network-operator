@@ -312,6 +312,10 @@ func setupIntentReconciler(mgr manager.Manager, apiTimeout time.Duration, cfg *o
 		return fmt.Errorf("unable to create InterfaceConfig controller: %w", err)
 	}
 
+	if err = (&networkv1alpha1.VRFRouteConfiguration{}).SetupWebhookWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to create webhook for VRFRouteConfiguration: %w", err)
+	}
+
 	setupLog.Info("intent reconciler enabled — legacy ConfigReconciler disabled")
 	return nil
 }
