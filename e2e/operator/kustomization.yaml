@@ -10,6 +10,8 @@ resources:
 - ../../config/agent-cra-frr
 - ../../config/agent-hbn-l2
 - ../../config/healthcheck
+- ../../config/platform-coil
+- ../../config/platform-metallb
 - ../../config/webhook
 - intent_rbac.yaml
 patches:

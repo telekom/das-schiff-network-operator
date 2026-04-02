@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: platform-coil
+  namespace: system
+  labels:
+    app.kubernetes.io/name: platform-coil
+    app.kubernetes.io/component: platform
+    app.kubernetes.io/managed-by: kustomize
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: platform-coil
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: platform-coil
+    spec:
+      tolerations:
+      - key: node-role.kubernetes.io/control-plane
+        operator: Exists
+        effect: NoSchedule
+      containers:
+      - name: controller
+        image: controller:latest
+        command:
+        - /platform-coil
+        args:
+        - --metrics-bind-address=:8090
+        - --health-probe-bind-address=:8091
+        ports:
+        - containerPort: 8090
+          name: metrics
+        - containerPort: 8091
+          name: health
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: health
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: health
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          limits:
+            cpu: 200m
+            memory: 128Mi
+          requests:
+            cpu: 100m
+            memory: 64Mi
+      serviceAccountName: platform-coil
