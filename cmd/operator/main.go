@@ -316,6 +316,22 @@ func setupIntentReconciler(mgr manager.Manager, apiTimeout time.Duration, cfg *o
 		return fmt.Errorf("unable to create webhook for VRFRouteConfiguration: %w", err)
 	}
 
+	if err = (&networkconnector.Network{}).SetupWebhookWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to create webhook for Network: %w", err)
+	}
+	if err = (&networkconnector.VRF{}).SetupWebhookWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to create webhook for VRF: %w", err)
+	}
+	if err = (&networkconnector.Layer2Attachment{}).SetupWebhookWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to create webhook for Layer2Attachment: %w", err)
+	}
+	if err = (&networkconnector.Inbound{}).SetupWebhookWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to create webhook for Inbound: %w", err)
+	}
+	if err = (&networkconnector.Outbound{}).SetupWebhookWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to create webhook for Outbound: %w", err)
+	}
+
 	setupLog.Info("intent reconciler enabled — legacy ConfigReconciler disabled")
 	return nil
 }
