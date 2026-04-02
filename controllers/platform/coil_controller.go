@@ -18,32 +18,37 @@ package platform
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/go-logr/logr"
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
-	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	ctrlreconcile "sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
 const (
 	coilFinalizer = "network-connector.sylvaproject.org/coil-cleanup"
-	coilNamespace = "coil-system"
 )
 
-// CoilReconciler watches Outbound and PodNetwork resources and reconciles
-// Coil EgressNAT and AddressPool resources.
-//
-// This is a scaffold — Coil CRD types are not imported yet.
-// Uses ConfigMap placeholders until proper Coil types are available.
+var (
+	calicoIPPoolGVK = schema.GroupVersionKind{Group: "crd.projectcalico.org", Version: "v1", Kind: "IPPool"}
+	coilEgressGVK   = schema.GroupVersionKind{Group: "coil.cybozu.com", Version: "v2", Kind: "Egress"}
+)
+
+// CoilReconciler watches Outbound resources and reconciles
+// Calico IPPool and Coil Egress resources.
 type CoilReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
@@ -53,91 +58,193 @@ type CoilReconciler struct {
 //+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=outbounds,verbs=get;list;watch
 //+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=outbounds/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=outbounds/finalizers,verbs=update
-//+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=podnetworks,verbs=get;list;watch
-//+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=podnetworks/status,verbs=get;update;patch
-//+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=podnetworks/finalizers,verbs=update
+//+kubebuilder:rbac:groups=coil.cybozu.com,resources=egresses,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=crd.projectcalico.org,resources=ippools,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=destinations,verbs=get;list;watch
 
 // Reconcile handles Outbound create/update/delete events.
 func (r *CoilReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	// Try Outbound first.
 	outbound := &nc.Outbound{}
-	if err := r.Get(ctx, req.NamespacedName, outbound); err == nil {
-		return r.reconcileOutbound(ctx, outbound, logger)
+	if err := r.Get(ctx, req.NamespacedName, outbound); err != nil {
+		if apierrors.IsNotFound(err) {
+			return ctrl.Result{}, nil
+		}
+		return ctrl.Result{}, fmt.Errorf("error fetching Outbound: %w", err)
 	}
 
-	// Try PodNetwork.
-	podNetwork := &nc.PodNetwork{}
-	if err := r.Get(ctx, req.NamespacedName, podNetwork); err == nil {
-		return r.reconcilePodNetwork(ctx, podNetwork, logger)
+	if !outbound.DeletionTimestamp.IsZero() {
+		return r.handleOutboundDeletion(ctx, outbound, logger)
+	}
+
+	if !controllerutil.ContainsFinalizer(outbound, coilFinalizer) {
+		controllerutil.AddFinalizer(outbound, coilFinalizer)
+		if err := r.Update(ctx, outbound); err != nil {
+			return ctrl.Result{}, fmt.Errorf("error adding finalizer: %w", err)
+		}
+	}
+
+	// Resolve destination prefixes.
+	prefixes, err := r.resolveDestinations(ctx, outbound)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("error resolving destinations: %w", err)
+	}
+
+	// Determine addresses: prefer status, fallback to spec.
+	addresses := outbound.Status.Addresses
+	if addresses == nil {
+		addresses = outbound.Spec.Addresses
+	}
+
+	// Reconcile Calico IPPools.
+	if addresses != nil {
+		if len(addresses.IPv4) > 0 {
+			if err := r.upsertCalicoIPPool(ctx, outbound, addresses.IPv4[0], 32, "v4", logger); err != nil {
+				return ctrl.Result{}, fmt.Errorf("error reconciling IPv4 IPPool: %w", err)
+			}
+		}
+		if len(addresses.IPv6) > 0 {
+			if err := r.upsertCalicoIPPool(ctx, outbound, addresses.IPv6[0], 128, "v6", logger); err != nil {
+				return ctrl.Result{}, fmt.Errorf("error reconciling IPv6 IPPool: %w", err)
+			}
+		}
+	}
+
+	// Reconcile Coil Egress.
+	if err := r.upsertCoilEgress(ctx, outbound, prefixes, addresses, logger); err != nil {
+		return ctrl.Result{}, fmt.Errorf("error reconciling Coil Egress: %w", err)
 	}
 
 	return ctrl.Result{}, nil
 }
 
-func (r *CoilReconciler) reconcileOutbound(ctx context.Context, ob *nc.Outbound, logger logr.Logger) (ctrl.Result, error) {
-	if !ob.DeletionTimestamp.IsZero() {
-		return r.handleOutboundDeletion(ctx, ob, logger)
+// resolveDestinations lists all Destination CRDs and filters by the Outbound's label selector,
+// returning all matching prefixes.
+func (r *CoilReconciler) resolveDestinations(ctx context.Context, ob *nc.Outbound) ([]string, error) {
+	if ob.Spec.Destinations == nil {
+		return nil, nil
 	}
 
-	if !controllerutil.ContainsFinalizer(ob, coilFinalizer) {
-		controllerutil.AddFinalizer(ob, coilFinalizer)
-		if err := r.Update(ctx, ob); err != nil {
-			return ctrl.Result{}, fmt.Errorf("error adding finalizer: %w", err)
+	selector, err := metav1.LabelSelectorAsSelector(ob.Spec.Destinations)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing destination selector: %w", err)
+	}
+
+	var destList nc.DestinationList
+	if err := r.List(ctx, &destList); err != nil {
+		return nil, fmt.Errorf("error listing destinations: %w", err)
+	}
+
+	var prefixes []string
+	for i := range destList.Items {
+		if selector.Matches(labels.Set(destList.Items[i].Labels)) {
+			prefixes = append(prefixes, destList.Items[i].Spec.Prefixes...)
 		}
 	}
-
-	cm := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      fmt.Sprintf("coil-egress-%s", ob.Name),
-			Namespace: coilNamespace,
-			Labels: map[string]string{
-				"app.kubernetes.io/managed-by":           "network-connector",
-				"network-connector.sylvaproject.org/type": "egressnat",
-			},
-		},
-		Data: map[string]string{
-			"outbound":   ob.Name,
-			"networkRef": ob.Spec.NetworkRef,
-		},
-	}
-
-	if ob.Spec.Replicas != nil {
-		cm.Data["replicas"] = fmt.Sprintf("%d", *ob.Spec.Replicas)
-	}
-
-	return ctrl.Result{}, r.upsertConfigMap(ctx, cm, logger)
+	return prefixes, nil
 }
 
-func (r *CoilReconciler) reconcilePodNetwork(ctx context.Context, pn *nc.PodNetwork, logger logr.Logger) (ctrl.Result, error) {
-	if !pn.DeletionTimestamp.IsZero() {
-		return r.handlePodNetworkDeletion(ctx, pn, logger)
+func (r *CoilReconciler) upsertCalicoIPPool(ctx context.Context, ob *nc.Outbound, cidr string, blockSize int64, suffix string, logger logr.Logger) error {
+	poolName := fmt.Sprintf("%s-%s", ob.Name, suffix)
+
+	desired := &unstructured.Unstructured{}
+	desired.SetGroupVersionKind(calicoIPPoolGVK)
+	desired.SetName(poolName)
+	desired.SetLabels(map[string]string{
+		"app.kubernetes.io/managed-by":                "network-connector",
+		"network-connector.sylvaproject.org/outbound": ob.Name,
+	})
+	if err := unstructured.SetNestedField(desired.Object, cidr, "spec", "cidr"); err != nil {
+		return fmt.Errorf("error setting cidr: %w", err)
+	}
+	if err := unstructured.SetNestedField(desired.Object, false, "spec", "natOutgoing"); err != nil {
+		return fmt.Errorf("error setting natOutgoing: %w", err)
+	}
+	if err := unstructured.SetNestedField(desired.Object, blockSize, "spec", "blockSize"); err != nil {
+		return fmt.Errorf("error setting blockSize: %w", err)
+	}
+	if err := unstructured.SetNestedField(desired.Object, "!all()", "spec", "nodeSelector"); err != nil {
+		return fmt.Errorf("error setting nodeSelector: %w", err)
+	}
+	if err := unstructured.SetNestedStringSlice(desired.Object, []string{"Workload"}, "spec", "allowedUses"); err != nil {
+		return fmt.Errorf("error setting allowedUses: %w", err)
 	}
 
-	if !controllerutil.ContainsFinalizer(pn, coilFinalizer) {
-		controllerutil.AddFinalizer(pn, coilFinalizer)
-		if err := r.Update(ctx, pn); err != nil {
-			return ctrl.Result{}, fmt.Errorf("error adding finalizer: %w", err)
+	existing := &unstructured.Unstructured{}
+	existing.SetGroupVersionKind(calicoIPPoolGVK)
+	err := r.Get(ctx, types.NamespacedName{Name: poolName}, existing)
+	if apierrors.IsNotFound(err) {
+		logger.Info("creating Calico IPPool", "name", poolName)
+		return r.Create(ctx, desired)
+	}
+	if err != nil {
+		return fmt.Errorf("error getting IPPool: %w", err)
+	}
+
+	existing.Object["spec"] = desired.Object["spec"]
+	existing.SetLabels(desired.GetLabels())
+	return r.Update(ctx, existing)
+}
+
+func (r *CoilReconciler) upsertCoilEgress(ctx context.Context, ob *nc.Outbound, prefixes []string, addresses *nc.AddressAllocation, logger logr.Logger) error {
+	replicas := int64(1)
+	if ob.Spec.Replicas != nil {
+		replicas = int64(*ob.Spec.Replicas)
+	}
+
+	// Build pool annotations.
+	annotations := map[string]string{}
+	if addresses != nil && len(addresses.IPv4) > 0 {
+		poolRef, _ := json.Marshal([]string{fmt.Sprintf("%s-v4", ob.Name)})
+		annotations["cni.projectcalico.org/ipv4pools"] = string(poolRef)
+	}
+	if addresses != nil && len(addresses.IPv6) > 0 {
+		poolRef, _ := json.Marshal([]string{fmt.Sprintf("%s-v6", ob.Name)})
+		annotations["cni.projectcalico.org/ipv6pools"] = string(poolRef)
+	}
+
+	// Convert prefixes to []interface{} for unstructured.
+	destSlice := make([]interface{}, len(prefixes))
+	for i, p := range prefixes {
+		destSlice[i] = p
+	}
+
+	desired := &unstructured.Unstructured{}
+	desired.SetGroupVersionKind(coilEgressGVK)
+	desired.SetName(ob.Name)
+	desired.SetNamespace(ob.Namespace)
+	desired.SetLabels(map[string]string{
+		"app.kubernetes.io/managed-by":                "network-connector",
+		"network-connector.sylvaproject.org/outbound": ob.Name,
+	})
+
+	if err := unstructured.SetNestedSlice(desired.Object, destSlice, "spec", "destinations"); err != nil {
+		return fmt.Errorf("error setting destinations: %w", err)
+	}
+	if err := unstructured.SetNestedField(desired.Object, replicas, "spec", "replicas"); err != nil {
+		return fmt.Errorf("error setting replicas: %w", err)
+	}
+	if len(annotations) > 0 {
+		if err := unstructured.SetNestedStringMap(desired.Object, annotations, "spec", "template", "metadata", "annotations"); err != nil {
+			return fmt.Errorf("error setting template annotations: %w", err)
 		}
 	}
 
-	cm := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      fmt.Sprintf("coil-pool-%s", pn.Name),
-			Namespace: coilNamespace,
-			Labels: map[string]string{
-				"app.kubernetes.io/managed-by":           "network-connector",
-				"network-connector.sylvaproject.org/type": "addresspool",
-			},
-		},
-		Data: map[string]string{
-			"podnetwork": pn.Name,
-			"networkRef": pn.Spec.NetworkRef,
-		},
+	existing := &unstructured.Unstructured{}
+	existing.SetGroupVersionKind(coilEgressGVK)
+	err := r.Get(ctx, types.NamespacedName{Name: ob.Name, Namespace: ob.Namespace}, existing)
+	if apierrors.IsNotFound(err) {
+		logger.Info("creating Coil Egress", "name", ob.Name, "namespace", ob.Namespace)
+		return r.Create(ctx, desired)
+	}
+	if err != nil {
+		return fmt.Errorf("error getting Egress: %w", err)
 	}
 
-	return ctrl.Result{}, r.upsertConfigMap(ctx, cm, logger)
+	existing.Object["spec"] = desired.Object["spec"]
+	existing.SetLabels(desired.GetLabels())
+	return r.Update(ctx, existing)
 }
 
 func (r *CoilReconciler) handleOutboundDeletion(ctx context.Context, ob *nc.Outbound, logger logr.Logger) (ctrl.Result, error) {
@@ -145,49 +252,67 @@ func (r *CoilReconciler) handleOutboundDeletion(ctx context.Context, ob *nc.Outb
 		return ctrl.Result{}, nil
 	}
 
-	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
-		Name: fmt.Sprintf("coil-egress-%s", ob.Name), Namespace: coilNamespace,
-	}}
-	if err := r.Delete(ctx, cm); err != nil && !apierrors.IsNotFound(err) {
-		return ctrl.Result{}, fmt.Errorf("error deleting Coil egress placeholder: %w", err)
+	// Delete Coil Egress.
+	egress := &unstructured.Unstructured{}
+	egress.SetGroupVersionKind(coilEgressGVK)
+	egress.SetName(ob.Name)
+	egress.SetNamespace(ob.Namespace)
+	if err := r.Delete(ctx, egress); err != nil && !apierrors.IsNotFound(err) {
+		return ctrl.Result{}, fmt.Errorf("error deleting Coil Egress: %w", err)
 	}
-	logger.Info("deleted Coil egress placeholder", "name", cm.Name)
+	logger.Info("deleted Coil Egress", "name", ob.Name)
+
+	// Delete Calico IPPools.
+	for _, suffix := range []string{"v4", "v6"} {
+		pool := &unstructured.Unstructured{}
+		pool.SetGroupVersionKind(calicoIPPoolGVK)
+		pool.SetName(fmt.Sprintf("%s-%s", ob.Name, suffix))
+		if err := r.Delete(ctx, pool); err != nil && !apierrors.IsNotFound(err) {
+			return ctrl.Result{}, fmt.Errorf("error deleting Calico IPPool %s: %w", pool.GetName(), err)
+		}
+		logger.Info("deleted Calico IPPool", "name", pool.GetName())
+	}
 
 	controllerutil.RemoveFinalizer(ob, coilFinalizer)
-	return ctrl.Result{}, r.Update(ctx, ob)
+	if err := r.Update(ctx, ob); err != nil {
+		return ctrl.Result{}, fmt.Errorf("error removing finalizer: %w", err)
+	}
+
+	return ctrl.Result{}, nil
 }
 
-func (r *CoilReconciler) handlePodNetworkDeletion(ctx context.Context, pn *nc.PodNetwork, logger logr.Logger) (ctrl.Result, error) {
-	if !controllerutil.ContainsFinalizer(pn, coilFinalizer) {
-		return ctrl.Result{}, nil
+// mapDestinationToOutbounds maps Destination changes to Outbound reconcile requests
+// by listing all Outbounds and checking if their label selector matches the changed Destination.
+func (r *CoilReconciler) mapDestinationToOutbounds(ctx context.Context, obj client.Object) []ctrlreconcile.Request {
+	logger := log.FromContext(ctx)
+
+	var outboundList nc.OutboundList
+	if err := r.List(ctx, &outboundList); err != nil {
+		logger.Error(err, "error listing outbounds for destination mapping")
+		return nil
 	}
 
-	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
-		Name: fmt.Sprintf("coil-pool-%s", pn.Name), Namespace: coilNamespace,
-	}}
-	if err := r.Delete(ctx, cm); err != nil && !apierrors.IsNotFound(err) {
-		return ctrl.Result{}, fmt.Errorf("error deleting Coil pool placeholder: %w", err)
+	var requests []ctrlreconcile.Request
+	for i := range outboundList.Items {
+		ob := &outboundList.Items[i]
+		if ob.Spec.Destinations == nil {
+			continue
+		}
+		selector, err := metav1.LabelSelectorAsSelector(ob.Spec.Destinations)
+		if err != nil {
+			logger.Error(err, "error parsing destination selector", "outbound", ob.Name)
+			continue
+		}
+		if selector.Matches(labels.Set(obj.GetLabels())) {
+			requests = append(requests, ctrlreconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      ob.Name,
+					Namespace: ob.Namespace,
+				},
+			})
+		}
 	}
-	logger.Info("deleted Coil pool placeholder", "name", cm.Name)
-
-	controllerutil.RemoveFinalizer(pn, coilFinalizer)
-	return ctrl.Result{}, r.Update(ctx, pn)
-}
-
-func (r *CoilReconciler) upsertConfigMap(ctx context.Context, cm *corev1.ConfigMap, logger logr.Logger) error {
-	existing := &corev1.ConfigMap{}
-	err := r.Get(ctx, types.NamespacedName{Name: cm.Name, Namespace: cm.Namespace}, existing)
-	if apierrors.IsNotFound(err) {
-		logger.Info("creating Coil placeholder", "name", cm.Name)
-		return r.Create(ctx, cm)
-	}
-	if err != nil {
-		return fmt.Errorf("error getting ConfigMap: %w", err)
-	}
-
-	existing.Data = cm.Data
-	existing.Labels = cm.Labels
-	return r.Update(ctx, existing)
+	return requests
 }
 
 // SetupWithManager registers the Coil controller.
@@ -195,6 +320,6 @@ func (r *CoilReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("coil-reconciler").
 		For(&nc.Outbound{}).
-		Watches(&nc.PodNetwork{}, &handler.EnqueueRequestForObject{}).
+		Watches(&nc.Destination{}, handler.EnqueueRequestsFromMapFunc(r.mapDestinationToOutbounds)).
 		Complete(r)
 }

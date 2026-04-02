@@ -22,10 +22,10 @@ import (
 
 	"github.com/go-logr/logr"
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
-	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -39,11 +39,7 @@ const (
 )
 
 // MetalLBReconciler watches Inbound resources and reconciles MetalLB
-// IPAddressPool + L2/BGPAdvertisement resources.
-//
-// This is a scaffold — MetalLB CRD types are not imported yet.
-// The reconciler creates ConfigMaps as placeholders that a future
-// MetalLB integration will replace with proper typed resources.
+// IPAddressPool + L2/BGPAdvertisement resources using unstructured objects.
 type MetalLBReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
@@ -53,7 +49,9 @@ type MetalLBReconciler struct {
 //+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=inbounds,verbs=get;list;watch
 //+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=inbounds/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=inbounds/finalizers,verbs=update
-//+kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=metallb.io,resources=ipaddresspools,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=metallb.io,resources=bgpadvertisements,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=metallb.io,resources=l2advertisements,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile handles Inbound create/update/delete events.
 func (r *MetalLBReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -80,7 +78,7 @@ func (r *MetalLBReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		}
 	}
 
-	// Reconcile the MetalLB resources (placeholder: ConfigMap).
+	// Reconcile the MetalLB resources.
 	if err := r.reconcilePool(ctx, inbound, logger); err != nil {
 		return ctrl.Result{}, fmt.Errorf("error reconciling MetalLB pool: %w", err)
 	}
@@ -88,53 +86,130 @@ func (r *MetalLBReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	return ctrl.Result{}, nil
 }
 
-// reconcilePool creates or updates a placeholder ConfigMap representing
-// the MetalLB IPAddressPool. Will be replaced with proper MetalLB CRD types.
-func (r *MetalLBReconciler) reconcilePool(ctx context.Context, inbound *nc.Inbound, logger logr.Logger) error {
-	poolName := inbound.Name
+// resolvePoolName returns the explicit pool name or falls back to the Inbound name.
+func resolvePoolName(inbound *nc.Inbound) string {
 	if inbound.Spec.PoolName != nil {
-		poolName = *inbound.Spec.PoolName
+		return *inbound.Spec.PoolName
+	}
+	return inbound.Name
+}
+
+// collectAddresses prefers Status.Addresses (IPAM-resolved), falling back to Spec.Addresses.
+func collectAddresses(inbound *nc.Inbound) []interface{} {
+	src := inbound.Status.Addresses
+	if src == nil {
+		src = inbound.Spec.Addresses
+	}
+	if src == nil {
+		return nil
+	}
+	addrs := make([]interface{}, 0, len(src.IPv4)+len(src.IPv6))
+	for _, a := range src.IPv4 {
+		addrs = append(addrs, a)
+	}
+	for _, a := range src.IPv6 {
+		addrs = append(addrs, a)
+	}
+	return addrs
+}
+
+// managedLabels returns labels applied to every MetalLB object we create.
+func managedLabels(inboundName string) map[string]interface{} {
+	return map[string]interface{}{
+		"app.kubernetes.io/managed-by":              "network-connector",
+		"network-connector.sylvaproject.org/inbound": inboundName,
+	}
+}
+
+// newIPAddressPool builds an unstructured IPAddressPool.
+func newIPAddressPool(poolName, inboundName string, addresses []interface{}) *unstructured.Unstructured {
+	pool := &unstructured.Unstructured{}
+	pool.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "metallb.io",
+		Version: "v1beta1",
+		Kind:    "IPAddressPool",
+	})
+	pool.SetName(poolName)
+	pool.SetNamespace(metallbNamespace)
+	pool.SetLabels(toStringLabels(managedLabels(inboundName)))
+	if err := unstructured.SetNestedSlice(pool.Object, addresses, "spec", "addresses"); err != nil {
+		// addresses is always []interface{} of strings; this cannot fail in practice.
+		panic(fmt.Sprintf("bug: SetNestedSlice: %v", err))
+	}
+	return pool
+}
+
+// newAdvertisement builds an unstructured BGPAdvertisement or L2Advertisement.
+func newAdvertisement(kind, poolName, inboundName string) *unstructured.Unstructured {
+	adv := &unstructured.Unstructured{}
+	adv.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "metallb.io",
+		Version: "v1beta1",
+		Kind:    kind,
+	})
+	adv.SetName(poolName)
+	adv.SetNamespace(metallbNamespace)
+	adv.SetLabels(toStringLabels(managedLabels(inboundName)))
+	if err := unstructured.SetNestedSlice(adv.Object, []interface{}{poolName}, "spec", "ipAddressPools"); err != nil {
+		panic(fmt.Sprintf("bug: SetNestedSlice: %v", err))
+	}
+	return adv
+}
+
+// advertisementKind maps the Inbound advertisement type to the MetalLB CRD kind.
+func advertisementKind(advType string) string {
+	if advType == "l2" {
+		return "L2Advertisement"
+	}
+	return "BGPAdvertisement"
+}
+
+// reconcilePool creates or updates IPAddressPool + Advertisement for an Inbound.
+func (r *MetalLBReconciler) reconcilePool(ctx context.Context, inbound *nc.Inbound, logger logr.Logger) error {
+	poolName := resolvePoolName(inbound)
+	addresses := collectAddresses(inbound)
+	kind := advertisementKind(inbound.Spec.Advertisement.Type)
+
+	// Reconcile IPAddressPool.
+	desiredPool := newIPAddressPool(poolName, inbound.Name, addresses)
+	if err := r.applyUnstructured(ctx, desiredPool, logger); err != nil {
+		return fmt.Errorf("error reconciling IPAddressPool %q: %w", poolName, err)
 	}
 
-	cm := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      fmt.Sprintf("metallb-pool-%s", poolName),
-			Namespace: metallbNamespace,
-			Labels: map[string]string{
-				"app.kubernetes.io/managed-by":           "network-connector",
-				"network-connector.sylvaproject.org/type": "ipaddresspool",
-			},
-		},
-		Data: map[string]string{
-			"inbound":           inbound.Name,
-			"networkRef":        inbound.Spec.NetworkRef,
-			"advertisementType": inbound.Spec.Advertisement.Type,
-		},
+	// Reconcile Advertisement.
+	desiredAdv := newAdvertisement(kind, poolName, inbound.Name)
+	if err := r.applyUnstructured(ctx, desiredAdv, logger); err != nil {
+		return fmt.Errorf("error reconciling %s %q: %w", kind, poolName, err)
 	}
 
-	// Collect addresses.
-	if inbound.Spec.Addresses != nil {
-		for i, addr := range inbound.Spec.Addresses.IPv4 {
-			cm.Data[fmt.Sprintf("ipv4-%d", i)] = addr
-		}
-		for i, addr := range inbound.Spec.Addresses.IPv6 {
-			cm.Data[fmt.Sprintf("ipv6-%d", i)] = addr
-		}
+	// Update Inbound status with resolved pool name.
+	inbound.Status.PoolName = &poolName
+	if err := r.Status().Update(ctx, inbound); err != nil {
+		return fmt.Errorf("error updating Inbound status: %w", err)
 	}
 
-	existing := &corev1.ConfigMap{}
-	err := r.Get(ctx, types.NamespacedName{Name: cm.Name, Namespace: cm.Namespace}, existing)
+	return nil
+}
+
+// applyUnstructured creates or updates an unstructured object.
+func (r *MetalLBReconciler) applyUnstructured(ctx context.Context, desired *unstructured.Unstructured, logger logr.Logger) error {
+	existing := &unstructured.Unstructured{}
+	existing.SetGroupVersionKind(desired.GroupVersionKind())
+
+	key := types.NamespacedName{Name: desired.GetName(), Namespace: desired.GetNamespace()}
+	err := r.Get(ctx, key, existing)
 	if apierrors.IsNotFound(err) {
-		logger.Info("creating MetalLB pool placeholder", "name", cm.Name)
-		return r.Create(ctx, cm)
+		logger.Info("creating MetalLB resource", "kind", desired.GetKind(), "name", desired.GetName())
+		return r.Create(ctx, desired)
 	}
 	if err != nil {
-		return fmt.Errorf("error getting ConfigMap: %w", err)
+		return fmt.Errorf("error getting %s %q: %w", desired.GetKind(), desired.GetName(), err)
 	}
 
-	existing.Data = cm.Data
-	existing.Labels = cm.Labels
-	return r.Update(ctx, existing)
+	// Preserve resource version for update.
+	desired.SetResourceVersion(existing.GetResourceVersion())
+	logger.Info("updating MetalLB resource", "kind", desired.GetKind(), "name", desired.GetName())
+	return r.Update(ctx, desired)
 }
 
 func (r *MetalLBReconciler) handleDeletion(ctx context.Context, inbound *nc.Inbound, logger logr.Logger) (ctrl.Result, error) {
@@ -142,22 +217,28 @@ func (r *MetalLBReconciler) handleDeletion(ctx context.Context, inbound *nc.Inbo
 		return ctrl.Result{}, nil
 	}
 
-	poolName := inbound.Name
-	if inbound.Spec.PoolName != nil {
-		poolName = *inbound.Spec.PoolName
-	}
+	poolName := resolvePoolName(inbound)
+	kind := advertisementKind(inbound.Spec.Advertisement.Type)
 
-	// Delete the placeholder ConfigMap.
-	cm := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      fmt.Sprintf("metallb-pool-%s", poolName),
-			Namespace: metallbNamespace,
-		},
+	// Delete the IPAddressPool.
+	pool := &unstructured.Unstructured{}
+	pool.SetGroupVersionKind(schema.GroupVersionKind{Group: "metallb.io", Version: "v1beta1", Kind: "IPAddressPool"})
+	pool.SetName(poolName)
+	pool.SetNamespace(metallbNamespace)
+	if err := r.Delete(ctx, pool); err != nil && !apierrors.IsNotFound(err) {
+		return ctrl.Result{}, fmt.Errorf("error deleting IPAddressPool %q: %w", poolName, err)
 	}
-	if err := r.Delete(ctx, cm); err != nil && !apierrors.IsNotFound(err) {
-		return ctrl.Result{}, fmt.Errorf("error deleting MetalLB pool placeholder: %w", err)
+	logger.Info("deleted IPAddressPool", "name", poolName)
+
+	// Delete the Advertisement.
+	adv := &unstructured.Unstructured{}
+	adv.SetGroupVersionKind(schema.GroupVersionKind{Group: "metallb.io", Version: "v1beta1", Kind: kind})
+	adv.SetName(poolName)
+	adv.SetNamespace(metallbNamespace)
+	if err := r.Delete(ctx, adv); err != nil && !apierrors.IsNotFound(err) {
+		return ctrl.Result{}, fmt.Errorf("error deleting %s %q: %w", kind, poolName, err)
 	}
-	logger.Info("deleted MetalLB pool placeholder", "name", cm.Name)
+	logger.Info("deleted Advertisement", "kind", kind, "name", poolName)
 
 	controllerutil.RemoveFinalizer(inbound, metallbFinalizer)
 	if err := r.Update(ctx, inbound); err != nil {
@@ -165,6 +246,15 @@ func (r *MetalLBReconciler) handleDeletion(ctx context.Context, inbound *nc.Inbo
 	}
 
 	return ctrl.Result{}, nil
+}
+
+// toStringLabels converts map[string]interface{} to map[string]string.
+func toStringLabels(m map[string]interface{}) map[string]string {
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		out[k] = fmt.Sprint(v)
+	}
+	return out
 }
 
 // SetupWithManager registers the MetalLB controller.
