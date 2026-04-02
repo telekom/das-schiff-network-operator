@@ -106,6 +106,13 @@ func (f *Framework) CreateNamespace(ctx context.Context, name string) error {
 	return nil
 }
 
+// DeleteNamespace deletes a namespace. Subsequent CreateNamespace calls for the
+// same name will wait for termination to complete before recreating.
+func (f *Framework) DeleteNamespace(ctx context.Context, name string) error {
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name}}
+	return client.IgnoreNotFound(f.Client.Delete(ctx, ns))
+}
+
 // CleanupTestNamespaces deletes all namespaces created during the test run.
 func (f *Framework) CleanupTestNamespaces() {
 	ctx := context.Background()

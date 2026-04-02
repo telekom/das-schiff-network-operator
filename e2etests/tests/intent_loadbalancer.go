@@ -29,34 +29,41 @@ var _ = Describe("Intent LoadBalancer Service", Label("intent", "lb"), func() {
 		ctx = context.Background()
 
 		Expect(f.CreateNamespace(ctx, ns)).To(Succeed())
+		DeferCleanup(func() {
+			_ = f.DeleteNamespace(context.Background(), ns)
+		})
 
 		By("Applying intent base configs (VRFs, Networks, Destinations)")
 		baseCfg, err := readTestdata("intent/base-configs.yaml")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(f.ApplyManifest(ctx, baseCfg)).To(Succeed())
+		DeferCleanup(func() {
+			_ = f.DeleteManifest(context.Background(), baseCfg)
+		})
 
 		By("Applying intent LB Inbound manifest")
 		lbManifest, err := readTestdata("intent/lb/manifests.yaml")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(f.ApplyManifest(ctx, lbManifest)).To(Succeed())
+		DeferCleanup(func() {
+			_ = f.DeleteManifest(context.Background(), lbManifest)
+		})
 
 		By("Applying MetalLB m2m pool configuration")
 		metallb, err := readTestdata("lb-service/metallb.yaml")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(f.ApplyManifest(ctx, metallb)).To(Succeed())
+		DeferCleanup(func() {
+			_ = f.DeleteManifest(context.Background(), metallb)
+		})
 
 		By("Applying intent LB app manifests (Deployment, Service)")
 		app, err := readTestdata("intent/lb/app.yaml")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(f.ApplyManifestInNamespace(ctx, app, ns)).To(Succeed())
-	})
-
-	AfterEach(func() {
-		app, _ := readTestdata("intent/lb/app.yaml")
-		_ = f.DeleteManifestInNamespace(ctx, app, ns)
-
-		lbManifest, _ := readTestdata("intent/lb/manifests.yaml")
-		_ = f.DeleteManifest(ctx, lbManifest)
+		DeferCleanup(func() {
+			_ = f.DeleteManifestInNamespace(context.Background(), app, ns)
+		})
 	})
 
 	Context("m2m VRF LB via Inbound CRD", func() {

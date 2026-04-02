@@ -30,31 +30,36 @@ var _ = Describe("Intent-Exclusive: Egress NAT", Label("intent-exclusive", "egre
 
 		By("Creating test namespace")
 		Expect(f.CreateNamespace(ctx, ns)).To(Succeed())
+		DeferCleanup(func() {
+			_ = f.DeleteNamespace(context.Background(), ns)
+		})
 
 		By("Applying intent base configs (VRFs, Networks, Destinations)")
 		baseManifest, err := readTestdata("intent/base-configs.yaml")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(f.ApplyManifest(ctx, baseManifest)).To(Succeed())
+		DeferCleanup(func() {
+			_ = f.DeleteManifest(context.Background(), baseManifest)
+		})
 
 		By("Applying intent Outbound egress manifests")
 		manifest, err := readTestdata("intent/egress/manifests.yaml")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(f.ApplyManifest(ctx, manifest)).To(Succeed())
+		DeferCleanup(func() {
+			_ = f.DeleteManifest(context.Background(), manifest)
+		})
 
 		By("Applying Coil egress + test pod (intent-exclusive)")
 		egressManifest, err := readTestdata("intent/egress/coil-egress-exclusive.yaml")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(f.ApplyManifestInNamespace(ctx, egressManifest, ns)).To(Succeed())
+		DeferCleanup(func() {
+			_ = f.DeleteManifestInNamespace(context.Background(), egressManifest, ns)
+		})
 
 		By("Waiting for intent reconciler to process")
 		time.Sleep(10 * time.Second)
-	})
-
-	AfterEach(func() {
-		egressManifest, _ := readTestdata("intent/egress/coil-egress-exclusive.yaml")
-		_ = f.DeleteManifestInNamespace(ctx, egressManifest, ns)
-		manifest, _ := readTestdata("intent/egress/manifests.yaml")
-		_ = f.DeleteManifest(ctx, manifest)
 	})
 
 	Context("m2m intent egress", func() {

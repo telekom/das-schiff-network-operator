@@ -29,21 +29,23 @@ var _ = Describe("Intent-Exclusive: L2 Connectivity", Label("intent-exclusive", 
 
 		By("Creating test namespace")
 		Expect(f.CreateNamespace(ctx, ns)).To(Succeed())
+		DeferCleanup(func() {
+			cleanCtx := context.Background()
+			_ = f.DeletePod(cleanCtx, ns, "intent-excl-l2-01")
+			_ = f.DeletePod(cleanCtx, ns, "intent-excl-l2-02")
+			_ = f.DeleteNamespace(cleanCtx, ns)
+		})
 
 		By("Applying L2 intent fixtures (L2A for VLAN 501)")
 		l2aManifest, err := readTestdata("intent/l2/manifests.yaml")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(f.ApplyManifest(ctx, l2aManifest)).To(Succeed())
+		DeferCleanup(func() {
+			_ = f.DeleteManifest(context.Background(), l2aManifest)
+		})
 
 		By("Waiting for intent reconciler to apply NNC (VLAN 501 via CRA-FRR)")
 		time.Sleep(10 * time.Second)
-	})
-
-	AfterEach(func() {
-		_ = f.DeletePod(ctx, ns, "intent-excl-l2-01")
-		_ = f.DeletePod(ctx, ns, "intent-excl-l2-02")
-		l2aManifest, _ := readTestdata("intent/l2/manifests.yaml")
-		_ = f.DeleteManifest(ctx, l2aManifest)
 	})
 
 	It("should create VLANs and allow L2 ping between pods", func() {
