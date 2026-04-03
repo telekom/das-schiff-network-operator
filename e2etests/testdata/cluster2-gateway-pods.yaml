@@ -26,7 +26,7 @@ spec:
           {"dst": "fd94:685b:30cf::/48", "gw": "fda5:25c1:193c::fe"},
           {"dst": "fda5:25c1:193c::/48", "gw": "fda5:25c1:193c::fe"},
           {"dst": "fdbb:6b17:90ba::/64", "gw": "fda5:25c1:193c::fe"},
-          {"dst": "fd90:4dbf:396d::/126", "gw": "fda5:25c1:193c::fe"},
+          {"dst": "fd90:4dbf:396e::/126", "gw": "fda5:25c1:193c::fe"},
           {"dst": "fd75:2d70:f7f7::/64", "gw": "fda5:25c1:193c::fe"}
         ]
       }
