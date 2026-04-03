@@ -80,6 +80,10 @@ build-platform-coil: ## Build platform-coil binary.
 build-platform-metallb: ## Build platform-metallb binary.
 	go build -ldflags "$(LDFLAGS)" -o bin/platform-metallb ./cmd/platform-metallb/
 
+.PHONY: build-network-sync
+build-network-sync: ## Build network-sync binary.
+	go build -ldflags "$(LDFLAGS)" -o bin/network-sync ./cmd/network-sync/
+
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
 	go run -ldflags "$(LDFLAGS)" ./cmd/operator/main.go
@@ -98,6 +102,7 @@ docker-build: #test ## Build docker image with the manager.
 	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-nwop-agent-netplan.Dockerfile -t ${IMG_BASE}/das-schiff-nwop-agent-netplan:latest .
 	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-platform-coil.Dockerfile -t ${IMG_BASE}/das-schiff-platform-coil:latest .
 	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-platform-metallb.Dockerfile -t ${IMG_BASE}/das-schiff-platform-metallb:latest .
+	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-network-sync.Dockerfile -t ${IMG_BASE}/das-schiff-network-sync:latest .
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
@@ -117,6 +122,7 @@ kind-load: docker-build ## Load docker image into kind cluster.
 	kind load docker-image ${IMG_BASE}/das-schiff-nwop-agent-netplan:latest
 	kind load docker-image ${IMG_BASE}/das-schiff-platform-coil:latest
 	kind load docker-image ${IMG_BASE}/das-schiff-platform-metallb:latest
+	kind load docker-image ${IMG_BASE}/das-schiff-network-sync:latest
 
 ##@ Release
 
