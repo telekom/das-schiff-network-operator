@@ -30,6 +30,12 @@ var _ = Describe("Intent-Exclusive: VRF Isolation", Label("intent-exclusive", "v
 
 		By("Creating test namespace")
 		Expect(f.CreateNamespace(ctx, ns)).To(Succeed())
+		DeferCleanup(func() {
+			cleanCtx := context.Background()
+			_ = f.DeletePod(cleanCtx, ns, "intent-excl-vrf-01")
+			_ = f.DeletePod(cleanCtx, ns, "intent-excl-vrf-04")
+			_ = f.DeleteNamespace(cleanCtx, ns)
+		})
 
 		By("Applying intent base configs")
 		base, err := readTestdata("intent/base-configs.yaml")
@@ -40,16 +46,13 @@ var _ = Describe("Intent-Exclusive: VRF Isolation", Label("intent-exclusive", "v
 		vrf, err := readTestdata("intent/vrf/manifests.yaml")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(f.ApplyManifest(ctx, vrf)).To(Succeed())
+		DeferCleanup(func() {
+			_ = f.DeleteManifest(context.Background(), vrf)
+		})
 
-		By("Waiting for intent reconciler to process")
-		time.Sleep(10 * time.Second)
-	})
-
-	AfterEach(func() {
-		_ = f.DeletePod(ctx, ns, "intent-excl-vrf-01")
-		_ = f.DeletePod(ctx, ns, "intent-excl-vrf-04")
-		vrf, _ := readTestdata("intent/vrf/manifests.yaml")
-		_ = f.DeleteManifest(ctx, vrf)
+		By("Waiting for NNC to contain both VRFs on worker nodes")
+		Expect(f.WaitForNNCVRFs(ctx, f.Config.WorkerNode1, []string{"m2m", "c2m"}, 60*time.Second)).To(Succeed())
+		Expect(f.WaitForNNCVRFs(ctx, f.Config.WorkerNode2, []string{"m2m", "c2m"}, 60*time.Second)).To(Succeed())
 	})
 
 	It("should block connectivity between different VRFs via intent pipeline", func() {

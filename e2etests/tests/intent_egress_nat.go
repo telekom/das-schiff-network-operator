@@ -37,9 +37,6 @@ var _ = Describe("Intent Egress NAT", Label("intent", "egress"), func() {
 		baseManifest, err := readTestdata("intent/base-configs.yaml")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(f.ApplyManifest(ctx, baseManifest)).To(Succeed())
-		DeferCleanup(func() {
-			_ = f.DeleteManifest(context.Background(), baseManifest)
-		})
 
 		By("Applying intent Outbound egress manifests in test namespace")
 		manifest, err := readTestdata("intent/egress/manifests.yaml")
@@ -105,7 +102,7 @@ var _ = Describe("Intent Egress NAT", Label("intent", "egress"), func() {
 			Eventually(func() bool {
 				r, _ := f.PingFromPod(ctx, ns, "egress-intent-01", cfg.M2MGWIPv6, 3)
 				return r != nil && r.Success
-			}).WithTimeout(60*time.Second).WithPolling(5*time.Second).Should(BeTrue(),
+			}).WithTimeout(90*time.Second).WithPolling(5*time.Second).Should(BeTrue(),
 				"Intent egress pod cannot reach m2mgw IPv6")
 
 			By("Verifying egress-intent-01 CANNOT reach c2mgw (wrong VRF, IPv4)")

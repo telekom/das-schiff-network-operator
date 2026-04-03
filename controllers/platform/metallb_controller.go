@@ -19,10 +19,12 @@ package platform
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/go-logr/logr"
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -68,6 +70,11 @@ func (r *MetalLBReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	// Handle deletion.
 	if !inbound.DeletionTimestamp.IsZero() {
 		return r.handleDeletion(ctx, inbound, logger)
+	}
+
+	// Check target CRDs exist before adding finalizer or creating resources.
+	if ready, result := r.checkTargetCRDs(ctx, logger); !ready {
+		return result, nil
 	}
 
 	// Ensure finalizer.
@@ -263,4 +270,26 @@ func (r *MetalLBReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Named("metallb-reconciler").
 		For(&nc.Inbound{}).
 		Complete(r)
+}
+
+var metallbTargetGVKs = []schema.GroupVersionKind{
+	{Group: "metallb.io", Version: "v1beta1", Kind: "IPAddressPool"},
+	{Group: "metallb.io", Version: "v1beta1", Kind: "BGPAdvertisement"},
+	{Group: "metallb.io", Version: "v1beta1", Kind: "L2Advertisement"},
+}
+
+// checkTargetCRDs verifies that MetalLB CRDs are registered.
+// Returns (true, _) if ready, or (false, requeueResult) if not.
+func (r *MetalLBReconciler) checkTargetCRDs(ctx context.Context, logger logr.Logger) (bool, ctrl.Result) {
+	for _, gvk := range metallbTargetGVKs {
+		list := &unstructured.UnstructuredList{}
+		list.SetGroupVersionKind(gvk)
+		if err := r.List(ctx, list, client.Limit(1)); err != nil {
+			if apimeta.IsNoMatchError(err) {
+				logger.Info("target CRD not yet available, will retry", "gvk", gvk.String())
+				return false, ctrl.Result{RequeueAfter: 30 * time.Second}
+			}
+		}
+	}
+	return true, ctrl.Result{}
 }

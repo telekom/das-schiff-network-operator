@@ -36,6 +36,11 @@ var _ = Describe("Intent-Exclusive: L2 Connectivity", Label("intent-exclusive", 
 			_ = f.DeleteNamespace(cleanCtx, ns)
 		})
 
+		By("Applying intent base configs (VRFs, Networks, Destinations)")
+		baseManifest, err := readTestdata("intent/base-configs.yaml")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(f.ApplyManifest(ctx, baseManifest)).To(Succeed())
+
 		By("Applying L2 intent fixtures (L2A for VLAN 501)")
 		l2aManifest, err := readTestdata("intent/l2/manifests.yaml")
 		Expect(err).NotTo(HaveOccurred())
@@ -44,8 +49,9 @@ var _ = Describe("Intent-Exclusive: L2 Connectivity", Label("intent-exclusive", 
 			_ = f.DeleteManifest(context.Background(), l2aManifest)
 		})
 
-		By("Waiting for intent reconciler to apply NNC (VLAN 501 via CRA-FRR)")
-		time.Sleep(10 * time.Second)
+		By("Waiting for NNC to contain VRF m2m on both worker nodes")
+		Expect(f.WaitForNNCVRFs(ctx, f.Config.WorkerNode1, []string{"m2m"}, 60*time.Second)).To(Succeed())
+		Expect(f.WaitForNNCVRFs(ctx, f.Config.WorkerNode2, []string{"m2m"}, 60*time.Second)).To(Succeed())
 	})
 
 	It("should create VLANs and allow L2 ping between pods", func() {

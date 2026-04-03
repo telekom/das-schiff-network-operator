@@ -20,10 +20,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/go-logr/logr"
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
@@ -76,6 +78,11 @@ func (r *CoilReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 
 	if !outbound.DeletionTimestamp.IsZero() {
 		return r.handleOutboundDeletion(ctx, outbound, logger)
+	}
+
+	// Check target CRDs exist before adding finalizer or creating resources.
+	if ready, result := r.checkTargetCRDs(ctx, logger); !ready {
+		return result, nil
 	}
 
 	if !controllerutil.ContainsFinalizer(outbound, coilFinalizer) {
@@ -322,4 +329,20 @@ func (r *CoilReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&nc.Outbound{}).
 		Watches(&nc.Destination{}, handler.EnqueueRequestsFromMapFunc(r.mapDestinationToOutbounds)).
 		Complete(r)
+}
+
+// checkTargetCRDs verifies that Calico IPPool and Coil Egress CRDs are registered.
+// Returns (true, _) if ready, or (false, requeueResult) if not.
+func (r *CoilReconciler) checkTargetCRDs(ctx context.Context, logger logr.Logger) (bool, ctrl.Result) {
+	for _, gvk := range []schema.GroupVersionKind{calicoIPPoolGVK, coilEgressGVK} {
+		list := &unstructured.UnstructuredList{}
+		list.SetGroupVersionKind(gvk)
+		if err := r.List(ctx, list, client.Limit(1)); err != nil {
+			if apimeta.IsNoMatchError(err) {
+				logger.Info("target CRD not yet available, will retry", "gvk", gvk.String())
+				return false, ctrl.Result{RequeueAfter: 30 * time.Second}
+			}
+		}
+	}
+	return true, ctrl.Result{}
 }

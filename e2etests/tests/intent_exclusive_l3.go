@@ -30,6 +30,12 @@ var _ = Describe("Intent-Exclusive: L3 Connectivity", Label("intent-exclusive", 
 
 		By("Creating test namespace")
 		Expect(f.CreateNamespace(ctx, ns)).To(Succeed())
+		DeferCleanup(func() {
+			cleanCtx := context.Background()
+			_ = f.DeletePod(cleanCtx, ns, "intent-excl-l3-01")
+			_ = f.DeletePod(cleanCtx, ns, "intent-excl-l3-03")
+			_ = f.DeleteNamespace(cleanCtx, ns)
+		})
 
 		By("Applying intent base configs")
 		base, err := readTestdata("intent/base-configs.yaml")
@@ -40,16 +46,13 @@ var _ = Describe("Intent-Exclusive: L3 Connectivity", Label("intent-exclusive", 
 		l3, err := readTestdata("intent/l3/manifests.yaml")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(f.ApplyManifest(ctx, l3)).To(Succeed())
+		DeferCleanup(func() {
+			_ = f.DeleteManifest(context.Background(), l3)
+		})
 
-		By("Waiting for intent reconciler to process NNCs")
-		time.Sleep(10 * time.Second)
-	})
-
-	AfterEach(func() {
-		_ = f.DeletePod(ctx, ns, "intent-excl-l3-01")
-		_ = f.DeletePod(ctx, ns, "intent-excl-l3-03")
-		l3, _ := readTestdata("intent/l3/manifests.yaml")
-		_ = f.DeleteManifest(ctx, l3)
+		By("Waiting for NNC to contain VRF m2m on both worker nodes")
+		Expect(f.WaitForNNCVRFs(ctx, f.Config.WorkerNode1, []string{"m2m"}, 60*time.Second)).To(Succeed())
+		Expect(f.WaitForNNCVRFs(ctx, f.Config.WorkerNode2, []string{"m2m"}, 60*time.Second)).To(Succeed())
 	})
 
 	It("should route between VLANs 501 and 502 in the same VRF via intent pipeline", func() {

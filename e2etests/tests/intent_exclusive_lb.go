@@ -42,9 +42,6 @@ var _ = Describe("Intent-Exclusive: LoadBalancer Service", Label("intent-exclusi
 		baseCfg, err := readTestdata("intent/base-configs.yaml")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(f.ApplyManifest(ctx, baseCfg)).To(Succeed())
-		DeferCleanup(func() {
-			_ = f.DeleteManifest(context.Background(), baseCfg)
-		})
 
 		By("Applying intent LB Inbound manifest")
 		lbManifest, err := readTestdata("intent/lb/manifests.yaml")

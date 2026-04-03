@@ -42,9 +42,6 @@ var _ = Describe("Intent-Exclusive: Egress NAT", Label("intent-exclusive", "egre
 		baseManifest, err := readTestdata("intent/base-configs.yaml")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(f.ApplyManifest(ctx, baseManifest)).To(Succeed())
-		DeferCleanup(func() {
-			_ = f.DeleteManifest(context.Background(), baseManifest)
-		})
 
 		By("Applying intent Outbound egress manifests in test namespace")
 		manifest, err := readTestdata("intent/egress/manifests.yaml")
@@ -90,9 +87,6 @@ var _ = Describe("Intent-Exclusive: Egress NAT", Label("intent-exclusive", "egre
 		DeferCleanup(func() {
 			_ = f.Client.Delete(context.Background(), pod)
 		})
-
-		By("Waiting for intent reconciler to process")
-		time.Sleep(10 * time.Second)
 	})
 
 	Context("m2m intent egress", func() {
