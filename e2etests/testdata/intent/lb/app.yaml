@@ -23,7 +23,7 @@ kind: Service
 metadata:
   name: intent-lb-svc
   annotations:
-    metallb.universe.tf/address-pool: m2m-pool
+    metallb.universe.tf/address-pool: ib-lb
 spec:
   type: LoadBalancer
   ipFamilyPolicy: PreferDualStack

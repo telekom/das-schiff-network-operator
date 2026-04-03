@@ -10,4 +10,6 @@ spec:
       type: gateway
   addresses:
     ipv4:
-      - "10.250.4.30/32"
+      - "10.250.3.0/30"
+    ipv6:
+      - "fd90:4dbf:396e::/126"

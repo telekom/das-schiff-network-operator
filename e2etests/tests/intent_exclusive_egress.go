@@ -2,12 +2,16 @@ package tests
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/telekom/das-schiff-network-operator/e2etests/framework"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 // Intent-Exclusive Egress NAT test using Outbound CRD.
@@ -42,20 +46,49 @@ var _ = Describe("Intent-Exclusive: Egress NAT", Label("intent-exclusive", "egre
 			_ = f.DeleteManifest(context.Background(), baseManifest)
 		})
 
-		By("Applying intent Outbound egress manifests")
+		By("Applying intent Outbound egress manifests in test namespace")
 		manifest, err := readTestdata("intent/egress/manifests.yaml")
 		Expect(err).NotTo(HaveOccurred())
-		Expect(f.ApplyManifest(ctx, manifest)).To(Succeed())
+		Expect(f.ApplyManifestInNamespace(ctx, manifest, ns)).To(Succeed())
 		DeferCleanup(func() {
-			_ = f.DeleteManifest(context.Background(), manifest)
+			_ = f.DeleteManifestInNamespace(context.Background(), manifest, ns)
 		})
 
-		By("Applying Coil egress + test pod (intent-exclusive)")
-		egressManifest, err := readTestdata("intent/egress/coil-egress-exclusive.yaml")
-		Expect(err).NotTo(HaveOccurred())
-		Expect(f.ApplyManifestInNamespace(ctx, egressManifest, ns)).To(Succeed())
+		By("Waiting for Coil Egress to be created by platform controller")
+		Eventually(func() error {
+			egress := &unstructured.Unstructured{}
+			egress.SetGroupVersionKind(schema.GroupVersionKind{
+				Group:   "coil.cybozu.com",
+				Version: "v2",
+				Kind:    "Egress",
+			})
+			return f.DynamicGet(ctx, ns, "ob-egress", egress)
+		}).WithTimeout(60 * time.Second).WithPolling(5 * time.Second).Should(Succeed(),
+			"Coil Egress should be created by platform-coil controller")
+
+		By("Creating egress test pod with Coil annotation")
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "egress-excl-01",
+				Namespace: ns,
+				Annotations: map[string]string{
+					fmt.Sprintf("egress.coil.cybozu.com/%s", ns): "ob-egress",
+				},
+			},
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{
+					{
+						Name:    "tester",
+						Image:   "busybox:1.37",
+						Command: []string{"sleep", "infinity"},
+					},
+				},
+				RestartPolicy: corev1.RestartPolicyNever,
+			},
+		}
+		Expect(f.Client.Create(ctx, pod)).To(Succeed())
 		DeferCleanup(func() {
-			_ = f.DeleteManifestInNamespace(context.Background(), egressManifest, ns)
+			_ = f.Client.Delete(context.Background(), pod)
 		})
 
 		By("Waiting for intent reconciler to process")

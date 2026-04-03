@@ -24,6 +24,7 @@ spec:
       containers:
       - name: controller
         image: controller:latest
+        imagePullPolicy: IfNotPresent
         command:
         - /platform-coil
         args:

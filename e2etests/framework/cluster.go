@@ -232,6 +232,12 @@ func (f *Framework) DeleteManifestInNamespace(ctx context.Context, yamlData []by
 	return nil
 }
 
+// DynamicGet fetches an unstructured object by namespace and name.
+// The caller must set the GVK on obj before calling.
+func (f *Framework) DynamicGet(ctx context.Context, namespace, name string, obj *unstructured.Unstructured) error {
+	return f.Client.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, obj)
+}
+
 // WaitForNodesReady waits for all nodes to report Ready.
 func (f *Framework) WaitForNodesReady(timeout time.Duration) error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)

@@ -10,6 +10,8 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/telekom/das-schiff-network-operator/e2etests/framework"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 // Intent-Exclusive LoadBalancer Service.
@@ -52,13 +54,17 @@ var _ = Describe("Intent-Exclusive: LoadBalancer Service", Label("intent-exclusi
 			_ = f.DeleteManifest(context.Background(), lbManifest)
 		})
 
-		By("Applying MetalLB m2m pool configuration")
-		metallb, err := readTestdata("lb-service/metallb.yaml")
-		Expect(err).NotTo(HaveOccurred())
-		Expect(f.ApplyManifest(ctx, metallb)).To(Succeed())
-		DeferCleanup(func() {
-			_ = f.DeleteManifest(context.Background(), metallb)
-		})
+		By("Waiting for MetalLB IPAddressPool to be created by platform controller")
+		Eventually(func() error {
+			pool := &unstructured.Unstructured{}
+			pool.SetGroupVersionKind(schema.GroupVersionKind{
+				Group:   "metallb.io",
+				Version: "v1beta1",
+				Kind:    "IPAddressPool",
+			})
+			return f.DynamicGet(ctx, "metallb-system", "ib-lb", pool)
+		}).WithTimeout(60 * time.Second).WithPolling(5 * time.Second).Should(Succeed(),
+			"MetalLB IPAddressPool should be created by platform-metallb controller")
 
 		By("Applying intent LB app manifests (Deployment, Service)")
 		app, err := readTestdata("intent/lb/app.yaml")
