@@ -54,8 +54,8 @@ func PhaseBuildImages(repoRoot string) error {
 	}
 	os.Remove(craFRRTar)
 
-	// 3. Build operator + agent images
-	Logf("  Building operator + agent images...")
+	// 3. Build operator + agent + platform images
+	Logf("  Building operator + agent + platform images...")
 	if err := RunCmd("docker", "build",
 		"--build-arg", "ldflags="+ldflags,
 		"-f", filepath.Join(repoRoot, "das-schiff-network-operator.Dockerfile"),
@@ -76,11 +76,29 @@ func PhaseBuildImages(repoRoot string) error {
 
 	if err := RunCmd("docker", "build",
 		"--build-arg", "ldflags="+ldflags,
-		"-f", filepath.Join(repoRoot, "das-schiff-nwop-agent-hbn-l2.Dockerfile"),
-		"-t", imgBase+"/das-schiff-nwop-agent-hbn-l2:latest",
+		"-f", filepath.Join(repoRoot, "das-schiff-nwop-agent-netplan.Dockerfile"),
+		"-t", imgBase+"/das-schiff-nwop-agent-netplan:latest",
 		repoRoot,
 	); err != nil {
-		return fmt.Errorf("building agent-hbn-l2: %w", err)
+		return fmt.Errorf("building agent-netplan: %w", err)
+	}
+
+	if err := RunCmd("docker", "build",
+		"--build-arg", "ldflags="+ldflags,
+		"-f", filepath.Join(repoRoot, "das-schiff-platform-coil.Dockerfile"),
+		"-t", imgBase+"/das-schiff-platform-coil:latest",
+		repoRoot,
+	); err != nil {
+		return fmt.Errorf("building platform-coil: %w", err)
+	}
+
+	if err := RunCmd("docker", "build",
+		"--build-arg", "ldflags="+ldflags,
+		"-f", filepath.Join(repoRoot, "das-schiff-platform-metallb.Dockerfile"),
+		"-t", imgBase+"/das-schiff-platform-metallb:latest",
+		repoRoot,
+	); err != nil {
+		return fmt.Errorf("building platform-metallb: %w", err)
 	}
 
 	// 4. Build NAT64 image
@@ -154,6 +172,8 @@ func PhaseCreateNodes(cluster *Cluster, repoRoot string) error {
 			"-e", "container=docker",
 			"-v", filepath.Join(genDir, shortName, "cra") + ":/etc/cra",
 			"-v", filepath.Join(genDir, shortName, "node-identity.env") + ":/etc/node-identity.env:ro",
+			"-v", filepath.Join(genDir, shortName, "netplan") + ":/etc/netplan",
+			"-v", filepath.Join(genDir, shortName, "systemd-network/10-netplan-hbn.network.d") + ":/etc/systemd/network/10-netplan-hbn.network.d:ro",
 			"-v", repoRoot + ":/repo:ro",
 			// Mount /lib/modules from the VM kernel (Docker Desktop/OrbStack maps this
 			// from the Linux VM, not macOS host). Needed for modprobe (e.g., fou module).
@@ -241,18 +261,12 @@ func PhaseUnderlay(cluster *Cluster) error {
 			return fmt.Errorf("waiting for hbn on %s: %w", node.Name, err)
 		}
 
-		// Configure host-side hbn veth
-		if _, err := DockerExec(node.Name, "ip", "link", "set", "hbn", "up"); err != nil {
-			return fmt.Errorf("bringing up hbn on %s: %w", node.Name, err)
-		}
-		DockerExec(node.Name, "ip", "addr", "add", "fd00:7:caa5::1/127", "dev", "hbn", "preferred_lft", "0") //nolint:errcheck
-		DockerExec(node.Name, "ip", "addr", "add", node.IPv4+"/32", "dev", "hbn")                            //nolint:errcheck
-		DockerExec(node.Name, "ip", "addr", "add", node.IPv6+"/128", "dev", "hbn")                           //nolint:errcheck
-		if _, err := DockerExec(node.Name, "ip", "route", "add", "default", "src", node.IPv4, "via", "inet6", "fd00:7:caa5::", "dev", "hbn"); err != nil {
-			return fmt.Errorf("adding IPv4 default route on %s: %w", node.Name, err)
-		}
-		if _, err := DockerExec(node.Name, "ip", "-6", "route", "add", "default", "via", "fd00:7:caa5::", "dev", "hbn", "src", node.IPv6); err != nil {
-			return fmt.Errorf("adding IPv6 default route on %s: %w", node.Name, err)
+		// Apply per-node netplan config (10-hbn.yaml mounted via Docker volume).
+		// Configures addresses + IPv6 default route on the hbn veth.
+		// IPv4 default via IPv6 next-hop is handled by a networkd drop-in
+		// (cross-family / RFC 5549 — not expressible in netplan).
+		if _, err := DockerExec(node.Name, "netplan", "apply"); err != nil {
+			return fmt.Errorf("netplan apply on %s: %w", node.Name, err)
 		}
 	}
 
@@ -436,12 +450,14 @@ func PhaseComponents(cluster *Cluster, repoRoot string) error {
 	}
 
 	// Load images into containerd on all nodes
-	Logf("Loading operator/agent images into containerd...")
+	Logf("Loading operator/agent/platform images into containerd...")
 	imgBase := EnvOr("IMG_BASE", "ghcr.io/telekom")
 	images := []string{
 		imgBase + "/das-schiff-network-operator:latest",
 		imgBase + "/das-schiff-nwop-agent-cra-frr:latest",
-		imgBase + "/das-schiff-nwop-agent-hbn-l2:latest",
+		imgBase + "/das-schiff-nwop-agent-netplan:latest",
+		imgBase + "/das-schiff-platform-coil:latest",
+		imgBase + "/das-schiff-platform-metallb:latest",
 	}
 	for _, node := range cluster.Nodes {
 		for _, img := range images {
@@ -591,6 +607,8 @@ ports:
 	kubectl("wait", "--for=condition=available", "deployment/controller", //nolint:errcheck
 		"-n", "metallb-system", "--timeout=120s")
 	kubectl("delete", "daemonset", "speaker", "-n", "metallb-system", "--ignore-not-found=true") //nolint:errcheck
+	// Remove the webhook too — it targets the speaker which we don't run.
+	kubectl("delete", "validatingwebhookconfiguration", "metallb-webhook-configuration", "--ignore-not-found=true") //nolint:errcheck
 
 	// kube-vip DaemonSet
 	Logf("Installing kube-vip DaemonSet...")
@@ -785,7 +803,9 @@ func PhaseCluster2Components(cluster *Cluster, repoRoot string) error {
 	images := []string{
 		imgBase + "/das-schiff-network-operator:latest",
 		imgBase + "/das-schiff-nwop-agent-cra-frr:latest",
-		imgBase + "/das-schiff-nwop-agent-hbn-l2:latest",
+		imgBase + "/das-schiff-nwop-agent-netplan:latest",
+		imgBase + "/das-schiff-platform-coil:latest",
+		imgBase + "/das-schiff-platform-metallb:latest",
 	}
 	for _, img := range images {
 		Logf("  Loading %s on %s", filepath.Base(img), cp.Name)

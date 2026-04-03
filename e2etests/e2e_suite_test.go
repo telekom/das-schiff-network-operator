@@ -33,8 +33,8 @@ var _ = BeforeSuite(func() {
 	By("Waiting for CRA-FRR agent pods to be Running")
 	Expect(f.WaitForDaemonSetReady("kube-system", "network-operator-agent-cra-frr", cfg.ComponentReadyTimeout)).To(Succeed())
 
-	By("Waiting for HBN-L2 agent pods to be Running")
-	Expect(f.WaitForDaemonSetReady("kube-system", "network-operator-agent-hbn-l2", cfg.ComponentReadyTimeout)).To(Succeed())
+	By("Waiting for agent-netplan pods to be Running")
+	Expect(f.WaitForDaemonSetReady("kube-system", "network-operator-agent-netplan", cfg.ComponentReadyTimeout)).To(Succeed())
 
 	// Export framework to tests
 	framework.Global = f

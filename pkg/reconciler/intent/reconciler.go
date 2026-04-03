@@ -458,7 +458,9 @@ func (r *Reconciler) cleanupOrphanedNNCs(ctx context.Context, nodes []corev1.Nod
 }
 
 // buildNetplanState derives a netplan State from the assembled NNC spec.
-// It creates VLAN devices from the NNC Layer2 entries (host-side config for HBN-L2 agent).
+// It creates VLAN devices from the NNC Layer2 entries. The hbn parent
+// ethernet is defined in a static netplan config on the node (10-hbn.yaml),
+// so netplan can wire VLANs to it when this state is applied.
 func buildNetplanState(spec *networkv1alpha1.NodeNetworkConfigSpec) *netplan.State {
 	state := netplan.NewEmptyState()
 
@@ -480,9 +482,11 @@ func buildNetplanState(spec *networkv1alpha1.NodeNetworkConfigSpec) *netplan.Sta
 		}
 
 		vlan := map[string]interface{}{
-			"id":   l2.VLAN,
-			"link": "hbn",
-			"mtu":  l2.MTU,
+			"id":         l2.VLAN,
+			"link":       "hbn",
+			"mtu":        l2.MTU,
+			"critical":   true,
+			"link-local": []interface{}{},
 		}
 
 		rawVlan, err := json.Marshal(vlan)

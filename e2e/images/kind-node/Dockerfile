@@ -15,7 +15,8 @@ RUN apt-get update && \
       iproute2 \
       bridge-utils \
       bpftool \
-      tcpdump && \
+      tcpdump \
+      netplan.io && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 

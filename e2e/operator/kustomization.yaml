@@ -8,7 +8,7 @@ resources:
 - ../../config/cert
 - ../../config/operator
 - ../../config/agent-cra-frr
-- ../../config/agent-hbn-l2
+- ../../config/agent-netplan
 - ../../config/healthcheck
 - ../../config/platform-coil
 - ../../config/platform-metallb
