@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: network-sync
+  namespace: kube-system
+  labels:
+    app: network-sync
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: network-sync
+  template:
+    metadata:
+      labels:
+        app: network-sync
+    spec:
+      serviceAccountName: network-sync
+      tolerations:
+      - key: node-role.kubernetes.io/control-plane
+        operator: Exists
+        effect: NoSchedule
+      containers:
+      - name: manager
+        image: ghcr.io/telekom/das-schiff-network-sync:latest
+        imagePullPolicy: Never
+        args:
+        - --metrics-bind-address=:8090
+        - --health-probe-bind-address=:8091
+        ports:
+        - containerPort: 8090
+          name: metrics
+        - containerPort: 8091
+          name: healthz
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: healthz
+          initialDelaySeconds: 10
+          periodSeconds: 15
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: healthz
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          limits:
+            memory: 256Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+      terminationGracePeriodSeconds: 10

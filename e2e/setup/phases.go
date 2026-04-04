@@ -101,6 +101,15 @@ func PhaseBuildImages(repoRoot string) error {
 		return fmt.Errorf("building platform-metallb: %w", err)
 	}
 
+	if err := RunCmd("docker", "build",
+		"--build-arg", "ldflags="+ldflags,
+		"-f", filepath.Join(repoRoot, "das-schiff-network-sync.Dockerfile"),
+		"-t", imgBase+"/das-schiff-network-sync:latest",
+		repoRoot,
+	); err != nil {
+		return fmt.Errorf("building network-sync: %w", err)
+	}
+
 	// 4. Build NAT64 image
 	nat64Ctx := filepath.Join(repoRoot, "e2e", "images", "nat64")
 	Logf("  Building NAT64 image (%s)...", nat64Image)
@@ -458,6 +467,7 @@ func PhaseComponents(cluster *Cluster, repoRoot string) error {
 		imgBase + "/das-schiff-nwop-agent-netplan:latest",
 		imgBase + "/das-schiff-platform-coil:latest",
 		imgBase + "/das-schiff-platform-metallb:latest",
+		imgBase + "/das-schiff-network-sync:latest",
 	}
 	for _, node := range cluster.Nodes {
 		for _, img := range images {
@@ -629,6 +639,14 @@ ports:
 		"kubectl --kubeconfig=%s kustomize /repo/e2e/operator | kubectl --kubeconfig=%s apply -f -",
 		kubeconfigPath, kubeconfigPath)); err != nil {
 		return fmt.Errorf("installing operator: %w", err)
+	}
+
+	// Network-sync controller (CAPI CRD + RBAC + Deployment)
+	Logf("Installing network-sync controller...")
+	if _, err := DockerExecShell(cp.Name, fmt.Sprintf(
+		"kubectl --kubeconfig=%s kustomize /repo/e2e/sync | kubectl --kubeconfig=%s apply -f -",
+		kubeconfigPath, kubeconfigPath)); err != nil {
+		return fmt.Errorf("installing network-sync: %w", err)
 	}
 
 	Logf("Component installation complete")
@@ -960,6 +978,95 @@ func ExtractCluster2Kubeconfig(repoRoot string, cluster *Cluster) error {
 
 	Logf("Cluster-2 kubeconfig written")
 	return nil
+}
+
+// PhaseSyncSetup creates the management-cluster resources for the network-sync controller:
+// namespace, kubeconfig Secret, and CAPI Cluster object on cluster-1, pointing to cluster-2.
+func PhaseSyncSetup(cluster1, cluster2 *Cluster, repoRoot string) error {
+	Logf("Phase 8: Configuring sync controller for cluster-2...")
+
+	cp1 := cluster1.ControlPlane()
+	cp2 := cluster2.ControlPlane()
+	kubeconfigPath := "/etc/kubernetes/admin.conf"
+
+	kubectl := func(args ...string) error {
+		fullArgs := append([]string{"--kubeconfig=" + kubeconfigPath}, args...)
+		_, err := DockerExec(cp1.Name, append([]string{"kubectl"}, fullArgs...)...)
+		return err
+	}
+
+	// 1. Create sync namespace on cluster-1
+	Logf("Creating sync namespace cluster-nwop2 on cluster-1...")
+	kubectl("create", "namespace", "cluster-nwop2", "--dry-run=client", "-o", "yaml") //nolint:errcheck
+	nsYAML := `apiVersion: v1
+kind: Namespace
+metadata:
+  name: cluster-nwop2`
+	DockerExecInput(cp1.Name, nsYAML, "kubectl", "--kubeconfig="+kubeconfigPath, "apply", "-f", "-") //nolint:errcheck
+
+	// 2. Read cluster-2's kubeconfig and create a Secret on cluster-1
+	Logf("Creating kubeconfig Secret for cluster-2 on cluster-1...")
+	rawKubeconfig, err := DockerExec(cp2.Name, "cat", "/etc/kubernetes/admin.conf")
+	if err != nil {
+		return fmt.Errorf("reading cluster2 kubeconfig: %w", err)
+	}
+	// Replace server address with the overlay IPv4 (reachable from cluster-1)
+	rawKubeconfig = strings.ReplaceAll(rawKubeconfig,
+		fmt.Sprintf("server: https://[%s]:6443", cp2.IPv6),
+		fmt.Sprintf("server: https://%s:6443", cp2.IPv4))
+	rawKubeconfig = strings.ReplaceAll(rawKubeconfig,
+		fmt.Sprintf("server: https://%s:6443", cluster2.VIP),
+		fmt.Sprintf("server: https://%s:6443", cp2.IPv4))
+
+	// Create the Secret with the kubeconfig as `data.value`
+	// (CAPI convention: <cluster-name>-kubeconfig, key "value")
+	secretYAML := fmt.Sprintf(`apiVersion: v1
+kind: Secret
+metadata:
+  name: nwop2-kubeconfig
+  namespace: cluster-nwop2
+type: Opaque
+stringData:
+  value: |
+%s`, indentLines(rawKubeconfig, 4))
+	if err := DockerExecInput(cp1.Name, secretYAML,
+		"kubectl", "--kubeconfig="+kubeconfigPath, "apply", "-f", "-"); err != nil {
+		return fmt.Errorf("creating kubeconfig secret: %w", err)
+	}
+
+	// 3. Create CAPI Cluster object on cluster-1
+	Logf("Creating CAPI Cluster object for nwop2...")
+	clusterYAML := `apiVersion: cluster.x-k8s.io/v1beta1
+kind: Cluster
+metadata:
+  name: nwop2
+  namespace: cluster-nwop2
+spec:
+  paused: false`
+	if err := DockerExecInput(cp1.Name, clusterYAML,
+		"kubectl", "--kubeconfig="+kubeconfigPath, "apply", "-f", "-"); err != nil {
+		return fmt.Errorf("creating CAPI cluster: %w", err)
+	}
+
+	// 4. Wait for network-sync to pick up the cluster
+	Logf("Waiting for network-sync deployment to be available...")
+	kubectl("wait", "--for=condition=available", "deployment/network-sync", //nolint:errcheck
+		"-n", "kube-system", "--timeout=120s")
+
+	Logf("Sync controller configured for cluster-2")
+	return nil
+}
+
+// indentLines indents each line of s by n spaces.
+func indentLines(s string, n int) string {
+	prefix := strings.Repeat(" ", n)
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		if line != "" {
+			lines[i] = prefix + line
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // EnvOr returns the environment variable value or a fallback default.

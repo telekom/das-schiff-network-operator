@@ -30,7 +30,8 @@ type Framework struct {
 	Client     client.Client
 
 	// Cluster-2 (gateway cluster) clients — initialized when Cluster2Kubeconfig is set.
-	Cluster2KubeClient kubernetes.Interface
+	Cluster2KubeClient  kubernetes.Interface
+	cluster2Client      client.Client
 
 	// Track namespaces created during tests for cleanup.
 	testNamespaces []string
@@ -71,7 +72,21 @@ func (f *Framework) InitCluster2() error {
 	if err != nil {
 		return fmt.Errorf("create cluster2 kubernetes client: %w", err)
 	}
+	f.cluster2Client, err = client.New(restCfg, client.Options{})
+	if err != nil {
+		return fmt.Errorf("create cluster2 controller-runtime client: %w", err)
+	}
 	return nil
+}
+
+// Cluster2Client returns the controller-runtime client for cluster-2.
+func (f *Framework) Cluster2Client() client.Client {
+	return f.cluster2Client
+}
+
+// ObjectKey returns a client.ObjectKey for the given namespace and name.
+func ObjectKey(namespace, name string) types.NamespacedName {
+	return types.NamespacedName{Namespace: namespace, Name: name}
 }
 
 // CreateNamespace creates a namespace and tracks it for cleanup.
@@ -280,5 +295,23 @@ func (f *Framework) WaitForDaemonSetReady(namespace, name string, timeout time.D
 		}
 		return ds.Status.DesiredNumberScheduled > 0 &&
 			ds.Status.DesiredNumberScheduled == ds.Status.NumberReady, nil
+	})
+}
+
+// WaitForDeploymentReady waits for a Deployment to have all replicas available.
+func (f *Framework) WaitForDeploymentReady(namespace, name string, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	return Poll(ctx, 5*time.Second, func() (bool, error) {
+		deploy, err := f.KubeClient.AppsV1().Deployments(namespace).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return false, nil
+		}
+		if deploy.Spec.Replicas == nil {
+			return false, nil
+		}
+		return deploy.Status.AvailableReplicas == *deploy.Spec.Replicas &&
+			deploy.Status.UpdatedReplicas == *deploy.Spec.Replicas, nil
 	})
 }

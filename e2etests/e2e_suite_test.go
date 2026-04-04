@@ -36,6 +36,9 @@ var _ = BeforeSuite(func() {
 	By("Waiting for agent-netplan pods to be Running")
 	Expect(f.WaitForDaemonSetReady("kube-system", "network-operator-agent-netplan", cfg.ComponentReadyTimeout)).To(Succeed())
 
+	By("Waiting for network-sync deployment to be Ready")
+	Expect(f.WaitForDeploymentReady("kube-system", "network-sync", cfg.ComponentReadyTimeout)).To(Succeed())
+
 	// Export framework to tests
 	framework.Global = f
 
