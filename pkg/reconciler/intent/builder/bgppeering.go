@@ -96,7 +96,8 @@ func (b *BGPPeeringBuilder) buildListenRange(bp *nc.BGPPeering, data *resolver.R
 	peers := b.buildListenRangePeers(bp, net)
 
 	// Apply to all nodes (no nodeSelector on BGPPeering).
-	for _, node := range data.Nodes {
+	for i := range data.Nodes {
+		node := &data.Nodes[i]
 		contrib, ok := result[node.Name]
 		if !ok {
 			contrib = NewNodeContribution()
@@ -184,7 +185,7 @@ func (b *BGPPeeringBuilder) buildBasePeer(bp *nc.BGPPeering) networkv1alpha1.BGP
 	peer := networkv1alpha1.BGPPeer{}
 
 	if bp.Spec.WorkloadAS != nil {
-		peer.RemoteASN = uint32(*bp.Spec.WorkloadAS)
+		peer.RemoteASN = uint32(*bp.Spec.WorkloadAS) //nolint:gosec // value validated by CRD schema (positive integer)
 	}
 
 	peer.HoldTime = bp.Spec.HoldTime
@@ -220,7 +221,7 @@ func (b *BGPPeeringBuilder) buildAddressFamilies(bp *nc.BGPPeering) (*networkv1a
 	}
 
 	if bp.Spec.MaximumPrefixes != nil {
-		maxPfx := uint32(*bp.Spec.MaximumPrefixes)
+		maxPfx := uint32(*bp.Spec.MaximumPrefixes) //nolint:gosec // value validated by CRD schema (positive integer)
 		if ipv4 != nil {
 			ipv4.MaxPrefixes = &maxPfx
 		}

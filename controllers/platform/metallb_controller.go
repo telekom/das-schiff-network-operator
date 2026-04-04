@@ -19,7 +19,6 @@ package platform
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/go-logr/logr"
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
@@ -290,7 +289,7 @@ func (r *MetalLBReconciler) checkTargetCRDs(ctx context.Context, logger logr.Log
 		if err := r.List(ctx, list, client.Limit(1)); err != nil {
 			if apimeta.IsNoMatchError(err) {
 				logger.Info("target CRD not yet available, will retry", "gvk", gvk.String())
-				return false, ctrl.Result{RequeueAfter: 30 * time.Second}
+				return false, ctrl.Result{RequeueAfter: crdRequeueInterval}
 			}
 		}
 	}

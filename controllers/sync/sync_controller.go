@@ -3,6 +3,7 @@ package sync
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/go-logr/logr"
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
@@ -23,6 +24,8 @@ const (
 	labelManagedByValue = "network-sync"
 	annotationSourceNS = "network-sync.telekom.com/source-namespace"
 )
+
+const syncRequeueInterval = 10 * time.Second
 
 // SyncController watches intent CRDs on the management cluster and syncs them
 // to workload clusters via the RemoteClientManager.
@@ -74,7 +77,7 @@ func (r *SyncController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	remoteClients := r.Remotes.GetByNamespace(req.Namespace)
 	if len(remoteClients) == 0 {
 		// No remote client yet — ClusterController hasn't set it up.
-		return ctrl.Result{RequeueAfter: 10_000_000_000}, nil // 10s
+		return ctrl.Result{RequeueAfter: syncRequeueInterval}, nil
 	}
 
 	// List and sync every intent CRD type in this namespace.

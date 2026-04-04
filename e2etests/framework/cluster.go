@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/telekom/das-schiff-network-operator/e2etests/config"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -18,6 +17,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/telekom/das-schiff-network-operator/e2etests/config"
 )
 
 // Global is the shared framework instance, set during BeforeSuite.

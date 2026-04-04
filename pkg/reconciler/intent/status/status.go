@@ -30,6 +30,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+const (
+	reasonAllResolved = "AllResolved"
+	msgAllResolved    = "All references resolved"
+)
+
 // Updater handles status condition updates for intent CRDs.
 type Updater struct {
 	client client.Client
@@ -48,6 +53,7 @@ func NewUpdater(c client.Client, logger logr.Logger) *Updater {
 // On conflict, it re-fetches the object and reapplies the update function.
 func (u *Updater) statusUpdateWithRetry(ctx context.Context, obj client.Object, applyStatus func(obj client.Object)) error {
 	const maxRetries = 3
+	const statusRetryDelay = 100 * time.Millisecond
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		if attempt > 0 {
 			// Re-fetch to get current resourceVersion.
@@ -65,7 +71,7 @@ func (u *Updater) statusUpdateWithRetry(ctx context.Context, obj client.Object, 
 		if !apierrors.IsConflict(err) {
 			return fmt.Errorf("updating status for %s/%s: %w", obj.GetObjectKind().GroupVersionKind().Kind, obj.GetName(), err)
 		}
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(statusRetryDelay)
 	}
 	return fmt.Errorf("status update conflict after %d retries for %s/%s", maxRetries, obj.GetObjectKind().GroupVersionKind().Kind, obj.GetName())
 }
@@ -107,7 +113,7 @@ func (u *Updater) updateVRFConditions(ctx context.Context, fetched *resolver.Fet
 		vrf := &fetched.VRFs[i]
 		if err := u.statusUpdateWithRetry(ctx, vrf, func(obj client.Object) {
 			v := obj.(*nc.VRF)
-			setCondition(&v.Status.Conditions, nc.ConditionTypeResolved, metav1.ConditionTrue, "AllResolved", "VRF has no external references to resolve", v.Generation)
+			setCondition(&v.Status.Conditions, nc.ConditionTypeResolved, metav1.ConditionTrue, reasonAllResolved, "VRF has no external references to resolve", v.Generation)
 			setCondition(&v.Status.Conditions, nc.ConditionTypeReady, metav1.ConditionTrue, "Ready", "VRF is ready", v.Generation)
 			v.Status.ObservedGeneration = v.Generation
 		}); err != nil {
@@ -122,7 +128,7 @@ func (u *Updater) updateNetworkConditions(ctx context.Context, fetched *resolver
 		net := &fetched.Networks[i]
 		if err := u.statusUpdateWithRetry(ctx, net, func(obj client.Object) {
 			n := obj.(*nc.Network)
-			setCondition(&n.Status.Conditions, nc.ConditionTypeResolved, metav1.ConditionTrue, "AllResolved", "Network has no external references to resolve", n.Generation)
+			setCondition(&n.Status.Conditions, nc.ConditionTypeResolved, metav1.ConditionTrue, reasonAllResolved, "Network has no external references to resolve", n.Generation)
 			setCondition(&n.Status.Conditions, nc.ConditionTypeReady, metav1.ConditionTrue, "Ready", "Network is ready", n.Generation)
 			n.Status.ObservedGeneration = n.Generation
 		}); err != nil {
@@ -136,8 +142,8 @@ func (u *Updater) updateDestinationConditions(ctx context.Context, fetched *reso
 	for i := range fetched.Destinations {
 		dest := &fetched.Destinations[i]
 		resolvedStatus := metav1.ConditionTrue
-		resolvedReason := "AllResolved"
-		resolvedMsg := "All references resolved"
+		resolvedReason := reasonAllResolved
+		resolvedMsg := msgAllResolved
 
 		if dest.Spec.VRFRef != nil {
 			if _, ok := resolved.VRFs[*dest.Spec.VRFRef]; !ok {
@@ -262,7 +268,7 @@ func (u *Updater) updateCollectorConditions(ctx context.Context, fetched *resolv
 		col := &fetched.Collectors[i]
 		if err := u.statusUpdateWithRetry(ctx, col, func(obj client.Object) {
 			c := obj.(*nc.Collector)
-			setCondition(&c.Status.Conditions, nc.ConditionTypeResolved, metav1.ConditionTrue, "AllResolved", "Collector references resolved", c.Generation)
+			setCondition(&c.Status.Conditions, nc.ConditionTypeResolved, metav1.ConditionTrue, reasonAllResolved, "Collector references resolved", c.Generation)
 			setCondition(&c.Status.Conditions, nc.ConditionTypeReady, metav1.ConditionTrue, "Ready", "Collector is ready", c.Generation)
 			c.Status.ObservedGeneration = c.Generation
 		}); err != nil {
@@ -281,8 +287,8 @@ func (u *Updater) updateTrafficMirrorConditions(ctx context.Context, fetched *re
 	for i := range fetched.TrafficMirrors {
 		tm := &fetched.TrafficMirrors[i]
 		resolvedStatus := metav1.ConditionTrue
-		resolvedReason := "AllResolved"
-		resolvedMsg := "All references resolved"
+		resolvedReason := reasonAllResolved
+		resolvedMsg := msgAllResolved
 
 		if !collectorNames[tm.Spec.Collector] {
 			resolvedStatus = metav1.ConditionFalse
@@ -313,7 +319,7 @@ func checkNetworkRef(networkRef string, resolved *resolver.ResolvedData) (metav1
 	if _, ok := resolved.Networks[networkRef]; !ok {
 		return metav1.ConditionFalse, "NetworkNotFound", fmt.Sprintf("referenced Network %q not found", networkRef)
 	}
-	return metav1.ConditionTrue, "AllResolved", "All references resolved"
+	return metav1.ConditionTrue, reasonAllResolved, msgAllResolved
 }
 
 // setCondition is a helper to set a condition with observedGeneration.

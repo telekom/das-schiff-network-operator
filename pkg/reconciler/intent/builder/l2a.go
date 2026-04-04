@@ -30,6 +30,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
+const defaultMTU = 1500
+
 // L2ABuilder transforms Layer2Attachment intent CRDs into NNC Layer2 configs.
 type L2ABuilder struct{}
 
@@ -108,7 +110,7 @@ func (b *L2ABuilder) Build(ctx context.Context, data *resolver.ResolvedData) (ma
 				if !exists {
 					fvrf = buildFabricVRF(vrfSpec)
 				}
-				fvrf = addNetworkToFabricVRF(fvrf, net)
+				fvrf = addNetworkToFabricVRF(&fvrf, net)
 				contrib.FabricVRFs[vrfName] = fvrf
 			}
 		}
@@ -159,8 +161,8 @@ func (b *L2ABuilder) buildLayer2(l2a *nc.Layer2Attachment, net *resolver.Resolve
 	}
 
 	layer2 := &networkv1alpha1.Layer2{
-		VNI:         uint32(b.vniValue(net)),
-		VLAN:        uint16(b.vlanID(net)),
+		VNI:         uint32(b.vniValue(net)),  //nolint:gosec // value validated by CRD schema (positive integer)
+		VLAN:        uint16(b.vlanID(net)),    //nolint:gosec // value validated by CRD schema (positive integer)
 		RouteTarget: rt,
 		MTU:         b.mtu(l2a),
 	}
@@ -223,9 +225,9 @@ func (b *L2ABuilder) vniValue(net *resolver.ResolvedNetwork) int32 {
 // mtu extracts the MTU from a Layer2Attachment, defaulting to 1500.
 func (b *L2ABuilder) mtu(l2a *nc.Layer2Attachment) uint16 {
 	if l2a.Spec.MTU != nil {
-		return uint16(*l2a.Spec.MTU)
+		return uint16(*l2a.Spec.MTU) //nolint:gosec // value validated by CRD schema (positive integer)
 	}
-	return 1500
+	return defaultMTU
 }
 
 // routeTarget returns an empty string so that FRR auto-derives the L2 VNI's
@@ -257,7 +259,7 @@ func buildFabricVRF(vrfSpec *nc.VRFSpec) networkv1alpha1.FabricVRF {
 	}
 
 	if vrfSpec.VNI != nil {
-		fvrf.VNI = uint32(*vrfSpec.VNI)
+		fvrf.VNI = uint32(*vrfSpec.VNI) //nolint:gosec // value validated by CRD schema (positive integer)
 	}
 
 	if vrfSpec.RouteTarget != nil {
@@ -271,10 +273,10 @@ func buildFabricVRF(vrfSpec *nc.VRFSpec) networkv1alpha1.FabricVRF {
 // addNetworkToFabricVRF adds a Network's CIDRs to the FabricVRF's EVPN export filter
 // and cluster VRFImport filter. This ensures subnets are exported via EVPN and
 // imported from the cluster VRF into the fabric VRF.
-func addNetworkToFabricVRF(fvrf networkv1alpha1.FabricVRF, net *resolver.ResolvedNetwork) networkv1alpha1.FabricVRF {
+func addNetworkToFabricVRF(fvrf *networkv1alpha1.FabricVRF, net *resolver.ResolvedNetwork) networkv1alpha1.FabricVRF {
 	items := networkCIDRFilterItems(net)
 	if len(items) == 0 {
-		return fvrf
+		return *fvrf
 	}
 
 	// Add to EVPN export filter.
@@ -290,7 +292,7 @@ func addNetworkToFabricVRF(fvrf networkv1alpha1.FabricVRF, net *resolver.Resolve
 		fvrf.VRFImports[0].Filter.Items = append(fvrf.VRFImports[0].Filter.Items, items...)
 	}
 
-	return fvrf
+	return *fvrf
 }
 
 // networkCIDRFilterItems creates FilterItems for a Network's IPv4 and IPv6 CIDRs.
@@ -325,7 +327,7 @@ func networkCIDRFilterItems(net *resolver.ResolvedNetwork) []networkv1alpha1.Fil
 
 // addressFilterItems creates FilterItems for a list of CIDR addresses.
 func addressFilterItems(addresses []string) []networkv1alpha1.FilterItem {
-	var items []networkv1alpha1.FilterItem
+	items := make([]networkv1alpha1.FilterItem, 0, len(addresses))
 	for _, addr := range addresses {
 		le := 32
 		if strings.Contains(addr, ":") {

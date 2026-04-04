@@ -28,6 +28,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+const testOutboundPrefix = "10.100.0.0/24"
+
 // baseInboundData returns a minimal ResolvedData with one node, one Network,
 // one VRF-backed Destination, and a matching RawDestination for label-selector matching.
 func baseInboundData() *resolver.ResolvedData {
@@ -300,7 +302,7 @@ func TestOutboundBuilder_BasicOutbound(t *testing.T) {
 			Spec: nc.OutboundSpec{
 				NetworkRef:   "net-1",
 				Destinations: &metav1.LabelSelector{MatchLabels: map[string]string{"type": "gw"}},
-				Addresses:    &nc.AddressAllocation{IPv4: []string{"10.100.0.0/24"}},
+				Addresses:    &nc.AddressAllocation{IPv4: []string{testOutboundPrefix}},
 			},
 		},
 	}
@@ -335,8 +337,8 @@ func TestOutboundBuilder_BasicOutbound(t *testing.T) {
 	if len(fvrf.EVPNExportFilter.Items) != 1 {
 		t.Fatalf("expected 1 EVPN export filter item, got %d", len(fvrf.EVPNExportFilter.Items))
 	}
-	if fvrf.EVPNExportFilter.Items[0].Matcher.Prefix.Prefix != "10.100.0.0/24" {
-		t.Errorf("expected prefix 10.100.0.0/24, got %q", fvrf.EVPNExportFilter.Items[0].Matcher.Prefix.Prefix)
+	if fvrf.EVPNExportFilter.Items[0].Matcher.Prefix.Prefix != testOutboundPrefix {
+		t.Errorf("expected prefix %s, got %q", testOutboundPrefix, fvrf.EVPNExportFilter.Items[0].Matcher.Prefix.Prefix)
 	}
 
 	// VRFImport filter items mirror the same.
@@ -382,7 +384,7 @@ func TestOutboundBuilder_NoDestinations(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{Name: "no-dest-outbound"},
 			Spec: nc.OutboundSpec{
 				NetworkRef: "net-1",
-				Addresses:  &nc.AddressAllocation{IPv4: []string{"10.100.0.0/24"}},
+				Addresses:  &nc.AddressAllocation{IPv4: []string{testOutboundPrefix}},
 				// No Destinations selector.
 			},
 		},

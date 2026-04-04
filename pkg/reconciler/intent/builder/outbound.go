@@ -121,7 +121,7 @@ func (b *OutboundBuilder) collectAddresses(ob *nc.Outbound) []string {
 	if ob.Spec.Addresses == nil {
 		return nil
 	}
-	var addrs []string
+	addrs := make([]string, 0, len(ob.Spec.Addresses.IPv4)+len(ob.Spec.Addresses.IPv6))
 	addrs = append(addrs, ob.Spec.Addresses.IPv4...)
 	addrs = append(addrs, ob.Spec.Addresses.IPv6...)
 	return addrs

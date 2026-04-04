@@ -50,7 +50,10 @@ func TestMain(m *testing.M) {
 	logf.SetLogger(zap.New(zap.UseDevMode(true)))
 
 	// Resolve CRD path relative to this source file (not the test binary CWD).
-	_, thisFile, _, _ := runtime.Caller(0)
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		panic("runtime.Caller failed")
+	}
 	repoRoot := filepath.Join(filepath.Dir(thisFile), "..", "..", "..")
 	crdPath := filepath.Join(repoRoot, "config", "crd", "bases")
 
@@ -99,7 +102,7 @@ func TestMain(m *testing.M) {
 // testNamespace is used for all namespaced intent CRDs in tests.
 const testNamespace = "default"
 
-// --- Helpers ---
+// --- Helpers ---.
 
 func ptr[T any](v T) *T { return &v }
 
@@ -115,13 +118,13 @@ func createNode(t *testing.T, ctx context.Context, name string, nodeLabels map[s
 	t.Helper()
 	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: nodeLabels}}
 	require.NoError(t, k8sClient.Create(ctx, node), "create node %s", name)
-	t.Cleanup(func() { _ = k8sClient.Delete(context.Background(), node) })
+	t.Cleanup(func() { _ = k8sClient.Delete(context.Background(), node) }) //nolint:contextcheck // cleanup runs outside test context
 }
 
 func createObj(t *testing.T, ctx context.Context, obj client.Object) {
 	t.Helper()
 	require.NoError(t, k8sClient.Create(ctx, obj), "create %T %s", obj, obj.GetName())
-	t.Cleanup(func() { _ = k8sClient.Delete(context.Background(), obj) })
+	t.Cleanup(func() { _ = k8sClient.Delete(context.Background(), obj) }) //nolint:contextcheck // cleanup runs outside test context
 }
 
 func reconcileAndGetNNC(t *testing.T, ctx context.Context, nodeName string) *networkv1alpha1.NodeNetworkConfig {
@@ -129,7 +132,7 @@ func reconcileAndGetNNC(t *testing.T, ctx context.Context, nodeName string) *net
 	require.NoError(t, reconciler.ReconcileDebounced(ctx), "reconcile failed")
 	nnc := &networkv1alpha1.NodeNetworkConfig{}
 	require.NoError(t, k8sClient.Get(ctx, client.ObjectKey{Name: nodeName}, nnc), "get NNC %s", nodeName)
-	t.Cleanup(func() { _ = k8sClient.Delete(context.Background(), nnc) })
+	t.Cleanup(func() { _ = k8sClient.Delete(context.Background(), nnc) }) //nolint:contextcheck // cleanup runs outside test context
 	return nnc
 }
 
@@ -137,7 +140,7 @@ func getNetplanConfig(t *testing.T, ctx context.Context, nodeName string) *netwo
 	t.Helper()
 	npc := &networkv1alpha1.NodeNetplanConfig{}
 	require.NoError(t, k8sClient.Get(ctx, client.ObjectKey{Name: nodeName}, npc), "get NodeNetplanConfig %s", nodeName)
-	t.Cleanup(func() { _ = k8sClient.Delete(context.Background(), npc) })
+	t.Cleanup(func() { _ = k8sClient.Delete(context.Background(), npc) }) //nolint:contextcheck // cleanup runs outside test context
 	return npc
 }
 
@@ -183,7 +186,7 @@ func makeDestination(name, vrfRef string, destLabels map[string]string, prefixes
 }
 
 // makeL2A creates a Layer2Attachment intent CRD.
-func makeL2A(name, networkRef string, destSelector *metav1.LabelSelector, nodeSelector *metav1.LabelSelector) *nc.Layer2Attachment {
+func makeL2A(name, networkRef string, destSelector, nodeSelector *metav1.LabelSelector) *nc.Layer2Attachment {
 	return &nc.Layer2Attachment{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace},
 		Spec: nc.Layer2AttachmentSpec{
@@ -239,7 +242,7 @@ func destSelector(value string) *metav1.LabelSelector {
 	}
 }
 
-// --- Test Cases ---
+// --- Test Cases ---.
 
 func TestL2APipeline(t *testing.T) {
 	ctx := context.Background()
@@ -584,7 +587,7 @@ func TestRevisionStableOnNoChange(t *testing.T) {
 	assert.Equal(t, rv1, nnc2.ResourceVersion, "expected ResourceVersion to stay stable (no-op update)")
 }
 
-// --- BGPPeering Tests ---
+// --- BGPPeering Tests ---.
 
 func TestBGPPeeringListenRange(t *testing.T) {
 	ctx := context.Background()

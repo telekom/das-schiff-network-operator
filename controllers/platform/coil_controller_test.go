@@ -68,7 +68,7 @@ func getEgress(t *testing.T, r *CoilReconciler, name string) *unstructured.Unstr
 	return obj
 }
 
-func TestCoilReconciler_CreateIPPoolsAndEgress(t *testing.T) {
+func TestCoilReconciler_CreateIPPoolsAndEgress(t *testing.T) { //nolint:funlen // table-driven test
 	scheme := newScheme()
 	replicas := int32(3)
 

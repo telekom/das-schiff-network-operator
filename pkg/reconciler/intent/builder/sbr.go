@@ -177,8 +177,8 @@ func (b *SBRBuilder) addConsumerToGroups(
 				groups[vrfName] = group
 			}
 			group.sourcePrefixes = appendUnique(group.sourcePrefixes, sourcePrefixes...)
-			for _, d := range dests {
-				group.vrfRoutes[vrfName] = appendUnique(group.vrfRoutes[vrfName], d.Spec.Prefixes...)
+			for di := range dests {
+				group.vrfRoutes[vrfName] = appendUnique(group.vrfRoutes[vrfName], dests[di].Spec.Prefixes...)
 			}
 		}
 		return
@@ -198,8 +198,8 @@ func (b *SBRBuilder) addConsumerToGroups(
 
 	group.sourcePrefixes = appendUnique(group.sourcePrefixes, sourcePrefixes...)
 	for vrfName, dests := range grouped {
-		for _, d := range dests {
-			group.vrfRoutes[vrfName] = appendUnique(group.vrfRoutes[vrfName], d.Spec.Prefixes...)
+		for di := range dests {
+			group.vrfRoutes[vrfName] = appendUnique(group.vrfRoutes[vrfName], dests[di].Spec.Prefixes...)
 		}
 	}
 }

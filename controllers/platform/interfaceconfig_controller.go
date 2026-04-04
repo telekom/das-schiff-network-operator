@@ -140,7 +140,7 @@ func (r *InterfaceConfigReconciler) reconcileNodeConfig(ctx context.Context, ifc
 		Spec: networkv1alpha1.NodeNetplanConfigSpec{
 			DesiredState: netplan.State{
 				Network: netplan.NetworkState{
-					Version:   2,
+					Version:   2, //nolint:mnd // netplan specification version
 					Ethernets: ethernets,
 					Bonds:     bonds,
 				},

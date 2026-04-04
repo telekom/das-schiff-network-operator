@@ -26,7 +26,7 @@ func testScheme() *runtime.Scheme {
 
 const testRemoteNamespace = "default"
 
-func newFakeSyncController(mgmtObjs []client.Object, remoteObjs []client.Object) (*SyncController, client.Client) {
+func newFakeSyncController(mgmtObjs, remoteObjs []client.Object) (*SyncController, client.Client) {
 	s := testScheme()
 
 	mgmtClient := fake.NewClientBuilder().

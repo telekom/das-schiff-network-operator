@@ -41,7 +41,10 @@ import (
 )
 
 const (
-	coilFinalizer = "network-connector.sylvaproject.org/coil-cleanup"
+	coilFinalizer      = "network-connector.sylvaproject.org/coil-cleanup"
+	ipv4HostPrefixLen  = 32
+	ipv6HostPrefixLen  = 128
+	crdRequeueInterval = 30 * time.Second
 )
 
 var (
@@ -107,12 +110,12 @@ func (r *CoilReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	// Reconcile Calico IPPools.
 	if addresses != nil {
 		if len(addresses.IPv4) > 0 {
-			if err := r.upsertCalicoIPPool(ctx, outbound, addresses.IPv4[0], 32, "v4", logger); err != nil {
+			if err := r.upsertCalicoIPPool(ctx, outbound, addresses.IPv4[0], ipv4HostPrefixLen, "v4", logger); err != nil {
 				return ctrl.Result{}, fmt.Errorf("error reconciling IPv4 IPPool: %w", err)
 			}
 		}
 		if len(addresses.IPv6) > 0 {
-			if err := r.upsertCalicoIPPool(ctx, outbound, addresses.IPv6[0], 128, "v6", logger); err != nil {
+			if err := r.upsertCalicoIPPool(ctx, outbound, addresses.IPv6[0], ipv6HostPrefixLen, "v6", logger); err != nil {
 				return ctrl.Result{}, fmt.Errorf("error reconciling IPv6 IPPool: %w", err)
 			}
 		}
@@ -355,7 +358,7 @@ func (r *CoilReconciler) checkTargetCRDs(ctx context.Context, logger logr.Logger
 		if err := r.List(ctx, list, client.Limit(1)); err != nil {
 			if apimeta.IsNoMatchError(err) {
 				logger.Info("target CRD not yet available, will retry", "gvk", gvk.String())
-				return false, ctrl.Result{RequeueAfter: 30 * time.Second}
+				return false, ctrl.Result{RequeueAfter: crdRequeueInterval}
 			}
 		}
 	}

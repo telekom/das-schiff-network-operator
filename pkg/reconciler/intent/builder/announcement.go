@@ -55,7 +55,8 @@ func (b *AnnouncementBuilder) Build(_ context.Context, data *resolver.ResolvedDa
 		filter := b.buildEVPNExportFilter(ap)
 
 		// Apply to all nodes where VRF exists.
-		for _, node := range data.Nodes {
+		for i := range data.Nodes {
+			node := &data.Nodes[i]
 			contrib, ok := result[node.Name]
 			if !ok {
 				contrib = NewNodeContribution()

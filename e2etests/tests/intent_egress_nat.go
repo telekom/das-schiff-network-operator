@@ -7,11 +7,12 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/telekom/das-schiff-network-operator/e2etests/framework"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+
+	"github.com/telekom/das-schiff-network-operator/e2etests/framework"
 )
 
 // Intent-based Egress NAT test using Outbound CRD.

@@ -41,7 +41,7 @@ func (b *InboundBuilder) Name() string {
 // Build produces per-node FabricVRF contributions from Inbound resources.
 // A single Inbound may select multiple Destinations across different VRFs
 // via its label selector — FabricVRF entries are produced for each matched VRF.
-func (b *InboundBuilder) Build(_ context.Context, data *resolver.ResolvedData) (map[string]*NodeContribution, error) {
+func (b *InboundBuilder) Build(_ context.Context, data *resolver.ResolvedData) (map[string]*NodeContribution, error) { //nolint:gocognit // inbound building has many valid branches
 	result := make(map[string]*NodeContribution)
 
 	for i := range data.Inbounds {
@@ -128,7 +128,7 @@ func (b *InboundBuilder) collectAddresses(ib *nc.Inbound) []string {
 	if ib.Spec.Addresses == nil {
 		return nil
 	}
-	var addrs []string
+	addrs := make([]string, 0, len(ib.Spec.Addresses.IPv4)+len(ib.Spec.Addresses.IPv6))
 	addrs = append(addrs, ib.Spec.Addresses.IPv4...)
 	addrs = append(addrs, ib.Spec.Addresses.IPv6...)
 	return addrs

@@ -57,15 +57,15 @@ func (b *MirrorBuilder) Build(_ context.Context, data *resolver.ResolvedData) (m
 		// Resolve the source attachment and determine where to place the ACL.
 		switch tm.Spec.Source.Kind {
 		case "Layer2Attachment":
-			if err := b.addToLayer2(tm.Spec.Source.Name, mirrorACL, data, result); err != nil {
+			if err := b.addToLayer2(tm.Spec.Source.Name, &mirrorACL, data, result); err != nil {
 				return nil, fmt.Errorf("TrafficMirror %q source resolution failed: %w", tm.Name, err)
 			}
 		case "Inbound":
-			if err := b.addToInboundVRF(tm.Spec.Source.Name, mirrorACL, data, result); err != nil {
+			if err := b.addToInboundVRF(tm.Spec.Source.Name, &mirrorACL, data, result); err != nil {
 				return nil, fmt.Errorf("TrafficMirror %q source resolution failed: %w", tm.Name, err)
 			}
 		case "Outbound":
-			if err := b.addToOutboundVRF(tm.Spec.Source.Name, mirrorACL, data, result); err != nil {
+			if err := b.addToOutboundVRF(tm.Spec.Source.Name, &mirrorACL, data, result); err != nil {
 				return nil, fmt.Errorf("TrafficMirror %q source resolution failed: %w", tm.Name, err)
 			}
 		default:
@@ -114,18 +114,18 @@ func (b *MirrorBuilder) convertTrafficMatch(tm *nc.TrafficMatch) networkv1alpha1
 		result.DstPrefix = tm.DstPrefix
 	}
 	if tm.SrcPort != nil {
-		port := uint16(*tm.SrcPort)
+		port := uint16(*tm.SrcPort) //nolint:gosec // value validated by CRD schema (positive integer)
 		result.SrcPort = &port
 	}
 	if tm.DstPort != nil {
-		port := uint16(*tm.DstPort)
+		port := uint16(*tm.DstPort) //nolint:gosec // value validated by CRD schema (positive integer)
 		result.DstPort = &port
 	}
 	return result
 }
 
 // addToLayer2 adds MirrorACL to a Layer2 entry identified by L2A name on all nodes.
-func (b *MirrorBuilder) addToLayer2(l2aName string, acl networkv1alpha1.MirrorACL, data *resolver.ResolvedData, result map[string]*NodeContribution) error {
+func (b *MirrorBuilder) addToLayer2(l2aName string, acl *networkv1alpha1.MirrorACL, data *resolver.ResolvedData, result map[string]*NodeContribution) error {
 	// Find the L2A.
 	var l2a *nc.Layer2Attachment
 	for j := range data.Layer2Attachments {
@@ -161,7 +161,7 @@ func (b *MirrorBuilder) addToLayer2(l2aName string, acl networkv1alpha1.MirrorAC
 		if !exists {
 			layer2 = networkv1alpha1.Layer2{}
 		}
-		layer2.MirrorACLs = append(layer2.MirrorACLs, acl)
+		layer2.MirrorACLs = append(layer2.MirrorACLs, *acl)
 		contrib.Layer2s[mapKey] = layer2
 	}
 
@@ -169,7 +169,7 @@ func (b *MirrorBuilder) addToLayer2(l2aName string, acl networkv1alpha1.MirrorAC
 }
 
 // addToInboundVRF adds MirrorACL to the VRF associated with an Inbound on all nodes.
-func (b *MirrorBuilder) addToInboundVRF(ibName string, acl networkv1alpha1.MirrorACL, data *resolver.ResolvedData, result map[string]*NodeContribution) error {
+func (b *MirrorBuilder) addToInboundVRF(ibName string, acl *networkv1alpha1.MirrorACL, data *resolver.ResolvedData, result map[string]*NodeContribution) error {
 	vrfName, vrfSpec, err := b.resolveInboundVRF(ibName, data)
 	if err != nil {
 		return err
@@ -189,7 +189,7 @@ func (b *MirrorBuilder) addToInboundVRF(ibName string, acl networkv1alpha1.Mirro
 		if !exists {
 			fvrf = buildFabricVRF(vrfSpec)
 		}
-		fvrf.MirrorACLs = append(fvrf.MirrorACLs, acl)
+		fvrf.MirrorACLs = append(fvrf.MirrorACLs, *acl)
 		contrib.FabricVRFs[vrfName] = fvrf
 	}
 
@@ -197,7 +197,7 @@ func (b *MirrorBuilder) addToInboundVRF(ibName string, acl networkv1alpha1.Mirro
 }
 
 // addToOutboundVRF adds MirrorACL to the VRF associated with an Outbound on all nodes.
-func (b *MirrorBuilder) addToOutboundVRF(obName string, acl networkv1alpha1.MirrorACL, data *resolver.ResolvedData, result map[string]*NodeContribution) error {
+func (b *MirrorBuilder) addToOutboundVRF(obName string, acl *networkv1alpha1.MirrorACL, data *resolver.ResolvedData, result map[string]*NodeContribution) error {
 	vrfName, vrfSpec, err := b.resolveOutboundVRF(obName, data)
 	if err != nil {
 		return err
@@ -217,7 +217,7 @@ func (b *MirrorBuilder) addToOutboundVRF(obName string, acl networkv1alpha1.Mirr
 		if !exists {
 			fvrf = buildFabricVRF(vrfSpec)
 		}
-		fvrf.MirrorACLs = append(fvrf.MirrorACLs, acl)
+		fvrf.MirrorACLs = append(fvrf.MirrorACLs, *acl)
 		contrib.FabricVRFs[vrfName] = fvrf
 	}
 

@@ -18,6 +18,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
+const secretRequeueInterval = 30 * time.Second
+
 var capiClusterGVK = schema.GroupVersionKind{
 	Group:   "cluster.x-k8s.io",
 	Version: "v1beta1",
@@ -57,7 +59,7 @@ func (r *ClusterController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}, secret)
 	if apierrors.IsNotFound(err) {
 		log.Info("kubeconfig Secret not found yet, waiting", "secret", secretName)
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		return ctrl.Result{RequeueAfter: secretRequeueInterval}, nil
 	}
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("fetching kubeconfig Secret %q: %w", secretName, err)
@@ -66,7 +68,7 @@ func (r *ClusterController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	kubeconfig, ok := secret.Data["value"]
 	if !ok || len(kubeconfig) == 0 {
 		log.Info("kubeconfig Secret missing 'value' key", "secret", secretName)
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		return ctrl.Result{RequeueAfter: secretRequeueInterval}, nil
 	}
 
 	if err := r.Remotes.UpdateFromKubeconfig(req.NamespacedName, kubeconfig); err != nil {

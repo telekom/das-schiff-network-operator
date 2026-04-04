@@ -51,7 +51,7 @@ func TestBGPPeeringBuilder_EmptyData(t *testing.T) {
 	}
 }
 
-func TestBGPPeeringBuilder_ListenRange(t *testing.T) {
+func TestBGPPeeringBuilder_ListenRange(t *testing.T) { //nolint:funlen // table-driven test
 	b := NewBGPPeeringBuilder()
 
 	data := &resolver.ResolvedData{

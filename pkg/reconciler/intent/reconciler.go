@@ -160,7 +160,8 @@ func (r *Reconciler) ReconcileDebounced(ctx context.Context) error {
 	}
 
 	// 6. Assemble NNC spec per node.
-	for _, node := range fetched.Nodes {
+	for i := range fetched.Nodes {
+		node := &fetched.Nodes[i]
 		result, err := assembler.Assemble(contributions[node.Name])
 		if err != nil {
 			r.logger.Error(err, "assembly failed", "node", node.Name)
@@ -176,14 +177,14 @@ func (r *Reconciler) ReconcileDebounced(ctx context.Context) error {
 		result.Spec.Revision = revision
 
 		// 7. Create or update NNC.
-		if err := r.applyNNC(timeoutCtx, &node, result.Spec, result.Origins); err != nil {
+		if err := r.applyNNC(timeoutCtx, node, result.Spec, result.Origins); err != nil {
 			r.logger.Error(err, "failed to apply NodeNetworkConfig", "node", node.Name)
 			continue
 		}
 
 		// 8. Create or update NodeNetplanConfig (host-side VLANs for HBN-L2 agent).
 		netplanState := buildNetplanState(result.Spec)
-		if err := r.applyNetplanConfig(timeoutCtx, &node, netplanState); err != nil {
+		if err := r.applyNetplanConfig(timeoutCtx, node, netplanState); err != nil {
 			r.logger.Error(err, "failed to apply NodeNetplanConfig", "node", node.Name)
 			continue
 		}
@@ -317,6 +318,7 @@ const originsAnnotation = "network-connector.sylvaproject.org/origins"
 // It skips nodes that are currently provisioning (rolling update gate).
 func (r *Reconciler) applyNNC(ctx context.Context, node *corev1.Node, spec *networkv1alpha1.NodeNetworkConfigSpec, origins map[string]string) error {
 	const maxRetries = 5
+	const conflictRetryDelay = 200 * time.Millisecond
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		err := r.tryApplyNNC(ctx, node, spec, origins)
 		if err == nil {
@@ -326,7 +328,7 @@ func (r *Reconciler) applyNNC(ctx context.Context, node *corev1.Node, spec *netw
 			return err
 		}
 		r.logger.Info("NNC update conflict, retrying", "node", node.Name, "attempt", attempt+1)
-		time.Sleep(200 * time.Millisecond)
+		time.Sleep(conflictRetryDelay)
 	}
 	return fmt.Errorf("NNC update for node %s failed after %d retries due to conflicts", node.Name, maxRetries)
 }
@@ -413,18 +415,19 @@ func computeRevision(spec *networkv1alpha1.NodeNetworkConfigSpec) (string, error
 }
 
 const intentManagedLabel = "network-connector.sylvaproject.org/managed-by"
+const intentLabelValue = "intent"
 
 // setIntentManagedLabel marks an NNC as managed by the intent reconciler.
 func setIntentManagedLabel(nnc *networkv1alpha1.NodeNetworkConfig) {
 	if nnc.Labels == nil {
 		nnc.Labels = make(map[string]string)
 	}
-	nnc.Labels[intentManagedLabel] = "intent"
+	nnc.Labels[intentManagedLabel] = intentLabelValue
 }
 
 // hasIntentManagedLabel returns true if the NNC is already marked as intent-managed.
 func hasIntentManagedLabel(nnc *networkv1alpha1.NodeNetworkConfig) bool {
-	return nnc.Labels != nil && nnc.Labels[intentManagedLabel] == "intent"
+	return nnc.Labels != nil && nnc.Labels[intentManagedLabel] == intentLabelValue
 }
 
 // stripLegacyOwnerRefs removes owner references that are not the Node.
@@ -569,12 +572,12 @@ func setIntentManagedNetplanLabel(npc *networkv1alpha1.NodeNetplanConfig) {
 	if npc.Labels == nil {
 		npc.Labels = make(map[string]string)
 	}
-	npc.Labels[intentManagedLabel] = "intent"
+	npc.Labels[intentManagedLabel] = intentLabelValue
 }
 
 // hasIntentManagedNetplanLabel returns true if the NodeNetplanConfig is already managed by intent.
 func hasIntentManagedNetplanLabel(npc *networkv1alpha1.NodeNetplanConfig) bool {
-	return npc.Labels != nil && npc.Labels[intentManagedLabel] == "intent"
+	return npc.Labels != nil && npc.Labels[intentManagedLabel] == intentLabelValue
 }
 
 // cleanupOrphanedNetplanConfigs deletes NodeNetplanConfigs that don't correspond to any current node.
