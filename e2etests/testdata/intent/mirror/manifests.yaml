@@ -60,25 +60,15 @@ spec:
         name: "mirror-pool"
 ---
 apiVersion: network-connector.sylvaproject.org/v1alpha1
-kind: TrafficMirror
+kind: Inbound
 metadata:
-  name: tm-l2-ingress
+  name: ib-m2m-mirror
   namespace: default
 spec:
-  source:
-    kind: Layer2Attachment
-    name: "l2a-base-vlan501"
-  collector: "col-mirror"
-  direction: ingress
----
-apiVersion: network-connector.sylvaproject.org/v1alpha1
-kind: TrafficMirror
-metadata:
-  name: tm-l2-egress
-  namespace: default
-spec:
-  source:
-    kind: Layer2Attachment
-    name: "l2a-base-vlan501"
-  collector: "col-mirror"
-  direction: egress
+  networkRef: "net-vlan501"
+  destinations:
+    matchLabels:
+      type: gateway
+  count: 1
+  advertisement:
+    type: bgp

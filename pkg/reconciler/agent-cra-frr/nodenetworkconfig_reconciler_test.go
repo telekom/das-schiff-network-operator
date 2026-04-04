@@ -36,6 +36,7 @@ func TestConvertNodeConfigToNetlink_MirrorACLs(t *testing.T) {
 							DestinationAddress: "192.168.99.1",
 							DestinationVrf:     "mirror",
 							EncapsulationType:  v1alpha1.EncapsulationTypeGRE,
+							Direction:          "ingress",
 						},
 					},
 				},
@@ -54,6 +55,7 @@ func TestConvertNodeConfigToNetlink_MirrorACLs(t *testing.T) {
 								DestinationAddress: "192.168.99.1",
 								DestinationVrf:     "mirror",
 								EncapsulationType:  v1alpha1.EncapsulationTypeGRE,
+								Direction:          "egress",
 							},
 						},
 					},
@@ -110,8 +112,8 @@ func TestConvertNodeConfigToNetlink_MirrorACLs(t *testing.T) {
 	if l2Rule.SrcPrefix != "10.0.0.0/24" {
 		t.Errorf("L2 SrcPrefix = %q, want 10.0.0.0/24", l2Rule.SrcPrefix)
 	}
-	if l2Rule.Direction != "both" {
-		t.Errorf("L2 Direction = %q, want both", l2Rule.Direction)
+	if l2Rule.Direction != "ingress" {
+		t.Errorf("L2 Direction = %q, want ingress", l2Rule.Direction)
 	}
 
 	// Verify VRF mirror rule
@@ -120,6 +122,9 @@ func TestConvertNodeConfigToNetlink_MirrorACLs(t *testing.T) {
 	}
 	if vrfRule.Protocol != "icmp" {
 		t.Errorf("VRF Protocol = %q, want icmp", vrfRule.Protocol)
+	}
+	if vrfRule.Direction != "egress" {
+		t.Errorf("VRF Direction = %q, want egress", vrfRule.Direction)
 	}
 
 	// Verify loopbacks
@@ -196,6 +201,7 @@ func TestConvertMirrorACL_AllFields(t *testing.T) {
 		DestinationAddress: "192.168.99.5",
 		DestinationVrf:     "mir-vrf",
 		EncapsulationType:  v1alpha1.EncapsulationTypeGRE,
+		Direction:          "egress",
 	}
 
 	vrfLoopbacks := map[string]string{"mir-vrf": "10.255.0.1/32"}
@@ -228,6 +234,9 @@ func TestConvertMirrorACL_AllFields(t *testing.T) {
 	if rule.DstPort != 5678 {
 		t.Errorf("DstPort = %d, want 5678", rule.DstPort)
 	}
+	if rule.Direction != "egress" {
+		t.Errorf("Direction = %q, want egress", rule.Direction)
+	}
 }
 
 func TestConvertMirrorACL_MinimalMatch(t *testing.T) {
@@ -253,5 +262,8 @@ func TestConvertMirrorACL_MinimalMatch(t *testing.T) {
 	}
 	if rule.DstPort != 0 {
 		t.Errorf("DstPort should be 0, got %d", rule.DstPort)
+	}
+	if rule.Direction != "both" {
+		t.Errorf("Direction should be both (default), got %q", rule.Direction)
 	}
 }

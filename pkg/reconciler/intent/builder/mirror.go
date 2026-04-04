@@ -92,6 +92,7 @@ func (b *MirrorBuilder) buildMirrorACL(tm *nc.TrafficMirror, col *nc.Collector) 
 		DestinationAddress: col.Spec.Address,
 		DestinationVrf:     col.Spec.MirrorVRF.Name,
 		EncapsulationType:  networkv1alpha1.EncapsulationTypeGRE,
+		Direction:          tm.Spec.Direction,
 	}
 
 	if tm.Spec.TrafficMatch != nil {

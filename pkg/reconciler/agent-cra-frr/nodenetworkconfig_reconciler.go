@@ -124,9 +124,13 @@ func (a *CRAFRRConfigApplier) convertNodeConfigToNetlink(nodeCfg *v1alpha1.NodeN
 // convertMirrorACL converts a single NNC MirrorACL to an nl.MirrorRule.
 // vrfLoopbackIPs maps VRF name → first loopback IP for GRE local address.
 func convertMirrorACL(acl v1alpha1.MirrorACL, sourceIface string, vrfLoopbackIPs map[string]string) nl.MirrorRule {
+	direction := acl.Direction
+	if direction == "" {
+		direction = "both"
+	}
 	rule := nl.MirrorRule{
 		SourceInterface: sourceIface,
-		Direction:       "both",
+		Direction:       direction,
 		GRERemote:       acl.DestinationAddress,
 		GRELocal:        vrfLoopbackIPs[acl.DestinationVrf],
 		GREVRF:          acl.DestinationVrf,
