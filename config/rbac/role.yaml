@@ -7,18 +7,6 @@ rules:
 - apiGroups:
   - ""
   resources:
-  - configmaps
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - ""
-  resources:
   - nodes
   - secrets
   verbs:
@@ -54,6 +42,44 @@ rules:
   verbs:
   - get
   - list
+  - update
+  - watch
+- apiGroups:
+  - coil.cybozu.com
+  resources:
+  - egresses
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - crd.projectcalico.org
+  resources:
+  - ippools
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - metallb.io
+  resources:
+  - bgpadvertisements
+  - ipaddresspools
+  - l2advertisements
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
   - update
   - watch
 - apiGroups:
@@ -100,7 +126,6 @@ rules:
   - inbounds/finalizers
   - interfaceconfigs/finalizers
   - outbounds/finalizers
-  - podnetworks/finalizers
   verbs:
   - update
 - apiGroups:

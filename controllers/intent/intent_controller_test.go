@@ -1,0 +1,71 @@
+package intent
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
+	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
+	intentreconciler "github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent"
+	"k8s.io/apimachinery/pkg/runtime"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+)
+
+func testScheme() *runtime.Scheme {
+	s := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(s))
+	utilruntime.Must(nc.AddToScheme(s))
+	utilruntime.Must(networkv1alpha1.AddToScheme(s))
+	return s
+}
+
+func newTestIntentReconciler(t *testing.T) *IntentReconciler {
+	t.Helper()
+	s := testScheme()
+	fakeClient := fake.NewClientBuilder().WithScheme(s).Build()
+	logger := zap.New(zap.UseDevMode(true))
+
+	reconciler, err := intentreconciler.NewReconciler(fakeClient, logger, 60*time.Second, "")
+	if err != nil {
+		t.Fatalf("failed to create intent reconciler: %v", err)
+	}
+
+	return &IntentReconciler{
+		Client:     fakeClient,
+		Scheme:     s,
+		Reconciler: reconciler,
+	}
+}
+
+func TestIntentReconcile_RequeuesAfterInterval(t *testing.T) {
+	r := newTestIntentReconciler(t)
+	result, err := r.Reconcile(context.Background(), ctrl.Request{})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if result.RequeueAfter != 10*time.Minute {
+		t.Errorf("expected RequeueAfter %v, got %v", 10*time.Minute, result.RequeueAfter)
+	}
+}
+
+func TestIntentReconcile_NoErrorOnEmptyCluster(t *testing.T) {
+	r := newTestIntentReconciler(t)
+	result, err := r.Reconcile(context.Background(), ctrl.Request{})
+	if err != nil {
+		t.Fatalf("expected no error on empty cluster, got %v", err)
+	}
+	if result.Requeue {
+		t.Error("expected Requeue to be false")
+	}
+}
+
+func TestIntentReconcile_RequeueTime(t *testing.T) {
+	if requeueTime != 10*time.Minute {
+		t.Errorf("expected requeueTime to be %v, got %v", 10*time.Minute, requeueTime)
+	}
+}
