@@ -43,6 +43,17 @@ func (a *CRAFRRConfigApplier) ApplyConfig(ctx context.Context, cfg *v1alpha1.Nod
 }
 
 func (a *CRAFRRConfigApplier) convertNodeConfigToNetlink(nodeCfg *v1alpha1.NodeNetworkConfig) (netlinkConfig nl.NetlinkConfiguration) {
+	// Pre-compute loopback IPs per VRF for GRE local address resolution.
+	vrfLoopbackIPs := make(map[string]string)
+	for name, vrf := range nodeCfg.Spec.FabricVRFs {
+		for _, lo := range vrf.Loopbacks {
+			if len(lo.IPAddresses) > 0 {
+				vrfLoopbackIPs[name] = lo.IPAddresses[0]
+				break
+			}
+		}
+	}
+
 	for _, layer2 := range nodeCfg.Spec.Layer2s {
 		nlLayer2 := nl.Layer2Information{
 			VlanID:     int(layer2.VLAN),
@@ -58,6 +69,13 @@ func (a *CRAFRRConfigApplier) convertNodeConfigToNetlink(nodeCfg *v1alpha1.NodeN
 		}
 
 		netlinkConfig.Layer2s = append(netlinkConfig.Layer2s, nlLayer2)
+
+		// Convert L2 MirrorACLs → mirror rules targeting the bridge interface
+		bridgeIface := fmt.Sprintf("br.%d", layer2.VLAN)
+		for _, acl := range layer2.MirrorACLs {
+			netlinkConfig.Mirrors = append(netlinkConfig.Mirrors,
+				convertMirrorACL(acl, bridgeIface, vrfLoopbackIPs))
+		}
 	}
 
 	// Skip adding management VRF
@@ -66,13 +84,29 @@ func (a *CRAFRRConfigApplier) convertNodeConfigToNetlink(nodeCfg *v1alpha1.NodeN
 			continue
 		}
 
+		vrf := nodeCfg.Spec.FabricVRFs[name]
 		nlVrf := nl.VRFInformation{
 			Name: name,
-			VNI:  int(nodeCfg.Spec.FabricVRFs[name].VNI),
+			VNI:  int(vrf.VNI),
 			MTU:  nl.DefaultMtu,
 		}
 
 		netlinkConfig.VRFs = append(netlinkConfig.VRFs, nlVrf)
+
+		// Convert VRF MirrorACLs → mirror rules targeting the VRF device
+		for _, acl := range vrf.MirrorACLs {
+			netlinkConfig.Mirrors = append(netlinkConfig.Mirrors,
+				convertMirrorACL(acl, name, vrfLoopbackIPs))
+		}
+
+		// Convert VRF loopbacks → loopback configs for netlink dummy creation
+		for loName, lo := range vrf.Loopbacks {
+			netlinkConfig.Loopbacks = append(netlinkConfig.Loopbacks, nl.LoopbackConfig{
+				Name:      "lo." + loName,
+				VRF:       name,
+				Addresses: lo.IPAddresses,
+			})
+		}
 	}
 
 	for name := range nodeCfg.Spec.LocalVRFs {
@@ -85,6 +119,35 @@ func (a *CRAFRRConfigApplier) convertNodeConfigToNetlink(nodeCfg *v1alpha1.NodeN
 	}
 
 	return netlinkConfig
+}
+
+// convertMirrorACL converts a single NNC MirrorACL to an nl.MirrorRule.
+// vrfLoopbackIPs maps VRF name → first loopback IP for GRE local address.
+func convertMirrorACL(acl v1alpha1.MirrorACL, sourceIface string, vrfLoopbackIPs map[string]string) nl.MirrorRule {
+	rule := nl.MirrorRule{
+		SourceInterface: sourceIface,
+		Direction:       "both",
+		GRERemote:       acl.DestinationAddress,
+		GRELocal:        vrfLoopbackIPs[acl.DestinationVrf],
+		GREVRF:          acl.DestinationVrf,
+	}
+
+	if acl.TrafficMatch.Protocol != nil {
+		rule.Protocol = *acl.TrafficMatch.Protocol
+	}
+	if acl.TrafficMatch.SrcPrefix != nil {
+		rule.SrcPrefix = *acl.TrafficMatch.SrcPrefix
+	}
+	if acl.TrafficMatch.DstPrefix != nil {
+		rule.DstPrefix = *acl.TrafficMatch.DstPrefix
+	}
+	if acl.TrafficMatch.SrcPort != nil {
+		rule.SrcPort = *acl.TrafficMatch.SrcPort
+	}
+	if acl.TrafficMatch.DstPort != nil {
+		rule.DstPort = *acl.TrafficMatch.DstPort
+	}
+	return rule
 }
 
 func convertPolicyRoutes(nodeCfg *v1alpha1.NodeNetworkConfig) []cra.PolicyRoute {

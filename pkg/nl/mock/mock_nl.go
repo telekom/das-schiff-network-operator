@@ -415,3 +415,89 @@ func (mr *MockToolkitInterfaceMockRecorder) VethPeerIndex(link any) *gomock.Call
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "VethPeerIndex", reflect.TypeOf((*MockToolkitInterface)(nil).VethPeerIndex), link)
 }
+
+// QdiscAdd mocks base method.
+func (m *MockToolkitInterface) QdiscAdd(qdisc netlink.Qdisc) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "QdiscAdd", qdisc)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// QdiscAdd indicates an expected call of QdiscAdd.
+func (mr *MockToolkitInterfaceMockRecorder) QdiscAdd(qdisc any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "QdiscAdd", reflect.TypeOf((*MockToolkitInterface)(nil).QdiscAdd), qdisc)
+}
+
+// QdiscDel mocks base method.
+func (m *MockToolkitInterface) QdiscDel(qdisc netlink.Qdisc) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "QdiscDel", qdisc)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// QdiscDel indicates an expected call of QdiscDel.
+func (mr *MockToolkitInterfaceMockRecorder) QdiscDel(qdisc any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "QdiscDel", reflect.TypeOf((*MockToolkitInterface)(nil).QdiscDel), qdisc)
+}
+
+// QdiscList mocks base method.
+func (m *MockToolkitInterface) QdiscList(link netlink.Link) ([]netlink.Qdisc, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "QdiscList", link)
+	ret0, _ := ret[0].([]netlink.Qdisc)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// QdiscList indicates an expected call of QdiscList.
+func (mr *MockToolkitInterfaceMockRecorder) QdiscList(link any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "QdiscList", reflect.TypeOf((*MockToolkitInterface)(nil).QdiscList), link)
+}
+
+// FilterAdd mocks base method.
+func (m *MockToolkitInterface) FilterAdd(filter netlink.Filter) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "FilterAdd", filter)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// FilterAdd indicates an expected call of FilterAdd.
+func (mr *MockToolkitInterfaceMockRecorder) FilterAdd(filter any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FilterAdd", reflect.TypeOf((*MockToolkitInterface)(nil).FilterAdd), filter)
+}
+
+// FilterDel mocks base method.
+func (m *MockToolkitInterface) FilterDel(filter netlink.Filter) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "FilterDel", filter)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// FilterDel indicates an expected call of FilterDel.
+func (mr *MockToolkitInterfaceMockRecorder) FilterDel(filter any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FilterDel", reflect.TypeOf((*MockToolkitInterface)(nil).FilterDel), filter)
+}
+
+// FilterList mocks base method.
+func (m *MockToolkitInterface) FilterList(link netlink.Link, parent uint32) ([]netlink.Filter, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "FilterList", link, parent)
+	ret0, _ := ret[0].([]netlink.Filter)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// FilterList indicates an expected call of FilterList.
+func (mr *MockToolkitInterfaceMockRecorder) FilterList(link, parent any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FilterList", reflect.TypeOf((*MockToolkitInterface)(nil).FilterList), link, parent)
+}

@@ -212,6 +212,11 @@ e2e-test-sync: ## Run E2E sync controller tests.
 	docker exec clab-nwop-tester bash -c \
 	  'cd /repo && KUBECONFIG=/repo/e2etests/.kubeconfig E2E_INTENT_MODE=true go test -v -count=1 -timeout=30m ./e2etests/... -ginkgo.label-filter="sync"'
 
+.PHONY: e2e-test-mirror
+e2e-test-mirror: ## Run E2E traffic mirror tests.
+	docker exec clab-nwop-tester bash -c \
+	  'cd /repo && KUBECONFIG=/repo/e2etests/.kubeconfig E2E_INTENT_MODE=true go test -v -count=1 -timeout=30m ./e2etests/... -ginkgo.label-filter="mirror"'
+
 ##@ Build Dependencies
 
 CONTROLLER_GEN = $(shell pwd)/bin/controller-gen

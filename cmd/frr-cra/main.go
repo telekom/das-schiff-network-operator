@@ -522,6 +522,31 @@ func waitForL3VNIs(vrfs []nl.VRFInformation) {
 	log.Printf("Warning: timed out waiting for L3VNIs in FRR (needed %d)", len(needed))
 }
 
+func reconcileMirrors(cfg nl.NetlinkConfiguration) error {
+	// 1. Create loopback (dummy) interfaces in mirror VRFs
+	if err := nlManager.ReconcileLoopbacks(cfg.Loopbacks); err != nil {
+		return fmt.Errorf("error reconciling loopbacks: %w", err)
+	}
+
+	// 2. Create GRE tunnels for mirror rules
+	tunnelIndex, err := nlManager.ReconcileGRETunnels(cfg.Mirrors)
+	if err != nil {
+		return fmt.Errorf("error reconciling GRE tunnels: %w", err)
+	}
+
+	// 3. Set up tc mirror filters
+	if err := nlManager.ReconcileTcMirrors(cfg.Mirrors, tunnelIndex); err != nil {
+		return fmt.Errorf("error reconciling tc mirrors: %w", err)
+	}
+
+	// 4. Clean up stale GRE tunnels
+	if err := nlManager.CleanupMirrors(cfg.Mirrors); err != nil {
+		return fmt.Errorf("error cleaning up mirrors: %w", err)
+	}
+
+	return nil
+}
+
 func applyConfig(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -627,6 +652,13 @@ func applyConfig(w http.ResponseWriter, r *http.Request) {
 	if err := reconcilePolicyRoutes(craConfiguration.PolicyRoutes); err != nil {
 		log.Println("Failed to reconcile policy routes", err)
 		http.Error(w, fmt.Sprintf("Failed to reconcile policy routes: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Reconcile mirror loopbacks, GRE tunnels, and tc filters
+	if err := reconcileMirrors(craConfiguration.NetlinkConfiguration); err != nil {
+		log.Println("Failed to reconcile mirrors", err)
+		http.Error(w, fmt.Sprintf("Failed to reconcile mirrors: %v", err), http.StatusInternalServerError)
 		return
 	}
 
