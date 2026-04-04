@@ -24,6 +24,8 @@ func testScheme() *runtime.Scheme {
 	return s
 }
 
+const testRemoteNamespace = "default"
+
 func newFakeSyncController(mgmtObjs []client.Object, remoteObjs []client.Object) (*SyncController, client.Client) {
 	s := testScheme()
 
@@ -77,7 +79,7 @@ func TestSyncCreatesRemoteObject(t *testing.T) {
 	// Check remote cluster has the VRF.
 	remoteVRF := &nc.VRF{}
 	err = remoteClient.Get(ctx, types.NamespacedName{
-		Namespace: RemoteNamespace,
+		Namespace: testRemoteNamespace,
 		Name:      "vrf-m2m",
 	}, remoteVRF)
 	if err != nil {
@@ -113,7 +115,7 @@ func TestSyncUpdatesRemoteObject(t *testing.T) {
 	staleRemote := &nc.VRF{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "vrf-m2m",
-			Namespace: RemoteNamespace,
+			Namespace: testRemoteNamespace,
 			Labels: map[string]string{
 				labelManagedBy: labelManagedByValue,
 			},
@@ -136,7 +138,7 @@ func TestSyncUpdatesRemoteObject(t *testing.T) {
 	}
 
 	remoteVRF := &nc.VRF{}
-	if err := remoteClient.Get(ctx, types.NamespacedName{Namespace: RemoteNamespace, Name: "vrf-m2m"}, remoteVRF); err != nil {
+	if err := remoteClient.Get(ctx, types.NamespacedName{Namespace: testRemoteNamespace, Name: "vrf-m2m"}, remoteVRF); err != nil {
 		t.Fatalf("Get remote VRF: %v", err)
 	}
 	if remoteVRF.Spec.VNI == nil || *remoteVRF.Spec.VNI != 2002026 {
@@ -160,7 +162,7 @@ func TestSyncDeletion(t *testing.T) {
 	remoteVRF := &nc.VRF{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "vrf-m2m",
-			Namespace: RemoteNamespace,
+			Namespace: testRemoteNamespace,
 			Labels:    map[string]string{labelManagedBy: labelManagedByValue},
 		},
 		Spec: nc.VRFSpec{VRF: "m2m", VNI: ptrInt32(2002026), RouteTarget: ptrString("65188:2026")},
@@ -177,7 +179,7 @@ func TestSyncDeletion(t *testing.T) {
 	}
 
 	// Remote object should be deleted.
-	err = remoteClient.Get(ctx, types.NamespacedName{Namespace: RemoteNamespace, Name: "vrf-m2m"}, &nc.VRF{})
+	err = remoteClient.Get(ctx, types.NamespacedName{Namespace: testRemoteNamespace, Name: "vrf-m2m"}, &nc.VRF{})
 	if err == nil {
 		t.Error("Expected remote VRF to be deleted, but it still exists")
 	}
@@ -229,7 +231,7 @@ func TestSyncIPAMPromotion(t *testing.T) {
 	}
 
 	remoteInbound := &nc.Inbound{}
-	if err := remoteClient.Get(ctx, types.NamespacedName{Namespace: RemoteNamespace, Name: "ib-test"}, remoteInbound); err != nil {
+	if err := remoteClient.Get(ctx, types.NamespacedName{Namespace: testRemoteNamespace, Name: "ib-test"}, remoteInbound); err != nil {
 		t.Fatalf("Remote Inbound not found: %v", err)
 	}
 
@@ -282,7 +284,7 @@ func TestSyncRefusesUnmanagedObject(t *testing.T) {
 	unmanagedRemote := &nc.VRF{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "vrf-m2m",
-			Namespace: RemoteNamespace,
+			Namespace: testRemoteNamespace,
 		},
 		Spec: nc.VRFSpec{VRF: "m2m", VNI: ptrInt32(1), RouteTarget: ptrString("1:1")},
 	}
@@ -349,10 +351,10 @@ func TestSyncMultipleCRDTypes(t *testing.T) {
 	}
 
 	// Both should exist on remote.
-	if err := remoteClient.Get(ctx, types.NamespacedName{Namespace: RemoteNamespace, Name: "vrf-m2m"}, &nc.VRF{}); err != nil {
+	if err := remoteClient.Get(ctx, types.NamespacedName{Namespace: testRemoteNamespace, Name: "vrf-m2m"}, &nc.VRF{}); err != nil {
 		t.Errorf("Remote VRF not found: %v", err)
 	}
-	if err := remoteClient.Get(ctx, types.NamespacedName{Namespace: RemoteNamespace, Name: "net-vlan501"}, &nc.Network{}); err != nil {
+	if err := remoteClient.Get(ctx, types.NamespacedName{Namespace: testRemoteNamespace, Name: "net-vlan501"}, &nc.Network{}); err != nil {
 		t.Errorf("Remote Network not found: %v", err)
 	}
 }

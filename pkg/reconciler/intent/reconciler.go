@@ -56,6 +56,7 @@ type Reconciler struct {
 	debouncer        *debounce.Debouncer
 	client           client.Client
 	timeout          time.Duration
+	namespace        string
 	builders         []builder.Builder
 	finalizerManager *finalizer.Manager
 	statusUpdater    *status.Updater
@@ -64,11 +65,14 @@ type Reconciler struct {
 }
 
 // NewReconciler creates a new intent reconciler.
-func NewReconciler(clusterClient client.Client, logger logr.Logger, timeout time.Duration) (*Reconciler, error) {
+// The namespace parameter restricts which namespace intent CRDs are read from.
+// An empty string means all namespaces (cluster-wide).
+func NewReconciler(clusterClient client.Client, logger logr.Logger, timeout time.Duration, namespace string) (*Reconciler, error) {
 	r := &Reconciler{
-		logger:  logger,
-		timeout: timeout,
-		client:  clusterClient,
+		logger:    logger,
+		timeout:   timeout,
+		client:    clusterClient,
+		namespace: namespace,
 		builders: []builder.Builder{
 			builder.NewL2ABuilder(),
 			builder.NewInboundBuilder(),
@@ -211,7 +215,13 @@ func filterActive[T any, PT interface {
 func (r *Reconciler) fetchAll(ctx context.Context) (*resolver.FetchedResources, error) {
 	f := &resolver.FetchedResources{}
 
-	// Fetch nodes.
+	// Build list options — restrict to namespace if configured.
+	var listOpts []client.ListOption
+	if r.namespace != "" {
+		listOpts = append(listOpts, client.InNamespace(r.namespace))
+	}
+
+	// Fetch nodes (always cluster-wide).
 	nodeList := &corev1.NodeList{}
 	if err := r.client.List(ctx, nodeList); err != nil {
 		return nil, fmt.Errorf("error listing Nodes: %w", err)
@@ -220,7 +230,7 @@ func (r *Reconciler) fetchAll(ctx context.Context) (*resolver.FetchedResources, 
 
 	// Fetch VRFs.
 	vrfList := &nc.VRFList{}
-	if err := r.client.List(ctx, vrfList); err != nil {
+	if err := r.client.List(ctx, vrfList, listOpts...); err != nil {
 		return nil, fmt.Errorf("error listing VRFs: %w", err)
 	}
 	f.AllVRFs = vrfList.Items
@@ -228,7 +238,7 @@ func (r *Reconciler) fetchAll(ctx context.Context) (*resolver.FetchedResources, 
 
 	// Fetch Networks.
 	networkList := &nc.NetworkList{}
-	if err := r.client.List(ctx, networkList); err != nil {
+	if err := r.client.List(ctx, networkList, listOpts...); err != nil {
 		return nil, fmt.Errorf("error listing Networks: %w", err)
 	}
 	f.AllNetworks = networkList.Items
@@ -236,7 +246,7 @@ func (r *Reconciler) fetchAll(ctx context.Context) (*resolver.FetchedResources, 
 
 	// Fetch Destinations.
 	destList := &nc.DestinationList{}
-	if err := r.client.List(ctx, destList); err != nil {
+	if err := r.client.List(ctx, destList, listOpts...); err != nil {
 		return nil, fmt.Errorf("error listing Destinations: %w", err)
 	}
 	f.AllDestinations = destList.Items
@@ -244,56 +254,56 @@ func (r *Reconciler) fetchAll(ctx context.Context) (*resolver.FetchedResources, 
 
 	// Fetch Layer2Attachments.
 	l2aList := &nc.Layer2AttachmentList{}
-	if err := r.client.List(ctx, l2aList); err != nil {
+	if err := r.client.List(ctx, l2aList, listOpts...); err != nil {
 		return nil, fmt.Errorf("error listing Layer2Attachments: %w", err)
 	}
 	f.Layer2Attachments = filterActive(l2aList.Items)
 
 	// Fetch Inbounds.
 	inboundList := &nc.InboundList{}
-	if err := r.client.List(ctx, inboundList); err != nil {
+	if err := r.client.List(ctx, inboundList, listOpts...); err != nil {
 		return nil, fmt.Errorf("error listing Inbounds: %w", err)
 	}
 	f.Inbounds = filterActive(inboundList.Items)
 
 	// Fetch Outbounds.
 	outboundList := &nc.OutboundList{}
-	if err := r.client.List(ctx, outboundList); err != nil {
+	if err := r.client.List(ctx, outboundList, listOpts...); err != nil {
 		return nil, fmt.Errorf("error listing Outbounds: %w", err)
 	}
 	f.Outbounds = filterActive(outboundList.Items)
 
 	// Fetch PodNetworks.
 	podNetworkList := &nc.PodNetworkList{}
-	if err := r.client.List(ctx, podNetworkList); err != nil {
+	if err := r.client.List(ctx, podNetworkList, listOpts...); err != nil {
 		return nil, fmt.Errorf("error listing PodNetworks: %w", err)
 	}
 	f.PodNetworks = filterActive(podNetworkList.Items)
 
 	// Fetch BGPPeerings.
 	bgpList := &nc.BGPPeeringList{}
-	if err := r.client.List(ctx, bgpList); err != nil {
+	if err := r.client.List(ctx, bgpList, listOpts...); err != nil {
 		return nil, fmt.Errorf("error listing BGPPeerings: %w", err)
 	}
 	f.BGPPeerings = filterActive(bgpList.Items)
 
 	// Fetch Collectors.
 	collectorList := &nc.CollectorList{}
-	if err := r.client.List(ctx, collectorList); err != nil {
+	if err := r.client.List(ctx, collectorList, listOpts...); err != nil {
 		return nil, fmt.Errorf("error listing Collectors: %w", err)
 	}
 	f.Collectors = filterActive(collectorList.Items)
 
 	// Fetch TrafficMirrors.
 	mirrorList := &nc.TrafficMirrorList{}
-	if err := r.client.List(ctx, mirrorList); err != nil {
+	if err := r.client.List(ctx, mirrorList, listOpts...); err != nil {
 		return nil, fmt.Errorf("error listing TrafficMirrors: %w", err)
 	}
 	f.TrafficMirrors = filterActive(mirrorList.Items)
 
 	// Fetch AnnouncementPolicies.
 	policyList := &nc.AnnouncementPolicyList{}
-	if err := r.client.List(ctx, policyList); err != nil {
+	if err := r.client.List(ctx, policyList, listOpts...); err != nil {
 		return nil, fmt.Errorf("error listing AnnouncementPolicies: %w", err)
 	}
 	f.AnnouncementPolicies = filterActive(policyList.Items)

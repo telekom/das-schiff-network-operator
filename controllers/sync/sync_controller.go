@@ -22,18 +22,16 @@ const (
 	labelManagedBy = "network-sync.telekom.com/managed-by"
 	labelManagedByValue = "network-sync"
 	annotationSourceNS = "network-sync.telekom.com/source-namespace"
-
-	// RemoteNamespace is the namespace intent CRDs are synced into on workload clusters.
-	RemoteNamespace = "default"
 )
 
 // SyncController watches intent CRDs on the management cluster and syncs them
 // to workload clusters via the RemoteClientManager.
 type SyncController struct {
-	Client  client.Client
-	Scheme  *runtime.Scheme
-	Log     logr.Logger
-	Remotes *RemoteClientManager
+	Client          client.Client
+	Scheme          *runtime.Scheme
+	Log             logr.Logger
+	Remotes         *RemoteClientManager
+	RemoteNamespace string
 }
 
 // intentCRDTypes returns fresh instances of all intent CRD types to sync.
@@ -136,7 +134,7 @@ func (r *SyncController) buildRemoteObject(src client.Object, sourceNamespace st
 	dst := src.DeepCopyObject().(client.Object)
 
 	// Reset metadata for remote cluster.
-	dst.SetNamespace(RemoteNamespace)
+	dst.SetNamespace(r.remoteNamespace())
 	dst.SetResourceVersion("")
 	dst.SetUID("")
 	dst.SetCreationTimestamp(metav1.Time{})
@@ -220,7 +218,7 @@ func (r *SyncController) applyRemote(ctx context.Context, remoteClient client.Cl
 // deleteRemote removes the object from the remote cluster.
 func (r *SyncController) deleteRemote(ctx context.Context, remoteClient client.Client, src client.Object) error {
 	remote := src.DeepCopyObject().(client.Object)
-	remote.SetNamespace(RemoteNamespace)
+	remote.SetNamespace(r.remoteNamespace())
 	remote.SetResourceVersion("")
 	remote.SetUID("")
 
@@ -253,6 +251,15 @@ func (r *SyncController) SetupWithManager(mgr ctrl.Manager) error {
 	}
 
 	return builder.Complete(r)
+}
+
+// remoteNamespace returns the target namespace on workload clusters.
+// Defaults to "default" if not configured.
+func (r *SyncController) remoteNamespace() string {
+	if r.RemoteNamespace != "" {
+		return r.RemoteNamespace
+	}
+	return "default"
 }
 
 // extractItems pulls []client.Object from a typed ObjectList.

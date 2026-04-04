@@ -47,3 +47,11 @@ e2e/setup/e2e/
 *.conf.sav
 
 vendor/
+
+# Built binaries
+kubectl-nnc
+lin-nnc
+network-sync
+platform-coil
+platform-metallb
+operator

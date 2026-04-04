@@ -43,9 +43,11 @@ func init() {
 func main() {
 	var metricsAddr string
 	var probeAddr string
+	var remoteNamespace string
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
+	flag.StringVar(&remoteNamespace, "remote-namespace", "default", "Target namespace on workload clusters for synced CRDs.")
 
 	opts := zap.Options{Development: true}
 	opts.BindFlags(flag.CommandLine)
@@ -78,10 +80,11 @@ func main() {
 	}
 
 	if err = (&syncctrl.SyncController{
-		Client:  mgr.GetClient(),
-		Scheme:  mgr.GetScheme(),
-		Log:     mgr.GetLogger().WithName("SyncController"),
-		Remotes: remotes,
+		Client:          mgr.GetClient(),
+		Scheme:          mgr.GetScheme(),
+		Log:             mgr.GetLogger().WithName("SyncController"),
+		Remotes:         remotes,
+		RemoteNamespace: remoteNamespace,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Sync")
 		os.Exit(1)

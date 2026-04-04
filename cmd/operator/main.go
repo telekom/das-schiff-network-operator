@@ -79,6 +79,7 @@ type operatorConfig struct {
 	disableRestartOnCertRefresh  bool
 	processImportsAsStaticRoutes bool
 	enableIntentReconciler       bool
+	intentNamespace              string
 	healthAddr                   string
 	metricsAddr                  string
 	webhookAddr                  string
@@ -112,6 +113,8 @@ func parseFlags() *operatorConfig {
 		"If set to true, the operator will process imports as static routes.")
 	flag.BoolVar(&cfg.enableIntentReconciler, "enable-intent-reconciler", false,
 		"Enable the intent-based reconciler (network-connector.sylvaproject.org CRDs). Disables legacy ConfigReconciler when active.")
+	flag.StringVar(&cfg.intentNamespace, "intent-namespace", "default",
+		"Namespace to watch for intent CRDs. Empty string means all namespaces (cluster-wide).")
 	flag.StringVar(&cfg.healthAddr, "health-addr", ":7085",
 		"bind address of health/readiness probes")
 	flag.StringVar(&cfg.metricsAddr, "metrics-addr", ":7084",
@@ -288,7 +291,7 @@ func setupIntentReconciler(mgr manager.Manager, apiTimeout time.Duration, cfg *o
 		setupLog.Info("cert setup finished")
 	}
 
-	ir, err := intentreconciler.NewReconciler(mgr.GetClient(), mgr.GetLogger().WithName("IntentReconciler"), apiTimeout)
+	ir, err := intentreconciler.NewReconciler(mgr.GetClient(), mgr.GetLogger().WithName("IntentReconciler"), apiTimeout, cfg.intentNamespace)
 	if err != nil {
 		return fmt.Errorf("unable to create intent reconciler: %w", err)
 	}

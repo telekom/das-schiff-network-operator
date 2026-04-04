@@ -81,7 +81,7 @@ func TestMain(m *testing.M) {
 	}
 
 	logger := logf.Log.WithName("test-reconciler")
-	reconciler, err = NewReconciler(k8sClient, logger, 60*time.Second)
+	reconciler, err = NewReconciler(k8sClient, logger, 60*time.Second, "default")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to create reconciler: %v\n", err)
 		os.Exit(1)
