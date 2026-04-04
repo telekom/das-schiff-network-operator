@@ -46,8 +46,14 @@ jobs:
       - name: Set up E2E lab
         run: make e2e-up
 
-      - name: Run E2E tests
+      - name: Run E2E tests (legacy)
         run: make e2e-test
+
+      - name: Run E2E tests (intent)
+        run: make e2e-test-intent
+
+      - name: Run E2E tests (mirror)
+        run: make e2e-test-mirror
 
       - name: Collect debug logs
         if: failure()
@@ -66,6 +72,13 @@ jobs:
           docker exec nwop-control-plane kubectl \
             --kubeconfig=/etc/kubernetes/admin.conf get events -A \
             --sort-by='.lastTimestamp' > /tmp/e2e-logs/events.log 2>&1 || true
+          # Intent CRD state
+          for crd in vrfs networks destinations layer2attachments inbounds outbounds \
+                     bgppeerings collectors trafficmirrors nodenetworkconfigs; do
+            docker exec nwop-control-plane kubectl \
+              --kubeconfig=/etc/kubernetes/admin.conf get "$crd" -A -o yaml \
+              > "/tmp/e2e-logs/intent-${crd}.yaml" 2>&1 || true
+          done
           for rtr in leaf1 leaf2 dcgw1 dcgw2; do
             docker exec "clab-nwop-${rtr}" vtysh -c 'show bgp summary' \
               > "/tmp/e2e-logs/${rtr}-bgp.log" 2>&1 || true
