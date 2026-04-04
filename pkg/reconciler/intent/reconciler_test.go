@@ -233,9 +233,9 @@ func makePodNetwork(name, networkRef string, destSelector *metav1.LabelSelector,
 	}
 }
 
-func destSelector(key, value string) *metav1.LabelSelector {
+func destSelector(value string) *metav1.LabelSelector {
 	return &metav1.LabelSelector{
-		MatchLabels: map[string]string{key: value},
+		MatchLabels: map[string]string{"type": value},
 	}
 }
 
@@ -249,7 +249,7 @@ func TestL2APipeline(t *testing.T) {
 	createObj(t, ctx, makeVRF("vrf-l2a", "m2m", 2002026, "65188:2026"))
 	createObj(t, ctx, makeNetwork("net-l2a-501", 501, 4000002, "10.250.0.0/24", "fd94::1/64"))
 	createObj(t, ctx, makeDestination("dest-l2a-gw", "vrf-l2a", map[string]string{"type": "gateway"}, []string{"10.102.0.0/16"}))
-	createObj(t, ctx, makeL2A("l2a-pipeline", "net-l2a-501", destSelector("type", "gateway"), nil))
+	createObj(t, ctx, makeL2A("l2a-pipeline", "net-l2a-501", destSelector("gateway"), nil))
 
 	nnc := reconcileAndGetNNC(t, ctx, nodeName)
 
@@ -282,7 +282,7 @@ func TestL2ANodeSelector(t *testing.T) {
 	createObj(t, ctx, makeVRF("vrf-sel", "selm2m", 2002027, "65188:2027"))
 	createObj(t, ctx, makeNetwork("net-sel-501", 501, 4000002, "10.250.0.0/24", ""))
 	createObj(t, ctx, makeDestination("dest-sel", "vrf-sel", map[string]string{"type": "sel"}, []string{"10.102.0.0/16"}))
-	createObj(t, ctx, makeL2A("l2a-sel", "net-sel-501", destSelector("type", "sel"),
+	createObj(t, ctx, makeL2A("l2a-sel", "net-sel-501", destSelector("sel"),
 		&metav1.LabelSelector{MatchLabels: map[string]string{"role": "worker"}}))
 
 	require.NoError(t, reconciler.ReconcileDebounced(ctx))
@@ -312,7 +312,7 @@ func TestInboundPipeline(t *testing.T) {
 	createObj(t, ctx, makeVRF("vrf-ib", "ibm2m", 2002030, "65188:2030"))
 	createObj(t, ctx, makeNetwork("net-ib", 600, 5000001, "10.100.0.0/24", ""))
 	createObj(t, ctx, makeDestination("dest-ib", "vrf-ib", map[string]string{"type": "ib"}, []string{"10.102.0.0/16"}))
-	createObj(t, ctx, makeInbound("ib-test", "net-ib", destSelector("type", "ib"), []string{"10.100.0.10/32"}))
+	createObj(t, ctx, makeInbound("ib-test", "net-ib", destSelector("ib"), []string{"10.100.0.10/32"}))
 
 	nnc := reconcileAndGetNNC(t, ctx, nodeName)
 
@@ -333,7 +333,7 @@ func TestOutboundPipeline(t *testing.T) {
 	createObj(t, ctx, makeVRF("vrf-ob", "obm2m", 2002031, "65188:2031"))
 	createObj(t, ctx, makeNetwork("net-ob", 601, 5000002, "10.200.0.0/24", ""))
 	createObj(t, ctx, makeDestination("dest-ob", "vrf-ob", map[string]string{"type": "ob"}, []string{"10.103.0.0/16"}))
-	createObj(t, ctx, makeOutbound("ob-test", "net-ob", destSelector("type", "ob"), []string{"10.200.0.5/32"}))
+	createObj(t, ctx, makeOutbound("ob-test", "net-ob", destSelector("ob"), []string{"10.200.0.5/32"}))
 
 	nnc := reconcileAndGetNNC(t, ctx, nodeName)
 
@@ -352,7 +352,7 @@ func TestPodNetworkPipeline(t *testing.T) {
 	createObj(t, ctx, makeVRF("vrf-pn", "pnm2m", 2002032, "65188:2032"))
 	createObj(t, ctx, makeNetwork("net-pn", 602, 5000003, "10.50.0.0/16", ""))
 	createObj(t, ctx, makeDestination("dest-pn", "vrf-pn", map[string]string{"type": "pn"}, []string{"10.104.0.0/16"}))
-	createObj(t, ctx, makePodNetwork("pn-test", "net-pn", destSelector("type", "pn"),
+	createObj(t, ctx, makePodNetwork("pn-test", "net-pn", destSelector("pn"),
 		[]nc.AdditionalRoute{{Prefixes: []string{"10.60.0.0/16"}}}))
 
 	nnc := reconcileAndGetNNC(t, ctx, nodeName)
@@ -372,7 +372,7 @@ func TestSBRSingleVRF(t *testing.T) {
 	createObj(t, ctx, makeVRF("vrf-sbr1", "sbrm", 2002040, "65188:2040"))
 	createObj(t, ctx, makeNetwork("net-sbr1", 700, 6000001, "10.100.0.0/24", ""))
 	createObj(t, ctx, makeDestination("dest-sbr1", "vrf-sbr1", map[string]string{"type": "sbr1"}, []string{"10.102.0.0/16"}))
-	createObj(t, ctx, makeInbound("ib-sbr1", "net-sbr1", destSelector("type", "sbr1"), []string{"10.100.0.10/32"}))
+	createObj(t, ctx, makeInbound("ib-sbr1", "net-sbr1", destSelector("sbr1"), []string{"10.100.0.10/32"}))
 
 	nnc := reconcileAndGetNNC(t, ctx, nodeName)
 
@@ -449,7 +449,7 @@ func TestLifecycleUpdate(t *testing.T) {
 	net := makeNetwork("net-lc-upd", 510, 4100001, "10.250.10.0/24", "")
 	createObj(t, ctx, net)
 	createObj(t, ctx, makeDestination("dest-lc-upd", "vrf-lc-upd", map[string]string{"type": "lc"}, []string{"10.102.0.0/16"}))
-	createObj(t, ctx, makeL2A("l2a-lc-upd", "net-lc-upd", destSelector("type", "lc"), nil))
+	createObj(t, ctx, makeL2A("l2a-lc-upd", "net-lc-upd", destSelector("lc"), nil))
 
 	nnc1 := reconcileAndGetNNC(t, ctx, nodeName)
 	rev1 := nnc1.Spec.Revision
@@ -484,7 +484,7 @@ func TestLifecycleDelete(t *testing.T) {
 	createObj(t, ctx, makeNetwork("net-lc-del", 520, 4200001, "10.250.20.0/24", ""))
 	createObj(t, ctx, makeDestination("dest-lc-del", "vrf-lc-del", map[string]string{"type": "del"}, []string{"10.102.0.0/16"}))
 
-	l2a := makeL2A("l2a-lc-del", "net-lc-del", destSelector("type", "del"), nil)
+	l2a := makeL2A("l2a-lc-del", "net-lc-del", destSelector("del"), nil)
 	createObj(t, ctx, l2a)
 
 	nnc := reconcileAndGetNNC(t, ctx, nodeName)
@@ -515,7 +515,7 @@ func TestMultiNodeAssembly(t *testing.T) {
 	createObj(t, ctx, makeNetwork("net-multi", 530, 4300001, "10.250.30.0/24", ""))
 	createObj(t, ctx, makeDestination("dest-multi", "vrf-multi", map[string]string{"type": "multi"}, []string{"10.102.0.0/16"}))
 	// No nodeSelector → should apply to all 3 nodes
-	createObj(t, ctx, makeL2A("l2a-multi", "net-multi", destSelector("type", "multi"), nil))
+	createObj(t, ctx, makeL2A("l2a-multi", "net-multi", destSelector("multi"), nil))
 
 	require.NoError(t, reconciler.ReconcileDebounced(ctx))
 
@@ -537,7 +537,7 @@ func TestOriginTracking(t *testing.T) {
 	createObj(t, ctx, makeVRF("vrf-origin", "origm", 2002070, "65188:2070"))
 	createObj(t, ctx, makeNetwork("net-origin", 540, 4400001, "10.250.40.0/24", ""))
 	createObj(t, ctx, makeDestination("dest-origin", "vrf-origin", map[string]string{"type": "origin"}, []string{"10.102.0.0/16"}))
-	createObj(t, ctx, makeL2A("l2a-origin", "net-origin", destSelector("type", "origin"), nil))
+	createObj(t, ctx, makeL2A("l2a-origin", "net-origin", destSelector("origin"), nil))
 
 	nnc := reconcileAndGetNNC(t, ctx, nodeName)
 
@@ -566,7 +566,7 @@ func TestRevisionStableOnNoChange(t *testing.T) {
 	createObj(t, ctx, makeVRF("vrf-rev", "revm", 2002080, "65188:2080"))
 	createObj(t, ctx, makeNetwork("net-rev", 550, 4500001, "10.250.50.0/24", ""))
 	createObj(t, ctx, makeDestination("dest-rev", "vrf-rev", map[string]string{"type": "rev"}, []string{"10.102.0.0/16"}))
-	createObj(t, ctx, makeL2A("l2a-rev", "net-rev", destSelector("type", "rev"), nil))
+	createObj(t, ctx, makeL2A("l2a-rev", "net-rev", destSelector("rev"), nil))
 
 	nnc1 := reconcileAndGetNNC(t, ctx, nodeName)
 	rev1 := nnc1.Spec.Revision
@@ -594,8 +594,8 @@ func TestBGPPeeringListenRange(t *testing.T) {
 	createObj(t, ctx, makeVRF("vrf-bgp-lr", "bgplr", 2002090, "65188:2090"))
 	createObj(t, ctx, makeNetwork("net-bgp-lr", 560, 4600001, "10.250.60.0/24", "fd96::1/64"))
 	createObj(t, ctx, makeDestination("dest-bgp-lr", "vrf-bgp-lr", map[string]string{"type": "bgp-lr"}, []string{"10.102.0.0/16"}))
-	createObj(t, ctx, makeL2A("l2a-bgp-lr", "net-bgp-lr", destSelector("type", "bgp-lr"), nil))
-	createObj(t, ctx, makeInbound("ib-bgp-lr", "net-bgp-lr", destSelector("type", "bgp-lr"), []string{"10.250.60.10/32"}))
+	createObj(t, ctx, makeL2A("l2a-bgp-lr", "net-bgp-lr", destSelector("bgp-lr"), nil))
+	createObj(t, ctx, makeInbound("ib-bgp-lr", "net-bgp-lr", destSelector("bgp-lr"), []string{"10.250.60.10/32"}))
 
 	// BGPPeering in listenRange mode referencing the L2A
 	bgpPeering := &nc.BGPPeering{
@@ -637,7 +637,7 @@ func TestBGPPeeringLoopbackPeer(t *testing.T) {
 	createObj(t, ctx, makeVRF("vrf-bgp-lb", "bgplb", 2002091, "65188:2091"))
 	createObj(t, ctx, makeNetwork("net-bgp-lb", 561, 4600002, "10.250.61.0/24", ""))
 	createObj(t, ctx, makeDestination("dest-bgp-lb", "vrf-bgp-lb", map[string]string{"type": "bgp-lb"}, []string{"10.102.0.0/16"}))
-	createObj(t, ctx, makeInbound("ib-bgp-lb", "net-bgp-lb", destSelector("type", "bgp-lb"), []string{"10.250.61.10/32"}))
+	createObj(t, ctx, makeInbound("ib-bgp-lb", "net-bgp-lb", destSelector("bgp-lb"), []string{"10.250.61.10/32"}))
 
 	// BGPPeering in loopbackPeer mode (no attachmentRef)
 	bgpPeering := &nc.BGPPeering{
@@ -678,7 +678,7 @@ func TestTrafficMirrorL2ASource(t *testing.T) {
 	createObj(t, ctx, makeVRF("vrf-mir-col", "mircol", 2002101, "65188:2101"))
 	createObj(t, ctx, makeNetwork("net-mir", 570, 4700001, "10.250.70.0/24", ""))
 	createObj(t, ctx, makeDestination("dest-mir", "vrf-mir", map[string]string{"type": "mir"}, []string{"10.102.0.0/16"}))
-	createObj(t, ctx, makeL2A("l2a-mir", "net-mir", destSelector("type", "mir"), nil))
+	createObj(t, ctx, makeL2A("l2a-mir", "net-mir", destSelector("mir"), nil))
 
 	// Collector with mirror VRF
 	collector := &nc.Collector{

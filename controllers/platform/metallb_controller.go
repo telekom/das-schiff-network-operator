@@ -266,10 +266,13 @@ func toStringLabels(m map[string]interface{}) map[string]string {
 
 // SetupWithManager registers the MetalLB controller.
 func (r *MetalLBReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewControllerManagedBy(mgr).
+	if err := ctrl.NewControllerManagedBy(mgr).
 		Named("metallb-reconciler").
 		For(&nc.Inbound{}).
-		Complete(r)
+		Complete(r); err != nil {
+		return fmt.Errorf("error setting up metallb controller: %w", err)
+	}
+	return nil
 }
 
 var metallbTargetGVKs = []schema.GroupVersionKind{

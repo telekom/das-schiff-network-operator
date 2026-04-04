@@ -697,6 +697,15 @@ spec:
                           description: DestinationVrf is the destination VRF for the
                             mirrored traffic.
                           type: string
+                        direction:
+                          default: both
+                          description: 'Direction is the mirror direction: ingress,
+                            egress, or both.'
+                          enum:
+                          - ingress
+                          - egress
+                          - both
+                          type: string
                         encapsulationType:
                           description: EncapsulationType is the encapsulation type
                             for the mirrored traffic.
@@ -2016,6 +2025,15 @@ spec:
                             description: DestinationVrf is the destination VRF for
                               the mirrored traffic.
                             type: string
+                          direction:
+                            default: both
+                            description: 'Direction is the mirror direction: ingress,
+                              egress, or both.'
+                            enum:
+                            - ingress
+                            - egress
+                            - both
+                            type: string
                           encapsulationType:
                             description: EncapsulationType is the encapsulation type
                               for the mirrored traffic.
@@ -2592,6 +2610,15 @@ spec:
                           destinationVrf:
                             description: DestinationVrf is the destination VRF for
                               the mirrored traffic.
+                            type: string
+                          direction:
+                            default: both
+                            description: 'Direction is the mirror direction: ingress,
+                              egress, or both.'
+                            enum:
+                            - ingress
+                            - egress
+                            - both
                             type: string
                           encapsulationType:
                             description: EncapsulationType is the encapsulation type
@@ -3307,6 +3334,15 @@ spec:
                           destinationVrf:
                             description: DestinationVrf is the destination VRF for
                               the mirrored traffic.
+                            type: string
+                          direction:
+                            default: both
+                            description: 'Direction is the mirror direction: ingress,
+                              egress, or both.'
+                            enum:
+                            - ingress
+                            - egress
+                            - both
                             type: string
                           encapsulationType:
                             description: EncapsulationType is the encapsulation type

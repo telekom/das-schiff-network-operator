@@ -183,7 +183,10 @@ func (r *CoilReconciler) upsertCalicoIPPool(ctx context.Context, ob *nc.Outbound
 	err := r.Get(ctx, types.NamespacedName{Name: poolName}, existing)
 	if apierrors.IsNotFound(err) {
 		logger.Info("creating Calico IPPool", "name", poolName)
-		return r.Create(ctx, desired)
+		if err := r.Create(ctx, desired); err != nil {
+			return fmt.Errorf("error creating Calico IPPool %s: %w", poolName, err)
+		}
+		return nil
 	}
 	if err != nil {
 		return fmt.Errorf("error getting IPPool: %w", err)
@@ -191,7 +194,10 @@ func (r *CoilReconciler) upsertCalicoIPPool(ctx context.Context, ob *nc.Outbound
 
 	existing.Object["spec"] = desired.Object["spec"]
 	existing.SetLabels(desired.GetLabels())
-	return r.Update(ctx, existing)
+	if err := r.Update(ctx, existing); err != nil {
+		return fmt.Errorf("error updating Calico IPPool %s: %w", poolName, err)
+	}
+	return nil
 }
 
 func (r *CoilReconciler) upsertCoilEgress(ctx context.Context, ob *nc.Outbound, prefixes []string, addresses *nc.AddressAllocation, logger logr.Logger) error {
@@ -243,7 +249,10 @@ func (r *CoilReconciler) upsertCoilEgress(ctx context.Context, ob *nc.Outbound, 
 	err := r.Get(ctx, types.NamespacedName{Name: ob.Name, Namespace: ob.Namespace}, existing)
 	if apierrors.IsNotFound(err) {
 		logger.Info("creating Coil Egress", "name", ob.Name, "namespace", ob.Namespace)
-		return r.Create(ctx, desired)
+		if err := r.Create(ctx, desired); err != nil {
+			return fmt.Errorf("error creating Coil Egress %s/%s: %w", ob.Namespace, ob.Name, err)
+		}
+		return nil
 	}
 	if err != nil {
 		return fmt.Errorf("error getting Egress: %w", err)
@@ -251,7 +260,10 @@ func (r *CoilReconciler) upsertCoilEgress(ctx context.Context, ob *nc.Outbound, 
 
 	existing.Object["spec"] = desired.Object["spec"]
 	existing.SetLabels(desired.GetLabels())
-	return r.Update(ctx, existing)
+	if err := r.Update(ctx, existing); err != nil {
+		return fmt.Errorf("error updating Coil Egress %s/%s: %w", ob.Namespace, ob.Name, err)
+	}
+	return nil
 }
 
 func (r *CoilReconciler) handleOutboundDeletion(ctx context.Context, ob *nc.Outbound, logger logr.Logger) (ctrl.Result, error) {
@@ -324,11 +336,14 @@ func (r *CoilReconciler) mapDestinationToOutbounds(ctx context.Context, obj clie
 
 // SetupWithManager registers the Coil controller.
 func (r *CoilReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewControllerManagedBy(mgr).
+	if err := ctrl.NewControllerManagedBy(mgr).
 		Named("coil-reconciler").
 		For(&nc.Outbound{}).
 		Watches(&nc.Destination{}, handler.EnqueueRequestsFromMapFunc(r.mapDestinationToOutbounds)).
-		Complete(r)
+		Complete(r); err != nil {
+		return fmt.Errorf("error setting up coil controller: %w", err)
+	}
+	return nil
 }
 
 // checkTargetCRDs verifies that Calico IPPool and Coil Egress CRDs are registered.

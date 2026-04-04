@@ -197,7 +197,10 @@ func (r *SyncController) applyRemote(ctx context.Context, remoteClient client.Cl
 	}, existing)
 
 	if apierrors.IsNotFound(err) {
-		return remoteClient.Create(ctx, desired)
+		if err := remoteClient.Create(ctx, desired); err != nil {
+			return fmt.Errorf("creating remote object %s/%s: %w", desired.GetNamespace(), desired.GetName(), err)
+		}
+		return nil
 	}
 	if err != nil {
 		return fmt.Errorf("getting remote object: %w", err)
@@ -212,7 +215,10 @@ func (r *SyncController) applyRemote(ctx context.Context, remoteClient client.Cl
 	// Preserve remote resourceVersion for update.
 	desired.SetResourceVersion(existing.GetResourceVersion())
 	desired.SetUID(existing.GetUID())
-	return remoteClient.Update(ctx, desired)
+	if err := remoteClient.Update(ctx, desired); err != nil {
+		return fmt.Errorf("updating remote object %s/%s: %w", desired.GetNamespace(), desired.GetName(), err)
+	}
+	return nil
 }
 
 // deleteRemote removes the object from the remote cluster.
@@ -226,7 +232,10 @@ func (r *SyncController) deleteRemote(ctx context.Context, remoteClient client.C
 	if apierrors.IsNotFound(err) {
 		return nil // Already gone.
 	}
-	return err
+	if err != nil {
+		return fmt.Errorf("deleting remote object %s/%s: %w", remote.GetNamespace(), remote.GetName(), err)
+	}
+	return nil
 }
 
 // SetupWithManager registers watches for all intent CRD types.

@@ -50,20 +50,20 @@ func newTestReconciler(objs ...client.Object) (*MetalLBReconciler, client.Client
 	return r, c
 }
 
-func newInbound(name, ns string, spec nc.InboundSpec) *nc.Inbound {
+func newInbound(name string, spec nc.InboundSpec) *nc.Inbound {
 	return &nc.Inbound{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
 		Spec:       spec,
 	}
 }
 
-func getUnstructured(t *testing.T, c client.Client, gvk schema.GroupVersionKind, ns, name string) *unstructured.Unstructured {
+func getUnstructured(t *testing.T, c client.Client, gvk schema.GroupVersionKind, name string) *unstructured.Unstructured {
 	t.Helper()
 	obj := &unstructured.Unstructured{}
 	obj.SetGroupVersionKind(gvk)
-	err := c.Get(context.Background(), types.NamespacedName{Name: name, Namespace: ns}, obj)
+	err := c.Get(context.Background(), types.NamespacedName{Name: name, Namespace: metallbNamespace}, obj)
 	if err != nil {
-		t.Fatalf("failed to get %s %s/%s: %v", gvk.Kind, ns, name, err)
+		t.Fatalf("failed to get %s %s/%s: %v", gvk.Kind, metallbNamespace, name, err)
 	}
 	return obj
 }
@@ -74,10 +74,10 @@ var (
 	l2GVK     = schema.GroupVersionKind{Group: "metallb.io", Version: "v1beta1", Kind: "L2Advertisement"}
 )
 
-func doReconcile(t *testing.T, r *MetalLBReconciler, name, ns string) {
+func doReconcile(t *testing.T, r *MetalLBReconciler, name string) {
 	t.Helper()
 	result, err := r.Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: types.NamespacedName{Name: name, Namespace: ns},
+		NamespacedName: types.NamespacedName{Name: name, Namespace: "default"},
 	})
 	if err != nil {
 		t.Fatalf("Reconcile failed: %v", err)
@@ -89,15 +89,15 @@ func doReconcile(t *testing.T, r *MetalLBReconciler, name, ns string) {
 
 // Test 1: Create IPAddressPool + BGPAdvertisement with explicit addresses.
 func TestMetalLBReconciler_BGPAdvertisement(t *testing.T) {
-	ib := newInbound("test-bgp", "default", nc.InboundSpec{
+	ib := newInbound("test-bgp", nc.InboundSpec{
 		NetworkRef: "net1",
 		Addresses:  &nc.AddressAllocation{IPv4: []string{"10.0.0.0/24"}},
 		Advertisement: nc.AdvertisementConfig{Type: "bgp"},
 	})
 	r, c := newTestReconciler(ib)
-	doReconcile(t, r, "test-bgp", "default")
+	doReconcile(t, r, "test-bgp")
 
-	pool := getUnstructured(t, c, ipPoolGVK, metallbNamespace, "test-bgp")
+	pool := getUnstructured(t, c, ipPoolGVK, "test-bgp")
 	addrs, _, _ := unstructured.NestedSlice(pool.Object, "spec", "addresses")
 	if len(addrs) != 1 || addrs[0] != "10.0.0.0/24" {
 		t.Errorf("expected addresses [10.0.0.0/24], got %v", addrs)
@@ -106,7 +106,7 @@ func TestMetalLBReconciler_BGPAdvertisement(t *testing.T) {
 		t.Error("missing managed-by label on IPAddressPool")
 	}
 
-	adv := getUnstructured(t, c, bgpGVK, metallbNamespace, "test-bgp")
+	adv := getUnstructured(t, c, bgpGVK, "test-bgp")
 	pools, _, _ := unstructured.NestedSlice(adv.Object, "spec", "ipAddressPools")
 	if len(pools) != 1 || pools[0] != "test-bgp" {
 		t.Errorf("expected ipAddressPools [test-bgp], got %v", pools)
@@ -115,16 +115,16 @@ func TestMetalLBReconciler_BGPAdvertisement(t *testing.T) {
 
 // Test 2: Create IPAddressPool + L2Advertisement.
 func TestMetalLBReconciler_L2Advertisement(t *testing.T) {
-	ib := newInbound("test-l2", "default", nc.InboundSpec{
+	ib := newInbound("test-l2", nc.InboundSpec{
 		NetworkRef: "net1",
 		Addresses:  &nc.AddressAllocation{IPv4: []string{"192.168.1.0/24"}},
 		Advertisement: nc.AdvertisementConfig{Type: "l2"},
 	})
 	r, c := newTestReconciler(ib)
-	doReconcile(t, r, "test-l2", "default")
+	doReconcile(t, r, "test-l2")
 
-	getUnstructured(t, c, ipPoolGVK, metallbNamespace, "test-l2")
-	adv := getUnstructured(t, c, l2GVK, metallbNamespace, "test-l2")
+	getUnstructured(t, c, ipPoolGVK, "test-l2")
+	adv := getUnstructured(t, c, l2GVK, "test-l2")
 	if adv.GetKind() != "L2Advertisement" {
 		t.Errorf("expected L2Advertisement, got %s", adv.GetKind())
 	}
@@ -132,18 +132,18 @@ func TestMetalLBReconciler_L2Advertisement(t *testing.T) {
 
 // Test 3: Use custom pool name from Inbound.Spec.PoolName.
 func TestMetalLBReconciler_CustomPoolName(t *testing.T) {
-	ib := newInbound("test-custom", "default", nc.InboundSpec{
+	ib := newInbound("test-custom", nc.InboundSpec{
 		NetworkRef: "net1",
 		PoolName:   ptrStr("my-custom-pool"),
 		Addresses:  &nc.AddressAllocation{IPv4: []string{"10.1.0.0/24"}},
 		Advertisement: nc.AdvertisementConfig{Type: "bgp"},
 	})
 	r, c := newTestReconciler(ib)
-	doReconcile(t, r, "test-custom", "default")
+	doReconcile(t, r, "test-custom")
 
 	// Should use the custom pool name, not the inbound name.
-	getUnstructured(t, c, ipPoolGVK, metallbNamespace, "my-custom-pool")
-	getUnstructured(t, c, bgpGVK, metallbNamespace, "my-custom-pool")
+	getUnstructured(t, c, ipPoolGVK, "my-custom-pool")
+	getUnstructured(t, c, bgpGVK, "my-custom-pool")
 
 	// Verify status pool name is set.
 	updated := &nc.Inbound{}
@@ -157,16 +157,16 @@ func TestMetalLBReconciler_CustomPoolName(t *testing.T) {
 
 // Test 4: Prefer status addresses over spec addresses.
 func TestMetalLBReconciler_PreferStatusAddresses(t *testing.T) {
-	ib := newInbound("test-status-addr", "default", nc.InboundSpec{
+	ib := newInbound("test-status-addr", nc.InboundSpec{
 		NetworkRef: "net1",
 		Addresses:  &nc.AddressAllocation{IPv4: []string{"10.0.0.0/24"}},
 		Advertisement: nc.AdvertisementConfig{Type: "bgp"},
 	})
 	ib.Status.Addresses = &nc.AddressAllocation{IPv4: []string{"10.99.0.0/24"}}
 	r, c := newTestReconciler(ib)
-	doReconcile(t, r, "test-status-addr", "default")
+	doReconcile(t, r, "test-status-addr")
 
-	pool := getUnstructured(t, c, ipPoolGVK, metallbNamespace, "test-status-addr")
+	pool := getUnstructured(t, c, ipPoolGVK, "test-status-addr")
 	addrs, _, _ := unstructured.NestedSlice(pool.Object, "spec", "addresses")
 	if len(addrs) != 1 || addrs[0] != "10.99.0.0/24" {
 		t.Errorf("expected status addresses [10.99.0.0/24], got %v", addrs)
@@ -175,13 +175,13 @@ func TestMetalLBReconciler_PreferStatusAddresses(t *testing.T) {
 
 // Test 5: Update existing resources when Inbound spec changes.
 func TestMetalLBReconciler_Update(t *testing.T) {
-	ib := newInbound("test-update", "default", nc.InboundSpec{
+	ib := newInbound("test-update", nc.InboundSpec{
 		NetworkRef: "net1",
 		Addresses:  &nc.AddressAllocation{IPv4: []string{"10.0.0.0/24"}},
 		Advertisement: nc.AdvertisementConfig{Type: "bgp"},
 	})
 	r, c := newTestReconciler(ib)
-	doReconcile(t, r, "test-update", "default")
+	doReconcile(t, r, "test-update")
 
 	// Update addresses on the Inbound.
 	updated := &nc.Inbound{}
@@ -194,9 +194,9 @@ func TestMetalLBReconciler_Update(t *testing.T) {
 	}
 
 	// Reconcile again.
-	doReconcile(t, r, "test-update", "default")
+	doReconcile(t, r, "test-update")
 
-	pool := getUnstructured(t, c, ipPoolGVK, metallbNamespace, "test-update")
+	pool := getUnstructured(t, c, ipPoolGVK, "test-update")
 	addrs, _, _ := unstructured.NestedSlice(pool.Object, "spec", "addresses")
 	if len(addrs) != 2 {
 		t.Errorf("expected 2 addresses after update, got %d: %v", len(addrs), addrs)
@@ -205,7 +205,7 @@ func TestMetalLBReconciler_Update(t *testing.T) {
 
 // Test 6: Deletion cleanup.
 func TestMetalLBReconciler_Deletion(t *testing.T) {
-	ib := newInbound("test-delete", "default", nc.InboundSpec{
+	ib := newInbound("test-delete", nc.InboundSpec{
 		NetworkRef: "net1",
 		Addresses:  &nc.AddressAllocation{IPv4: []string{"10.0.0.0/24"}},
 		Advertisement: nc.AdvertisementConfig{Type: "bgp"},
@@ -213,11 +213,11 @@ func TestMetalLBReconciler_Deletion(t *testing.T) {
 	r, c := newTestReconciler(ib)
 
 	// First reconcile creates resources and adds finalizer.
-	doReconcile(t, r, "test-delete", "default")
+	doReconcile(t, r, "test-delete")
 
 	// Verify resources exist.
-	getUnstructured(t, c, ipPoolGVK, metallbNamespace, "test-delete")
-	getUnstructured(t, c, bgpGVK, metallbNamespace, "test-delete")
+	getUnstructured(t, c, ipPoolGVK, "test-delete")
+	getUnstructured(t, c, bgpGVK, "test-delete")
 
 	// Delete the Inbound — fake client sets DeletionTimestamp when finalizers are present.
 	updated := &nc.Inbound{}
@@ -229,7 +229,7 @@ func TestMetalLBReconciler_Deletion(t *testing.T) {
 	}
 
 	// Reconcile again to trigger deletion handling.
-	doReconcile(t, r, "test-delete", "default")
+	doReconcile(t, r, "test-delete")
 
 	// Verify IPAddressPool is deleted.
 	obj := &unstructured.Unstructured{}
@@ -262,7 +262,7 @@ func TestMetalLBReconciler_Deletion(t *testing.T) {
 
 // Test 7: Dual-stack addresses (IPv4 + IPv6).
 func TestMetalLBReconciler_DualStack(t *testing.T) {
-	ib := newInbound("test-dual", "default", nc.InboundSpec{
+	ib := newInbound("test-dual", nc.InboundSpec{
 		NetworkRef: "net1",
 		Addresses: &nc.AddressAllocation{
 			IPv4: []string{"10.250.4.0/24"},
@@ -271,9 +271,9 @@ func TestMetalLBReconciler_DualStack(t *testing.T) {
 		Advertisement: nc.AdvertisementConfig{Type: "bgp"},
 	})
 	r, c := newTestReconciler(ib)
-	doReconcile(t, r, "test-dual", "default")
+	doReconcile(t, r, "test-dual")
 
-	pool := getUnstructured(t, c, ipPoolGVK, metallbNamespace, "test-dual")
+	pool := getUnstructured(t, c, ipPoolGVK, "test-dual")
 	addrs, _, _ := unstructured.NestedSlice(pool.Object, "spec", "addresses")
 	if len(addrs) != 2 {
 		t.Fatalf("expected 2 addresses (dual-stack), got %d: %v", len(addrs), addrs)

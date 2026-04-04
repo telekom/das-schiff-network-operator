@@ -152,7 +152,10 @@ func (r *InterfaceConfigReconciler) reconcileNodeConfig(ctx context.Context, ifc
 	err = r.Get(ctx, client.ObjectKeyFromObject(desired), existing)
 	if apierrors.IsNotFound(err) {
 		logger.Info("creating NodeNetplanConfig", "node", node.Name)
-		return r.Create(ctx, desired)
+		if err := r.Create(ctx, desired); err != nil {
+			return fmt.Errorf("error creating NodeNetplanConfig for node %s: %w", node.Name, err)
+		}
+		return nil
 	}
 	if err != nil {
 		return fmt.Errorf("error getting NodeNetplanConfig: %w", err)
@@ -160,7 +163,10 @@ func (r *InterfaceConfigReconciler) reconcileNodeConfig(ctx context.Context, ifc
 
 	existing.Spec = desired.Spec
 	existing.Labels = desired.Labels
-	return r.Update(ctx, existing)
+	if err := r.Update(ctx, existing); err != nil {
+		return fmt.Errorf("error updating NodeNetplanConfig for node %s: %w", node.Name, err)
+	}
+	return nil
 }
 
 func (r *InterfaceConfigReconciler) handleDeletion(ctx context.Context, ifconfig *nc.InterfaceConfig, logger logr.Logger) (ctrl.Result, error) {
@@ -260,9 +266,12 @@ func buildNetplanBonds(bonds map[string]nc.BondConfig) (map[string]netplan.Devic
 
 // SetupWithManager registers the InterfaceConfig controller.
 func (r *InterfaceConfigReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewControllerManagedBy(mgr).
+	if err := ctrl.NewControllerManagedBy(mgr).
 		Named("interfaceconfig-reconciler").
 		For(&nc.InterfaceConfig{}).
 		Watches(&corev1.Node{}, &handler.EnqueueRequestForObject{}).
-		Complete(r)
+		Complete(r); err != nil {
+		return fmt.Errorf("error setting up interfaceconfig controller: %w", err)
+	}
+	return nil
 }

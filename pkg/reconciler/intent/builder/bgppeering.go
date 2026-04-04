@@ -116,7 +116,7 @@ func (b *BGPPeeringBuilder) buildListenRange(bp *nc.BGPPeering, data *resolver.R
 }
 
 // buildLoopbackPeer creates BGPPeer entries with Address on the ClusterVRF.
-func (b *BGPPeeringBuilder) buildLoopbackPeer(bp *nc.BGPPeering, data *resolver.ResolvedData, result map[string]*NodeContribution) error {
+func (b *BGPPeeringBuilder) buildLoopbackPeer(bp *nc.BGPPeering, data *resolver.ResolvedData, result map[string]*NodeContribution) error { //nolint:unparam // error return kept for interface consistency
 	peer := b.buildBasePeer(bp)
 	// Loopback peer address is TBD — set to nil (auto-generated ULA by agent).
 

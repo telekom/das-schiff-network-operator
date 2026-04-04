@@ -356,7 +356,10 @@ func (r *Reconciler) tryApplyNNC(ctx context.Context, node *corev1.Node, spec *n
 		setIntentManagedLabel(existing)
 		existing.Spec = *spec
 		setOriginsAnnotation(existing, origins)
-		return r.client.Update(ctx, existing)
+		if err := r.client.Update(ctx, existing); err != nil {
+			return fmt.Errorf("error updating NodeNetworkConfig for node %s: %w", node.Name, err)
+		}
+		return nil
 	}
 
 	// NNC does not exist — create it.
@@ -373,7 +376,10 @@ func (r *Reconciler) tryApplyNNC(ctx context.Context, node *corev1.Node, spec *n
 		return fmt.Errorf("error setting owner reference for NNC %s: %w", node.Name, err)
 	}
 
-	return r.client.Create(ctx, nnc)
+	if err := r.client.Create(ctx, nnc); err != nil {
+		return fmt.Errorf("error creating NodeNetworkConfig for node %s: %w", node.Name, err)
+	}
+	return nil
 }
 
 // setOriginsAnnotation writes the origins map as a JSON annotation on the NNC.
@@ -533,7 +539,10 @@ func (r *Reconciler) applyNetplanConfig(ctx context.Context, node *corev1.Node, 
 
 		setIntentManagedNetplanLabel(existing)
 		existing.Spec = desiredSpec
-		return r.client.Update(ctx, existing)
+		if err := r.client.Update(ctx, existing); err != nil {
+			return fmt.Errorf("error updating NodeNetplanConfig for node %s: %w", node.Name, err)
+		}
+		return nil
 	}
 
 	// Does not exist — create.
@@ -549,7 +558,10 @@ func (r *Reconciler) applyNetplanConfig(ctx context.Context, node *corev1.Node, 
 		return fmt.Errorf("error setting owner reference for NodeNetplanConfig %s: %w", node.Name, err)
 	}
 
-	return r.client.Create(ctx, npc)
+	if err := r.client.Create(ctx, npc); err != nil {
+		return fmt.Errorf("error creating NodeNetplanConfig for node %s: %w", node.Name, err)
+	}
+	return nil
 }
 
 // setIntentManagedNetplanLabel marks a NodeNetplanConfig as managed by the intent reconciler.

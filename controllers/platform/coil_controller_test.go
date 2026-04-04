@@ -36,10 +36,10 @@ func newScheme() *runtime.Scheme {
 	return s
 }
 
-func reconcileOnce(t *testing.T, r *CoilReconciler, name, namespace string) {
+func reconcileOnce(t *testing.T, r *CoilReconciler, name string) {
 	t.Helper()
 	_, err := r.Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: types.NamespacedName{Name: name, Namespace: namespace},
+		NamespacedName: types.NamespacedName{Name: name, Namespace: "default"},
 	})
 	if err != nil {
 		t.Fatalf("reconcile failed: %v", err)
@@ -57,11 +57,11 @@ func getIPPool(t *testing.T, r *CoilReconciler, name string) *unstructured.Unstr
 	return obj
 }
 
-func getEgress(t *testing.T, r *CoilReconciler, name, namespace string) *unstructured.Unstructured {
+func getEgress(t *testing.T, r *CoilReconciler, name string) *unstructured.Unstructured {
 	t.Helper()
 	obj := &unstructured.Unstructured{}
 	obj.SetGroupVersionKind(coilEgressGVK)
-	err := r.Get(context.Background(), types.NamespacedName{Name: name, Namespace: namespace}, obj)
+	err := r.Get(context.Background(), types.NamespacedName{Name: name, Namespace: "default"}, obj)
 	if err != nil {
 		return nil
 	}
@@ -104,9 +104,9 @@ func TestCoilReconciler_CreateIPPoolsAndEgress(t *testing.T) {
 	r := &CoilReconciler{Client: cli, Scheme: scheme}
 
 	// First reconcile adds finalizer.
-	reconcileOnce(t, r, "egress-a", "default")
+	reconcileOnce(t, r, "egress-a")
 	// Second reconcile creates resources.
-	reconcileOnce(t, r, "egress-a", "default")
+	reconcileOnce(t, r, "egress-a")
 
 	// Verify IPv4 IPPool.
 	poolV4 := getIPPool(t, r, "egress-a-v4")
@@ -149,7 +149,7 @@ func TestCoilReconciler_CreateIPPoolsAndEgress(t *testing.T) {
 	}
 
 	// Verify Coil Egress.
-	egress := getEgress(t, r, "egress-a", "default")
+	egress := getEgress(t, r, "egress-a")
 	if egress == nil {
 		t.Fatal("expected egress-a Egress to exist")
 	}
@@ -231,10 +231,10 @@ func TestCoilReconciler_ResolveMultipleDestinations(t *testing.T) {
 	cli := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ob, dest1, dest2, dest3).Build()
 	r := &CoilReconciler{Client: cli, Scheme: scheme}
 
-	reconcileOnce(t, r, "multi-dest", "default")
-	reconcileOnce(t, r, "multi-dest", "default")
+	reconcileOnce(t, r, "multi-dest")
+	reconcileOnce(t, r, "multi-dest")
 
-	egress := getEgress(t, r, "multi-dest", "default")
+	egress := getEgress(t, r, "multi-dest")
 	if egress == nil {
 		t.Fatal("expected multi-dest Egress to exist")
 	}
@@ -277,8 +277,8 @@ func TestCoilReconciler_SkipIPv4Pool(t *testing.T) {
 	cli := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ob).Build()
 	r := &CoilReconciler{Client: cli, Scheme: scheme}
 
-	reconcileOnce(t, r, "ipv6-only", "default")
-	reconcileOnce(t, r, "ipv6-only", "default")
+	reconcileOnce(t, r, "ipv6-only")
+	reconcileOnce(t, r, "ipv6-only")
 
 	// IPv4 pool should NOT exist.
 	if pool := getIPPool(t, r, "ipv6-only-v4"); pool != nil {
@@ -291,7 +291,7 @@ func TestCoilReconciler_SkipIPv4Pool(t *testing.T) {
 	}
 
 	// Egress should only have IPv6 pool annotation.
-	egress := getEgress(t, r, "ipv6-only", "default")
+	egress := getEgress(t, r, "ipv6-only")
 	if egress == nil {
 		t.Fatal("expected Egress to exist")
 	}
@@ -324,8 +324,8 @@ func TestCoilReconciler_SkipIPv6Pool(t *testing.T) {
 	cli := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ob).Build()
 	r := &CoilReconciler{Client: cli, Scheme: scheme}
 
-	reconcileOnce(t, r, "ipv4-only", "default")
-	reconcileOnce(t, r, "ipv4-only", "default")
+	reconcileOnce(t, r, "ipv4-only")
+	reconcileOnce(t, r, "ipv4-only")
 
 	if pool := getIPPool(t, r, "ipv4-only-v4"); pool == nil {
 		t.Error("expected IPv4 IPPool to exist")
@@ -355,10 +355,10 @@ func TestCoilReconciler_DefaultReplicas(t *testing.T) {
 	cli := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ob).Build()
 	r := &CoilReconciler{Client: cli, Scheme: scheme}
 
-	reconcileOnce(t, r, "no-replicas", "default")
-	reconcileOnce(t, r, "no-replicas", "default")
+	reconcileOnce(t, r, "no-replicas")
+	reconcileOnce(t, r, "no-replicas")
 
-	egress := getEgress(t, r, "no-replicas", "default")
+	egress := getEgress(t, r, "no-replicas")
 	if egress == nil {
 		t.Fatal("expected Egress to exist")
 	}
@@ -389,8 +389,8 @@ func TestCoilReconciler_DeletionCleanup(t *testing.T) {
 	r := &CoilReconciler{Client: cli, Scheme: scheme}
 
 	// Create resources.
-	reconcileOnce(t, r, "to-delete", "default")
-	reconcileOnce(t, r, "to-delete", "default")
+	reconcileOnce(t, r, "to-delete")
+	reconcileOnce(t, r, "to-delete")
 
 	// Verify resources exist.
 	if getIPPool(t, r, "to-delete-v4") == nil {
@@ -399,7 +399,7 @@ func TestCoilReconciler_DeletionCleanup(t *testing.T) {
 	if getIPPool(t, r, "to-delete-v6") == nil {
 		t.Fatal("expected v6 IPPool to exist before deletion")
 	}
-	if getEgress(t, r, "to-delete", "default") == nil {
+	if getEgress(t, r, "to-delete") == nil {
 		t.Fatal("expected Egress to exist before deletion")
 	}
 
@@ -416,7 +416,7 @@ func TestCoilReconciler_DeletionCleanup(t *testing.T) {
 	r.Client = cli
 
 	// Reconcile deletion.
-	reconcileOnce(t, r, "to-delete", "default")
+	reconcileOnce(t, r, "to-delete")
 
 	// Verify resources are deleted.
 	if getIPPool(t, r, "to-delete-v4") != nil {
@@ -425,7 +425,7 @@ func TestCoilReconciler_DeletionCleanup(t *testing.T) {
 	if getIPPool(t, r, "to-delete-v6") != nil {
 		t.Error("expected v6 IPPool to be deleted")
 	}
-	if getEgress(t, r, "to-delete", "default") != nil {
+	if getEgress(t, r, "to-delete") != nil {
 		t.Error("expected Egress to be deleted")
 	}
 
@@ -478,10 +478,10 @@ func TestCoilReconciler_DestinationChangeTriggersUpdate(t *testing.T) {
 	r := &CoilReconciler{Client: cli, Scheme: scheme}
 
 	// Initial reconcile.
-	reconcileOnce(t, r, "dest-update", "default")
-	reconcileOnce(t, r, "dest-update", "default")
+	reconcileOnce(t, r, "dest-update")
+	reconcileOnce(t, r, "dest-update")
 
-	egress := getEgress(t, r, "dest-update", "default")
+	egress := getEgress(t, r, "dest-update")
 	if egress == nil {
 		t.Fatal("expected Egress to exist")
 	}
@@ -501,9 +501,9 @@ func TestCoilReconciler_DestinationChangeTriggersUpdate(t *testing.T) {
 	}
 
 	// Re-reconcile the Outbound (simulating the watch trigger).
-	reconcileOnce(t, r, "dest-update", "default")
+	reconcileOnce(t, r, "dest-update")
 
-	egress = getEgress(t, r, "dest-update", "default")
+	egress = getEgress(t, r, "dest-update")
 	if egress == nil {
 		t.Fatal("expected Egress to exist after update")
 	}
@@ -553,10 +553,10 @@ func TestCoilReconciler_NoMatchingDestinations(t *testing.T) {
 	cli := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ob, dest).Build()
 	r := &CoilReconciler{Client: cli, Scheme: scheme}
 
-	reconcileOnce(t, r, "no-match", "default")
-	reconcileOnce(t, r, "no-match", "default")
+	reconcileOnce(t, r, "no-match")
+	reconcileOnce(t, r, "no-match")
 
-	egress := getEgress(t, r, "no-match", "default")
+	egress := getEgress(t, r, "no-match")
 	if egress == nil {
 		t.Fatal("expected Egress to exist even with no matching destinations")
 	}
@@ -590,8 +590,8 @@ func TestCoilReconciler_StatusAddressesPreferred(t *testing.T) {
 	cli := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ob).WithStatusSubresource(ob).Build()
 	r := &CoilReconciler{Client: cli, Scheme: scheme}
 
-	reconcileOnce(t, r, "status-pref", "default")
-	reconcileOnce(t, r, "status-pref", "default")
+	reconcileOnce(t, r, "status-pref")
+	reconcileOnce(t, r, "status-pref")
 
 	pool := getIPPool(t, r, "status-pref-v4")
 	if pool == nil {

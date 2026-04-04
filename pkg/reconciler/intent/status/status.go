@@ -53,7 +53,7 @@ func (u *Updater) statusUpdateWithRetry(ctx context.Context, obj client.Object, 
 			// Re-fetch to get current resourceVersion.
 			fresh := obj.DeepCopyObject().(client.Object)
 			if err := u.client.Get(ctx, client.ObjectKeyFromObject(obj), fresh); err != nil {
-				return err
+				return fmt.Errorf("re-fetching %s/%s for status update: %w", obj.GetObjectKind().GroupVersionKind().Kind, obj.GetName(), err)
 			}
 			obj = fresh
 		}
@@ -63,7 +63,7 @@ func (u *Updater) statusUpdateWithRetry(ctx context.Context, obj client.Object, 
 			return nil
 		}
 		if !apierrors.IsConflict(err) {
-			return err
+			return fmt.Errorf("updating status for %s/%s: %w", obj.GetObjectKind().GroupVersionKind().Kind, obj.GetName(), err)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}

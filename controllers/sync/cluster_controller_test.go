@@ -16,10 +16,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
 
-func newCapiCluster(name, namespace string) *unstructured.Unstructured {
+func newCapiCluster(namespace string) *unstructured.Unstructured {
 	cluster := &unstructured.Unstructured{}
 	cluster.SetGroupVersionKind(capiClusterGVK)
-	cluster.SetName(name)
+	cluster.SetName("test-cluster")
 	cluster.SetNamespace(namespace)
 	return cluster
 }
@@ -58,7 +58,7 @@ func TestClusterReconcile_ClusterNotFound(t *testing.T) {
 }
 
 func TestClusterReconcile_SecretNotFound(t *testing.T) {
-	cluster := newCapiCluster("test-cluster", "test-ns")
+	cluster := newCapiCluster("test-ns")
 	c := newClusterController(cluster)
 
 	result, err := c.Reconcile(context.Background(), ctrl.Request{
@@ -73,7 +73,7 @@ func TestClusterReconcile_SecretNotFound(t *testing.T) {
 }
 
 func TestClusterReconcile_SecretMissingValueKey(t *testing.T) {
-	cluster := newCapiCluster("test-cluster", "test-ns")
+	cluster := newCapiCluster("test-ns")
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-cluster-kubeconfig",
@@ -97,7 +97,7 @@ func TestClusterReconcile_SecretMissingValueKey(t *testing.T) {
 }
 
 func TestClusterReconcile_SecretEmptyValue(t *testing.T) {
-	cluster := newCapiCluster("test-cluster", "test-ns")
+	cluster := newCapiCluster("test-ns")
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-cluster-kubeconfig",
@@ -121,7 +121,7 @@ func TestClusterReconcile_SecretEmptyValue(t *testing.T) {
 }
 
 func TestClusterReconcile_InvalidKubeconfig(t *testing.T) {
-	cluster := newCapiCluster("test-cluster", "test-ns")
+	cluster := newCapiCluster("test-ns")
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-cluster-kubeconfig",
@@ -145,7 +145,7 @@ func TestClusterReconcile_InvalidKubeconfig(t *testing.T) {
 }
 
 func TestClusterReconcile_Success(t *testing.T) {
-	cluster := newCapiCluster("test-cluster", "test-ns")
+	cluster := newCapiCluster("test-ns")
 	// Minimal valid kubeconfig that clientcmd.RESTConfigFromKubeConfig can parse.
 	kubeconfig := []byte(`apiVersion: v1
 kind: Config

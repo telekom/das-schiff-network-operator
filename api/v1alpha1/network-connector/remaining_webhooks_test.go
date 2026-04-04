@@ -27,8 +27,7 @@ import (
 // helpers (int32Ptr and strPtr live in network_vrf_webhook_test.go)
 // ---------------------------------------------------------------------------
 
-func int64Ptr(v int64) *int64    { return &v }
-func uint32Ptr(v uint32) *uint32 { return &v }
+
 
 // ===========================================================================
 // BGPPeering tests

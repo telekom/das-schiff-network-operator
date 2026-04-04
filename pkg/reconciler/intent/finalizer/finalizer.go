@@ -56,7 +56,7 @@ func (m *Manager) ReconcileFinalizers(ctx context.Context, fetched *resolver.Fet
 		return fmt.Errorf("Destination finalizers: %w", err)
 	}
 	if err := m.reconcileCollectorFinalizers(ctx, fetched); err != nil {
-		return fmt.Errorf("Collector finalizers: %w", err)
+		return fmt.Errorf("collector finalizers: %w", err)
 	}
 	return nil
 }
