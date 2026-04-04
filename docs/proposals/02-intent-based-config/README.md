@@ -118,7 +118,7 @@ All intent controllers run in the **tenant cluster**, integrated into the existi
 │                                 ▼                                   │
 │                ┌────────────────────────────────────────┐           │
 │                │ Integration with revision pipeline     │           │
-│                │ (see §3.4 — open design question)      │           │
+│                │ (see §3.4 — Option B, D24)             │           │
 │                └────────┬───────────────────────────────┘           │
 │                         │                                           │
 │                         ▼                                           │
@@ -970,7 +970,7 @@ status:
 
 **Validation Rules:**
 - All referenced `Inbound` resources must exist.
-- All referenced `Inbound` resources must not have a MetalLB controller configured (BGP is handled by the workload, not MetalLB).
+- All referenced `Inbound` resources must not have `advertisement` configured (BGP is handled by the workload directly, not via MetalLB). A `BGPNeighbor`-referenced `Inbound` provides the IP subnet/VRF plumbing only — it must not create a MetalLB pool for those addresses. The `InboundSpec.Advertisement` field must be absent (zero value) for any `Inbound` listed in `allowedInbounds`.
 
 ### 4.8 PodNetwork
 
@@ -1642,9 +1642,9 @@ type Layer2AttachmentSpec struct {
     //          the HBN-generated name (when interfaceRef is not set).
     // +optional
     InterfaceName *string `json:"interfaceName,omitempty"`
-    // SRIOV indicates whether this attachment uses SR-IOV VFs.
+    // SRIOV configures SR-IOV VF settings for this attachment.
     // +optional
-    SRIOV bool `json:"sriov,omitempty"`
+    SRIOV *SRIOVConfig `json:"sriov,omitempty"`
     // Communities is a list of BGP communities to set on routes exported
     // from this attachment into matched Destination VRFs.
     // +optional
@@ -1652,6 +1652,14 @@ type Layer2AttachmentSpec struct {
     // Note: Static routing for non-HBN mode (next-hop addresses) is on the
     // Destination CRD (NextHop field), not here. The controller reads
     // Destination.nextHop when building routes for interfaceRef-based attachments.
+}
+
+// SRIOVConfig configures SR-IOV VF settings for a Layer2Attachment.
+type SRIOVConfig struct {
+    // Enabled indicates whether to configure SR-IOV VFs for this attachment
+    // (VTEP_LEAF mode on BM4X). Immutable after creation.
+    // +kubebuilder:default=false
+    Enabled bool `json:"enabled"`
 }
 
 // InboundSpec defines the desired state of Inbound.
