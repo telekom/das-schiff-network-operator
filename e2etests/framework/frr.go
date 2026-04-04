@@ -120,7 +120,7 @@ func (f *Framework) ClearEVPNOnNodes(ctx context.Context, nodes []string) error 
 
 // WaitForCleanRMACs clears EVPN, waits for kernel neighbor tables on all
 // br.* bridges to be populated with correct (non-zero) MACs. It retries the
-// EVPN clear if zero-MAC entries reappear, up to maxAttempts times.
+// EVPN clear if zero-MAC entries reappear, up to 3 times.
 func (f *Framework) WaitForCleanRMACs(ctx context.Context, nodes []string, timeout time.Duration) error {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()

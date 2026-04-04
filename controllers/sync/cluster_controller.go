@@ -3,6 +3,8 @@ package sync
 import (
 	"context"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
@@ -39,7 +41,7 @@ func (r *ClusterController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	err := r.Client.Get(ctx, req.NamespacedName, cluster)
 	if apierrors.IsNotFound(err) {
 		log.Info("Cluster deleted, removing remote client")
-		r.Remotes.Remove(req.Namespace)
+		r.Remotes.Remove(req.NamespacedName)
 		return ctrl.Result{}, nil
 	}
 	if err != nil {
@@ -55,7 +57,7 @@ func (r *ClusterController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}, secret)
 	if apierrors.IsNotFound(err) {
 		log.Info("kubeconfig Secret not found yet, waiting", "secret", secretName)
-		return ctrl.Result{RequeueAfter: 30_000_000_000}, nil // 30s
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("fetching kubeconfig Secret %q: %w", secretName, err)
@@ -64,14 +66,14 @@ func (r *ClusterController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	kubeconfig, ok := secret.Data["value"]
 	if !ok || len(kubeconfig) == 0 {
 		log.Info("kubeconfig Secret missing 'value' key", "secret", secretName)
-		return ctrl.Result{RequeueAfter: 30_000_000_000}, nil
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 
-	if err := r.Remotes.UpdateFromKubeconfig(req.Namespace, kubeconfig); err != nil {
-		return ctrl.Result{}, fmt.Errorf("updating remote client for %q: %w", req.Namespace, err)
+	if err := r.Remotes.UpdateFromKubeconfig(req.NamespacedName, kubeconfig); err != nil {
+		return ctrl.Result{}, fmt.Errorf("updating remote client for %q: %w", req.NamespacedName, err)
 	}
 
-	log.Info("Remote client ready", "namespace", req.Namespace)
+	log.Info("Remote client ready", "cluster", req.NamespacedName)
 	return ctrl.Result{}, nil
 }
 
@@ -90,7 +92,7 @@ func (r *ClusterController) SetupWithManager(mgr ctrl.Manager) error {
 			// Convention: <cluster-name>-kubeconfig
 			name := secret.GetName()
 			const suffix = "-kubeconfig"
-			if len(name) <= len(suffix) {
+			if !strings.HasSuffix(name, suffix) {
 				return nil
 			}
 			clusterName := name[:len(name)-len(suffix)]

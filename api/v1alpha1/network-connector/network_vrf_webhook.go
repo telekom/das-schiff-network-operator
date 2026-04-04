@@ -65,8 +65,8 @@ func (*Network) ValidateDelete(_ context.Context, r *Network) (admission.Warning
 }
 
 func (r *Network) validateNetwork() error {
-	if r.Spec.IPv4 == nil && r.Spec.IPv6 == nil {
-		return fmt.Errorf("at least one of ipv4 or ipv6 must be set")
+	if r.Spec.IPv4 == nil && r.Spec.IPv6 == nil && r.Spec.VLAN == nil {
+		return fmt.Errorf("at least one of ipv4, ipv6 or vlan must be set")
 	}
 	if r.Spec.IPv4 != nil {
 		if _, _, err := net.ParseCIDR(r.Spec.IPv4.CIDR); err != nil {

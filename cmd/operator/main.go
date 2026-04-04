@@ -334,6 +334,27 @@ func setupIntentReconciler(mgr manager.Manager, apiTimeout time.Duration, cfg *o
 	if err = (&networkconnector.Outbound{}).SetupWebhookWithManager(mgr); err != nil {
 		return fmt.Errorf("unable to create webhook for Outbound: %w", err)
 	}
+	if err = (&networkconnector.BGPPeering{}).SetupWebhookWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to create webhook for BGPPeering: %w", err)
+	}
+	if err = (&networkconnector.Collector{}).SetupWebhookWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to create webhook for Collector: %w", err)
+	}
+	if err = (&networkconnector.Destination{}).SetupWebhookWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to create webhook for Destination: %w", err)
+	}
+	if err = (&networkconnector.TrafficMirror{}).SetupWebhookWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to create webhook for TrafficMirror: %w", err)
+	}
+	if err = (&networkconnector.PodNetwork{}).SetupWebhookWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to create webhook for PodNetwork: %w", err)
+	}
+	if err = (&networkconnector.AnnouncementPolicy{}).SetupWebhookWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to create webhook for AnnouncementPolicy: %w", err)
+	}
+	if err = (&networkconnector.InterfaceConfig{}).SetupWebhookWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to create webhook for InterfaceConfig: %w", err)
+	}
 
 	setupLog.Info("intent reconciler enabled — legacy ConfigReconciler disabled")
 	return nil

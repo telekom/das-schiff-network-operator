@@ -43,7 +43,11 @@ var _ = Describe("Intent BGP Peering", Label("intent", "bgp"), func() {
 		Expect(f.ApplyManifest(ctx, manifest)).To(Succeed())
 
 		By("Waiting for CRDs to settle")
-		time.Sleep(5 * time.Second)
+		Eventually(func() bool {
+			nnc, err := f.GetNNC(ctx, cfg.WorkerNode1)
+			return err == nil && nnc != nil
+		}).WithTimeout(30*time.Second).WithPolling(5*time.Second).Should(BeTrue(),
+			"NNC should be present after applying intent CRDs")
 
 		By("Verifying existing m2m VRF BGP peering is still functional")
 		// The legacy BGPaaS test runs separately; here we just verify

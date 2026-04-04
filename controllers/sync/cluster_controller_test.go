@@ -41,7 +41,7 @@ func newClusterController(objs ...client.Object) *ClusterController {
 func TestClusterReconcile_ClusterNotFound(t *testing.T) {
 	c := newClusterController()
 	// Pre-populate a remote client to verify Remove is called.
-	c.Remotes.clients["test-ns"] = fake.NewClientBuilder().WithScheme(testScheme()).Build()
+	c.Remotes.clients[types.NamespacedName{Namespace: "test-ns", Name: "test-cluster"}] = fake.NewClientBuilder().WithScheme(testScheme()).Build()
 
 	result, err := c.Reconcile(context.Background(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Namespace: "test-ns", Name: "test-cluster"},
@@ -52,7 +52,7 @@ func TestClusterReconcile_ClusterNotFound(t *testing.T) {
 	if result.RequeueAfter != 0 {
 		t.Errorf("expected no requeue, got RequeueAfter=%v", result.RequeueAfter)
 	}
-	if c.Remotes.Has("test-ns") {
+	if c.Remotes.Has(types.NamespacedName{Namespace: "test-ns", Name: "test-cluster"}) {
 		t.Error("expected remote client to be removed")
 	}
 }
@@ -184,7 +184,7 @@ users:
 	if result.RequeueAfter != 0 {
 		t.Errorf("expected no requeue, got RequeueAfter=%v", result.RequeueAfter)
 	}
-	if !c.Remotes.Has("test-ns") {
+	if !c.Remotes.Has(types.NamespacedName{Namespace: "test-ns", Name: "test-cluster"}) {
 		t.Error("expected remote client to be registered after successful reconcile")
 	}
 }

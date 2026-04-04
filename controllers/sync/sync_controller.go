@@ -71,8 +71,8 @@ func intentCRDLists() []client.ObjectList {
 func (r *SyncController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := r.Log.WithValues("namespace", req.Namespace)
 
-	remoteClient := r.Remotes.Get(req.Namespace)
-	if remoteClient == nil {
+	remoteClients := r.Remotes.GetByNamespace(req.Namespace)
+	if len(remoteClients) == 0 {
 		// No remote client yet — ClusterController hasn't set it up.
 		return ctrl.Result{RequeueAfter: 10_000_000_000}, nil // 10s
 	}
@@ -84,8 +84,10 @@ func (r *SyncController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		}
 		items := extractItems(list)
 		for i := range items {
-			if err := r.syncObject(ctx, log, remoteClient, items[i]); err != nil {
-				return ctrl.Result{}, err
+			for _, remoteClient := range remoteClients {
+				if err := r.syncObject(ctx, log, remoteClient, items[i]); err != nil {
+					return ctrl.Result{}, err
+				}
 			}
 		}
 	}

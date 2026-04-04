@@ -41,7 +41,7 @@ func newFakeSyncController(mgmtObjs []client.Object, remoteObjs []client.Object)
 		Build()
 
 	remotes := NewRemoteClientManager(s)
-	remotes.clients["test-cluster"] = remoteClient
+	remotes.clients[types.NamespacedName{Namespace: "test-cluster", Name: "test-cluster"}] = remoteClient
 
 	return &SyncController{
 		Client:  mgmtClient,
@@ -305,27 +305,27 @@ func TestRemoteClientManager(t *testing.T) {
 	s := testScheme()
 	m := NewRemoteClientManager(s)
 
-	if m.Has("ns1") {
-		t.Error("Should not have ns1 initially")
+	if m.Has(types.NamespacedName{Namespace: "ns1", Name: "c1"}) {
+		t.Error("Should not have ns1/c1 initially")
 	}
-	if m.Get("ns1") != nil {
-		t.Error("Get should return nil for unknown namespace")
+	if m.Get(types.NamespacedName{Namespace: "ns1", Name: "c1"}) != nil {
+		t.Error("Get should return nil for unknown cluster")
 	}
 
 	// We can't test UpdateFromKubeconfig without a real cluster,
 	// but we can test Has/Get/Remove with direct injection.
-	m.clients["ns1"] = fake.NewClientBuilder().WithScheme(s).Build()
+	m.clients[types.NamespacedName{Namespace: "ns1", Name: "c1"}] = fake.NewClientBuilder().WithScheme(s).Build()
 
-	if !m.Has("ns1") {
-		t.Error("Should have ns1 after injection")
+	if !m.Has(types.NamespacedName{Namespace: "ns1", Name: "c1"}) {
+		t.Error("Should have ns1/c1 after injection")
 	}
-	if m.Get("ns1") == nil {
-		t.Error("Get should return client for ns1")
+	if m.Get(types.NamespacedName{Namespace: "ns1", Name: "c1"}) == nil {
+		t.Error("Get should return client for ns1/c1")
 	}
 
-	m.Remove("ns1")
-	if m.Has("ns1") {
-		t.Error("Should not have ns1 after removal")
+	m.Remove(types.NamespacedName{Namespace: "ns1", Name: "c1"})
+	if m.Has(types.NamespacedName{Namespace: "ns1", Name: "c1"}) {
+		t.Error("Should not have ns1/c1 after removal")
 	}
 }
 

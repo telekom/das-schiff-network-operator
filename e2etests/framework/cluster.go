@@ -200,6 +200,8 @@ func (f *Framework) applySingleObject(ctx context.Context, yamlData []byte, ns s
 				continue
 			}
 			return err
+		} else if !apierrors.IsNotFound(err) {
+			return fmt.Errorf("get %s/%s: %w", obj.GetKind(), obj.GetName(), err)
 		}
 		return f.Client.Create(ctx, obj)
 	}
