@@ -783,7 +783,7 @@ func (lo *Loopback) Sort() {
 		lo.IPv4.Sort()
 	}
 	if lo.IPv6 != nil {
-		lo.IPv4.Sort()
+		lo.IPv6.Sort()
 	}
 }
 
