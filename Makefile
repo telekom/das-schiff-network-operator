@@ -198,9 +198,9 @@ e2e-down: ## Tear down the E2E lab.
 	cd e2e/setup && go run ./cmd down
 
 .PHONY: e2e-test
-e2e-test: ## Run all E2E tests.
+e2e-test: ## Run legacy E2E tests (excludes intent/mirror/sync tests).
 	docker exec clab-nwop-tester bash -c \
-	  'cd /repo && KUBECONFIG=/repo/e2etests/.kubeconfig go test -v -count=1 -timeout=30m ./e2etests/...'
+	  'cd /repo && KUBECONFIG=/repo/e2etests/.kubeconfig go test -v -count=1 -timeout=30m ./e2etests/... -ginkgo.label-filter="!intent && !intent-exclusive && !mirror && !sync"'
 
 .PHONY: e2e-test-intent
 e2e-test-intent: ## Run E2E tests with intent reconciler enabled (replaces legacy pipeline).
