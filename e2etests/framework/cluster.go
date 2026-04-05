@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
@@ -190,23 +191,49 @@ func (f *Framework) applySingleObject(ctx context.Context, yamlData []byte, ns s
 		Namespace: obj.GetNamespace(),
 	}
 
-	// Retry on conflict (operator may update resource version concurrently).
-	for attempt := 0; attempt < 5; attempt++ {
+	// Retry on conflict (operator may update resource version concurrently)
+	// and on transient webhook failures (connection reset after operator restart).
+	for attempt := 0; attempt < 10; attempt++ {
 		existing := obj.DeepCopy()
 		if err := f.Client.Get(ctx, key, existing); err == nil {
 			obj.SetResourceVersion(existing.GetResourceVersion())
 			err = f.Client.Update(ctx, obj)
-			if apierrors.IsConflict(err) {
-				time.Sleep(500 * time.Millisecond)
+			if apierrors.IsConflict(err) || isWebhookTransient(err) {
+				time.Sleep(time.Duration(attempt+1) * 500 * time.Millisecond)
 				continue
 			}
 			return err
 		} else if !apierrors.IsNotFound(err) {
+			if isWebhookTransient(err) {
+				time.Sleep(time.Duration(attempt+1) * 500 * time.Millisecond)
+				continue
+			}
 			return fmt.Errorf("get %s/%s: %w", obj.GetKind(), obj.GetName(), err)
 		}
-		return f.Client.Create(ctx, obj)
+		err = f.Client.Create(ctx, obj)
+		if isWebhookTransient(err) {
+			time.Sleep(time.Duration(attempt+1) * 500 * time.Millisecond)
+			continue
+		}
+		return err
 	}
-	return fmt.Errorf("failed to apply %s/%s after retries: conflict", obj.GetKind(), obj.GetName())
+	return fmt.Errorf("failed to apply %s/%s after retries", obj.GetKind(), obj.GetName())
+}
+
+// isWebhookTransient returns true for transient webhook errors (connection reset,
+// refused, EOF) that occur briefly after an operator restart.
+func isWebhookTransient(err error) bool {
+	if err == nil {
+		return false
+	}
+	if apierrors.IsInternalError(err) {
+		msg := err.Error()
+		return strings.Contains(msg, "connection reset by peer") ||
+			strings.Contains(msg, "connection refused") ||
+			strings.Contains(msg, "EOF") ||
+			strings.Contains(msg, "webhook")
+	}
+	return false
 }
 
 // splitYAMLDocuments splits multi-document YAML into individual documents.

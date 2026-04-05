@@ -3,6 +3,7 @@ package framework
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -185,18 +186,41 @@ func (f *Framework) waitForOperatorReady(ctx context.Context, timeout time.Durat
 	})
 }
 
-// waitForWebhookReady waits for the operator webhook endpoint to be serving.
+// waitForWebhookReady waits for the operator webhook to actually serve requests.
+// Checking the endpoint alone isn't enough — the TLS cert may not be injected yet.
 func (f *Framework) waitForWebhookReady(ctx context.Context, timeout time.Duration) error {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	return Poll(ctx, 5*time.Second, func() (bool, error) {
-		ep, err := f.KubeClient.CoreV1().Endpoints(operatorNamespace).Get(ctx, "network-operator-webhook-service", metav1.GetOptions{})
-		if err != nil {
-			return false, nil
+	// Dry-run a VRF create to verify the webhook is responding.
+	vrfProbe := &unstructured.Unstructured{}
+	vrfProbe.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   intentAPIGroup,
+		Version: "v1alpha1",
+		Kind:    "VRF",
+	})
+	vrfProbe.SetName("webhook-probe")
+	vrfProbe.SetNamespace("default")
+	unstructured.SetNestedField(vrfProbe.Object, "probe", "spec", "vrf") //nolint:errcheck
+
+	return Poll(ctx, 3*time.Second, func() (bool, error) {
+		err := f.Client.Create(ctx, vrfProbe, client.DryRunAll)
+		if err == nil {
+			return true, nil
 		}
-		for _, subset := range ep.Subsets {
-			if len(subset.Addresses) > 0 {
+		// Any API-level error (4xx) means the webhook IS responding.
+		// Only connection-level errors (reset, refused, timeout) mean it's not ready.
+		if apierrors.IsInvalid(err) || apierrors.IsForbidden(err) ||
+			apierrors.IsAlreadyExists(err) || apierrors.IsBadRequest(err) ||
+			apierrors.IsConflict(err) {
+			return true, nil
+		}
+		// Check for webhook-specific validation errors (status reason).
+		var statusErr *apierrors.StatusError
+		if ok := errors.As(err, &statusErr); ok {
+			code := statusErr.Status().Code
+			// Any HTTP response from the API server means webhook is reachable.
+			if code >= 400 && code < 500 {
 				return true, nil
 			}
 		}
