@@ -28,7 +28,7 @@ const (
 
 // EnableIntentReconciler patches the operator deployment to enable the intent
 // reconciler and creates the necessary RBAC for intent CRDs. It then waits
-// for the operator to restart.
+// for the operator to restart and the webhook to be serving.
 func (f *Framework) EnableIntentReconciler(ctx context.Context) error {
 	// 1. Create RBAC for intent CRD API group.
 	if err := f.ensureIntentRBAC(ctx); err != nil {
@@ -48,6 +48,11 @@ func (f *Framework) EnableIntentReconciler(ctx context.Context) error {
 	// 4. Wait for operator pod to restart with new args.
 	if err := f.waitForOperatorReady(ctx, 120*time.Second); err != nil {
 		return fmt.Errorf("wait for operator restart: %w", err)
+	}
+
+	// 5. Wait for webhook to be serving (cert generation takes a moment).
+	if err := f.waitForWebhookReady(ctx, 120*time.Second); err != nil {
+		return fmt.Errorf("wait for webhook ready: %w", err)
 	}
 
 	return nil
@@ -177,6 +182,25 @@ func (f *Framework) waitForOperatorReady(ctx context.Context, timeout time.Durat
 		return deploy.Status.UpdatedReplicas == *deploy.Spec.Replicas &&
 			deploy.Status.AvailableReplicas == *deploy.Spec.Replicas &&
 			deploy.Status.UnavailableReplicas == 0, nil
+	})
+}
+
+// waitForWebhookReady waits for the operator webhook endpoint to be serving.
+func (f *Framework) waitForWebhookReady(ctx context.Context, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	return Poll(ctx, 5*time.Second, func() (bool, error) {
+		ep, err := f.KubeClient.CoreV1().Endpoints(operatorNamespace).Get(ctx, "network-operator-webhook-service", metav1.GetOptions{})
+		if err != nil {
+			return false, nil
+		}
+		for _, subset := range ep.Subsets {
+			if len(subset.Addresses) > 0 {
+				return true, nil
+			}
+		}
+		return false, nil
 	})
 }
 

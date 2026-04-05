@@ -52,7 +52,10 @@ var _ = BeforeSuite(func() {
 		By("Intent mode: applying intent base-configs (VRFs, Networks, Destinations)")
 		intentConfigs, err := config.ReadManifest("intent/base-configs.yaml")
 		Expect(err).NotTo(HaveOccurred())
-		Expect(f.ApplyManifest(context.Background(), intentConfigs)).To(Succeed())
+		// Retry because the webhook needs time to start serving after the operator restart.
+		Eventually(func() error {
+			return f.ApplyManifest(context.Background(), intentConfigs)
+		}).WithTimeout(120 * time.Second).WithPolling(5 * time.Second).Should(Succeed())
 
 		By("Intent mode: waiting for intent reconciler to produce NNCs")
 		Expect(f.WaitForIntentNNCs(context.Background(), 60*time.Second)).To(Succeed())
