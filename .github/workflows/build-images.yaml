@@ -198,6 +198,9 @@ jobs:
 
       - name: Generate SBOM
         if: inputs.sbom
+        # Note: sbom-action v0.24.0 requires the Node.js 24 Actions runtime.
+        # GitHub-hosted runners (ubuntu-latest) include node24; self-hosted runners
+        # and GHES environments may need to be updated before upgrading to v0.24.0.
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
         with:
           image: ghcr.io/telekom/${{ matrix.image }}@${{ steps.push.outputs.digest }}
