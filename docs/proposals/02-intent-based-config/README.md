@@ -808,8 +808,10 @@ spec:
   poolName: my-pool
   # Optional: LoadBalancerClass for tenant-managed LB implementations (e.g., kube-vip)
   # tenantLoadBalancerClass: my-lb-class
-  # Advertisement type: bgp (default) or l2
-  advertisement:
+   # Advertisement type: bgp (default) or l2
+   # Optional: omit entirely for BGPNeighbor-referenced Inbounds where the
+   # workload manages its own BGP and no MetalLB pool should be created.
+   advertisement:
     type: bgp                        # bgp | l2
 
   # Note: Ingress controller orchestration (e.g. nginx deployment) is
@@ -970,7 +972,7 @@ status:
 
 **Validation Rules:**
 - All referenced `Inbound` resources must exist.
-- All referenced `Inbound` resources must not have `advertisement` configured (BGP is handled by the workload directly, not via MetalLB). A `BGPNeighbor`-referenced `Inbound` provides the IP subnet/VRF plumbing only — it must not create a MetalLB pool for those addresses. The `InboundSpec.Advertisement` field must be absent (zero value) for any `Inbound` listed in `allowedInbounds`.
+- All referenced `Inbound` resources must not have `advertisement` configured (BGP is handled by the workload directly, not via MetalLB). A `BGPNeighbor`-referenced `Inbound` provides the IP subnet/VRF plumbing only — it must not create a MetalLB pool for those addresses. The `advertisement` field must be omitted (not set) in the `InboundSpec` for any `Inbound` listed in `allowedInbounds`.
 
 ### 4.8 PodNetwork
 
