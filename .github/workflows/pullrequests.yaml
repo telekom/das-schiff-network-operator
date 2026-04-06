@@ -42,6 +42,9 @@ jobs:
       - name: Run Tests
         run: make test
       - name: Upload coverage report
+        # Note: codecov-action v6 requires the Node.js 24 Actions runtime.
+        # GitHub-hosted runners (ubuntu-latest) include node24; self-hosted runners
+        # and GHES environments may need to be updated before upgrading to v6.
         uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6.0.0
         with:
           files: cover.out
