@@ -86,10 +86,12 @@ func (b *AnnouncementBuilder) Build(_ context.Context, data *resolver.ResolvedDa
 
 // buildEVPNExportFilter constructs an EVPN export filter from an AnnouncementPolicy.
 func (*AnnouncementBuilder) buildEVPNExportFilter(ap *nc.AnnouncementPolicy) *networkv1alpha1.Filter {
-	var items []networkv1alpha1.FilterItem
+	hostItems := buildHostRouteFilterItems(ap.Spec.HostRoutes)
+	aggItems := buildAggregateFilterItems(ap.Spec.Aggregate)
 
-	items = append(items, buildHostRouteFilterItems(ap.Spec.HostRoutes)...)
-	items = append(items, buildAggregateFilterItems(ap.Spec.Aggregate)...)
+	items := make([]networkv1alpha1.FilterItem, 0, len(hostItems)+len(aggItems))
+	items = append(items, hostItems...)
+	items = append(items, aggItems...)
 
 	if len(items) == 0 {
 		return nil

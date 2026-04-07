@@ -217,220 +217,111 @@ func filterActive[T any, PT interface {
 	return active
 }
 
+// paginateInto fetches all pages of a list type, calling consume on each page's items.
+func paginateInto[L interface {
+	client.ObjectList
+	*U
+}, U any](ctx context.Context, c client.Client, baseOpts []client.ListOption, consume func(list L)) error {
+	for continueToken := ""; ; {
+		list := L(new(U))
+		opts := make([]client.ListOption, 0, len(baseOpts)+2)
+		opts = append(opts, baseOpts...)
+		opts = append(opts, client.Limit(listLimit))
+		if continueToken != "" {
+			opts = append(opts, client.Continue(continueToken))
+		}
+		if err := c.List(ctx, list, opts...); err != nil {
+			return err
+		}
+		consume(list)
+		continueToken = list.GetContinue()
+		if continueToken == "" {
+			return nil
+		}
+	}
+}
+
 func (r *Reconciler) fetchAll(ctx context.Context) (*resolver.FetchedResources, error) {
 	f := &resolver.FetchedResources{}
 
-	// Build base list options — restrict to namespace if configured.
 	var nsOpts []client.ListOption
 	if r.namespace != "" {
 		nsOpts = append(nsOpts, client.InNamespace(r.namespace))
 	}
 
-	// Fetch nodes (always cluster-wide, paginated).
-	for continueToken := ""; ; {
-		nodeList := &corev1.NodeList{}
-		opts := []client.ListOption{client.Limit(listLimit)}
-		if continueToken != "" {
-			opts = append(opts, client.Continue(continueToken))
-		}
-		if err := r.client.List(ctx, nodeList, opts...); err != nil {
-			return nil, fmt.Errorf("error listing Nodes: %w", err)
-		}
-		f.Nodes = append(f.Nodes, nodeList.Items...)
-		continueToken = nodeList.GetContinue()
-		if continueToken == "" {
-			break
-		}
+	if err := paginateInto[*corev1.NodeList](ctx, r.client, nil, func(l *corev1.NodeList) {
+		f.Nodes = append(f.Nodes, l.Items...)
+	}); err != nil {
+		return nil, fmt.Errorf("error listing Nodes: %w", err)
 	}
 
-	// Fetch VRFs (paginated).
-	for continueToken := ""; ; {
-		vrfList := &nc.VRFList{}
-		opts := append(append([]client.ListOption{}, nsOpts...), client.Limit(listLimit))
-		if continueToken != "" {
-			opts = append(opts, client.Continue(continueToken))
-		}
-		if err := r.client.List(ctx, vrfList, opts...); err != nil {
-			return nil, fmt.Errorf("error listing VRFs: %w", err)
-		}
-		f.AllVRFs = append(f.AllVRFs, vrfList.Items...)
-		f.VRFs = append(f.VRFs, filterActive(vrfList.Items)...)
-		continueToken = vrfList.GetContinue()
-		if continueToken == "" {
-			break
-		}
+	if err := paginateInto[*nc.VRFList](ctx, r.client, nsOpts, func(l *nc.VRFList) {
+		f.AllVRFs = append(f.AllVRFs, l.Items...)
+		f.VRFs = append(f.VRFs, filterActive(l.Items)...)
+	}); err != nil {
+		return nil, fmt.Errorf("error listing VRFs: %w", err)
 	}
 
-	// Fetch Networks (paginated).
-	for continueToken := ""; ; {
-		networkList := &nc.NetworkList{}
-		opts := append(append([]client.ListOption{}, nsOpts...), client.Limit(listLimit))
-		if continueToken != "" {
-			opts = append(opts, client.Continue(continueToken))
-		}
-		if err := r.client.List(ctx, networkList, opts...); err != nil {
-			return nil, fmt.Errorf("error listing Networks: %w", err)
-		}
-		f.AllNetworks = append(f.AllNetworks, networkList.Items...)
-		f.Networks = append(f.Networks, filterActive(networkList.Items)...)
-		continueToken = networkList.GetContinue()
-		if continueToken == "" {
-			break
-		}
+	if err := paginateInto[*nc.NetworkList](ctx, r.client, nsOpts, func(l *nc.NetworkList) {
+		f.AllNetworks = append(f.AllNetworks, l.Items...)
+		f.Networks = append(f.Networks, filterActive(l.Items)...)
+	}); err != nil {
+		return nil, fmt.Errorf("error listing Networks: %w", err)
 	}
 
-	// Fetch Destinations (paginated).
-	for continueToken := ""; ; {
-		destList := &nc.DestinationList{}
-		opts := append(append([]client.ListOption{}, nsOpts...), client.Limit(listLimit))
-		if continueToken != "" {
-			opts = append(opts, client.Continue(continueToken))
-		}
-		if err := r.client.List(ctx, destList, opts...); err != nil {
-			return nil, fmt.Errorf("error listing Destinations: %w", err)
-		}
-		f.AllDestinations = append(f.AllDestinations, destList.Items...)
-		f.Destinations = append(f.Destinations, filterActive(destList.Items)...)
-		continueToken = destList.GetContinue()
-		if continueToken == "" {
-			break
-		}
+	if err := paginateInto[*nc.DestinationList](ctx, r.client, nsOpts, func(l *nc.DestinationList) {
+		f.AllDestinations = append(f.AllDestinations, l.Items...)
+		f.Destinations = append(f.Destinations, filterActive(l.Items)...)
+	}); err != nil {
+		return nil, fmt.Errorf("error listing Destinations: %w", err)
 	}
 
-	// Fetch Layer2Attachments (paginated).
-	for continueToken := ""; ; {
-		l2aList := &nc.Layer2AttachmentList{}
-		opts := append(append([]client.ListOption{}, nsOpts...), client.Limit(listLimit))
-		if continueToken != "" {
-			opts = append(opts, client.Continue(continueToken))
-		}
-		if err := r.client.List(ctx, l2aList, opts...); err != nil {
-			return nil, fmt.Errorf("error listing Layer2Attachments: %w", err)
-		}
-		f.Layer2Attachments = append(f.Layer2Attachments, filterActive(l2aList.Items)...)
-		continueToken = l2aList.GetContinue()
-		if continueToken == "" {
-			break
-		}
+	if err := paginateInto[*nc.Layer2AttachmentList](ctx, r.client, nsOpts, func(l *nc.Layer2AttachmentList) {
+		f.Layer2Attachments = append(f.Layer2Attachments, filterActive(l.Items)...)
+	}); err != nil {
+		return nil, fmt.Errorf("error listing Layer2Attachments: %w", err)
 	}
 
-	// Fetch Inbounds (paginated).
-	for continueToken := ""; ; {
-		inboundList := &nc.InboundList{}
-		opts := append(append([]client.ListOption{}, nsOpts...), client.Limit(listLimit))
-		if continueToken != "" {
-			opts = append(opts, client.Continue(continueToken))
-		}
-		if err := r.client.List(ctx, inboundList, opts...); err != nil {
-			return nil, fmt.Errorf("error listing Inbounds: %w", err)
-		}
-		f.Inbounds = append(f.Inbounds, filterActive(inboundList.Items)...)
-		continueToken = inboundList.GetContinue()
-		if continueToken == "" {
-			break
-		}
+	if err := paginateInto[*nc.InboundList](ctx, r.client, nsOpts, func(l *nc.InboundList) {
+		f.Inbounds = append(f.Inbounds, filterActive(l.Items)...)
+	}); err != nil {
+		return nil, fmt.Errorf("error listing Inbounds: %w", err)
 	}
 
-	// Fetch Outbounds (paginated).
-	for continueToken := ""; ; {
-		outboundList := &nc.OutboundList{}
-		opts := append(append([]client.ListOption{}, nsOpts...), client.Limit(listLimit))
-		if continueToken != "" {
-			opts = append(opts, client.Continue(continueToken))
-		}
-		if err := r.client.List(ctx, outboundList, opts...); err != nil {
-			return nil, fmt.Errorf("error listing Outbounds: %w", err)
-		}
-		f.Outbounds = append(f.Outbounds, filterActive(outboundList.Items)...)
-		continueToken = outboundList.GetContinue()
-		if continueToken == "" {
-			break
-		}
+	if err := paginateInto[*nc.OutboundList](ctx, r.client, nsOpts, func(l *nc.OutboundList) {
+		f.Outbounds = append(f.Outbounds, filterActive(l.Items)...)
+	}); err != nil {
+		return nil, fmt.Errorf("error listing Outbounds: %w", err)
 	}
 
-	// Fetch PodNetworks (paginated).
-	for continueToken := ""; ; {
-		podNetworkList := &nc.PodNetworkList{}
-		opts := append(append([]client.ListOption{}, nsOpts...), client.Limit(listLimit))
-		if continueToken != "" {
-			opts = append(opts, client.Continue(continueToken))
-		}
-		if err := r.client.List(ctx, podNetworkList, opts...); err != nil {
-			return nil, fmt.Errorf("error listing PodNetworks: %w", err)
-		}
-		f.PodNetworks = append(f.PodNetworks, filterActive(podNetworkList.Items)...)
-		continueToken = podNetworkList.GetContinue()
-		if continueToken == "" {
-			break
-		}
+	if err := paginateInto[*nc.PodNetworkList](ctx, r.client, nsOpts, func(l *nc.PodNetworkList) {
+		f.PodNetworks = append(f.PodNetworks, filterActive(l.Items)...)
+	}); err != nil {
+		return nil, fmt.Errorf("error listing PodNetworks: %w", err)
 	}
 
-	// Fetch BGPPeerings (paginated).
-	for continueToken := ""; ; {
-		bgpList := &nc.BGPPeeringList{}
-		opts := append(append([]client.ListOption{}, nsOpts...), client.Limit(listLimit))
-		if continueToken != "" {
-			opts = append(opts, client.Continue(continueToken))
-		}
-		if err := r.client.List(ctx, bgpList, opts...); err != nil {
-			return nil, fmt.Errorf("error listing BGPPeerings: %w", err)
-		}
-		f.BGPPeerings = append(f.BGPPeerings, filterActive(bgpList.Items)...)
-		continueToken = bgpList.GetContinue()
-		if continueToken == "" {
-			break
-		}
+	if err := paginateInto[*nc.BGPPeeringList](ctx, r.client, nsOpts, func(l *nc.BGPPeeringList) {
+		f.BGPPeerings = append(f.BGPPeerings, filterActive(l.Items)...)
+	}); err != nil {
+		return nil, fmt.Errorf("error listing BGPPeerings: %w", err)
 	}
 
-	// Fetch Collectors (paginated).
-	for continueToken := ""; ; {
-		collectorList := &nc.CollectorList{}
-		opts := append(append([]client.ListOption{}, nsOpts...), client.Limit(listLimit))
-		if continueToken != "" {
-			opts = append(opts, client.Continue(continueToken))
-		}
-		if err := r.client.List(ctx, collectorList, opts...); err != nil {
-			return nil, fmt.Errorf("error listing Collectors: %w", err)
-		}
-		f.Collectors = append(f.Collectors, filterActive(collectorList.Items)...)
-		continueToken = collectorList.GetContinue()
-		if continueToken == "" {
-			break
-		}
+	if err := paginateInto[*nc.CollectorList](ctx, r.client, nsOpts, func(l *nc.CollectorList) {
+		f.Collectors = append(f.Collectors, filterActive(l.Items)...)
+	}); err != nil {
+		return nil, fmt.Errorf("error listing Collectors: %w", err)
 	}
 
-	// Fetch TrafficMirrors (paginated).
-	for continueToken := ""; ; {
-		mirrorList := &nc.TrafficMirrorList{}
-		opts := append(append([]client.ListOption{}, nsOpts...), client.Limit(listLimit))
-		if continueToken != "" {
-			opts = append(opts, client.Continue(continueToken))
-		}
-		if err := r.client.List(ctx, mirrorList, opts...); err != nil {
-			return nil, fmt.Errorf("error listing TrafficMirrors: %w", err)
-		}
-		f.TrafficMirrors = append(f.TrafficMirrors, filterActive(mirrorList.Items)...)
-		continueToken = mirrorList.GetContinue()
-		if continueToken == "" {
-			break
-		}
+	if err := paginateInto[*nc.TrafficMirrorList](ctx, r.client, nsOpts, func(l *nc.TrafficMirrorList) {
+		f.TrafficMirrors = append(f.TrafficMirrors, filterActive(l.Items)...)
+	}); err != nil {
+		return nil, fmt.Errorf("error listing TrafficMirrors: %w", err)
 	}
 
-	// Fetch AnnouncementPolicies (paginated).
-	for continueToken := ""; ; {
-		policyList := &nc.AnnouncementPolicyList{}
-		opts := append(append([]client.ListOption{}, nsOpts...), client.Limit(listLimit))
-		if continueToken != "" {
-			opts = append(opts, client.Continue(continueToken))
-		}
-		if err := r.client.List(ctx, policyList, opts...); err != nil {
-			return nil, fmt.Errorf("error listing AnnouncementPolicies: %w", err)
-		}
-		f.AnnouncementPolicies = append(f.AnnouncementPolicies, filterActive(policyList.Items)...)
-		continueToken = policyList.GetContinue()
-		if continueToken == "" {
-			break
-		}
+	if err := paginateInto[*nc.AnnouncementPolicyList](ctx, r.client, nsOpts, func(l *nc.AnnouncementPolicyList) {
+		f.AnnouncementPolicies = append(f.AnnouncementPolicies, filterActive(l.Items)...)
+	}); err != nil {
+		return nil, fmt.Errorf("error listing AnnouncementPolicies: %w", err)
 	}
 
 	return f, nil
