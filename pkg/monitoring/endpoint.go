@@ -438,8 +438,7 @@ func passRequest(r *http.Request, addr, query string, results chan []byte, error
 	}
 
 	url := fmt.Sprintf("%s://%s:%s%s", protocol, addr, port, query)
-	//nolint:gosec
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, url, http.NoBody)
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, url, http.NoBody) //nolint:gosec // URL is built from trusted monitoring endpoint addresses
 	if err != nil {
 		errors <- fmt.Errorf("error creating request for %s: %w", addr, err)
 		return
