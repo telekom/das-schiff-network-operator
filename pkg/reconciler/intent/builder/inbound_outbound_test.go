@@ -369,12 +369,12 @@ func TestOutboundBuilder_UnknownNetwork(t *testing.T) {
 	}
 
 	b := NewOutboundBuilder()
-	_, err := b.Build(context.Background(), data)
-	if err == nil {
-		t.Fatal("expected error for unknown Network reference, got nil")
+	result, err := b.Build(context.Background(), data)
+	if err != nil {
+		t.Fatalf("unexpected error for unknown Network reference: %v", err)
 	}
-	if !strings.Contains(err.Error(), "unknown Network") {
-		t.Errorf("expected 'unknown Network' in error, got: %v", err)
+	if len(result) != 0 {
+		t.Errorf("expected empty result when outbound references unknown Network, got %d entries", len(result))
 	}
 }
 

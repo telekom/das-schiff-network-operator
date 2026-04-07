@@ -14,7 +14,7 @@ spec:
     shortNames:
     - ifc
     singular: interfaceconfig
-  scope: Namespaced
+  scope: Cluster
   versions:
   - additionalPrinterColumns:
     - jsonPath: .status.conditions[?(@.type=="Ready")].status

@@ -17,8 +17,6 @@ limitations under the License.
 package resolver
 
 import (
-	"fmt"
-
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 )
 
@@ -61,7 +59,7 @@ func ResolveDestinations(destinations []nc.Destination, vrfs map[string]*Resolve
 			vrfName := *destinations[i].Spec.VRFRef
 			vrf, ok := vrfs[vrfName]
 			if !ok {
-				return nil, fmt.Errorf("destination %q references unknown VRF %q", destinations[i].Name, vrfName)
+				continue
 			}
 			d.VRFSpec = &vrf.Spec
 		}

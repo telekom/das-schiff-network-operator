@@ -55,7 +55,6 @@ type BGPPeeringRef struct {
 }
 
 // BGPPeeringSpec defines the desired state of BGPPeering.
-// +kubebuilder:validation:XValidation:rule="self.mode == oldSelf.mode",message="mode is immutable"
 // +kubebuilder:validation:XValidation:rule="self.mode == 'listenRange' ? has(self.ref.attachmentRef) : !has(self.ref.attachmentRef)",message="attachmentRef is required for listenRange mode and forbidden for loopbackPeer mode"
 type BGPPeeringSpec struct {
 	// Mode selects the peering type: listenRange (L2 attachment BGP) or loopbackPeer (BGPaaS).
@@ -149,6 +148,7 @@ type BGPPeeringStatus struct {
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
 //+kubebuilder:resource:shortName=bgpp
+//+kubebuilder:validation:XValidation:rule="self.spec.mode == oldSelf.spec.mode",message="mode is immutable"
 //+kubebuilder:printcolumn:name="Mode",type=string,JSONPath=`.spec.mode`
 //+kubebuilder:printcolumn:name="WorkloadAS",type=integer,JSONPath=`.spec.workloadAS`
 //+kubebuilder:printcolumn:name="BFD",type=boolean,JSONPath=`.spec.enableBFD`

@@ -18,7 +18,6 @@ package builder
 
 import (
 	"context"
-	"fmt"
 
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
@@ -48,7 +47,7 @@ func (b *OutboundBuilder) Build(_ context.Context, data *resolver.ResolvedData) 
 		ob := &data.Outbounds[i]
 
 		if _, ok := data.Networks[ob.Spec.NetworkRef]; !ok {
-			return nil, fmt.Errorf("outbound %q references unknown Network %q", ob.Name, ob.Spec.NetworkRef)
+			continue
 		}
 
 		if ob.Spec.Destinations == nil {

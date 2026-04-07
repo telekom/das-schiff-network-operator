@@ -122,9 +122,13 @@ rules:
 - apiGroups:
   - network-connector.sylvaproject.org
   resources:
+  - collectors/finalizers
+  - destinations/finalizers
   - inbounds/finalizers
   - interfaceconfigs/finalizers
+  - networks/finalizers
   - outbounds/finalizers
+  - vrfs/finalizers
   verbs:
   - update
 - apiGroups:

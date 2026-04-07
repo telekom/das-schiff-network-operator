@@ -44,10 +44,13 @@ type Controller struct {
 
 //+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=vrfs,verbs=get;list;watch
 //+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=vrfs/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=vrfs/finalizers,verbs=update
 //+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=networks,verbs=get;list;watch
 //+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=networks/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=networks/finalizers,verbs=update
 //+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=destinations,verbs=get;list;watch
 //+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=destinations/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=destinations/finalizers,verbs=update
 //+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=layer2attachments,verbs=get;list;watch
 //+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=layer2attachments/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=inbounds,verbs=get;list;watch
@@ -60,6 +63,7 @@ type Controller struct {
 //+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=bgppeerings/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=collectors,verbs=get;list;watch
 //+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=collectors/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=collectors/finalizers,verbs=update
 //+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=trafficmirrors,verbs=get;list;watch
 //+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=trafficmirrors/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=announcementpolicies,verbs=get;list;watch

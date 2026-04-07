@@ -14,7 +14,7 @@ spec:
     shortNames:
     - nns
     singular: nodenetworkstatus
-  scope: Namespaced
+  scope: Cluster
   versions:
   - additionalPrinterColumns:
     - jsonPath: .status.lastUpdated

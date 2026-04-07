@@ -169,8 +169,6 @@ spec:
             - ref
             type: object
             x-kubernetes-validations:
-            - message: mode is immutable
-              rule: self.mode == oldSelf.mode
             - message: attachmentRef is required for listenRange mode and forbidden
                 for loopbackPeer mode
               rule: 'self.mode == ''listenRange'' ? has(self.ref.attachmentRef) :
@@ -271,6 +269,9 @@ spec:
                 type: integer
             type: object
         type: object
+        x-kubernetes-validations:
+        - message: mode is immutable
+          rule: self.spec.mode == oldSelf.spec.mode
     served: true
     storage: true
     subresources:

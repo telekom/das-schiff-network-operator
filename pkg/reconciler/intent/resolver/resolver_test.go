@@ -165,9 +165,12 @@ func TestResolveDestinations_UnknownVRF(t *testing.T) {
 		},
 	}
 
-	_, err := ResolveDestinations(destinations, vrfs)
-	if err == nil {
-		t.Fatal("expected error for unknown VRF reference")
+	resolved, err := ResolveDestinations(destinations, vrfs)
+	if err != nil {
+		t.Fatalf("unexpected error resolving destinations with unknown VRF: %v", err)
+	}
+	if len(resolved) != 0 {
+		t.Errorf("expected destination with unknown VRF to be skipped, got %d entries", len(resolved))
 	}
 }
 
@@ -222,8 +225,11 @@ func TestResolveAll_DestinationError(t *testing.T) {
 		},
 	}
 
-	_, err := ResolveAll(fetched)
-	if err == nil {
-		t.Fatal("expected error from ResolveAll with missing VRF")
+	resolved, err := ResolveAll(fetched)
+	if err != nil {
+		t.Fatalf("unexpected error from ResolveAll with missing VRF: %v", err)
+	}
+	if len(resolved.Destinations) != 0 {
+		t.Errorf("expected destination with unknown VRF to be skipped, got %d", len(resolved.Destinations))
 	}
 }
