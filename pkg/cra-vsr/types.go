@@ -762,7 +762,7 @@ func (phys *Physical) Sort() {
 		phys.IPv4.Sort()
 	}
 	if phys.IPv6 != nil {
-		phys.IPv4.Sort()
+		phys.IPv6.Sort()
 	}
 }
 
@@ -774,7 +774,7 @@ func (br *Bridge) Sort() {
 		br.IPv4.Sort()
 	}
 	if br.IPv6 != nil {
-		br.IPv4.Sort()
+		br.IPv6.Sort()
 	}
 }
 
@@ -792,7 +792,7 @@ func (vxlan *VXLAN) Sort() {
 		vxlan.IPv4.Sort()
 	}
 	if vxlan.IPv6 != nil {
-		vxlan.IPv4.Sort()
+		vxlan.IPv6.Sort()
 	}
 }
 

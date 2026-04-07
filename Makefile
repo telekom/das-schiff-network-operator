@@ -194,7 +194,7 @@ kustomize: ## Download kustomize locally if necessary.
 
 ENVTEST = $(shell pwd)/bin/setup-envtest
 .PHONY: envtest
-envtest: ## Download envtest-setup locally if necessary.
+envtest: ## Download setup-envtest locally if necessary.
 	$(call go-get-tool,$(ENVTEST),sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.0.0-20260305142021-f9589b9f2b9d)
 
 GO_LICENSES = $(shell pwd)/bin/go-licenses

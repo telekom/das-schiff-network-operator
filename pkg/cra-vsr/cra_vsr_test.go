@@ -19,6 +19,7 @@ package cra
 import (
 	"encoding/xml"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -44,8 +45,8 @@ func TestCraVsr(t *testing.T) {
 }
 
 const operatorConfigEnv = "OPERATOR_CONFIG"
-const newConfigPath = "/tmp/config.yaml"
 
+var newConfigPath string
 var oldConfigPath string
 var isConfigEnvExist bool
 
@@ -318,6 +319,9 @@ var revision = &v1alpha1.NetworkConfigRevision{
 }
 
 var _ = BeforeSuite(func() {
+	tempDir := GinkgoT().TempDir()
+	newConfigPath = filepath.Join(tempDir, "config.yaml")
+
 	oldConfigPath, isConfigEnvExist = os.LookupEnv(operatorConfigEnv)
 	os.Setenv(operatorConfigEnv, newConfigPath)
 
@@ -338,8 +342,6 @@ var _ = AfterSuite(func() {
 	} else {
 		os.Unsetenv(operatorConfigEnv)
 	}
-	err := os.Remove(newConfigPath)
-	Expect(err).ToNot(HaveOccurred())
 })
 
 var _ = Describe("CRA-VSR", func() {
