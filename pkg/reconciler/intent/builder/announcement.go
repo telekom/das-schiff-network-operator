@@ -46,7 +46,7 @@ func (*AnnouncementBuilder) Name() string {
 }
 
 // Build produces per-node EVPN export filter contributions from AnnouncementPolicy resources.
-func (b *AnnouncementBuilder) Build(_ context.Context, data *resolver.ResolvedData) (map[string]*NodeContribution, error) { //nolint:revive // cognitive-complexity: announcement building has many valid branches
+func (b *AnnouncementBuilder) Build(_ context.Context, data *resolver.ResolvedData) (map[string]*NodeContribution, error) {
 	result := make(map[string]*NodeContribution)
 
 	for i := range data.AnnouncementPolicies {
@@ -85,121 +85,11 @@ func (b *AnnouncementBuilder) Build(_ context.Context, data *resolver.ResolvedDa
 }
 
 // buildEVPNExportFilter constructs an EVPN export filter from an AnnouncementPolicy.
-func (*AnnouncementBuilder) buildEVPNExportFilter(ap *nc.AnnouncementPolicy) *networkv1alpha1.Filter { //nolint:funlen,revive // EVPN filter construction requires many sequential steps
+func (*AnnouncementBuilder) buildEVPNExportFilter(ap *nc.AnnouncementPolicy) *networkv1alpha1.Filter {
 	var items []networkv1alpha1.FilterItem
 
-	// Host routes (/32 /128) community actions.
-	if ap.Spec.HostRoutes != nil && len(ap.Spec.HostRoutes.Communities) > 0 {
-		additive := true
-
-		// IPv4 host routes (/32).
-		ge32 := ipv4MaxPrefixLen
-		items = append(items, networkv1alpha1.FilterItem{
-			Matcher: networkv1alpha1.Matcher{
-				Prefix: &networkv1alpha1.PrefixMatcher{
-					Prefix: "0.0.0.0/0",
-					Ge:     &ge32,
-					Le:     &ge32,
-				},
-			},
-			Action: networkv1alpha1.Action{
-				Type: networkv1alpha1.Accept,
-				ModifyRoute: &networkv1alpha1.ModifyRouteAction{
-					AddCommunities:      ap.Spec.HostRoutes.Communities,
-					AdditiveCommunities: &additive,
-				},
-			},
-		})
-
-		// IPv6 host routes (/128).
-		ge128 := ipv6MaxPrefixLen
-		items = append(items, networkv1alpha1.FilterItem{
-			Matcher: networkv1alpha1.Matcher{
-				Prefix: &networkv1alpha1.PrefixMatcher{
-					Prefix: "::/0",
-					Ge:     &ge128,
-					Le:     &ge128,
-				},
-			},
-			Action: networkv1alpha1.Action{
-				Type: networkv1alpha1.Accept,
-				ModifyRoute: &networkv1alpha1.ModifyRouteAction{
-					AddCommunities:      ap.Spec.HostRoutes.Communities,
-					AdditiveCommunities: &additive,
-				},
-			},
-		})
-	}
-
-	// Aggregate route config.
-	if ap.Spec.Aggregate != nil {
-		aggregateEnabled := ap.Spec.Aggregate.Enabled == nil || *ap.Spec.Aggregate.Enabled
-
-		if aggregateEnabled && len(ap.Spec.Aggregate.Communities) > 0 {
-			additive := true
-
-			// IPv4 aggregate — match non-host routes.
-			le31 := ipv4HostRouteLen
-			items = append(items, networkv1alpha1.FilterItem{
-				Matcher: networkv1alpha1.Matcher{
-					Prefix: &networkv1alpha1.PrefixMatcher{
-						Prefix: "0.0.0.0/0",
-						Le:     &le31,
-					},
-				},
-				Action: networkv1alpha1.Action{
-					Type: networkv1alpha1.Accept,
-					ModifyRoute: &networkv1alpha1.ModifyRouteAction{
-						AddCommunities:      ap.Spec.Aggregate.Communities,
-						AdditiveCommunities: &additive,
-					},
-				},
-			})
-
-			// IPv6 aggregate — match non-host routes.
-			le127 := ipv6HostRouteLen
-			items = append(items, networkv1alpha1.FilterItem{
-				Matcher: networkv1alpha1.Matcher{
-					Prefix: &networkv1alpha1.PrefixMatcher{
-						Prefix: "::/0",
-						Le:     &le127,
-					},
-				},
-				Action: networkv1alpha1.Action{
-					Type: networkv1alpha1.Accept,
-					ModifyRoute: &networkv1alpha1.ModifyRouteAction{
-						AddCommunities:      ap.Spec.Aggregate.Communities,
-						AdditiveCommunities: &additive,
-					},
-				},
-			})
-		}
-
-		if !aggregateEnabled {
-			// Reject aggregate prefixes (non-host routes).
-			le31 := ipv4HostRouteLen
-			items = append(items, networkv1alpha1.FilterItem{
-				Matcher: networkv1alpha1.Matcher{
-					Prefix: &networkv1alpha1.PrefixMatcher{
-						Prefix: "0.0.0.0/0",
-						Le:     &le31,
-					},
-				},
-				Action: networkv1alpha1.Action{Type: networkv1alpha1.Reject},
-			})
-
-			le127 := ipv6HostRouteLen
-			items = append(items, networkv1alpha1.FilterItem{
-				Matcher: networkv1alpha1.Matcher{
-					Prefix: &networkv1alpha1.PrefixMatcher{
-						Prefix: "::/0",
-						Le:     &le127,
-					},
-				},
-				Action: networkv1alpha1.Action{Type: networkv1alpha1.Reject},
-			})
-		}
-	}
+	items = append(items, buildHostRouteFilterItems(ap.Spec.HostRoutes)...)
+	items = append(items, buildAggregateFilterItems(ap.Spec.Aggregate)...)
 
 	if len(items) == 0 {
 		return nil
@@ -209,6 +99,104 @@ func (*AnnouncementBuilder) buildEVPNExportFilter(ap *nc.AnnouncementPolicy) *ne
 		Items:         items,
 		DefaultAction: networkv1alpha1.Action{Type: networkv1alpha1.Accept},
 	}
+}
+
+// buildHostRouteFilterItems creates filter items for host route announcements (/32 and /128).
+func buildHostRouteFilterItems(cfg *nc.RouteAnnouncementConfig) []networkv1alpha1.FilterItem {
+	if cfg == nil || len(cfg.Communities) == 0 {
+		return nil
+	}
+
+	additive := true
+	ge32 := ipv4MaxPrefixLen
+	ge128 := ipv6MaxPrefixLen
+
+	return []networkv1alpha1.FilterItem{
+		{
+			Matcher: networkv1alpha1.Matcher{
+				Prefix: &networkv1alpha1.PrefixMatcher{Prefix: "0.0.0.0/0", Ge: &ge32, Le: &ge32},
+			},
+			Action: networkv1alpha1.Action{
+				Type: networkv1alpha1.Accept,
+				ModifyRoute: &networkv1alpha1.ModifyRouteAction{
+					AddCommunities:      cfg.Communities,
+					AdditiveCommunities: &additive,
+				},
+			},
+		},
+		{
+			Matcher: networkv1alpha1.Matcher{
+				Prefix: &networkv1alpha1.PrefixMatcher{Prefix: "::/0", Ge: &ge128, Le: &ge128},
+			},
+			Action: networkv1alpha1.Action{
+				Type: networkv1alpha1.Accept,
+				ModifyRoute: &networkv1alpha1.ModifyRouteAction{
+					AddCommunities:      cfg.Communities,
+					AdditiveCommunities: &additive,
+				},
+			},
+		},
+	}
+}
+
+// buildAggregateFilterItems creates filter items for aggregate route announcements.
+func buildAggregateFilterItems(cfg *nc.AggregateConfig) []networkv1alpha1.FilterItem {
+	if cfg == nil {
+		return nil
+	}
+
+	aggregateEnabled := cfg.Enabled == nil || *cfg.Enabled
+	le31 := ipv4HostRouteLen
+	le127 := ipv6HostRouteLen
+
+	if aggregateEnabled && len(cfg.Communities) > 0 {
+		additive := true
+		return []networkv1alpha1.FilterItem{
+			{
+				Matcher: networkv1alpha1.Matcher{
+					Prefix: &networkv1alpha1.PrefixMatcher{Prefix: "0.0.0.0/0", Le: &le31},
+				},
+				Action: networkv1alpha1.Action{
+					Type: networkv1alpha1.Accept,
+					ModifyRoute: &networkv1alpha1.ModifyRouteAction{
+						AddCommunities:      cfg.Communities,
+						AdditiveCommunities: &additive,
+					},
+				},
+			},
+			{
+				Matcher: networkv1alpha1.Matcher{
+					Prefix: &networkv1alpha1.PrefixMatcher{Prefix: "::/0", Le: &le127},
+				},
+				Action: networkv1alpha1.Action{
+					Type: networkv1alpha1.Accept,
+					ModifyRoute: &networkv1alpha1.ModifyRouteAction{
+						AddCommunities:      cfg.Communities,
+						AdditiveCommunities: &additive,
+					},
+				},
+			},
+		}
+	}
+
+	if !aggregateEnabled {
+		return []networkv1alpha1.FilterItem{
+			{
+				Matcher: networkv1alpha1.Matcher{
+					Prefix: &networkv1alpha1.PrefixMatcher{Prefix: "0.0.0.0/0", Le: &le31},
+				},
+				Action: networkv1alpha1.Action{Type: networkv1alpha1.Reject},
+			},
+			{
+				Matcher: networkv1alpha1.Matcher{
+					Prefix: &networkv1alpha1.PrefixMatcher{Prefix: "::/0", Le: &le127},
+				},
+				Action: networkv1alpha1.Action{Type: networkv1alpha1.Reject},
+			},
+		}
+	}
+
+	return nil
 }
 
 // mergeFilter merges a new filter into an existing one.

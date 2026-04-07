@@ -39,7 +39,7 @@ func (*BGPPeeringBuilder) Name() string {
 }
 
 // Build produces per-node BGPPeer contributions from BGPPeering resources.
-func (b *BGPPeeringBuilder) Build(_ context.Context, data *resolver.ResolvedData) (map[string]*NodeContribution, error) { //nolint:revive // cognitive-complexity: BGP peering building has many valid mode branches
+func (b *BGPPeeringBuilder) Build(_ context.Context, data *resolver.ResolvedData) (map[string]*NodeContribution, error) {
 	result := make(map[string]*NodeContribution)
 
 	for i := range data.BGPPeerings {
@@ -51,9 +51,7 @@ func (b *BGPPeeringBuilder) Build(_ context.Context, data *resolver.ResolvedData
 				return nil, fmt.Errorf("BGPPeering %q (listenRange) failed: %w", bp.Name, err)
 			}
 		case nc.BGPPeeringModeLoopbackPeer:
-			if err := b.buildLoopbackPeer(bp, data, result); err != nil {
-				return nil, fmt.Errorf("BGPPeering %q (loopbackPeer) failed: %w", bp.Name, err)
-			}
+			b.buildLoopbackPeer(bp, data, result)
 		default:
 			return nil, fmt.Errorf("BGPPeering %q has unknown mode %q", bp.Name, bp.Spec.Mode)
 		}
@@ -117,7 +115,7 @@ func (b *BGPPeeringBuilder) buildListenRange(bp *nc.BGPPeering, data *resolver.R
 }
 
 // buildLoopbackPeer creates BGPPeer entries with Address on the ClusterVRF.
-func (b *BGPPeeringBuilder) buildLoopbackPeer(bp *nc.BGPPeering, data *resolver.ResolvedData, result map[string]*NodeContribution) error { //nolint:unparam // error return kept for interface consistency
+func (b *BGPPeeringBuilder) buildLoopbackPeer(bp *nc.BGPPeering, data *resolver.ResolvedData, result map[string]*NodeContribution) {
 	peer := b.buildBasePeer(bp)
 	// Loopback peer address is TBD — set to nil (auto-generated ULA by agent).
 
@@ -138,8 +136,6 @@ func (b *BGPPeeringBuilder) buildLoopbackPeer(bp *nc.BGPPeering, data *resolver.
 
 		contrib.ClusterVRF.BGPPeers = append(contrib.ClusterVRF.BGPPeers, peer)
 	}
-
-	return nil
 }
 
 // resolveL2AVRF looks up a Layer2Attachment's destination VRF.

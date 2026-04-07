@@ -41,7 +41,7 @@ func (*InboundBuilder) Name() string {
 // Build produces per-node FabricVRF contributions from Inbound resources.
 // A single Inbound may select multiple Destinations across different VRFs
 // via its label selector — FabricVRF entries are produced for each matched VRF.
-func (b *InboundBuilder) Build(_ context.Context, data *resolver.ResolvedData) (map[string]*NodeContribution, error) { //nolint:gocognit,revive // inbound building has many valid branches
+func (b *InboundBuilder) Build(_ context.Context, data *resolver.ResolvedData) (map[string]*NodeContribution, error) {
 	result := make(map[string]*NodeContribution)
 
 	for i := range data.Inbounds {
@@ -75,38 +75,47 @@ func (b *InboundBuilder) Build(_ context.Context, data *resolver.ResolvedData) (
 			if vrfSpec == nil {
 				continue
 			}
-
-			// Inbound applies to all nodes (no nodeSelector).
-			for i := range data.Nodes {
-				contrib, ok := result[data.Nodes[i].Name]
-				if !ok {
-					contrib = NewNodeContribution()
-					result[data.Nodes[i].Name] = contrib
-				}
-
-				fvrf, exists := contrib.FabricVRFs[vrfName]
-				if !exists {
-					fvrf = buildFabricVRF(vrfSpec)
-				}
-
-				if redistribute != nil {
-					fvrf.Redistribute = mergeRedistribute(fvrf.Redistribute, redistribute)
-				}
-
-				// Add allocated addresses to EVPN export filter and cluster vrfImport.
-				if fvrf.EVPNExportFilter != nil {
-					fvrf.EVPNExportFilter.Items = append(fvrf.EVPNExportFilter.Items, filterItems...)
-				}
-				if len(fvrf.VRFImports) > 0 {
-					fvrf.VRFImports[0].Filter.Items = append(fvrf.VRFImports[0].Filter.Items, filterItems...)
-				}
-
-				contrib.FabricVRFs[vrfName] = fvrf
-			}
+			b.applyInboundToNodes(vrfName, vrfSpec, filterItems, redistribute, data, result)
 		}
 	}
 
 	return result, nil
+}
+
+// applyInboundToNodes applies inbound FabricVRF config to all nodes for a single VRF.
+func (*InboundBuilder) applyInboundToNodes(
+	vrfName string,
+	vrfSpec *nc.VRFSpec,
+	filterItems []networkv1alpha1.FilterItem,
+	redistribute *networkv1alpha1.Redistribute,
+	data *resolver.ResolvedData,
+	result map[string]*NodeContribution,
+) {
+	for i := range data.Nodes {
+		contrib, ok := result[data.Nodes[i].Name]
+		if !ok {
+			contrib = NewNodeContribution()
+			result[data.Nodes[i].Name] = contrib
+		}
+
+		fvrf, exists := contrib.FabricVRFs[vrfName]
+		if !exists {
+			fvrf = buildFabricVRF(vrfSpec)
+		}
+
+		if redistribute != nil {
+			fvrf.Redistribute = mergeRedistribute(fvrf.Redistribute, redistribute)
+		}
+
+		if fvrf.EVPNExportFilter != nil {
+			fvrf.EVPNExportFilter.Items = append(fvrf.EVPNExportFilter.Items, filterItems...)
+		}
+		if len(fvrf.VRFImports) > 0 {
+			fvrf.VRFImports[0].Filter.Items = append(fvrf.VRFImports[0].Filter.Items, filterItems...)
+		}
+
+		contrib.FabricVRFs[vrfName] = fvrf
+	}
 }
 
 // resolveVRFSpec finds the VRFSpec for a given VRF name from the grouped destinations.
