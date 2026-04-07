@@ -5,7 +5,7 @@ FROM --platform=$BUILDPLATFORM docker.io/library/golang:${GO_VERSION}-alpine AS 
 
 ARG TARGETOS
 ARG TARGETARCH
-ARG ldflags="-s -w"
+ARG ldflags=""
 
 WORKDIR /workspace
 COPY go.mod go.mod
@@ -25,7 +25,7 @@ COPY bpf/ bpf/
 RUN cd pkg/bpf && go generate ./...
 
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-$(go env GOARCH)} \
-    go build -trimpath -ldflags="${ldflags}" -o frr-cra main.go
+    go build -trimpath -ldflags="-s -w ${ldflags}" -o frr-cra main.go
 
 FROM docker.io/library/ubuntu:25.10
 
