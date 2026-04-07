@@ -32,6 +32,10 @@ spec:
     - jsonPath: .status.total
       name: Total
       type: integer
+    - jsonPath: .status.failedNode
+      name: FailedNode
+      priority: 1
+      type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date

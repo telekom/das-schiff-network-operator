@@ -136,7 +136,7 @@ func (crr *ConfigRevisionReconciler) reconcileDebounced(ctx context.Context) err
 
 	// there is nothing to deploy - skip
 	if revisionToDeploy == nil {
-		crr.logger.Error(fmt.Errorf("there is no revision to deploy"), "revision deployment aboorted")
+		crr.logger.Error(fmt.Errorf("there is no revision to deploy"), "revision deployment aborted")
 		return nil
 	}
 
@@ -240,7 +240,7 @@ func (crr *ConfigRevisionReconciler) getRevisionCounters(configs []v1alpha1.Node
 func (crr *ConfigRevisionReconciler) removeRedundantConfigs(ctx context.Context, configs []v1alpha1.NodeNetworkConfig) ([]v1alpha1.NodeNetworkConfig, error) {
 	cfg := []v1alpha1.NodeNetworkConfig{}
 	for i := range configs {
-		// Every NodeNetworkConfig obejct should have 2 owner references - for NodeConfigRevision and for the Node. If there is only one owner reference,
+		// Every NodeNetworkConfig object should have 2 owner references - for NodeConfigRevision and for the Node. If there is only one owner reference,
 		// it means that either node or revision were deleted, so the config itself can be deleted as well.
 		if len(configs[i].ObjectMeta.OwnerReferences) < numOfRefs {
 			crr.logger.Info("deleting redundant NodeNetworkConfig", "name", configs[i].Name)
