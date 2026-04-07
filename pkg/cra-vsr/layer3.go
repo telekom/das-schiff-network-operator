@@ -21,6 +21,7 @@ import (
 	"sort"
 
 	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
+	"github.com/telekom/das-schiff-network-operator/pkg/helpers/types"
 )
 
 const (
@@ -40,6 +41,7 @@ type InfoL3 struct {
 	tid  int
 	vni  int
 	mtu  int
+	vrf  *v1alpha1.VRF
 }
 
 func NewLayer3(
@@ -105,12 +107,13 @@ func (l *Layer3) setupTableID() error {
 	return nil
 }
 
-func (Layer3) makeInfo(name string, tid, vni int) InfoL3 {
+func (Layer3) makeInfo(name string, tid, vni int, vrf *v1alpha1.VRF) InfoL3 {
 	return InfoL3{
 		name: name,
 		tid:  tid,
 		vni:  vni,
 		mtu:  defaultMtu,
+		vrf:  vrf,
 	}
 }
 
@@ -118,6 +121,7 @@ func (l *Layer3) setupInformations() error {
 	type FlattenVRF struct {
 		name string
 		vni  int
+		conf v1alpha1.VRF
 	}
 
 	vrfs := []FlattenVRF{}
@@ -125,19 +129,23 @@ func (l *Layer3) setupInformations() error {
 		vrfs = append(vrfs, FlattenVRF{
 			name: name,
 			vni:  int(l.nodeCfg.FabricVRFs[name].VNI),
+			conf: l.nodeCfg.FabricVRFs[name].VRF,
 		})
 	}
 	for name := range l.nodeCfg.LocalVRFs {
 		vrfs = append(vrfs, FlattenVRF{
 			name: name,
 			vni:  -1,
+			conf: l.nodeCfg.LocalVRFs[name],
 		})
 	}
 	sort.Slice(vrfs, func(i, j int) bool {
 		return vrfs[i].name < vrfs[j].name
 	})
 
-	for _, vrf := range vrfs {
+	for i := range vrfs {
+		vrf := &vrfs[i]
+
 		if l.mgr.isReservedVRF(vrf.name) {
 			continue
 		}
@@ -151,7 +159,7 @@ func (l *Layer3) setupInformations() error {
 			l.tableID[vrf.name] = tid
 		}
 
-		l.infos[vrf.name] = l.makeInfo(vrf.name, tid, vrf.vni)
+		l.infos[vrf.name] = l.makeInfo(vrf.name, tid, vrf.vni, &vrf.conf)
 	}
 
 	{
@@ -160,7 +168,7 @@ func (l *Layer3) setupInformations() error {
 		if !ok {
 			return fmt.Errorf("cluster vrf not found in cra")
 		}
-		l.infos[name] = l.makeInfo(name, tid, -1)
+		l.infos[name] = l.makeInfo(name, tid, -1, l.nodeCfg.ClusterVRF)
 	}
 
 	{
@@ -169,10 +177,57 @@ func (l *Layer3) setupInformations() error {
 		if !ok {
 			return fmt.Errorf("management vrf not found in cra")
 		}
-		l.infos[name] = l.makeInfo(name, tid, -1)
+
+		var vrf *v1alpha1.VRF
+		conf, ok := l.nodeCfg.FabricVRFs[name]
+		if ok {
+			vrf = &conf.VRF
+		}
+
+		l.infos[name] = l.makeInfo(name, tid, -1, vrf)
 	}
 
 	return nil
+}
+
+func (*Layer3) setupGRE(vrf *VRF, name string, conf v1alpha1.GRE) {
+	//nolint:mnd
+	gre := GRE{
+		Name:    name,
+		MTU:     types.ToPtr(1500),
+		Local:   conf.SourceAddress,
+		Remote:  &conf.DestinationAddress,
+		KeyBoth: conf.EncapsulationKey,
+	}
+
+	if conf.Layer == v1alpha1.GRELayer2 {
+		vrf.Interfaces.GRETaps = append(vrf.Interfaces.GRETaps, GRETap{
+			GRE: gre,
+		})
+	} else {
+		vrf.Interfaces.GREs = append(vrf.Interfaces.GREs, gre)
+	}
+}
+
+func (l *Layer3) setupLoopback(vrf *VRF, name string, conf v1alpha1.Loopback) {
+	ipv4 := &IPAddressList{}
+	ipv6 := &IPAddressList{}
+	for _, addr := range conf.IPAddresses {
+		l.mgr.createIPAddress(addr, ipv4, ipv6)
+	}
+
+	lo := Loopback{
+		Name: name,
+	}
+
+	if len(ipv4.IPAddresses) > 0 {
+		lo.IPv4 = ipv4
+	}
+	if len(ipv6.IPAddresses) > 0 {
+		lo.IPv6 = ipv6
+	}
+
+	vrf.Interfaces.Loopbacks = append(vrf.Interfaces.Loopbacks, lo)
 }
 
 func (l *Layer3) setupVRF(info InfoL3) error {
@@ -190,6 +245,22 @@ func (l *Layer3) setupVRF(info InfoL3) error {
 		l.mgr.createVXLAN(
 			(vxlanPrefix + info.name), br, l.ns.Interfaces,
 			info.vni, info.mtu, true, false)
+	}
+
+	if info.vrf != nil {
+		for name, conf := range info.vrf.GREs {
+			l.setupGRE(vrf, name, conf)
+		}
+		for name, conf := range info.vrf.Loopbacks {
+			l.setupLoopback(vrf, name, conf)
+		}
+
+		if info.vni != -1 || l.mgr.isReservedVRF(info.name) {
+			for i := range info.vrf.MirrorACLs {
+				from := (vxlanPrefix + info.name)
+				l.mgr.createMirrorTraffic(l.ns, from, &info.vrf.MirrorACLs[i])
+			}
+		}
 	}
 
 	return nil
