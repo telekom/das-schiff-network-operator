@@ -217,6 +217,9 @@ func filterActive[T any, PT interface {
 	return active
 }
 
+// paginateMaxExtraOpts is the maximum number of options appended beyond baseOpts (Limit + Continue).
+const paginateMaxExtraOpts = 2
+
 // paginateInto fetches all pages of a list type, calling consume on each page's items.
 func paginateInto[L interface {
 	client.ObjectList
@@ -224,14 +227,14 @@ func paginateInto[L interface {
 }, U any](ctx context.Context, c client.Client, baseOpts []client.ListOption, consume func(list L)) error {
 	for continueToken := ""; ; {
 		list := L(new(U))
-		opts := make([]client.ListOption, 0, len(baseOpts)+2)
+		opts := make([]client.ListOption, 0, len(baseOpts)+paginateMaxExtraOpts)
 		opts = append(opts, baseOpts...)
 		opts = append(opts, client.Limit(listLimit))
 		if continueToken != "" {
 			opts = append(opts, client.Continue(continueToken))
 		}
 		if err := c.List(ctx, list, opts...); err != nil {
-			return err
+			return fmt.Errorf("paginated list: %w", err)
 		}
 		consume(list)
 		continueToken = list.GetContinue()
