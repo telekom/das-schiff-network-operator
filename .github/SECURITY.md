@@ -8,7 +8,7 @@
 
 Or use GitHub's private security advisory feature:
 
-🔒 **[Report a Vulnerability](https://github.com/telekom/das-schiff-network-operator/security/advisories/new)**
+🔒 **[Report a Vulnerability](/security/advisories/new)**
 
 Please include:
 
