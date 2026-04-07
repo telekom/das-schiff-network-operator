@@ -67,6 +67,19 @@ var _ = Describe("ConfigReconciler", func() {
 			Expect(cr.shouldSkip(revisions, &newRevision)).To(BeTrue())
 		})
 
+		It("should skip when invalid item is not first and a valid item precedes it", func() {
+			// Items[0] is a valid revision with a different hash — the fast-path does
+			// not match and loop 2 breaks at the first valid item. Loop 3 must then
+			// find the invalid entry at Items[1] and return true.
+			valid := makeRevision("xyz999", false, time.Now())
+			invalid := makeRevision("abc123", true, time.Now().Add(-time.Minute))
+			revisions := &v1alpha1.NetworkConfigRevisionList{
+				Items: []v1alpha1.NetworkConfigRevision{valid, invalid},
+			}
+			newRevision := makeRevision("abc123", false, time.Now())
+			Expect(cr.shouldSkip(revisions, &newRevision)).To(BeTrue())
+		})
+
 		It("should not skip when revisions list is empty", func() {
 			revisions := &v1alpha1.NetworkConfigRevisionList{}
 			newRevision := makeRevision("abc123", false, time.Now())
