@@ -439,7 +439,12 @@ func passRequest(r *http.Request, addr, query string, results chan []byte, error
 
 	url := fmt.Sprintf("%s://%s:%s%s", protocol, addr, port, query)
 	//nolint:gosec
-	resp, err := http.Get(url) //nolint:noctx
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, url, http.NoBody)
+	if err != nil {
+		errors <- fmt.Errorf("error creating request for %s: %w", addr, err)
+		return
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		errors <- fmt.Errorf("error getting data from %s: %w", addr, err)
 		return

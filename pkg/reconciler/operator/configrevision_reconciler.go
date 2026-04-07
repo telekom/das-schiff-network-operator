@@ -544,7 +544,7 @@ func listNodes(ctx context.Context, c client.Client) (map[string]*corev1.Node, e
 	for i := range list.Items {
 		// discard nodes that are not in ready state
 		for j := range list.Items[i].Status.Conditions {
-			// TODO: Should taint node.kubernetes.io/not-ready be used instead of Conditions?
+			// TODO(preexisting): Consider using node taint node.kubernetes.io/not-ready instead of Conditions for revision status
 			if list.Items[i].Status.Conditions[j].Type == corev1.NodeReady &&
 				list.Items[i].Status.Conditions[j].Status == corev1.ConditionTrue {
 				nodes[list.Items[i].Name] = &list.Items[i]

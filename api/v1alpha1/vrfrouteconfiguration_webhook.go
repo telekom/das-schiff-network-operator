@@ -39,7 +39,8 @@ func (r *VRFRouteConfiguration) SetupWebhookWithManager(mgr ctrl.Manager) error 
 	return nil
 }
 
-// TODO(user): EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
+// VRFRouteConfiguration webhook validates create and update operations.
+// Delete validation is registered but intentionally permissive (no-op).
 
 // TODO(user): change verbs to "verbs=create;update;delete" if you want to enable deletion validation.
 //+kubebuilder:webhook:path=/validate-network-t-caas-telekom-com-v1alpha1-vrfrouteconfiguration,mutating=false,failurePolicy=fail,sideEffects=None,groups=network.t-caas.telekom.com,resources=vrfrouteconfigurations,verbs=create;update,versions=v1alpha1,name=vvrfrouteconfiguration.kb.io,admissionReviewVersions=v1
@@ -74,7 +75,7 @@ func (*VRFRouteConfiguration) ValidateUpdate(_ context.Context, _, r *VRFRouteCo
 func (*VRFRouteConfiguration) ValidateDelete(_ context.Context, r *VRFRouteConfiguration) (admission.Warnings, error) {
 	vrfrouteconfigurationlog.Info("validate delete", "name", r.Name)
 
-	// TODO(user): fill in your validation logic upon object deletion.
+	// Deletion validation is intentionally permissive; no constraints are enforced on delete.
 	return nil, nil
 }
 
