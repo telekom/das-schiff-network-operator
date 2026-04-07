@@ -378,8 +378,8 @@ func TestSBRSingleVRF(t *testing.T) {
 
 	nnc := reconcileAndGetNNC(t, ctx, nodeName)
 
-	_, ok := nnc.Spec.LocalVRFs["s-sbrm"]
-	assert.True(t, ok, "expected LocalVRF 's-sbrm' (SBR intermediate VRF)")
+	_, ok := nnc.Spec.LocalVRFs["s-vrf-sbr1"]
+	assert.True(t, ok, "expected LocalVRF 's-vrf-sbr1' (SBR intermediate VRF, keyed by VRFRef)")
 
 	// ClusterVRF should have PolicyRoutes for SBR
 	require.NotNil(t, nnc.Spec.ClusterVRF, "expected ClusterVRF to be set for SBR")

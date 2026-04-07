@@ -111,9 +111,9 @@ func TestInboundBuilder_BasicInbound(t *testing.T) {
 		t.Fatal("expected contribution for node-1")
 	}
 
-	fvrf, ok := contrib.FabricVRFs["gateway"]
+	fvrf, ok := contrib.FabricVRFs["gw-vrf"]
 	if !ok {
-		t.Fatal("expected FabricVRF 'gateway'")
+		t.Fatal("expected FabricVRF 'gw-vrf'")
 	}
 
 	// VNI and RouteTargets from the resolved VRFSpec.
@@ -249,9 +249,9 @@ func TestInboundBuilder_DualStackRedistribute(t *testing.T) {
 		t.Fatal("expected contribution for node-1")
 	}
 
-	fvrf, ok := contrib.FabricVRFs["gateway"]
+	fvrf, ok := contrib.FabricVRFs["gw-vrf"]
 	if !ok {
-		t.Fatal("expected FabricVRF 'gateway'")
+		t.Fatal("expected FabricVRF 'gw-vrf'")
 	}
 
 	if fvrf.Redistribute == nil || fvrf.Redistribute.Connected == nil {
@@ -322,9 +322,9 @@ func TestOutboundBuilder_BasicOutbound(t *testing.T) {
 		t.Fatal("expected contribution for node-1")
 	}
 
-	fvrf, ok := contrib.FabricVRFs["gateway"]
+	fvrf, ok := contrib.FabricVRFs["gw-vrf"]
 	if !ok {
-		t.Fatal("expected FabricVRF 'gateway'")
+		t.Fatal("expected FabricVRF 'gw-vrf'")
 	}
 
 	if fvrf.VNI != 3000 {

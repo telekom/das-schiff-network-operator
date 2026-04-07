@@ -86,9 +86,9 @@ func TestSBRBuilder_BasicOutbound(t *testing.T) {
 
 	contrib := result["worker-1"]
 
-	// Should have intermediate LocalVRF s-internet.
-	require.Contains(t, contrib.LocalVRFs, "s-internet")
-	localVRF := contrib.LocalVRFs["s-internet"]
+	// Should have intermediate LocalVRF s-internet-vrf (keyed by VRFRef).
+	require.Contains(t, contrib.LocalVRFs, "s-internet-vrf")
+	localVRF := contrib.LocalVRFs["s-internet-vrf"]
 
 	// Cluster VRF import for internal reachability.
 	require.Len(t, localVRF.VRFImports, 1)
@@ -99,7 +99,7 @@ func TestSBRBuilder_BasicOutbound(t *testing.T) {
 	require.Len(t, localVRF.StaticRoutes, 1)
 	assert.Equal(t, "0.0.0.0/0", localVRF.StaticRoutes[0].Prefix)
 	require.NotNil(t, localVRF.StaticRoutes[0].NextHop)
-	assert.Equal(t, "internet", *localVRF.StaticRoutes[0].NextHop.Vrf)
+	assert.Equal(t, "internet-vrf", *localVRF.StaticRoutes[0].NextHop.Vrf)
 
 	// ClusterVRF PolicyRoute: source-only (single VRF consumer).
 	require.NotNil(t, contrib.ClusterVRF)
@@ -107,7 +107,7 @@ func TestSBRBuilder_BasicOutbound(t *testing.T) {
 	pr := contrib.ClusterVRF.PolicyRoutes[0]
 	assert.Equal(t, "198.51.100.10/32", *pr.TrafficMatch.SrcPrefix)
 	assert.Nil(t, pr.TrafficMatch.DstPrefix, "single-VRF should use source-only matching")
-	assert.Equal(t, "s-internet", *pr.NextHop.Vrf)
+	assert.Equal(t, "s-internet-vrf", *pr.NextHop.Vrf)
 }
 
 func TestSBRBuilder_InboundWithStatusAddresses(t *testing.T) {
@@ -214,8 +214,8 @@ func TestSBRBuilder_MultiVRFConsumer(t *testing.T) {
 	for _, sr := range comboVRF.StaticRoutes {
 		routesByPrefix[sr.Prefix] = *sr.NextHop.Vrf
 	}
-	assert.Equal(t, "internet", routesByPrefix["0.0.0.0/0"])
-	assert.Equal(t, "private", routesByPrefix["10.0.0.0/8"])
+	assert.Equal(t, "internet-vrf", routesByPrefix["0.0.0.0/0"])
+	assert.Equal(t, "private-vrf", routesByPrefix["10.0.0.0/8"])
 
 	// ClusterVRF: source-only policy routes (no dst matching needed — LPM handles it).
 	require.NotNil(t, contrib.ClusterVRF)
@@ -318,7 +318,7 @@ func TestSBRBuilder_MultiConsumerMerge(t *testing.T) {
 
 	// Only ONE intermediate VRF (same destination VRF).
 	require.Len(t, contrib.LocalVRFs, 1)
-	require.Contains(t, contrib.LocalVRFs, "s-internet")
+	require.Contains(t, contrib.LocalVRFs, "s-internet-vrf")
 
 	// TWO PolicyRoutes (one per source prefix, merged from both consumers).
 	require.Len(t, contrib.ClusterVRF.PolicyRoutes, 2)
