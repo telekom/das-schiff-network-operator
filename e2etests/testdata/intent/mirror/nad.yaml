@@ -1,4 +1,9 @@
 # NetworkAttachmentDefinition for VLAN 590 (mirror VRF)
+# Uses CNI conflist to chain macvlan with the tuning meta-plugin.
+# The tuning plugin disables IPv6 DAD (Duplicate Address Detection) at
+# CNI-chain time, preventing addresses from entering "dadfailed" state
+# in containerlab/Kind environments where CRA bridge agents respond to
+# DAD probes.
 apiVersion: k8s.cni.cncf.io/v1
 kind: NetworkAttachmentDefinition
 metadata:
@@ -6,11 +11,22 @@ metadata:
 spec:
   config: |
     {
-      "cniVersion": "0.3.1",
-      "type": "macvlan",
-      "master": "vlan.590",
-      "mode": "bridge",
-      "ipam": {
-        "type": "static"
-      }
+      "cniVersion": "0.4.0",
+      "name": "macvlan-vlan590",
+      "plugins": [
+        {
+          "type": "macvlan",
+          "master": "vlan.590",
+          "mode": "bridge",
+          "ipam": {
+            "type": "static"
+          }
+        },
+        {
+          "type": "tuning",
+          "sysctl": {
+            "net.ipv6.conf.IFNAME.accept_dad": "0"
+          }
+        }
+      ]
     }
