@@ -267,8 +267,8 @@ func TestL2APipeline(t *testing.T) {
 	assert.Equal(t, "m2m", l2.IRB.VRF)
 	assert.NotEmpty(t, l2.IRB.IPAddresses)
 
-	fvrf, ok := nnc.Spec.FabricVRFs["m2m"]
-	require.True(t, ok, "expected FabricVRF entry for key 'm2m', got keys: %v", mapKeys(nnc.Spec.FabricVRFs))
+	fvrf, ok := nnc.Spec.FabricVRFs["vrf-l2a"]
+	require.True(t, ok, "expected FabricVRF entry for key 'vrf-l2a', got keys: %v", mapKeys(nnc.Spec.FabricVRFs))
 	assert.Equal(t, uint32(2002026), fvrf.VNI)
 
 	// Verify revision is set
@@ -319,8 +319,8 @@ func TestInboundPipeline(t *testing.T) {
 
 	nnc := reconcileAndGetNNC(t, ctx, nodeName)
 
-	fvrf, ok := nnc.Spec.FabricVRFs["ibm2m"]
-	require.True(t, ok, "expected FabricVRF 'ibm2m', got keys: %v", mapKeys(nnc.Spec.FabricVRFs))
+	fvrf, ok := nnc.Spec.FabricVRFs["vrf-ib"]
+	require.True(t, ok, "expected FabricVRF 'vrf-ib', got keys: %v", mapKeys(nnc.Spec.FabricVRFs))
 
 	// Should have static routes or redistribute for the inbound IPs
 	assert.True(t, len(fvrf.StaticRoutes) > 0 || fvrf.Redistribute != nil,
@@ -339,8 +339,8 @@ func TestOutboundPipeline(t *testing.T) {
 
 	nnc := reconcileAndGetNNC(t, ctx, nodeName)
 
-	fvrf, ok := nnc.Spec.FabricVRFs["obm2m"]
-	require.True(t, ok, "expected FabricVRF 'obm2m', got keys: %v", mapKeys(nnc.Spec.FabricVRFs))
+	fvrf, ok := nnc.Spec.FabricVRFs["vrf-ob"]
+	require.True(t, ok, "expected FabricVRF 'vrf-ob', got keys: %v", mapKeys(nnc.Spec.FabricVRFs))
 
 	assert.True(t, len(fvrf.StaticRoutes) > 0 || len(fvrf.PolicyRoutes) > 0,
 		"expected FabricVRF to have static routes or policy routes for outbound")
