@@ -294,7 +294,9 @@ type MirrorACL struct {
 type GRELayer string
 
 const (
+	// GRELayer2 configures GRE with Layer 2 (Ethernet) encapsulation (GRE TAP).
 	GRELayer2 GRELayer = "layer2"
+	// GRELayer3 configures GRE with Layer 3 (IP) encapsulation (standard GRE).
 	GRELayer3 GRELayer = "layer3"
 )
 
