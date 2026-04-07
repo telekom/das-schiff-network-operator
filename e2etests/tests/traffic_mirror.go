@@ -72,13 +72,17 @@ func addMirrorACLToNNC(ctx context.Context, f *framework.Framework, nodeName, vr
 }
 
 // removeMirrorACLsFromNNC reads the NNC for the given node, removes all mirrorAcls
-// from spec.fabricVRFs[vrfName], and updates the object.
+// from spec.fabricVRFs[vrfName], and patches the object using a merge-patch (MergeFrom).
+// Using Patch instead of Update avoids resourceVersion conflicts from concurrent status updates.
 func removeMirrorACLsFromNNC(ctx context.Context, f *framework.Framework, nodeName, vrfName string) error {
 	nnc := &unstructured.Unstructured{}
 	nnc.SetGroupVersionKind(nncGVK)
 	if err := f.Client.Get(ctx, types.NamespacedName{Name: nodeName}, nnc); err != nil {
 		return client.IgnoreNotFound(err)
 	}
+
+	// Build the patch base before modifying so MergeFrom can compute the diff.
+	base := nnc.DeepCopy()
 
 	fabricVRFs, found, err := unstructured.NestedMap(nnc.Object, "spec", "fabricVRFs")
 	if err != nil || !found {
@@ -104,7 +108,7 @@ func removeMirrorACLsFromNNC(ctx context.Context, f *framework.Framework, nodeNa
 		return fmt.Errorf("bump revision: %w", err)
 	}
 
-	return f.Client.Update(ctx, nnc)
+	return f.Client.Patch(ctx, nnc, client.MergeFrom(base))
 }
 
 // verifyMirrorCapture verifies that traffic is mirrored to a capture pod.
