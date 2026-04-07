@@ -178,13 +178,21 @@ func (r *Outbound) validateOutbound() error {
 
 func validateAddressAllocation(a *AddressAllocation) error {
 	for _, v4 := range a.IPv4 {
-		if _, _, err := net.ParseCIDR(v4); err != nil {
+		ip, _, err := net.ParseCIDR(v4)
+		if err != nil {
 			return fmt.Errorf("invalid IPv4 CIDR %q: %w", v4, err)
+		}
+		if ip.To4() == nil {
+			return fmt.Errorf("invalid IPv4 CIDR %q: not an IPv4 CIDR", v4)
 		}
 	}
 	for _, v6 := range a.IPv6 {
-		if _, _, err := net.ParseCIDR(v6); err != nil {
+		ip, _, err := net.ParseCIDR(v6)
+		if err != nil {
 			return fmt.Errorf("invalid IPv6 CIDR %q: %w", v6, err)
+		}
+		if ip.To4() != nil {
+			return fmt.Errorf("invalid IPv6 CIDR %q: not an IPv6 CIDR", v6)
 		}
 	}
 	return nil

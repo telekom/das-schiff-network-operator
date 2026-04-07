@@ -69,13 +69,21 @@ func (r *Network) validateNetwork() error {
 		return fmt.Errorf("at least one of ipv4, ipv6 or vlan must be set")
 	}
 	if r.Spec.IPv4 != nil {
-		if _, _, err := net.ParseCIDR(r.Spec.IPv4.CIDR); err != nil {
+		ip, _, err := net.ParseCIDR(r.Spec.IPv4.CIDR)
+		if err != nil {
 			return fmt.Errorf("invalid ipv4 CIDR %q: %w", r.Spec.IPv4.CIDR, err)
+		}
+		if ip.To4() == nil {
+			return fmt.Errorf("invalid ipv4 CIDR %q: must be an IPv4 CIDR", r.Spec.IPv4.CIDR)
 		}
 	}
 	if r.Spec.IPv6 != nil {
-		if _, _, err := net.ParseCIDR(r.Spec.IPv6.CIDR); err != nil {
+		ip, _, err := net.ParseCIDR(r.Spec.IPv6.CIDR)
+		if err != nil {
 			return fmt.Errorf("invalid ipv6 CIDR %q: %w", r.Spec.IPv6.CIDR, err)
+		}
+		if ip.To4() != nil {
+			return fmt.Errorf("invalid ipv6 CIDR %q: must be an IPv6 CIDR", r.Spec.IPv6.CIDR)
 		}
 	}
 	if r.Spec.VNI != nil && *r.Spec.VNI <= 0 {

@@ -30,8 +30,9 @@ var _ = Describe("Intent BGP Peering", Label("intent", "bgp"), func() {
 	})
 
 	AfterEach(func() {
-		manifest, _ := readTestdata("intent/bgp/manifests.yaml")
-		_ = f.DeleteManifest(ctx, manifest)
+		manifest, err := readTestdata("intent/bgp/manifests.yaml")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(f.DeleteManifest(ctx, manifest)).To(Succeed())
 	})
 
 	It("should accept BGPPeering intent CRDs without breaking existing connectivity", func() {

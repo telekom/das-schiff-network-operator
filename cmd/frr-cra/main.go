@@ -581,11 +581,16 @@ func applyConfig(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to open FRR config file", http.StatusInternalServerError)
 		return
 	}
-	defer file.Close()
 	_, err = io.Copy(file, strings.NewReader(craConfiguration.FRRConfiguration))
 	if err != nil {
+		_ = file.Close()
 		log.Println("Failed to write FRR config", err)
 		http.Error(w, "Failed to write FRR config", http.StatusInternalServerError)
+		return
+	}
+	if err := file.Close(); err != nil {
+		log.Println("Failed to close FRR config file", err)
+		http.Error(w, "Failed to close FRR config file", http.StatusInternalServerError)
 		return
 	}
 

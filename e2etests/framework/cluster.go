@@ -32,8 +32,8 @@ type Framework struct {
 	Client     client.Client
 
 	// Cluster-2 (gateway cluster) clients — initialized when Cluster2Kubeconfig is set.
-	Cluster2KubeClient  kubernetes.Interface
-	cluster2Client      client.Client
+	Cluster2KubeClient kubernetes.Interface
+	cluster2Client     client.Client
 
 	// Track namespaces created during tests for cleanup.
 	testNamespaces []string
@@ -92,9 +92,12 @@ func ObjectKey(namespace, name string) types.NamespacedName {
 }
 
 // CreateNamespace creates a namespace and tracks it for cleanup.
+// If the namespace is in Terminating state, it waits (up to 60s, ctx-bounded) for it to be gone.
+// Only namespaces actually created by this call are tracked for cleanup.
 func (f *Framework) CreateNamespace(ctx context.Context, name string) error {
 	// If namespace is terminating from a previous test, wait for it to be gone.
-	for i := 0; i < 60; i++ {
+	deadline := time.Now().Add(60 * time.Second)
+	for {
 		existing := &corev1.Namespace{}
 		if err := f.Client.Get(ctx, types.NamespacedName{Name: name}, existing); err != nil {
 			if apierrors.IsNotFound(err) {
@@ -102,13 +105,19 @@ func (f *Framework) CreateNamespace(ctx context.Context, name string) error {
 			}
 			return err
 		}
-		if existing.Status.Phase == corev1.NamespaceTerminating {
-			time.Sleep(1 * time.Second)
-			continue
+		if existing.Status.Phase != corev1.NamespaceTerminating {
+			// Namespace exists and is active — do not track for cleanup to avoid
+			// accidentally deleting a namespace not created by this test run.
+			return nil
 		}
-		// Namespace exists and is active — reuse it.
-		f.testNamespaces = append(f.testNamespaces, name)
-		return nil
+		if time.Now().After(deadline) {
+			return fmt.Errorf("namespace %q still Terminating after 60s", name)
+		}
+		select {
+		case <-time.After(1 * time.Second):
+		case <-ctx.Done():
+			return fmt.Errorf("context cancelled while waiting for namespace %q to terminate: %w", name, ctx.Err())
+		}
 	}
 
 	ns := &corev1.Namespace{
@@ -118,7 +127,10 @@ func (f *Framework) CreateNamespace(ctx context.Context, name string) error {
 		if !apierrors.IsAlreadyExists(err) {
 			return err
 		}
+		// Created between our Get and Create — not tracked since we didn'''t create it.
+		return nil
 	}
+	// Only track namespaces we actually created.
 	f.testNamespaces = append(f.testNamespaces, name)
 	return nil
 }
@@ -213,6 +225,11 @@ func (f *Framework) applySingleObject(ctx context.Context, yamlData []byte, ns s
 		err = f.Client.Create(ctx, obj)
 		if isWebhookTransient(err) {
 			time.Sleep(time.Duration(attempt+1) * 500 * time.Millisecond)
+			continue
+		}
+		if apierrors.IsAlreadyExists(err) || apierrors.IsConflict(err) {
+			// Race: object was created between our Get and Create; retry the loop.
+			time.Sleep(500 * time.Millisecond)
 			continue
 		}
 		return err

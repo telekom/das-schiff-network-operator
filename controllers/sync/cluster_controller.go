@@ -13,8 +13,10 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
@@ -107,9 +109,14 @@ func (r *ClusterController) SetupWithManager(mgr ctrl.Manager) error {
 		},
 	)
 
+	// Only watch Secrets whose name ends with -kubeconfig to reduce event volume.
+	kubeconfigPredicate := predicate.NewPredicateFuncs(func(obj client.Object) bool {
+		return strings.HasSuffix(obj.GetName(), "-kubeconfig")
+	})
+
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("cluster-controller").
 		Watches(clusterObj, &handler.EnqueueRequestForObject{}).
-		Watches(&corev1.Secret{}, secretToCluster).
+		Watches(&corev1.Secret{}, secretToCluster, builder.WithPredicates(kubeconfigPredicate)).
 		Complete(r)
 }

@@ -118,6 +118,14 @@ func (f *Framework) ClearEVPNOnNodes(ctx context.Context, nodes []string) error 
 	return nil
 }
 
+// ctxSleep sleeps for d or until ctx is cancelled, whichever comes first.
+func ctxSleep(ctx context.Context, d time.Duration) {
+	select {
+	case <-time.After(d):
+	case <-ctx.Done():
+	}
+}
+
 // WaitForCleanRMACs clears EVPN, waits for kernel neighbor tables on all
 // br.* bridges to be populated with correct (non-zero) MACs. It retries the
 // EVPN clear if zero-MAC entries reappear, up to 3 times.
@@ -126,7 +134,10 @@ func (f *Framework) WaitForCleanRMACs(ctx context.Context, nodes []string, timeo
 	defer cancel()
 
 	// Give CRA-FRR time to finish any pending FRR reload before checking.
-	time.Sleep(5 * time.Second)
+	ctxSleep(ctx, 5*time.Second)
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("WaitForCleanRMACs timed out waiting for initial settle: %w", err)
+	}
 
 	for attempt := 0; attempt < 3; attempt++ {
 		// Clear EVPN on all nodes to force re-advertisement.
@@ -135,7 +146,10 @@ func (f *Framework) WaitForCleanRMACs(ctx context.Context, nodes []string, timeo
 		}
 
 		// Wait for EVPN re-convergence.
-		time.Sleep(10 * time.Second)
+		ctxSleep(ctx, 10*time.Second)
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("WaitForCleanRMACs timed out waiting for re-convergence: %w", err)
+		}
 
 		// Check kernel neighbor tables — all ::ffff: entries must have non-zero MACs.
 		clean := true
