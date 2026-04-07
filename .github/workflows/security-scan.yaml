@@ -1,0 +1,115 @@
+# SPDX-FileCopyrightText: 2025 Deutsche Telekom AG
+#
+# SPDX-License-Identifier: Apache-2.0
+
+name: Security Scan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 6 * * 1" # Every Monday at 6am UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  govulncheck:
+    name: Go Vulnerability Check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Go
+        uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5 # v6.2.0
+        with:
+          go-version-file: go.mod
+
+      - name: Install packages
+        run: sudo apt-get update && sudo apt-get install -y llvm clang libbpf-dev gcc-multilib linux-headers-$(uname -r)
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+
+      - name: Run govulncheck
+        # govulncheck exits 3 when vulnerabilities are found and 0 when clean.
+        # Any other non-zero exit code indicates a genuine execution error
+        # (e.g., module download/build failure) that should fail the job.
+        run: |
+          set +e
+          govulncheck ./...
+          exit_code=$?
+          set -e
+          if [ "$exit_code" -eq 0 ] || [ "$exit_code" -eq 3 ]; then
+            exit 0
+          fi
+          exit "$exit_code"
+
+  trivy-fs:
+    name: Trivy Filesystem Scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # security-events: write is needed for SARIF upload on push/schedule/workflow_dispatch.
+      # On pull_request the upload step is skipped via its 'if' condition,
+      # so the permission is unused but harmless.
+      security-events: write
+      # actions: read is required by codeql-action/upload-sarif to resolve
+      # the workflow run context (ref, sha) for SARIF result correlation.
+      actions: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-fs-results.sarif'
+
+      - name: Upload Trivy scan results
+        uses: github/codeql-action/upload-sarif@0d579ffd059c29b07949a3cce3983f0780820c98 # v4.32.6
+        if: always() && (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && hashFiles('trivy-fs-results.sarif') != ''
+        with:
+          sarif_file: 'trivy-fs-results.sarif'
+
+  license-audit:
+    name: Dependency License Audit
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Go
+        uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5 # v6.2.0
+        with:
+          go-version-file: go.mod
+
+      - name: Install packages
+        run: sudo apt-get update && sudo apt-get install -y llvm clang libbpf-dev gcc-multilib linux-headers-$(uname -r)
+
+      # Note: This workflow intentionally uses go-licenses v2 for `check`.
+      # The Makefile still uses go-licenses v1 for other tasks (e.g. save/report),
+      # so both major versions coexist by design.
+      - name: Install go-licenses
+        run: go install github.com/google/go-licenses/v2@v2.0.1
+
+      - name: Check dependency licenses
+        run: |
+          go-licenses check ./... \
+            --allowed_licenses=Apache-2.0,MIT,BSD-2-Clause,BSD-3-Clause,ISC,MPL-2.0,CC0-1.0,Unlicense \
+            --ignore=github.com/rackn/gohai
