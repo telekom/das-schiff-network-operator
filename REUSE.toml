@@ -153,3 +153,17 @@ path = ["bpf/**/*.c", "bpf/**/*.h"]
 precedence = "override"
 SPDX-FileCopyrightText = "2026 Deutsche Telekom AG"
 SPDX-License-Identifier = "GPL-2.0-only"
+
+# Root LICENSE file - Apache-2.0
+[[annotations]]
+path = ["LICENSE"]
+precedence = "override"
+SPDX-FileCopyrightText = "2020 Deutsche Telekom AG"
+SPDX-License-Identifier = "Apache-2.0"
+
+# BPF bundled license text (verbatim GPL-2.0 copy)
+[[annotations]]
+path = ["bpf/LICENSE"]
+precedence = "override"
+SPDX-FileCopyrightText = "Free Software Foundation, Inc."
+SPDX-License-Identifier = "GPL-2.0-only"
