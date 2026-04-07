@@ -27,9 +27,16 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+// craManager is the subset of cra.Manager that CRAVSRConfigApplier uses.
+// Extracting this interface allows unit tests to inject a stub without
+// requiring a live NETCONF connection.
+type craManager interface {
+	ApplyConfiguration(ctx context.Context, cfg *v1alpha1.NodeNetworkConfigSpec) error
+}
+
 // CRAVSRConfigApplier implements the common.ConfigApplier interface for CRA-VSR.
 type CRAVSRConfigApplier struct {
-	craManager *cra.Manager
+	craManager craManager
 }
 
 // ApplyConfig applies the network configuration using CRA-VSR manager.
@@ -47,13 +54,13 @@ type NodeNetworkConfigReconciler struct {
 
 // NewNodeNetworkConfigReconciler creates a new NodeNetworkConfigReconciler for CRA-VSR.
 func NewNodeNetworkConfigReconciler(
-	craManager *cra.Manager,
+	manager *cra.Manager,
 	clusterClient client.Client,
 	logger logr.Logger,
 	nodeNetworkConfigPath string,
 ) (*NodeNetworkConfigReconciler, error) {
 	configApplier := &CRAVSRConfigApplier{
-		craManager: craManager,
+		craManager: manager,
 	}
 
 	commonReconciler, err := common.NewNodeNetworkConfigReconciler(

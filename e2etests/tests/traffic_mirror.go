@@ -23,13 +23,18 @@ var nncGVK = schema.GroupVersionKind{
 }
 
 // addMirrorACLToNNC reads the NNC for the given node, adds the provided mirrorACL
-// to spec.fabricVRFs[vrfName].mirrorAcls, and updates the object.
+// to spec.fabricVRFs[vrfName].mirrorAcls, and patches the object using a merge-patch
+// (MergeFrom). Unlike Update, Patch only sends the changed fields so it is not
+// susceptible to resourceVersion conflicts from concurrent status updates.
 func addMirrorACLToNNC(ctx context.Context, f *framework.Framework, nodeName, vrfName string, mirrorACL map[string]interface{}) (string, error) {
 	nnc := &unstructured.Unstructured{}
 	nnc.SetGroupVersionKind(nncGVK)
 	if err := f.Client.Get(ctx, types.NamespacedName{Name: nodeName}, nnc); err != nil {
 		return "", fmt.Errorf("get NNC %s: %w", nodeName, err)
 	}
+
+	// Build the patch base before modifying so MergeFrom can compute the diff.
+	base := nnc.DeepCopy()
 
 	fabricVRFs, found, err := unstructured.NestedMap(nnc.Object, "spec", "fabricVRFs")
 	if err != nil {
@@ -63,7 +68,7 @@ func addMirrorACLToNNC(ctx context.Context, f *framework.Framework, nodeName, vr
 		return "", fmt.Errorf("bump revision: %w", err)
 	}
 
-	return newRev, f.Client.Update(ctx, nnc)
+	return newRev, f.Client.Patch(ctx, nnc, client.MergeFrom(base))
 }
 
 // removeMirrorACLsFromNNC reads the NNC for the given node, removes all mirrorAcls
@@ -205,11 +210,13 @@ var _ = Describe("Traffic Mirroring", Label("mirror"), func() {
 		}, framework.WithNetAdmin())).To(Succeed())
 
 		By("Creating mirror-capture on worker-2 (VLAN 501, m2m) — receives mirrored GRE-encapsulated packets")
+		// Use nicolaka/netshoot instead of busybox: busybox does not ship tcpdump,
+		// which verifyMirrorCapture requires to capture packets on the net1 interface.
 		Expect(f.CreateTestPod(ctx, ns, "mirror-capture", cfg.WorkerNode2, map[string]string{
 			"k8s.v1.cni.cncf.io/networks": fmt.Sprintf(
 				`[{"name": "macvlan-vlan501", "ips": ["%s/24", "%s/64"]}]`,
 				cfg.Macvlan02IPv4, cfg.Macvlan02IPv6),
-		}, framework.WithNetAdmin())).To(Succeed())
+		}, framework.WithImage("nicolaka/netshoot:v0.13"), framework.WithNetAdmin())).To(Succeed())
 
 		By("Waiting for test pods to be ready")
 		Expect(f.WaitForPodReady(ctx, ns, "mirror-src", cfg.PodReadyTimeout)).To(Succeed())
