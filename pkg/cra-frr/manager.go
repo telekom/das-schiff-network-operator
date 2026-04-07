@@ -58,17 +58,15 @@ func NewManager(craURLs []string, timeout time.Duration, clientCert, clientKey s
 }
 
 func (m *Manager) postRequest(ctx context.Context, path string, body []byte) ([]byte, error) {
-	bodyReader := bytes.NewReader(body)
-
 	for _, baseURL := range m.craURLs {
 		url := fmt.Sprintf("%s%s", baseURL, path)
 
-		req, err := http.NewRequest(http.MethodPost, url, bodyReader)
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 		if err != nil {
 			return nil, fmt.Errorf("error creating request: %w", err)
 		}
 
-		res, err := m.client.Do(req.WithContext(ctx))
+		res, err := m.client.Do(req)
 		if err != nil {
 			// Continue to the next URL if there is a connection issue
 			continue
@@ -126,12 +124,12 @@ func (m *Manager) GetMetrics(ctx context.Context, metricsType MetricsType) ([]by
 	for _, baseURL := range m.craURLs {
 		url := fmt.Sprintf("%s/%s/metrics", baseURL, metricsType)
 
-		req, err := http.NewRequest(http.MethodGet, url, http.NoBody)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 		if err != nil {
 			return nil, fmt.Errorf("error creating request: %w", err)
 		}
 
-		res, err := m.client.Do(req.WithContext(ctx))
+		res, err := m.client.Do(req)
 		if err != nil {
 			continue
 		}
