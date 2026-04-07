@@ -17,6 +17,9 @@ limitations under the License.
 package agent_cra_vsr //nolint:revive
 
 import (
+	"context"
+	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -29,15 +32,36 @@ import (
 
 var _ common.ConfigApplier = &CRAVSRConfigApplier{}
 
+// stubCRAManager is a test stub for the CRA manager that returns a
+// configurable error from ApplyConfiguration.
+type stubCRAManager struct {
+	err error
+}
+
+func (s *stubCRAManager) ApplyConfiguration(_ context.Context, _ *v1alpha1.NodeNetworkConfigSpec) error {
+	return s.err
+}
+
+// writeMiniHealthcheckConfig writes a minimal (empty-object) healthcheck config
+// YAML to a temp file and points OPERATOR_NETHEALTHCHECK_CONFIG at it so that
+// healthcheck.LoadConfig succeeds without touching the filesystem default path.
+func writeMiniHealthcheckConfig(t *testing.T) {
+	t.Helper()
+	cfgFile := filepath.Join(t.TempDir(), "net-healthcheck-config.yaml")
+	if err := os.WriteFile(cfgFile, []byte("{}\n"), 0o600); err != nil {
+		t.Fatalf("failed to write temp healthcheck config: %v", err)
+	}
+	t.Setenv("OPERATOR_NETHEALTHCHECK_CONFIG", cfgFile)
+}
+
 // TestNewNodeNetworkConfigReconciler_RestoreOnReconcileFailure verifies that the
 // factory sets RestoreOnReconcileFailure=false (VSR uses transactional commits).
 func TestNewNodeNetworkConfigReconciler_RestoreOnReconcileFailure(t *testing.T) {
-	// Ensure OPERATOR_NETHEALTHCHECK_CONFIG is not set to a real path, which would
-	// cause healthcheck.LoadConfig to treat the file as mandatory and fail the test.
-	// When the env var is empty, LoadConfig uses the built-in default path
-	// (/opt/network-operator/net-healthcheck-config.yaml) in non-mandatory mode
-	// and silently skips it when the file does not exist (dev/CI environments).
-	t.Setenv("OPERATOR_NETHEALTHCHECK_CONFIG", "")
+	// Point OPERATOR_NETHEALTHCHECK_CONFIG at a valid temp file so that
+	// healthcheck.LoadConfig treats it as mandatory (non-empty env var path) and
+	// reads the empty-object YAML without error, ensuring full test isolation
+	// regardless of what may or may not exist at the default system path.
+	writeMiniHealthcheckConfig(t)
 
 	scheme := runtime.NewScheme()
 	if err := v1alpha1.AddToScheme(scheme); err != nil {
@@ -70,5 +94,32 @@ func TestNewNodeNetworkConfigReconciler_RestoreOnReconcileFailure(t *testing.T) 
 
 	if reconciler.NodeNetworkConfigReconciler.RestoreOnReconcileFailure() {
 		t.Error("expected RestoreOnReconcileFailure=false for CRA-VSR reconciler, got true")
+	}
+}
+
+// TestCRAVSRConfigApplier_ApplyConfig_PropagatesError verifies that
+// CRAVSRConfigApplier.ApplyConfig returns an error when the underlying manager fails.
+func TestCRAVSRConfigApplier_ApplyConfig_PropagatesError(t *testing.T) {
+	sentinel := errors.New("netconf commit failed")
+	applier := &CRAVSRConfigApplier{craManager: &stubCRAManager{err: sentinel}}
+
+	cfg := &v1alpha1.NodeNetworkConfig{}
+	err := applier.ApplyConfig(context.Background(), cfg)
+	if err == nil {
+		t.Fatal("expected error from ApplyConfig, got nil")
+	}
+	if !errors.Is(err, sentinel) {
+		t.Errorf("expected error to wrap sentinel, got: %v", err)
+	}
+}
+
+// TestCRAVSRConfigApplier_ApplyConfig_SuccessOnNoError verifies that
+// CRAVSRConfigApplier.ApplyConfig returns nil when the manager succeeds.
+func TestCRAVSRConfigApplier_ApplyConfig_SuccessOnNoError(t *testing.T) {
+	applier := &CRAVSRConfigApplier{craManager: &stubCRAManager{err: nil}}
+
+	cfg := &v1alpha1.NodeNetworkConfig{}
+	if err := applier.ApplyConfig(context.Background(), cfg); err != nil {
+		t.Errorf("expected no error from ApplyConfig, got: %v", err)
 	}
 }
