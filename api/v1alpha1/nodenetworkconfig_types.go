@@ -297,12 +297,16 @@ type NextHop struct {
 
 // NodeNetworkConfigStatus defines the observed state of NodeConfig.
 type NodeNetworkConfigStatus struct {
-	// ConfigStatus describes provisioning state of the NodeConfig. Can be either 'provisioning', 'provisioned' or 'failed'.
+	// ConfigStatus describes provisioning state of the NodeConfig. Can be either 'provisioning', 'provisioned' or 'invalid'.
 	ConfigStatus string `json:"configStatus"`
 	// LastUpdate determines when last update (change) of the ConfigStatus field took place.
 	LastUpdate metav1.Time `json:"lastUpdate"`
 	// LastAppliedRevision stores hash of the NodeConfigRevision that was last applied to the node.
 	LastAppliedRevision string `json:"lastAppliedRevision,omitempty"`
+	// ErrorMessage contains the error message when ConfigStatus is 'invalid'.
+	// This field is cleared whenever ConfigStatus transitions to any non-'invalid' state
+	// (including 'provisioning' and 'provisioned'), so stale errors do not persist.
+	ErrorMessage string `json:"errorMessage,omitempty"`
 }
 
 //+kubebuilder:object:root=true
