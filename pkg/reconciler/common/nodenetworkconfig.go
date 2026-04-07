@@ -385,3 +385,9 @@ func SetStatus(
 func (r *NodeNetworkConfigReconciler) GetNodeNetworkConfig() *v1alpha1.NodeNetworkConfig {
 	return r.NodeNetworkConfig
 }
+
+// RestoreOnReconcileFailure returns whether the reconciler restores the previous
+// configuration when reconciliation fails.
+func (r *NodeNetworkConfigReconciler) RestoreOnReconcileFailure() bool {
+	return r.restoreOnReconcileFailure
+}
