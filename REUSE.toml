@@ -7,7 +7,7 @@ version = 1
 
 # GitHub workflows - CC0-1.0
 [[annotations]]
-path = [".github/**/*.yml", ".github/**/*.yaml", ".github/**/*.md", ".github/ISSUE_TEMPLATE/**", ".github/labeler.yml"]
+path = [".github/**/*.yml", ".github/**/*.yaml", ".github/**/*.md", ".github/ISSUE_TEMPLATE/**", ".github/CODEOWNERS", "CODEOWNERS"]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Deutsche Telekom AG"
 SPDX-License-Identifier = "CC0-1.0"
@@ -43,11 +43,18 @@ path = [
   "*.Dockerfile",
   "Makefile",
   "PROJECT",
-  "go.mod",
-  "go.sum",
+  "**/go.mod",
+  "**/go.sum",
   "REUSE.toml",
 ]
 precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Deutsche Telekom AG"
+SPDX-License-Identifier = "CC0-1.0"
+
+# e2e/setup Go module files - CC0-1.0 (override to avoid Apache-2.0 overlap from e2e/**)
+[[annotations]]
+path = ["e2e/setup/go.mod", "e2e/setup/go.sum"]
+precedence = "override"
 SPDX-FileCopyrightText = "2026 Deutsche Telekom AG"
 SPDX-License-Identifier = "CC0-1.0"
 
