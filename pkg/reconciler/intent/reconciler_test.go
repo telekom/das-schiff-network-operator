@@ -267,8 +267,8 @@ func TestL2APipeline(t *testing.T) {
 	assert.Equal(t, "m2m", l2.IRB.VRF)
 	assert.NotEmpty(t, l2.IRB.IPAddresses)
 
-	fvrf, ok := nnc.Spec.FabricVRFs["vrf-l2a"]
-	require.True(t, ok, "expected FabricVRF entry for key 'vrf-l2a', got keys: %v", mapKeys(nnc.Spec.FabricVRFs))
+	fvrf, ok := nnc.Spec.FabricVRFs["m2m"]
+	require.True(t, ok, "expected FabricVRF entry for key 'm2m', got keys: %v", mapKeys(nnc.Spec.FabricVRFs))
 	assert.Equal(t, uint32(2002026), fvrf.VNI)
 
 	// Verify revision is set
