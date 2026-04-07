@@ -7,6 +7,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
 	"github.com/telekom/das-schiff-network-operator/e2etests/framework"
 )
 
@@ -68,18 +69,22 @@ var _ = Describe("Intent-Exclusive: L3 Connectivity", Label("intent-exclusive", 
 			"k8s.v1.cni.cncf.io/networks": fmt.Sprintf(
 				`[{"name": "macvlan-vlan501", "ips": ["%s/24", "%s/64"]}]`,
 				cfg.Macvlan01IPv4, cfg.Macvlan01IPv6),
-		})).To(Succeed())
+		}, framework.WithNetAdmin())).To(Succeed())
 
 		By("Creating intent-excl-l3-03 on worker-2 (VLAN 502, m2m)")
 		Expect(f.CreateTestPod(ctx, ns, "intent-excl-l3-03", cfg.WorkerNode2, map[string]string{
 			"k8s.v1.cni.cncf.io/networks": fmt.Sprintf(
 				`[{"name": "macvlan-vlan502", "ips": ["%s/24", "%s/64"]}]`,
 				cfg.Macvlan03IPv4, cfg.Macvlan03IPv6),
-		})).To(Succeed())
+		}, framework.WithNetAdmin())).To(Succeed())
 
 		By("Waiting for pods to be ready")
 		Expect(f.WaitForPodReady(ctx, ns, "intent-excl-l3-01", cfg.PodReadyTimeout)).To(Succeed())
 		Expect(f.WaitForPodReady(ctx, ns, "intent-excl-l3-03", cfg.PodReadyTimeout)).To(Succeed())
+
+		By("Disabling IPv6 DAD and re-adding addresses")
+		Expect(f.EnsureIPv6NoDad(ctx, ns, "intent-excl-l3-01", cfg.Macvlan01IPv6, "net1")).To(Succeed())
+		Expect(f.EnsureIPv6NoDad(ctx, ns, "intent-excl-l3-03", cfg.Macvlan03IPv6, "net1")).To(Succeed())
 
 		By("Verifying IPv4 cross-VLAN connectivity: 501 → 502")
 		Eventually(func() bool {

@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -16,20 +15,22 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 )
 
 const (
-	finalizerName = "network-sync.telekom.com/cleanup"
-	labelManagedBy = "network-sync.telekom.com/managed-by"
+	finalizerName       = "network-sync.telekom.com/cleanup"
+	labelManagedBy      = "network-sync.telekom.com/managed-by"
 	labelManagedByValue = "network-sync"
-	annotationSourceNS = "network-sync.telekom.com/source-namespace"
+	annotationSourceNS  = "network-sync.telekom.com/source-namespace"
 )
 
 const syncRequeueInterval = 10 * time.Second
 
-// SyncController watches intent CRDs on the management cluster and syncs them
+// Controller watches intent CRDs on the management cluster and syncs them
 // to workload clusters via the RemoteClientManager.
-type SyncController struct {
+type Controller struct {
 	Client          client.Client
 	Scheme          *runtime.Scheme
 	Log             logr.Logger
@@ -71,7 +72,7 @@ func intentCRDLists() []client.ObjectList {
 	}
 }
 
-func (r *SyncController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := r.Log.WithValues("namespace", req.Namespace)
 
 	remoteClients := r.Remotes.GetByNamespace(req.Namespace)
@@ -99,7 +100,7 @@ func (r *SyncController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 }
 
 // syncObject handles create/update/delete for a single intent CRD object.
-func (r *SyncController) syncObject(ctx context.Context, log logr.Logger, remoteClient client.Client, obj client.Object) error {
+func (r *Controller) syncObject(ctx context.Context, log logr.Logger, remoteClient client.Client, obj client.Object) error {
 	name := obj.GetName()
 	kind := obj.GetObjectKind().GroupVersionKind().Kind
 	ns := obj.GetNamespace()
@@ -130,13 +131,19 @@ func (r *SyncController) syncObject(ctx context.Context, log logr.Logger, remote
 
 	// Build the desired remote object and apply it.
 	remote := r.buildRemoteObject(obj, ns)
+	if remote == nil {
+		return fmt.Errorf("buildRemoteObject returned nil for %s/%s", kind, name)
+	}
 	log.V(1).Info("Syncing to remote", "kind", kind, "name", name)
 	return r.applyRemote(ctx, remoteClient, remote)
 }
 
 // buildRemoteObject creates the desired remote object from the mgmt-side source.
-func (r *SyncController) buildRemoteObject(src client.Object, sourceNamespace string) client.Object {
-	dst := src.DeepCopyObject().(client.Object)
+func (r *Controller) buildRemoteObject(src client.Object, sourceNamespace string) client.Object {
+	dst, ok := src.DeepCopyObject().(client.Object)
+	if !ok {
+		return nil
+	}
 
 	// Reset metadata for remote cluster.
 	dst.SetNamespace(r.remoteNamespace())
@@ -148,8 +155,8 @@ func (r *SyncController) buildRemoteObject(src client.Object, sourceNamespace st
 	dst.SetGenerateName("")
 	dst.SetSelfLink("")
 	dst.SetManagedFields(nil)
-	dst.SetFinalizers(nil)       // Remote objects don't need our finalizer
-	dst.SetOwnerReferences(nil)  // No cross-cluster owner refs
+	dst.SetFinalizers(nil)      // Remote objects don't need our finalizer
+	dst.SetOwnerReferences(nil) // No cross-cluster owner refs
 
 	// Set sync labels/annotations.
 	labels := dst.GetLabels()
@@ -176,7 +183,7 @@ func (r *SyncController) buildRemoteObject(src client.Object, sourceNamespace st
 
 // promoteIPAMAddresses copies status.addresses into spec.addresses for Inbound/Outbound
 // so the workload operator sees pre-allocated IPs from mgmt-cluster IPAM.
-func (r *SyncController) promoteIPAMAddresses(obj client.Object) {
+func (*Controller) promoteIPAMAddresses(obj client.Object) {
 	switch v := obj.(type) {
 	case *nc.Inbound:
 		if v.Spec.Addresses == nil && v.Status.Addresses != nil &&
@@ -194,8 +201,11 @@ func (r *SyncController) promoteIPAMAddresses(obj client.Object) {
 }
 
 // applyRemote creates or updates the object on the remote cluster.
-func (r *SyncController) applyRemote(ctx context.Context, remoteClient client.Client, desired client.Object) error {
-	existing := desired.DeepCopyObject().(client.Object)
+func (*Controller) applyRemote(ctx context.Context, remoteClient client.Client, desired client.Object) error {
+	existing, ok := desired.DeepCopyObject().(client.Object)
+	if !ok {
+		return fmt.Errorf("DeepCopyObject did not return client.Object for %s/%s", desired.GetNamespace(), desired.GetName())
+	}
 	err := remoteClient.Get(ctx, types.NamespacedName{
 		Namespace: desired.GetNamespace(),
 		Name:      desired.GetName(),
@@ -227,8 +237,11 @@ func (r *SyncController) applyRemote(ctx context.Context, remoteClient client.Cl
 }
 
 // deleteRemote removes the object from the remote cluster.
-func (r *SyncController) deleteRemote(ctx context.Context, remoteClient client.Client, src client.Object) error {
-	remote := src.DeepCopyObject().(client.Object)
+func (r *Controller) deleteRemote(ctx context.Context, remoteClient client.Client, src client.Object) error {
+	remote, ok := src.DeepCopyObject().(client.Object)
+	if !ok {
+		return fmt.Errorf("DeepCopyObject did not return client.Object for %s/%s", src.GetNamespace(), src.GetName())
+	}
 	remote.SetNamespace(r.remoteNamespace())
 	remote.SetResourceVersion("")
 	remote.SetUID("")
@@ -244,7 +257,7 @@ func (r *SyncController) deleteRemote(ctx context.Context, remoteClient client.C
 }
 
 // SetupWithManager registers watches for all intent CRD types.
-func (r *SyncController) SetupWithManager(mgr ctrl.Manager) error {
+func (r *Controller) SetupWithManager(mgr ctrl.Manager) error {
 	// Map any intent CRD change → reconcile for its namespace.
 	enqueueNS := handler.EnqueueRequestsFromMapFunc(
 		func(_ context.Context, obj client.Object) []reconcile.Request {
@@ -264,12 +277,15 @@ func (r *SyncController) SetupWithManager(mgr ctrl.Manager) error {
 		builder = builder.Watches(obj, enqueueNS)
 	}
 
-	return builder.Complete(r)
+	if err := builder.Complete(r); err != nil {
+		return fmt.Errorf("setting up sync controller: %w", err)
+	}
+	return nil
 }
 
 // remoteNamespace returns the target namespace on workload clusters.
 // Defaults to "default" if not configured.
-func (r *SyncController) remoteNamespace() string {
+func (r *Controller) remoteNamespace() string {
 	if r.RemoteNamespace != "" {
 		return r.RemoteNamespace
 	}

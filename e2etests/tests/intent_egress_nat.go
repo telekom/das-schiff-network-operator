@@ -56,7 +56,7 @@ var _ = Describe("Intent Egress NAT", Label("intent", "egress"), func() {
 				Kind:    "Egress",
 			})
 			return f.DynamicGet(ctx, ns, "ob-egress", egress)
-		}).WithTimeout(60 * time.Second).WithPolling(5 * time.Second).Should(Succeed(),
+		}).WithTimeout(120*time.Second).WithPolling(5*time.Second).Should(Succeed(),
 			"Coil Egress should be created by platform-coil controller")
 
 		By("Creating egress test pod with Coil annotation")

@@ -7,8 +7,9 @@ import (
 	"io"
 
 	"github.com/google/go-cmp/cmp"
-	"github.com/telekom/das-schiff-network-operator/pkg/helpers/slice"
 	"gopkg.in/yaml.v2"
+
+	"github.com/telekom/das-schiff-network-operator/pkg/helpers/slice"
 )
 
 type (

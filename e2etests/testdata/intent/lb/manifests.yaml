@@ -12,4 +12,4 @@ spec:
     ipv4:
       - "10.250.4.20/32"
   advertisement:
-    type: bgp
+    type: l2

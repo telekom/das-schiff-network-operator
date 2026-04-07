@@ -59,11 +59,11 @@ func ResolveDestinations(destinations []nc.Destination, vrfs map[string]*Resolve
 		// VRFRef is optional (Destination may use nextHop instead).
 		if destinations[i].Spec.VRFRef != nil {
 			vrfName := *destinations[i].Spec.VRFRef
-			if vrf, ok := vrfs[vrfName]; ok {
-				d.VRFSpec = &vrf.Spec
-			} else {
+			vrf, ok := vrfs[vrfName]
+			if !ok {
 				return nil, fmt.Errorf("destination %q references unknown VRF %q", destinations[i].Name, vrfName)
 			}
+			d.VRFSpec = &vrf.Spec
 		}
 
 		resolved[destinations[i].Name] = d

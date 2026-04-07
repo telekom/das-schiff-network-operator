@@ -35,7 +35,7 @@ var (
 )
 
 // ---------------------------------------------------------------------------
-// Network webhook
+// Network webhook.
 // ---------------------------------------------------------------------------
 
 func (r *Network) SetupWebhookWithManager(mgr ctrl.Manager) error {
@@ -96,7 +96,7 @@ func (r *Network) validateNetwork() error {
 }
 
 // ---------------------------------------------------------------------------
-// VRF webhook
+// VRF webhook.
 // ---------------------------------------------------------------------------
 
 func (r *VRF) SetupWebhookWithManager(mgr ctrl.Manager) error {

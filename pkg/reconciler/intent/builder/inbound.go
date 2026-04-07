@@ -34,14 +34,14 @@ func NewInboundBuilder() *InboundBuilder {
 }
 
 // Name returns the builder name.
-func (b *InboundBuilder) Name() string {
+func (*InboundBuilder) Name() string {
 	return "inbound"
 }
 
 // Build produces per-node FabricVRF contributions from Inbound resources.
 // A single Inbound may select multiple Destinations across different VRFs
 // via its label selector — FabricVRF entries are produced for each matched VRF.
-func (b *InboundBuilder) Build(_ context.Context, data *resolver.ResolvedData) (map[string]*NodeContribution, error) { //nolint:gocognit // inbound building has many valid branches
+func (b *InboundBuilder) Build(_ context.Context, data *resolver.ResolvedData) (map[string]*NodeContribution, error) { //nolint:gocognit,revive // inbound building has many valid branches
 	result := make(map[string]*NodeContribution)
 
 	for i := range data.Inbounds {
@@ -50,14 +50,13 @@ func (b *InboundBuilder) Build(_ context.Context, data *resolver.ResolvedData) (
 		// Resolve the referenced Network.
 		net, ok := data.Networks[ib.Spec.NetworkRef]
 		if !ok {
-			return nil, fmt.Errorf("Inbound %q references unknown Network %q", ib.Name, ib.Spec.NetworkRef)
+			return nil, fmt.Errorf("inbound %q references unknown Network %q", ib.Name, ib.Spec.NetworkRef)
 		}
 
 		if ib.Spec.Destinations == nil {
 			continue
 		}
 
-		// Resolve ALL matching destinations, grouped by VRF.
 		grouped := groupDestinationsByVRF(ib.Spec.Destinations, data)
 		if len(grouped) == 0 {
 			continue
@@ -71,18 +70,18 @@ func (b *InboundBuilder) Build(_ context.Context, data *resolver.ResolvedData) (
 		redistribute := b.buildRedistribute(net)
 
 		// Produce FabricVRF contributions for each matched VRF.
-		for vrfName, _ := range grouped {
+		for vrfName := range grouped {
 			vrfSpec := b.resolveVRFSpec(vrfName, grouped, data)
 			if vrfSpec == nil {
 				continue
 			}
 
 			// Inbound applies to all nodes (no nodeSelector).
-			for _, node := range data.Nodes {
-				contrib, ok := result[node.Name]
+			for i := range data.Nodes {
+				contrib, ok := result[data.Nodes[i].Name]
 				if !ok {
 					contrib = NewNodeContribution()
-					result[node.Name] = contrib
+					result[data.Nodes[i].Name] = contrib
 				}
 
 				fvrf, exists := contrib.FabricVRFs[vrfName]
@@ -111,7 +110,7 @@ func (b *InboundBuilder) Build(_ context.Context, data *resolver.ResolvedData) (
 }
 
 // resolveVRFSpec finds the VRFSpec for a given VRF name from the grouped destinations.
-func (b *InboundBuilder) resolveVRFSpec(vrfName string, grouped map[string][]nc.Destination, data *resolver.ResolvedData) *nc.VRFSpec {
+func (*InboundBuilder) resolveVRFSpec(vrfName string, grouped map[string][]nc.Destination, data *resolver.ResolvedData) *nc.VRFSpec {
 	dests := grouped[vrfName]
 	if len(dests) == 0 {
 		return nil
@@ -124,7 +123,7 @@ func (b *InboundBuilder) resolveVRFSpec(vrfName string, grouped map[string][]nc.
 }
 
 // collectAddresses gathers explicit addresses from the Inbound spec.
-func (b *InboundBuilder) collectAddresses(ib *nc.Inbound) []string {
+func (*InboundBuilder) collectAddresses(ib *nc.Inbound) []string {
 	if ib.Spec.Addresses == nil {
 		return nil
 	}
@@ -135,7 +134,7 @@ func (b *InboundBuilder) collectAddresses(ib *nc.Inbound) []string {
 }
 
 // buildRedistribute creates a redistribute connected filter for the Inbound Network CIDRs.
-func (b *InboundBuilder) buildRedistribute(net *resolver.ResolvedNetwork) *networkv1alpha1.Redistribute {
+func (*InboundBuilder) buildRedistribute(net *resolver.ResolvedNetwork) *networkv1alpha1.Redistribute {
 	var items []networkv1alpha1.FilterItem
 
 	if net.Spec.IPv4 != nil {

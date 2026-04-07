@@ -12,11 +12,6 @@ import (
 	"github.com/go-logr/logr"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
-	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
-	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
-	mock_healthcheck "github.com/telekom/das-schiff-network-operator/pkg/healthcheck/mock"
-	mock_common "github.com/telekom/das-schiff-network-operator/pkg/reconciler/common/mock"
-	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/operator"
 	"go.uber.org/mock/gomock"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -24,6 +19,12 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
+	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
+	mock_healthcheck "github.com/telekom/das-schiff-network-operator/pkg/healthcheck/mock"
+	mock_common "github.com/telekom/das-schiff-network-operator/pkg/reconciler/common/mock"
+	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/operator"
 )
 
 const testNodeName = "test-node"

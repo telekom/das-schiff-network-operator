@@ -17,8 +17,9 @@ limitations under the License.
 package resolver
 
 import (
-	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 	corev1 "k8s.io/api/core/v1"
+
+	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 )
 
 // ResolvedVRF is a VRF with its spec data accessible by name.

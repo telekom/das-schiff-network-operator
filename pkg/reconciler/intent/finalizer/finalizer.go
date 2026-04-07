@@ -21,12 +21,13 @@ import (
 	"fmt"
 
 	"github.com/go-logr/logr"
-	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
-	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/resolver"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+
+	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
+	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/resolver"
 )
 
 // Manager handles in-use finalizer lifecycle for intent CRDs.
@@ -50,10 +51,10 @@ func (m *Manager) ReconcileFinalizers(ctx context.Context, fetched *resolver.Fet
 		return fmt.Errorf("VRF finalizers: %w", err)
 	}
 	if err := m.reconcileNetworkFinalizers(ctx, fetched); err != nil {
-		return fmt.Errorf("Network finalizers: %w", err)
+		return fmt.Errorf("network finalizers: %w", err)
 	}
 	if err := m.reconcileDestinationFinalizers(ctx, fetched); err != nil {
-		return fmt.Errorf("Destination finalizers: %w", err)
+		return fmt.Errorf("destination finalizers: %w", err)
 	}
 	if err := m.reconcileCollectorFinalizers(ctx, fetched); err != nil {
 		return fmt.Errorf("collector finalizers: %w", err)

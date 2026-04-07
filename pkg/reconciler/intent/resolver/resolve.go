@@ -19,8 +19,9 @@ package resolver
 import (
 	"fmt"
 
-	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 	corev1 "k8s.io/api/core/v1"
+
+	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 )
 
 // FetchedResources holds all listed intent CRDs and nodes, passed from the reconciler.

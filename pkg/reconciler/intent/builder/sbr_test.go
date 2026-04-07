@@ -21,13 +21,14 @@ import (
 	"strings"
 	"testing"
 
-	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
-	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
-	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/resolver"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
+	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
+	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/resolver"
 )
 
 func ptrString(s string) *string { return &s }

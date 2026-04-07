@@ -28,17 +28,17 @@ import (
 )
 
 var (
-	bgppeeringlog        = logf.Log.WithName("bgppeering-resource")
-	podnetworklog        = logf.Log.WithName("podnetwork-resource")
-	collectorlog         = logf.Log.WithName("collector-resource")
-	trafficmirrorlog     = logf.Log.WithName("trafficmirror-resource")
+	bgppeeringlog         = logf.Log.WithName("bgppeering-resource")
+	podnetworklog         = logf.Log.WithName("podnetwork-resource")
+	collectorlog          = logf.Log.WithName("collector-resource")
+	trafficmirrorlog      = logf.Log.WithName("trafficmirror-resource")
 	announcementpolicylog = logf.Log.WithName("announcementpolicy-resource")
-	destinationlog       = logf.Log.WithName("destination-resource")
-	interfaceconfiglog   = logf.Log.WithName("interfaceconfig-resource")
+	destinationlog        = logf.Log.WithName("destination-resource")
+	interfaceconfiglog    = logf.Log.WithName("interfaceconfig-resource")
 )
 
 // ===========================================================================
-// BGPPeering webhook
+// BGPPeering webhook.
 // ===========================================================================
 
 func (r *BGPPeering) SetupWebhookWithManager(mgr ctrl.Manager) error {

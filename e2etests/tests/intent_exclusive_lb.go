@@ -8,10 +8,11 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/telekom/das-schiff-network-operator/e2etests/framework"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+
+	"github.com/telekom/das-schiff-network-operator/e2etests/framework"
 )
 
 // Intent-Exclusive LoadBalancer Service.
@@ -60,7 +61,7 @@ var _ = Describe("Intent-Exclusive: LoadBalancer Service", Label("intent-exclusi
 				Kind:    "IPAddressPool",
 			})
 			return f.DynamicGet(ctx, "metallb-system", "ib-lb", pool)
-		}).WithTimeout(60 * time.Second).WithPolling(5 * time.Second).Should(Succeed(),
+		}).WithTimeout(60*time.Second).WithPolling(5*time.Second).Should(Succeed(),
 			"MetalLB IPAddressPool should be created by platform-metallb controller")
 
 		By("Applying intent LB app manifests (Deployment, Service)")
@@ -127,7 +128,7 @@ var _ = Describe("Intent-Exclusive: LoadBalancer Service", Label("intent-exclusi
 				code, _ := f.CurlFromCluster2Pod(ctx, "e2e-gateways", "m2m-gateway",
 					fmt.Sprintf("http://%s:80", lbIPv4))
 				return code
-			}).WithTimeout(cfg.BGPTimeout).WithPolling(5 * time.Second).Should(
+			}).WithTimeout(cfg.BGPTimeout).WithPolling(5*time.Second).Should(
 				Equal("200"), "Intent-exclusive: Expected HTTP 200 from LB VIP via intent pipeline")
 		})
 	})

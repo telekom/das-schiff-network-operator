@@ -21,10 +21,11 @@ import (
 	"strings"
 	"testing"
 
-	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
-	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/resolver"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
+	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/resolver"
 )
 
 func ptr[T any](v T) *T { return &v }
@@ -231,7 +232,7 @@ func TestL2ABuilder_WithDestinationVRF(t *testing.T) {
 		t.Fatal("expected IRB to be set when destinations have VRF")
 	}
 	if l2.IRB.VRF != "prod" {
-		t.Errorf("expected IRB VRF 'prod', got %q", l2.IRB.VRF)
+		t.Errorf("expected IRB VRF 'prod' (backbone name), got %q", l2.IRB.VRF)
 	}
 	if len(l2.IRB.IPAddresses) != 1 || l2.IRB.IPAddresses[0] != "10.100.0.0/24" {
 		t.Errorf("expected IRB IP [10.100.0.0/24], got %v", l2.IRB.IPAddresses)
@@ -244,10 +245,10 @@ func TestL2ABuilder_WithDestinationVRF(t *testing.T) {
 		t.Errorf("expected empty L2 RouteTarget (FRR auto-derives), got %q", l2.RouteTarget)
 	}
 
-	// FabricVRF should have been created.
+	// FabricVRF is keyed by backbone VRF name (spec.vrf), not CRD name.
 	fvrf, ok := contrib.FabricVRFs["prod"]
 	if !ok {
-		t.Fatal("expected FabricVRF 'prod'")
+		t.Fatal("expected FabricVRF 'prod' (backbone name)")
 	}
 	if fvrf.VNI != 5001 {
 		t.Errorf("expected FabricVRF VNI 5001, got %d", fvrf.VNI)

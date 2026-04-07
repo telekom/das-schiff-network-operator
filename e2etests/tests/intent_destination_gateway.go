@@ -55,7 +55,7 @@ var _ = Describe("Intent: Destination Gateway Validation", Label("intent", "dest
 				return false
 			}
 			return framework.NNCHasFabricVRF(nnc, "c2m")
-		}).WithTimeout(cfg.BGPTimeout).WithPolling(5 * time.Second).Should(BeTrue(),
+		}).WithTimeout(cfg.BGPTimeout).WithPolling(5*time.Second).Should(BeTrue(),
 			"c2m VRF did not appear in NNC within timeout")
 
 		By("Waiting for NNCs to be provisioned by CRA-FRR")
@@ -66,7 +66,7 @@ var _ = Describe("Intent: Destination Gateway Validation", Label("intent", "dest
 					return false
 				}
 				return framework.NNCIsProvisioned(nnc)
-			}).WithTimeout(cfg.BGPTimeout).WithPolling(5 * time.Second).Should(BeTrue(),
+			}).WithTimeout(cfg.BGPTimeout).WithPolling(5*time.Second).Should(BeTrue(),
 				fmt.Sprintf("NNC for %s not provisioned", node))
 		}
 	})
@@ -87,9 +87,12 @@ var _ = Describe("Intent: Destination Gateway Validation", Label("intent", "dest
 				"k8s.v1.cni.cncf.io/networks": fmt.Sprintf(
 					`[{"name": "macvlan-vlan501", "ips": ["%s/24", "%s/64"]}]`,
 					cfg.Macvlan01IPv4, cfg.Macvlan01IPv6),
-			})).To(Succeed())
+			}, framework.WithNetAdmin())).To(Succeed())
 
 			Expect(f.WaitForPodReady(ctx, ns, "dest-gw-m2m", cfg.PodReadyTimeout)).To(Succeed())
+
+			By("Disabling IPv6 DAD and re-adding address")
+			Expect(f.EnsureIPv6NoDad(ctx, ns, "dest-gw-m2m", cfg.Macvlan01IPv6, "net1")).To(Succeed())
 
 			By("Verifying pod → m2m-gateway (IPv4)")
 			Eventually(func() bool {
@@ -132,9 +135,12 @@ var _ = Describe("Intent: Destination Gateway Validation", Label("intent", "dest
 				"k8s.v1.cni.cncf.io/networks": fmt.Sprintf(
 					`[{"name": "macvlan-vlan503", "ips": ["%s/24", "%s/64"]}]`,
 					cfg.Macvlan04IPv4, cfg.Macvlan04IPv6),
-			})).To(Succeed())
+			}, framework.WithNetAdmin())).To(Succeed())
 
 			Expect(f.WaitForPodReady(ctx, ns, "dest-gw-c2m", cfg.PodReadyTimeout)).To(Succeed())
+
+			By("Disabling IPv6 DAD and re-adding address")
+			Expect(f.EnsureIPv6NoDad(ctx, ns, "dest-gw-c2m", cfg.Macvlan04IPv6, "net1")).To(Succeed())
 
 			By("Verifying pod → c2m-gateway (IPv4)")
 			Eventually(func() bool {
@@ -177,17 +183,21 @@ var _ = Describe("Intent: Destination Gateway Validation", Label("intent", "dest
 				"k8s.v1.cni.cncf.io/networks": fmt.Sprintf(
 					`[{"name": "macvlan-vlan501", "ips": ["%s/24", "%s/64"]}]`,
 					cfg.Macvlan01IPv4, cfg.Macvlan01IPv6),
-			})).To(Succeed())
+			}, framework.WithNetAdmin())).To(Succeed())
 
 			By("Creating dest-gw-c2m on worker-2 (VLAN 503, c2m)")
 			Expect(f.CreateTestPod(ctx, ns, "dest-gw-c2m", cfg.WorkerNode2, map[string]string{
 				"k8s.v1.cni.cncf.io/networks": fmt.Sprintf(
 					`[{"name": "macvlan-vlan503", "ips": ["%s/24", "%s/64"]}]`,
 					cfg.Macvlan04IPv4, cfg.Macvlan04IPv6),
-			})).To(Succeed())
+			}, framework.WithNetAdmin())).To(Succeed())
 
 			Expect(f.WaitForPodReady(ctx, ns, "dest-gw-m2m", cfg.PodReadyTimeout)).To(Succeed())
 			Expect(f.WaitForPodReady(ctx, ns, "dest-gw-c2m", cfg.PodReadyTimeout)).To(Succeed())
+
+			By("Disabling IPv6 DAD and re-adding addresses")
+			Expect(f.EnsureIPv6NoDad(ctx, ns, "dest-gw-m2m", cfg.Macvlan01IPv6, "net1")).To(Succeed())
+			Expect(f.EnsureIPv6NoDad(ctx, ns, "dest-gw-c2m", cfg.Macvlan04IPv6, "net1")).To(Succeed())
 
 			By("Verifying m2m-gateway CANNOT reach c2m pod (IPv4)")
 			result, _ := f.PingFromCluster2Pod(ctx, "e2e-gateways", "m2m-gateway",

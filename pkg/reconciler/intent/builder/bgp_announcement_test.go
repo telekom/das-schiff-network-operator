@@ -22,11 +22,12 @@ import (
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/resolver"
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // ---------------------------------------------------------------------------
@@ -444,10 +445,8 @@ func TestAnnouncementBuilder_BasicHostRoutes(t *testing.T) {
 		t.Errorf("expected Ge=128 for IPv6 host route, got %v", item6.Matcher.Prefix.Ge)
 	}
 
-	// DefaultAction is Reject because buildFabricVRF initialises the filter
-	// with Reject as default and mergeFilter preserves the existing default.
 	if filter.DefaultAction.Type != networkv1alpha1.Reject {
-		t.Errorf("expected DefaultAction Reject (from buildFabricVRF base), got %q", filter.DefaultAction.Type)
+		t.Errorf("expected DefaultAction Reject (base filter's deny-by-default is preserved by mergeFilter), got %q", filter.DefaultAction.Type)
 	}
 }
 
@@ -612,5 +611,29 @@ func TestAnnouncementBuilder_UnknownVRF(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "unknown VRF") {
 		t.Errorf("expected 'unknown VRF' in error, got: %v", err)
+	}
+}
+
+func TestMergeFilter_BaseDefaultActionWins(t *testing.T) {
+	base := &networkv1alpha1.Filter{
+		DefaultAction: networkv1alpha1.Action{Type: networkv1alpha1.Reject},
+		Items: []networkv1alpha1.FilterItem{
+			{Action: networkv1alpha1.Action{Type: networkv1alpha1.Accept}},
+		},
+	}
+	addition := &networkv1alpha1.Filter{
+		DefaultAction: networkv1alpha1.Action{Type: networkv1alpha1.Accept},
+		Items: []networkv1alpha1.FilterItem{
+			{Action: networkv1alpha1.Action{Type: networkv1alpha1.Accept}},
+		},
+	}
+
+	merged := mergeFilter(base, addition)
+
+	if merged.DefaultAction.Type != networkv1alpha1.Reject {
+		t.Errorf("base DefaultAction must be preserved: expected Reject, got %q", merged.DefaultAction.Type)
+	}
+	if len(merged.Items) != 2 {
+		t.Errorf("expected 2 merged items, got %d", len(merged.Items))
 	}
 }

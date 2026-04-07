@@ -5,15 +5,16 @@ import (
 	"testing"
 	"time"
 
-	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
-	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
-	intentreconciler "github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+
+	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
+	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
+	intentreconciler "github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent"
 )
 
 func testScheme() *runtime.Scheme {
@@ -24,7 +25,7 @@ func testScheme() *runtime.Scheme {
 	return s
 }
 
-func newTestIntentReconciler(t *testing.T) *IntentReconciler {
+func newTestIntentReconciler(t *testing.T) *Controller {
 	t.Helper()
 	s := testScheme()
 	fakeClient := fake.NewClientBuilder().WithScheme(s).Build()
@@ -35,7 +36,7 @@ func newTestIntentReconciler(t *testing.T) *IntentReconciler {
 		t.Fatalf("failed to create intent reconciler: %v", err)
 	}
 
-	return &IntentReconciler{
+	return &Controller{
 		Client:     fakeClient,
 		Scheme:     s,
 		Reconciler: reconciler,

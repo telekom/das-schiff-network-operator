@@ -22,9 +22,6 @@ import (
 	"fmt"
 
 	"github.com/go-logr/logr"
-	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
-	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
-	"github.com/telekom/das-schiff-network-operator/pkg/network/netplan"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -35,6 +32,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+
+	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
+	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
+	"github.com/telekom/das-schiff-network-operator/pkg/network/netplan"
 )
 
 const (
@@ -133,7 +134,7 @@ func (r *InterfaceConfigReconciler) reconcileNodeConfig(ctx context.Context, ifc
 		ObjectMeta: metav1.ObjectMeta{
 			Name: node.Name,
 			Labels: map[string]string{
-				"app.kubernetes.io/managed-by":           "network-connector",
+				"app.kubernetes.io/managed-by":            managedByValue,
 				"network-connector.sylvaproject.org/type": "nodenetplanconfig",
 			},
 		},
@@ -191,7 +192,10 @@ func (r *InterfaceConfigReconciler) handleDeletion(ctx context.Context, ifconfig
 	}
 
 	controllerutil.RemoveFinalizer(ifconfig, ifconfigFinalizer)
-	return ctrl.Result{}, r.Update(ctx, ifconfig)
+	if err := r.Update(ctx, ifconfig); err != nil {
+		return ctrl.Result{}, fmt.Errorf("removing finalizer from InterfaceConfig %s: %w", ifconfig.Name, err)
+	}
+	return ctrl.Result{}, nil
 }
 
 // buildNetplanEthernets converts InterfaceConfig ethernets to netplan Device map.

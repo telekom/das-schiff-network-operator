@@ -6,8 +6,9 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/telekom/das-schiff-network-operator/pkg/helpers/slice"
 	yaml "gopkg.in/yaml.v2"
+
+	"github.com/telekom/das-schiff-network-operator/pkg/helpers/slice"
 )
 
 type (

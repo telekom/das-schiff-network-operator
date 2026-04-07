@@ -27,34 +27,30 @@ import (
 	"strconv"
 	"time"
 
-	operator2 "github.com/telekom/das-schiff-network-operator/controllers/operator"
-	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/operator"
-	"github.com/telekom/das-schiff-network-operator/pkg/utils"
-	"sigs.k8s.io/controller-runtime/pkg/healthz"
-	"sigs.k8s.io/controller-runtime/pkg/webhook"
-
+	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.) //nolint:gci
+	// to ensure that exec-entrypoint and run can make use of them.
+	"github.com/open-policy-agent/cert-controller/pkg/rotator"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	_ "k8s.io/client-go/plugin/pkg/client/auth"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/healthz"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
+	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	networkconnector "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 	intentctrl "github.com/telekom/das-schiff-network-operator/controllers/intent"
+	operator2 "github.com/telekom/das-schiff-network-operator/controllers/operator"
 	"github.com/telekom/das-schiff-network-operator/controllers/platform"
 	intentreconciler "github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent"
+	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/operator"
+	"github.com/telekom/das-schiff-network-operator/pkg/utils"
 	"github.com/telekom/das-schiff-network-operator/pkg/version"
-
-	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.) //nolint:gci
-	// to ensure that exec-entrypoint and run can make use of them.
-	"github.com/open-policy-agent/cert-controller/pkg/rotator"
-	_ "k8s.io/client-go/plugin/pkg/client/auth"
-	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/log/zap"
-	"sigs.k8s.io/controller-runtime/pkg/manager"
-	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
-	//nolint:gci // kubebuilder import
-	//+kubebuilder:scaffold:imports
 )
 
 var (
@@ -114,7 +110,8 @@ func parseFlags() *operatorConfig {
 	flag.BoolVar(&cfg.enableIntentReconciler, "enable-intent-reconciler", false,
 		"Enable the intent-based reconciler (network-connector.sylvaproject.org CRDs). Disables legacy ConfigReconciler when active.")
 	flag.StringVar(&cfg.intentNamespace, "intent-namespace", "default",
-		"Namespace to watch for intent CRDs. Empty string means all namespaces (cluster-wide).")
+		"Namespace to watch for intent CRDs. Empty string means all namespaces (cluster-wide). "+
+			"Defaults to 'default' to avoid accidentally reconciling CRDs from all namespaces on first deployment.")
 	flag.StringVar(&cfg.healthAddr, "health-addr", ":7085",
 		"bind address of health/readiness probes")
 	flag.StringVar(&cfg.metricsAddr, "metrics-addr", ":7084",
@@ -296,7 +293,7 @@ func setupIntentReconciler(mgr manager.Manager, apiTimeout time.Duration, cfg *o
 		return fmt.Errorf("unable to create intent reconciler: %w", err)
 	}
 
-	if err = (&intentctrl.IntentReconciler{
+	if err = (&intentctrl.Controller{
 		Client:     mgr.GetClient(),
 		Scheme:     mgr.GetScheme(),
 		Reconciler: ir,

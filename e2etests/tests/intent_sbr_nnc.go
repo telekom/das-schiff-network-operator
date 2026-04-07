@@ -7,8 +7,9 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/telekom/das-schiff-network-operator/e2etests/framework"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+
+	"github.com/telekom/das-schiff-network-operator/e2etests/framework"
 )
 
 // Intent SBR NNC Validation — checks that Outbound/Inbound destination selectors

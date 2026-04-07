@@ -21,8 +21,6 @@ import (
 	"fmt"
 	"time"
 
-	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
-	intentreconciler "github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -30,12 +28,15 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
+	intentreconciler "github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent"
 )
 
 const requeueTime = 10 * time.Minute
 
-// IntentReconciler watches all intent CRDs and fans out to the intent reconciler.
-type IntentReconciler struct {
+// Controller watches all intent CRDs and fans out to the intent reconciler.
+type Controller struct {
 	client.Client
 	Scheme     *runtime.Scheme
 	Reconciler *intentreconciler.Reconciler
@@ -65,8 +66,9 @@ type IntentReconciler struct {
 //+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=announcementpolicies/status,verbs=get;update;patch
 
 // Reconcile handles any intent CRD change by triggering the debounced reconciler.
-func (r *IntentReconciler) Reconcile(ctx context.Context, _ ctrl.Request) (ctrl.Result, error) {
-	_ = log.FromContext(ctx)
+func (r *Controller) Reconcile(ctx context.Context, _ ctrl.Request) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+	logger.V(1).Info("intent CRD change detected, triggering debounced reconciliation")
 
 	r.Reconciler.Reconcile(ctx)
 
@@ -74,7 +76,7 @@ func (r *IntentReconciler) Reconcile(ctx context.Context, _ ctrl.Request) (ctrl.
 }
 
 // SetupWithManager registers watches for all intent CRDs and Node.
-func (r *IntentReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *Controller) SetupWithManager(mgr ctrl.Manager) error {
 	// Generic handler: any change in any watched type triggers a single reconcile.
 	h := handler.EnqueueRequestsFromMapFunc(
 		func(_ context.Context, _ client.Object) []reconcile.Request {

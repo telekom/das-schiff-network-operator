@@ -6,6 +6,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
 	"github.com/telekom/das-schiff-network-operator/e2etests/framework"
 )
 
@@ -60,7 +61,7 @@ var _ = Describe("Intent Gateway Connectivity", Label("intent", "gateway"), func
 				r, err := f.PingFromCluster2Pod(ctx, "e2e-gateways", "m2m-gateway",
 					"10.250.0.1", 3)
 				return err == nil && r != nil && r.Success
-			}).WithTimeout(cfg.BGPTimeout).WithPolling(5 * time.Second).Should(BeTrue(),
+			}).WithTimeout(cfg.BGPTimeout).WithPolling(5*time.Second).Should(BeTrue(),
 				"DC gateway connectivity broken after applying intent CRDs")
 		})
 	})

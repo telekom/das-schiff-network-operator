@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+
 	"github.com/telekom/das-schiff-network-operator/e2e/setup"
 )
 

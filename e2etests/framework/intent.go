@@ -150,12 +150,19 @@ func (f *Framework) patchOperatorForIntent(ctx context.Context) error {
 		}
 	}
 
-	// Use JSON patch to append the arg.
+	// Use JSON patch to append the args.
 	patch := []map[string]interface{}{
 		{
 			"op":    "add",
 			"path":  "/spec/template/spec/containers/0/args/-",
 			"value": "--enable-intent-reconciler",
+		},
+		{
+			// Watch all namespaces so the intent reconciler sees Outbound CRDs
+			// created in test namespaces (not just the default namespace).
+			"op":    "add",
+			"path":  "/spec/template/spec/containers/0/args/-",
+			"value": "--intent-namespace=",
 		},
 	}
 	patchBytes, err := json.Marshal(patch)

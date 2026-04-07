@@ -34,12 +34,12 @@ func NewBGPPeeringBuilder() *BGPPeeringBuilder {
 }
 
 // Name returns the builder name.
-func (b *BGPPeeringBuilder) Name() string {
+func (*BGPPeeringBuilder) Name() string {
 	return "bgppeering"
 }
 
 // Build produces per-node BGPPeer contributions from BGPPeering resources.
-func (b *BGPPeeringBuilder) Build(_ context.Context, data *resolver.ResolvedData) (map[string]*NodeContribution, error) {
+func (b *BGPPeeringBuilder) Build(_ context.Context, data *resolver.ResolvedData) (map[string]*NodeContribution, error) { //nolint:revive // cognitive-complexity: BGP peering building has many valid mode branches
 	result := make(map[string]*NodeContribution)
 
 	for i := range data.BGPPeerings {
@@ -125,11 +125,11 @@ func (b *BGPPeeringBuilder) buildLoopbackPeer(bp *nc.BGPPeering, data *resolver.
 	peer.IPv4, peer.IPv6 = b.buildAddressFamilies(bp)
 
 	// Apply to all nodes.
-	for _, node := range data.Nodes {
-		contrib, ok := result[node.Name]
+	for i := range data.Nodes {
+		contrib, ok := result[data.Nodes[i].Name]
 		if !ok {
 			contrib = NewNodeContribution()
-			result[node.Name] = contrib
+			result[data.Nodes[i].Name] = contrib
 		}
 
 		if contrib.ClusterVRF == nil {
@@ -143,7 +143,7 @@ func (b *BGPPeeringBuilder) buildLoopbackPeer(bp *nc.BGPPeering, data *resolver.
 }
 
 // resolveL2AVRF looks up a Layer2Attachment's destination VRF.
-func (b *BGPPeeringBuilder) resolveL2AVRF(l2a *nc.Layer2Attachment, data *resolver.ResolvedData) (string, *nc.VRFSpec) {
+func (*BGPPeeringBuilder) resolveL2AVRF(l2a *nc.Layer2Attachment, data *resolver.ResolvedData) (string, *nc.VRFSpec) {
 	if l2a.Spec.Destinations == nil {
 		return "", nil
 	}
@@ -181,7 +181,7 @@ func (b *BGPPeeringBuilder) buildListenRangePeers(bp *nc.BGPPeering, net *resolv
 }
 
 // buildBasePeer creates a BGPPeer with common fields from the BGPPeering spec.
-func (b *BGPPeeringBuilder) buildBasePeer(bp *nc.BGPPeering) networkv1alpha1.BGPPeer {
+func (*BGPPeeringBuilder) buildBasePeer(bp *nc.BGPPeering) networkv1alpha1.BGPPeer {
 	peer := networkv1alpha1.BGPPeer{}
 
 	if bp.Spec.WorkloadAS != nil {
@@ -201,9 +201,7 @@ func (b *BGPPeeringBuilder) buildBasePeer(bp *nc.BGPPeering) networkv1alpha1.BGP
 }
 
 // buildAddressFamilies constructs IPv4/IPv6 address family config from the BGPPeering spec.
-func (b *BGPPeeringBuilder) buildAddressFamilies(bp *nc.BGPPeering) (*networkv1alpha1.AddressFamily, *networkv1alpha1.AddressFamily) {
-	var ipv4, ipv6 *networkv1alpha1.AddressFamily
-
+func (*BGPPeeringBuilder) buildAddressFamilies(bp *nc.BGPPeering) (ipv4, ipv6 *networkv1alpha1.AddressFamily) {
 	if len(bp.Spec.AddressFamilies) == 0 {
 		// Default: dual-stack.
 		ipv4 = &networkv1alpha1.AddressFamily{}

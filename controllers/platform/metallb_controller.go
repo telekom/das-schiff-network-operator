@@ -21,7 +21,6 @@ import (
 	"fmt"
 
 	"github.com/go-logr/logr"
-	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -32,6 +31,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+
+	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 )
 
 const (
@@ -40,7 +41,7 @@ const (
 )
 
 // MetalLBReconciler watches Inbound resources and reconciles MetalLB
-// IPAddressPool + L2/BGPAdvertisement resources using unstructured objects.
+// IPAddressPool resources using unstructured objects.
 type MetalLBReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
@@ -51,7 +52,6 @@ type MetalLBReconciler struct {
 //+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=inbounds/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=inbounds/finalizers,verbs=update
 //+kubebuilder:rbac:groups=metallb.io,resources=ipaddresspools,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=metallb.io,resources=bgpadvertisements,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=metallb.io,resources=l2advertisements,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile handles Inbound create/update/delete events.
@@ -122,7 +122,7 @@ func collectAddresses(inbound *nc.Inbound) []interface{} {
 // managedLabels returns labels applied to every MetalLB object we create.
 func managedLabels(inboundName string) map[string]interface{} {
 	return map[string]interface{}{
-		"app.kubernetes.io/managed-by":              "network-connector",
+		"app.kubernetes.io/managed-by":               managedByValue,
 		"network-connector.sylvaproject.org/inbound": inboundName,
 	}
 }
@@ -145,50 +145,40 @@ func newIPAddressPool(poolName, inboundName string, addresses []interface{}) *un
 	return pool
 }
 
-// newAdvertisement builds an unstructured BGPAdvertisement or L2Advertisement.
-func newAdvertisement(kind, poolName, inboundName string) *unstructured.Unstructured {
+func newL2Advertisement(poolName, inboundName string) *unstructured.Unstructured {
 	adv := &unstructured.Unstructured{}
 	adv.SetGroupVersionKind(schema.GroupVersionKind{
 		Group:   "metallb.io",
 		Version: "v1beta1",
-		Kind:    kind,
+		Kind:    "L2Advertisement",
 	})
 	adv.SetName(poolName)
 	adv.SetNamespace(metallbNamespace)
 	adv.SetLabels(toStringLabels(managedLabels(inboundName)))
-	if err := unstructured.SetNestedSlice(adv.Object, []interface{}{poolName}, "spec", "ipAddressPools"); err != nil {
-		panic(fmt.Sprintf("bug: SetNestedSlice: %v", err))
+	if err := unstructured.SetNestedStringSlice(adv.Object, []string{poolName}, "spec", "ipAddressPools"); err != nil {
+		panic(fmt.Sprintf("bug: SetNestedStringSlice: %v", err))
 	}
 	return adv
 }
 
-// advertisementKind maps the Inbound advertisement type to the MetalLB CRD kind.
-func advertisementKind(advType string) string {
-	if advType == "l2" {
-		return "L2Advertisement"
-	}
-	return "BGPAdvertisement"
-}
-
-// reconcilePool creates or updates IPAddressPool + Advertisement for an Inbound.
 func (r *MetalLBReconciler) reconcilePool(ctx context.Context, inbound *nc.Inbound, logger logr.Logger) error {
 	poolName := resolvePoolName(inbound)
 	addresses := collectAddresses(inbound)
-	kind := advertisementKind(inbound.Spec.Advertisement.Type)
 
-	// Reconcile IPAddressPool.
 	desiredPool := newIPAddressPool(poolName, inbound.Name, addresses)
 	if err := r.applyUnstructured(ctx, desiredPool, logger); err != nil {
 		return fmt.Errorf("error reconciling IPAddressPool %q: %w", poolName, err)
 	}
 
-	// Reconcile Advertisement.
-	desiredAdv := newAdvertisement(kind, poolName, inbound.Name)
-	if err := r.applyUnstructured(ctx, desiredAdv, logger); err != nil {
-		return fmt.Errorf("error reconciling %s %q: %w", kind, poolName, err)
+	// Only create an L2Advertisement for l2 mode.
+	// For bgp mode, kube-vip handles advertisement — no MetalLB advertisement object needed.
+	if inbound.Spec.Advertisement.Type == "l2" {
+		desiredAdv := newL2Advertisement(poolName, inbound.Name)
+		if err := r.applyUnstructured(ctx, desiredAdv, logger); err != nil {
+			return fmt.Errorf("error reconciling L2Advertisement %q: %w", poolName, err)
+		}
 	}
 
-	// Update Inbound status with resolved pool name.
 	inbound.Status.PoolName = &poolName
 	if err := r.Status().Update(ctx, inbound); err != nil {
 		return fmt.Errorf("error updating Inbound status: %w", err)
@@ -206,7 +196,10 @@ func (r *MetalLBReconciler) applyUnstructured(ctx context.Context, desired *unst
 	err := r.Get(ctx, key, existing)
 	if apierrors.IsNotFound(err) {
 		logger.Info("creating MetalLB resource", "kind", desired.GetKind(), "name", desired.GetName())
-		return r.Create(ctx, desired)
+		if err := r.Create(ctx, desired); err != nil {
+			return fmt.Errorf("creating %s %q: %w", desired.GetKind(), desired.GetName(), err)
+		}
+		return nil
 	}
 	if err != nil {
 		return fmt.Errorf("error getting %s %q: %w", desired.GetKind(), desired.GetName(), err)
@@ -215,7 +208,10 @@ func (r *MetalLBReconciler) applyUnstructured(ctx context.Context, desired *unst
 	// Preserve resource version for update.
 	desired.SetResourceVersion(existing.GetResourceVersion())
 	logger.Info("updating MetalLB resource", "kind", desired.GetKind(), "name", desired.GetName())
-	return r.Update(ctx, desired)
+	if err := r.Update(ctx, desired); err != nil {
+		return fmt.Errorf("updating %s %q: %w", desired.GetKind(), desired.GetName(), err)
+	}
+	return nil
 }
 
 func (r *MetalLBReconciler) handleDeletion(ctx context.Context, inbound *nc.Inbound, logger logr.Logger) (ctrl.Result, error) {
@@ -224,9 +220,7 @@ func (r *MetalLBReconciler) handleDeletion(ctx context.Context, inbound *nc.Inbo
 	}
 
 	poolName := resolvePoolName(inbound)
-	kind := advertisementKind(inbound.Spec.Advertisement.Type)
 
-	// Delete the IPAddressPool.
 	pool := &unstructured.Unstructured{}
 	pool.SetGroupVersionKind(schema.GroupVersionKind{Group: "metallb.io", Version: "v1beta1", Kind: "IPAddressPool"})
 	pool.SetName(poolName)
@@ -236,15 +230,14 @@ func (r *MetalLBReconciler) handleDeletion(ctx context.Context, inbound *nc.Inbo
 	}
 	logger.Info("deleted IPAddressPool", "name", poolName)
 
-	// Delete the Advertisement.
 	adv := &unstructured.Unstructured{}
-	adv.SetGroupVersionKind(schema.GroupVersionKind{Group: "metallb.io", Version: "v1beta1", Kind: kind})
+	adv.SetGroupVersionKind(schema.GroupVersionKind{Group: "metallb.io", Version: "v1beta1", Kind: "L2Advertisement"})
 	adv.SetName(poolName)
 	adv.SetNamespace(metallbNamespace)
 	if err := r.Delete(ctx, adv); err != nil && !apierrors.IsNotFound(err) {
-		return ctrl.Result{}, fmt.Errorf("error deleting %s %q: %w", kind, poolName, err)
+		return ctrl.Result{}, fmt.Errorf("error deleting L2Advertisement %q: %w", poolName, err)
 	}
-	logger.Info("deleted Advertisement", "kind", kind, "name", poolName)
+	logger.Info("deleted L2Advertisement", "name", poolName)
 
 	controllerutil.RemoveFinalizer(inbound, metallbFinalizer)
 	if err := r.Update(ctx, inbound); err != nil {
@@ -276,7 +269,6 @@ func (r *MetalLBReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 var metallbTargetGVKs = []schema.GroupVersionKind{
 	{Group: "metallb.io", Version: "v1beta1", Kind: "IPAddressPool"},
-	{Group: "metallb.io", Version: "v1beta1", Kind: "BGPAdvertisement"},
 	{Group: "metallb.io", Version: "v1beta1", Kind: "L2Advertisement"},
 }
 

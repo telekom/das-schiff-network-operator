@@ -20,11 +20,12 @@ import (
 	"context"
 	"fmt"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/resolver"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
 )
 
 // PodNetworkBuilder transforms PodNetwork intent CRDs into FabricVRF CNI routing config.
@@ -36,7 +37,7 @@ func NewPodNetworkBuilder() *PodNetworkBuilder {
 }
 
 // Name returns the builder name.
-func (b *PodNetworkBuilder) Name() string {
+func (*PodNetworkBuilder) Name() string {
 	return "podnetwork"
 }
 
@@ -70,11 +71,11 @@ func (b *PodNetworkBuilder) Build(_ context.Context, data *resolver.ResolvedData
 		staticRoutes := b.buildExtraRoutes(pn)
 
 		// PodNetwork applies to all nodes (no nodeSelector).
-		for _, node := range data.Nodes {
-			contrib, ok := result[node.Name]
+		for i := range data.Nodes {
+			contrib, ok := result[data.Nodes[i].Name]
 			if !ok {
 				contrib = NewNodeContribution()
-				result[node.Name] = contrib
+				result[data.Nodes[i].Name] = contrib
 			}
 
 			fvrf, exists := contrib.FabricVRFs[vrfName]
@@ -95,7 +96,7 @@ func (b *PodNetworkBuilder) Build(_ context.Context, data *resolver.ResolvedData
 }
 
 // resolveDestinationVRF finds the VRF for a PodNetwork by matching its destination selector.
-func (b *PodNetworkBuilder) resolveDestinationVRF(pn *nc.PodNetwork, data *resolver.ResolvedData) (string, *nc.VRFSpec, error) {
+func (*PodNetworkBuilder) resolveDestinationVRF(pn *nc.PodNetwork, data *resolver.ResolvedData) (string, *nc.VRFSpec, error) {
 	if pn.Spec.Destinations == nil {
 		return "", nil, nil
 	}
@@ -119,7 +120,7 @@ func (b *PodNetworkBuilder) resolveDestinationVRF(pn *nc.PodNetwork, data *resol
 }
 
 // buildRedistribute creates a redistribute connected filter for the PodNetwork CIDRs.
-func (b *PodNetworkBuilder) buildRedistribute(net *resolver.ResolvedNetwork) *networkv1alpha1.Redistribute {
+func (*PodNetworkBuilder) buildRedistribute(net *resolver.ResolvedNetwork) *networkv1alpha1.Redistribute {
 	var items []networkv1alpha1.FilterItem
 
 	if net.Spec.IPv4 != nil {
@@ -157,8 +158,12 @@ func (b *PodNetworkBuilder) buildRedistribute(net *resolver.ResolvedNetwork) *ne
 }
 
 // buildExtraRoutes creates static routes from the PodNetwork's Routes field.
-func (b *PodNetworkBuilder) buildExtraRoutes(pn *nc.PodNetwork) []networkv1alpha1.StaticRoute {
-	var routes []networkv1alpha1.StaticRoute
+func (*PodNetworkBuilder) buildExtraRoutes(pn *nc.PodNetwork) []networkv1alpha1.StaticRoute {
+	totalPrefixes := 0
+	for _, r := range pn.Spec.Routes {
+		totalPrefixes += len(r.Prefixes)
+	}
+	routes := make([]networkv1alpha1.StaticRoute, 0, totalPrefixes)
 	for _, r := range pn.Spec.Routes {
 		for _, prefix := range r.Prefixes {
 			routes = append(routes, networkv1alpha1.StaticRoute{

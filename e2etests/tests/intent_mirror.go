@@ -8,9 +8,10 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
+
 	"github.com/telekom/das-schiff-network-operator/e2etests/config"
 	"github.com/telekom/das-schiff-network-operator/e2etests/framework"
-	corev1 "k8s.io/api/core/v1"
 )
 
 // TC-I-MIRROR: Intent Traffic Mirror E2E tests.
@@ -103,18 +104,22 @@ spec:
 		Expect(f.CreateTestPod(ctx, ns, "traffic-src", cfg.WorkerNode1, map[string]string{
 			"k8s.v1.cni.cncf.io/networks": fmt.Sprintf(
 				`[{"name": "macvlan-vlan501", "ips": ["%s/24", "%s/64"]}]`, cfg.Macvlan01IPv4, cfg.Macvlan01IPv6),
-		})).To(Succeed())
+		}, framework.WithNetAdmin())).To(Succeed())
 
 		By("Creating traffic-dst pod on worker-2 (VLAN 501)")
 		Expect(f.CreateTestPod(ctx, ns, "traffic-dst", cfg.WorkerNode2, map[string]string{
 			"k8s.v1.cni.cncf.io/networks": fmt.Sprintf(
 				`[{"name": "macvlan-vlan501", "ips": ["%s/24", "%s/64"]}]`, cfg.Macvlan02IPv4, cfg.Macvlan02IPv6),
-		})).To(Succeed())
+		}, framework.WithNetAdmin())).To(Succeed())
 
 		By("Waiting for all pods to be ready")
 		Expect(f.WaitForPodReady(ctx, ns, "mirror-capture", cfg.PodReadyTimeout)).To(Succeed())
 		Expect(f.WaitForPodReady(ctx, ns, "traffic-src", cfg.PodReadyTimeout)).To(Succeed())
 		Expect(f.WaitForPodReady(ctx, ns, "traffic-dst", cfg.PodReadyTimeout)).To(Succeed())
+
+		By("Disabling IPv6 DAD and re-adding addresses on traffic pods")
+		Expect(f.EnsureIPv6NoDad(ctx, ns, "traffic-src", cfg.Macvlan01IPv6, "net1")).To(Succeed())
+		Expect(f.EnsureIPv6NoDad(ctx, ns, "traffic-dst", cfg.Macvlan02IPv6, "net1")).To(Succeed())
 	}
 
 	// verifyMirrorCapture sends pings and verifies GRE packets are captured at the collector.
@@ -123,7 +128,7 @@ spec:
 		Eventually(func() bool {
 			result, _ := f.PingFromPod(ctx, ns, "traffic-src", srcIP, 5)
 			return result != nil && result.Success
-		}).WithTimeout(60 * time.Second).WithPolling(3 * time.Second).Should(BeTrue(),
+		}).WithTimeout(60*time.Second).WithPolling(3*time.Second).Should(BeTrue(),
 			"Ping should succeed before checking mirror")
 
 		By(fmt.Sprintf("Verifying mirrored GRE packets at collector (%s)", label))
@@ -140,7 +145,7 @@ spec:
 			count := strings.TrimSpace(stdout)
 			GinkgoWriter.Printf("[%s] GRE packet count: %s\n", label, count)
 			return count != "" && count != "0"
-		}).WithTimeout(60 * time.Second).WithPolling(5 * time.Second).Should(BeTrue(),
+		}).WithTimeout(60*time.Second).WithPolling(5*time.Second).Should(BeTrue(),
 			fmt.Sprintf("Mirror-capture should receive GRE packets (%s)", label))
 	}
 

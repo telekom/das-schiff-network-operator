@@ -25,6 +25,13 @@ import (
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/resolver"
 )
 
+const (
+	ipv4MaxPrefixLen = 32
+	ipv6MaxPrefixLen = 128
+	ipv4HostRouteLen = 31
+	ipv6HostRouteLen = 127
+)
+
 // AnnouncementBuilder transforms AnnouncementPolicy intent CRDs into EVPN export filters.
 type AnnouncementBuilder struct{}
 
@@ -34,12 +41,12 @@ func NewAnnouncementBuilder() *AnnouncementBuilder {
 }
 
 // Name returns the builder name.
-func (b *AnnouncementBuilder) Name() string {
+func (*AnnouncementBuilder) Name() string {
 	return "announcement"
 }
 
 // Build produces per-node EVPN export filter contributions from AnnouncementPolicy resources.
-func (b *AnnouncementBuilder) Build(_ context.Context, data *resolver.ResolvedData) (map[string]*NodeContribution, error) {
+func (b *AnnouncementBuilder) Build(_ context.Context, data *resolver.ResolvedData) (map[string]*NodeContribution, error) { //nolint:revive // cognitive-complexity: announcement building has many valid branches
 	result := make(map[string]*NodeContribution)
 
 	for i := range data.AnnouncementPolicies {
@@ -78,7 +85,7 @@ func (b *AnnouncementBuilder) Build(_ context.Context, data *resolver.ResolvedDa
 }
 
 // buildEVPNExportFilter constructs an EVPN export filter from an AnnouncementPolicy.
-func (b *AnnouncementBuilder) buildEVPNExportFilter(ap *nc.AnnouncementPolicy) *networkv1alpha1.Filter {
+func (*AnnouncementBuilder) buildEVPNExportFilter(ap *nc.AnnouncementPolicy) *networkv1alpha1.Filter { //nolint:funlen,revive // EVPN filter construction requires many sequential steps
 	var items []networkv1alpha1.FilterItem
 
 	// Host routes (/32 /128) community actions.
@@ -86,7 +93,7 @@ func (b *AnnouncementBuilder) buildEVPNExportFilter(ap *nc.AnnouncementPolicy) *
 		additive := true
 
 		// IPv4 host routes (/32).
-		ge32 := 32
+		ge32 := ipv4MaxPrefixLen
 		items = append(items, networkv1alpha1.FilterItem{
 			Matcher: networkv1alpha1.Matcher{
 				Prefix: &networkv1alpha1.PrefixMatcher{
@@ -98,14 +105,14 @@ func (b *AnnouncementBuilder) buildEVPNExportFilter(ap *nc.AnnouncementPolicy) *
 			Action: networkv1alpha1.Action{
 				Type: networkv1alpha1.Accept,
 				ModifyRoute: &networkv1alpha1.ModifyRouteAction{
-					AddCommunities:  ap.Spec.HostRoutes.Communities,
+					AddCommunities:      ap.Spec.HostRoutes.Communities,
 					AdditiveCommunities: &additive,
 				},
 			},
 		})
 
 		// IPv6 host routes (/128).
-		ge128 := 128
+		ge128 := ipv6MaxPrefixLen
 		items = append(items, networkv1alpha1.FilterItem{
 			Matcher: networkv1alpha1.Matcher{
 				Prefix: &networkv1alpha1.PrefixMatcher{
@@ -117,7 +124,7 @@ func (b *AnnouncementBuilder) buildEVPNExportFilter(ap *nc.AnnouncementPolicy) *
 			Action: networkv1alpha1.Action{
 				Type: networkv1alpha1.Accept,
 				ModifyRoute: &networkv1alpha1.ModifyRouteAction{
-					AddCommunities:  ap.Spec.HostRoutes.Communities,
+					AddCommunities:      ap.Spec.HostRoutes.Communities,
 					AdditiveCommunities: &additive,
 				},
 			},
@@ -132,7 +139,7 @@ func (b *AnnouncementBuilder) buildEVPNExportFilter(ap *nc.AnnouncementPolicy) *
 			additive := true
 
 			// IPv4 aggregate — match non-host routes.
-			le31 := 31
+			le31 := ipv4HostRouteLen
 			items = append(items, networkv1alpha1.FilterItem{
 				Matcher: networkv1alpha1.Matcher{
 					Prefix: &networkv1alpha1.PrefixMatcher{
@@ -143,14 +150,14 @@ func (b *AnnouncementBuilder) buildEVPNExportFilter(ap *nc.AnnouncementPolicy) *
 				Action: networkv1alpha1.Action{
 					Type: networkv1alpha1.Accept,
 					ModifyRoute: &networkv1alpha1.ModifyRouteAction{
-						AddCommunities:  ap.Spec.Aggregate.Communities,
+						AddCommunities:      ap.Spec.Aggregate.Communities,
 						AdditiveCommunities: &additive,
 					},
 				},
 			})
 
 			// IPv6 aggregate — match non-host routes.
-			le127 := 127
+			le127 := ipv6HostRouteLen
 			items = append(items, networkv1alpha1.FilterItem{
 				Matcher: networkv1alpha1.Matcher{
 					Prefix: &networkv1alpha1.PrefixMatcher{
@@ -161,7 +168,7 @@ func (b *AnnouncementBuilder) buildEVPNExportFilter(ap *nc.AnnouncementPolicy) *
 				Action: networkv1alpha1.Action{
 					Type: networkv1alpha1.Accept,
 					ModifyRoute: &networkv1alpha1.ModifyRouteAction{
-						AddCommunities:  ap.Spec.Aggregate.Communities,
+						AddCommunities:      ap.Spec.Aggregate.Communities,
 						AdditiveCommunities: &additive,
 					},
 				},
@@ -170,7 +177,7 @@ func (b *AnnouncementBuilder) buildEVPNExportFilter(ap *nc.AnnouncementPolicy) *
 
 		if !aggregateEnabled {
 			// Reject aggregate prefixes (non-host routes).
-			le31 := 31
+			le31 := ipv4HostRouteLen
 			items = append(items, networkv1alpha1.FilterItem{
 				Matcher: networkv1alpha1.Matcher{
 					Prefix: &networkv1alpha1.PrefixMatcher{
@@ -181,7 +188,7 @@ func (b *AnnouncementBuilder) buildEVPNExportFilter(ap *nc.AnnouncementPolicy) *
 				Action: networkv1alpha1.Action{Type: networkv1alpha1.Reject},
 			})
 
-			le127 := 127
+			le127 := ipv6HostRouteLen
 			items = append(items, networkv1alpha1.FilterItem{
 				Matcher: networkv1alpha1.Matcher{
 					Prefix: &networkv1alpha1.PrefixMatcher{
@@ -205,6 +212,9 @@ func (b *AnnouncementBuilder) buildEVPNExportFilter(ap *nc.AnnouncementPolicy) *
 }
 
 // mergeFilter merges a new filter into an existing one.
+// The base filter's DefaultAction is preserved — only items are appended.
+// This keeps deny-by-default EVPN export semantics: only explicitly matched
+// routes are exported, regardless of the addition's default action.
 func mergeFilter(existing, addition *networkv1alpha1.Filter) *networkv1alpha1.Filter {
 	if existing == nil {
 		return addition

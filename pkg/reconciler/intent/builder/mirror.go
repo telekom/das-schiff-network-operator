@@ -34,7 +34,7 @@ func NewMirrorBuilder() *MirrorBuilder {
 }
 
 // Name returns the builder name.
-func (b *MirrorBuilder) Name() string {
+func (*MirrorBuilder) Name() string {
 	return "mirror"
 }
 
@@ -77,13 +77,13 @@ func (b *MirrorBuilder) Build(_ context.Context, data *resolver.ResolvedData) (m
 }
 
 // resolveCollector finds a Collector by name.
-func (b *MirrorBuilder) resolveCollector(name string, data *resolver.ResolvedData) (*nc.Collector, error) {
+func (*MirrorBuilder) resolveCollector(name string, data *resolver.ResolvedData) (*nc.Collector, error) {
 	for i := range data.Collectors {
 		if data.Collectors[i].Name == name {
 			return &data.Collectors[i], nil
 		}
 	}
-	return nil, fmt.Errorf("Collector %q not found", name)
+	return nil, fmt.Errorf("collector %q not found", name)
 }
 
 // buildMirrorACL creates a MirrorACL from a TrafficMirror and its resolved Collector.
@@ -103,7 +103,7 @@ func (b *MirrorBuilder) buildMirrorACL(tm *nc.TrafficMirror, col *nc.Collector) 
 }
 
 // convertTrafficMatch converts a nc.TrafficMatch to a networkv1alpha1.TrafficMatch.
-func (b *MirrorBuilder) convertTrafficMatch(tm *nc.TrafficMatch) networkv1alpha1.TrafficMatch {
+func (*MirrorBuilder) convertTrafficMatch(tm *nc.TrafficMatch) networkv1alpha1.TrafficMatch {
 	result := networkv1alpha1.TrafficMatch{
 		Protocol: tm.Protocol,
 	}
@@ -125,7 +125,7 @@ func (b *MirrorBuilder) convertTrafficMatch(tm *nc.TrafficMatch) networkv1alpha1
 }
 
 // addToLayer2 adds MirrorACL to a Layer2 entry identified by L2A name on all nodes.
-func (b *MirrorBuilder) addToLayer2(l2aName string, acl *networkv1alpha1.MirrorACL, data *resolver.ResolvedData, result map[string]*NodeContribution) error {
+func (*MirrorBuilder) addToLayer2(l2aName string, acl *networkv1alpha1.MirrorACL, data *resolver.ResolvedData, result map[string]*NodeContribution) error {
 	// Find the L2A.
 	var l2a *nc.Layer2Attachment
 	for j := range data.Layer2Attachments {
@@ -150,7 +150,8 @@ func (b *MirrorBuilder) addToLayer2(l2aName string, acl *networkv1alpha1.MirrorA
 	mapKey := fmt.Sprintf("%d", vlan)
 
 	// Apply to all nodes.
-	for _, node := range data.Nodes {
+	for i := range data.Nodes {
+		node := &data.Nodes[i]
 		contrib, ok := result[node.Name]
 		if !ok {
 			contrib = NewNodeContribution()
@@ -175,10 +176,11 @@ func (b *MirrorBuilder) addToInboundVRF(ibName string, acl *networkv1alpha1.Mirr
 		return err
 	}
 	if vrfName == "" {
-		return fmt.Errorf("Inbound %q has no VRF", ibName)
+		return fmt.Errorf("inbound %q has no VRF", ibName)
 	}
 
-	for _, node := range data.Nodes {
+	for i := range data.Nodes {
+		node := &data.Nodes[i]
 		contrib, ok := result[node.Name]
 		if !ok {
 			contrib = NewNodeContribution()
@@ -203,10 +205,11 @@ func (b *MirrorBuilder) addToOutboundVRF(obName string, acl *networkv1alpha1.Mir
 		return err
 	}
 	if vrfName == "" {
-		return fmt.Errorf("Outbound %q has no VRF", obName)
+		return fmt.Errorf("outbound %q has no VRF", obName)
 	}
 
-	for _, node := range data.Nodes {
+	for i := range data.Nodes {
+		node := &data.Nodes[i]
 		contrib, ok := result[node.Name]
 		if !ok {
 			contrib = NewNodeContribution()
@@ -225,7 +228,7 @@ func (b *MirrorBuilder) addToOutboundVRF(obName string, acl *networkv1alpha1.Mir
 }
 
 // resolveInboundVRF finds the VRF name and spec for a named Inbound.
-func (b *MirrorBuilder) resolveInboundVRF(name string, data *resolver.ResolvedData) (string, *nc.VRFSpec, error) {
+func (*MirrorBuilder) resolveInboundVRF(name string, data *resolver.ResolvedData) (string, *nc.VRFSpec, error) {
 	for i := range data.Inbounds {
 		if data.Inbounds[i].Name != name {
 			continue
@@ -241,11 +244,11 @@ func (b *MirrorBuilder) resolveInboundVRF(name string, data *resolver.ResolvedDa
 		}
 		return "", nil, nil
 	}
-	return "", nil, fmt.Errorf("Inbound %q not found", name)
+	return "", nil, fmt.Errorf("inbound %q not found", name)
 }
 
 // resolveOutboundVRF finds the VRF name and spec for a named Outbound.
-func (b *MirrorBuilder) resolveOutboundVRF(name string, data *resolver.ResolvedData) (string, *nc.VRFSpec, error) {
+func (*MirrorBuilder) resolveOutboundVRF(name string, data *resolver.ResolvedData) (string, *nc.VRFSpec, error) {
 	for i := range data.Outbounds {
 		if data.Outbounds[i].Name != name {
 			continue
@@ -261,5 +264,5 @@ func (b *MirrorBuilder) resolveOutboundVRF(name string, data *resolver.ResolvedD
 		}
 		return "", nil, nil
 	}
-	return "", nil, fmt.Errorf("Outbound %q not found", name)
+	return "", nil, fmt.Errorf("outbound %q not found", name)
 }

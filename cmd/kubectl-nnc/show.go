@@ -22,9 +22,10 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/cmd/kubectl-nnc/renderer"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 func newShowCmd() *cobra.Command {

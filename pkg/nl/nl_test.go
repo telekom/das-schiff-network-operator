@@ -11,11 +11,12 @@ import (
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
-	"github.com/telekom/das-schiff-network-operator/pkg/config"
-	mock_nl "github.com/telekom/das-schiff-network-operator/pkg/nl/mock"
 	"github.com/vishvananda/netlink"
 	"go.uber.org/mock/gomock"
 	"golang.org/x/sys/unix"
+
+	"github.com/telekom/das-schiff-network-operator/pkg/config"
+	mock_nl "github.com/telekom/das-schiff-network-operator/pkg/nl/mock"
 )
 
 const (

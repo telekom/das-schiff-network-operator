@@ -137,15 +137,15 @@ type Layer2AttachmentStatus struct {
 
 // Layer2Attachment attaches a Network as a Layer 2 segment to a set of nodes.
 // Supports HBN mode (VXLAN + VRF) and non-HBN mode (physical interface).
-//+kubebuilder:object:root=true
-//+kubebuilder:subresource:status
-//+kubebuilder:resource:shortName=l2a
-//+kubebuilder:printcolumn:name="NetworkRef",type=string,JSONPath=`.spec.networkRef`
-//+kubebuilder:printcolumn:name="InterfaceName",type=string,JSONPath=`.spec.interfaceName`
-//+kubebuilder:printcolumn:name="MTU",type=integer,JSONPath=`.spec.mtu`
-//+kubebuilder:printcolumn:name="SRIOV",type=boolean,JSONPath=`.spec.sriov.enabled`
-//+kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
-//+kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
+// +kubebuilder:object:root=true
+// +kubebuilder:subresource:status
+// +kubebuilder:resource:shortName=l2a
+// +kubebuilder:printcolumn:name="NetworkRef",type=string,JSONPath=`.spec.networkRef`
+// +kubebuilder:printcolumn:name="InterfaceName",type=string,JSONPath=`.spec.interfaceName`
+// +kubebuilder:printcolumn:name="MTU",type=integer,JSONPath=`.spec.mtu`
+// +kubebuilder:printcolumn:name="SRIOV",type=boolean,JSONPath=`.spec.sriov.enabled`
+// +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 type Layer2Attachment struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

@@ -21,18 +21,21 @@ import (
 	"testing"
 	"time"
 
-	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 )
 
 func newScheme() *runtime.Scheme {
 	s := runtime.NewScheme()
 	_ = nc.AddToScheme(s)
+	_ = clientgoscheme.AddToScheme(s)
 	return s
 }
 
@@ -126,7 +129,7 @@ func TestCoilReconciler_CreateIPPoolsAndEgress(t *testing.T) { //nolint:funlen /
 		t.Errorf("expected nodeSelector '!all()', got %s", nodeSelector)
 	}
 	natOutgoing, _, _ := unstructured.NestedBool(poolV4.Object, "spec", "natOutgoing")
-	if natOutgoing != false {
+	if natOutgoing {
 		t.Errorf("expected natOutgoing false, got %v", natOutgoing)
 	}
 	allowedUses, _, _ := unstructured.NestedStringSlice(poolV4.Object, "spec", "allowedUses")
@@ -172,7 +175,7 @@ func TestCoilReconciler_CreateIPPoolsAndEgress(t *testing.T) { //nolint:funlen /
 
 	// Verify managed-by label on IPPool.
 	lbls := poolV4.GetLabels()
-	if lbls["app.kubernetes.io/managed-by"] != "network-connector" {
+	if lbls["app.kubernetes.io/managed-by"] != managedByValue {
 		t.Errorf("expected managed-by label, got %v", lbls)
 	}
 	if lbls["network-connector.sylvaproject.org/outbound"] != "egress-a" {

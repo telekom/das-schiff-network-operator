@@ -20,7 +20,6 @@ import (
 	"context"
 	"testing"
 
-	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -29,6 +28,8 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 )
 
 func ptrStr(s string) *string { return &s }
@@ -87,11 +88,10 @@ func doReconcile(t *testing.T, r *MetalLBReconciler, name string) {
 	}
 }
 
-// Test 1: Create IPAddressPool + BGPAdvertisement with explicit addresses.
 func TestMetalLBReconciler_BGPAdvertisement(t *testing.T) {
 	ib := newInbound("test-bgp", nc.InboundSpec{
-		NetworkRef: "net1",
-		Addresses:  &nc.AddressAllocation{IPv4: []string{"10.0.0.0/24"}},
+		NetworkRef:    "net1",
+		Addresses:     &nc.AddressAllocation{IPv4: []string{"10.0.0.0/24"}},
 		Advertisement: nc.AdvertisementConfig{Type: "bgp"},
 	})
 	r, c := newTestReconciler(ib)
@@ -102,50 +102,58 @@ func TestMetalLBReconciler_BGPAdvertisement(t *testing.T) {
 	if len(addrs) != 1 || addrs[0] != "10.0.0.0/24" {
 		t.Errorf("expected addresses [10.0.0.0/24], got %v", addrs)
 	}
-	if pool.GetLabels()["app.kubernetes.io/managed-by"] != "network-connector" {
+	if pool.GetLabels()["app.kubernetes.io/managed-by"] != managedByValue {
 		t.Error("missing managed-by label on IPAddressPool")
 	}
 
-	adv := getUnstructured(t, c, bgpGVK, "test-bgp")
-	pools, _, _ := unstructured.NestedSlice(adv.Object, "spec", "ipAddressPools")
-	if len(pools) != 1 || pools[0] != "test-bgp" {
-		t.Errorf("expected ipAddressPools [test-bgp], got %v", pools)
+	adv := &unstructured.Unstructured{}
+	adv.SetGroupVersionKind(bgpGVK)
+	err := c.Get(context.Background(), types.NamespacedName{Name: "test-bgp", Namespace: metallbNamespace}, adv)
+	if err == nil {
+		t.Error("expected NO BGPAdvertisement (kube-vip handles BGP advertisement)")
 	}
 }
 
-// Test 2: Create IPAddressPool + L2Advertisement.
 func TestMetalLBReconciler_L2Advertisement(t *testing.T) {
 	ib := newInbound("test-l2", nc.InboundSpec{
-		NetworkRef: "net1",
-		Addresses:  &nc.AddressAllocation{IPv4: []string{"192.168.1.0/24"}},
+		NetworkRef:    "net1",
+		Addresses:     &nc.AddressAllocation{IPv4: []string{"192.168.1.0/24"}},
 		Advertisement: nc.AdvertisementConfig{Type: "l2"},
 	})
 	r, c := newTestReconciler(ib)
 	doReconcile(t, r, "test-l2")
 
 	getUnstructured(t, c, ipPoolGVK, "test-l2")
+
 	adv := getUnstructured(t, c, l2GVK, "test-l2")
-	if adv.GetKind() != "L2Advertisement" {
-		t.Errorf("expected L2Advertisement, got %s", adv.GetKind())
+	pools, _, _ := unstructured.NestedStringSlice(adv.Object, "spec", "ipAddressPools")
+	if len(pools) != 1 || pools[0] != "test-l2" {
+		t.Errorf("expected L2Advertisement ipAddressPools=[test-l2], got %v", pools)
+	}
+	if adv.GetLabels()["app.kubernetes.io/managed-by"] != managedByValue {
+		t.Error("missing managed-by label on L2Advertisement")
 	}
 }
 
-// Test 3: Use custom pool name from Inbound.Spec.PoolName.
 func TestMetalLBReconciler_CustomPoolName(t *testing.T) {
 	ib := newInbound("test-custom", nc.InboundSpec{
-		NetworkRef: "net1",
-		PoolName:   ptrStr("my-custom-pool"),
-		Addresses:  &nc.AddressAllocation{IPv4: []string{"10.1.0.0/24"}},
+		NetworkRef:    "net1",
+		PoolName:      ptrStr("my-custom-pool"),
+		Addresses:     &nc.AddressAllocation{IPv4: []string{"10.1.0.0/24"}},
 		Advertisement: nc.AdvertisementConfig{Type: "bgp"},
 	})
 	r, c := newTestReconciler(ib)
 	doReconcile(t, r, "test-custom")
 
-	// Should use the custom pool name, not the inbound name.
 	getUnstructured(t, c, ipPoolGVK, "my-custom-pool")
-	getUnstructured(t, c, bgpGVK, "my-custom-pool")
 
-	// Verify status pool name is set.
+	adv := &unstructured.Unstructured{}
+	adv.SetGroupVersionKind(bgpGVK)
+	err := c.Get(context.Background(), types.NamespacedName{Name: "my-custom-pool", Namespace: metallbNamespace}, adv)
+	if err == nil {
+		t.Error("expected NO BGPAdvertisement")
+	}
+
 	updated := &nc.Inbound{}
 	if err := c.Get(context.Background(), types.NamespacedName{Name: "test-custom", Namespace: "default"}, updated); err != nil {
 		t.Fatal(err)
@@ -158,8 +166,8 @@ func TestMetalLBReconciler_CustomPoolName(t *testing.T) {
 // Test 4: Prefer status addresses over spec addresses.
 func TestMetalLBReconciler_PreferStatusAddresses(t *testing.T) {
 	ib := newInbound("test-status-addr", nc.InboundSpec{
-		NetworkRef: "net1",
-		Addresses:  &nc.AddressAllocation{IPv4: []string{"10.0.0.0/24"}},
+		NetworkRef:    "net1",
+		Addresses:     &nc.AddressAllocation{IPv4: []string{"10.0.0.0/24"}},
 		Advertisement: nc.AdvertisementConfig{Type: "bgp"},
 	})
 	ib.Status.Addresses = &nc.AddressAllocation{IPv4: []string{"10.99.0.0/24"}}
@@ -176,8 +184,8 @@ func TestMetalLBReconciler_PreferStatusAddresses(t *testing.T) {
 // Test 5: Update existing resources when Inbound spec changes.
 func TestMetalLBReconciler_Update(t *testing.T) {
 	ib := newInbound("test-update", nc.InboundSpec{
-		NetworkRef: "net1",
-		Addresses:  &nc.AddressAllocation{IPv4: []string{"10.0.0.0/24"}},
+		NetworkRef:    "net1",
+		Addresses:     &nc.AddressAllocation{IPv4: []string{"10.0.0.0/24"}},
 		Advertisement: nc.AdvertisementConfig{Type: "bgp"},
 	})
 	r, c := newTestReconciler(ib)
@@ -203,23 +211,18 @@ func TestMetalLBReconciler_Update(t *testing.T) {
 	}
 }
 
-// Test 6: Deletion cleanup.
 func TestMetalLBReconciler_Deletion(t *testing.T) {
 	ib := newInbound("test-delete", nc.InboundSpec{
-		NetworkRef: "net1",
-		Addresses:  &nc.AddressAllocation{IPv4: []string{"10.0.0.0/24"}},
+		NetworkRef:    "net1",
+		Addresses:     &nc.AddressAllocation{IPv4: []string{"10.0.0.0/24"}},
 		Advertisement: nc.AdvertisementConfig{Type: "bgp"},
 	})
 	r, c := newTestReconciler(ib)
 
-	// First reconcile creates resources and adds finalizer.
 	doReconcile(t, r, "test-delete")
 
-	// Verify resources exist.
 	getUnstructured(t, c, ipPoolGVK, "test-delete")
-	getUnstructured(t, c, bgpGVK, "test-delete")
 
-	// Delete the Inbound — fake client sets DeletionTimestamp when finalizers are present.
 	updated := &nc.Inbound{}
 	if err := c.Get(context.Background(), types.NamespacedName{Name: "test-delete", Namespace: "default"}, updated); err != nil {
 		t.Fatal(err)
@@ -228,10 +231,8 @@ func TestMetalLBReconciler_Deletion(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Reconcile again to trigger deletion handling.
 	doReconcile(t, r, "test-delete")
 
-	// Verify IPAddressPool is deleted.
 	obj := &unstructured.Unstructured{}
 	obj.SetGroupVersionKind(ipPoolGVK)
 	err := c.Get(context.Background(), types.NamespacedName{Name: "test-delete", Namespace: metallbNamespace}, obj)
@@ -239,18 +240,14 @@ func TestMetalLBReconciler_Deletion(t *testing.T) {
 		t.Error("expected IPAddressPool to be deleted")
 	}
 
-	// Verify BGPAdvertisement is deleted.
-	obj2 := &unstructured.Unstructured{}
-	obj2.SetGroupVersionKind(bgpGVK)
-	err = c.Get(context.Background(), types.NamespacedName{Name: "test-delete", Namespace: metallbNamespace}, obj2)
-	if err == nil {
-		t.Error("expected BGPAdvertisement to be deleted")
+	advObj := &unstructured.Unstructured{}
+	advObj.SetGroupVersionKind(l2GVK)
+	if err := c.Get(context.Background(), types.NamespacedName{Name: "test-delete", Namespace: metallbNamespace}, advObj); err == nil {
+		t.Error("expected L2Advertisement to be deleted")
 	}
 
-	// Verify finalizer is removed.
 	finalIb := &nc.Inbound{}
 	if err := c.Get(context.Background(), types.NamespacedName{Name: "test-delete", Namespace: "default"}, finalIb); err != nil {
-		// Object may be fully deleted once finalizer is removed — that's expected.
 		return
 	}
 	for _, f := range finalIb.Finalizers {

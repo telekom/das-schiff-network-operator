@@ -22,12 +22,13 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
-	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/resolver"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
+	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/resolver"
 )
 
 const (
@@ -57,7 +58,11 @@ func (u *Updater) statusUpdateWithRetry(ctx context.Context, obj client.Object, 
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		if attempt > 0 {
 			// Re-fetch to get current resourceVersion.
-			fresh := obj.DeepCopyObject().(client.Object)
+			freshObj := obj.DeepCopyObject()
+			fresh, ok := freshObj.(client.Object)
+			if !ok {
+				return fmt.Errorf("deep copy of %s did not implement client.Object", obj.GetObjectKind().GroupVersionKind().Kind)
+			}
 			if err := u.client.Get(ctx, client.ObjectKeyFromObject(obj), fresh); err != nil {
 				return fmt.Errorf("re-fetching %s/%s for status update: %w", obj.GetObjectKind().GroupVersionKind().Kind, obj.GetName(), err)
 			}
@@ -82,28 +87,28 @@ func (u *Updater) UpdateConditions(ctx context.Context, fetched *resolver.Fetche
 		return fmt.Errorf("VRF conditions: %w", err)
 	}
 	if err := u.updateNetworkConditions(ctx, fetched); err != nil {
-		return fmt.Errorf("Network conditions: %w", err)
+		return fmt.Errorf("network conditions: %w", err)
 	}
 	if err := u.updateDestinationConditions(ctx, fetched, resolved); err != nil {
-		return fmt.Errorf("Destination conditions: %w", err)
+		return fmt.Errorf("destination conditions: %w", err)
 	}
 	if err := u.updateInboundConditions(ctx, fetched, resolved); err != nil {
-		return fmt.Errorf("Inbound conditions: %w", err)
+		return fmt.Errorf("inbound conditions: %w", err)
 	}
 	if err := u.updateOutboundConditions(ctx, fetched, resolved); err != nil {
-		return fmt.Errorf("Outbound conditions: %w", err)
+		return fmt.Errorf("outbound conditions: %w", err)
 	}
 	if err := u.updateLayer2AttachmentConditions(ctx, fetched, resolved); err != nil {
-		return fmt.Errorf("Layer2Attachment conditions: %w", err)
+		return fmt.Errorf("layer2Attachment conditions: %w", err)
 	}
 	if err := u.updatePodNetworkConditions(ctx, fetched, resolved); err != nil {
-		return fmt.Errorf("PodNetwork conditions: %w", err)
+		return fmt.Errorf("podNetwork conditions: %w", err)
 	}
 	if err := u.updateCollectorConditions(ctx, fetched); err != nil {
-		return fmt.Errorf("Collector conditions: %w", err)
+		return fmt.Errorf("collector conditions: %w", err)
 	}
 	if err := u.updateTrafficMirrorConditions(ctx, fetched, resolved); err != nil {
-		return fmt.Errorf("TrafficMirror conditions: %w", err)
+		return fmt.Errorf("trafficMirror conditions: %w", err)
 	}
 	return nil
 }
@@ -315,7 +320,7 @@ func (u *Updater) updateTrafficMirrorConditions(ctx context.Context, fetched *re
 }
 
 // checkNetworkRef checks if a networkRef resolves to an existing Network.
-func checkNetworkRef(networkRef string, resolved *resolver.ResolvedData) (metav1.ConditionStatus, string, string) {
+func checkNetworkRef(networkRef string, resolved *resolver.ResolvedData) (condStatus metav1.ConditionStatus, reason, message string) {
 	if _, ok := resolved.Networks[networkRef]; !ok {
 		return metav1.ConditionFalse, "NetworkNotFound", fmt.Sprintf("referenced Network %q not found", networkRef)
 	}

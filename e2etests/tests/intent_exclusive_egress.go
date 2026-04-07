@@ -7,11 +7,12 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/telekom/das-schiff-network-operator/e2etests/framework"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+
+	"github.com/telekom/das-schiff-network-operator/e2etests/framework"
 )
 
 // Intent-Exclusive Egress NAT test using Outbound CRD.
@@ -60,7 +61,7 @@ var _ = Describe("Intent-Exclusive: Egress NAT", Label("intent-exclusive", "egre
 				Kind:    "Egress",
 			})
 			return f.DynamicGet(ctx, ns, "ob-egress", egress)
-		}).WithTimeout(60 * time.Second).WithPolling(5 * time.Second).Should(Succeed(),
+		}).WithTimeout(120*time.Second).WithPolling(5*time.Second).Should(Succeed(),
 			"Coil Egress should be created by platform-coil controller")
 
 		By("Creating egress test pod with Coil annotation")

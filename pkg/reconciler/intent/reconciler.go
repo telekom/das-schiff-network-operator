@@ -25,6 +25,12 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 	"github.com/telekom/das-schiff-network-operator/pkg/debounce"
@@ -36,17 +42,15 @@ import (
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/legacy"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/resolver"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/status"
-	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
 const (
 	defaultDebounceTime = 1 * time.Second
 	// DefaultTimeout is the default API timeout.
 	DefaultTimeout = "60s"
+	// listLimit caps the number of objects returned per List call to prevent
+	// unbounded memory consumption on large clusters.
+	listLimit = 500
 )
 
 // Reconciler is the intent-based reconciler that watches all intent CRDs
@@ -221,10 +225,11 @@ func (r *Reconciler) fetchAll(ctx context.Context) (*resolver.FetchedResources, 
 	if r.namespace != "" {
 		listOpts = append(listOpts, client.InNamespace(r.namespace))
 	}
+	listOpts = append(listOpts, client.Limit(listLimit))
 
 	// Fetch nodes (always cluster-wide).
 	nodeList := &corev1.NodeList{}
-	if err := r.client.List(ctx, nodeList); err != nil {
+	if err := r.client.List(ctx, nodeList, client.Limit(listLimit)); err != nil {
 		return nil, fmt.Errorf("error listing Nodes: %w", err)
 	}
 	f.Nodes = nodeList.Items
@@ -328,7 +333,11 @@ func (r *Reconciler) applyNNC(ctx context.Context, node *corev1.Node, spec *netw
 			return err
 		}
 		r.logger.Info("NNC update conflict, retrying", "node", node.Name, "attempt", attempt+1)
-		time.Sleep(conflictRetryDelay)
+		select {
+		case <-time.After(conflictRetryDelay):
+		case <-ctx.Done():
+			return fmt.Errorf("context done while retrying NNC update: %w", ctx.Err())
+		}
 	}
 	return fmt.Errorf("NNC update for node %s failed after %d retries due to conflicts", node.Name, maxRetries)
 }
@@ -458,7 +467,7 @@ func (r *Reconciler) cleanupOrphanedNNCs(ctx context.Context, nodes []corev1.Nod
 	}
 
 	nncList := &networkv1alpha1.NodeNetworkConfigList{}
-	if err := r.client.List(ctx, nncList); err != nil {
+	if err := r.client.List(ctx, nncList, client.Limit(listLimit)); err != nil {
 		return fmt.Errorf("error listing NodeNetworkConfigs: %w", err)
 	}
 
@@ -467,7 +476,12 @@ func (r *Reconciler) cleanupOrphanedNNCs(ctx context.Context, nodes []corev1.Nod
 		if _, exists := nodeNames[nnc.Name]; exists {
 			continue
 		}
-		// Only clean up NNCs managed by intent (or legacy ones during takeover).
+		// Only delete NNCs that were created by the intent reconciler.
+		// NNCs without the intent-managed label belong to the legacy reconciler
+		// and must not be touched during migration.
+		if !hasIntentManagedLabel(nnc) {
+			continue
+		}
 		r.logger.Info("deleting orphaned NodeNetworkConfig", "name", nnc.Name)
 		if err := r.client.Delete(ctx, nnc); err != nil && !apierrors.IsNotFound(err) {
 			r.logger.Error(err, "failed to delete orphaned NNC", "name", nnc.Name)
@@ -588,7 +602,7 @@ func (r *Reconciler) cleanupOrphanedNetplanConfigs(ctx context.Context, nodes []
 	}
 
 	npcList := &networkv1alpha1.NodeNetplanConfigList{}
-	if err := r.client.List(ctx, npcList); err != nil {
+	if err := r.client.List(ctx, npcList, client.Limit(listLimit)); err != nil {
 		return fmt.Errorf("error listing NodeNetplanConfigs: %w", err)
 	}
 

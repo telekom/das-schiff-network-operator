@@ -28,8 +28,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
-	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -38,6 +36,9 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	k8syaml "sigs.k8s.io/yaml"
+
+	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
+	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 )
 
 var (
@@ -261,14 +262,13 @@ func TestL2APipeline(t *testing.T) {
 	require.True(t, ok, "expected Layer2 entry for key '501'")
 	assert.Equal(t, uint32(4000002), l2.VNI)
 	assert.Equal(t, uint16(501), l2.VLAN)
-	assert.Equal(t, uint16(9000), l2.MTU)
+	assert.Equal(t, uint16(1500), l2.MTU)
 	require.NotNil(t, l2.IRB, "expected IRB to be set")
-	assert.Equal(t, "vrf-l2a", l2.IRB.VRF)
+	assert.Equal(t, "m2m", l2.IRB.VRF)
 	assert.NotEmpty(t, l2.IRB.IPAddresses)
 
-	// Verify FabricVRF (keyed by VRF CRD name, not backbone VRF name)
-	fvrf, ok := nnc.Spec.FabricVRFs["vrf-l2a"]
-	require.True(t, ok, "expected FabricVRF entry for key 'vrf-l2a', got keys: %v", mapKeys(nnc.Spec.FabricVRFs))
+	fvrf, ok := nnc.Spec.FabricVRFs["m2m"]
+	require.True(t, ok, "expected FabricVRF entry for key 'm2m', got keys: %v", mapKeys(nnc.Spec.FabricVRFs))
 	assert.Equal(t, uint32(2002026), fvrf.VNI)
 
 	// Verify revision is set
@@ -319,9 +319,8 @@ func TestInboundPipeline(t *testing.T) {
 
 	nnc := reconcileAndGetNNC(t, ctx, nodeName)
 
-	// Verify FabricVRF exists for the VRF
-	fvrf, ok := nnc.Spec.FabricVRFs["vrf-ib"]
-	require.True(t, ok, "expected FabricVRF 'vrf-ib', got keys: %v", mapKeys(nnc.Spec.FabricVRFs))
+	fvrf, ok := nnc.Spec.FabricVRFs["ibm2m"]
+	require.True(t, ok, "expected FabricVRF 'ibm2m', got keys: %v", mapKeys(nnc.Spec.FabricVRFs))
 
 	// Should have static routes or redistribute for the inbound IPs
 	assert.True(t, len(fvrf.StaticRoutes) > 0 || fvrf.Redistribute != nil,
@@ -340,8 +339,8 @@ func TestOutboundPipeline(t *testing.T) {
 
 	nnc := reconcileAndGetNNC(t, ctx, nodeName)
 
-	fvrf, ok := nnc.Spec.FabricVRFs["vrf-ob"]
-	require.True(t, ok, "expected FabricVRF 'vrf-ob', got keys: %v", mapKeys(nnc.Spec.FabricVRFs))
+	fvrf, ok := nnc.Spec.FabricVRFs["obm2m"]
+	require.True(t, ok, "expected FabricVRF 'obm2m', got keys: %v", mapKeys(nnc.Spec.FabricVRFs))
 
 	assert.True(t, len(fvrf.StaticRoutes) > 0 || len(fvrf.PolicyRoutes) > 0,
 		"expected FabricVRF to have static routes or policy routes for outbound")
@@ -379,7 +378,6 @@ func TestSBRSingleVRF(t *testing.T) {
 
 	nnc := reconcileAndGetNNC(t, ctx, nodeName)
 
-	// SBR should create intermediate LocalVRF "s-sbrm"
 	_, ok := nnc.Spec.LocalVRFs["s-sbrm"]
 	assert.True(t, ok, "expected LocalVRF 's-sbrm' (SBR intermediate VRF)")
 
@@ -404,7 +402,6 @@ func TestSBRMultiVRF(t *testing.T) {
 	createObj(t, ctx, makeDestination("dest-sbr-a", "vrf-sbr-a", map[string]string{"zone": "a"}, []string{"10.1.0.0/16"}))
 	createObj(t, ctx, makeDestination("dest-sbr-b", "vrf-sbr-b", map[string]string{"zone": "b"}, []string{"10.2.0.0/16"}))
 
-	// Inbound selecting destinations in BOTH VRFs
 	inbound := &nc.Inbound{
 		ObjectMeta: metav1.ObjectMeta{Name: "ib-sbr-multi", Namespace: testNamespace},
 		Spec: nc.InboundSpec{
@@ -424,22 +421,29 @@ func TestSBRMultiVRF(t *testing.T) {
 
 	nnc := reconcileAndGetNNC(t, ctx, nodeName)
 
-	// Should have 2 intermediate LocalVRFs
-	_, okA := nnc.Spec.LocalVRFs["s-vrfa"]
-	_, okB := nnc.Spec.LocalVRFs["s-vrfb"]
-	assert.True(t, okA, "expected LocalVRF 's-vrfa'")
-	assert.True(t, okB, "expected LocalVRF 's-vrfb'")
+	comboName := "s-3d1234a5"
+	comboVRF, ok := nnc.Spec.LocalVRFs[comboName]
+	assert.True(t, ok, "expected combo LocalVRF %q", comboName)
 
-	// ClusterVRF should have PolicyRoutes with src+dst for multi-VRF
+	prefixesFound := map[string]bool{}
+	for _, sr := range comboVRF.StaticRoutes {
+		prefixesFound[sr.Prefix] = true
+	}
+	assert.True(t, prefixesFound["10.1.0.0/16"], "expected static route for 10.1.0.0/16 (vrfa)")
+	assert.True(t, prefixesFound["10.2.0.0/16"], "expected static route for 10.2.0.0/16 (vrfb)")
+
 	require.NotNil(t, nnc.Spec.ClusterVRF, "expected ClusterVRF")
-	hasDstPrefix := false
 	for _, pr := range nnc.Spec.ClusterVRF.PolicyRoutes {
-		if pr.TrafficMatch.DstPrefix != nil && *pr.TrafficMatch.DstPrefix != "" {
-			hasDstPrefix = true
+		assert.Nil(t, pr.TrafficMatch.DstPrefix, "expected no DstPrefix in multi-VRF SBR PolicyRoute")
+	}
+	hasSrcPrefix := false
+	for _, pr := range nnc.Spec.ClusterVRF.PolicyRoutes {
+		if pr.TrafficMatch.SrcPrefix != nil {
+			hasSrcPrefix = true
 			break
 		}
 	}
-	assert.True(t, hasDstPrefix, "expected multi-VRF SBR PolicyRoutes to have DstPrefix for disambiguation")
+	assert.True(t, hasSrcPrefix, "expected PolicyRoute with SrcPrefix for multi-VRF SBR")
 }
 
 func TestLifecycleUpdate(t *testing.T) {
@@ -799,8 +803,8 @@ func TestAnnouncementPolicyHostRoutesAndAggregate(t *testing.T) {
 	aggItem := filter.Items[2]
 	assert.Equal(t, []string{"65000:300"}, aggItem.Action.ModifyRoute.AddCommunities)
 
-	// Default action should be Accept
-	assert.Equal(t, networkv1alpha1.Accept, filter.DefaultAction.Type)
+	// Default action should be Reject (base FabricVRF's deny-by-default is preserved by mergeFilter).
+	assert.Equal(t, networkv1alpha1.Reject, filter.DefaultAction.Type)
 }
 
 func TestBuildNetplanState(t *testing.T) {

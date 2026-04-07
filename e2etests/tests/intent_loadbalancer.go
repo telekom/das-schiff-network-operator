@@ -8,10 +8,11 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/telekom/das-schiff-network-operator/e2etests/framework"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+
+	"github.com/telekom/das-schiff-network-operator/e2etests/framework"
 )
 
 // Intent-based LoadBalancer Service (Tier 2).
@@ -57,7 +58,7 @@ var _ = Describe("Intent LoadBalancer Service", Label("intent", "lb"), func() {
 				Kind:    "IPAddressPool",
 			})
 			return f.DynamicGet(ctx, "metallb-system", "ib-lb", pool)
-		}).WithTimeout(60 * time.Second).WithPolling(5 * time.Second).Should(Succeed(),
+		}).WithTimeout(60*time.Second).WithPolling(5*time.Second).Should(Succeed(),
 			"MetalLB IPAddressPool should be created by platform-metallb controller")
 
 		By("Applying intent LB app manifests (Deployment, Service)")
@@ -121,7 +122,7 @@ var _ = Describe("Intent LoadBalancer Service", Label("intent", "lb"), func() {
 				code, _ := f.CurlFromCluster2Pod(ctx, "e2e-gateways", "m2m-gateway",
 					fmt.Sprintf("http://%s:80", lbIPv4))
 				return code
-			}).WithTimeout(cfg.BGPTimeout).WithPolling(5 * time.Second).Should(
+			}).WithTimeout(cfg.BGPTimeout).WithPolling(5*time.Second).Should(
 				Equal("200"), "Expected HTTP 200 from intent LB VIP via m2mgw")
 		})
 	})

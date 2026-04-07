@@ -88,7 +88,7 @@ func (r *ClusterController) SetupWithManager(mgr ctrl.Manager) error {
 
 	// Map Secrets back to their owning Cluster.
 	secretToCluster := handler.EnqueueRequestsFromMapFunc(
-		func(ctx context.Context, obj client.Object) []reconcile.Request {
+		func(_ context.Context, obj client.Object) []reconcile.Request {
 			secret, ok := obj.(*corev1.Secret)
 			if !ok {
 				return nil
@@ -114,9 +114,12 @@ func (r *ClusterController) SetupWithManager(mgr ctrl.Manager) error {
 		return strings.HasSuffix(obj.GetName(), "-kubeconfig")
 	})
 
-	return ctrl.NewControllerManagedBy(mgr).
+	if err := ctrl.NewControllerManagedBy(mgr).
 		Named("cluster-controller").
 		Watches(clusterObj, &handler.EnqueueRequestForObject{}).
 		Watches(&corev1.Secret{}, secretToCluster, builder.WithPredicates(kubeconfigPredicate)).
-		Complete(r)
+		Complete(r); err != nil {
+		return fmt.Errorf("setting up cluster controller: %w", err)
+	}
+	return nil
 }

@@ -23,10 +23,11 @@ import (
 	"net"
 
 	"github.com/go-logr/logr"
-	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
-	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/resolver"
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
+	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/resolver"
 )
 
 // Allocator handles IP address allocation from Network pools.
@@ -60,44 +61,11 @@ func (a *Allocator) ReconcileAllocations(ctx context.Context, fetched *resolver.
 	// Seed pools with already-allocated addresses to avoid duplicate allocations.
 	a.seedExistingAllocations(fetched, pools, networks)
 
-	for i := range fetched.Inbounds {
-		inb := &fetched.Inbounds[i]
-		if inb.Spec.Count == nil || inb.Spec.Addresses != nil {
-			continue
-		}
-		if inb.Status.Addresses != nil && len(inb.Status.Addresses.IPv4)+len(inb.Status.Addresses.IPv6) > 0 {
-			continue // already allocated
-		}
-		addrs, err := a.allocate(inb.Spec.NetworkRef, int(*inb.Spec.Count), networks, pools)
-		if err != nil {
-			a.logger.Error(err, "IPAM allocation failed for Inbound", "inbound", inb.Name)
-			continue
-		}
-		inb.Status.Addresses = addrs
-		if err := a.client.Status().Update(ctx, inb); err != nil {
-			return fmt.Errorf("updating Inbound %q status with allocated addresses: %w", inb.Name, err)
-		}
-		a.logger.Info("allocated addresses for Inbound", "inbound", inb.Name, "addresses", addrs)
+	if err := a.reconcileInboundAllocations(ctx, fetched, networks, pools); err != nil {
+		return err
 	}
-
-	for i := range fetched.Outbounds {
-		outb := &fetched.Outbounds[i]
-		if outb.Spec.Count == nil || outb.Spec.Addresses != nil {
-			continue
-		}
-		if outb.Status.Addresses != nil && len(outb.Status.Addresses.IPv4)+len(outb.Status.Addresses.IPv6) > 0 {
-			continue // already allocated
-		}
-		addrs, err := a.allocate(outb.Spec.NetworkRef, int(*outb.Spec.Count), networks, pools)
-		if err != nil {
-			a.logger.Error(err, "IPAM allocation failed for Outbound", "outbound", outb.Name)
-			continue
-		}
-		outb.Status.Addresses = addrs
-		if err := a.client.Status().Update(ctx, outb); err != nil {
-			return fmt.Errorf("updating Outbound %q status with allocated addresses: %w", outb.Name, err)
-		}
-		a.logger.Info("allocated addresses for Outbound", "outbound", outb.Name, "addresses", addrs)
+	if err := a.reconcileOutboundAllocations(ctx, fetched, networks, pools); err != nil {
+		return err
 	}
 
 	// Allocate per-node IPs for Layer2Attachments with nodeIPs.enabled.
@@ -114,9 +82,55 @@ func (a *Allocator) ReconcileAllocations(ctx context.Context, fetched *resolver.
 	return nil
 }
 
+func (a *Allocator) reconcileInboundAllocations(ctx context.Context, fetched *resolver.FetchedResources, networks map[string]*resolver.ResolvedNetwork, pools map[string]*networkPool) error {
+	for i := range fetched.Inbounds {
+		inb := &fetched.Inbounds[i]
+		if inb.Spec.Count == nil || inb.Spec.Addresses != nil {
+			continue
+		}
+		if inb.Status.Addresses != nil && len(inb.Status.Addresses.IPv4)+len(inb.Status.Addresses.IPv6) > 0 {
+			continue
+		}
+		addrs, err := a.allocate(inb.Spec.NetworkRef, int(*inb.Spec.Count), networks, pools)
+		if err != nil {
+			a.logger.Error(err, "IPAM allocation failed for Inbound", "inbound", inb.Name)
+			continue
+		}
+		inb.Status.Addresses = addrs
+		if err := a.client.Status().Update(ctx, inb); err != nil {
+			return fmt.Errorf("updating Inbound %q status with allocated addresses: %w", inb.Name, err)
+		}
+		a.logger.Info("allocated addresses for Inbound", "inbound", inb.Name, "addresses", addrs)
+	}
+	return nil
+}
+
+func (a *Allocator) reconcileOutboundAllocations(ctx context.Context, fetched *resolver.FetchedResources, networks map[string]*resolver.ResolvedNetwork, pools map[string]*networkPool) error {
+	for i := range fetched.Outbounds {
+		outb := &fetched.Outbounds[i]
+		if outb.Spec.Count == nil || outb.Spec.Addresses != nil {
+			continue
+		}
+		if outb.Status.Addresses != nil && len(outb.Status.Addresses.IPv4)+len(outb.Status.Addresses.IPv6) > 0 {
+			continue
+		}
+		addrs, err := a.allocate(outb.Spec.NetworkRef, int(*outb.Spec.Count), networks, pools)
+		if err != nil {
+			a.logger.Error(err, "IPAM allocation failed for Outbound", "outbound", outb.Name)
+			continue
+		}
+		outb.Status.Addresses = addrs
+		if err := a.client.Status().Update(ctx, outb); err != nil {
+			return fmt.Errorf("updating Outbound %q status with allocated addresses: %w", outb.Name, err)
+		}
+		a.logger.Info("allocated addresses for Outbound", "outbound", outb.Name, "addresses", addrs)
+	}
+	return nil
+}
+
 // seedExistingAllocations scans resources with existing status.addresses and
 // advances pool cursors past the highest already-allocated IP per network CIDR.
-func (a *Allocator) seedExistingAllocations(fetched *resolver.FetchedResources, pools map[string]*networkPool, networks map[string]*resolver.ResolvedNetwork) {
+func (*Allocator) seedExistingAllocations(fetched *resolver.FetchedResources, pools map[string]*networkPool, networks map[string]*resolver.ResolvedNetwork) {
 	collectAddresses := func(networkRef string, addrs *nc.AddressAllocation) {
 		if addrs == nil {
 			return
@@ -227,24 +241,24 @@ func (a *Allocator) reconcileNodeIPs(ctx context.Context, l2a *nc.Layer2Attachme
 }
 
 // allocate allocates count IPs from the given network's CIDR pool.
-func (a *Allocator) allocate(networkRef string, count int, networks map[string]*resolver.ResolvedNetwork, pools map[string]*networkPool) (*nc.AddressAllocation, error) {
-	net, ok := networks[networkRef]
+func (*Allocator) allocate(networkRef string, count int, networks map[string]*resolver.ResolvedNetwork, pools map[string]*networkPool) (*nc.AddressAllocation, error) {
+	netObj, ok := networks[networkRef]
 	if !ok {
 		return nil, fmt.Errorf("network %q not found", networkRef)
 	}
 
 	alloc := &nc.AddressAllocation{}
 
-	if net.Spec.IPv4 != nil {
-		ips, err := allocateFromCIDR(networkRef+"/v4", net.Spec.IPv4.CIDR, count, pools)
+	if netObj.Spec.IPv4 != nil {
+		ips, err := allocateFromCIDR(networkRef+"/v4", netObj.Spec.IPv4.CIDR, count, pools)
 		if err != nil {
 			return nil, fmt.Errorf("IPv4 allocation from network %q: %w", networkRef, err)
 		}
 		alloc.IPv4 = ips
 	}
 
-	if net.Spec.IPv6 != nil {
-		ips, err := allocateFromCIDR(networkRef+"/v6", net.Spec.IPv6.CIDR, count, pools)
+	if netObj.Spec.IPv6 != nil {
+		ips, err := allocateFromCIDR(networkRef+"/v6", netObj.Spec.IPv6.CIDR, count, pools)
 		if err != nil {
 			return nil, fmt.Errorf("IPv6 allocation from network %q: %w", networkRef, err)
 		}

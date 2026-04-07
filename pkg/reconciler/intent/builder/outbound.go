@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 
+	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/resolver"
 )
@@ -33,7 +34,7 @@ func NewOutboundBuilder() *OutboundBuilder {
 }
 
 // Name returns the builder name.
-func (b *OutboundBuilder) Name() string {
+func (*OutboundBuilder) Name() string {
 	return "outbound"
 }
 
@@ -46,42 +47,35 @@ func (b *OutboundBuilder) Build(_ context.Context, data *resolver.ResolvedData) 
 	for i := range data.Outbounds {
 		ob := &data.Outbounds[i]
 
-		// Resolve the referenced Network.
 		if _, ok := data.Networks[ob.Spec.NetworkRef]; !ok {
-			return nil, fmt.Errorf("Outbound %q references unknown Network %q", ob.Name, ob.Spec.NetworkRef)
+			return nil, fmt.Errorf("outbound %q references unknown Network %q", ob.Name, ob.Spec.NetworkRef)
 		}
 
 		if ob.Spec.Destinations == nil {
 			continue
 		}
 
-		// Resolve ALL matching destinations, grouped by VRF.
 		grouped := groupDestinationsByVRF(ob.Spec.Destinations, data)
 		if len(grouped) == 0 {
 			continue
 		}
 
-		// Collect allocated addresses for EVPN export and cluster vrfImport filters.
 		addresses := b.collectAddresses(ob)
 		filterItems := addressFilterItems(addresses)
 
-		// SNAT routing chain is handled by the SBR builder:
-		//   ClusterVRF policyRoutes (src→s-<vrf>) + LocalVRF static routes (→fabricVRF).
-		// The FabricVRF only needs EVPN export + vrfImport for the allocated addresses.
-
-		// Produce FabricVRF contributions for each matched VRF.
 		for vrfName, dests := range grouped {
 			vrfSpec := b.resolveVRFSpec(dests, data)
 			if vrfSpec == nil {
 				continue
 			}
 
-			// Outbound applies to all nodes (no nodeSelector).
-			for _, node := range data.Nodes {
-				contrib, ok := result[node.Name]
+			staticRoutes := b.buildDestinationRoutes(dests)
+
+			for i := range data.Nodes {
+				contrib, ok := result[data.Nodes[i].Name]
 				if !ok {
 					contrib = NewNodeContribution()
-					result[node.Name] = contrib
+					result[data.Nodes[i].Name] = contrib
 				}
 
 				fvrf, exists := contrib.FabricVRFs[vrfName]
@@ -95,6 +89,7 @@ func (b *OutboundBuilder) Build(_ context.Context, data *resolver.ResolvedData) 
 				if len(fvrf.VRFImports) > 0 {
 					fvrf.VRFImports[0].Filter.Items = append(fvrf.VRFImports[0].Filter.Items, filterItems...)
 				}
+				fvrf.StaticRoutes = append(fvrf.StaticRoutes, staticRoutes...)
 
 				contrib.FabricVRFs[vrfName] = fvrf
 			}
@@ -105,7 +100,7 @@ func (b *OutboundBuilder) Build(_ context.Context, data *resolver.ResolvedData) 
 }
 
 // resolveVRFSpec finds the VRFSpec from a set of destinations for the same VRF.
-func (b *OutboundBuilder) resolveVRFSpec(dests []nc.Destination, data *resolver.ResolvedData) *nc.VRFSpec {
+func (*OutboundBuilder) resolveVRFSpec(dests []nc.Destination, data *resolver.ResolvedData) *nc.VRFSpec {
 	if len(dests) == 0 {
 		return nil
 	}
@@ -117,7 +112,7 @@ func (b *OutboundBuilder) resolveVRFSpec(dests []nc.Destination, data *resolver.
 }
 
 // collectAddresses gathers explicit addresses from the Outbound spec.
-func (b *OutboundBuilder) collectAddresses(ob *nc.Outbound) []string {
+func (*OutboundBuilder) collectAddresses(ob *nc.Outbound) []string {
 	if ob.Spec.Addresses == nil {
 		return nil
 	}
@@ -125,4 +120,19 @@ func (b *OutboundBuilder) collectAddresses(ob *nc.Outbound) []string {
 	addrs = append(addrs, ob.Spec.Addresses.IPv4...)
 	addrs = append(addrs, ob.Spec.Addresses.IPv6...)
 	return addrs
+}
+
+// buildDestinationRoutes creates static routes for all prefixes in the given destinations.
+func (*OutboundBuilder) buildDestinationRoutes(dests []nc.Destination) []networkv1alpha1.StaticRoute {
+	total := 0
+	for i := range dests {
+		total += len(dests[i].Spec.Prefixes)
+	}
+	routes := make([]networkv1alpha1.StaticRoute, 0, total)
+	for i := range dests {
+		for _, prefix := range dests[i].Spec.Prefixes {
+			routes = append(routes, networkv1alpha1.StaticRoute{Prefix: prefix})
+		}
+	}
+	return routes
 }

@@ -21,13 +21,14 @@ import (
 	"fmt"
 	"strings"
 
-	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
-	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
-	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/resolver"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+
+	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
+	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
+	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/resolver"
 )
 
 const defaultMTU = 1500
@@ -41,7 +42,7 @@ func NewL2ABuilder() *L2ABuilder {
 }
 
 // Name returns the builder name.
-func (b *L2ABuilder) Name() string {
+func (*L2ABuilder) Name() string {
 	return "l2a"
 }
 
@@ -81,7 +82,8 @@ func (b *L2ABuilder) Build(ctx context.Context, data *resolver.ResolvedData) (ma
 			return nil, fmt.Errorf("Layer2Attachment %q node selector error: %w", l2a.Name, err)
 		}
 
-		for _, node := range matchingNodes {
+		for i := range matchingNodes {
+			node := &matchingNodes[i]
 			if l2a.Spec.InterfaceName != nil && *l2a.Spec.InterfaceName != "" {
 				ifKey := node.Name + "/" + *l2a.Spec.InterfaceName
 				if prev, exists := ifOwner[ifKey]; exists {
@@ -121,7 +123,7 @@ func (b *L2ABuilder) Build(ctx context.Context, data *resolver.ResolvedData) (ma
 
 // resolveDestinationVRF finds the VRF for IRB plumbing by selecting Destinations
 // matching the L2A's destination selector.
-func (b *L2ABuilder) resolveDestinationVRF(l2a *nc.Layer2Attachment, data *resolver.ResolvedData) (string, *nc.VRFSpec, error) {
+func (*L2ABuilder) resolveDestinationVRF(l2a *nc.Layer2Attachment, data *resolver.ResolvedData) (string, *nc.VRFSpec, error) {
 	if l2a.Spec.Destinations == nil {
 		return "", nil, nil // no VRF plumbing requested
 	}
@@ -136,10 +138,7 @@ func (b *L2ABuilder) resolveDestinationVRF(l2a *nc.Layer2Attachment, data *resol
 		rawDest := &data.RawDestinations[i]
 		if selector.Matches(labels.Set(rawDest.Labels)) {
 			resolved, ok := data.Destinations[rawDest.Name]
-			if ok && resolved.VRFSpec != nil && resolved.Spec.VRFRef != nil {
-				// Return the backbone VRF name (spec.vrf), not the CRD name.
-				// The CRA agent uses this as the FabricVRF map key to create
-				// VRF links named "s-<key>", so it must match legacy format.
+			if ok && resolved.VRFSpec != nil {
 				return resolved.VRFSpec.VRF, resolved.VRFSpec, nil
 			}
 		}
@@ -161,8 +160,8 @@ func (b *L2ABuilder) buildLayer2(l2a *nc.Layer2Attachment, net *resolver.Resolve
 	}
 
 	layer2 := &networkv1alpha1.Layer2{
-		VNI:         uint32(b.vniValue(net)),  //nolint:gosec // value validated by CRD schema (positive integer)
-		VLAN:        uint16(b.vlanID(net)),    //nolint:gosec // value validated by CRD schema (positive integer)
+		VNI:         uint32(b.vniValue(net)), //nolint:gosec // value validated by CRD schema (positive integer)
+		VLAN:        uint16(b.vlanID(net)),   //nolint:gosec // value validated by CRD schema (positive integer)
 		RouteTarget: rt,
 		MTU:         b.mtu(l2a),
 	}
@@ -180,7 +179,7 @@ func (b *L2ABuilder) buildLayer2(l2a *nc.Layer2Attachment, net *resolver.Resolve
 }
 
 // buildIRB constructs the IRB config for an L2A with VRF plumbing.
-func (b *L2ABuilder) buildIRB(l2a *nc.Layer2Attachment, net *resolver.ResolvedNetwork, vrfName string) (*networkv1alpha1.IRB, error) {
+func (*L2ABuilder) buildIRB(_ *nc.Layer2Attachment, net *resolver.ResolvedNetwork, vrfName string) (*networkv1alpha1.IRB, error) {
 	irb := &networkv1alpha1.IRB{
 		VRF: vrfName,
 	}
@@ -207,7 +206,7 @@ func (b *L2ABuilder) buildIRB(l2a *nc.Layer2Attachment, net *resolver.ResolvedNe
 }
 
 // vlanID extracts the VLAN ID from a Network, defaulting to 0 if unset.
-func (b *L2ABuilder) vlanID(net *resolver.ResolvedNetwork) int32 {
+func (*L2ABuilder) vlanID(net *resolver.ResolvedNetwork) int32 {
 	if net.Spec.VLAN != nil {
 		return *net.Spec.VLAN
 	}
@@ -215,15 +214,14 @@ func (b *L2ABuilder) vlanID(net *resolver.ResolvedNetwork) int32 {
 }
 
 // vniValue extracts the VNI from a Network, defaulting to 0 if unset.
-func (b *L2ABuilder) vniValue(net *resolver.ResolvedNetwork) int32 {
+func (*L2ABuilder) vniValue(net *resolver.ResolvedNetwork) int32 {
 	if net.Spec.VNI != nil {
 		return *net.Spec.VNI
 	}
 	return 0
 }
 
-// mtu extracts the MTU from a Layer2Attachment, defaulting to 1500.
-func (b *L2ABuilder) mtu(l2a *nc.Layer2Attachment) uint16 {
+func (*L2ABuilder) mtu(l2a *nc.Layer2Attachment) uint16 {
 	if l2a.Spec.MTU != nil {
 		return uint16(*l2a.Spec.MTU) //nolint:gosec // value validated by CRD schema (positive integer)
 	}
@@ -235,7 +233,7 @@ func (b *L2ABuilder) mtu(l2a *nc.Layer2Attachment) uint16 {
 // type-2 routes via build_evpn_route_extcomm — setting the L2 VNI RT to the
 // VRF's RT would cause link-local type-2 routes (which lack RMAC) to be imported
 // into the VRF, corrupting the nexthop router MAC.
-func (b *L2ABuilder) routeTarget(_ *resolver.ResolvedNetwork, _ *nc.VRFSpec) string {
+func (*L2ABuilder) routeTarget(_ *resolver.ResolvedNetwork, _ *nc.VRFSpec) string {
 	return ""
 }
 

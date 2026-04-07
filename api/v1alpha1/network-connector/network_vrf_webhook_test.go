@@ -25,8 +25,8 @@ import (
 // helpers
 // ---------------------------------------------------------------------------
 
-func int32Ptr(v int32) *int32  { return &v }
-func strPtr(v string) *string  { return &v }
+func int32Ptr(v int32) *int32 { return &v }
+func strPtr(v string) *string { return &v }
 
 // ---------------------------------------------------------------------------
 // Network – valid cases

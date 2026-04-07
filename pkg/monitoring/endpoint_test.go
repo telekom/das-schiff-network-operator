@@ -11,11 +11,12 @@ import (
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
-	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
-	monmock "github.com/telekom/das-schiff-network-operator/pkg/monitoring/mock"
 	"go.uber.org/mock/gomock"
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
+	monmock "github.com/telekom/das-schiff-network-operator/pkg/monitoring/mock"
 )
 
 const (

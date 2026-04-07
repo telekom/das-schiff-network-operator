@@ -8,8 +8,13 @@ import (
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
 )
 
-func strPtr(s string) *string   { return &s }
-func u16Ptr(v uint16) *uint16   { return &v }
+const (
+	testMirrorVRF    = "mirror"
+	testLoopbackAddr = "10.255.0.1/32"
+)
+
+func strPtr(s string) *string { return &s }
+func u16Ptr(v uint16) *uint16 { return &v }
 
 func TestConvertNodeConfigToNetlink_MirrorACLs(t *testing.T) {
 	applier := &CRAFRRConfigApplier{
@@ -34,7 +39,7 @@ func TestConvertNodeConfigToNetlink_MirrorACLs(t *testing.T) {
 								SrcPrefix: strPtr("10.0.0.0/24"),
 							},
 							DestinationAddress: "192.168.99.1",
-							DestinationVrf:     "mirror",
+							DestinationVrf:     testMirrorVRF,
 							EncapsulationType:  v1alpha1.EncapsulationTypeGRE,
 							Direction:          "ingress",
 						},
@@ -42,10 +47,10 @@ func TestConvertNodeConfigToNetlink_MirrorACLs(t *testing.T) {
 				},
 			},
 			FabricVRFs: map[string]v1alpha1.FabricVRF{
-				"mirror": {
+				testMirrorVRF: {
 					VRF: v1alpha1.VRF{
 						Loopbacks: map[string]v1alpha1.Loopback{
-							"mirror": {IPAddresses: []string{"10.255.0.1/32"}},
+							testMirrorVRF: {IPAddresses: []string{testLoopbackAddr}},
 						},
 						MirrorACLs: []v1alpha1.MirrorACL{
 							{
@@ -53,7 +58,7 @@ func TestConvertNodeConfigToNetlink_MirrorACLs(t *testing.T) {
 									Protocol: strPtr("icmp"),
 								},
 								DestinationAddress: "192.168.99.1",
-								DestinationVrf:     "mirror",
+								DestinationVrf:     testMirrorVRF,
 								EncapsulationType:  v1alpha1.EncapsulationTypeGRE,
 								Direction:          "egress",
 							},
@@ -64,8 +69,8 @@ func TestConvertNodeConfigToNetlink_MirrorACLs(t *testing.T) {
 					EVPNExportRouteTargets: []string{"65000:10099"},
 				},
 				"prod": {
-					VRF: v1alpha1.VRF{},
-					VNI: 10001,
+					VRF:                    v1alpha1.VRF{},
+					VNI:                    10001,
 					EVPNImportRouteTargets: []string{"65000:10001"},
 					EVPNExportRouteTargets: []string{"65000:10001"},
 				},
@@ -86,7 +91,7 @@ func TestConvertNodeConfigToNetlink_MirrorACLs(t *testing.T) {
 		if result.Mirrors[i].SourceInterface == "br.100" {
 			l2Rule = &result.Mirrors[i]
 		}
-		if result.Mirrors[i].SourceInterface == "mirror" {
+		if result.Mirrors[i].SourceInterface == testMirrorVRF {
 			vrfRule = &result.Mirrors[i]
 		}
 	}
@@ -97,11 +102,11 @@ func TestConvertNodeConfigToNetlink_MirrorACLs(t *testing.T) {
 	if l2Rule.GRERemote != "192.168.99.1" {
 		t.Errorf("L2 GRERemote = %q, want 192.168.99.1", l2Rule.GRERemote)
 	}
-	if l2Rule.GRELocal != "10.255.0.1/32" {
-		t.Errorf("L2 GRELocal = %q, want 10.255.0.1/32", l2Rule.GRELocal)
+	if l2Rule.GRELocal != testLoopbackAddr {
+		t.Errorf("L2 GRELocal = %q, want %s", l2Rule.GRELocal, testLoopbackAddr)
 	}
-	if l2Rule.GREVRF != "mirror" {
-		t.Errorf("L2 GREVRF = %q, want mirror", l2Rule.GREVRF)
+	if l2Rule.GREVRF != testMirrorVRF {
+		t.Errorf("L2 GREVRF = %q, want %s", l2Rule.GREVRF, testMirrorVRF)
 	}
 	if l2Rule.Protocol != "tcp" {
 		t.Errorf("L2 Protocol = %q, want tcp", l2Rule.Protocol)
@@ -132,14 +137,15 @@ func TestConvertNodeConfigToNetlink_MirrorACLs(t *testing.T) {
 		t.Fatalf("expected 1 loopback config, got %d", len(result.Loopbacks))
 	}
 	lo := result.Loopbacks[0]
-	if lo.Name != "lo.mirror" {
-		t.Errorf("loopback Name = %q, want lo.mirror", lo.Name)
+	wantLoName := "lo." + testMirrorVRF
+	if lo.Name != wantLoName {
+		t.Errorf("loopback Name = %q, want %s", lo.Name, wantLoName)
 	}
-	if lo.VRF != "mirror" {
-		t.Errorf("loopback VRF = %q, want mirror", lo.VRF)
+	if lo.VRF != testMirrorVRF {
+		t.Errorf("loopback VRF = %q, want %s", lo.VRF, testMirrorVRF)
 	}
-	if len(lo.Addresses) != 1 || lo.Addresses[0] != "10.255.0.1/32" {
-		t.Errorf("loopback Addresses = %v, want [10.255.0.1/32]", lo.Addresses)
+	if len(lo.Addresses) != 1 || lo.Addresses[0] != testLoopbackAddr {
+		t.Errorf("loopback Addresses = %v, want [%s]", lo.Addresses, testLoopbackAddr)
 	}
 
 	// Verify VRFs (should include mirror and prod, but not mgmt)
@@ -150,7 +156,7 @@ func TestConvertNodeConfigToNetlink_MirrorACLs(t *testing.T) {
 	if vrfNames["mgmt"] {
 		t.Error("management VRF should be excluded")
 	}
-	if !vrfNames["mirror"] {
+	if !vrfNames[testMirrorVRF] {
 		t.Error("mirror VRF missing")
 	}
 	if !vrfNames["prod"] {
@@ -204,8 +210,8 @@ func TestConvertMirrorACL_AllFields(t *testing.T) {
 		Direction:          "egress",
 	}
 
-	vrfLoopbacks := map[string]string{"mir-vrf": "10.255.0.1/32"}
-	rule := convertMirrorACL(acl, "br.200", vrfLoopbacks)
+	vrfLoopbacks := map[string]string{"mir-vrf": testLoopbackAddr}
+	rule := convertMirrorACL(&acl, "br.200", vrfLoopbacks)
 
 	if rule.SourceInterface != "br.200" {
 		t.Errorf("SourceInterface = %q, want br.200", rule.SourceInterface)
@@ -213,8 +219,8 @@ func TestConvertMirrorACL_AllFields(t *testing.T) {
 	if rule.GRERemote != "192.168.99.5" {
 		t.Errorf("GRERemote = %q, want 192.168.99.5", rule.GRERemote)
 	}
-	if rule.GRELocal != "10.255.0.1/32" {
-		t.Errorf("GRELocal = %q, want 10.255.0.1/32", rule.GRELocal)
+	if rule.GRELocal != testLoopbackAddr {
+		t.Errorf("GRELocal = %q, want %s", rule.GRELocal, testLoopbackAddr)
 	}
 	if rule.GREVRF != "mir-vrf" {
 		t.Errorf("GREVRF = %q, want mir-vrf", rule.GREVRF)
@@ -242,11 +248,11 @@ func TestConvertMirrorACL_AllFields(t *testing.T) {
 func TestConvertMirrorACL_MinimalMatch(t *testing.T) {
 	acl := v1alpha1.MirrorACL{
 		DestinationAddress: "192.168.99.1",
-		DestinationVrf:     "mirror",
+		DestinationVrf:     testMirrorVRF,
 		EncapsulationType:  v1alpha1.EncapsulationTypeGRE,
 	}
 
-	rule := convertMirrorACL(acl, "prod", map[string]string{"mirror": "10.0.0.1/32"})
+	rule := convertMirrorACL(&acl, "prod", map[string]string{testMirrorVRF: "10.0.0.1/32"})
 
 	if rule.Protocol != "" {
 		t.Errorf("Protocol should be empty, got %q", rule.Protocol)

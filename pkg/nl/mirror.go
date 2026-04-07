@@ -12,11 +12,14 @@ import (
 const (
 	grePrefix    = "gre."
 	mirrorPrefix = "mir."
-	// tc handle constants
+	// tc handle constants.
 	handleClsact       = netlink.HANDLE_CLSACT
 	handleMinIngress   = netlink.HANDLE_MIN_INGRESS
 	handleMinEgress    = netlink.HANDLE_MIN_EGRESS
 	maxMirrorIfNameLen = 15
+	ethPAll            = uint16(0x0003) // ETH_P_ALL
+	ethPIP             = uint16(0x0800) // ETH_P_IP
+	ethPIPv6           = uint16(0x86DD) // ETH_P_IPV6
 )
 
 // ipProtoNumber maps protocol name to IP protocol number.
@@ -110,7 +113,8 @@ func (n *Manager) ReconcileGRETunnels(rules []MirrorRule) (map[string]int, error
 	}
 	seen := make(map[tunnelKey]bool)
 
-	for _, r := range rules {
+	for i := range rules {
+		r := &rules[i]
 		tk := tunnelKey{local: r.GRELocal, remote: r.GRERemote, vrf: r.GREVRF}
 		if seen[tk] {
 			continue
@@ -195,11 +199,12 @@ func (n *Manager) ReconcileTcMirrors(rules []MirrorRule, tunnelIndex map[string]
 		rules []MirrorRule
 	}
 	grouped := make(map[string]*ifaceRules)
-	for _, r := range rules {
+	for i := range rules {
+		r := &rules[i]
 		if _, ok := grouped[r.SourceInterface]; !ok {
 			grouped[r.SourceInterface] = &ifaceRules{}
 		}
-		grouped[r.SourceInterface].rules = append(grouped[r.SourceInterface].rules, r)
+		grouped[r.SourceInterface].rules = append(grouped[r.SourceInterface].rules, *r)
 	}
 
 	for iface, ir := range grouped {
@@ -230,19 +235,24 @@ func (n *Manager) setupMirrorFilters(iface string, rules []MirrorRule, tunnelInd
 	}
 
 	// Add filters for each rule
-	for i, r := range rules {
+	for i := range rules {
+		r := &rules[i]
 		greIdx, ok := tunnelIndex[r.GRERemote]
 		if !ok {
 			return fmt.Errorf("no GRE tunnel index for remote %s", r.GRERemote)
 		}
 
+		if i+1 > int(^uint16(0)) {
+			return fmt.Errorf("too many mirror rules: index %d exceeds uint16 limit", i)
+		}
+		prio := uint16(i + 1) //nolint:gosec // G115: bounds-checked above (i+1 <= math.MaxUint16)
 		if r.Direction == "ingress" || r.Direction == "both" {
-			if err := n.addMirrorFilter(link, handleMinIngress, uint16(i+1), r, greIdx); err != nil {
+			if err := n.addMirrorFilter(link, handleMinIngress, prio, r, greIdx); err != nil {
 				return fmt.Errorf("error adding ingress filter: %w", err)
 			}
 		}
 		if r.Direction == "egress" || r.Direction == "both" {
-			if err := n.addMirrorFilter(link, handleMinEgress, uint16(i+1), r, greIdx); err != nil {
+			if err := n.addMirrorFilter(link, handleMinEgress, prio, r, greIdx); err != nil {
 				return fmt.Errorf("error adding egress filter: %w", err)
 			}
 		}
@@ -288,13 +298,13 @@ func (n *Manager) clearFilters(link netlink.Link, parent uint32) error {
 	return nil
 }
 
-func (n *Manager) addMirrorFilter(link netlink.Link, parent uint32, prio uint16, rule MirrorRule, greIfIndex int) error {
+func (n *Manager) addMirrorFilter(link netlink.Link, parent uint32, prio uint16, rule *MirrorRule, greIfIndex int) error {
 	flower := &netlink.Flower{
 		FilterAttrs: netlink.FilterAttrs{
 			LinkIndex: link.Attrs().Index,
 			Parent:    parent,
 			Priority:  prio,
-			Protocol:  0x0003, // ETH_P_ALL
+			Protocol:  ethPAll,
 		},
 		Actions: []netlink.Action{
 			&netlink.MirredAction{
@@ -342,9 +352,9 @@ func (n *Manager) addMirrorFilter(link netlink.Link, parent uint32, prio uint16,
 	// If we have IP-level match criteria, set EthType for IP filtering
 	if flower.IPProto != nil || flower.SrcIP != nil || flower.DestIP != nil {
 		if isIPv6(rule.SrcPrefix, rule.DstPrefix) {
-			flower.EthType = 0x86DD // ETH_P_IPV6
+			flower.EthType = ethPIPv6
 		} else {
-			flower.EthType = 0x0800 // ETH_P_IP
+			flower.EthType = ethPIP
 		}
 	}
 
@@ -373,8 +383,8 @@ func (n *Manager) CleanupMirrors(desired []MirrorRule) error {
 
 	// Build set of desired GRE tunnel names
 	desiredGRE := make(map[string]bool)
-	for _, r := range desired {
-		desiredGRE[greTunnelName(r.GRERemote)] = true
+	for i := range desired {
+		desiredGRE[greTunnelName(desired[i].GRERemote)] = true
 	}
 
 	for _, link := range links {

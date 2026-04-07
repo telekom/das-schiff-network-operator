@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -38,6 +37,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	ctrlreconcile "sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
+	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 )
 
 const (
@@ -45,6 +47,9 @@ const (
 	ipv4HostPrefixLen  = 32
 	ipv6HostPrefixLen  = 128
 	crdRequeueInterval = 30 * time.Second
+
+	// managedByValue is the label value for app.kubernetes.io/managed-by across all platform controllers.
+	managedByValue = "network-connector"
 )
 
 var (
@@ -66,6 +71,8 @@ type CoilReconciler struct {
 //+kubebuilder:rbac:groups=coil.cybozu.com,resources=egresses,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=crd.projectcalico.org,resources=ippools,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=destinations,verbs=get;list;watch
+//+kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch
+//+kubebuilder:rbac:groups=network.t-caas.telekom.com,resources=nodenetworkconfigs,verbs=get;list;watch
 
 // Reconcile handles Outbound create/update/delete events.
 func (r *CoilReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -162,7 +169,7 @@ func (r *CoilReconciler) upsertCalicoIPPool(ctx context.Context, ob *nc.Outbound
 	desired.SetGroupVersionKind(calicoIPPoolGVK)
 	desired.SetName(poolName)
 	desired.SetLabels(map[string]string{
-		"app.kubernetes.io/managed-by":                "network-connector",
+		"app.kubernetes.io/managed-by":                managedByValue,
 		"network-connector.sylvaproject.org/outbound": ob.Name,
 	})
 	if err := unstructured.SetNestedField(desired.Object, cidr, "spec", "cidr"); err != nil {
@@ -231,7 +238,7 @@ func (r *CoilReconciler) upsertCoilEgress(ctx context.Context, ob *nc.Outbound, 
 	desired.SetName(ob.Name)
 	desired.SetNamespace(ob.Namespace)
 	desired.SetLabels(map[string]string{
-		"app.kubernetes.io/managed-by":                "network-connector",
+		"app.kubernetes.io/managed-by":                managedByValue,
 		"network-connector.sylvaproject.org/outbound": ob.Name,
 	})
 
@@ -337,12 +344,37 @@ func (r *CoilReconciler) mapDestinationToOutbounds(ctx context.Context, obj clie
 	return requests
 }
 
+// mapNNCToOutbounds maps NodeNetworkConfig changes to Outbound reconcile requests
+// by listing all Outbounds in the NNC's namespace (cluster-scoped NNCs map by node name).
+func (r *CoilReconciler) mapNNCToOutbounds(ctx context.Context, _ client.Object) []ctrlreconcile.Request {
+	logger := log.FromContext(ctx)
+
+	var outboundList nc.OutboundList
+	if err := r.List(ctx, &outboundList); err != nil {
+		logger.Error(err, "error listing outbounds for NNC mapping")
+		return nil
+	}
+
+	requests := make([]ctrlreconcile.Request, 0, len(outboundList.Items))
+	for i := range outboundList.Items {
+		ob := &outboundList.Items[i]
+		requests = append(requests, ctrlreconcile.Request{
+			NamespacedName: types.NamespacedName{
+				Name:      ob.Name,
+				Namespace: ob.Namespace,
+			},
+		})
+	}
+	return requests
+}
+
 // SetupWithManager registers the Coil controller.
 func (r *CoilReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if err := ctrl.NewControllerManagedBy(mgr).
 		Named("coil-reconciler").
 		For(&nc.Outbound{}).
 		Watches(&nc.Destination{}, handler.EnqueueRequestsFromMapFunc(r.mapDestinationToOutbounds)).
+		Watches(&networkv1alpha1.NodeNetworkConfig{}, handler.EnqueueRequestsFromMapFunc(r.mapNNCToOutbounds)).
 		Complete(r); err != nil {
 		return fmt.Errorf("error setting up coil controller: %w", err)
 	}

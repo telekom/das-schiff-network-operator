@@ -71,7 +71,6 @@ rules:
 - apiGroups:
   - metallb.io
   resources:
-  - bgpadvertisements
   - ipaddresspools
   - l2advertisements
   verbs:

@@ -27,12 +27,13 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/telekom/das-schiff-network-operator/pkg/cra-vsr"
-	"github.com/telekom/das-schiff-network-operator/pkg/helpers/slice"
-	"github.com/telekom/das-schiff-network-operator/pkg/nl"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 	ctrl "sigs.k8s.io/controller-runtime"
+
+	"github.com/telekom/das-schiff-network-operator/pkg/cra-vsr"
+	"github.com/telekom/das-schiff-network-operator/pkg/helpers/slice"
+	"github.com/telekom/das-schiff-network-operator/pkg/nl"
 )
 
 const (

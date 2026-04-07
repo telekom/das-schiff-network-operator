@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -15,6 +14,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+
+	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 )
 
 func testScheme() *runtime.Scheme {
@@ -26,7 +27,7 @@ func testScheme() *runtime.Scheme {
 
 const testRemoteNamespace = "default"
 
-func newFakeSyncController(mgmtObjs, remoteObjs []client.Object) (*SyncController, client.Client) {
+func newFakeSyncController(mgmtObjs, remoteObjs []client.Object) (*Controller, client.Client) {
 	s := testScheme()
 
 	mgmtClient := fake.NewClientBuilder().
@@ -43,7 +44,7 @@ func newFakeSyncController(mgmtObjs, remoteObjs []client.Object) (*SyncControlle
 	remotes := NewRemoteClientManager(s)
 	remotes.clients[types.NamespacedName{Namespace: "test-cluster", Name: "test-cluster"}] = remoteClient
 
-	return &SyncController{
+	return &Controller{
 		Client:  mgmtClient,
 		Scheme:  s,
 		Log:     zap.New(zap.UseDevMode(true)),
@@ -252,7 +253,7 @@ func TestSyncNoRemoteClient(t *testing.T) {
 	mgmtClient := fake.NewClientBuilder().WithScheme(s).Build()
 	remotes := NewRemoteClientManager(s)
 
-	sc := &SyncController{
+	sc := &Controller{
 		Client:  mgmtClient,
 		Scheme:  s,
 		Log:     zap.New(zap.UseDevMode(true)),
@@ -359,7 +360,7 @@ func TestSyncMultipleCRDTypes(t *testing.T) {
 	}
 }
 
-func ptrInt32(v int32) *int32   { return &v }
+func ptrInt32(v int32) *int32    { return &v }
 func ptrString(v string) *string { return &v }
 
 // Ensure corev1 import is used (for scheme registration).

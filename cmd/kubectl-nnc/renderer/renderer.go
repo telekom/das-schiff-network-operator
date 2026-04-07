@@ -25,8 +25,9 @@ import (
 	"text/tabwriter"
 	"time"
 
-	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 )
 
 const (
@@ -45,6 +46,15 @@ const (
 	treeLast   = "└─"
 	treePipe   = "│ "
 	treeSpace  = "  "
+
+	tabwriterMinWidth = 0
+	tabwriterTabWidth = 2
+	tabwriterPadding  = 2
+
+	revisionShortLen = 12
+	revisionLongLen  = 16
+
+	hoursPerDay = 24
 )
 
 // Origins maps NNC section keys (e.g. "layer2s/prod-vlan100") to source CRDs.
@@ -93,12 +103,12 @@ func (r *Renderer) RenderList(list *networkv1alpha1.NodeNetworkConfigList) {
 		return
 	}
 
-	tw := tabwriter.NewWriter(r.w, 0, 2, 2, ' ', 0)
+	tw := tabwriter.NewWriter(r.w, tabwriterMinWidth, tabwriterTabWidth, tabwriterPadding, ' ', 0)
 	fmt.Fprintln(tw, "NODE\tREVISION\tSTATUS\tLAST UPDATE\t#L2\t#FABRIC\t#LOCAL")
 
 	for i := range list.Items {
 		nnc := &list.Items[i]
-		rev := truncate(nnc.Spec.Revision, 12)
+		rev := truncate(nnc.Spec.Revision, revisionShortLen)
 		status := nnc.Status.ConfigStatus
 		lastUpdate := formatMetaTime(nnc.Status.LastUpdate)
 
@@ -116,7 +126,7 @@ func (r *Renderer) RenderList(list *networkv1alpha1.NodeNetworkConfigList) {
 
 func (r *Renderer) renderHeader(nnc *networkv1alpha1.NodeNetworkConfig) {
 	fmt.Fprintf(r.w, "%s: %s\n", r.bold("NodeNetworkConfig"), nnc.Name)
-	fmt.Fprintf(r.w, "  Revision: %s\n", truncate(nnc.Spec.Revision, 16))
+	fmt.Fprintf(r.w, "  Revision: %s\n", truncate(nnc.Spec.Revision, revisionLongLen))
 	fmt.Fprintf(r.w, "  Status:   %s", r.colorStatus(nnc.Status.ConfigStatus))
 	if !nnc.Status.LastUpdate.IsZero() {
 		fmt.Fprintf(r.w, " (last update: %s)", formatMetaTime(nnc.Status.LastUpdate))
@@ -235,108 +245,127 @@ func (r *Renderer) renderClusterVRF(vrf *networkv1alpha1.VRF, origins Origins) {
 
 func (r *Renderer) renderVRFDetails(prefix string, vrf *networkv1alpha1.VRF, origins Origins, originPrefix string) {
 	indent := "  " + prefix + " "
-
-	if len(vrf.BGPPeers) > 0 {
-		fmt.Fprintf(r.w, "%sBGPPeers:\n", indent)
-		tw := tabwriter.NewWriter(r.w, 0, 2, 2, ' ', 0)
-		fmt.Fprintf(tw, "%s  NEIGHBOR\tASN\tFAMILIES\n", indent)
-		for _, peer := range vrf.BGPPeers {
-			addr := "<dynamic>"
-			if peer.Address != nil {
-				addr = *peer.Address
-			} else if peer.ListenRange != nil {
-				addr = *peer.ListenRange + " (range)"
-			}
-			var families []string
-			if peer.IPv4 != nil {
-				families = append(families, "ipv4")
-			}
-			if peer.IPv6 != nil {
-				families = append(families, "ipv6")
-			}
-			fmt.Fprintf(tw, "%s  %s\t%d\t%s\n", indent, addr, peer.RemoteASN, strings.Join(families, ","))
-		}
-		tw.Flush()
-	}
-
-	if len(vrf.StaticRoutes) > 0 {
-		fmt.Fprintf(r.w, "%sStaticRoutes:\n", indent)
-		tw := tabwriter.NewWriter(r.w, 0, 2, 2, ' ', 0)
-		fmt.Fprintf(tw, "%s  PREFIX\tNEXTHOP\n", indent)
-		for _, sr := range vrf.StaticRoutes {
-			nh := "-"
-			if sr.NextHop != nil {
-				if sr.NextHop.Vrf != nil {
-					nh = "vrf:" + *sr.NextHop.Vrf
-				} else if sr.NextHop.Address != nil {
-					nh = *sr.NextHop.Address
-				}
-			}
-			origin := r.originSuffix(origins, originPrefix+"/staticRoutes/"+sr.Prefix)
-			fmt.Fprintf(tw, "%s  %s\t%s%s\n", indent, sr.Prefix, nh, origin)
-		}
-		tw.Flush()
-	}
-
-	if len(vrf.PolicyRoutes) > 0 {
-		fmt.Fprintf(r.w, "%sPolicyRoutes:\n", indent)
-		tw := tabwriter.NewWriter(r.w, 0, 2, 2, ' ', 0)
-		fmt.Fprintf(tw, "%s  SRC\tDST\tNEXTHOP-VRF\n", indent)
-		for _, pr := range vrf.PolicyRoutes {
-			src := ptrOrDash(pr.TrafficMatch.SrcPrefix)
-			dst := ptrOrDash(pr.TrafficMatch.DstPrefix)
-			vrfStr := ptrOrDash(pr.NextHop.Vrf)
-			origin := ""
-			if pr.NextHop.Vrf != nil {
-				origin = r.originSuffix(origins, originPrefix+"/policyRoutes/"+*pr.NextHop.Vrf)
-			}
-			fmt.Fprintf(tw, "%s  %s\t%s\t%s%s\n", indent, src, dst, vrfStr, origin)
-		}
-		tw.Flush()
-	}
-
-	if len(vrf.VRFImports) > 0 {
-		fmt.Fprintf(r.w, "%sVRFImports:\n", indent)
-		for _, imp := range vrf.VRFImports {
-			fmt.Fprintf(r.w, "%s  from %s (default: %s)\n", indent,
-				r.cyan(imp.FromVRF), string(imp.Filter.DefaultAction.Type))
-			if len(imp.Filter.Items) > 0 {
-				tw := tabwriter.NewWriter(r.w, 0, 2, 2, ' ', 0)
-				fmt.Fprintf(tw, "%s    ACTION\tPREFIX\n", indent)
-				for _, item := range imp.Filter.Items {
-					action := string(item.Action.Type)
-					prefix := "-"
-					if item.Matcher.Prefix != nil {
-						prefix = item.Matcher.Prefix.Prefix
-						if item.Matcher.Prefix.Le != nil {
-							prefix += fmt.Sprintf(" le %d", *item.Matcher.Prefix.Le)
-						}
-					}
-					fmt.Fprintf(tw, "%s    %s\t%s\n", indent, action, prefix)
-				}
-				tw.Flush()
-			}
-		}
-	}
-
-	if vrf.Redistribute != nil {
-		parts := []string{}
-		if vrf.Redistribute.Connected != nil {
-			parts = append(parts, "connected")
-		}
-		if vrf.Redistribute.Static != nil {
-			parts = append(parts, "static")
-		}
-		fmt.Fprintf(r.w, "%sRedistribute: %s\n", indent, strings.Join(parts, ", "))
-	}
-
+	r.renderBGPPeers(indent, vrf.BGPPeers)
+	r.renderStaticRoutes(indent, vrf.StaticRoutes, origins, originPrefix)
+	r.renderPolicyRoutes(indent, vrf.PolicyRoutes, origins, originPrefix)
+	r.renderVRFImports(indent, vrf.VRFImports)
+	r.renderRedistribute(indent, vrf.Redistribute)
 	if len(vrf.Loopbacks) > 0 {
 		fmt.Fprintf(r.w, "%sLoopbacks: %d\n", indent, len(vrf.Loopbacks))
 	}
 }
 
-// --- Formatting helpers ---
+func (r *Renderer) renderBGPPeers(indent string, peers []networkv1alpha1.BGPPeer) {
+	if len(peers) == 0 {
+		return
+	}
+	fmt.Fprintf(r.w, "%sBGPPeers:\n", indent)
+	tw := tabwriter.NewWriter(r.w, tabwriterMinWidth, tabwriterTabWidth, tabwriterPadding, ' ', 0)
+	fmt.Fprintf(tw, "%s  NEIGHBOR\tASN\tFAMILIES\n", indent)
+	for _, peer := range peers {
+		addr := "<dynamic>"
+		if peer.Address != nil {
+			addr = *peer.Address
+		} else if peer.ListenRange != nil {
+			addr = *peer.ListenRange + " (range)"
+		}
+		var families []string
+		if peer.IPv4 != nil {
+			families = append(families, "ipv4")
+		}
+		if peer.IPv6 != nil {
+			families = append(families, "ipv6")
+		}
+		fmt.Fprintf(tw, "%s  %s\t%d\t%s\n", indent, addr, peer.RemoteASN, strings.Join(families, ","))
+	}
+	tw.Flush()
+}
 
+func (r *Renderer) renderStaticRoutes(indent string, routes []networkv1alpha1.StaticRoute, origins Origins, originPrefix string) {
+	if len(routes) == 0 {
+		return
+	}
+	fmt.Fprintf(r.w, "%sStaticRoutes:\n", indent)
+	tw := tabwriter.NewWriter(r.w, tabwriterMinWidth, tabwriterTabWidth, tabwriterPadding, ' ', 0)
+	fmt.Fprintf(tw, "%s  PREFIX\tNEXTHOP\n", indent)
+	for _, sr := range routes {
+		nh := "-"
+		if sr.NextHop != nil {
+			if sr.NextHop.Vrf != nil {
+				nh = "vrf:" + *sr.NextHop.Vrf
+			} else if sr.NextHop.Address != nil {
+				nh = *sr.NextHop.Address
+			}
+		}
+		origin := r.originSuffix(origins, originPrefix+"/staticRoutes/"+sr.Prefix)
+		fmt.Fprintf(tw, "%s  %s\t%s%s\n", indent, sr.Prefix, nh, origin)
+	}
+	tw.Flush()
+}
+
+func (r *Renderer) renderPolicyRoutes(indent string, routes []networkv1alpha1.PolicyRoute, origins Origins, originPrefix string) {
+	if len(routes) == 0 {
+		return
+	}
+	fmt.Fprintf(r.w, "%sPolicyRoutes:\n", indent)
+	tw := tabwriter.NewWriter(r.w, tabwriterMinWidth, tabwriterTabWidth, tabwriterPadding, ' ', 0)
+	fmt.Fprintf(tw, "%s  SRC\tDST\tNEXTHOP-VRF\n", indent)
+	for _, pr := range routes {
+		src := ptrOrDash(pr.TrafficMatch.SrcPrefix)
+		dst := ptrOrDash(pr.TrafficMatch.DstPrefix)
+		vrfStr := ptrOrDash(pr.NextHop.Vrf)
+		origin := ""
+		if pr.NextHop.Vrf != nil {
+			origin = r.originSuffix(origins, originPrefix+"/policyRoutes/"+*pr.NextHop.Vrf)
+		}
+		fmt.Fprintf(tw, "%s  %s\t%s\t%s%s\n", indent, src, dst, vrfStr, origin)
+	}
+	tw.Flush()
+}
+
+func (r *Renderer) renderVRFImports(indent string, imports []networkv1alpha1.VRFImport) {
+	if len(imports) == 0 {
+		return
+	}
+	fmt.Fprintf(r.w, "%sVRFImports:\n", indent)
+	for _, imp := range imports {
+		fmt.Fprintf(r.w, "%s  from %s (default: %s)\n", indent,
+			r.cyan(imp.FromVRF), string(imp.Filter.DefaultAction.Type))
+		if len(imp.Filter.Items) == 0 {
+			continue
+		}
+		tw := tabwriter.NewWriter(r.w, tabwriterMinWidth, tabwriterTabWidth, tabwriterPadding, ' ', 0)
+		fmt.Fprintf(tw, "%s    ACTION\tPREFIX\n", indent)
+		for _, item := range imp.Filter.Items {
+			action := string(item.Action.Type)
+			prefix := "-"
+			if item.Matcher.Prefix != nil {
+				prefix = item.Matcher.Prefix.Prefix
+				if item.Matcher.Prefix.Le != nil {
+					prefix += fmt.Sprintf(" le %d", *item.Matcher.Prefix.Le)
+				}
+			}
+			fmt.Fprintf(tw, "%s    %s\t%s\n", indent, action, prefix)
+		}
+		tw.Flush()
+	}
+}
+
+func (r *Renderer) renderRedistribute(indent string, redistribute *networkv1alpha1.Redistribute) {
+	if redistribute == nil {
+		return
+	}
+	var parts []string
+	if redistribute.Connected != nil {
+		parts = append(parts, "connected")
+	}
+	if redistribute.Static != nil {
+		parts = append(parts, "static")
+	}
+	fmt.Fprintf(r.w, "%sRedistribute: %s\n", indent, strings.Join(parts, ", "))
+}
+
+// colorStatus returns the status string with ANSI color codes if color is enabled.
 func (r *Renderer) colorStatus(status string) string {
 	if !r.color {
 		return status
@@ -405,10 +434,10 @@ func formatMetaTime(t metav1.Time) string {
 		return fmt.Sprintf("%ds ago", int(d.Seconds()))
 	case d < time.Hour:
 		return fmt.Sprintf("%dm ago", int(d.Minutes()))
-	case d < 24*time.Hour:
+	case d < hoursPerDay*time.Hour:
 		return fmt.Sprintf("%dh ago", int(d.Hours()))
 	default:
-		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+		return fmt.Sprintf("%dd ago", int(d.Hours()/hoursPerDay))
 	}
 }
 

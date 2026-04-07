@@ -33,10 +33,7 @@ var (
 	outboundlog = logf.Log.WithName("outbound-resource")
 )
 
-// ---------------------------------------------------------------------------
-// Layer2Attachment webhook
-// ---------------------------------------------------------------------------
-
+// SetupWebhookWithManager registers the Layer2Attachment webhook with the controller manager.
 func (r *Layer2Attachment) SetupWebhookWithManager(mgr ctrl.Manager) error {
 	if err := builder.WebhookManagedBy(mgr, r).WithValidator(r).Complete(); err != nil {
 		return fmt.Errorf("error building Layer2Attachment webhook: %w", err)
@@ -82,10 +79,7 @@ func (r *Layer2Attachment) validateLayer2Attachment() error {
 	return nil
 }
 
-// ---------------------------------------------------------------------------
-// Inbound webhook
-// ---------------------------------------------------------------------------
-
+// SetupWebhookWithManager registers the Inbound webhook with the controller manager.
 func (r *Inbound) SetupWebhookWithManager(mgr ctrl.Manager) error {
 	if err := builder.WebhookManagedBy(mgr, r).WithValidator(r).Complete(); err != nil {
 		return fmt.Errorf("error building Inbound webhook: %w", err)
@@ -127,10 +121,7 @@ func (r *Inbound) validateInbound() error {
 	return nil
 }
 
-// ---------------------------------------------------------------------------
-// Outbound webhook
-// ---------------------------------------------------------------------------
-
+// SetupWebhookWithManager registers the Outbound webhook with the controller manager.
 func (r *Outbound) SetupWebhookWithManager(mgr ctrl.Manager) error {
 	if err := builder.WebhookManagedBy(mgr, r).WithValidator(r).Complete(); err != nil {
 		return fmt.Errorf("error building Outbound webhook: %w", err)
@@ -171,10 +162,6 @@ func (r *Outbound) validateOutbound() error {
 	}
 	return nil
 }
-
-// ---------------------------------------------------------------------------
-// Shared helpers
-// ---------------------------------------------------------------------------
 
 func validateAddressAllocation(a *AddressAllocation) error {
 	for _, v4 := range a.IPv4 {

@@ -19,8 +19,9 @@ package resolver
 import (
 	"testing"
 
-	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 )
 
 func ptr[T any](v T) *T { return &v }

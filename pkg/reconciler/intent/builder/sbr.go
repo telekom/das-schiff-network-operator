@@ -23,11 +23,12 @@ import (
 	"sort"
 	"strings"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/resolver"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
 )
 
 // SBRBuilder auto-detects cross-VRF routing needs and produces intermediate
@@ -48,7 +49,7 @@ func NewSBRBuilder() *SBRBuilder {
 }
 
 // Name returns the builder name.
-func (b *SBRBuilder) Name() string {
+func (*SBRBuilder) Name() string {
 	return "sbr"
 }
 
@@ -103,7 +104,8 @@ func (b *SBRBuilder) Build(_ context.Context, data *resolver.ResolvedData) (map[
 
 	// Build per-node contributions.
 	result := make(map[string]*NodeContribution)
-	for _, node := range data.Nodes {
+	for i := range data.Nodes {
+		node := &data.Nodes[i]
 		contrib := NewNodeContribution()
 
 		for _, group := range sortedGroups(groups) {
@@ -125,6 +127,7 @@ func (b *SBRBuilder) Build(_ context.Context, data *resolver.ResolvedData) (map[
 			if contrib.ClusterVRF == nil {
 				contrib.ClusterVRF = &networkv1alpha1.VRF{}
 			}
+			sort.Strings(group.sourcePrefixes)
 			for _, src := range group.sourcePrefixes {
 				srcCopy := src
 				contrib.ClusterVRF.PolicyRoutes = append(contrib.ClusterVRF.PolicyRoutes, networkv1alpha1.PolicyRoute{
@@ -150,7 +153,7 @@ func (b *SBRBuilder) Build(_ context.Context, data *resolver.ResolvedData) (map[
 // Single-VRF consumers get a dedicated group keyed by VRF name → "s-<vrf>".
 // Multi-VRF consumers get a combo group keyed by sorted destination names → "s-<hash>".
 // Two consumers selecting the same destinations share the same combo group.
-func (b *SBRBuilder) addConsumerToGroups(
+func (*SBRBuilder) addConsumerToGroups(
 	destSelector *metav1.LabelSelector,
 	sourcePrefixes []string,
 	data *resolver.ResolvedData,
@@ -235,7 +238,7 @@ func intermediateVRFName(group *sbrGroup) string {
 // buildComboVRF creates the intermediate LocalVRF for a group.
 // It contains static routes for ALL destination prefixes from ALL VRFs in the set,
 // each pointing to the correct FabricVRF via NextHop.Vrf. LPM does the disambiguation.
-func (b *SBRBuilder) buildComboVRF(group *sbrGroup) networkv1alpha1.VRF {
+func (*SBRBuilder) buildComboVRF(group *sbrGroup) networkv1alpha1.VRF {
 	vrf := networkv1alpha1.VRF{
 		VRFImports: []networkv1alpha1.VRFImport{
 			{

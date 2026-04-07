@@ -5,12 +5,13 @@ import (
 	"fmt"
 
 	"github.com/go-logr/logr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/pkg/config"
 	cra "github.com/telekom/das-schiff-network-operator/pkg/cra-frr"
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/common"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
@@ -45,8 +46,8 @@ func (a *CRAFRRConfigApplier) ApplyConfig(ctx context.Context, cfg *v1alpha1.Nod
 func (a *CRAFRRConfigApplier) convertNodeConfigToNetlink(nodeCfg *v1alpha1.NodeNetworkConfig) (netlinkConfig nl.NetlinkConfiguration) {
 	// Pre-compute loopback IPs per VRF for GRE local address resolution.
 	vrfLoopbackIPs := make(map[string]string)
-	for name, vrf := range nodeCfg.Spec.FabricVRFs {
-		for _, lo := range vrf.Loopbacks {
+	for name := range nodeCfg.Spec.FabricVRFs {
+		for _, lo := range nodeCfg.Spec.FabricVRFs[name].Loopbacks {
 			if len(lo.IPAddresses) > 0 {
 				vrfLoopbackIPs[name] = lo.IPAddresses[0]
 				break
@@ -70,11 +71,10 @@ func (a *CRAFRRConfigApplier) convertNodeConfigToNetlink(nodeCfg *v1alpha1.NodeN
 
 		netlinkConfig.Layer2s = append(netlinkConfig.Layer2s, nlLayer2)
 
-		// Convert L2 MirrorACLs → mirror rules targeting the bridge interface
 		bridgeIface := fmt.Sprintf("br.%d", layer2.VLAN)
-		for _, acl := range layer2.MirrorACLs {
+		for j := range layer2.MirrorACLs {
 			netlinkConfig.Mirrors = append(netlinkConfig.Mirrors,
-				convertMirrorACL(acl, bridgeIface, vrfLoopbackIPs))
+				convertMirrorACL(&layer2.MirrorACLs[j], bridgeIface, vrfLoopbackIPs))
 		}
 	}
 
@@ -93,10 +93,9 @@ func (a *CRAFRRConfigApplier) convertNodeConfigToNetlink(nodeCfg *v1alpha1.NodeN
 
 		netlinkConfig.VRFs = append(netlinkConfig.VRFs, nlVrf)
 
-		// Convert VRF MirrorACLs → mirror rules targeting the VRF device
-		for _, acl := range vrf.MirrorACLs {
+		for j := range vrf.MirrorACLs {
 			netlinkConfig.Mirrors = append(netlinkConfig.Mirrors,
-				convertMirrorACL(acl, name, vrfLoopbackIPs))
+				convertMirrorACL(&vrf.MirrorACLs[j], name, vrfLoopbackIPs))
 		}
 
 		// Convert VRF loopbacks → loopback configs for netlink dummy creation
@@ -121,9 +120,7 @@ func (a *CRAFRRConfigApplier) convertNodeConfigToNetlink(nodeCfg *v1alpha1.NodeN
 	return netlinkConfig
 }
 
-// convertMirrorACL converts a single NNC MirrorACL to an nl.MirrorRule.
-// vrfLoopbackIPs maps VRF name → first loopback IP for GRE local address.
-func convertMirrorACL(acl v1alpha1.MirrorACL, sourceIface string, vrfLoopbackIPs map[string]string) nl.MirrorRule {
+func convertMirrorACL(acl *v1alpha1.MirrorACL, sourceIface string, vrfLoopbackIPs map[string]string) nl.MirrorRule {
 	direction := acl.Direction
 	if direction == "" {
 		direction = "both"

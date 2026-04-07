@@ -33,12 +33,12 @@ func NewCollectorBuilder() *CollectorBuilder {
 }
 
 // Name returns the builder name.
-func (b *CollectorBuilder) Name() string {
+func (*CollectorBuilder) Name() string {
 	return "collector"
 }
 
 // Build produces per-node FabricVRF loopback contributions from Collector resources.
-func (b *CollectorBuilder) Build(_ context.Context, data *resolver.ResolvedData) (map[string]*NodeContribution, error) {
+func (*CollectorBuilder) Build(_ context.Context, data *resolver.ResolvedData) (map[string]*NodeContribution, error) {
 	result := make(map[string]*NodeContribution)
 
 	for i := range data.Collectors {
@@ -48,7 +48,7 @@ func (b *CollectorBuilder) Build(_ context.Context, data *resolver.ResolvedData)
 		vrfName := col.Spec.MirrorVRF.Name
 		resolvedVRF, ok := data.VRFs[vrfName]
 		if !ok {
-			return nil, fmt.Errorf("Collector %q references unknown VRF %q", col.Name, vrfName)
+			return nil, fmt.Errorf("collector %q references unknown VRF %q", col.Name, vrfName)
 		}
 
 		// Build loopback entry from the MirrorVRF config.
@@ -58,11 +58,11 @@ func (b *CollectorBuilder) Build(_ context.Context, data *resolver.ResolvedData)
 		}
 
 		// Apply to all nodes.
-		for _, node := range data.Nodes {
-			contrib, ok := result[node.Name]
+		for i := range data.Nodes {
+			contrib, ok := result[data.Nodes[i].Name]
 			if !ok {
 				contrib = NewNodeContribution()
-				result[node.Name] = contrib
+				result[data.Nodes[i].Name] = contrib
 			}
 
 			fvrf, exists := contrib.FabricVRFs[vrfName]

@@ -79,7 +79,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&syncctrl.SyncController{
+	if err = (&syncctrl.Controller{
 		Client:          mgr.GetClient(),
 		Scheme:          mgr.GetScheme(),
 		Log:             mgr.GetLogger().WithName("SyncController"),

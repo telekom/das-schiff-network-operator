@@ -5,10 +5,11 @@ import (
 
 	"github.com/godbus/dbus/v5"
 	"github.com/sirupsen/logrus"
+	"gopkg.in/natefinch/lumberjack.v2"
+
 	"github.com/telekom/das-schiff-network-operator/pkg/network/net"
 	"github.com/telekom/das-schiff-network-operator/pkg/network/netplan"
 	"github.com/telekom/das-schiff-network-operator/pkg/network/netplan/config"
-	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 const (

@@ -7,6 +7,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
 	"github.com/telekom/das-schiff-network-operator/e2etests/framework"
 )
 
@@ -76,6 +77,10 @@ var _ = Describe("VIP Failover", Label("failover"), func() {
 		By("Waiting for pods to be ready")
 		Expect(f.WaitForPodReady(ctx, ns, "failover-src", cfg.PodReadyTimeout)).To(Succeed())
 		Expect(f.WaitForPodReady(ctx, ns, "failover-dst", cfg.PodReadyTimeout)).To(Succeed())
+
+		By("Disabling IPv6 DAD and re-adding addresses")
+		Expect(f.EnsureIPv6NoDad(ctx, ns, "failover-src", cfg.FailoverPod01IPv6, "net1")).To(Succeed())
+		Expect(f.EnsureIPv6NoDad(ctx, ns, "failover-dst", cfg.FailoverPod02IPv6, "net1")).To(Succeed())
 
 		By("Verifying baseline cross-node connectivity")
 		Eventually(func() bool {
