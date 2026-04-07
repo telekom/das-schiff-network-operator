@@ -40,7 +40,7 @@ func (r *VRFRouteConfiguration) SetupWebhookWithManager(mgr ctrl.Manager) error 
 }
 
 // VRFRouteConfiguration webhook validates create and update operations.
-// Delete validation is registered but intentionally permissive (no-op).
+// Delete validation is not registered; ValidateDelete is a no-op until verbs include delete.
 
 // TODO(user): change verbs to "verbs=create;update;delete" if you want to enable deletion validation.
 //+kubebuilder:webhook:path=/validate-network-t-caas-telekom-com-v1alpha1-vrfrouteconfiguration,mutating=false,failurePolicy=fail,sideEffects=None,groups=network.t-caas.telekom.com,resources=vrfrouteconfigurations,verbs=create;update,versions=v1alpha1,name=vvrfrouteconfiguration.kb.io,admissionReviewVersions=v1
