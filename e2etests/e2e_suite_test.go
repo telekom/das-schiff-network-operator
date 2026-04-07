@@ -8,8 +8,7 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/telekom/das-schiff-network-operator/e2etests/config"
 	"github.com/telekom/das-schiff-network-operator/e2etests/framework"
-	// Import test packages so their init() / Describe blocks register.
-	_ "github.com/telekom/das-schiff-network-operator/e2etests/tests"
+	_ "github.com/telekom/das-schiff-network-operator/e2etests/tests" // Import test packages so their init() / Describe blocks register.
 )
 
 var f *framework.Framework
