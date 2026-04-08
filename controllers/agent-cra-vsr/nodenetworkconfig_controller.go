@@ -19,20 +19,16 @@ package agent_cra_vsr //nolint:revive
 import (
 	"context"
 	"fmt"
-	"os"
-	"strings"
 	"time"
 
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
-	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
+	"github.com/telekom/das-schiff-network-operator/controllers/shared"
 	reconcilervsr "github.com/telekom/das-schiff-network-operator/pkg/reconciler/agent-cra-vsr"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
 )
 
 const requeueTime = 10 * time.Minute
@@ -59,9 +55,13 @@ type NodeNetworkConfigReconciler struct {
 func (r *NodeNetworkConfigReconciler) Reconcile(ctx context.Context, _ ctrl.Request) (ctrl.Result, error) {
 	_ = log.FromContext(ctx)
 
+	if r.Reconciler == nil {
+		return ctrl.Result{}, fmt.Errorf("reconciler is not initialized")
+	}
+
 	result, err := r.Reconciler.Reconcile(ctx)
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("reconicliation error: %w", err)
+		return ctrl.Result{}, fmt.Errorf("reconciliation error: %w", err)
 	}
 
 	// If the reconciler requested a specific requeue, use that
@@ -74,19 +74,8 @@ func (r *NodeNetworkConfigReconciler) Reconcile(ctx context.Context, _ ctrl.Requ
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *NodeNetworkConfigReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	namePredicates := predicate.Funcs{
-		CreateFunc: func(e event.CreateEvent) bool {
-			return strings.Contains(e.Object.GetName(), os.Getenv(healthcheck.NodenameEnv))
-		},
-		UpdateFunc: func(e event.UpdateEvent) bool {
-			return strings.Contains(e.ObjectNew.GetName(), os.Getenv(healthcheck.NodenameEnv))
-		},
-		DeleteFunc:  func(event.DeleteEvent) bool { return false },
-		GenericFunc: func(event.GenericEvent) bool { return false },
-	}
-
 	err := ctrl.NewControllerManagedBy(mgr).
-		For(&networkv1alpha1.NodeNetworkConfig{}, builder.WithPredicates(namePredicates)).
+		For(&networkv1alpha1.NodeNetworkConfig{}, builder.WithPredicates(shared.BuildNamePredicates())).
 		Complete(r)
 	if err != nil {
 		return fmt.Errorf("error creating controller: %w", err)
