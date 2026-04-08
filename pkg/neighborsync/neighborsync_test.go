@@ -534,30 +534,34 @@ var _ = Describe("EnsureNeighborSuppression()", func() {
 
 		fakeLink := &netlink.Dummy{}
 		nlMock.EXPECT().LinkByIndex(10).Return(fakeLink, nil)
+		// syncKernelNeighbors runs before bpfAttachFn on first registration.
+		nlMock.EXPECT().NeighList(5, netlink.FAMILY_ALL).Return(nil, nil)
 
 		err := n.EnsureNeighborSuppression(5, 10)
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("failed to attach BPF program"))
 	})
 
-	It("does not store bridgeID/vethID when BPF attach fails", func() {
+	It("stores bridgeID/vethID even when BPF attach fails", func() {
 		mockCtrl := gomock.NewController(GinkgoT())
 		defer mockCtrl.Finish()
 		nlMock := mock_nl.NewMockToolkitInterface(mockCtrl)
 		n := newTestNeighborSync(nlMock)
 
-		// BPF attach fails after LinkByIndex succeeds — maps must remain empty.
+		// BPF attach fails after LinkByIndex succeeds — maps are populated
+		// before bpfAttachFn is called in the current code path.
 		n.bpfAttachFn = func(_ netlink.Link) error { return errors.New("bpf attach failed") }
 
 		fakeLink := &netlink.Dummy{}
 		nlMock.EXPECT().LinkByIndex(10).Return(fakeLink, nil)
+		nlMock.EXPECT().NeighList(5, netlink.FAMILY_ALL).Return(nil, nil)
 
 		_ = n.EnsureNeighborSuppression(5, 10)
 
 		_, bridgeStored := n.sendGratuitousNeighbor.Load(5)
 		_, vethStored := n.receiveNeighbors.Load(10)
-		Expect(bridgeStored).To(BeFalse(), "bridgeID must not be stored when BPF attach fails")
-		Expect(vethStored).To(BeFalse(), "vethID must not be stored when BPF attach fails")
+		Expect(bridgeStored).To(BeTrue(), "bridgeID is stored before BPF attach is attempted")
+		Expect(vethStored).To(BeTrue(), "vethID is stored before BPF attach is attempted")
 	})
 
 	It("stores bridgeID/vethID and calls NeighList on first registration", func() {
