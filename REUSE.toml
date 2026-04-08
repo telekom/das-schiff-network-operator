@@ -36,11 +36,14 @@ SPDX-License-Identifier = "Apache-2.0"
 [[annotations]]
 path = [
   ".dockerignore",
+  ".editorconfig",
   ".gitignore",
   ".golangci.yml",
+  ".yamllint.yml",
   "*.Dockerfile",
   "Makefile",
   "PROJECT",
+  "versions.env",
   "**/go.mod",
   "**/go.sum",
   "REUSE.toml",
