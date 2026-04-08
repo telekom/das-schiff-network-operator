@@ -48,9 +48,6 @@ const (
 	defaultDebounceTime = 1 * time.Second
 	// DefaultTimeout is the default API timeout.
 	DefaultTimeout = "60s"
-	// listLimit caps the number of objects returned per List call to prevent
-	// unbounded memory consumption on large clusters.
-	listLimit = 500
 )
 
 // Reconciler is the intent-based reconciler that watches all intent CRDs
@@ -217,31 +214,19 @@ func filterActive[T any, PT interface {
 	return active
 }
 
-// paginateMaxExtraOpts is the maximum number of options appended beyond baseOpts (Limit + Continue).
-const paginateMaxExtraOpts = 2
-
-// paginateInto fetches all pages of a list type, calling consume on each page's items.
-func paginateInto[L interface {
+// listInto fetches all objects of a list type in a single call and passes them to consume.
+// The manager's cached client already holds all watched objects in memory, so pagination
+// via Limit/Continue is neither necessary nor supported by the cache.
+func listInto[L interface {
 	client.ObjectList
 	*U
 }, U any](ctx context.Context, c client.Client, baseOpts []client.ListOption, consume func(list L)) error {
-	for continueToken := ""; ; {
-		list := L(new(U))
-		opts := make([]client.ListOption, 0, len(baseOpts)+paginateMaxExtraOpts)
-		opts = append(opts, baseOpts...)
-		opts = append(opts, client.Limit(listLimit))
-		if continueToken != "" {
-			opts = append(opts, client.Continue(continueToken))
-		}
-		if err := c.List(ctx, list, opts...); err != nil {
-			return fmt.Errorf("paginated list: %w", err)
-		}
-		consume(list)
-		continueToken = list.GetContinue()
-		if continueToken == "" {
-			return nil
-		}
+	list := L(new(U))
+	if err := c.List(ctx, list, baseOpts...); err != nil {
+		return fmt.Errorf("list: %w", err)
 	}
+	consume(list)
+	return nil
 }
 
 func (r *Reconciler) fetchAll(ctx context.Context) (*resolver.FetchedResources, error) {
@@ -252,76 +237,76 @@ func (r *Reconciler) fetchAll(ctx context.Context) (*resolver.FetchedResources, 
 		nsOpts = append(nsOpts, client.InNamespace(r.namespace))
 	}
 
-	if err := paginateInto[*corev1.NodeList](ctx, r.client, nil, func(l *corev1.NodeList) {
+	if err := listInto[*corev1.NodeList](ctx, r.client, nil, func(l *corev1.NodeList) {
 		f.Nodes = append(f.Nodes, l.Items...)
 	}); err != nil {
 		return nil, fmt.Errorf("error listing Nodes: %w", err)
 	}
 
-	if err := paginateInto[*nc.VRFList](ctx, r.client, nsOpts, func(l *nc.VRFList) {
+	if err := listInto[*nc.VRFList](ctx, r.client, nsOpts, func(l *nc.VRFList) {
 		f.AllVRFs = append(f.AllVRFs, l.Items...)
 		f.VRFs = append(f.VRFs, filterActive(l.Items)...)
 	}); err != nil {
 		return nil, fmt.Errorf("error listing VRFs: %w", err)
 	}
 
-	if err := paginateInto[*nc.NetworkList](ctx, r.client, nsOpts, func(l *nc.NetworkList) {
+	if err := listInto[*nc.NetworkList](ctx, r.client, nsOpts, func(l *nc.NetworkList) {
 		f.AllNetworks = append(f.AllNetworks, l.Items...)
 		f.Networks = append(f.Networks, filterActive(l.Items)...)
 	}); err != nil {
 		return nil, fmt.Errorf("error listing Networks: %w", err)
 	}
 
-	if err := paginateInto[*nc.DestinationList](ctx, r.client, nsOpts, func(l *nc.DestinationList) {
+	if err := listInto[*nc.DestinationList](ctx, r.client, nsOpts, func(l *nc.DestinationList) {
 		f.AllDestinations = append(f.AllDestinations, l.Items...)
 		f.Destinations = append(f.Destinations, filterActive(l.Items)...)
 	}); err != nil {
 		return nil, fmt.Errorf("error listing Destinations: %w", err)
 	}
 
-	if err := paginateInto[*nc.Layer2AttachmentList](ctx, r.client, nsOpts, func(l *nc.Layer2AttachmentList) {
+	if err := listInto[*nc.Layer2AttachmentList](ctx, r.client, nsOpts, func(l *nc.Layer2AttachmentList) {
 		f.Layer2Attachments = append(f.Layer2Attachments, filterActive(l.Items)...)
 	}); err != nil {
 		return nil, fmt.Errorf("error listing Layer2Attachments: %w", err)
 	}
 
-	if err := paginateInto[*nc.InboundList](ctx, r.client, nsOpts, func(l *nc.InboundList) {
+	if err := listInto[*nc.InboundList](ctx, r.client, nsOpts, func(l *nc.InboundList) {
 		f.Inbounds = append(f.Inbounds, filterActive(l.Items)...)
 	}); err != nil {
 		return nil, fmt.Errorf("error listing Inbounds: %w", err)
 	}
 
-	if err := paginateInto[*nc.OutboundList](ctx, r.client, nsOpts, func(l *nc.OutboundList) {
+	if err := listInto[*nc.OutboundList](ctx, r.client, nsOpts, func(l *nc.OutboundList) {
 		f.Outbounds = append(f.Outbounds, filterActive(l.Items)...)
 	}); err != nil {
 		return nil, fmt.Errorf("error listing Outbounds: %w", err)
 	}
 
-	if err := paginateInto[*nc.PodNetworkList](ctx, r.client, nsOpts, func(l *nc.PodNetworkList) {
+	if err := listInto[*nc.PodNetworkList](ctx, r.client, nsOpts, func(l *nc.PodNetworkList) {
 		f.PodNetworks = append(f.PodNetworks, filterActive(l.Items)...)
 	}); err != nil {
 		return nil, fmt.Errorf("error listing PodNetworks: %w", err)
 	}
 
-	if err := paginateInto[*nc.BGPPeeringList](ctx, r.client, nsOpts, func(l *nc.BGPPeeringList) {
+	if err := listInto[*nc.BGPPeeringList](ctx, r.client, nsOpts, func(l *nc.BGPPeeringList) {
 		f.BGPPeerings = append(f.BGPPeerings, filterActive(l.Items)...)
 	}); err != nil {
 		return nil, fmt.Errorf("error listing BGPPeerings: %w", err)
 	}
 
-	if err := paginateInto[*nc.CollectorList](ctx, r.client, nsOpts, func(l *nc.CollectorList) {
+	if err := listInto[*nc.CollectorList](ctx, r.client, nsOpts, func(l *nc.CollectorList) {
 		f.Collectors = append(f.Collectors, filterActive(l.Items)...)
 	}); err != nil {
 		return nil, fmt.Errorf("error listing Collectors: %w", err)
 	}
 
-	if err := paginateInto[*nc.TrafficMirrorList](ctx, r.client, nsOpts, func(l *nc.TrafficMirrorList) {
+	if err := listInto[*nc.TrafficMirrorList](ctx, r.client, nsOpts, func(l *nc.TrafficMirrorList) {
 		f.TrafficMirrors = append(f.TrafficMirrors, filterActive(l.Items)...)
 	}); err != nil {
 		return nil, fmt.Errorf("error listing TrafficMirrors: %w", err)
 	}
 
-	if err := paginateInto[*nc.AnnouncementPolicyList](ctx, r.client, nsOpts, func(l *nc.AnnouncementPolicyList) {
+	if err := listInto[*nc.AnnouncementPolicyList](ctx, r.client, nsOpts, func(l *nc.AnnouncementPolicyList) {
 		f.AnnouncementPolicies = append(f.AnnouncementPolicies, filterActive(l.Items)...)
 	}); err != nil {
 		return nil, fmt.Errorf("error listing AnnouncementPolicies: %w", err)
@@ -480,7 +465,7 @@ func (r *Reconciler) cleanupOrphanedNNCs(ctx context.Context, nodes []corev1.Nod
 	}
 
 	nncList := &networkv1alpha1.NodeNetworkConfigList{}
-	if err := r.client.List(ctx, nncList, client.Limit(listLimit)); err != nil {
+	if err := r.client.List(ctx, nncList); err != nil {
 		return fmt.Errorf("error listing NodeNetworkConfigs: %w", err)
 	}
 
@@ -615,7 +600,7 @@ func (r *Reconciler) cleanupOrphanedNetplanConfigs(ctx context.Context, nodes []
 	}
 
 	npcList := &networkv1alpha1.NodeNetplanConfigList{}
-	if err := r.client.List(ctx, npcList, client.Limit(listLimit)); err != nil {
+	if err := r.client.List(ctx, npcList); err != nil {
 		return fmt.Errorf("error listing NodeNetplanConfigs: %w", err)
 	}
 
