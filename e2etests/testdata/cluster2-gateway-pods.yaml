@@ -6,7 +6,12 @@ kind: Namespace
 metadata:
   name: e2e-gateways
 ---
-# NAD for VLAN 601 (m2m gateway)
+# NAD for VLAN 601 (m2m gateway).
+# Uses CNI conflist to chain macvlan with the tuning meta-plugin.
+# The tuning plugin disables IPv6 DAD (Duplicate Address Detection) at
+# CNI-chain time, preventing addresses from entering "dadfailed" state
+# in containerlab/Kind environments where CRA bridge agents respond to
+# DAD probes.
 apiVersion: k8s.cni.cncf.io/v1
 kind: NetworkAttachmentDefinition
 metadata:
@@ -15,24 +20,36 @@ metadata:
 spec:
   config: |
     {
-      "cniVersion": "0.3.1",
-      "type": "macvlan",
-      "master": "vlan.601",
-      "mode": "bridge",
-      "ipam": {
-        "type": "static",
-        "routes": [
-          {"dst": "10.250.0.0/16", "gw": "10.102.0.254"},
-          {"dst": "fd94:685b:30cf::/48", "gw": "fda5:25c1:193c::fe"},
-          {"dst": "fda5:25c1:193c::/48", "gw": "fda5:25c1:193c::fe"},
-          {"dst": "fdbb:6b17:90ba::/64", "gw": "fda5:25c1:193c::fe"},
-          {"dst": "fd90:4dbf:396d::/126", "gw": "fda5:25c1:193c::fe"},
-          {"dst": "fd75:2d70:f7f7::/64", "gw": "fda5:25c1:193c::fe"}
-        ]
-      }
+      "cniVersion": "0.4.0",
+      "name": "macvlan-vlan601",
+      "plugins": [
+        {
+          "type": "macvlan",
+          "master": "vlan.601",
+          "mode": "bridge",
+          "ipam": {
+            "type": "static",
+            "routes": [
+              {"dst": "10.250.0.0/16", "gw": "10.102.0.254"},
+              {"dst": "fd94:685b:30cf::/48", "gw": "fda5:25c1:193c::fe"},
+              {"dst": "fda5:25c1:193c::/48", "gw": "fda5:25c1:193c::fe"},
+              {"dst": "fdbb:6b17:90ba::/64", "gw": "fda5:25c1:193c::fe"},
+              {"dst": "fd90:4dbf:396d::/126", "gw": "fda5:25c1:193c::fe"},
+              {"dst": "fd75:2d70:f7f7::/64", "gw": "fda5:25c1:193c::fe"}
+            ]
+          }
+        },
+        {
+          "type": "tuning",
+          "sysctl": {
+            "net.ipv6.conf.IFNAME.accept_dad": "0"
+          }
+        }
+      ]
     }
 ---
-# NAD for VLAN 602 (c2m gateway)
+# NAD for VLAN 602 (c2m gateway).
+# See VLAN 601 NAD above for DAD workaround rationale.
 apiVersion: k8s.cni.cncf.io/v1
 kind: NetworkAttachmentDefinition
 metadata:
@@ -41,20 +58,31 @@ metadata:
 spec:
   config: |
     {
-      "cniVersion": "0.3.1",
-      "type": "macvlan",
-      "master": "vlan.602",
-      "mode": "bridge",
-      "ipam": {
-        "type": "static",
-        "routes": [
-          {"dst": "10.250.0.0/16", "gw": "10.102.1.254"},
-          {"dst": "fd94:685b:30cf::/48", "gw": "fda5:25c1:193d::fe"},
-          {"dst": "fda5:25c1:193d::/48", "gw": "fda5:25c1:193d::fe"},
-          {"dst": "fdb2:e3e1:fcbf::/64", "gw": "fda5:25c1:193d::fe"},
-          {"dst": "fde8:e5cf:d314::/126", "gw": "fda5:25c1:193d::fe"}
-        ]
-      }
+      "cniVersion": "0.4.0",
+      "name": "macvlan-vlan602",
+      "plugins": [
+        {
+          "type": "macvlan",
+          "master": "vlan.602",
+          "mode": "bridge",
+          "ipam": {
+            "type": "static",
+            "routes": [
+              {"dst": "10.250.0.0/16", "gw": "10.102.1.254"},
+              {"dst": "fd94:685b:30cf::/48", "gw": "fda5:25c1:193d::fe"},
+              {"dst": "fda5:25c1:193d::/48", "gw": "fda5:25c1:193d::fe"},
+              {"dst": "fdb2:e3e1:fcbf::/64", "gw": "fda5:25c1:193d::fe"},
+              {"dst": "fde8:e5cf:d314::/126", "gw": "fda5:25c1:193d::fe"}
+            ]
+          }
+        },
+        {
+          "type": "tuning",
+          "sysctl": {
+            "net.ipv6.conf.IFNAME.accept_dad": "0"
+          }
+        }
+      ]
     }
 ---
 # m2m gateway pod — provides 10.102.0.1 / fda5:25c1:193c::1
