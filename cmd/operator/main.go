@@ -23,7 +23,9 @@ import (
 	"flag"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -141,6 +143,10 @@ func main() {
 		os.Exit(1)
 	}
 
+	certDir := "/tmp/k8s-webhook-server/serving-certs"
+	certPath := filepath.Join(certDir, "tls.crt")
+	keyPath := filepath.Join(certDir, "tls.key")
+
 	options := ctrl.Options{
 		Scheme:                  scheme,
 		LeaderElection:          true,
@@ -153,8 +159,19 @@ func main() {
 		WebhookServer: webhook.NewServer(webhook.Options{
 			Host:    host,
 			Port:    port,
-			CertDir: "/tmp/k8s-webhook-server/serving-certs",
-			TLSOpts: []func(c *tls.Config){func(c *tls.Config) { c.MinVersion = tls.VersionTLS13 }},
+			CertDir: certDir,
+			TLSOpts: []func(*tls.Config){
+				func(c *tls.Config) {
+					c.MinVersion = tls.VersionTLS13
+					c.GetCertificate = func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+						cert, err := tls.LoadX509KeyPair(certPath, keyPath)
+						if err != nil {
+							return nil, fmt.Errorf("webhook cert not yet available: %w", err)
+						}
+						return &cert, nil
+					}
+				},
+			},
 		}),
 	}
 
@@ -171,6 +188,15 @@ func main() {
 	}
 	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up ready check")
+		os.Exit(1)
+	}
+	if err := mgr.AddReadyzCheck("webhook-cert", func(_ *http.Request) error {
+		if _, err := os.Stat(certPath); err != nil {
+			return fmt.Errorf("webhook cert not yet available: %w", err)
+		}
+		return nil
+	}); err != nil {
+		setupLog.Error(err, "unable to set up webhook cert readiness check")
 		os.Exit(1)
 	}
 
