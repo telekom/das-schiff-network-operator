@@ -142,14 +142,3 @@ func IsSequence(i interface{}) bool {
 func IsScalar(i interface{}) bool {
 	return !IsMapping(i) && !IsSequence(i)
 }
-
-//nolint:unused
-func describe(i interface{}) string {
-	if IsMapping(i) {
-		return "mapping"
-	}
-	if IsSequence(i) {
-		return "sequence"
-	}
-	return "scalar"
-}

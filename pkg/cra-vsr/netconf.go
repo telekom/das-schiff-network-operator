@@ -98,6 +98,10 @@ func NewNetconf(urls []string, user, pwd string, timeout time.Duration) *Netconf
 			Auth: []ssh.AuthMethod{
 				ssh.Password(pwd),
 			},
+			// InsecureIgnoreHostKey is acceptable here because the NETCONF target is a
+			// locally managed network device reachable only within the cluster's trust
+			// boundary. Host-key verification would require pre-distributing known-hosts
+			// for each device and is not operationally feasible in this environment.
 			HostKeyCallback: ssh.InsecureIgnoreHostKey(), //nolint:gosec
 		},
 	}

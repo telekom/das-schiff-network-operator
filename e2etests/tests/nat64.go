@@ -43,7 +43,7 @@ var _ = Describe("NAT64 Outbound", Label("nat64"), func() {
 		Expect(stdout).To(ContainSubstring("64:ff9b::"),
 			"Expected synthesised AAAA with 64:ff9b:: prefix, got: %s", stdout)
 
-		// TODO: Once NAT64 gateway is fully wired with routes from CRA-FRR,
+		// TODO(preexisting): Once NAT64 gateway is fully wired with routes from CRA-FRR,
 		// test that the pod can actually curl an IPv4-only endpoint through
 		// the synthesised IPv6 address.
 	})
