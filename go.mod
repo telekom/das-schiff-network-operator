@@ -17,7 +17,7 @@ require (
 	github.com/open-policy-agent/cert-controller v0.14.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/rackn/netwrangler v0.7.1
-	github.com/sirupsen/logrus v1.9.3
+	github.com/sirupsen/logrus v1.9.4
 	github.com/vishvananda/netlink v1.3.1
 	go.uber.org/mock v0.6.0
 	golang.org/x/crypto v0.46.0
