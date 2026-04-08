@@ -871,10 +871,13 @@ func PhaseCluster2Components(cluster *Cluster, repoRoot string) error {
 	}
 
 	// Enable intent reconciler on cluster-2 (cluster-2 always uses intent CRDs).
+	// Pass --intent-namespace= (empty) so the reconciler watches ALL namespaces,
+	// matching the behaviour of e2etests/framework/intent.go EnableIntentReconciler().
 	Logf("Cluster-2: Enabling intent reconciler on operator...")
 	if _, err := DockerExecShell(cp.Name, fmt.Sprintf(
 		`kubectl --kubeconfig=%s -n kube-system patch deployment network-operator-operator --type=json `+
-			`-p='[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--enable-intent-reconciler"}]'`,
+			`-p='[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--enable-intent-reconciler"},`+
+			`{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--intent-namespace="}]'`,
 		kubeconfigPath)); err != nil {
 		return fmt.Errorf("patching operator for intent: %w", err)
 	}

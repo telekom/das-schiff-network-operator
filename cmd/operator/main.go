@@ -81,9 +81,6 @@ type operatorConfig struct {
 	webhookAddr                  string
 	leaderElectionID             string
 	zapOpts                      zap.Options
-
-	// setupFinished is set at runtime (not via flags).
-	setupFinished chan struct{}
 }
 
 func parseFlags() *operatorConfig {
@@ -177,62 +174,33 @@ func main() {
 		os.Exit(1)
 	}
 
-	var setupFinished chan struct{}
-
 	if !cfg.disableCertRotation {
-		setupFinished, err = setupRotator(mgr, cfg.disableRestartOnCertRefresh)
-		if err != nil {
+		if err := setupRotator(mgr, cfg.disableRestartOnCertRefresh); err != nil {
 			setupLog.Error(err, "failed to setup add Rotator")
 			os.Exit(1)
 		}
 	}
 
-	cfg.setupFinished = setupFinished
-
-	setupErr := make(chan error)
-
-	go func() {
-		setupErr <- setupReconcilers(mgr, cfg)
-		close(setupErr)
-	}()
+	// Register all controllers and webhooks BEFORE starting the manager.
+	// controller-runtime requires SetupWithManager calls to happen before
+	// mgr.Start() so that informers are properly registered and started.
+	if err := setupReconcilers(mgr, cfg); err != nil {
+		setupLog.Error(err, "unable to setup reconcilers")
+		os.Exit(1)
+	}
 
 	ctx, cancel := context.WithCancel(ctrl.SetupSignalHandler())
 
 	setupLog.Info("starting manager")
-	mgrErr := make(chan error)
-	go func() {
-		if err := mgr.Start(ctx); err != nil {
-			mgrErr <- err
-		}
-		close(mgrErr)
-	}()
-
-	if err := waitForExit(setupErr, mgrErr, cancel); err != nil {
-		setupLog.Error(err, "error")
+	if err := mgr.Start(ctx); err != nil {
+		cancel()
+		setupLog.Error(err, "manager error")
 		os.Exit(1)
 	}
-
-	os.Exit(0)
+	cancel()
 }
 
-func waitForExit(setupErr, mgrErr chan error, cancel context.CancelFunc) error {
-	for {
-		select {
-		case err := <-setupErr:
-			if err != nil {
-				setupLog.Error(err, "unable to setup reconcilers")
-				cancel()
-			}
-		case err := <-mgrErr:
-			if err != nil {
-				return fmt.Errorf("manager error: %w", err)
-			}
-			return nil
-		}
-	}
-}
-
-func setupRotator(mgr ctrl.Manager, disableRestartOnCertRefresh bool) (chan struct{}, error) {
+func setupRotator(mgr ctrl.Manager, disableRestartOnCertRefresh bool) error {
 	webhooks := []rotator.WebhookInfo{
 		{
 			Name: "network-operator-validating-webhook-configuration",
@@ -263,10 +231,10 @@ func setupRotator(mgr ctrl.Manager, disableRestartOnCertRefresh bool) (chan stru
 		RestartOnSecretRefresh: !disableRestartOnCertRefresh,
 	}); err != nil {
 		close(setupFinished)
-		return nil, fmt.Errorf("unable to set up cert rotation: %w", err)
+		return fmt.Errorf("unable to set up cert rotation: %w", err)
 	}
 
-	return setupFinished, nil
+	return nil
 }
 
 func setupReconcilers(mgr manager.Manager, cfg *operatorConfig) error {
@@ -283,11 +251,6 @@ func setupReconcilers(mgr manager.Manager, cfg *operatorConfig) error {
 }
 
 func setupIntentReconciler(mgr manager.Manager, apiTimeout time.Duration, cfg *operatorConfig) error {
-	if cfg.setupFinished != nil {
-		<-cfg.setupFinished
-		setupLog.Info("cert setup finished")
-	}
-
 	ir, err := intentreconciler.NewReconciler(mgr.GetClient(), mgr.GetLogger().WithName("IntentReconciler"), apiTimeout, cfg.intentNamespace)
 	if err != nil {
 		return fmt.Errorf("unable to create intent reconciler: %w", err)
@@ -381,11 +344,6 @@ func setupLegacyReconcilers(mgr manager.Manager, apiTimeout time.Duration, cfg *
 	ncr, err := operator.NewNodeConfigReconciler(mgr.GetClient(), mgr.GetLogger().WithName("NodeConfigReconciler"), apiTimeout, configTimeoutVal, preconfigTimeoutVal, mgr.GetScheme(), cfg.maxUpdating, importMode)
 	if err != nil {
 		return fmt.Errorf("unable to create node reconciler: %w", err)
-	}
-
-	if cfg.setupFinished != nil {
-		<-cfg.setupFinished
-		setupLog.Info("cert setup finished")
 	}
 
 	initialSetup := newOnLeaderElectionEvent(cr)

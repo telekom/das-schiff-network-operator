@@ -77,6 +77,25 @@ jobs:
           docker exec nwop-control-plane kubectl \
             --kubeconfig=/etc/kubernetes/admin.conf get events -A \
             --sort-by='.lastTimestamp' > /tmp/e2e-logs/events.log 2>&1 || true
+          # Cluster-1 operator logs (current + previous crashed container)
+          docker exec nwop-control-plane bash -c \
+            'POD=$(kubectl --kubeconfig=/etc/kubernetes/admin.conf -n kube-system \
+              get pods -l app.kubernetes.io/name=network-operator -o name | head -1); \
+             [ -n "$POD" ] && kubectl --kubeconfig=/etc/kubernetes/admin.conf \
+              -n kube-system logs "$POD" --all-containers' \
+            > /tmp/e2e-logs/operator-logs.log 2>&1 || true
+          docker exec nwop-control-plane bash -c \
+            'POD=$(kubectl --kubeconfig=/etc/kubernetes/admin.conf -n kube-system \
+              get pods -l app.kubernetes.io/name=network-operator -o name | head -1); \
+             [ -n "$POD" ] && kubectl --kubeconfig=/etc/kubernetes/admin.conf \
+              -n kube-system logs "$POD" --all-containers --previous' \
+            > /tmp/e2e-logs/operator-logs-previous.log 2>&1 || true
+          docker exec nwop-control-plane bash -c \
+            'POD=$(kubectl --kubeconfig=/etc/kubernetes/admin.conf -n kube-system \
+              get pods -l app.kubernetes.io/name=network-operator -o name | head -1); \
+             [ -n "$POD" ] && kubectl --kubeconfig=/etc/kubernetes/admin.conf \
+              -n kube-system describe "$POD"' \
+            > /tmp/e2e-logs/operator-describe.log 2>&1 || true
           # Cluster-2 state
           docker exec nwop2-worker kubectl \
             --kubeconfig=/etc/kubernetes/admin.conf get pods -A -o wide \
@@ -84,9 +103,30 @@ jobs:
           docker exec nwop2-worker kubectl \
             --kubeconfig=/etc/kubernetes/admin.conf get events -A \
             --sort-by='.lastTimestamp' > /tmp/e2e-logs/cluster2-events.log 2>&1 || true
+          # Cluster-2 operator logs (current + previous crashed container)
+          docker exec nwop2-worker bash -c \
+            'POD=$(kubectl --kubeconfig=/etc/kubernetes/admin.conf -n kube-system \
+              get pods -l app.kubernetes.io/name=network-operator -o name | head -1); \
+             [ -n "$POD" ] && kubectl --kubeconfig=/etc/kubernetes/admin.conf \
+              -n kube-system logs "$POD" --all-containers' \
+            > /tmp/e2e-logs/cluster2-operator-logs.log 2>&1 || true
+          docker exec nwop2-worker bash -c \
+            'POD=$(kubectl --kubeconfig=/etc/kubernetes/admin.conf -n kube-system \
+              get pods -l app.kubernetes.io/name=network-operator -o name | head -1); \
+             [ -n "$POD" ] && kubectl --kubeconfig=/etc/kubernetes/admin.conf \
+              -n kube-system logs "$POD" --all-containers --previous' \
+            > /tmp/e2e-logs/cluster2-operator-logs-previous.log 2>&1 || true
+          docker exec nwop2-worker bash -c \
+            'POD=$(kubectl --kubeconfig=/etc/kubernetes/admin.conf -n kube-system \
+              get pods -l app.kubernetes.io/name=network-operator -o name | head -1); \
+             [ -n "$POD" ] && kubectl --kubeconfig=/etc/kubernetes/admin.conf \
+              -n kube-system describe "$POD"' \
+            > /tmp/e2e-logs/cluster2-operator-describe.log 2>&1 || true
           # Intent CRD state (both clusters)
           for crd in vrfs networks destinations layer2attachments inbounds outbounds \
-                     bgppeerings collectors trafficmirrors nodenetworkconfigs; do
+                     bgppeerings collectors trafficmirrors nodenetworkconfigs \
+                     interfaceconfigs nodenetworkstatuses nodenetplanconfigs \
+                     podnetworks announcementpolicies; do
             docker exec nwop-control-plane kubectl \
               --kubeconfig=/etc/kubernetes/admin.conf get "$crd" -A -o yaml \
               > "/tmp/e2e-logs/intent-${crd}.yaml" 2>&1 || true
