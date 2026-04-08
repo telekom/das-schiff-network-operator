@@ -417,6 +417,9 @@ func (n *NeighborSync) replaceNeighborReachable(ifindex, family int, ip net.IP, 
 	}
 
 	bridgeIdx := link.Attrs().MasterIndex
+	if bridgeIdx == 0 {
+		return fmt.Errorf("interface %d has no master bridge (MasterIndex=0)", ifindex)
+	}
 
 	// Check existing neighbor entry to detect MAC changes.
 	// Only send gratuitous ARP/NA when the MAC actually changed to avoid
