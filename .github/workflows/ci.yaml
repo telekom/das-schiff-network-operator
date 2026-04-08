@@ -93,7 +93,7 @@ jobs:
 
   build-images:
     name: build container images
-    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event.pull_request.head.repo.full_name == github.repository
     needs: [golangci, test, validate-generated]
     permissions:
       contents: read
