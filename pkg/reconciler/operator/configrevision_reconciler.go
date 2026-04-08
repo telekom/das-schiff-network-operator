@@ -136,7 +136,7 @@ func (crr *ConfigRevisionReconciler) reconcileDebounced(ctx context.Context) err
 
 	// there is nothing to deploy - skip
 	if revisionToDeploy == nil {
-		crr.logger.Error(fmt.Errorf("there is no revision to deploy"), "revision deployment aboorted")
+		crr.logger.Error(fmt.Errorf("there is no revision to deploy"), "revision deployment aborted")
 		return nil
 	}
 
@@ -179,8 +179,9 @@ func (crr *ConfigRevisionReconciler) processConfigsForRevision(ctx context.Conte
 	cnt := crr.getRevisionCounters(configs, revision)
 
 	if cnt.invalid > 0 {
-		// Only invalidate on transition to invalid or when failure details are not yet set.
-		if !revision.Status.IsInvalid || revision.Status.FailedNode == "" {
+		// Invalidate when transitioning to invalid state, or when the failed node
+		// has changed (a different node may fail on an already-invalid revision).
+		if !revision.Status.IsInvalid || revision.Status.FailedNode != cnt.failedNode {
 			if err := crr.invalidateRevision(ctx, revision, cnt.failedNode, cnt.failedMessage, cnt.failedAt); err != nil {
 				return cnt, fmt.Errorf("failed to invalidate revision %s: %w", revision.Name, err)
 			}
@@ -229,7 +230,7 @@ func (crr *ConfigRevisionReconciler) getRevisionCounters(configs []v1alpha1.Node
 				if cnt.failedNode == "" || cfg.Name < cnt.failedNode {
 					cnt.failedNode = cfg.Name
 					cnt.failedMessage = "provisioning timeout reached"
-					cnt.failedAt = metav1.Now()
+					cnt.failedAt = metav1.NewTime(cfg.Status.LastUpdate.Add(timeout))
 				}
 			}
 		}
@@ -240,7 +241,7 @@ func (crr *ConfigRevisionReconciler) getRevisionCounters(configs []v1alpha1.Node
 func (crr *ConfigRevisionReconciler) removeRedundantConfigs(ctx context.Context, configs []v1alpha1.NodeNetworkConfig) ([]v1alpha1.NodeNetworkConfig, error) {
 	cfg := []v1alpha1.NodeNetworkConfig{}
 	for i := range configs {
-		// Every NodeNetworkConfig obejct should have 2 owner references - for NodeConfigRevision and for the Node. If there is only one owner reference,
+		// Every NodeNetworkConfig object should have 2 owner references - for NodeConfigRevision and for the Node. If there is only one owner reference,
 		// it means that either node or revision were deleted, so the config itself can be deleted as well.
 		if len(configs[i].ObjectMeta.OwnerReferences) < numOfRefs {
 			crr.logger.Info("deleting redundant NodeNetworkConfig", "name", configs[i].Name)
