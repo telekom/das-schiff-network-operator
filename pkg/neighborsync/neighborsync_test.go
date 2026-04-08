@@ -4,260 +4,599 @@ import (
 	"errors"
 	"net"
 	"net/netip"
-	"sync"
 	"testing"
+	"time"
 
-	"github.com/cilium/ebpf/ringbuf"
-	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/telekom/das-schiff-network-operator/pkg/nl"
 	mock_nl "github.com/telekom/das-schiff-network-operator/pkg/nl/mock"
 	"github.com/vishvananda/netlink"
+	netlinkNl "github.com/vishvananda/netlink/nl"
 	"go.uber.org/mock/gomock"
-)
-
-var (
-	mockCtrl  *gomock.Controller
-	mockNlOps *mock_nl.MockToolkitInterface
+	"golang.org/x/sys/unix"
 )
 
 func TestNeighborSync(t *testing.T) {
 	RegisterFailHandler(Fail)
-	mockCtrl = gomock.NewController(t)
-	defer mockCtrl.Finish()
 	RunSpecs(t, "NeighborSync Suite")
 }
 
-var _ = BeforeSuite(func() {
-	mockNlOps = mock_nl.NewMockToolkitInterface(mockCtrl)
+// noopNetlinkOps is a no-op implementation of nl.ToolkitInterface for tests that do not
+// exercise any netlink operations (e.g. timer/map logic tests).
+type noopNetlinkOps struct{}
+
+func (noopNetlinkOps) LinkByIndex(_ int) (netlink.Link, error)     { return &netlink.Dummy{}, nil }
+func (noopNetlinkOps) NeighList(_, _ int) ([]netlink.Neigh, error) { return nil, nil }
+func (noopNetlinkOps) NeighSet(_ *netlink.Neigh) error             { return nil }
+func (noopNetlinkOps) LinkByName(_ string) (netlink.Link, error)   { return &netlink.Dummy{}, nil }
+func (noopNetlinkOps) LinkList() ([]netlink.Link, error)           { return nil, nil }
+func (noopNetlinkOps) NewIPNet(_ net.IP) *net.IPNet                { return nil }
+func (noopNetlinkOps) RouteListFiltered(_ int, _ *netlink.Route, _ uint64) ([]netlink.Route, error) {
+	return nil, nil
+}
+func (noopNetlinkOps) RouteDel(_ *netlink.Route) error                        { return nil }
+func (noopNetlinkOps) RouteAdd(_ *netlink.Route) error                        { return nil }
+func (noopNetlinkOps) AddrList(_ netlink.Link, _ int) ([]netlink.Addr, error) { return nil, nil }
+func (noopNetlinkOps) VethPeerIndex(_ *netlink.Veth) (int, error)             { return 0, nil }
+func (noopNetlinkOps) ParseAddr(_ string) (*netlink.Addr, error)              { return nil, nil }
+func (noopNetlinkOps) LinkDel(_ netlink.Link) error                           { return nil }
+func (noopNetlinkOps) LinkSetUp(_ netlink.Link) error                         { return nil }
+func (noopNetlinkOps) LinkAdd(_ netlink.Link) error                           { return nil }
+func (noopNetlinkOps) AddrAdd(_ netlink.Link, _ *netlink.Addr) error          { return nil }
+func (noopNetlinkOps) AddrDel(_ netlink.Link, _ *netlink.Addr) error          { return nil }
+func (noopNetlinkOps) LinkSetLearning(_ netlink.Link, _ bool) error           { return nil }
+func (noopNetlinkOps) LinkSetHairpin(_ netlink.Link, _ bool) error            { return nil }
+func (noopNetlinkOps) ExecuteNetlinkRequest(_ *netlinkNl.NetlinkRequest, _ int, _ uint16) ([][]byte, error) {
+	return nil, nil
+}
+func (noopNetlinkOps) LinkSetMTU(_ netlink.Link, _ int) error                       { return nil }
+func (noopNetlinkOps) LinkSetDown(_ netlink.Link) error                             { return nil }
+func (noopNetlinkOps) LinkSetHardwareAddr(_ netlink.Link, _ net.HardwareAddr) error { return nil }
+func (noopNetlinkOps) LinkSetMasterByIndex(_ netlink.Link, _ int) error             { return nil }
+func (noopNetlinkOps) LinkSetNoMaster(_ netlink.Link) error                         { return nil }
+func (noopNetlinkOps) LinkGetProtinfo(_ netlink.Link) (netlink.Protinfo, error) {
+	return netlink.Protinfo{}, nil
+}
+func (noopNetlinkOps) LinkSetMaster(_, _ netlink.Link) error { return nil }
+
+func newTestNeighborSync(nlOps nl.ToolkitInterface) *NeighborSync {
+	return &NeighborSync{
+		nlOps:                    nlOps,
+		sendNeighborRequestFn:    func(_ int, _ net.HardwareAddr, _ netip.Addr) {},
+		sendGratuitousNeighborFn: func(_ int, _ netip.Addr, _ net.HardwareAddr) {},
+	}
+}
+
+var _ = Describe("createTimerIfNotExists()", func() {
+	It("stores a new timer when none exists", func() {
+		n := newTestNeighborSync(&noopNetlinkOps{})
+		mac := net.HardwareAddr{0x01, 0x02, 0x03, 0x04, 0x05, 0x06}
+		addr := netip.MustParseAddr("10.0.0.1")
+
+		n.createTimerIfNotExists(1, mac, addr)
+
+		key := timerKey{LinkIndex: 1, Address: addr}
+		val, ok := n.neighbors.Load(key)
+		Expect(ok).To(BeTrue())
+		t, ok := val.(*timer)
+		Expect(ok).To(BeTrue())
+		Expect(t.Address).To(Equal(mac))
+		Expect(t.NextRun.After(time.Now().Add(-100 * time.Millisecond))).To(BeTrue())
+	})
+
+	It("updates the MAC address when a timer already exists", func() {
+		n := newTestNeighborSync(&noopNetlinkOps{})
+		addr := netip.MustParseAddr("10.0.0.1")
+		mac1 := net.HardwareAddr{0x01, 0x02, 0x03, 0x04, 0x05, 0x06}
+		mac2 := net.HardwareAddr{0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF}
+
+		n.createTimerIfNotExists(1, mac1, addr)
+		n.createTimerIfNotExists(1, mac2, addr)
+
+		key := timerKey{LinkIndex: 1, Address: addr}
+		val, _ := n.neighbors.Load(key)
+		t := val.(*timer)
+		Expect(t.Address).To(Equal(mac2))
+	})
+
+	It("stores separate timers for different link indices", func() {
+		n := newTestNeighborSync(&noopNetlinkOps{})
+		mac := net.HardwareAddr{0x01, 0x02, 0x03, 0x04, 0x05, 0x06}
+		addr := netip.MustParseAddr("10.0.0.1")
+
+		n.createTimerIfNotExists(1, mac, addr)
+		n.createTimerIfNotExists(2, mac, addr)
+
+		_, ok1 := n.neighbors.Load(timerKey{LinkIndex: 1, Address: addr})
+		_, ok2 := n.neighbors.Load(timerKey{LinkIndex: 2, Address: addr})
+		Expect(ok1).To(BeTrue())
+		Expect(ok2).To(BeTrue())
+	})
 })
 
-func noopSendNeighborRequest(_ int, _ net.HardwareAddr, _ netip.Addr) {}
-func noopSendGratuitous(_ int, _ netip.Addr, _ net.HardwareAddr)      {}
+var _ = Describe("deleteTimerIfExists()", func() {
+	It("removes an existing timer", func() {
+		n := newTestNeighborSync(&noopNetlinkOps{})
+		mac := net.HardwareAddr{0x01, 0x02, 0x03, 0x04, 0x05, 0x06}
+		addr := netip.MustParseAddr("10.0.0.1")
+		n.createTimerIfNotExists(1, mac, addr)
 
-var _ = Describe("neighSubscribeFn DI hook", func() {
-	var ns *NeighborSync
-	var subscribeCalled bool
+		n.deleteTimerIfExists(1, addr)
 
-	BeforeEach(func() {
-		subscribeCalled = false
-		ns = &NeighborSync{
-			nlOps:                    mockNlOps,
-			sendNeighborRequestFn:    noopSendNeighborRequest,
-			sendGratuitousNeighborFn: noopSendGratuitous,
-		}
+		_, ok := n.neighbors.Load(timerKey{LinkIndex: 1, Address: addr})
+		Expect(ok).To(BeFalse())
 	})
 
-	It("calls neighSubscribeFn with ListExisting=true and correct channel directions", func() {
-		ns.neighSubscribeFn = func(_ chan<- netlink.NeighUpdate, _ <-chan struct{}, opts netlink.NeighSubscribeOptions) error {
-			subscribeCalled = true
-			Expect(opts.ListExisting).To(BeTrue())
-			// Return an error to stop the receiveUpdates loop after verifying options.
-			return errors.New("stop")
-		}
+	It("is a no-op when no timer exists", func() {
+		n := newTestNeighborSync(&noopNetlinkOps{})
+		addr := netip.MustParseAddr("10.0.0.1")
 
-		done := make(chan struct{})
-		go func() {
-			ns.receiveUpdates()
-			close(done)
-		}()
-
-		Eventually(func() bool { return subscribeCalled }, "2s").Should(BeTrue())
-		Eventually(done, "2s").Should(BeClosed())
-	})
-
-	It("stops receiveUpdates loop when neighSubscribeFn returns an error", func() {
-		callCount := 0
-		ns.neighSubscribeFn = func(_ chan<- netlink.NeighUpdate, _ <-chan struct{}, _ netlink.NeighSubscribeOptions) error {
-			callCount++
-			return errors.New("subscribe failed")
-		}
-
-		done := make(chan struct{})
-		go func() {
-			ns.receiveUpdates()
-			close(done)
-		}()
-
-		Eventually(done, "2s").Should(BeClosed())
-		Expect(callCount).To(Equal(1))
+		Expect(func() { n.deleteTimerIfExists(99, addr) }).NotTo(Panic())
 	})
 })
 
-var _ = Describe("newRingbufReaderFn DI hook", func() {
-	var ns *NeighborSync
+var _ = Describe("handleNeighborDelete()", func() {
+	It("removes the timer for the deleted neighbor", func() {
+		n := newTestNeighborSync(&noopNetlinkOps{})
+		mac := net.HardwareAddr{0x01, 0x02, 0x03, 0x04, 0x05, 0x06}
+		addr := netip.MustParseAddr("192.168.1.1")
+		n.createTimerIfNotExists(3, mac, addr)
 
-	BeforeEach(func() {
-		ns = &NeighborSync{
-			nlOps:                    mockNlOps,
-			sendNeighborRequestFn:    noopSendNeighborRequest,
-			sendGratuitousNeighborFn: noopSendGratuitous,
-		}
-	})
+		neigh := &netlink.Neigh{LinkIndex: 3}
+		n.handleNeighborDelete(addr, neigh)
 
-	It("calls newRingbufReaderFn and exits runBpfNeighborSync when it returns an error", func() {
-		ringbufCalled := false
-		ns.newRingbufReaderFn = func() (*ringbuf.Reader, error) {
-			ringbufCalled = true
-			return nil, errors.New("ringbuf open failed")
-		}
-
-		done := make(chan struct{})
-		go func() {
-			ns.runBpfNeighborSync()
-			close(done)
-		}()
-
-		Eventually(done, "2s").Should(BeClosed())
-		Expect(ringbufCalled).To(BeTrue())
+		_, ok := n.neighbors.Load(timerKey{LinkIndex: 3, Address: addr})
+		Expect(ok).To(BeFalse())
 	})
 })
 
-var _ = Describe("EnsureNeighborSuppression", func() {
-	var ns *NeighborSync
-	var bpfAttachCallCount int
-	var fakeLink netlink.Link
+var _ = Describe("handleNeighborAdd()", func() {
+	It("creates a timer when state is NUD_REACHABLE", func() {
+		n := newTestNeighborSync(&noopNetlinkOps{})
+		addr := netip.MustParseAddr("10.1.2.3")
 
-	BeforeEach(func() {
-		bpfAttachCallCount = 0
-		fakeLink = &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Index: 10, MasterIndex: 20}}
+		neigh := &netlink.Neigh{
+			LinkIndex: 5,
+			State:     netlink.NUD_REACHABLE,
+		}
+		n.handleNeighborAdd(addr, neigh)
 
-		ns = &NeighborSync{
-			nlOps:                    mockNlOps,
-			sendNeighborRequestFn:    noopSendNeighborRequest,
-			sendGratuitousNeighborFn: noopSendGratuitous,
-			bpfAttachFn: func(_ netlink.Link) error {
-				bpfAttachCallCount++
-				return nil
+		_, ok := n.neighbors.Load(timerKey{LinkIndex: 5, Address: addr})
+		Expect(ok).To(BeTrue())
+	})
+
+	It("does not create a timer when state is NUD_STALE (sends request instead)", func() {
+		requestSent := false
+		n := &NeighborSync{
+			nlOps:                    &noopNetlinkOps{},
+			sendGratuitousNeighborFn: func(_ int, _ netip.Addr, _ net.HardwareAddr) {},
+			sendNeighborRequestFn:    func(_ int, _ net.HardwareAddr, _ netip.Addr) { requestSent = true },
+		}
+		addr := netip.MustParseAddr("10.1.2.3")
+		mac := net.HardwareAddr{0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF}
+
+		neigh := &netlink.Neigh{
+			LinkIndex:    5,
+			State:        netlink.NUD_STALE,
+			HardwareAddr: mac,
+		}
+		n.handleNeighborAdd(addr, neigh)
+
+		_, ok := n.neighbors.Load(timerKey{LinkIndex: 5, Address: addr})
+		Expect(ok).To(BeFalse())
+		Expect(requestSent).To(BeTrue())
+	})
+
+	It("deletes timer and sends gratuitous neighbor when NTF_EXT_LEARNED and bridge registered", func() {
+		gratSent := false
+		n := &NeighborSync{
+			nlOps:                    &noopNetlinkOps{},
+			sendNeighborRequestFn:    func(_ int, _ net.HardwareAddr, _ netip.Addr) {},
+			sendGratuitousNeighborFn: func(_ int, _ netip.Addr, _ net.HardwareAddr) { gratSent = true },
+		}
+		addr := netip.MustParseAddr("10.0.0.5")
+		mac := net.HardwareAddr{0x01, 0x02, 0x03, 0x04, 0x05, 0x06}
+
+		n.createTimerIfNotExists(7, mac, addr)
+		n.sendGratuitousNeighbor.Store(7, struct{}{})
+
+		neigh := &netlink.Neigh{
+			LinkIndex:    7,
+			Flags:        netlink.NTF_EXT_LEARNED,
+			HardwareAddr: mac,
+		}
+		n.handleNeighborAdd(addr, neigh)
+
+		_, ok := n.neighbors.Load(timerKey{LinkIndex: 7, Address: addr})
+		Expect(ok).To(BeFalse())
+		Expect(gratSent).To(BeTrue())
+	})
+
+	It("deletes timer but skips gratuitous neighbor when NTF_EXT_LEARNED and bridge not registered", func() {
+		gratSent := false
+		n := &NeighborSync{
+			nlOps:                    &noopNetlinkOps{},
+			sendNeighborRequestFn:    func(_ int, _ net.HardwareAddr, _ netip.Addr) {},
+			sendGratuitousNeighborFn: func(_ int, _ netip.Addr, _ net.HardwareAddr) { gratSent = true },
+		}
+		addr := netip.MustParseAddr("10.0.0.5")
+		mac := net.HardwareAddr{0x01, 0x02, 0x03, 0x04, 0x05, 0x06}
+
+		n.createTimerIfNotExists(7, mac, addr)
+
+		neigh := &netlink.Neigh{
+			LinkIndex:    7,
+			Flags:        netlink.NTF_EXT_LEARNED,
+			HardwareAddr: mac,
+		}
+		n.handleNeighborAdd(addr, neigh)
+
+		_, ok := n.neighbors.Load(timerKey{LinkIndex: 7, Address: addr})
+		Expect(ok).To(BeFalse())
+		Expect(gratSent).To(BeFalse())
+	})
+})
+
+var _ = Describe("processUpdate()", func() {
+	It("ignores updates for interfaces not in neighRefreshInterfaces", func() {
+		n := newTestNeighborSync(&noopNetlinkOps{})
+		ip := net.ParseIP("10.0.0.1").To4()
+		update := &netlink.NeighUpdate{
+			Type:  unix.RTM_NEWNEIGH,
+			Neigh: netlink.Neigh{LinkIndex: 99, IP: ip, State: netlink.NUD_REACHABLE},
+		}
+		n.processUpdate(update)
+
+		addr, _ := netip.AddrFromSlice(ip)
+		_, ok := n.neighbors.Load(timerKey{LinkIndex: 99, Address: addr})
+		Expect(ok).To(BeFalse())
+	})
+
+	It("processes RTM_NEWNEIGH for tracked interfaces", func() {
+		n := newTestNeighborSync(&noopNetlinkOps{})
+		n.neighRefreshInterfaces.Store(10, struct{}{})
+
+		ip := net.ParseIP("10.0.0.2").To4()
+		update := &netlink.NeighUpdate{
+			Type: unix.RTM_NEWNEIGH,
+			Neigh: netlink.Neigh{
+				LinkIndex:    10,
+				IP:           ip,
+				State:        netlink.NUD_REACHABLE,
+				HardwareAddr: net.HardwareAddr{0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x01},
 			},
-			bpfDetachFn: func(_ netlink.Link) error { return nil },
 		}
-		ns.initOnce = sync.Once{}
+		n.processUpdate(update)
+
+		addr, _ := netip.AddrFromSlice(ip)
+		_, ok := n.neighbors.Load(timerKey{LinkIndex: 10, Address: addr})
+		Expect(ok).To(BeTrue())
 	})
 
-	It("calls bpfAttachFn once on first call", func() {
-		mockNlOps.EXPECT().LinkByIndex(10).Return(fakeLink, nil).Times(1)
-		mockNlOps.EXPECT().NeighList(20, gomock.Any()).Return(nil, nil).AnyTimes()
+	It("processes RTM_DELNEIGH for tracked interfaces", func() {
+		n := newTestNeighborSync(&noopNetlinkOps{})
+		n.neighRefreshInterfaces.Store(10, struct{}{})
 
-		err := ns.EnsureNeighborSuppression(20, 10)
-		Expect(err).ToNot(HaveOccurred())
-		Expect(bpfAttachCallCount).To(Equal(1))
+		ip := net.ParseIP("10.0.0.3").To4()
+		mac := net.HardwareAddr{0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x02}
+		addr, _ := netip.AddrFromSlice(ip)
+		n.createTimerIfNotExists(10, mac, addr)
+
+		update := &netlink.NeighUpdate{
+			Type:  unix.RTM_DELNEIGH,
+			Neigh: netlink.Neigh{LinkIndex: 10, IP: ip},
+		}
+		n.processUpdate(update)
+
+		_, ok := n.neighbors.Load(timerKey{LinkIndex: 10, Address: addr})
+		Expect(ok).To(BeFalse())
 	})
 
-	It("is idempotent: second call with same vethID skips bpfAttachFn", func() {
-		mockNlOps.EXPECT().LinkByIndex(10).Return(fakeLink, nil).Times(1)
-		mockNlOps.EXPECT().NeighList(20, gomock.Any()).Return(nil, nil).AnyTimes()
+	It("ignores unrecognised netlink message types", func() {
+		n := newTestNeighborSync(&noopNetlinkOps{})
+		n.neighRefreshInterfaces.Store(10, struct{}{})
 
-		Expect(ns.EnsureNeighborSuppression(20, 10)).To(Succeed())
-		Expect(ns.EnsureNeighborSuppression(20, 10)).To(Succeed())
+		ip := net.ParseIP("10.0.0.4").To4()
+		update := &netlink.NeighUpdate{
+			Type:  0xDEAD,
+			Neigh: netlink.Neigh{LinkIndex: 10, IP: ip, State: netlink.NUD_REACHABLE},
+		}
+		Expect(func() { n.processUpdate(update) }).NotTo(Panic())
+	})
+})
 
-		Expect(bpfAttachCallCount).To(Equal(1))
+var _ = Describe("replaceNeighborReachable()", func() {
+	It("returns error when IP is empty", func() {
+		n := newTestNeighborSync(&noopNetlinkOps{})
+		var mac [6]byte
+		err := n.replaceNeighborReachable(1, unix.AF_INET, net.IP{}, mac)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("empty IP"))
 	})
 
 	It("returns error when LinkByIndex fails", func() {
-		mockNlOps.EXPECT().LinkByIndex(10).Return(nil, errors.New("link not found")).Times(1)
+		mockCtrl := gomock.NewController(GinkgoT())
+		defer mockCtrl.Finish()
 
-		err := ns.EnsureNeighborSuppression(20, 10)
+		nlMock := mock_nl.NewMockToolkitInterface(mockCtrl)
+		n := newTestNeighborSync(nlMock)
+
+		nlMock.EXPECT().LinkByIndex(5).Return(nil, errors.New("link not found"))
+
+		var mac [6]byte
+		err := n.replaceNeighborReachable(5, unix.AF_INET, net.ParseIP("10.0.0.1").To4(), mac)
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("failed to get link by index"))
 	})
 
-	It("returns error when bpfAttachFn fails", func() {
-		ns.bpfAttachFn = func(_ netlink.Link) error {
-			return errors.New("bpf attach failed")
-		}
-		mockNlOps.EXPECT().LinkByIndex(10).Return(fakeLink, nil).Times(1)
+	It("returns error when NeighSet fails", func() {
+		mockCtrl := gomock.NewController(GinkgoT())
+		defer mockCtrl.Finish()
 
-		err := ns.EnsureNeighborSuppression(20, 10)
+		nlMock := mock_nl.NewMockToolkitInterface(mockCtrl)
+		n := newTestNeighborSync(nlMock)
+
+		link := &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{MasterIndex: 100}}
+		nlMock.EXPECT().LinkByIndex(5).Return(link, nil)
+		nlMock.EXPECT().NeighList(100, unix.AF_INET).Return(nil, nil)
+		nlMock.EXPECT().NeighSet(gomock.Any()).Return(errors.New("set failed"))
+
+		var mac [6]byte
+		err := n.replaceNeighborReachable(5, unix.AF_INET, net.ParseIP("10.0.0.1").To4(), mac)
 		Expect(err).To(HaveOccurred())
-		Expect(err.Error()).To(ContainSubstring("failed to attach BPF program"))
+		Expect(err.Error()).To(ContainSubstring("failed to set neighbor"))
 	})
 
-	It("does not add vethID to tracked maps when bpfAttachFn fails", func() {
-		ns.bpfAttachFn = func(_ netlink.Link) error {
-			return errors.New("bpf attach failed")
+	It("calls NeighSet and returns no error when MAC is new", func() {
+		mockCtrl := gomock.NewController(GinkgoT())
+		defer mockCtrl.Finish()
+
+		nlMock := mock_nl.NewMockToolkitInterface(mockCtrl)
+		n := newTestNeighborSync(nlMock)
+
+		link := &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{MasterIndex: 200}}
+		nlMock.EXPECT().LinkByIndex(6).Return(link, nil)
+		nlMock.EXPECT().NeighList(200, unix.AF_INET).Return(nil, nil)
+		nlMock.EXPECT().NeighSet(gomock.Any()).Return(nil)
+
+		var mac [6]byte
+		mac[0] = 0xAA
+		err := n.replaceNeighborReachable(6, unix.AF_INET, net.ParseIP("192.168.0.1").To4(), mac)
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("does not send gratuitous neighbor when MAC is unchanged", func() {
+		mockCtrl := gomock.NewController(GinkgoT())
+		defer mockCtrl.Finish()
+
+		nlMock := mock_nl.NewMockToolkitInterface(mockCtrl)
+		gratSent := false
+		n := &NeighborSync{
+			nlOps:                    nlMock,
+			sendNeighborRequestFn:    func(_ int, _ net.HardwareAddr, _ netip.Addr) {},
+			sendGratuitousNeighborFn: func(_ int, _ netip.Addr, _ net.HardwareAddr) { gratSent = true },
 		}
-		mockNlOps.EXPECT().LinkByIndex(10).Return(fakeLink, nil).Times(1)
+		n.sendGratuitousNeighbor.Store(200, struct{}{})
 
-		_ = ns.EnsureNeighborSuppression(20, 10)
+		ip := net.ParseIP("10.10.10.1").To4()
+		var mac [6]byte
+		copy(mac[:], []byte{0x11, 0x22, 0x33, 0x44, 0x55, 0x66})
 
-		_, tracked := ns.receiveNeighbors.Load(10)
-		Expect(tracked).To(BeFalse())
-		_, gratuitous := ns.sendGratuitousNeighbor.Load(20)
-		Expect(gratuitous).To(BeFalse())
+		link := &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{MasterIndex: 200}}
+		existing := []netlink.Neigh{{IP: ip, HardwareAddr: net.HardwareAddr(mac[:])}}
+		nlMock.EXPECT().LinkByIndex(7).Return(link, nil)
+		nlMock.EXPECT().NeighList(200, unix.AF_INET).Return(existing, nil)
+		nlMock.EXPECT().NeighSet(gomock.Any()).Return(nil)
+
+		err := n.replaceNeighborReachable(7, unix.AF_INET, ip, mac)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(gratSent).To(BeFalse())
+	})
+
+	It("sends gratuitous neighbor when MAC changed and bridge is registered", func() {
+		mockCtrl := gomock.NewController(GinkgoT())
+		defer mockCtrl.Finish()
+
+		nlMock := mock_nl.NewMockToolkitInterface(mockCtrl)
+		gratSent := false
+		n := &NeighborSync{
+			nlOps:                    nlMock,
+			sendNeighborRequestFn:    func(_ int, _ net.HardwareAddr, _ netip.Addr) {},
+			sendGratuitousNeighborFn: func(_ int, _ netip.Addr, _ net.HardwareAddr) { gratSent = true },
+		}
+		n.sendGratuitousNeighbor.Store(300, struct{}{})
+
+		ip := net.ParseIP("10.10.10.2").To4()
+		oldMac := net.HardwareAddr{0x11, 0x22, 0x33, 0x44, 0x55, 0x66}
+		var newMac [6]byte
+		copy(newMac[:], []byte{0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF})
+
+		link := &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{MasterIndex: 300}}
+		existing := []netlink.Neigh{{IP: ip, HardwareAddr: oldMac}}
+		nlMock.EXPECT().LinkByIndex(8).Return(link, nil)
+		nlMock.EXPECT().NeighList(300, unix.AF_INET).Return(existing, nil)
+		nlMock.EXPECT().NeighSet(gomock.Any()).Return(nil)
+
+		err := n.replaceNeighborReachable(8, unix.AF_INET, ip, newMac)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(gratSent).To(BeTrue())
 	})
 })
 
-var _ = Describe("DisableNeighborSuppression", func() {
-	var ns *NeighborSync
-	var fakeLink netlink.Link
+var _ = Describe("EnsureARPRefresh() / DisableARPRefresh()", func() {
+	It("marks interface for refresh", func() {
+		mockCtrl := gomock.NewController(GinkgoT())
+		defer mockCtrl.Finish()
+		nlMock := mock_nl.NewMockToolkitInterface(mockCtrl)
+		nlMock.EXPECT().NeighList(42, netlink.FAMILY_ALL).Return(nil, nil)
+		n := newTestNeighborSync(nlMock)
+		n.EnsureARPRefresh(42)
 
-	BeforeEach(func() {
-		fakeLink = &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Index: 10, MasterIndex: 20}}
-
-		ns = &NeighborSync{
-			nlOps:                    mockNlOps,
-			sendNeighborRequestFn:    noopSendNeighborRequest,
-			sendGratuitousNeighborFn: noopSendGratuitous,
-			bpfAttachFn:              func(_ netlink.Link) error { return nil },
-			bpfDetachFn:              func(_ netlink.Link) error { return nil },
-		}
-		ns.initOnce = sync.Once{}
+		_, ok := n.neighRefreshInterfaces.Load(42)
+		Expect(ok).To(BeTrue())
 	})
 
-	It("clears in-memory maps on success", func() {
-		mockNlOps.EXPECT().LinkByIndex(10).Return(fakeLink, nil).Times(1)
-		ns.sendGratuitousNeighbor.Store(20, struct{}{})
-		ns.receiveNeighbors.Store(10, struct{}{})
+	It("unmarks interface after DisableARPRefresh", func() {
+		mockCtrl := gomock.NewController(GinkgoT())
+		defer mockCtrl.Finish()
+		nlMock := mock_nl.NewMockToolkitInterface(mockCtrl)
+		nlMock.EXPECT().NeighList(43, netlink.FAMILY_ALL).Return(nil, nil)
+		n := newTestNeighborSync(nlMock)
+		n.EnsureARPRefresh(43)
+		n.DisableARPRefresh(43)
 
-		err := ns.DisableNeighborSuppression(20, 10)
-		Expect(err).ToNot(HaveOccurred())
-
-		_, tracked := ns.receiveNeighbors.Load(10)
-		Expect(tracked).To(BeFalse())
-		_, gratuitous := ns.sendGratuitousNeighbor.Load(20)
-		Expect(gratuitous).To(BeFalse())
+		_, ok := n.neighRefreshInterfaces.Load(43)
+		Expect(ok).To(BeFalse())
 	})
 
-	It("returns error when LinkByIndex fails with a non-not-found error", func() {
-		mockNlOps.EXPECT().LinkByIndex(10).Return(nil, errors.New("netlink io error")).Times(1)
-		ns.sendGratuitousNeighbor.Store(20, struct{}{})
-		ns.receiveNeighbors.Store(10, struct{}{})
+	It("calling EnsureARPRefresh twice is idempotent", func() {
+		mockCtrl := gomock.NewController(GinkgoT())
+		defer mockCtrl.Finish()
+		nlMock := mock_nl.NewMockToolkitInterface(mockCtrl)
+		nlMock.EXPECT().NeighList(44, netlink.FAMILY_ALL).Return(nil, nil).Times(1)
+		n := newTestNeighborSync(nlMock)
 
-		err := ns.DisableNeighborSuppression(20, 10)
+		n.EnsureARPRefresh(44)
+		n.EnsureARPRefresh(44)
+
+		_, ok := n.neighRefreshInterfaces.Load(44)
+		Expect(ok).To(BeTrue())
+	})
+})
+
+var _ = Describe("NewNeighborSync()", func() {
+	It("returns a non-nil NeighborSync with real implementations wired", func() {
+		ns := NewNeighborSync()
+		Expect(ns).NotTo(BeNil())
+		Expect(ns.nlOps).NotTo(BeNil())
+		Expect(ns.sendNeighborRequestFn).NotTo(BeNil())
+		Expect(ns.sendGratuitousNeighborFn).NotTo(BeNil())
+	})
+})
+
+var _ = Describe("EnsureNeighborSuppression()", func() {
+	It("returns error when LinkByIndex fails", func() {
+		mockCtrl := gomock.NewController(GinkgoT())
+		defer mockCtrl.Finish()
+		nlMock := mock_nl.NewMockToolkitInterface(mockCtrl)
+		n := newTestNeighborSync(nlMock)
+
+		// LinkByIndex is called first (before any state mutation), so no NeighList call occurs.
+		nlMock.EXPECT().LinkByIndex(10).Return(nil, errors.New("no such device"))
+
+		err := n.EnsureNeighborSuppression(5, 10)
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("failed to get link by index"))
-
-		_, tracked := ns.receiveNeighbors.Load(10)
-		Expect(tracked).To(BeTrue())
 	})
 
-	It("treats LinkByIndex link-not-found as benign and clears in-memory maps", func() {
-		mockNlOps.EXPECT().LinkByIndex(10).Return(nil, netlink.LinkNotFoundError{}).Times(1)
-		ns.sendGratuitousNeighbor.Store(20, struct{}{})
-		ns.receiveNeighbors.Store(10, struct{}{})
+	It("does not store bridgeID/vethID when LinkByIndex fails", func() {
+		mockCtrl := gomock.NewController(GinkgoT())
+		defer mockCtrl.Finish()
+		nlMock := mock_nl.NewMockToolkitInterface(mockCtrl)
+		n := newTestNeighborSync(nlMock)
 
-		err := ns.DisableNeighborSuppression(20, 10)
-		Expect(err).ToNot(HaveOccurred())
+		// LinkByIndex fails before state is mutated — maps must remain empty.
+		nlMock.EXPECT().LinkByIndex(10).Return(nil, errors.New("no such device"))
 
-		_, tracked := ns.receiveNeighbors.Load(10)
-		Expect(tracked).To(BeFalse())
-		_, gratuitous := ns.sendGratuitousNeighbor.Load(20)
-		Expect(gratuitous).To(BeFalse())
+		_ = n.EnsureNeighborSuppression(5, 10)
+
+		_, bridgeStored := n.sendGratuitousNeighbor.Load(5)
+		_, vethStored := n.receiveNeighbors.Load(10)
+		Expect(bridgeStored).To(BeFalse(), "bridgeID must not be stored when validation fails")
+		Expect(vethStored).To(BeFalse(), "vethID must not be stored when validation fails")
 	})
 
-	It("returns error when bpfDetachFn fails with non-not-found error", func() {
-		ns.bpfDetachFn = func(_ netlink.Link) error {
-			return errors.New("bpf detach failed")
+	It("stores bridgeID/vethID and calls NeighList on first registration", func() {
+		mockCtrl := gomock.NewController(GinkgoT())
+		defer mockCtrl.Finish()
+		nlMock := mock_nl.NewMockToolkitInterface(mockCtrl)
+		n := newTestNeighborSync(nlMock)
+
+		// Inject a no-op BPF attach function so EnsureNeighborSuppression can
+		// complete successfully without a real kernel BPF program.
+		n.bpfAttachFn = func(_ netlink.Link) error { return nil }
+
+		fakeLink := &netlink.Dummy{}
+		// LinkByIndex validates the veth exists; called with vethID=10.
+		nlMock.EXPECT().LinkByIndex(10).Return(fakeLink, nil)
+		// syncKernelNeighbors is triggered on first registration of bridgeID=5;
+		// it calls NeighList on the bridge to seed the neighbor table.
+		nlMock.EXPECT().NeighList(5, netlink.FAMILY_ALL).Return(nil, nil)
+
+		err := n.EnsureNeighborSuppression(5, 10)
+		Expect(err).NotTo(HaveOccurred())
+
+		_, bridgeStored := n.sendGratuitousNeighbor.Load(5)
+		_, vethStored := n.receiveNeighbors.Load(10)
+		Expect(bridgeStored).To(BeTrue(), "bridgeID must be stored on success")
+		Expect(vethStored).To(BeTrue(), "vethID must be stored on success")
+	})
+})
+
+var _ = Describe("DisableNeighborSuppression()", func() {
+	It("returns error when LinkByIndex fails", func() {
+		mockCtrl := gomock.NewController(GinkgoT())
+		defer mockCtrl.Finish()
+		nlMock := mock_nl.NewMockToolkitInterface(mockCtrl)
+		n := newTestNeighborSync(nlMock)
+
+		nlMock.EXPECT().LinkByIndex(10).Return(nil, errors.New("no such device"))
+
+		err := n.DisableNeighborSuppression(5, 10)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("failed to get link by index"))
+	})
+
+	It("preserves bridgeID and vethID when LinkByIndex fails", func() {
+		mockCtrl := gomock.NewController(GinkgoT())
+		defer mockCtrl.Finish()
+		nlMock := mock_nl.NewMockToolkitInterface(mockCtrl)
+		n := newTestNeighborSync(nlMock)
+
+		// Pre-populate state as if EnsureNeighborSuppression had been called
+		n.sendGratuitousNeighbor.Store(5, struct{}{})
+		n.receiveNeighbors.Store(10, struct{}{})
+
+		// LinkByIndex fails before BPF detach — state must remain intact to stay
+		// consistent with the kernel (BPF is still attached).
+		nlMock.EXPECT().LinkByIndex(10).Return(nil, errors.New("no such device"))
+
+		_ = n.DisableNeighborSuppression(5, 10)
+
+		_, bridgeStored := n.sendGratuitousNeighbor.Load(5)
+		_, vethStored := n.receiveNeighbors.Load(10)
+		Expect(bridgeStored).To(BeTrue(), "bridgeID must be preserved when detach fails")
+		Expect(vethStored).To(BeTrue(), "vethID must be preserved when detach fails")
+	})
+
+	It("preserves bridgeID and vethID when BPF detach fails", func() {
+		mockCtrl := gomock.NewController(GinkgoT())
+		defer mockCtrl.Finish()
+		nlMock := mock_nl.NewMockToolkitInterface(mockCtrl)
+		n := newTestNeighborSync(nlMock)
+
+		// Inject a failing BPF detach function
+		n.bpfDetachFn = func(_ netlink.Link) error {
+			return errors.New("bpf detach error")
 		}
-		mockNlOps.EXPECT().LinkByIndex(10).Return(fakeLink, nil).Times(1)
-		ns.sendGratuitousNeighbor.Store(20, struct{}{})
-		ns.receiveNeighbors.Store(10, struct{}{})
 
-		err := ns.DisableNeighborSuppression(20, 10)
+		// Pre-populate state as if EnsureNeighborSuppression had been called
+		n.sendGratuitousNeighbor.Store(5, struct{}{})
+		n.receiveNeighbors.Store(10, struct{}{})
+
+		// LinkByIndex succeeds — BPF detach is what fails
+		fakeLink := &netlink.Dummy{}
+		nlMock.EXPECT().LinkByIndex(10).Return(fakeLink, nil)
+
+		err := n.DisableNeighborSuppression(5, 10)
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("failed to detach BPF program"))
 
-		_, tracked := ns.receiveNeighbors.Load(10)
-		Expect(tracked).To(BeTrue())
+		// State must be preserved because BPF detach failed — kernel-side suppression is still active
+		_, bridgeStored := n.sendGratuitousNeighbor.Load(5)
+		_, vethStored := n.receiveNeighbors.Load(10)
+		Expect(bridgeStored).To(BeTrue(), "bridgeID must be preserved when BPF detach fails")
+		Expect(vethStored).To(BeTrue(), "vethID must be preserved when BPF detach fails")
 	})
 })
