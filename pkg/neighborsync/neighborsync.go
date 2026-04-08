@@ -537,6 +537,14 @@ func (n *NeighborSync) EnsureNeighborSuppression(bridgeID, vethID int) error {
 		return fmt.Errorf("failed to get link by index: %w", err)
 	}
 
+	// Attach the BPF program before updating in-memory state. If attach fails
+	// the maps remain unchanged, keeping a consistent view for callers. This
+	// mirrors the ordering in DisableNeighborSuppression which detaches before
+	// removing map entries.
+	if err := n.bpfAttachFn(nlLink); err != nil {
+		return fmt.Errorf("failed to attach BPF program: %w", err)
+	}
+
 	_, existing := n.sendGratuitousNeighbor.Load(bridgeID)
 
 	n.sendGratuitousNeighbor.Store(bridgeID, struct{}{})
@@ -546,9 +554,6 @@ func (n *NeighborSync) EnsureNeighborSuppression(bridgeID, vethID int) error {
 		n.syncKernelNeighbors(bridgeID)
 	}
 
-	if err := n.bpfAttachFn(nlLink); err != nil {
-		return fmt.Errorf("failed to attach BPF program: %w", err)
-	}
 	return nil
 }
 
