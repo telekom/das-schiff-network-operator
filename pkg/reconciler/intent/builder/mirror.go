@@ -239,7 +239,7 @@ func (*MirrorBuilder) resolveInboundVRF(name string, data *resolver.ResolvedData
 		}
 		for _, resolved := range data.Destinations {
 			if resolved.VRFSpec != nil && resolved.Spec.VRFRef != nil {
-				return *resolved.Spec.VRFRef, resolved.VRFSpec, nil
+				return resolved.VRFSpec.VRF, resolved.VRFSpec, nil
 			}
 		}
 		return "", nil, nil
@@ -259,7 +259,7 @@ func (*MirrorBuilder) resolveOutboundVRF(name string, data *resolver.ResolvedDat
 		}
 		for _, resolved := range data.Destinations {
 			if resolved.VRFSpec != nil && resolved.Spec.VRFRef != nil {
-				return *resolved.Spec.VRFRef, resolved.VRFSpec, nil
+				return resolved.VRFSpec.VRF, resolved.VRFSpec, nil
 			}
 		}
 		return "", nil, nil

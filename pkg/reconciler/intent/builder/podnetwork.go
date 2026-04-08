@@ -111,7 +111,7 @@ func (*PodNetworkBuilder) resolveDestinationVRF(pn *nc.PodNetwork, data *resolve
 		if selector.Matches(labels.Set(rawDest.Labels)) {
 			resolved, ok := data.Destinations[rawDest.Name]
 			if ok && resolved.VRFSpec != nil && resolved.Spec.VRFRef != nil {
-				return *resolved.Spec.VRFRef, resolved.VRFSpec, nil
+				return resolved.VRFSpec.VRF, resolved.VRFSpec, nil
 			}
 		}
 	}

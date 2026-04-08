@@ -70,7 +70,7 @@ func (b *AnnouncementBuilder) Build(_ context.Context, data *resolver.ResolvedDa
 				result[node.Name] = contrib
 			}
 
-			vrfName := ap.Spec.VRFRef
+			vrfName := resolvedVRF.Spec.VRF
 			fvrf, exists := contrib.FabricVRFs[vrfName]
 			if !exists {
 				fvrf = buildFabricVRF(&resolvedVRF.Spec)

@@ -319,8 +319,8 @@ func TestInboundPipeline(t *testing.T) {
 
 	nnc := reconcileAndGetNNC(t, ctx, nodeName)
 
-	fvrf, ok := nnc.Spec.FabricVRFs["vrf-ib"]
-	require.True(t, ok, "expected FabricVRF 'vrf-ib', got keys: %v", mapKeys(nnc.Spec.FabricVRFs))
+	fvrf, ok := nnc.Spec.FabricVRFs["ibm2m"]
+	require.True(t, ok, "expected FabricVRF 'ibm2m', got keys: %v", mapKeys(nnc.Spec.FabricVRFs))
 
 	// Should have static routes or redistribute for the inbound IPs
 	assert.True(t, len(fvrf.StaticRoutes) > 0 || fvrf.Redistribute != nil,
@@ -339,8 +339,8 @@ func TestOutboundPipeline(t *testing.T) {
 
 	nnc := reconcileAndGetNNC(t, ctx, nodeName)
 
-	fvrf, ok := nnc.Spec.FabricVRFs["vrf-ob"]
-	require.True(t, ok, "expected FabricVRF 'vrf-ob', got keys: %v", mapKeys(nnc.Spec.FabricVRFs))
+	fvrf, ok := nnc.Spec.FabricVRFs["obm2m"]
+	require.True(t, ok, "expected FabricVRF 'obm2m', got keys: %v", mapKeys(nnc.Spec.FabricVRFs))
 
 	assert.True(t, len(fvrf.StaticRoutes) > 0 || len(fvrf.PolicyRoutes) > 0,
 		"expected FabricVRF to have static routes or policy routes for outbound")
@@ -359,8 +359,8 @@ func TestPodNetworkPipeline(t *testing.T) {
 
 	nnc := reconcileAndGetNNC(t, ctx, nodeName)
 
-	fvrf, ok := nnc.Spec.FabricVRFs["vrf-pn"]
-	require.True(t, ok, "expected FabricVRF 'vrf-pn', got keys: %v", mapKeys(nnc.Spec.FabricVRFs))
+	fvrf, ok := nnc.Spec.FabricVRFs["pnm2m"]
+	require.True(t, ok, "expected FabricVRF 'pnm2m', got keys: %v", mapKeys(nnc.Spec.FabricVRFs))
 
 	assert.True(t, fvrf.Redistribute != nil || len(fvrf.StaticRoutes) > 0,
 		"expected FabricVRF to have redistribute or static routes for pod network")
@@ -621,8 +621,8 @@ func TestBGPPeeringListenRange(t *testing.T) {
 	nnc := reconcileAndGetNNC(t, ctx, nodeName)
 
 	// Verify FabricVRF has BGPPeers with ListenRange from Network CIDRs
-	fvrf, ok := nnc.Spec.FabricVRFs["vrf-bgp-lr"]
-	require.True(t, ok, "expected FabricVRF 'vrf-bgp-lr', got keys: %v", mapKeys(nnc.Spec.FabricVRFs))
+	fvrf, ok := nnc.Spec.FabricVRFs["bgplr"]
+	require.True(t, ok, "expected FabricVRF 'bgplr', got keys: %v", mapKeys(nnc.Spec.FabricVRFs))
 	require.NotEmpty(t, fvrf.BGPPeers, "expected BGPPeers in FabricVRF")
 
 	// Should have peers with ListenRange from the dual-stack Network
@@ -745,8 +745,8 @@ func TestTrafficMirrorL2ASource(t *testing.T) {
 	assert.Equal(t, "10.0.0.0/8", *acl.TrafficMatch.SrcPrefix)
 
 	// Collector builder should also create a loopback on the mirror VRF
-	mirVRF, ok := nnc.Spec.FabricVRFs["vrf-mir-col"]
-	require.True(t, ok, "expected FabricVRF 'vrf-mir-col' from Collector builder")
+	mirVRF, ok := nnc.Spec.FabricVRFs["mircol"]
+	require.True(t, ok, "expected FabricVRF 'mircol' from Collector builder")
 	require.NotNil(t, mirVRF.Loopbacks, "expected Loopbacks in mirror VRF")
 	lo, ok := mirVRF.Loopbacks["lo.mir"]
 	require.True(t, ok, "expected Loopback 'lo.mir'")
@@ -780,8 +780,8 @@ func TestAnnouncementPolicyHostRoutesAndAggregate(t *testing.T) {
 
 	nnc := reconcileAndGetNNC(t, ctx, nodeName)
 
-	fvrf, ok := nnc.Spec.FabricVRFs["vrf-annpol"]
-	require.True(t, ok, "expected FabricVRF 'vrf-annpol', got keys: %v", mapKeys(nnc.Spec.FabricVRFs))
+	fvrf, ok := nnc.Spec.FabricVRFs["apm2m"]
+	require.True(t, ok, "expected FabricVRF 'apm2m', got keys: %v", mapKeys(nnc.Spec.FabricVRFs))
 	require.NotNil(t, fvrf.EVPNExportFilter, "expected EVPNExportFilter from AnnouncementPolicy")
 
 	filter := fvrf.EVPNExportFilter

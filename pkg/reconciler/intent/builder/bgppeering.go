@@ -146,7 +146,7 @@ func (*BGPPeeringBuilder) resolveL2AVRF(l2a *nc.Layer2Attachment, data *resolver
 
 	for _, resolved := range data.Destinations {
 		if resolved.VRFSpec != nil && resolved.Spec.VRFRef != nil {
-			return *resolved.Spec.VRFRef, resolved.VRFSpec
+			return resolved.VRFSpec.VRF, resolved.VRFSpec
 		}
 	}
 

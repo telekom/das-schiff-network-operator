@@ -50,6 +50,7 @@ func (*CollectorBuilder) Build(_ context.Context, data *resolver.ResolvedData) (
 		if !ok {
 			return nil, fmt.Errorf("collector %q references unknown VRF %q", col.Name, vrfName)
 		}
+		vrfName = resolvedVRF.Spec.VRF
 
 		// Build loopback entry from the MirrorVRF config.
 		loopbackName := col.Spec.MirrorVRF.Loopback.Name

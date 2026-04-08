@@ -97,9 +97,9 @@ func TestCollectorBuilder_BasicCollector(t *testing.T) {
 			t.Fatalf("expected contribution for %s", nodeName)
 		}
 
-		fvrf, ok := contrib.FabricVRFs["mirror-vrf"]
+		fvrf, ok := contrib.FabricVRFs["mirror"]
 		if !ok {
-			t.Fatalf("expected FabricVRF 'mirror-vrf' for %s, got keys %v", nodeName, keys(contrib.FabricVRFs))
+			t.Fatalf("expected FabricVRF 'mirror' for %s, got keys %v", nodeName, keys(contrib.FabricVRFs))
 		}
 
 		if fvrf.VNI != 9000 {
@@ -330,9 +330,9 @@ func TestMirrorBuilder_InboundSource(t *testing.T) {
 		t.Fatal("expected contribution for node-1")
 	}
 
-	fvrf, ok := contrib.FabricVRFs["prod-vrf"]
+	fvrf, ok := contrib.FabricVRFs["prod"]
 	if !ok {
-		t.Fatalf("expected FabricVRF 'prod-vrf', got keys %v", keys(contrib.FabricVRFs))
+		t.Fatalf("expected FabricVRF 'prod', got keys %v", keys(contrib.FabricVRFs))
 	}
 
 	if len(fvrf.MirrorACLs) != 1 {
@@ -517,9 +517,9 @@ func TestPodNetworkBuilder_BasicPodNetwork(t *testing.T) {
 		t.Fatal("expected contribution for node-1")
 	}
 
-	fvrf, ok := contrib.FabricVRFs["prod-vrf"]
+	fvrf, ok := contrib.FabricVRFs["prod"]
 	if !ok {
-		t.Fatalf("expected FabricVRF 'prod-vrf', got keys %v", keys(contrib.FabricVRFs))
+		t.Fatalf("expected FabricVRF 'prod', got keys %v", keys(contrib.FabricVRFs))
 	}
 
 	if fvrf.VNI != 5001 {
@@ -608,7 +608,7 @@ func TestPodNetworkBuilder_WithExtraRoutes(t *testing.T) {
 	}
 
 	contrib := result["node-1"]
-	fvrf := contrib.FabricVRFs["prod-vrf"]
+	fvrf := contrib.FabricVRFs["prod"]
 
 	if len(fvrf.StaticRoutes) != 2 {
 		t.Fatalf("expected 2 static routes, got %d", len(fvrf.StaticRoutes))

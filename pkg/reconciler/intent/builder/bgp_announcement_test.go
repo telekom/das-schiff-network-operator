@@ -130,9 +130,9 @@ func TestBGPPeeringBuilder_ListenRange(t *testing.T) { //nolint:funlen // table-
 	}
 
 	// resolveL2AVRF returns the VRFRef name as the map key.
-	fvrf, ok := contrib.FabricVRFs["prod-vrf"]
+	fvrf, ok := contrib.FabricVRFs["prod"]
 	if !ok {
-		t.Fatal("expected FabricVRF 'prod-vrf'")
+		t.Fatal("expected FabricVRF 'prod'")
 	}
 
 	// Dual-stack network → 2 peers (one IPv4, one IPv6).
@@ -403,9 +403,9 @@ func TestAnnouncementBuilder_BasicHostRoutes(t *testing.T) {
 	}
 
 	contrib := result["node-1"]
-	fvrf, ok := contrib.FabricVRFs["prod-vrf"]
+	fvrf, ok := contrib.FabricVRFs["prod"]
 	if !ok {
-		t.Fatal("expected FabricVRF 'prod-vrf'")
+		t.Fatal("expected FabricVRF 'prod'")
 	}
 
 	filter := fvrf.EVPNExportFilter
@@ -483,7 +483,7 @@ func TestAnnouncementBuilder_AggregateWithCommunities(t *testing.T) {
 	}
 
 	contrib := result["node-1"]
-	fvrf := contrib.FabricVRFs["prod-vrf"]
+	fvrf := contrib.FabricVRFs["prod"]
 	filter := fvrf.EVPNExportFilter
 	if filter == nil {
 		t.Fatal("expected EVPNExportFilter")
@@ -554,7 +554,7 @@ func TestAnnouncementBuilder_AggregateDisabled(t *testing.T) {
 	}
 
 	contrib := result["node-1"]
-	fvrf := contrib.FabricVRFs["prod-vrf"]
+	fvrf := contrib.FabricVRFs["prod"]
 	filter := fvrf.EVPNExportFilter
 	if filter == nil {
 		t.Fatal("expected EVPNExportFilter")

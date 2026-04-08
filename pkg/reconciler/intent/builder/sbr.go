@@ -292,11 +292,14 @@ func groupDestinationsByVRF(sel *metav1.LabelSelector, data *resolver.ResolvedDa
 		if rawDest.Spec.VRFRef == nil {
 			continue // nextHop-based destination — no SBR needed
 		}
-		// Use the VRFRef (CRD resource name) as the key so that static-route
-		// NextHop.Vrf values produced by buildComboVRF align with the FabricVRF
-		// map keys used by the rest of the intent pipeline (mirror, podnetwork,
-		// bgppeering builders all key FabricVRFs by VRFRef, not spec.vrf).
-		vrfName := *rawDest.Spec.VRFRef
+		// Use the VRF device name from the resolved destination's VRFSpec as the key.
+		// This ensures static-route NextHop.Vrf values produced by buildComboVRF
+		// align with the actual VRF names expected by the CRA.
+		vrfRef := *rawDest.Spec.VRFRef
+		vrfName := vrfRef // fallback to CRD name if resolution fails
+		if resolved, ok := data.Destinations[rawDest.Name]; ok && resolved.VRFSpec != nil {
+			vrfName = resolved.VRFSpec.VRF
+		}
 		grouped[vrfName] = append(grouped[vrfName], *rawDest)
 	}
 
