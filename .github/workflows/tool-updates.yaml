@@ -48,16 +48,18 @@ jobs:
             local repo=$1
             local current=$2
             local name=$3
-            latest=$(gh api "repos/${repo}/releases/latest" --jq '.tag_name' 2>/dev/null || echo "unknown")
+            local latest
+            latest=$(gh api "repos/${repo}/releases/latest" --jq '.tag_name') || { check_failed=true; return; }
             # Strip tool-name prefix for monorepo tags (e.g., "kustomize/v5.8.0" → "v5.8.0")
             latest="${latest##*/}"
-            if [ "$latest" != "unknown" ] && [ "$latest" != "$current" ]; then
+            if [ "$latest" != "$current" ]; then
               echo "  - **${name}**: ${current} → ${latest} ([releases](https://github.com/${repo}/releases))" >> updates.md
               found_any=true
             fi
           }
 
           found_any=false
+          check_failed=false
 
           check_github_release "kubernetes-sigs/kustomize" "${{ steps.versions.outputs.kustomize }}" "kustomize"
           check_github_release "kubernetes-sigs/controller-tools" "${{ steps.versions.outputs.controller_tools }}" "controller-tools"
@@ -74,10 +76,13 @@ jobs:
               cat updates.md
               echo ""
               echo "---"
-              echo "To update, edit \`versions.env\` and run \`make manifests generate\` to verify compatibility."
+              echo "To update, edit \`versions.env\` and run \`make generate manifests\` to verify compatibility."
             } > updates-final.md
             mv updates-final.md updates.md
             cat updates.md
+          fi
+          if [ "$check_failed" = "true" ]; then
+            echo "check_failed=true" >> $GITHUB_OUTPUT
           fi
 
       - name: Create or update issue
@@ -109,4 +114,9 @@ jobs:
             cat updates.md >> $GITHUB_STEP_SUMMARY
           else
             echo "All tools are up to date!" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ "${{ steps.check.outputs.check_failed }}" = "true" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "> [!WARNING]" >> $GITHUB_STEP_SUMMARY
+            echo "> One or more GitHub API calls failed; results may be incomplete." >> $GITHUB_STEP_SUMMARY
           fi
