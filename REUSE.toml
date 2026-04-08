@@ -27,8 +27,6 @@ path = [
   "internal/**/*.go",
   "pkg/**/*.go",
   "controllers/**/*.go",
-  "e2e/**/*.go",
-  "e2etests/**/*.go",
 ]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Deutsche Telekom AG"
@@ -128,7 +126,7 @@ SPDX-License-Identifier = "CC0-1.0"
 
 # Root-level markdown and owner files - CC0-1.0
 [[annotations]]
-path = ["AGENTS.md", "CODEOWNERS"]
+path = ["CODEOWNERS"]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Deutsche Telekom AG"
 SPDX-License-Identifier = "CC0-1.0"
