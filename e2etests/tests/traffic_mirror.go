@@ -85,7 +85,10 @@ func removeMirrorACLsFromNNC(ctx context.Context, f *framework.Framework, nodeNa
 	base := nnc.DeepCopy()
 
 	fabricVRFs, found, err := unstructured.NestedMap(nnc.Object, "spec", "fabricVRFs")
-	if err != nil || !found {
+	if err != nil {
+		return fmt.Errorf("read fabricVRFs: %w", err)
+	}
+	if !found {
 		return nil
 	}
 
