@@ -115,7 +115,8 @@ func buildPeeringVlanPeer(node *corev1.Node, peer *v1alpha1.BGPRevision, revisio
 
 	var irbIPs []string
 	var vrf string
-	for _, l2 := range revision.Spec.Layer2 {
+	for i := range revision.Spec.Layer2 {
+		l2 := &revision.Spec.Layer2[i]
 		if !matchSelector(node, l2.NodeSelector) {
 			continue
 		}

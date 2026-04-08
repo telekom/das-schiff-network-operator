@@ -22,16 +22,17 @@ const (
 var procSysNetPath = "/proc/sys/net"
 
 type Layer2Information struct {
-	VlanID           int      `json:"vlanID"`
-	MTU              int      `json:"mtu"`
-	VNI              int      `json:"vni"`
-	VRF              string   `json:"vrf"`
-	AnycastMAC       *string  `json:"anycastMAC"`
-	AnycastGateways  []string `json:"anycastGateways"`
-	NeighSuppression *bool    `json:"neighSuppression"`
-	bridge           *netlink.Bridge
-	vxlan            *netlink.Vxlan
-	vlanInterface    *netlink.Vlan
+	VlanID              int      `json:"vlanID"`
+	MTU                 int      `json:"mtu"`
+	VNI                 int      `json:"vni"`
+	VRF                 string   `json:"vrf"`
+	AnycastMAC          *string  `json:"anycastMAC"`
+	AnycastGateways     []string `json:"anycastGateways"`
+	NeighSuppression    *bool    `json:"neighSuppression"`
+	DisableSegmentation bool     `json:"disableSegmentation"`
+	bridge              *netlink.Bridge
+	vxlan               *netlink.Vxlan
+	vlanInterface       *netlink.Vlan
 }
 
 type NeighborInformation struct {
@@ -189,15 +190,23 @@ func (n *Manager) setupVXLAN(info *Layer2Information, bridge *netlink.Bridge) er
 	}
 	info.vxlan = vxlan
 
-	if _, err := n.createVLAN(
+	vlanIface, err := n.createVLAN(
 		info.VlanID,
 		bridge.Attrs().Index,
-		info.MTU); err != nil {
+		info.MTU)
+	if err != nil {
 		return err
 	}
+	info.vlanInterface = vlanIface
 
 	if err := n.setUp(fmt.Sprintf("%s%d", vlanPrefix, info.VlanID)); err != nil {
 		return err
+	}
+
+	if info.DisableSegmentation {
+		if err := reconcileSegmentation(vlanIface, info.DisableSegmentation); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -320,6 +329,11 @@ func (n *Manager) ReconcileL2(current, desired *Layer2Information) error {
 	}
 	// Add/Remove anycast gateways
 	if err := n.reconcileIPAddresses(current.bridge, currentGateways, desiredGateways); err != nil {
+		return err
+	}
+
+	// Reconcile disableSegmentation
+	if err := reconcileSegmentation(current.vlanInterface, desired.DisableSegmentation); err != nil {
 		return err
 	}
 
@@ -473,6 +487,22 @@ func (*Manager) configureBridge(intfName string) error {
 	// Ensure IPv6 Neighbor expiry is set to 30min
 	if err := os.WriteFile(fmt.Sprintf("%s/ipv6/neigh/%s/base_reachable_time_ms", procSysNetPath, intfName), []byte(baseTimer), neighFilePermissions); err != nil {
 		return fmt.Errorf("error setting ipv6 base_reachable_time_ms = %s for interface: %w", baseTimer, err)
+	}
+	return nil
+}
+
+func reconcileSegmentation(vlanInterface *netlink.Vlan, disableSegmentation bool) error {
+	intfName := vlanInterface.Attrs().Name
+	eth, err := newEthtoolFunc()
+	if err != nil {
+		return fmt.Errorf("error creating ethtool client for %s: %w", intfName, err)
+	}
+	defer eth.Close()
+
+	settingsMap := map[string]bool{"gro": !disableSegmentation, "gso": !disableSegmentation, "tso": !disableSegmentation}
+
+	if err := eth.Change(intfName, settingsMap); err != nil {
+		return fmt.Errorf("error changing ethtool settings for %s: %w", intfName, err)
 	}
 	return nil
 }
