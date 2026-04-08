@@ -16,7 +16,6 @@ import (
 	"github.com/mdlayher/arp"
 	"github.com/mdlayher/ndp"
 	"github.com/telekom/das-schiff-network-operator/pkg/bpf"
-	"github.com/telekom/das-schiff-network-operator/pkg/nl"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 )
@@ -40,17 +39,6 @@ type NeighborSync struct {
 	neighRefreshInterfaces sync.Map
 	sendGratuitousNeighbor sync.Map
 	receiveNeighbors       sync.Map
-
-	nlOps nl.ToolkitInterface
-
-	sendNeighborRequestFn    func(linkIndex int, destination net.HardwareAddr, address netip.Addr)
-	sendGratuitousNeighborFn func(linkIndex int, address netip.Addr, mac net.HardwareAddr)
-	// bpfAttachFn attaches the BPF program to an interface. Injectable for testing.
-	bpfAttachFn func(link netlink.Link) error
-	// bpfDetachFn detaches the BPF program from an interface. Injectable for testing.
-	bpfDetachFn func(link netlink.Link) error
-
-	initOnce sync.Once
 }
 
 func (n *NeighborSync) createTimerIfNotExists(linkIndex int, destination net.HardwareAddr, address netip.Addr) {
@@ -253,7 +241,7 @@ func (n *NeighborSync) handleNeighborAdd(addr netip.Addr, neigh *netlink.Neigh) 
 	if neigh.Flags&netlink.NTF_EXT_LEARNED != 0 {
 		// Send gratuitous ARP/NA when creating an extern_learned
 		if _, ok := n.sendGratuitousNeighbor.Load(neigh.LinkIndex); ok {
-			n.sendGratuitousNeighborFn(neigh.LinkIndex, addr, neigh.HardwareAddr)
+			sendGratuitousNeighbor(neigh.LinkIndex, addr, neigh.HardwareAddr)
 		}
 
 		// When the neighbor is moving to extern_learned, also stop tracking it.
@@ -266,7 +254,7 @@ func (n *NeighborSync) handleNeighborAdd(addr netip.Addr, neigh *netlink.Neigh) 
 	}
 
 	if neigh.State&netlink.NUD_STALE != 0 {
-		n.sendNeighborRequestFn(neigh.LinkIndex, neigh.HardwareAddr, addr)
+		sendNeighborRequest(neigh.LinkIndex, neigh.HardwareAddr, addr)
 	}
 }
 
@@ -294,7 +282,7 @@ func (n *NeighborSync) receiveUpdates() {
 }
 
 func (n *NeighborSync) syncKernelNeighbors(intfIndex int) {
-	neighbors, err := n.nlOps.NeighList(intfIndex, netlink.FAMILY_ALL)
+	neighbors, err := netlink.NeighList(intfIndex, netlink.FAMILY_ALL)
 	if err != nil {
 		log.Printf("failed to list neighbors: %v", err)
 		return
@@ -329,7 +317,7 @@ func (n *NeighborSync) runNeighborCheck() {
 					return true
 				}
 
-				n.sendNeighborRequestFn(timerKeyVal.LinkIndex, timerVal.Address, timerKeyVal.Address)
+				sendNeighborRequest(timerKeyVal.LinkIndex, timerVal.Address, timerKeyVal.Address)
 				timerVal.NextRun = time.Now().Add(refreshEvery)
 			}
 			return true
@@ -411,24 +399,18 @@ func (n *NeighborSync) replaceNeighborReachable(ifindex, family int, ip net.IP, 
 		return errors.New("invalid MAC from event")
 	}
 
-	link, err := n.nlOps.LinkByIndex(ifindex)
+	link, err := netlink.LinkByIndex(ifindex)
 	if err != nil {
 		return fmt.Errorf("failed to get link by index: %w", err)
 	}
 
 	bridgeIdx := link.Attrs().MasterIndex
-	if bridgeIdx == 0 {
-		return fmt.Errorf("interface %d has no master bridge (MasterIndex=0)", ifindex)
-	}
 
 	// Check existing neighbor entry to detect MAC changes.
 	// Only send gratuitous ARP/NA when the MAC actually changed to avoid
 	// infinite flooding loops through VXLAN (G-NA → remote BPF → G-NA → ...).
 	macChanged := true
-	existingNeighs, err := n.nlOps.NeighList(bridgeIdx, family)
-	if err != nil {
-		log.Printf("failed to list neighbors on bridge %d: %v — assuming MAC changed", bridgeIdx, err)
-	}
+	existingNeighs, _ := netlink.NeighList(bridgeIdx, family)
 	for i := range existingNeighs {
 		if existingNeighs[i].IP.Equal(ip) {
 			if bytes.Equal(existingNeighs[i].HardwareAddr, hw) {
@@ -445,7 +427,7 @@ func (n *NeighborSync) replaceNeighborReachable(ifindex, family int, ip net.IP, 
 		IP:           ip,
 		HardwareAddr: hw,
 	}
-	if err := n.nlOps.NeighSet(neigh); err != nil {
+	if err := netlink.NeighSet(neigh); err != nil {
 		return fmt.Errorf("failed to set neighbor: %w", err)
 	}
 
@@ -458,8 +440,8 @@ func (n *NeighborSync) replaceNeighborReachable(ifindex, family int, ip net.IP, 
 		if _, ok := n.sendGratuitousNeighbor.Load(bridgeIdx); ok {
 			addr, ok := netip.AddrFromSlice(ip)
 			if ok {
-				log.Printf("MAC changed for %s on bridge %d, sending gratuitous neighbor", ip.String(), bridgeIdx)
-				n.sendGratuitousNeighborFn(bridgeIdx, addr, hw)
+				log.Printf("MAC changed for %s on bridge %d, sending gratuitous neighbor", ip, bridgeIdx)
+				sendGratuitousNeighbor(bridgeIdx, addr, hw)
 			}
 		}
 	}
@@ -468,31 +450,7 @@ func (n *NeighborSync) replaceNeighborReachable(ifindex, family int, ip net.IP, 
 }
 
 func NewNeighborSync() *NeighborSync {
-	return &NeighborSync{
-		nlOps:                    &nl.Toolkit{},
-		sendNeighborRequestFn:    sendNeighborRequest,
-		sendGratuitousNeighborFn: sendGratuitousNeighbor,
-	}
-}
-
-func (n *NeighborSync) initDefaults() {
-	n.initOnce.Do(func() {
-		if n.nlOps == nil {
-			n.nlOps = &nl.Toolkit{}
-		}
-		if n.sendNeighborRequestFn == nil {
-			n.sendNeighborRequestFn = sendNeighborRequest
-		}
-		if n.sendGratuitousNeighborFn == nil {
-			n.sendGratuitousNeighborFn = sendGratuitousNeighbor
-		}
-		if n.bpfAttachFn == nil {
-			n.bpfAttachFn = bpf.AttachNeighborHandlerToInterface
-		}
-		if n.bpfDetachFn == nil {
-			n.bpfDetachFn = bpf.DetachNeighborHandlerFromInterface
-		}
-	})
+	return &NeighborSync{}
 }
 
 // StartNeighborSync starts the neighbor synchronization process.
@@ -508,7 +466,6 @@ func (n *NeighborSync) initDefaults() {
 //
 //	However a gratuitous ARP request or Neighbor Solicitation is generated to notify local apps.
 func (n *NeighborSync) StartNeighborSync() {
-	n.initDefaults()
 	go n.receiveUpdates()
 	go n.runNeighborCheck()
 	go n.runBpfNeighborSync()
@@ -516,7 +473,6 @@ func (n *NeighborSync) StartNeighborSync() {
 
 // EnsureARPRefresh marks the given interface ID for ARP refresh.
 func (n *NeighborSync) EnsureARPRefresh(interfaceID int) {
-	n.initDefaults()
 	_, existing := n.neighRefreshInterfaces.Load(interfaceID)
 
 	n.neighRefreshInterfaces.Store(interfaceID, struct{}{})
@@ -528,23 +484,6 @@ func (n *NeighborSync) EnsureARPRefresh(interfaceID int) {
 
 // EnsureNeighborSuppression marks the given interface ID for neighbor suppression.
 func (n *NeighborSync) EnsureNeighborSuppression(bridgeID, vethID int) error {
-	n.initDefaults()
-
-	// Validate the link exists before mutating any state, so a bad vethID
-	// does not leave the maps in an inconsistent state.
-	nlLink, err := n.nlOps.LinkByIndex(vethID)
-	if err != nil {
-		return fmt.Errorf("failed to get link by index: %w", err)
-	}
-
-	// Attach the BPF program before updating in-memory state. If attach fails
-	// the maps remain unchanged, keeping a consistent view for callers. This
-	// mirrors the ordering in DisableNeighborSuppression which detaches before
-	// removing map entries.
-	if err := n.bpfAttachFn(nlLink); err != nil {
-		return fmt.Errorf("failed to attach BPF program: %w", err)
-	}
-
 	_, existing := n.sendGratuitousNeighbor.Load(bridgeID)
 
 	n.sendGratuitousNeighbor.Store(bridgeID, struct{}{})
@@ -554,6 +493,13 @@ func (n *NeighborSync) EnsureNeighborSuppression(bridgeID, vethID int) error {
 		n.syncKernelNeighbors(bridgeID)
 	}
 
+	nlLink, err := netlink.LinkByIndex(vethID)
+	if err != nil {
+		return fmt.Errorf("failed to get link by index: %w", err)
+	}
+	if err := bpf.AttachNeighborHandlerToInterface(nlLink); err != nil {
+		return fmt.Errorf("failed to attach BPF program: %w", err)
+	}
 	return nil
 }
 
@@ -564,20 +510,14 @@ func (n *NeighborSync) DisableARPRefresh(interfaceID int) {
 
 // DisableNeighborSuppression unmarks the given interface ID for neighbor suppression.
 func (n *NeighborSync) DisableNeighborSuppression(bridgeID, vethID int) error {
-	n.initDefaults()
-
-	// Detach the BPF program before removing in-memory state. If detach fails
-	// the kernel-side suppression is still active and the maps should continue
-	// to reflect that, so callers can observe a consistent error.
-	nlLink, err := n.nlOps.LinkByIndex(vethID)
+	n.sendGratuitousNeighbor.Delete(bridgeID)
+	n.receiveNeighbors.Delete(vethID)
+	nlLink, err := netlink.LinkByIndex(vethID)
 	if err != nil {
 		return fmt.Errorf("failed to get link by index: %w", err)
 	}
-	if err := n.bpfDetachFn(nlLink); err != nil {
+	if err := bpf.DetachNeighborHandlerFromInterface(nlLink); err != nil {
 		return fmt.Errorf("failed to detach BPF program: %w", err)
 	}
-
-	n.sendGratuitousNeighbor.Delete(bridgeID)
-	n.receiveNeighbors.Delete(vethID)
 	return nil
 }
