@@ -28,8 +28,10 @@ jobs:
       - name: Load tool versions
         id: versions
         run: |
-          . ./versions.env
-          echo "golangci-lint=${GOLANGCI_LINT_VERSION}" >> $GITHUB_OUTPUT
+          if [ -f ./versions.env ]; then
+            . ./versions.env
+          fi
+          echo "golangci-lint=${GOLANGCI_LINT_VERSION:-v2.8.0}" >> $GITHUB_OUTPUT
       - name: Install packages
         run: sudo apt-get update && sudo apt-get install -y llvm clang libbpf-dev gcc-multilib linux-headers-$(uname -r)
       - name: run code generators
