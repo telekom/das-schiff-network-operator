@@ -330,6 +330,22 @@ var _ = Describe("replaceNeighborReachable()", func() {
 		Expect(err.Error()).To(ContainSubstring("failed to get link by index"))
 	})
 
+	It("returns error when MasterIndex is zero", func() {
+		mockCtrl := gomock.NewController(GinkgoT())
+		defer mockCtrl.Finish()
+
+		nlMock := mock_nl.NewMockToolkitInterface(mockCtrl)
+		n := newTestNeighborSync(nlMock)
+
+		link := &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{MasterIndex: 0}}
+		nlMock.EXPECT().LinkByIndex(5).Return(link, nil)
+
+		var mac [6]byte
+		err := n.replaceNeighborReachable(5, unix.AF_INET, net.ParseIP("10.0.0.1").To4(), mac)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("MasterIndex=0"))
+	})
+
 	It("returns error when NeighSet fails", func() {
 		mockCtrl := gomock.NewController(GinkgoT())
 		defer mockCtrl.Finish()
