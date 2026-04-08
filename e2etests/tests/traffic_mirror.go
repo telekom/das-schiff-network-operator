@@ -114,36 +114,26 @@ func removeMirrorACLsFromNNC(ctx context.Context, f *framework.Framework, nodeNa
 	return f.Client.Patch(ctx, nnc, client.MergeFrom(base))
 }
 
-// verifyMirrorCapture verifies that traffic is mirrored to a capture pod.
-// It starts tcpdump on capturePod FIRST (to avoid missing packets), waits for the
-// process to be active, then sends a ping from srcPod to targetIP, stops the capture,
-// and asserts that at least one packet from srcPod was captured.
-//
-// captureIface is the interface on capturePod to listen on (e.g. "net1").
-// srcPod and srcPodNS identify the pod from which to send test traffic.
-// targetIP is the ping destination.
 func verifyMirrorCapture(
 	ctx context.Context,
 	f *framework.Framework,
 	ns, capturePod, captureIface string,
-	srcPodNS, srcPod, targetIP string,
+	srcPodNS, srcPod, srcPodIP, targetIP string,
 ) {
 	GinkgoHelper()
 
-	By(fmt.Sprintf("Starting tcpdump on %s/%s iface=%s", ns, capturePod, captureIface))
-	// Start tcpdump in the background; write to /tmp/capture.pcap and echo the PID.
-	// We use "& echo $!" so we can reliably retrieve the PID for readiness polling.
+	By(fmt.Sprintf("Starting tcpdump on %s/%s iface=%s filtering GRE from %s", ns, capturePod, captureIface, srcPodIP))
+	tcpdumpFilter := fmt.Sprintf("proto gre and src host %s", srcPodIP)
 	_, _, err := f.ExecInPod(ctx, ns, capturePod, "",
 		[]string{"sh", "-c",
-			"tcpdump -i " + captureIface + " -w /tmp/capture.pcap -q 2>/tmp/tcpdump.err & echo $! > /tmp/tcpdump.pid"})
+			fmt.Sprintf("tcpdump -i %s -w /tmp/capture.pcap -q '%s' 2>/tmp/tcpdump.err & echo $! > /tmp/tcpdump.pid",
+				captureIface, tcpdumpFilter)})
 	Expect(err).NotTo(HaveOccurred(), "failed to start tcpdump")
 
 	By("Waiting for tcpdump to be active (checking PID)")
-	// Poll until the PID file exists and the process is alive.
 	pollCtx, pollCancel := context.WithTimeout(ctx, 15*time.Second)
 	defer pollCancel()
 	Expect(framework.Poll(pollCtx, time.Second, func() (bool, error) {
-		// Use pollCtx (not outer ctx) so the exec respects the poll timeout
 		stdout, _, pollErr := f.ExecInPod(pollCtx, ns, capturePod, "",
 			[]string{"sh", "-c",
 				"PID=$(cat /tmp/tcpdump.pid 2>/dev/null) && [ -n \"$PID\" ] && kill -0 $PID 2>/dev/null && echo active"})
@@ -163,15 +153,15 @@ func verifyMirrorCapture(
 	f.ExecInPod(ctx, ns, capturePod, "",
 		[]string{"sh", "-c", "PID=$(cat /tmp/tcpdump.pid 2>/dev/null) && [ -n \"$PID\" ] && kill -INT $PID; sleep 1"})
 
-	By("Asserting captured packets are non-empty")
-	// Use tcpdump -r to count actual packets; wc -c would pass even for an empty capture
-	// because libpcap always writes a 24-byte global header.
+	By("Asserting captured GRE packets from mirror source")
 	stdout, _, err := f.ExecInPod(ctx, ns, capturePod, "",
 		[]string{"sh", "-c", "tcpdump -r /tmp/capture.pcap 2>/dev/null | wc -l"})
 	Expect(err).NotTo(HaveOccurred(), "failed to count captured packets")
 	count, convErr := strconv.Atoi(strings.TrimSpace(stdout))
 	Expect(convErr).NotTo(HaveOccurred(), "unexpected output from tcpdump -r: %q", stdout)
-	Expect(count).To(BeNumerically(">", 0), "no mirrored packets captured in /tmp/capture.pcap")
+	Expect(count).To(BeNumerically(">", 0),
+		"no GRE-encapsulated mirrored packets from %s captured on %s/%s iface %s",
+		srcPodIP, ns, capturePod, captureIface)
 }
 
 // TC-09: Traffic Mirroring (MirrorACL).
@@ -262,14 +252,16 @@ var _ = Describe("Traffic Mirroring", Label("mirror"), func() {
 			Expect(found).To(BeTrue(), "spec.fabricVRFs not found in NNC")
 			vrf, ok := fabricVRFs[cfg.VRFM2M].(map[string]interface{})
 			Expect(ok).To(BeTrue(), "VRF %q not found in NNC fabricVRFs", cfg.VRFM2M)
-			acls, _, _ := unstructured.NestedSlice(vrf, "mirrorAcls")
+			acls, aclFound, aclErr := unstructured.NestedSlice(vrf, "mirrorAcls")
+			Expect(aclErr).NotTo(HaveOccurred(), "failed to read mirrorAcls from VRF")
+			Expect(aclFound).To(BeTrue(), "mirrorAcls key not found in VRF %q", cfg.VRFM2M)
 			Expect(acls).NotTo(BeEmpty(), "mirrorAcls not persisted in NNC spec after update")
 		}
 
 		By("Verifying mirrored traffic is captured on mirror-capture")
 		verifyMirrorCapture(ctx, f,
 			ns, "mirror-capture", "net1",
-			ns, "mirror-src", cfg.Macvlan02IPv4,
+			ns, "mirror-src", cfg.Macvlan01IPv4, cfg.Macvlan02IPv4,
 		)
 	})
 })
