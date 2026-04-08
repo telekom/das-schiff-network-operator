@@ -599,4 +599,29 @@ var _ = Describe("DisableNeighborSuppression()", func() {
 		Expect(bridgeStored).To(BeTrue(), "bridgeID must be preserved when BPF detach fails")
 		Expect(vethStored).To(BeTrue(), "vethID must be preserved when BPF detach fails")
 	})
+
+	It("removes bridgeID and vethID entries on success", func() {
+		mockCtrl := gomock.NewController(GinkgoT())
+		defer mockCtrl.Finish()
+		nlMock := mock_nl.NewMockToolkitInterface(mockCtrl)
+		n := newTestNeighborSync(nlMock)
+
+		// Inject a succeeding BPF detach function
+		n.bpfDetachFn = func(_ netlink.Link) error { return nil }
+
+		// Pre-populate state as if EnsureNeighborSuppression had been called
+		n.sendGratuitousNeighbor.Store(5, struct{}{})
+		n.receiveNeighbors.Store(10, struct{}{})
+
+		fakeLink := &netlink.Dummy{}
+		nlMock.EXPECT().LinkByIndex(10).Return(fakeLink, nil)
+
+		err := n.DisableNeighborSuppression(5, 10)
+		Expect(err).NotTo(HaveOccurred())
+
+		_, bridgeStored := n.sendGratuitousNeighbor.Load(5)
+		_, vethStored := n.receiveNeighbors.Load(10)
+		Expect(bridgeStored).To(BeFalse(), "bridgeID must be removed on successful disable")
+		Expect(vethStored).To(BeFalse(), "vethID must be removed on successful disable")
+	})
 })
