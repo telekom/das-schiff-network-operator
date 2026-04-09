@@ -6,11 +6,12 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
 	"github.com/telekom/das-schiff-network-operator/e2etests/framework"
 )
 
 // TC-09: Anycast Gateway.
-var _ = Describe("Anycast Gateway", Label("l2"), func() {
+var _ = Describe("Anycast Gateway", Label("l2", "intent"), func() {
 	var (
 		f   *framework.Framework
 		ctx context.Context

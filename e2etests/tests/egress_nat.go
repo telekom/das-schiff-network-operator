@@ -6,6 +6,8 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	"github.com/telekom/das-schiff-network-operator/e2etests/framework"
 )
 
@@ -25,6 +27,10 @@ var _ = Describe("Egress NAT", Label("egress"), func() {
 		Expect(f.CreateNamespace(ctx, ns)).To(Succeed())
 	})
 
+	AfterEach(func() {
+		_ = f.DeleteNamespace(ctx, ns)
+	})
+
 	Context("m2m egress (TC-08)", func() {
 		BeforeEach(func() {
 			By("Applying m2m egress manifests (Coil Egress + test pod)")
@@ -40,6 +46,23 @@ var _ = Describe("Egress NAT", Label("egress"), func() {
 
 		It("should NAT egress traffic to m2mgw through Coil egress", func() {
 			cfg := f.Config
+
+			By("Waiting for Coil egress gateway pod to be ready")
+			Eventually(func() bool {
+				pods, err := f.KubeClient.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{
+					LabelSelector: "app.kubernetes.io/name=coil,app.kubernetes.io/component=egress",
+				})
+				if err != nil || len(pods.Items) == 0 {
+					return false
+				}
+				for _, p := range pods.Items {
+					if p.Status.Phase == "Running" {
+						return true
+					}
+				}
+				return false
+			}).WithTimeout(2*time.Minute).WithPolling(5*time.Second).Should(BeTrue(),
+				"Coil egress gateway pod should be running")
 
 			By("Waiting for egress pod to be ready")
 			Expect(f.WaitForPodReady(ctx, ns, "egress-via-nat-01", cfg.PodReadyTimeout)).To(Succeed())
@@ -79,6 +102,23 @@ var _ = Describe("Egress NAT", Label("egress"), func() {
 
 		It("should NAT egress traffic to c2mgw through Coil egress", func() {
 			cfg := f.Config
+
+			By("Waiting for Coil c2m egress gateway pod to be ready")
+			Eventually(func() bool {
+				pods, err := f.KubeClient.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{
+					LabelSelector: "app.kubernetes.io/name=coil,app.kubernetes.io/component=egress",
+				})
+				if err != nil || len(pods.Items) == 0 {
+					return false
+				}
+				for _, p := range pods.Items {
+					if p.Status.Phase == "Running" {
+						return true
+					}
+				}
+				return false
+			}).WithTimeout(2*time.Minute).WithPolling(5*time.Second).Should(BeTrue(),
+				"Coil c2m egress gateway pod should be running")
 
 			By("Waiting for c2m egress pod to be ready")
 			Expect(f.WaitForPodReady(ctx, ns, "egress-via-nat-c2m-01", cfg.PodReadyTimeout)).To(Succeed())

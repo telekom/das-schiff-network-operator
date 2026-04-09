@@ -21,3 +21,5 @@ spec:
               value: Never
             - name: NO_DEFAULT_POOLS
               value: "true"
+            - name: FELIX_IPV6SUPPORT
+              value: "true"

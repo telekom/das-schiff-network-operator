@@ -1,0 +1,105 @@
+package tests
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+
+	"github.com/telekom/das-schiff-network-operator/e2etests/framework"
+)
+
+// Intent-Exclusive VRF Isolation.
+// Requires E2E_INTENT_MODE=true — intent reconciler produces NNCs, not legacy.
+// Validates that pods in different VRFs (m2m vs c2m) cannot communicate when
+// the intent pipeline is the sole NNC producer.
+var _ = Describe("Intent-Exclusive: VRF Isolation", Label("intent-exclusive", "vrf"), func() {
+	var (
+		f   *framework.Framework
+		ctx context.Context
+		ns  string
+	)
+
+	BeforeEach(func() {
+		f = framework.Global
+		Expect(f).NotTo(BeNil())
+		Expect(f.IsIntentMode()).To(BeTrue(), "intent-exclusive tests require E2E_INTENT_MODE=true")
+		ctx = context.Background()
+		ns = "e2e-test-intent-excl-vrf"
+
+		By("Creating test namespace")
+		Expect(f.CreateNamespace(ctx, ns)).To(Succeed())
+		DeferCleanup(func() {
+			cleanCtx := context.Background()
+			_ = f.DeletePod(cleanCtx, ns, "intent-excl-vrf-01")
+			_ = f.DeletePod(cleanCtx, ns, "intent-excl-vrf-04")
+			_ = f.DeleteNamespace(cleanCtx, ns)
+		})
+
+		By("Applying intent base configs")
+		base, err := readTestdata("intent/base-configs.yaml")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(f.ApplyManifest(ctx, base)).To(Succeed())
+
+		By("Applying VRF isolation intent fixtures (VLAN 501 m2m + VLAN 503 c2m)")
+		vrf, err := readTestdata("intent/vrf/manifests.yaml")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(f.ApplyManifest(ctx, vrf)).To(Succeed())
+		DeferCleanup(func() {
+			_ = f.DeleteManifest(context.Background(), vrf)
+		})
+
+		By("Waiting for NNC to contain both VRFs on worker nodes")
+		Expect(f.WaitForNNCVRFs(ctx, f.Config.WorkerNode1, []string{"m2m", "c2m"}, 60*time.Second)).To(Succeed())
+		Expect(f.WaitForNNCVRFs(ctx, f.Config.WorkerNode2, []string{"m2m", "c2m"}, 60*time.Second)).To(Succeed())
+	})
+
+	It("should block connectivity between different VRFs via intent pipeline", func() {
+		cfg := f.Config
+
+		By("Applying NADs for m2m (VLAN 501) and c2m (VLAN 503)")
+		nad501, err := readTestdata("l2-connectivity/nad.yaml")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(f.ApplyManifestInNamespace(ctx, nad501, ns)).To(Succeed())
+
+		nad503, err := readTestdata("l2-connectivity/nad-c2m.yaml")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(f.ApplyManifestInNamespace(ctx, nad503, ns)).To(Succeed())
+
+		By("Creating intent-excl-vrf-01 on worker-1 (VLAN 501, m2m)")
+		Expect(f.CreateTestPod(ctx, ns, "intent-excl-vrf-01", cfg.WorkerNode1, map[string]string{
+			"k8s.v1.cni.cncf.io/networks": fmt.Sprintf(
+				`[{"name": "macvlan-vlan501", "ips": ["%s/24", "%s/64"]}]`,
+				cfg.Macvlan01IPv4, cfg.Macvlan01IPv6),
+		}, framework.WithNetAdmin())).To(Succeed())
+
+		By("Creating intent-excl-vrf-04 on worker-2 (VLAN 503, c2m)")
+		Expect(f.CreateTestPod(ctx, ns, "intent-excl-vrf-04", cfg.WorkerNode2, map[string]string{
+			"k8s.v1.cni.cncf.io/networks": fmt.Sprintf(
+				`[{"name": "macvlan-vlan503", "ips": ["%s/24", "%s/64"]}]`,
+				cfg.Macvlan04IPv4, cfg.Macvlan04IPv6),
+		}, framework.WithNetAdmin())).To(Succeed())
+
+		By("Waiting for pods to be ready")
+		Expect(f.WaitForPodReady(ctx, ns, "intent-excl-vrf-01", cfg.PodReadyTimeout)).To(Succeed())
+		Expect(f.WaitForPodReady(ctx, ns, "intent-excl-vrf-04", cfg.PodReadyTimeout)).To(Succeed())
+
+		By("Disabling IPv6 DAD and re-adding addresses")
+		Expect(f.EnsureIPv6NoDad(ctx, ns, "intent-excl-vrf-01", cfg.Macvlan01IPv6, "net1")).To(Succeed())
+		Expect(f.EnsureIPv6NoDad(ctx, ns, "intent-excl-vrf-04", cfg.Macvlan04IPv6, "net1")).To(Succeed())
+
+		By("Verifying intent-excl-vrf-01 (m2m) CANNOT ping intent-excl-vrf-04 (c2m) IPv4")
+		Expect(f.AssertNoConnectivity(ctx, ns, "intent-excl-vrf-01", cfg.Macvlan04IPv4)).To(Succeed())
+
+		By("Verifying intent-excl-vrf-04 (c2m) CANNOT ping intent-excl-vrf-01 (m2m) IPv4")
+		Expect(f.AssertNoConnectivity(ctx, ns, "intent-excl-vrf-04", cfg.Macvlan01IPv4)).To(Succeed())
+
+		By("Verifying intent-excl-vrf-01 (m2m) CANNOT ping intent-excl-vrf-04 (c2m) IPv6")
+		Expect(f.AssertNoConnectivity(ctx, ns, "intent-excl-vrf-01", cfg.Macvlan04IPv6)).To(Succeed())
+
+		By("Verifying intent-excl-vrf-04 (c2m) CANNOT ping intent-excl-vrf-01 (m2m) IPv6")
+		Expect(f.AssertNoConnectivity(ctx, ns, "intent-excl-vrf-04", cfg.Macvlan01IPv6)).To(Succeed())
+	})
+})
