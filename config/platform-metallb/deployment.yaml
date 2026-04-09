@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: platform-metallb
+  namespace: system
+  labels:
+    app.kubernetes.io/name: platform-metallb
+    app.kubernetes.io/component: platform
+    app.kubernetes.io/managed-by: kustomize
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: platform-metallb
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: platform-metallb
+    spec:
+      tolerations:
+      - key: node-role.kubernetes.io/control-plane
+        operator: Exists
+        effect: NoSchedule
+      containers:
+      - name: controller
+        image: controller:latest
+        imagePullPolicy: IfNotPresent
+        command:
+        - /platform-metallb
+        args:
+        - --metrics-bind-address=:8092
+        - --health-probe-bind-address=:8093
+        ports:
+        - containerPort: 8092
+          name: metrics
+        - containerPort: 8093
+          name: health
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: health
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: health
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          limits:
+            cpu: 200m
+            memory: 128Mi
+          requests:
+            cpu: 100m
+            memory: 64Mi
+      serviceAccountName: platform-metallb
