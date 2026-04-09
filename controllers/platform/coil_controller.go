@@ -64,8 +64,9 @@ var (
 // Calico IPPool and Coil Egress resources.
 type CoilReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
-	Log    logr.Logger
+	APIReader client.Reader
+	Scheme    *runtime.Scheme
+	Log       logr.Logger
 }
 
 //+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=outbounds,verbs=get;list;watch
@@ -371,7 +372,8 @@ func (r *CoilReconciler) upsertEgressNetworkPolicy(ctx context.Context, ob *nc.O
 // kubeAPIEgressRule builds a NetworkPolicy egress rule allowing traffic to the kubernetes API service.
 func (r *CoilReconciler) kubeAPIEgressRule(ctx context.Context) (networkingv1.NetworkPolicyEgressRule, error) {
 	var svc corev1.Service
-	if err := r.Get(ctx, types.NamespacedName{Name: "kubernetes", Namespace: "default"}, &svc); err != nil {
+	// Use direct API reader to avoid triggering a cache informer (which would need list+watch RBAC).
+	if err := r.APIReader.Get(ctx, types.NamespacedName{Name: "kubernetes", Namespace: "default"}, &svc); err != nil {
 		return networkingv1.NetworkPolicyEgressRule{}, fmt.Errorf("resolving kubernetes service: %w", err)
 	}
 
