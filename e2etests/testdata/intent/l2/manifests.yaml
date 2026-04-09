@@ -1,0 +1,12 @@
+# Layer2Attachment for VLAN 501 (m2m VRF) - targets gateway destinations
+
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Layer2Attachment
+metadata:
+  name: l2a-vlan501
+  namespace: default
+spec:
+  networkRef: "net-vlan501"
+  destinations:
+    matchLabels:
+      type: gateway

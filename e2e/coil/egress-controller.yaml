@@ -52,11 +52,12 @@ spec:
     spec:
       containers:
         - name: coil-egress-controller
-          image: ghcr.io/cybozu-go/coil:2.11.1
+          image: ghcr.io/cybozu-go/coil:2.14.2
           command: [coil-egress-controller]
           args:
             - --zap-stacktrace-level=panic
             - --enable-cert-rotation=true
+            - --backend=nftables
           env:
             - name: COIL_POD_NAMESPACE
               valueFrom:

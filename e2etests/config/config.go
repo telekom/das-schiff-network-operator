@@ -66,6 +66,9 @@ type Config struct {
 	// NAT64
 	NAT64DNS string
 
+	// Intent mode: when true, operator uses intent reconciler instead of legacy.
+	IntentMode bool
+
 	// Timeouts
 	NodeReadyTimeout      time.Duration
 	ComponentReadyTimeout time.Duration
@@ -112,9 +115,9 @@ func LoadFromEnv() *Config {
 		C2MGWIPv4: "10.102.1.1",
 		C2MGWIPv6: "fda5:25c1:193d::1",
 
-		// Anycast MACs
-		AnycastMAC:        "1a:ee:cf:2f:a7:a8",
-		AnycastMACVlan502: "1a:ee:cf:2f:a7:a9",
+		// Anycast MACs (VRRP standard MAC used by intent L2A builder)
+		AnycastMAC:        "00:00:5e:00:01:01",
+		AnycastMACVlan502: "00:00:5e:00:01:01",
 
 		// Anycast VLAN 502 (m2m, cross-VLAN)
 		AnycastV502Pod01IPv4: "10.250.1.40",
@@ -130,6 +133,9 @@ func LoadFromEnv() *Config {
 
 		// NAT64
 		NAT64DNS: "fda5:25c1:193e::1",
+
+		// Intent mode
+		IntentMode: os.Getenv("E2E_INTENT_MODE") == "true",
 
 		// Timeouts
 		NodeReadyTimeout:      5 * time.Minute,

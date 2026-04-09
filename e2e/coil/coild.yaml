@@ -44,7 +44,7 @@ spec:
     spec:
       containers:
         - name: coild
-          image: ghcr.io/cybozu-go/coil:2.11.1
+          image: ghcr.io/cybozu-go/coil:2.14.2
           command: [coild]
           args:
             - --zap-stacktrace-level=panic
@@ -94,7 +94,7 @@ spec:
       hostPID: true
       initContainers:
         - name: coil-installer
-          image: ghcr.io/cybozu-go/coil:2.11.1
+          image: ghcr.io/cybozu-go/coil:2.14.2
           command: [coil-installer]
           env:
             - name: CNI_NETCONF

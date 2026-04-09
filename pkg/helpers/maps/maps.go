@@ -4,6 +4,7 @@ import (
 	"reflect"
 
 	"github.com/google/go-cmp/cmp"
+
 	"github.com/telekom/das-schiff-network-operator/pkg/helpers/slice"
 )
 

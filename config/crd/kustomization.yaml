@@ -8,6 +8,19 @@ resources:
 - bases/network.t-caas.telekom.com_nodenetplanconfigs.yaml
 - bases/network.t-caas.telekom.com_nodenetworkconfigs.yaml
 - bases/network.t-caas.telekom.com_networkconfigrevisions.yaml
+- bases/network-connector.sylvaproject.org_announcementpolicies.yaml
+- bases/network-connector.sylvaproject.org_bgppeerings.yaml
+- bases/network-connector.sylvaproject.org_collectors.yaml
+- bases/network-connector.sylvaproject.org_destinations.yaml
+- bases/network-connector.sylvaproject.org_inbounds.yaml
+- bases/network-connector.sylvaproject.org_interfaceconfigs.yaml
+- bases/network-connector.sylvaproject.org_layer2attachments.yaml
+- bases/network-connector.sylvaproject.org_networks.yaml
+- bases/network-connector.sylvaproject.org_nodenetworkstatuses.yaml
+- bases/network-connector.sylvaproject.org_outbounds.yaml
+- bases/network-connector.sylvaproject.org_podnetworks.yaml
+- bases/network-connector.sylvaproject.org_trafficmirrors.yaml
+- bases/network-connector.sylvaproject.org_vrfs.yaml
 #+kubebuilder:scaffold:crdkustomizeresource
 
 # [WEBHOOK] To enable webhook, uncomment all the sections with [WEBHOOK] prefix.

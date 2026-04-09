@@ -5,12 +5,13 @@ import (
 	"fmt"
 
 	"github.com/go-logr/logr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/pkg/config"
 	cra "github.com/telekom/das-schiff-network-operator/pkg/cra-frr"
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/common"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
@@ -43,6 +44,17 @@ func (a *CRAFRRConfigApplier) ApplyConfig(ctx context.Context, cfg *v1alpha1.Nod
 }
 
 func (a *CRAFRRConfigApplier) convertNodeConfigToNetlink(nodeCfg *v1alpha1.NodeNetworkConfig) (netlinkConfig nl.NetlinkConfiguration) {
+	// Pre-compute loopback IPs per VRF for GRE local address resolution.
+	vrfLoopbackIPs := make(map[string]string)
+	for name := range nodeCfg.Spec.FabricVRFs {
+		for _, lo := range nodeCfg.Spec.FabricVRFs[name].Loopbacks {
+			if len(lo.IPAddresses) > 0 {
+				vrfLoopbackIPs[name] = lo.IPAddresses[0]
+				break
+			}
+		}
+	}
+
 	for _, layer2 := range nodeCfg.Spec.Layer2s {
 		nlLayer2 := nl.Layer2Information{
 			VlanID:     int(layer2.VLAN),
@@ -58,6 +70,12 @@ func (a *CRAFRRConfigApplier) convertNodeConfigToNetlink(nodeCfg *v1alpha1.NodeN
 		}
 
 		netlinkConfig.Layer2s = append(netlinkConfig.Layer2s, nlLayer2)
+
+		bridgeIface := fmt.Sprintf("br.%d", layer2.VLAN)
+		for j := range layer2.MirrorACLs {
+			netlinkConfig.Mirrors = append(netlinkConfig.Mirrors,
+				convertMirrorACL(&layer2.MirrorACLs[j], bridgeIface, vrfLoopbackIPs))
+		}
 	}
 
 	// Skip adding management VRF
@@ -66,13 +84,28 @@ func (a *CRAFRRConfigApplier) convertNodeConfigToNetlink(nodeCfg *v1alpha1.NodeN
 			continue
 		}
 
+		vrf := nodeCfg.Spec.FabricVRFs[name]
 		nlVrf := nl.VRFInformation{
 			Name: name,
-			VNI:  int(nodeCfg.Spec.FabricVRFs[name].VNI),
+			VNI:  int(vrf.VNI),
 			MTU:  nl.DefaultMtu,
 		}
 
 		netlinkConfig.VRFs = append(netlinkConfig.VRFs, nlVrf)
+
+		for j := range vrf.MirrorACLs {
+			netlinkConfig.Mirrors = append(netlinkConfig.Mirrors,
+				convertMirrorACL(&vrf.MirrorACLs[j], name, vrfLoopbackIPs))
+		}
+
+		// Convert VRF loopbacks → loopback configs for netlink dummy creation
+		for loName, lo := range vrf.Loopbacks {
+			netlinkConfig.Loopbacks = append(netlinkConfig.Loopbacks, nl.LoopbackConfig{
+				Name:      "lo." + loName,
+				VRF:       name,
+				Addresses: lo.IPAddresses,
+			})
+		}
 	}
 
 	for name := range nodeCfg.Spec.LocalVRFs {
@@ -85,6 +118,37 @@ func (a *CRAFRRConfigApplier) convertNodeConfigToNetlink(nodeCfg *v1alpha1.NodeN
 	}
 
 	return netlinkConfig
+}
+
+func convertMirrorACL(acl *v1alpha1.MirrorACL, sourceIface string, vrfLoopbackIPs map[string]string) nl.MirrorRule {
+	direction := acl.Direction
+	if direction == "" {
+		direction = "both"
+	}
+	rule := nl.MirrorRule{
+		SourceInterface: sourceIface,
+		Direction:       direction,
+		GRERemote:       acl.DestinationAddress,
+		GRELocal:        vrfLoopbackIPs[acl.DestinationVrf],
+		GREVRF:          acl.DestinationVrf,
+	}
+
+	if acl.TrafficMatch.Protocol != nil {
+		rule.Protocol = *acl.TrafficMatch.Protocol
+	}
+	if acl.TrafficMatch.SrcPrefix != nil {
+		rule.SrcPrefix = *acl.TrafficMatch.SrcPrefix
+	}
+	if acl.TrafficMatch.DstPrefix != nil {
+		rule.DstPrefix = *acl.TrafficMatch.DstPrefix
+	}
+	if acl.TrafficMatch.SrcPort != nil {
+		rule.SrcPort = *acl.TrafficMatch.SrcPort
+	}
+	if acl.TrafficMatch.DstPort != nil {
+		rule.DstPort = *acl.TrafficMatch.DstPort
+	}
+	return rule
 }
 
 func convertPolicyRoutes(nodeCfg *v1alpha1.NodeNetworkConfig) []cra.PolicyRoute {

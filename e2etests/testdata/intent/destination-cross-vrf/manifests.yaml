@@ -1,0 +1,41 @@
+# Tests destinations in different VRFs selected by different L2As.
+# l2a-cross-vrf-m2m selects dest-dcgw (vrf-m2m) via type:gateway
+# l2a-cross-vrf-c2m selects dest-dcgw-c2m (vrf-c2m) via type:gateway-c2m
+# Both L2As use the same network (net-vlan501) but attach to different VRFs.
+# This validates that NNC correctly produces two FabricVRF entries for the
+# same VLAN when destinations differ.
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Layer2Attachment
+metadata:
+  name: l2a-cross-vrf-m2m
+  namespace: default
+spec:
+  networkRef: "net-vlan501"
+  destinations:
+    matchLabels:
+      type: gateway
+---
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Layer2Attachment
+metadata:
+  name: l2a-cross-vrf-c2m
+  namespace: default
+spec:
+  networkRef: "net-vlan503"
+  destinations:
+    matchLabels:
+      type: gateway-c2m
+---
+# Additional destination in c2m VRF with extra prefixes to validate merge
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Destination
+metadata:
+  name: dest-extra-c2m
+  namespace: default
+  labels:
+    type: gateway-c2m
+    zone: extra
+spec:
+  vrfRef: "vrf-c2m"
+  prefixes:
+    - "172.20.0.0/16"

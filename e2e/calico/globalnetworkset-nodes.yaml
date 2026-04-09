@@ -1,0 +1,18 @@
+# GlobalNetworkSet representing the cluster node and service subnets.
+# Used by the GlobalNetworkPolicy to allow egress gateway pods
+# to reach infrastructure endpoints (API server, DNS, webhooks)
+# that live on node IPs or behind service ClusterIPs.
+apiVersion: crd.projectcalico.org/v1
+kind: GlobalNetworkSet
+metadata:
+  name: cluster-infra
+  labels:
+    role: cluster-infra
+spec:
+  nets:
+    # Node subnets
+    - "10.100.0.0/24"
+    - "fdcb:f93c:3a3e::/64"
+    # Service CIDRs
+    - "10.96.0.0/16"
+    - "fd10:96::/108"

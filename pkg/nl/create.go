@@ -117,18 +117,25 @@ func (n *Manager) createVXLAN(vxlanName string, bridgeIdx, vni, mtu int, hairpin
 }
 
 func (*Manager) setEUIAutogeneration(intfName string, generateEUI bool) error {
-	fileName := fmt.Sprintf("%s/ipv6/conf/%s/addr_gen_mode", procSysNetPath, intfName)
+	safe, err := sanitizeIntfName(intfName)
+	if err != nil {
+		return err
+	}
+	fileName := fmt.Sprintf("%s/ipv6/conf/%s/addr_gen_mode", procSysNetPath, safe)
 	file, err := os.OpenFile(fileName, os.O_WRONLY, 0)
 	if err != nil {
 		return fmt.Errorf("error opening file: %w", err)
 	}
-	defer file.Close()
 	value := "1"
 	if generateEUI {
 		value = "0"
 	}
 	if _, err := fmt.Fprintf(file, "%s\n", value); err != nil {
+		file.Close()
 		return fmt.Errorf("error writing to file: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("error closing file: %w", err)
 	}
 	return nil
 }

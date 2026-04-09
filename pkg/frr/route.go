@@ -4,10 +4,11 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/telekom/das-schiff-network-operator/pkg/nl"
-	"github.com/telekom/das-schiff-network-operator/pkg/route"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/exp/maps"
+
+	"github.com/telekom/das-schiff-network-operator/pkg/nl"
+	"github.com/telekom/das-schiff-network-operator/pkg/route"
 )
 
 func getQuantity(routeSummaries RouteSummaries, addressFamily int, vrf, table string) ([]route.Information, error) {

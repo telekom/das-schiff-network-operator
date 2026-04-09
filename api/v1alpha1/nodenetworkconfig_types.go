@@ -285,6 +285,10 @@ type MirrorACL struct {
 	// EncapsulationType is the encapsulation type for the mirrored traffic.
 	// +kubebuilder:validation:Enum=gre
 	EncapsulationType EncapsulationType `json:"encapsulationType"`
+	// Direction is the mirror direction: ingress, egress, or both.
+	// +kubebuilder:validation:Enum=ingress;egress;both
+	// +kubebuilder:default=both
+	Direction string `json:"direction,omitempty"`
 }
 
 // NextHop represents a next hop configuration.

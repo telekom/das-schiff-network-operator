@@ -3,6 +3,7 @@ package operator
 import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
 	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 )
 

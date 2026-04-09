@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+
 	"github.com/telekom/das-schiff-network-operator/e2e/setup"
 )
 
@@ -111,6 +112,11 @@ func up(repoRoot string) error {
 	// Phase 7: Cluster-2 (gateway cluster)
 	if err := setup.PhaseCluster2(cluster2, repoRoot); err != nil {
 		return fmt.Errorf("cluster2: %w", err)
+	}
+
+	// Phase 8: Configure sync controller (create namespace + kubeconfig Secret + CAPI Cluster on cluster-1)
+	if err := setup.PhaseSyncSetup(cluster, cluster2, repoRoot); err != nil {
+		return fmt.Errorf("sync setup: %w", err)
 	}
 
 	setup.Logf("E2E lab ready in %v", time.Since(start).Round(time.Second))

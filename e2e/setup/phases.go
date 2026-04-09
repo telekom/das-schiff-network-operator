@@ -11,12 +11,50 @@ import (
 	"time"
 )
 
-// PhaseBuildImages builds all Docker images required for the E2E lab.
+// PhaseBuildImages builds or loads all Docker images required for the E2E lab.
+//
+// When E2E_SKIP_BUILD=true, pre-built OCI tarballs are loaded from E2E_IMAGE_DIR
+// instead of building from source. This is used in CI where images are built in
+// parallel jobs and passed as artifacts. Local dev (make e2e-up) leaves the flag
+// unset and builds everything as before.
 func PhaseBuildImages(repoRoot string) error {
+	if os.Getenv("E2E_SKIP_BUILD") == "true" {
+		return phaseLoadPrebuiltImages()
+	}
+	return phaseBuildAllImages(repoRoot)
+}
+
+// phaseLoadPrebuiltImages loads pre-built OCI tarballs from E2E_IMAGE_DIR.
+func phaseLoadPrebuiltImages() error {
+	imageDir := EnvOr("E2E_IMAGE_DIR", "/tmp/e2e-images")
+	Logf("Loading pre-built images from %s ...", imageDir)
+
+	entries, err := os.ReadDir(imageDir)
+	if err != nil {
+		return fmt.Errorf("reading image dir %s: %w", imageDir, err)
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".tar") {
+			continue
+		}
+		tarPath := filepath.Join(imageDir, entry.Name())
+		Logf("  Loading %s ...", entry.Name())
+		if err := RunCmd("docker", "load", "-i", tarPath); err != nil {
+			return fmt.Errorf("docker load %s: %w", entry.Name(), err)
+		}
+	}
+
+	Logf("All pre-built images loaded.")
+	return nil
+}
+
+// phaseBuildAllImages builds every image from source (local dev path).
+func phaseBuildAllImages(repoRoot string) error {
 	Logf("Building images...")
 
 	imgBase := EnvOr("IMG_BASE", "ghcr.io/telekom")
-	kindNodeVersion := EnvOr("KIND_NODE_VERSION", "v1.32.2")
+	kindNodeVersion := EnvOr("KIND_NODE_VERSION", "v1.35.1")
 	nodeImage := EnvOr("E2E_NODE_IMAGE", imgBase+"/das-schiff-kind-node:"+kindNodeVersion)
 	nat64Image := EnvOr("E2E_NAT64_IMAGE", imgBase+"/das-schiff-nat64:latest")
 	testerImage := EnvOr("E2E_TESTER_IMAGE", imgBase+"/das-schiff-e2e-tester:latest")
@@ -54,8 +92,8 @@ func PhaseBuildImages(repoRoot string) error {
 	}
 	os.Remove(craFRRTar)
 
-	// 3. Build operator + agent images
-	Logf("  Building operator + agent images...")
+	// 3. Build operator + agent + platform images
+	Logf("  Building operator + agent + platform images...")
 	if err := RunCmd("docker", "build",
 		"--build-arg", "ldflags="+ldflags,
 		"-f", filepath.Join(repoRoot, "das-schiff-network-operator.Dockerfile"),
@@ -76,11 +114,38 @@ func PhaseBuildImages(repoRoot string) error {
 
 	if err := RunCmd("docker", "build",
 		"--build-arg", "ldflags="+ldflags,
-		"-f", filepath.Join(repoRoot, "das-schiff-nwop-agent-hbn-l2.Dockerfile"),
-		"-t", imgBase+"/das-schiff-nwop-agent-hbn-l2:latest",
+		"-f", filepath.Join(repoRoot, "das-schiff-nwop-agent-netplan.Dockerfile"),
+		"-t", imgBase+"/das-schiff-nwop-agent-netplan:latest",
 		repoRoot,
 	); err != nil {
-		return fmt.Errorf("building agent-hbn-l2: %w", err)
+		return fmt.Errorf("building agent-netplan: %w", err)
+	}
+
+	if err := RunCmd("docker", "build",
+		"--build-arg", "ldflags="+ldflags,
+		"-f", filepath.Join(repoRoot, "das-schiff-platform-coil.Dockerfile"),
+		"-t", imgBase+"/das-schiff-platform-coil:latest",
+		repoRoot,
+	); err != nil {
+		return fmt.Errorf("building platform-coil: %w", err)
+	}
+
+	if err := RunCmd("docker", "build",
+		"--build-arg", "ldflags="+ldflags,
+		"-f", filepath.Join(repoRoot, "das-schiff-platform-metallb.Dockerfile"),
+		"-t", imgBase+"/das-schiff-platform-metallb:latest",
+		repoRoot,
+	); err != nil {
+		return fmt.Errorf("building platform-metallb: %w", err)
+	}
+
+	if err := RunCmd("docker", "build",
+		"--build-arg", "ldflags="+ldflags,
+		"-f", filepath.Join(repoRoot, "das-schiff-network-sync.Dockerfile"),
+		"-t", imgBase+"/das-schiff-network-sync:latest",
+		repoRoot,
+	); err != nil {
+		return fmt.Errorf("building network-sync: %w", err)
 	}
 
 	// 4. Build NAT64 image
@@ -127,7 +192,7 @@ func getLDFlags(repoRoot string) string {
 func PhaseCreateNodes(cluster *Cluster, repoRoot string) error {
 	Logf("Phase 1a: Creating k8s node containers...")
 
-	nodeImage := EnvOr("E2E_NODE_IMAGE", "ghcr.io/telekom/das-schiff-kind-node:v1.32.2")
+	nodeImage := EnvOr("E2E_NODE_IMAGE", "ghcr.io/telekom/das-schiff-kind-node:v1.35.1")
 	genDir := filepath.Join(repoRoot, "e2e", "generated")
 
 	for _, node := range cluster.Nodes {
@@ -154,6 +219,8 @@ func PhaseCreateNodes(cluster *Cluster, repoRoot string) error {
 			"-e", "container=docker",
 			"-v", filepath.Join(genDir, shortName, "cra") + ":/etc/cra",
 			"-v", filepath.Join(genDir, shortName, "node-identity.env") + ":/etc/node-identity.env:ro",
+			"-v", filepath.Join(genDir, shortName, "netplan") + ":/etc/netplan",
+			"-v", filepath.Join(genDir, shortName, "systemd-network/10-netplan-hbn.network.d") + ":/etc/systemd/network/10-netplan-hbn.network.d:ro",
 			"-v", repoRoot + ":/repo:ro",
 			// Mount /lib/modules from the VM kernel (Docker Desktop/OrbStack maps this
 			// from the Linux VM, not macOS host). Needed for modprobe (e.g., fou module).
@@ -241,18 +308,12 @@ func PhaseUnderlay(cluster *Cluster) error {
 			return fmt.Errorf("waiting for hbn on %s: %w", node.Name, err)
 		}
 
-		// Configure host-side hbn veth
-		if _, err := DockerExec(node.Name, "ip", "link", "set", "hbn", "up"); err != nil {
-			return fmt.Errorf("bringing up hbn on %s: %w", node.Name, err)
-		}
-		DockerExec(node.Name, "ip", "addr", "add", "fd00:7:caa5::1/127", "dev", "hbn", "preferred_lft", "0") //nolint:errcheck
-		DockerExec(node.Name, "ip", "addr", "add", node.IPv4+"/32", "dev", "hbn")                            //nolint:errcheck
-		DockerExec(node.Name, "ip", "addr", "add", node.IPv6+"/128", "dev", "hbn")                           //nolint:errcheck
-		if _, err := DockerExec(node.Name, "ip", "route", "add", "default", "src", node.IPv4, "via", "inet6", "fd00:7:caa5::", "dev", "hbn"); err != nil {
-			return fmt.Errorf("adding IPv4 default route on %s: %w", node.Name, err)
-		}
-		if _, err := DockerExec(node.Name, "ip", "-6", "route", "add", "default", "via", "fd00:7:caa5::", "dev", "hbn", "src", node.IPv6); err != nil {
-			return fmt.Errorf("adding IPv6 default route on %s: %w", node.Name, err)
+		// Apply per-node netplan config (10-hbn.yaml mounted via Docker volume).
+		// Configures addresses + IPv6 default route on the hbn veth.
+		// IPv4 default via IPv6 next-hop is handled by a networkd drop-in
+		// (cross-family / RFC 5549 — not expressible in netplan).
+		if _, err := DockerExec(node.Name, "netplan", "apply"); err != nil {
+			return fmt.Errorf("netplan apply on %s: %w", node.Name, err)
 		}
 	}
 
@@ -436,12 +497,15 @@ func PhaseComponents(cluster *Cluster, repoRoot string) error {
 	}
 
 	// Load images into containerd on all nodes
-	Logf("Loading operator/agent images into containerd...")
+	Logf("Loading operator/agent/platform images into containerd...")
 	imgBase := EnvOr("IMG_BASE", "ghcr.io/telekom")
 	images := []string{
 		imgBase + "/das-schiff-network-operator:latest",
 		imgBase + "/das-schiff-nwop-agent-cra-frr:latest",
-		imgBase + "/das-schiff-nwop-agent-hbn-l2:latest",
+		imgBase + "/das-schiff-nwop-agent-netplan:latest",
+		imgBase + "/das-schiff-platform-coil:latest",
+		imgBase + "/das-schiff-platform-metallb:latest",
+		imgBase + "/das-schiff-network-sync:latest",
 	}
 	for _, node := range cluster.Nodes {
 		for _, img := range images {
@@ -453,13 +517,9 @@ func PhaseComponents(cluster *Cluster, repoRoot string) error {
 		}
 	}
 
-	// IPv6 MASQUERADE rules
-	Logf("Adding IPv6 MASQUERADE rules...")
-	for _, node := range cluster.Nodes {
-		DockerExec(node.Name, "ip6tables", "-t", "nat", "-A", "POSTROUTING", //nolint:errcheck
-			"-s", "fd10:244::/56", "!", "-d", "fd10:244::/56",
-			"-j", "MASQUERADE", "--random-fully")
-	}
+	// IPv6 natOutgoing is handled by Calico (FelixConfiguration ipv6Support: true
+	// + default-ipv6-ippool natOutgoing: true). A static ip6tables masquerade rule
+	// would bypass Calico's ipset-based exclusion of egress pool CIDRs.
 
 	// Install CNI plugins
 	Logf("Installing CNI plugins...")
@@ -488,6 +548,8 @@ func PhaseComponents(cluster *Cluster, repoRoot string) error {
 		"crd/bgpconfigurations.crd.projectcalico.org",
 		"crd/felixconfigurations.crd.projectcalico.org",
 		"crd/ippools.crd.projectcalico.org",
+		"crd/globalnetworksets.crd.projectcalico.org",
+		"crd/globalnetworkpolicies.crd.projectcalico.org",
 		"--timeout=60s")
 	// Re-apply after CRDs are established to create CR resources (IPPools, BGPPeers, etc.)
 	kubectl("apply", "-k", "/repo/e2e/calico") //nolint:errcheck
@@ -502,57 +564,6 @@ func PhaseComponents(cluster *Cluster, repoRoot string) error {
 	// Patch Egress CRD
 	kubectl("patch", "crd", "egresses.coil.cybozu.com", "--type=json", //nolint:errcheck
 		`-p=[{"op":"replace","path":"/spec/versions/0/schema/openAPIV3Schema/properties/spec/properties/template","value":{"type":"object","x-kubernetes-preserve-unknown-fields":true}}]`)
-
-	// Calico IPPools for egress NAT
-	Logf("Creating Calico IPPools for egress...")
-	egressPools := `apiVersion: crd.projectcalico.org/v1
-kind: IPPool
-metadata:
-  name: m2m-egress-v4
-spec:
-  cidr: 10.250.2.0/30
-  natOutgoing: false
-  blockSize: 32
-  nodeSelector: "!all()"
-  allowedUses:
-    - Workload
----
-apiVersion: crd.projectcalico.org/v1
-kind: IPPool
-metadata:
-  name: m2m-egress-v6
-spec:
-  cidr: fd90:4dbf:396d::/126
-  natOutgoing: false
-  blockSize: 128
-  nodeSelector: "!all()"
-  allowedUses:
-    - Workload
----
-apiVersion: crd.projectcalico.org/v1
-kind: IPPool
-metadata:
-  name: c2m-egress-v4
-spec:
-  cidr: 10.250.6.0/30
-  natOutgoing: false
-  blockSize: 32
-  nodeSelector: "!all()"
-  allowedUses:
-    - Workload
----
-apiVersion: crd.projectcalico.org/v1
-kind: IPPool
-metadata:
-  name: c2m-egress-v6
-spec:
-  cidr: fde8:e5cf:d314::/126
-  natOutgoing: false
-  blockSize: 128
-  nodeSelector: "!all()"
-  allowedUses:
-    - Workload`
-	DockerExecInput(cp.Name, egressPools, "kubectl", "--kubeconfig="+kubeconfigPath, "apply", "-f", "-") //nolint:errcheck
 
 	// IPv4 EndpointSlice — API server is now on overlay IP from the start
 	Logf("Creating IPv4 EndpointSlice for kubernetes service...")
@@ -591,6 +602,8 @@ ports:
 	kubectl("wait", "--for=condition=available", "deployment/controller", //nolint:errcheck
 		"-n", "metallb-system", "--timeout=120s")
 	kubectl("delete", "daemonset", "speaker", "-n", "metallb-system", "--ignore-not-found=true") //nolint:errcheck
+	// Remove the webhook too — it targets the speaker which we don't run.
+	kubectl("delete", "validatingwebhookconfiguration", "metallb-webhook-configuration", "--ignore-not-found=true") //nolint:errcheck
 
 	// kube-vip DaemonSet
 	Logf("Installing kube-vip DaemonSet...")
@@ -611,6 +624,14 @@ ports:
 		"kubectl --kubeconfig=%s kustomize /repo/e2e/operator | kubectl --kubeconfig=%s apply -f -",
 		kubeconfigPath, kubeconfigPath)); err != nil {
 		return fmt.Errorf("installing operator: %w", err)
+	}
+
+	// Network-sync controller (CAPI CRD + RBAC + Deployment)
+	Logf("Installing network-sync controller...")
+	if _, err := DockerExecShell(cp.Name, fmt.Sprintf(
+		"kubectl --kubeconfig=%s kustomize /repo/e2e/sync | kubectl --kubeconfig=%s apply -f -",
+		kubeconfigPath, kubeconfigPath)); err != nil {
+		return fmt.Errorf("installing network-sync: %w", err)
 	}
 
 	Logf("Component installation complete")
@@ -733,18 +754,33 @@ func PhaseCluster2(cluster2 *Cluster, repoRoot string) error {
 		return fmt.Errorf("cluster2 underlay: %w", err)
 	}
 
-	// Phase C2-2: kubeadm init (single-node, no VIP, untaint control-plane)
-	Logf("Cluster-2: Running kubeadm init on %s...", node.Name)
-	if err := KubeadmInitSingleNode(cluster2); err != nil {
-		return fmt.Errorf("cluster2 kubeadm: %w", err)
+	// Wait for NAT64 route to propagate via EVPN before kubeadm (needs to pull pause image)
+	Logf("Cluster-2: Waiting for NAT64 route in cluster VRF...")
+	if err := WaitFor("NAT64 route", 120*time.Second, 5*time.Second, func() (bool, error) {
+		craPID, err := getCRAPID(node.Name)
+		if err != nil {
+			return false, err
+		}
+		out, _ := DockerExec(node.Name,
+			"nsenter", "-t", craPID, "-m", "-n", "--",
+			"vtysh", "-c", fmt.Sprintf("show ipv6 route vrf cluster %s/128", cluster2.NAT64DNS))
+		return strings.Contains(out, cluster2.NAT64DNS), nil
+	}); err != nil {
+		return fmt.Errorf("cluster2 NAT64 route: %w", err)
 	}
 
-	// Configure DNS → NAT64 (needed for fetching remote manifests like Calico)
+	// Configure DNS → NAT64 before kubeadm so image pulls work
 	Logf("Cluster-2: Configuring DNS → NAT64 (%s)...", cluster2.NAT64DNS)
 	if _, err := DockerExecShell(node.Name,
 		fmt.Sprintf("printf 'nameserver %s\\n' > /etc/resolv.conf", cluster2.NAT64DNS),
 	); err != nil {
 		return fmt.Errorf("setting DNS on %s: %w", node.Name, err)
+	}
+
+	// Phase C2-2: kubeadm init (single-node, no VIP, untaint control-plane)
+	Logf("Cluster-2: Running kubeadm init on %s...", node.Name)
+	if err := KubeadmInitSingleNode(cluster2); err != nil {
+		return fmt.Errorf("cluster2 kubeadm: %w", err)
 	}
 
 	// Phase C2-3: Install components (images, CNI plugins, Calico, Multus, operator)
@@ -785,7 +821,9 @@ func PhaseCluster2Components(cluster *Cluster, repoRoot string) error {
 	images := []string{
 		imgBase + "/das-schiff-network-operator:latest",
 		imgBase + "/das-schiff-nwop-agent-cra-frr:latest",
-		imgBase + "/das-schiff-nwop-agent-hbn-l2:latest",
+		imgBase + "/das-schiff-nwop-agent-netplan:latest",
+		imgBase + "/das-schiff-platform-coil:latest",
+		imgBase + "/das-schiff-platform-metallb:latest",
 	}
 	for _, img := range images {
 		Logf("  Loading %s on %s", filepath.Base(img), cp.Name)
@@ -832,6 +870,18 @@ func PhaseCluster2Components(cluster *Cluster, repoRoot string) error {
 		return fmt.Errorf("installing operator: %w", err)
 	}
 
+	// Enable intent reconciler on cluster-2 (cluster-2 always uses intent CRDs).
+	// Pass --intent-namespace= (empty) so the reconciler watches ALL namespaces,
+	// matching the behaviour of e2etests/framework/intent.go EnableIntentReconciler().
+	Logf("Cluster-2: Enabling intent reconciler on operator...")
+	if _, err := DockerExecShell(cp.Name, fmt.Sprintf(
+		`kubectl --kubeconfig=%s -n kube-system patch deployment network-operator-operator --type=json `+
+			`-p='[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--enable-intent-reconciler"},`+
+			`{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--intent-namespace="}]'`,
+		kubeconfigPath)); err != nil {
+		return fmt.Errorf("patching operator for intent: %w", err)
+	}
+
 	// Wait for operator
 	Logf("Cluster-2: Waiting for operator...")
 	DockerExec(cp.Name, "kubectl", "--kubeconfig="+kubeconfigPath, //nolint:errcheck
@@ -860,13 +910,13 @@ func PhaseCluster2Gateway(cluster *Cluster, repoRoot string) error {
 	cp := cluster.ControlPlane()
 	kubeconfigPath := "/etc/kubernetes/admin.conf"
 
-	// Apply cluster-2 network configs (VRFRouteConfigurations + Layer2NetworkConfigurations).
+	// Apply cluster-2 intent CRDs (VRFs, Networks, Destinations, L2Attachments).
 	// Retry because the webhook may not be serving yet even though the operator pod is Ready
 	// (the readiness probe checks healthz, but the webhook cert generation takes a moment longer).
 	Logf("Cluster-2: Applying network configs (waiting for webhook)...")
 	if err := WaitFor("cluster2 network configs", 120*time.Second, 5*time.Second, func() (bool, error) {
 		_, err := DockerExecShell(cp.Name, fmt.Sprintf(
-			"kubectl --kubeconfig=%s apply -f /repo/e2etests/testdata/cluster2-network-configs.yaml",
+			"kubectl --kubeconfig=%s apply -f /repo/e2etests/testdata/intent/cluster2-configs.yaml",
 			kubeconfigPath))
 		return err == nil, nil
 	}); err != nil {
@@ -940,6 +990,95 @@ func ExtractCluster2Kubeconfig(repoRoot string, cluster *Cluster) error {
 
 	Logf("Cluster-2 kubeconfig written")
 	return nil
+}
+
+// PhaseSyncSetup creates the management-cluster resources for the network-sync controller:
+// namespace, kubeconfig Secret, and CAPI Cluster object on cluster-1, pointing to cluster-2.
+func PhaseSyncSetup(cluster1, cluster2 *Cluster, repoRoot string) error {
+	Logf("Phase 8: Configuring sync controller for cluster-2...")
+
+	cp1 := cluster1.ControlPlane()
+	cp2 := cluster2.ControlPlane()
+	kubeconfigPath := "/etc/kubernetes/admin.conf"
+
+	kubectl := func(args ...string) error {
+		fullArgs := append([]string{"--kubeconfig=" + kubeconfigPath}, args...)
+		_, err := DockerExec(cp1.Name, append([]string{"kubectl"}, fullArgs...)...)
+		return err
+	}
+
+	// 1. Create sync namespace on cluster-1
+	Logf("Creating sync namespace cluster-nwop2 on cluster-1...")
+	kubectl("create", "namespace", "cluster-nwop2", "--dry-run=client", "-o", "yaml") //nolint:errcheck
+	nsYAML := `apiVersion: v1
+kind: Namespace
+metadata:
+  name: cluster-nwop2`
+	DockerExecInput(cp1.Name, nsYAML, "kubectl", "--kubeconfig="+kubeconfigPath, "apply", "-f", "-") //nolint:errcheck
+
+	// 2. Read cluster-2's kubeconfig and create a Secret on cluster-1
+	Logf("Creating kubeconfig Secret for cluster-2 on cluster-1...")
+	rawKubeconfig, err := DockerExec(cp2.Name, "cat", "/etc/kubernetes/admin.conf")
+	if err != nil {
+		return fmt.Errorf("reading cluster2 kubeconfig: %w", err)
+	}
+	// Replace server address with the overlay IPv4 (reachable from cluster-1)
+	rawKubeconfig = strings.ReplaceAll(rawKubeconfig,
+		fmt.Sprintf("server: https://[%s]:6443", cp2.IPv6),
+		fmt.Sprintf("server: https://%s:6443", cp2.IPv4))
+	rawKubeconfig = strings.ReplaceAll(rawKubeconfig,
+		fmt.Sprintf("server: https://%s:6443", cluster2.VIP),
+		fmt.Sprintf("server: https://%s:6443", cp2.IPv4))
+
+	// Create the Secret with the kubeconfig as `data.value`
+	// (CAPI convention: <cluster-name>-kubeconfig, key "value")
+	secretYAML := fmt.Sprintf(`apiVersion: v1
+kind: Secret
+metadata:
+  name: nwop2-kubeconfig
+  namespace: cluster-nwop2
+type: Opaque
+stringData:
+  value: |
+%s`, indentLines(rawKubeconfig, 4))
+	if err := DockerExecInput(cp1.Name, secretYAML,
+		"kubectl", "--kubeconfig="+kubeconfigPath, "apply", "-f", "-"); err != nil {
+		return fmt.Errorf("creating kubeconfig secret: %w", err)
+	}
+
+	// 3. Create CAPI Cluster object on cluster-1
+	Logf("Creating CAPI Cluster object for nwop2...")
+	clusterYAML := `apiVersion: cluster.x-k8s.io/v1beta1
+kind: Cluster
+metadata:
+  name: nwop2
+  namespace: cluster-nwop2
+spec:
+  paused: false`
+	if err := DockerExecInput(cp1.Name, clusterYAML,
+		"kubectl", "--kubeconfig="+kubeconfigPath, "apply", "-f", "-"); err != nil {
+		return fmt.Errorf("creating CAPI cluster: %w", err)
+	}
+
+	// 4. Wait for network-sync to pick up the cluster
+	Logf("Waiting for network-sync deployment to be available...")
+	kubectl("wait", "--for=condition=available", "deployment/network-sync", //nolint:errcheck
+		"-n", "kube-system", "--timeout=120s")
+
+	Logf("Sync controller configured for cluster-2")
+	return nil
+}
+
+// indentLines indents each line of s by n spaces.
+func indentLines(s string, n int) string {
+	prefix := strings.Repeat(" ", n)
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		if line != "" {
+			lines[i] = prefix + line
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // EnvOr returns the environment variable value or a fallback default.
