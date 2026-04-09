@@ -1,0 +1,55 @@
+# RBAC for the network-sync controller on the management cluster.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: network-sync
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: network-sync
+rules:
+# Watch CAPI Cluster objects
+- apiGroups: ["cluster.x-k8s.io"]
+  resources: ["clusters"]
+  verbs: ["get", "list", "watch"]
+# Read kubeconfig Secrets
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "list", "watch"]
+# Watch + manage all intent CRD types (including finalizer updates)
+- apiGroups: ["network-connector.sylvaproject.org"]
+  resources:
+  - vrfs
+  - networks
+  - destinations
+  - layer2attachments
+  - inbounds
+  - outbounds
+  - podnetworks
+  - bgppeerings
+  - collectors
+  - trafficmirrors
+  - announcementpolicies
+  - interfaceconfigs
+  verbs: ["get", "list", "watch", "update", "patch"]
+# Read intent CRD status (for IPAM promotion)
+- apiGroups: ["network-connector.sylvaproject.org"]
+  resources:
+  - inbounds/status
+  - outbounds/status
+  verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: network-sync
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: network-sync
+subjects:
+- kind: ServiceAccount
+  name: network-sync
+  namespace: kube-system
