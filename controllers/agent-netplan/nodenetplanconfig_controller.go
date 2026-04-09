@@ -23,9 +23,6 @@ import (
 	"strings"
 	"time"
 
-	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
-	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
-	agentnetplan "github.com/telekom/das-schiff-network-operator/pkg/reconciler/agent-netplan"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -33,6 +30,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
+
+	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
+	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
+	agentnetplan "github.com/telekom/das-schiff-network-operator/pkg/reconciler/agent-netplan"
 )
 
 const requeueTime = 10 * time.Minute

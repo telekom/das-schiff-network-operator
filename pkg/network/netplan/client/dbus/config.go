@@ -7,9 +7,10 @@ import (
 
 	"github.com/godbus/dbus/v5"
 	"github.com/sirupsen/logrus"
+	"k8s.io/apimachinery/pkg/util/yaml"
+
 	"github.com/telekom/das-schiff-network-operator/pkg/network/net"
 	"github.com/telekom/das-schiff-network-operator/pkg/network/netplan"
-	"k8s.io/apimachinery/pkg/util/yaml"
 )
 
 const (

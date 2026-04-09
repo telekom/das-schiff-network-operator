@@ -5,13 +5,16 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
-	schiff_unix "github.com/telekom/das-schiff-network-operator/pkg/unix"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/exp/maps"
 	"golang.org/x/sys/unix"
+
+	schiff_unix "github.com/telekom/das-schiff-network-operator/pkg/unix"
 )
 
 const (
@@ -20,6 +23,16 @@ const (
 )
 
 var procSysNetPath = "/proc/sys/net"
+
+// sanitizeIntfName validates that an interface name is a single path component
+// with no directory traversal. Returns the sanitized name or an error.
+func sanitizeIntfName(name string) (string, error) {
+	s := filepath.Base(name)
+	if s == "." || s == ".." || strings.ContainsAny(s, "/\\") {
+		return "", fmt.Errorf("invalid interface name: %q", name)
+	}
+	return s, nil
+}
 
 type Layer2Information struct {
 	VlanID           int      `json:"vlanID"`
@@ -437,14 +450,19 @@ func (n *Manager) isL2VNIreattachRequired(current, desired *Layer2Information) (
 }
 
 func (*Manager) configureBridge(intfName string) error {
+	safe, err := sanitizeIntfName(intfName)
+	if err != nil {
+		return err
+	}
+
 	// Ensure bridge can receive gratitious ARP
-	if err := os.WriteFile(fmt.Sprintf("%s/ipv4/conf/%s/arp_accept", procSysNetPath, intfName), []byte("1"), neighFilePermissions); err != nil {
+	if err := os.WriteFile(fmt.Sprintf("%s/ipv4/conf/%s/arp_accept", procSysNetPath, safe), []byte("1"), neighFilePermissions); err != nil {
 		return fmt.Errorf("error setting arp_accept = 1 for interface: %w", err)
 	}
 
 	// Ensure we can receive unsolicited and solicited but untracked NA
-	if _, err := os.Stat(fmt.Sprintf("%s/ipv6/conf/%s/accept_untracked_na", procSysNetPath, intfName)); err == nil {
-		if err := os.WriteFile(fmt.Sprintf("%s/ipv6/conf/%s/accept_untracked_na", procSysNetPath, intfName), []byte("2"), neighFilePermissions); err != nil {
+	if _, err := os.Stat(fmt.Sprintf("%s/ipv6/conf/%s/accept_untracked_na", procSysNetPath, safe)); err == nil {
+		if err := os.WriteFile(fmt.Sprintf("%s/ipv6/conf/%s/accept_untracked_na", procSysNetPath, safe), []byte("2"), neighFilePermissions); err != nil {
 			return fmt.Errorf("error setting accept_untracked_na = 2 for interface: %w", err)
 		}
 	} else if !os.IsNotExist(err) {
@@ -453,8 +471,8 @@ func (*Manager) configureBridge(intfName string) error {
 
 	// Disable duplicate address detection — anycast gateways share the same
 	// MAC + IP across nodes, so DAD would always flag a duplicate.
-	if _, err := os.Stat(fmt.Sprintf("%s/ipv6/conf/%s/accept_dad", procSysNetPath, intfName)); err == nil {
-		if err := os.WriteFile(fmt.Sprintf("%s/ipv6/conf/%s/accept_dad", procSysNetPath, intfName), []byte("0"), neighFilePermissions); err != nil {
+	if _, err := os.Stat(fmt.Sprintf("%s/ipv6/conf/%s/accept_dad", procSysNetPath, safe)); err == nil {
+		if err := os.WriteFile(fmt.Sprintf("%s/ipv6/conf/%s/accept_dad", procSysNetPath, safe), []byte("0"), neighFilePermissions); err != nil {
 			return fmt.Errorf("error setting accept_dad = 0 for interface: %w", err)
 		}
 	} else if !os.IsNotExist(err) {
@@ -467,11 +485,11 @@ func (*Manager) configureBridge(intfName string) error {
 	}
 
 	// Ensure Ipv4 Neighbor expiry is set to 30min
-	if err := os.WriteFile(fmt.Sprintf("%s/ipv4/neigh/%s/base_reachable_time_ms", procSysNetPath, intfName), []byte(baseTimer), neighFilePermissions); err != nil {
+	if err := os.WriteFile(fmt.Sprintf("%s/ipv4/neigh/%s/base_reachable_time_ms", procSysNetPath, safe), []byte(baseTimer), neighFilePermissions); err != nil {
 		return fmt.Errorf("error setting ipv4 base_reachable_time_ms = %s for interface: %w", baseTimer, err)
 	}
 	// Ensure IPv6 Neighbor expiry is set to 30min
-	if err := os.WriteFile(fmt.Sprintf("%s/ipv6/neigh/%s/base_reachable_time_ms", procSysNetPath, intfName), []byte(baseTimer), neighFilePermissions); err != nil {
+	if err := os.WriteFile(fmt.Sprintf("%s/ipv6/neigh/%s/base_reachable_time_ms", procSysNetPath, safe), []byte(baseTimer), neighFilePermissions); err != nil {
 		return fmt.Errorf("error setting ipv6 base_reachable_time_ms = %s for interface: %w", baseTimer, err)
 	}
 	return nil
