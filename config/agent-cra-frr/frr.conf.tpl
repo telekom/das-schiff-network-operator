@@ -136,10 +136,10 @@ address-family ipv4 unicast
   neighbor {{ $peerIdentifier }} maximum-prefix {{ .IPv4.MaxPrefixes }}
   {{ end }}
   {{ if .IPv4.ImportFilter }}
-  neighbor {{ $peerIdentifier }} route-map {{ $safeName }}-ipv4-in in
+  neighbor {{ $peerIdentifier }} route-map rm_{{ $safeName }}-ipv4-in in
   {{ end }}
   {{ if .IPv4.ExportFilter }}
-  neighbor {{ $peerIdentifier }} route-map {{ $safeName }}-ipv4-out out
+  neighbor {{ $peerIdentifier }} route-map rm_{{ $safeName }}-ipv4-out out
   {{ end }}
 exit-address-family
 {{ end }}
@@ -152,10 +152,10 @@ address-family ipv6 unicast
   neighbor {{ $peerIdentifier }} maximum-prefix {{ .IPv6.MaxPrefixes }}
   {{ end }}
   {{ if .IPv6.ImportFilter }}
-  neighbor {{ $peerIdentifier }} route-map {{ $safeName }}-ipv6-in in
+  neighbor {{ $peerIdentifier }} route-map rm_{{ $safeName }}-ipv6-in in
   {{ end }}
   {{ if .IPv6.ExportFilter }}
-  neighbor {{ $peerIdentifier }} route-map {{ $safeName }}-ipv6-out out
+  neighbor {{ $peerIdentifier }} route-map rm_{{ $safeName }}-ipv6-out out
   {{ end }}
 exit-address-family
 {{ end }}

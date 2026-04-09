@@ -4,12 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/go-logr/logr"
-	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
-	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
-	"github.com/telekom/das-schiff-network-operator/pkg/network/netplan"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 	"gopkg.in/yaml.v2"
@@ -17,6 +15,10 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
+	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
+	"github.com/telekom/das-schiff-network-operator/pkg/network/netplan"
 )
 
 const (
@@ -384,18 +386,25 @@ func (reconciler *NodeNetplanConfigReconciler) Reconcile(ctx context.Context) er
 }
 
 func setEUIAutogeneration(intfName string, generateEUI bool) error {
-	fileName := fmt.Sprintf("/proc/sys/net/ipv6/conf/%s/addr_gen_mode", intfName)
+	safe := filepath.Base(intfName)
+	if safe == "." || safe == ".." || strings.ContainsAny(safe, "/\\") {
+		return fmt.Errorf("invalid interface name: %q", intfName)
+	}
+	fileName := fmt.Sprintf("/proc/sys/net/ipv6/conf/%s/addr_gen_mode", safe)
 	file, err := os.OpenFile(fileName, os.O_WRONLY, 0)
 	if err != nil {
 		return fmt.Errorf("error opening file: %w", err)
 	}
-	defer file.Close()
 	value := "1"
 	if generateEUI {
 		value = "0"
 	}
 	if _, err := fmt.Fprintf(file, "%s\n", value); err != nil {
+		file.Close()
 		return fmt.Errorf("error writing to file: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("error closing file: %w", err)
 	}
 	return nil
 }
