@@ -249,6 +249,22 @@ jobs:
              [ -n "$POD" ] && kubectl --kubeconfig=/etc/kubernetes/admin.conf \
               -n kube-system describe "$POD"' \
             > /tmp/e2e-logs/operator-describe.log 2>&1 || true
+          # Platform controller logs (cluster-1)
+          for ctrl_label in platform-coil platform-metallb; do
+            docker exec nwop-control-plane bash -c \
+              "POD=\$(kubectl --kubeconfig=/etc/kubernetes/admin.conf -n kube-system \
+                get pods -l app.kubernetes.io/name=${ctrl_label} -o name | head -1); \
+               [ -n \"\$POD\" ] && kubectl --kubeconfig=/etc/kubernetes/admin.conf \
+                -n kube-system logs \"\$POD\" --all-containers" \
+              > "/tmp/e2e-logs/${ctrl_label}-logs.log" 2>&1 || true
+          done
+          # Network-sync controller logs (cluster-1)
+          docker exec nwop-control-plane bash -c \
+            'POD=$(kubectl --kubeconfig=/etc/kubernetes/admin.conf -n kube-system \
+              get pods -l app.kubernetes.io/name=network-sync -o name | head -1); \
+             [ -n "$POD" ] && kubectl --kubeconfig=/etc/kubernetes/admin.conf \
+              -n kube-system logs "$POD" --all-containers' \
+            > /tmp/e2e-logs/network-sync-logs.log 2>&1 || true
           # Cluster-2 state
           docker exec nwop2-worker kubectl \
             --kubeconfig=/etc/kubernetes/admin.conf get pods -A -o wide \
@@ -287,6 +303,16 @@ jobs:
               --kubeconfig=/etc/kubernetes/admin.conf get "$crd" -A -o yaml \
               > "/tmp/e2e-logs/cluster2-intent-${crd}.yaml" 2>&1 || true
           done
+          # Platform-managed resources (Coil Egress, Calico IPPool, NetworkPolicies)
+          docker exec nwop-control-plane kubectl \
+            --kubeconfig=/etc/kubernetes/admin.conf get egresses.coil.cybozu.com -A -o yaml \
+            > /tmp/e2e-logs/coil-egresses.yaml 2>&1 || true
+          docker exec nwop-control-plane kubectl \
+            --kubeconfig=/etc/kubernetes/admin.conf get ippools.crd.projectcalico.org -o yaml \
+            > /tmp/e2e-logs/calico-ippools.yaml 2>&1 || true
+          docker exec nwop-control-plane kubectl \
+            --kubeconfig=/etc/kubernetes/admin.conf get networkpolicies -A -o yaml \
+            > /tmp/e2e-logs/networkpolicies.yaml 2>&1 || true
           for rtr in leaf1 leaf2 dcgw1 dcgw2; do
             docker exec "clab-nwop-${rtr}" vtysh -c 'show bgp summary' \
               > "/tmp/e2e-logs/${rtr}-bgp.log" 2>&1 || true
