@@ -104,7 +104,7 @@ func TestCoilReconciler_CreateIPPoolsAndEgress(t *testing.T) { //nolint:funlen /
 	}
 
 	cli := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ob, dest).Build()
-	r := &CoilReconciler{Client: cli, Scheme: scheme}
+	r := &CoilReconciler{Client: cli, APIReader: cli, Scheme: scheme}
 
 	// First reconcile adds finalizer.
 	reconcileOnce(t, r, "egress-a")
@@ -232,7 +232,7 @@ func TestCoilReconciler_ResolveMultipleDestinations(t *testing.T) {
 	}
 
 	cli := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ob, dest1, dest2, dest3).Build()
-	r := &CoilReconciler{Client: cli, Scheme: scheme}
+	r := &CoilReconciler{Client: cli, APIReader: cli, Scheme: scheme}
 
 	reconcileOnce(t, r, "multi-dest")
 	reconcileOnce(t, r, "multi-dest")
@@ -278,7 +278,7 @@ func TestCoilReconciler_SkipIPv4Pool(t *testing.T) {
 	}
 
 	cli := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ob).Build()
-	r := &CoilReconciler{Client: cli, Scheme: scheme}
+	r := &CoilReconciler{Client: cli, APIReader: cli, Scheme: scheme}
 
 	reconcileOnce(t, r, "ipv6-only")
 	reconcileOnce(t, r, "ipv6-only")
@@ -325,7 +325,7 @@ func TestCoilReconciler_SkipIPv6Pool(t *testing.T) {
 	}
 
 	cli := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ob).Build()
-	r := &CoilReconciler{Client: cli, Scheme: scheme}
+	r := &CoilReconciler{Client: cli, APIReader: cli, Scheme: scheme}
 
 	reconcileOnce(t, r, "ipv4-only")
 	reconcileOnce(t, r, "ipv4-only")
@@ -356,7 +356,7 @@ func TestCoilReconciler_DefaultReplicas(t *testing.T) {
 	}
 
 	cli := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ob).Build()
-	r := &CoilReconciler{Client: cli, Scheme: scheme}
+	r := &CoilReconciler{Client: cli, APIReader: cli, Scheme: scheme}
 
 	reconcileOnce(t, r, "no-replicas")
 	reconcileOnce(t, r, "no-replicas")
@@ -389,7 +389,7 @@ func TestCoilReconciler_DeletionCleanup(t *testing.T) {
 	}
 
 	cli := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ob).Build()
-	r := &CoilReconciler{Client: cli, Scheme: scheme}
+	r := &CoilReconciler{Client: cli, APIReader: cli, Scheme: scheme}
 
 	// Create resources.
 	reconcileOnce(t, r, "to-delete")
@@ -478,7 +478,7 @@ func TestCoilReconciler_DestinationChangeTriggersUpdate(t *testing.T) {
 	}
 
 	cli := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ob, dest).Build()
-	r := &CoilReconciler{Client: cli, Scheme: scheme}
+	r := &CoilReconciler{Client: cli, APIReader: cli, Scheme: scheme}
 
 	// Initial reconcile.
 	reconcileOnce(t, r, "dest-update")
@@ -554,7 +554,7 @@ func TestCoilReconciler_NoMatchingDestinations(t *testing.T) {
 	}
 
 	cli := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ob, dest).Build()
-	r := &CoilReconciler{Client: cli, Scheme: scheme}
+	r := &CoilReconciler{Client: cli, APIReader: cli, Scheme: scheme}
 
 	reconcileOnce(t, r, "no-match")
 	reconcileOnce(t, r, "no-match")
@@ -591,7 +591,7 @@ func TestCoilReconciler_StatusAddressesPreferred(t *testing.T) {
 	}
 
 	cli := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ob).WithStatusSubresource(ob).Build()
-	r := &CoilReconciler{Client: cli, Scheme: scheme}
+	r := &CoilReconciler{Client: cli, APIReader: cli, Scheme: scheme}
 
 	reconcileOnce(t, r, "status-pref")
 	reconcileOnce(t, r, "status-pref")
@@ -645,7 +645,7 @@ func TestCoilReconciler_MapDestinationToOutbounds(t *testing.T) {
 	}
 
 	cli := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ob1, ob2, dest).Build()
-	r := &CoilReconciler{Client: cli, Scheme: scheme}
+	r := &CoilReconciler{Client: cli, APIReader: cli, Scheme: scheme}
 
 	requests := r.mapDestinationToOutbounds(context.Background(), dest)
 	if len(requests) != 1 {

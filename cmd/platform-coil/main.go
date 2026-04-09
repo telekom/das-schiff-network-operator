@@ -67,9 +67,10 @@ func main() {
 	}
 
 	if err = (&platform.CoilReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-		Log:    mgr.GetLogger().WithName("CoilReconciler"),
+		Client:    mgr.GetClient(),
+		APIReader: mgr.GetAPIReader(),
+		Scheme:    mgr.GetScheme(),
+		Log:       mgr.GetLogger().WithName("CoilReconciler"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Coil")
 		os.Exit(1)
