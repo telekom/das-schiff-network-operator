@@ -74,6 +74,22 @@ test: manifests generate fmt vet envtest ## Run tests.
 build: generate fmt vet ## Build manager binary.
 	go build -ldflags "$(LDFLAGS)" -o bin/manager cmd/operator/main.go
 
+.PHONY: kubectl-nnc
+kubectl-nnc: ## Build kubectl-nnc plugin binary.
+	go build -ldflags "$(LDFLAGS)" -o bin/kubectl-nnc ./cmd/kubectl-nnc/
+
+.PHONY: build-platform-coil
+build-platform-coil: ## Build platform-coil binary.
+	go build -ldflags "$(LDFLAGS)" -o bin/platform-coil ./cmd/platform-coil/
+
+.PHONY: build-platform-metallb
+build-platform-metallb: ## Build platform-metallb binary.
+	go build -ldflags "$(LDFLAGS)" -o bin/platform-metallb ./cmd/platform-metallb/
+
+.PHONY: build-network-sync
+build-network-sync: ## Build network-sync binary.
+	go build -ldflags "$(LDFLAGS)" -o bin/network-sync ./cmd/network-sync/
+
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
 	go run -ldflags "$(LDFLAGS)" ./cmd/operator/main.go
@@ -90,6 +106,9 @@ docker-build: #test ## Build docker image with the manager.
 	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-nwop-agent-cra-vsr.Dockerfile -t ${IMG_BASE}/das-schiff-nwop-agent-cra-vsr:latest .
 	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-nwop-agent-hbn-l2.Dockerfile -t ${IMG_BASE}/das-schiff-nwop-agent-hbn-l2:latest .
 	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-nwop-agent-netplan.Dockerfile -t ${IMG_BASE}/das-schiff-nwop-agent-netplan:latest .
+	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-platform-coil.Dockerfile -t ${IMG_BASE}/das-schiff-platform-coil:latest .
+	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-platform-metallb.Dockerfile -t ${IMG_BASE}/das-schiff-platform-metallb:latest .
+	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-network-sync.Dockerfile -t ${IMG_BASE}/das-schiff-network-sync:latest .
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
@@ -107,6 +126,9 @@ kind-load: docker-build ## Load docker image into kind cluster.
 	kind load docker-image ${IMG_BASE}/das-schiff-nwop-agent-cra-vsr:latest
 	kind load docker-image ${IMG_BASE}/das-schiff-nwop-agent-hbn-l2:latest
 	kind load docker-image ${IMG_BASE}/das-schiff-nwop-agent-netplan:latest
+	kind load docker-image ${IMG_BASE}/das-schiff-platform-coil:latest
+	kind load docker-image ${IMG_BASE}/das-schiff-platform-metallb:latest
+	kind load docker-image ${IMG_BASE}/das-schiff-network-sync:latest
 
 ##@ Release
 
@@ -154,7 +176,7 @@ undeploy: ## Undeploy controller from the K8s cluster specified in ~/.kube/confi
 
 ##@ E2E Testing
 
-KIND_NODE_VERSION ?= v1.35.2
+KIND_NODE_VERSION ?= v1.35.1
 E2E_NODE_IMAGE ?= $(IMG_BASE)/das-schiff-kind-node:$(KIND_NODE_VERSION)
 E2E_NAT64_IMAGE ?= $(IMG_BASE)/das-schiff-nat64:latest
 E2E_TESTER_IMAGE ?= $(IMG_BASE)/das-schiff-e2e-tester:latest
@@ -175,23 +197,44 @@ e2e-build-node-image: e2e-build-cra-frr ## Build kind node image with CRA-FRR ba
 
 .PHONY: e2e-up
 e2e-up: ## Stand up the full E2E lab (containerlab + CRA + kubeadm + components).
-	cd e2e/setup && E2E_NODE_IMAGE=$(E2E_NODE_IMAGE) E2E_NAT64_IMAGE=$(E2E_NAT64_IMAGE) E2E_TESTER_IMAGE=$(E2E_TESTER_IMAGE) go run ./cmd up
+	cd e2e/setup && \
+	  E2E_NODE_IMAGE=$(E2E_NODE_IMAGE) \
+	  E2E_NAT64_IMAGE=$(E2E_NAT64_IMAGE) \
+	  E2E_TESTER_IMAGE=$(E2E_TESTER_IMAGE) \
+	  E2E_SKIP_BUILD=$${E2E_SKIP_BUILD:-} \
+	  E2E_IMAGE_DIR=$${E2E_IMAGE_DIR:-} \
+	  go run ./cmd up
 
 .PHONY: e2e-down
 e2e-down: ## Tear down the E2E lab.
 	cd e2e/setup && go run ./cmd down
 
 .PHONY: e2e-test
-e2e-test: ## Run all E2E tests.
+e2e-test: ## Run legacy E2E tests (excludes intent/mirror/sync tests).
 	docker exec clab-nwop-tester bash -c \
-	  'cd /repo && KUBECONFIG=/repo/e2etests/.kubeconfig go test -v -count=1 -timeout=30m ./e2etests/...'
+	  'cd /repo && KUBECONFIG=/repo/e2etests/.kubeconfig go test -v -count=1 -timeout=30m ./e2etests/... -ginkgo.label-filter="!intent && !intent-exclusive && !mirror && !sync"'
+
+.PHONY: e2e-test-intent
+e2e-test-intent: ## Run E2E tests with intent reconciler enabled (replaces legacy pipeline).
+	docker exec clab-nwop-tester bash -c \
+	  'cd /repo && KUBECONFIG=/repo/e2etests/.kubeconfig E2E_INTENT_MODE=true go test -v -count=1 -timeout=30m ./e2etests/... -ginkgo.label-filter="intent-exclusive || intent"'
+
+.PHONY: e2e-test-sync
+e2e-test-sync: ## Run E2E sync controller tests.
+	docker exec clab-nwop-tester bash -c \
+	  'cd /repo && KUBECONFIG=/repo/e2etests/.kubeconfig E2E_INTENT_MODE=true go test -v -count=1 -timeout=30m ./e2etests/... -ginkgo.label-filter="sync"'
+
+.PHONY: e2e-test-mirror
+e2e-test-mirror: ## Run E2E traffic mirror tests.
+	docker exec clab-nwop-tester bash -c \
+	  'cd /repo && KUBECONFIG=/repo/e2etests/.kubeconfig E2E_INTENT_MODE=true go test -v -count=1 -timeout=30m ./e2etests/... -ginkgo.label-filter="mirror"'
 
 ##@ Build Dependencies
 
 CONTROLLER_GEN = $(shell pwd)/bin/controller-gen
 .PHONY: controller-gen
 controller-gen: ## Download controller-gen locally if necessary.
-	$(call go-get-tool,$(CONTROLLER_GEN),sigs.k8s.io/controller-tools/cmd/controller-gen@v0.17.2)
+	$(call go-get-tool,$(CONTROLLER_GEN),sigs.k8s.io/controller-tools/cmd/controller-gen@v0.20.0)
 
 KUSTOMIZE = $(shell pwd)/bin/kustomize
 .PHONY: kustomize
