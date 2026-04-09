@@ -48,6 +48,8 @@ func generateNodeConfig(genDir, tplDir string, node Node, clusterVNI int, cluste
 		"cra/netplan",
 		"cra/certs",
 		"cra/systemd-network/10-netplan-hbn.network.d",
+		"netplan",
+		"systemd-network/10-netplan-hbn.network.d",
 	} {
 		if err := os.MkdirAll(filepath.Join(nodeDir, sub), 0o755); err != nil {
 			return err
@@ -110,10 +112,47 @@ Gateway=fd00:7:caa5::1
 		return err
 	}
 
+	// Host-side systemd-networkd drop-in: IPv4 default via IPv6 next-hop (cross-family / RFC 5549).
+	// Netplan can't express cross-family routes, so we add the IPv4 default via a networkd drop-in.
+	hostHbnRoutes := fmt.Sprintf(`[Route]
+Destination=0.0.0.0/0
+Gateway=fd00:7:caa5::
+Source=%s
+`, node.IPv4)
+	if err := os.WriteFile(
+		filepath.Join(nodeDir, "systemd-network/10-netplan-hbn.network.d/ipv4-default-route.conf"),
+		[]byte(hostHbnRoutes), 0o644,
+	); err != nil {
+		return err
+	}
+
 	// Node identity env file
 	identity := fmt.Sprintf("NODE_IPV4=%s\nNODE_IPV6=%s\nVTEP_IP=%s\nNODE_HOSTNAME=%s\n",
 		node.IPv4, node.IPv6, node.VtepIP, node.Hostname)
-	return os.WriteFile(filepath.Join(nodeDir, "node-identity.env"), []byte(identity), 0o644)
+	if err := os.WriteFile(filepath.Join(nodeDir, "node-identity.env"), []byte(identity), 0o644); err != nil {
+		return err
+	}
+
+	// Host-side netplan config for hbn trunk interface.
+	// critical: true → KeepConfiguration=true in systemd-networkd (hitless apply).
+	// Addresses are per-node; routes go via CRA's link-local on the other end of the veth.
+	hbnNetplan := fmt.Sprintf(`# HBN trunk interface — parent for operator-managed VLANs.
+network:
+  version: 2
+  ethernets:
+    hbn:
+      addresses:
+        - fd00:7:caa5::1/127
+        - %s/32
+        - %s/128
+      link-local: []
+      critical: true
+      routes:
+        - to: "::/0"
+          via: "fd00:7:caa5::"
+          from: %s
+`, node.IPv4, node.IPv6, node.IPv6)
+	return os.WriteFile(filepath.Join(nodeDir, "netplan/10-hbn.yaml"), []byte(hbnNetplan), 0o600)
 }
 
 type templateData struct {

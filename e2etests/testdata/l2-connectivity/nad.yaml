@@ -41,6 +41,11 @@ spec:
     }
 ---
 # NetworkAttachmentDefinition for VLAN 502 (m2m VRF, cross-VLAN test)
+# Uses CNI conflist to chain macvlan with the tuning meta-plugin.
+# The tuning plugin disables IPv6 DAD (Duplicate Address Detection) at
+# CNI-chain time, preventing addresses from entering "dadfailed" state
+# in containerlab/Kind environments where CRA bridge agents respond to
+# DAD probes.
 apiVersion: k8s.cni.cncf.io/v1
 kind: NetworkAttachmentDefinition
 metadata:

@@ -1,0 +1,76 @@
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: VRF
+metadata:
+  name: vrf-mirror
+  namespace: default
+spec:
+  vrf: "mirror"
+  vni: 2002099
+  routeTarget: "65188:2099"
+---
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Destination
+metadata:
+  name: dest-mirror
+  namespace: default
+  labels:
+    type: mirror
+spec:
+  vrfRef: "vrf-mirror"
+  prefixes:
+    - "10.250.90.0/24"
+---
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Network
+metadata:
+  name: net-mirror-vlan590
+  namespace: default
+spec:
+  vlan: 590
+  vni: 4000090
+  ipv4:
+    cidr: "10.250.90.1/24"
+---
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Layer2Attachment
+metadata:
+  name: l2a-mirror-vlan590
+  namespace: default
+spec:
+  networkRef: "net-mirror-vlan590"
+  destinations:
+    matchLabels:
+      type: mirror
+---
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Collector
+metadata:
+  name: col-mirror
+  namespace: default
+spec:
+  address: "10.250.90.100"
+  protocol: l3gre
+  mirrorVRF:
+    name: "vrf-mirror"
+    loopback:
+      name: "mirror"
+      poolRef:
+        apiGroup: "ipam.cluster.x-k8s.io"
+        kind: "InClusterIPPool"
+        name: "mirror-pool"
+---
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Inbound
+metadata:
+  name: ib-m2m-mirror
+  namespace: default
+spec:
+  networkRef: "net-vlan501"
+  destinations:
+    matchLabels:
+      type: gateway
+  addresses:
+    ipv4:
+      - "10.250.90.50/32"
+  advertisement:
+    type: bgp
