@@ -548,6 +548,8 @@ func PhaseComponents(cluster *Cluster, repoRoot string) error {
 		"crd/bgpconfigurations.crd.projectcalico.org",
 		"crd/felixconfigurations.crd.projectcalico.org",
 		"crd/ippools.crd.projectcalico.org",
+		"crd/globalnetworksets.crd.projectcalico.org",
+		"crd/globalnetworkpolicies.crd.projectcalico.org",
 		"--timeout=60s")
 	// Re-apply after CRDs are established to create CR resources (IPPools, BGPPeers, etc.)
 	kubectl("apply", "-k", "/repo/e2e/calico") //nolint:errcheck

@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -136,7 +135,7 @@ func (r *CoilReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		return ctrl.Result{}, fmt.Errorf("error reconciling Coil Egress: %w", err)
 	}
 
-	// Reconcile egress NetworkPolicy for the Coil pods.
+	// Reconcile egress NetworkPolicy for the Coil gateway pods.
 	if err := r.upsertEgressNetworkPolicy(ctx, outbound, prefixes, logger); err != nil {
 		return ctrl.Result{}, fmt.Errorf("error reconciling egress NetworkPolicy: %w", err)
 	}
@@ -292,40 +291,43 @@ func (r *CoilReconciler) upsertCoilEgress(ctx context.Context, ob *nc.Outbound, 
 	return nil
 }
 
+// upsertEgressNetworkPolicy creates or updates a NetworkPolicy restricting the
+// Coil gateway pods to FoU tunnel traffic (UDP 5555) and destination prefixes.
+// Infrastructure access (K8s API, DNS) is handled by cluster-level Calico
+// GlobalNetworkPolicy + GlobalNetworkSet — see e2e/calico/ for E2E examples.
 func (r *CoilReconciler) upsertEgressNetworkPolicy(ctx context.Context, ob *nc.Outbound, prefixes []string, logger logr.Logger) error {
 	policyName := fmt.Sprintf("%s-egress", ob.Name)
 
-	// Build egress rules from destination prefixes.
-	egressPeers := make([]networkingv1.NetworkPolicyPeer, 0, len(prefixes))
-	for _, prefix := range prefixes {
-		egressPeers = append(egressPeers, networkingv1.NetworkPolicyPeer{
-			IPBlock: &networkingv1.IPBlock{CIDR: prefix},
-		})
-	}
-
-	// Allow DNS egress (UDP 53) so pods can resolve names.
-	dnsPort := int32(53) //nolint:mnd // well-known DNS port
 	udp := corev1.ProtocolUDP
-	dnsRule := networkingv1.NetworkPolicyEgressRule{
+	fouPort := intstr.FromInt32(5555) //nolint:mnd // Coil FoU default port
+
+	// Ingress: allow FoU from any source (tunnel return traffic).
+	ingressRules := []networkingv1.NetworkPolicyIngressRule{{
 		Ports: []networkingv1.NetworkPolicyPort{{
 			Protocol: &udp,
-			Port:     &intstr.IntOrString{Type: intstr.Int, IntVal: dnsPort},
+			Port:     &fouPort,
 		}},
-	}
+	}}
 
-	egressRules := []networkingv1.NetworkPolicyEgressRule{dnsRule}
-	if len(egressPeers) > 0 {
+	// Egress: allow FoU to any destination (tunnels terminate on node IPs).
+	egressRules := []networkingv1.NetworkPolicyEgressRule{{
+		Ports: []networkingv1.NetworkPolicyPort{{
+			Protocol: &udp,
+			Port:     &fouPort,
+		}},
+	}}
+
+	// Egress: allow destination prefixes (external networks the gateway routes to).
+	if len(prefixes) > 0 {
+		egressPeers := make([]networkingv1.NetworkPolicyPeer, 0, len(prefixes))
+		for _, prefix := range prefixes {
+			egressPeers = append(egressPeers, networkingv1.NetworkPolicyPeer{
+				IPBlock: &networkingv1.IPBlock{CIDR: prefix},
+			})
+		}
 		egressRules = append(egressRules, networkingv1.NetworkPolicyEgressRule{
 			To: egressPeers,
 		})
-	}
-
-	// Allow egress to the Kubernetes API server so gateway pods can function.
-	apiRule, err := r.kubeAPIEgressRule(ctx)
-	if err != nil {
-		logger.Info("could not resolve kubernetes API service, skipping API egress rule", "error", err.Error())
-	} else {
-		egressRules = append(egressRules, apiRule)
 	}
 
 	desired := &networkingv1.NetworkPolicy{
@@ -343,13 +345,17 @@ func (r *CoilReconciler) upsertEgressNetworkPolicy(ctx context.Context, ob *nc.O
 					"network-connector.sylvaproject.org/outbound": ob.Name,
 				},
 			},
-			PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeEgress},
-			Egress:      egressRules,
+			PolicyTypes: []networkingv1.PolicyType{
+				networkingv1.PolicyTypeIngress,
+				networkingv1.PolicyTypeEgress,
+			},
+			Ingress: ingressRules,
+			Egress:  egressRules,
 		},
 	}
 
 	existing := &networkingv1.NetworkPolicy{}
-	getErr := r.Get(ctx, types.NamespacedName{Name: policyName, Namespace: ob.Namespace}, existing)
+	getErr := r.APIReader.Get(ctx, types.NamespacedName{Name: policyName, Namespace: ob.Namespace}, existing)
 	if apierrors.IsNotFound(getErr) {
 		logger.Info("creating egress NetworkPolicy", "name", policyName)
 		if createErr := r.Create(ctx, desired); createErr != nil {
@@ -367,44 +373,6 @@ func (r *CoilReconciler) upsertEgressNetworkPolicy(ctx context.Context, ob *nc.O
 		return fmt.Errorf("error updating NetworkPolicy %s: %w", policyName, updateErr)
 	}
 	return nil
-}
-
-// kubeAPIEgressRule builds a NetworkPolicy egress rule allowing traffic to the kubernetes API service.
-func (r *CoilReconciler) kubeAPIEgressRule(ctx context.Context) (networkingv1.NetworkPolicyEgressRule, error) {
-	var svc corev1.Service
-	// Use direct API reader to avoid triggering a cache informer (which would need list+watch RBAC).
-	if err := r.APIReader.Get(ctx, types.NamespacedName{Name: "kubernetes", Namespace: "default"}, &svc); err != nil {
-		return networkingv1.NetworkPolicyEgressRule{}, fmt.Errorf("resolving kubernetes service: %w", err)
-	}
-
-	httpsPort := int32(443) //nolint:mnd // well-known HTTPS port
-	tcp := corev1.ProtocolTCP
-
-	// Allow all ClusterIPs (dual-stack support).
-	peers := make([]networkingv1.NetworkPolicyPeer, 0, len(svc.Spec.ClusterIPs))
-	for _, ip := range svc.Spec.ClusterIPs {
-		cidr := ip + "/32"
-		if strings.Contains(ip, ":") {
-			cidr = ip + "/128"
-		}
-		peers = append(peers, networkingv1.NetworkPolicyPeer{
-			IPBlock: &networkingv1.IPBlock{CIDR: cidr},
-		})
-	}
-	// Fallback if ClusterIPs is empty (pre-dual-stack clusters).
-	if len(peers) == 0 && svc.Spec.ClusterIP != "" {
-		peers = append(peers, networkingv1.NetworkPolicyPeer{
-			IPBlock: &networkingv1.IPBlock{CIDR: svc.Spec.ClusterIP + "/32"},
-		})
-	}
-
-	return networkingv1.NetworkPolicyEgressRule{
-		To: peers,
-		Ports: []networkingv1.NetworkPolicyPort{{
-			Protocol: &tcp,
-			Port:     &intstr.IntOrString{Type: intstr.Int, IntVal: httpsPort},
-		}},
-	}, nil
 }
 
 func (r *CoilReconciler) handleOutboundDeletion(ctx context.Context, ob *nc.Outbound, logger logr.Logger) (ctrl.Result, error) {
