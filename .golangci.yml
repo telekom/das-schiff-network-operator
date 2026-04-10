@@ -267,6 +267,11 @@ linters:
           - noctx
         text: 'os/exec.Command must not be called'
         path: pkg/network/netplan/client/direct/client\.go
+      # frr-cra: fmt.Sprintf("%s:%d", ip, port) is used as an os.NewFile descriptor
+      # name (not a network address), so net.JoinHostPort is not semantically correct.
+      - linters:
+          - nosprintfhostport
+        path: cmd/frr-cra/main\.go
       # E2E test infrastructure: relax pedantic linters
       - path: e2etests/
         linters:
