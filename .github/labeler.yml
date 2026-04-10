@@ -37,6 +37,7 @@ tests:
   - changed-files:
       - any-glob-to-any-file:
           - '**/*_test.go'
+          - '**/tests/*.go'
           - 'e2e/**'
           - 'e2etests/**'
 
