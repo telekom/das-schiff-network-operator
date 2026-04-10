@@ -382,6 +382,8 @@ var _ = Describe("BGP building", func() {
 			Expect(c.Spec.ClusterVRF.BGPPeers).To(BeEmpty())
 		})
 
+		// NOTE: This spec mutates package-level state (hbnHostNextHop) and the process
+		// environment. It must not run in parallel with other specs in this package.
 		It("should add loopback BGP peers with static routes", func() {
 			prevHbnHostNextHop := hbnHostNextHop
 			prevEnvValue, prevEnvWasSet := os.LookupEnv("HBN_HOST_NEXTHOP")

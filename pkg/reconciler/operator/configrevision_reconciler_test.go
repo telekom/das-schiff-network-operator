@@ -150,7 +150,7 @@ var _ = Describe("ConfigRevisionReconciler helpers", func() {
 	})
 
 	Describe("getOutdatedNodes", func() {
-		It("should return no nodes when revision is nil", func() {
+		It("should return empty result when revision is nil", func() {
 			nodes := map[string]*corev1.Node{
 				"node1": makeNode("node1", true),
 			}

@@ -91,8 +91,8 @@ var _ = Describe("buildFilterItems", func() {
 		}
 		result, err := buildFilterItems(items, IPv4)
 		Expect(err).ToNot(HaveOccurred())
-		Expect(result[0].Matcher.Prefix.Ge).To(Equal(&ge))
-		Expect(result[0].Matcher.Prefix.Le).To(Equal(&le))
+		Expect(result[0].Matcher.Prefix.Ge).To(HaveValue(Equal(ge)))
+		Expect(result[0].Matcher.Prefix.Le).To(HaveValue(Equal(le)))
 	})
 
 	DescribeTable("family filtering",
