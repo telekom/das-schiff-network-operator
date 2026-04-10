@@ -50,27 +50,32 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # updates_lines accumulates one markdown bullet per tool with an available update.
+          # It is only written to updates.md after all checks, when found_any=true.
+          updates_lines=""
+          found_any=false
+          check_failed=false
+
           check_github_release() {
             local repo=$1
             local current=$2
             local name=$3
             if [ -z "$current" ]; then
-              echo "  - **${name}**: skipped (version not found in versions.env)" >> updates.md
+              echo "::warning::${name}: version not found in versions.env — skipping update check"
               check_failed=true
               return
             fi
             local latest
             latest=$(gh api "repos/${repo}/releases/latest" --jq '.tag_name') || { check_failed=true; return; }
-            # Strip tool-name prefix for monorepo tags (e.g., "kustomize/v5.8.0" → "v5.8.0")
+            # Normalize both versions: strip any tool-name prefix (e.g., "kustomize/v5.8.0" → "v5.8.0").
+            # This handles monorepo release tag formats as well as plain "vX.Y.Z" tags.
             latest="${latest##*/}"
+            current="${current##*/}"
             if [ "$latest" != "$current" ]; then
-              echo "  - **${name}**: ${current} → ${latest} ([releases](https://github.com/${repo}/releases))" >> updates.md
+              updates_lines="${updates_lines}  - **${name}**: ${current} → ${latest} ([releases](https://github.com/${repo}/releases))\n"
               found_any=true
             fi
           }
-
-          found_any=false
-          check_failed=false
 
           check_github_release "kubernetes-sigs/kustomize" "${{ steps.versions.outputs.kustomize }}" "kustomize"
           check_github_release "kubernetes-sigs/controller-tools" "${{ steps.versions.outputs.controller_tools }}" "controller-tools"
@@ -78,18 +83,17 @@ jobs:
 
           if [ "$found_any" = "true" ]; then
             echo "found=true" >> $GITHUB_OUTPUT
-            # Prepend header to updates.md
+            # Write updates.md only when there are actual updates to report.
             {
               echo "## Tool Update Report"
               echo ""
               echo "The following tools have newer versions available:"
               echo ""
-              cat updates.md
+              printf "%b" "$updates_lines"
               echo ""
               echo "---"
               echo "To update, edit \`versions.env\` and run \`make generate manifests\` to verify compatibility."
-            } > updates-final.md
-            mv updates-final.md updates.md
+            } > updates.md
             cat updates.md
           fi
           if [ "$check_failed" = "true" ]; then
