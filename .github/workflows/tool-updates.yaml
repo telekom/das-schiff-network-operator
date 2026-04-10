@@ -31,7 +31,13 @@ jobs:
             exit 0
           fi
           get_version() {
-            grep -E "^${1}=" versions.env | head -1 | sed 's/^[^=]*=//'
+            local val
+            val=$(grep -E "^${1}=" versions.env | head -1 | sed 's/^[^=]*=//')
+            if [ -z "$val" ]; then
+              echo "::warning::Key ${1} not found or empty in versions.env"
+              return 1
+            fi
+            echo "$val"
           }
           echo "skip=false" >> $GITHUB_OUTPUT
           echo "kustomize=$(get_version KUSTOMIZE_VERSION)" >> $GITHUB_OUTPUT
@@ -48,6 +54,11 @@ jobs:
             local repo=$1
             local current=$2
             local name=$3
+            if [ -z "$current" ]; then
+              echo "  - **${name}**: skipped (version not found in versions.env)" >> updates.md
+              check_failed=true
+              return
+            fi
             local latest
             latest=$(gh api "repos/${repo}/releases/latest" --jq '.tag_name') || { check_failed=true; return; }
             # Strip tool-name prefix for monorepo tags (e.g., "kustomize/v5.8.0" → "v5.8.0")
