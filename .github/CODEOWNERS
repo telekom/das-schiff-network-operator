@@ -1,3 +1,4 @@
-# Default owners for everything in the repo
-# Specific paths listed for future team ownership splits
+# Default owners for everything in the repo.
+# Intentionally broad: @telekom/t-caas owns all paths as a single team.
+# Finer-grained path ownership can be added here as the team structure evolves.
 * @telekom/t-caas
