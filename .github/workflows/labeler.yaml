@@ -4,8 +4,10 @@
 
 name: PR Labeler
 
-# Note: We use pull_request_target so labels can be applied to PRs from forks.
-# This workflow does NOT checkout or execute untrusted PR code.
+# Note: We use pull_request_target instead of pull_request so that labels
+# can be applied to pull requests from forks. This is safe because:
+# - The labeler actions do NOT check out or execute untrusted PR code
+# - All actions are pinned to specific commit SHAs
 on:
   pull_request_target:
     types: [opened, synchronize, reopened]
