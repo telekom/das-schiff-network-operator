@@ -62,7 +62,13 @@ func addMirrorACLToNNC(ctx context.Context, f *framework.Framework, nodeName, vr
 
 	// Bump spec.revision so the CRA agent detects the config change and reprocesses.
 	// The CRA compares in-memory revision with spec.revision; if unchanged it skips.
-	oldRev, _, _ := unstructured.NestedString(nnc.Object, "spec", "revision")
+	oldRev, found, err := unstructured.NestedString(nnc.Object, "spec", "revision")
+	if err != nil {
+		return "", fmt.Errorf("read spec.revision: %w", err)
+	}
+	if !found {
+		oldRev = ""
+	}
 	newRev := oldRev + "-mirror"
 	if err := unstructured.SetNestedField(nnc.Object, newRev, "spec", "revision"); err != nil {
 		return "", fmt.Errorf("bump revision: %w", err)
@@ -106,7 +112,13 @@ func removeMirrorACLsFromNNC(ctx context.Context, f *framework.Framework, nodeNa
 
 	// Bump spec.revision so the CRA agent detects the config change and reprocesses.
 	// The CRA compares in-memory revision with spec.revision; if unchanged it skips.
-	oldRev, _, _ := unstructured.NestedString(nnc.Object, "spec", "revision")
+	oldRev, found, err := unstructured.NestedString(nnc.Object, "spec", "revision")
+	if err != nil {
+		return fmt.Errorf("read spec.revision: %w", err)
+	}
+	if !found {
+		oldRev = ""
+	}
 	if err := unstructured.SetNestedField(nnc.Object, oldRev+"-unmirror", "spec", "revision"); err != nil {
 		return fmt.Errorf("bump revision: %w", err)
 	}
