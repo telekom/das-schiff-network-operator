@@ -84,12 +84,12 @@ bpf-generate: ## Run go generate for the BPF program (builds it as well)
 
 .PHONY: docker-build
 docker-build: #test ## Build docker image with the manager.
-	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-cra-frr.Dockerfile -t ${IMG_BASE}/das-schiff-cra-frr:latest .
-	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-network-operator.Dockerfile -t ${IMG_BASE}/das-schiff-network-operator:latest .
-	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-nwop-agent-cra-frr.Dockerfile -t ${IMG_BASE}/das-schiff-nwop-agent-cra-frr:latest .
-	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-nwop-agent-cra-vsr.Dockerfile -t ${IMG_BASE}/das-schiff-nwop-agent-cra-vsr:latest .
-	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-nwop-agent-hbn-l2.Dockerfile -t ${IMG_BASE}/das-schiff-nwop-agent-hbn-l2:latest .
-	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-nwop-agent-netplan.Dockerfile -t ${IMG_BASE}/das-schiff-nwop-agent-netplan:latest .
+	DOCKER_BUILDKIT=1 docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-cra-frr.Dockerfile -t ${IMG_BASE}/das-schiff-cra-frr:latest .
+	DOCKER_BUILDKIT=1 docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-network-operator.Dockerfile -t ${IMG_BASE}/das-schiff-network-operator:latest .
+	DOCKER_BUILDKIT=1 docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-nwop-agent-cra-frr.Dockerfile -t ${IMG_BASE}/das-schiff-nwop-agent-cra-frr:latest .
+	DOCKER_BUILDKIT=1 docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-nwop-agent-cra-vsr.Dockerfile -t ${IMG_BASE}/das-schiff-nwop-agent-cra-vsr:latest .
+	DOCKER_BUILDKIT=1 docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-nwop-agent-hbn-l2.Dockerfile -t ${IMG_BASE}/das-schiff-nwop-agent-hbn-l2:latest .
+	DOCKER_BUILDKIT=1 docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-nwop-agent-netplan.Dockerfile -t ${IMG_BASE}/das-schiff-nwop-agent-netplan:latest .
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
@@ -161,7 +161,7 @@ E2E_TESTER_IMAGE ?= $(IMG_BASE)/das-schiff-e2e-tester:latest
 
 .PHONY: e2e-build-cra-frr
 e2e-build-cra-frr: ## Build the CRA-FRR image.
-	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-cra-frr.Dockerfile -t das-schiff-cra-frr:latest .
+	DOCKER_BUILDKIT=1 docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-cra-frr.Dockerfile -t das-schiff-cra-frr:latest .
 
 .PHONY: e2e-build-node-image
 e2e-build-node-image: e2e-build-cra-frr ## Build kind node image with CRA-FRR baked in.
