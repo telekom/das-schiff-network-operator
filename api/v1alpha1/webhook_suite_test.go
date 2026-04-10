@@ -120,7 +120,7 @@ var _ = BeforeSuite(func() {
 
 	// wait for the webhook server to get ready
 	dialer := &net.Dialer{Timeout: time.Second}
-	addrPort := fmt.Sprintf("%s:%d", webhookInstallOptions.LocalServingHost, webhookInstallOptions.LocalServingPort)
+	addrPort := net.JoinHostPort(webhookInstallOptions.LocalServingHost, fmt.Sprintf("%d", webhookInstallOptions.LocalServingPort))
 	Eventually(func() error {
 		// ignore TLS security in test suite
 		// #nosec
