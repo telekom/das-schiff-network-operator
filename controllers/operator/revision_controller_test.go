@@ -1,3 +1,5 @@
+//go:build integration
+
 /*
 Copyright 2024.
 
@@ -17,42 +19,14 @@ limitations under the License.
 package operator
 
 import (
-	"path/filepath"
 	"testing"
 
-	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/envtest"
 )
 
 func TestRevisionReconciler_SetupWithManager(t *testing.T) {
-	env := &envtest.Environment{
-		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "config", "crd", "bases")},
-		ErrorIfCRDPathMissing: true,
-	}
-
-	cfg, err := env.Start()
-	if err != nil {
-		t.Fatalf("failed to start envtest: %v", err)
-	}
-	defer func() {
-		if stopErr := env.Stop(); stopErr != nil {
-			t.Logf("failed to stop envtest: %v", stopErr)
-		}
-	}()
-
-	scheme := runtime.NewScheme()
-	if err := networkv1alpha1.AddToScheme(scheme); err != nil {
-		t.Fatalf("failed to add networkv1alpha1 scheme: %v", err)
-	}
-	if err := corev1.AddToScheme(scheme); err != nil {
-		t.Fatalf("failed to add corev1 scheme: %v", err)
-	}
-
-	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
-		Scheme: scheme,
+	mgr, err := ctrl.NewManager(testEnvCfg, ctrl.Options{
+		Scheme: newOperatorScheme(t),
 	})
 	if err != nil {
 		t.Fatalf("failed to create manager: %v", err)
