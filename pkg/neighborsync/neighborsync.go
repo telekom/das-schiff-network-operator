@@ -41,6 +41,10 @@ type NeighborSync struct {
 	sendGratuitousNeighbor sync.Map
 	receiveNeighbors       sync.Map
 
+	// nlOps is the netlink operations interface. NeighborSync only uses LinkByIndex,
+	// NeighList, and NeighSet; it accepts the broader nl.ToolkitInterface so that callers
+	// can inject the same mock/implementation used elsewhere in this repo (pkg/nl/mock)
+	// without requiring a separate narrower interface and its own generated mock.
 	nlOps nl.ToolkitInterface
 
 	sendNeighborRequestFn    func(linkIndex int, destination net.HardwareAddr, address netip.Addr)
@@ -545,10 +549,8 @@ func (n *NeighborSync) EnsureNeighborSuppression(bridgeID, vethID int) error {
 
 	_, existing := n.sendGratuitousNeighbor.Load(bridgeID)
 
-	// Maps are populated before BPF attach (optimistic update). If attach fails,
-	// the maps already reflect enabled state — this is intentional: callers that
-	// retry will follow the same code path and the in-memory state stays consistent
-	// with what the retry will attempt.
+	// Populate maps before BPF attach so that syncKernelNeighbors (called below on
+	// first registration) can see the bridge as active and emit gratuitous neighbors.
 	n.sendGratuitousNeighbor.Store(bridgeID, struct{}{})
 	n.receiveNeighbors.Store(vethID, struct{}{})
 
@@ -557,6 +559,11 @@ func (n *NeighborSync) EnsureNeighborSuppression(bridgeID, vethID int) error {
 	}
 
 	if err := n.bpfAttachFn(nlLink); err != nil {
+		// Roll back the in-memory state so callers see a consistent error:
+		// if BPF attach fails, kernel-side suppression is not active, so the
+		// maps must not claim it is.
+		n.sendGratuitousNeighbor.Delete(bridgeID)
+		n.receiveNeighbors.Delete(vethID)
 		return fmt.Errorf("failed to attach BPF program: %w", err)
 	}
 	return nil

@@ -23,7 +23,8 @@ func TestNeighborSync(t *testing.T) {
 }
 
 // noopNetlinkOps is a no-op implementation of nl.ToolkitInterface for tests that do not
-// exercise any netlink operations (e.g. timer/map logic tests).
+// exercise any netlink operations (e.g. timer/map logic tests). It satisfies the full
+// nl.ToolkitInterface without requiring a real kernel — all methods return zero values.
 type noopNetlinkOps struct{}
 
 func (noopNetlinkOps) LinkByIndex(_ int) (netlink.Link, error)     { return &netlink.Dummy{}, nil }
@@ -542,14 +543,14 @@ var _ = Describe("EnsureNeighborSuppression()", func() {
 		Expect(err.Error()).To(ContainSubstring("failed to attach BPF program"))
 	})
 
-	It("stores bridgeID/vethID even when BPF attach fails", func() {
+	It("rolls back bridgeID/vethID when BPF attach fails", func() {
 		mockCtrl := gomock.NewController(GinkgoT())
 		defer mockCtrl.Finish()
 		nlMock := mock_nl.NewMockToolkitInterface(mockCtrl)
 		n := newTestNeighborSync(nlMock)
 
-		// BPF attach fails after LinkByIndex succeeds — maps are populated
-		// before bpfAttachFn is called in the current code path.
+		// BPF attach fails after LinkByIndex succeeds — maps must be rolled back
+		// so the in-memory state stays consistent with the kernel (BPF not attached).
 		n.bpfAttachFn = func(_ netlink.Link) error { return errors.New("bpf attach failed") }
 
 		fakeLink := &netlink.Dummy{}
@@ -560,8 +561,8 @@ var _ = Describe("EnsureNeighborSuppression()", func() {
 
 		_, bridgeStored := n.sendGratuitousNeighbor.Load(5)
 		_, vethStored := n.receiveNeighbors.Load(10)
-		Expect(bridgeStored).To(BeTrue(), "bridgeID is stored before BPF attach is attempted")
-		Expect(vethStored).To(BeTrue(), "vethID is stored before BPF attach is attempted")
+		Expect(bridgeStored).To(BeFalse(), "bridgeID must be rolled back when BPF attach fails")
+		Expect(vethStored).To(BeFalse(), "vethID must be rolled back when BPF attach fails")
 	})
 
 	It("stores bridgeID/vethID and calls NeighList on first registration", func() {
