@@ -278,6 +278,9 @@ func (n *NeighborSync) receiveUpdates() {
 	for {
 		updates := make(chan netlink.NeighUpdate)
 		done := make(chan struct{})
+		// NeighSubscribeWithOptions is called directly (not via nlOps) because it uses a
+		// channel-based subscription model that is incompatible with the synchronous
+		// request-response pattern of nl.ToolkitInterface.
 		err := netlink.NeighSubscribeWithOptions(updates, done, netlink.NeighSubscribeOptions{ListExisting: true})
 		if err != nil {
 			log.Printf("failed to subscribe to neighbor updates: %v", err)
@@ -536,9 +539,16 @@ func (n *NeighborSync) EnsureNeighborSuppression(bridgeID, vethID int) error {
 	if err != nil {
 		return fmt.Errorf("failed to get link by index: %w", err)
 	}
+	if nlLink == nil {
+		return fmt.Errorf("link with index %d not found", vethID)
+	}
 
 	_, existing := n.sendGratuitousNeighbor.Load(bridgeID)
 
+	// Maps are populated before BPF attach (optimistic update). If attach fails,
+	// the maps already reflect enabled state — this is intentional: callers that
+	// retry will follow the same code path and the in-memory state stays consistent
+	// with what the retry will attempt.
 	n.sendGratuitousNeighbor.Store(bridgeID, struct{}{})
 	n.receiveNeighbors.Store(vethID, struct{}{})
 
@@ -567,6 +577,9 @@ func (n *NeighborSync) DisableNeighborSuppression(bridgeID, vethID int) error {
 	nlLink, err := n.nlOps.LinkByIndex(vethID)
 	if err != nil {
 		return fmt.Errorf("failed to get link by index: %w", err)
+	}
+	if nlLink == nil {
+		return fmt.Errorf("link with index %d not found", vethID)
 	}
 	if err := n.bpfDetachFn(nlLink); err != nil {
 		return fmt.Errorf("failed to detach BPF program: %w", err)
