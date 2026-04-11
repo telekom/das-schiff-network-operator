@@ -537,9 +537,7 @@ var _ = Describe("EnsureNeighborSuppression()", func() {
 
 		fakeLink := &netlink.Dummy{}
 		nlMock.EXPECT().LinkByIndex(10).Return(fakeLink, nil)
-		// syncKernelNeighbors runs before bpfAttachFn on first registration.
-		nlMock.EXPECT().NeighList(5, netlink.FAMILY_ALL).Return(nil, nil)
-
+		// syncKernelNeighbors is not expected to run because bpfAttachFn fails.
 		err := n.EnsureNeighborSuppression(5, 10)
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("failed to attach BPF program"))
@@ -557,7 +555,6 @@ var _ = Describe("EnsureNeighborSuppression()", func() {
 
 		fakeLink := &netlink.Dummy{}
 		nlMock.EXPECT().LinkByIndex(10).Return(fakeLink, nil)
-		nlMock.EXPECT().NeighList(5, netlink.FAMILY_ALL).Return(nil, nil)
 
 		_ = n.EnsureNeighborSuppression(5, 10)
 
