@@ -101,59 +101,6 @@ func (f *Framework) CurlFromCluster2Pod(ctx context.Context, namespace, podName,
 	return "", fmt.Errorf("unexpected wget response: %s", stderr)
 }
 
-// WaitForIPv6DADComplete polls `ip -6 -o addr show dev <iface>` inside a pod until
-// the given IPv6 address appears without the "tentative" flag, indicating that
-// Duplicate Address Detection (DAD) has completed.
-//
-// ipv6Addr must be a bare address (no prefix length), e.g. "fd94:685b:30cf:501::10".
-// The address is compared using canonical netip.Addr equality so that textually
-// different but equivalent representations (e.g. compressed vs expanded) are treated as the same.
-//
-// Errors from ExecInPod are propagated so that permanent failures (e.g. wrong interface
-// name, missing `ip` binary, permission issues) surface immediately instead of silently
-// looping until the context deadline.
-func (f *Framework) WaitForIPv6DADComplete(ctx context.Context, namespace, podName, iface, ipv6Addr string, timeout time.Duration) error {
-	canonical, err := parseCanonicalIPv6(ipv6Addr)
-	if err != nil {
-		return fmt.Errorf("invalid ipv6Addr %q: %w", ipv6Addr, err)
-	}
-
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	return Poll(ctx, 2*time.Second, func() (bool, error) {
-		stdout, stderr, execErr := f.ExecInPod(ctx, namespace, podName, "", []string{
-			"ip", "-6", "-o", "addr", "show", "dev", iface,
-		})
-		if execErr != nil {
-			return false, fmt.Errorf("ip addr show failed (stderr=%s): %w", stderr, execErr)
-		}
-
-		for _, line := range strings.Split(stdout, "\n") {
-			if strings.Contains(line, "tentative") {
-				continue
-			}
-			for _, field := range strings.Fields(line) {
-				addrPart := field
-				if slash := strings.IndexByte(addrPart, '/'); slash >= 0 {
-					addrPart = addrPart[:slash]
-				}
-				lineAddr, parseErr := parseCanonicalIPv6(addrPart)
-				if parseErr != nil {
-					continue
-				}
-				if lineAddr == canonical {
-					if strings.Contains(line, "dadfailed") {
-						return false, fmt.Errorf("DAD failed for address %s on interface %s", ipv6Addr, iface)
-					}
-					return true, nil
-				}
-			}
-		}
-		return false, nil
-	})
-}
-
 func parseCanonicalIPv6(s string) (netip.Addr, error) {
 	addr, err := netip.ParseAddr(s)
 	if err != nil {
