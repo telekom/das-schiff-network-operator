@@ -567,6 +567,35 @@ var _ = Describe("EnsureNeighborSuppression()", func() {
 		Expect(vethStored).To(BeFalse(), "vethID must be rolled back when BPF attach fails")
 	})
 
+	It("preserves pre-existing bridgeID but rolls back vethID when BPF attach fails on re-registration", func() {
+		mockCtrl := gomock.NewController(GinkgoT())
+		defer mockCtrl.Finish()
+		nlMock := mock_nl.NewMockToolkitInterface(mockCtrl)
+		n := newTestNeighborSync(nlMock)
+
+		// BPF attach always fails.
+		n.bpfAttachFn = func(_ netlink.Link) error { return errors.New("bpf attach failed") }
+
+		// Pre-populate bridgeID=5 as if it had been registered before (e.g. a
+		// previous veth on the same bridge succeeded). vethID=10 is new.
+		n.sendGratuitousNeighbor.Store(5, struct{}{})
+
+		fakeLink := &netlink.Dummy{}
+		nlMock.EXPECT().LinkByIndex(10).Return(fakeLink, nil)
+		// bridgeID=5 already exists, so syncKernelNeighbors is NOT called again.
+
+		err := n.EnsureNeighborSuppression(5, 10)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("failed to attach BPF program"))
+
+		// The pre-existing bridge entry must survive the rollback — only
+		// newly added state should be removed.
+		_, bridgeStored := n.sendGratuitousNeighbor.Load(5)
+		_, vethStored := n.receiveNeighbors.Load(10)
+		Expect(bridgeStored).To(BeTrue(), "pre-existing bridgeID must be preserved when BPF attach fails")
+		Expect(vethStored).To(BeFalse(), "newly added vethID must be rolled back when BPF attach fails")
+	})
+
 	It("stores bridgeID/vethID and calls NeighList on first registration", func() {
 		mockCtrl := gomock.NewController(GinkgoT())
 		defer mockCtrl.Finish()
