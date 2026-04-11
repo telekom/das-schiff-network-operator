@@ -33,7 +33,9 @@ jobs:
           # Parse only KEY=VALUE lines to avoid executing arbitrary shell content.
           get_version() {
             local val
-            val=$(grep -E "^${1}=" versions.env | head -1 | sed 's/^[^=]*=//')
+            # Use grep -m1 with || true so a missing key returns empty string rather
+            # than propagating a non-zero exit under set -e / -o pipefail.
+            val=$(grep -E "^${1}=" versions.env | head -1 | sed 's/^[^=]*=//' || true)
             if [ -z "$val" ]; then
               echo "::warning::Key ${1} not found or empty in versions.env" >&2
               return 1
