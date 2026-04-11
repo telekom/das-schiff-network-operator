@@ -3,6 +3,7 @@ package framework
 import (
 	"context"
 	"fmt"
+	"net"
 	"strings"
 	"time"
 )
@@ -14,10 +15,10 @@ type PingResult struct {
 }
 
 // PingFromPod executes a ping from a pod to a target address.
-// Uses IPv6 if target contains ':', otherwise IPv4.
+// Uses ping6 when target parses as an IPv6 address, otherwise ping (IPv4).
 func (f *Framework) PingFromPod(ctx context.Context, namespace, podName, target string, count int) (*PingResult, error) {
 	cmd := "ping"
-	if strings.Contains(target, ":") {
+	if ip := net.ParseIP(target); ip != nil && ip.To4() == nil {
 		cmd = "ping6"
 	}
 
@@ -72,7 +73,7 @@ func (f *Framework) AssertNoConnectivity(ctx context.Context, namespace, podName
 // PingFromCluster2Pod executes a ping from a pod on cluster-2.
 func (f *Framework) PingFromCluster2Pod(ctx context.Context, namespace, podName, target string, count int) (*PingResult, error) {
 	cmd := "ping"
-	if strings.Contains(target, ":") {
+	if ip := net.ParseIP(target); ip != nil && ip.To4() == nil {
 		cmd = "ping6"
 	}
 	args := []string{cmd, "-c", fmt.Sprintf("%d", count), "-W", "3", target}
