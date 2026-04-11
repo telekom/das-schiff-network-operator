@@ -47,9 +47,15 @@ jobs:
           controller_tools_ver=$(get_version CONTROLLER_TOOLS_VERSION) || true
           golangci_lint_ver=$(get_version GOLANGCI_LINT_VERSION) || true
           echo "skip=false" >> $GITHUB_OUTPUT
-          echo "kustomize=$kustomize_ver" >> $GITHUB_OUTPUT
-          echo "controller_tools=$controller_tools_ver" >> $GITHUB_OUTPUT
-          echo "golangci_lint=$golangci_lint_ver" >> $GITHUB_OUTPUT
+          if [ -n "$kustomize_ver" ] && [[ $kustomize_ver != ::warning::* ]]; then
+            echo "kustomize=$kustomize_ver" >> $GITHUB_OUTPUT
+          fi
+          if [ -n "$controller_tools_ver" ] && [[ $controller_tools_ver != ::warning::* ]]; then
+            echo "controller_tools=$controller_tools_ver" >> $GITHUB_OUTPUT
+          fi
+          if [ -n "$golangci_lint_ver" ] && [[ $golangci_lint_ver != ::warning::* ]]; then
+            echo "golangci_lint=$golangci_lint_ver" >> $GITHUB_OUTPUT
+          fi
 
       - name: Check for updates
         if: steps.versions.outputs.skip != 'true'
@@ -68,7 +74,7 @@ jobs:
             local current=$2
             local name=$3
             if [ -z "$current" ]; then
-              echo "::warning::${name}: version not found in versions.env — skipping update check"
+              echo "::warning::${name}: version not found in versions.env — skipping update check" >&2
               check_failed=true
               return
             fi
