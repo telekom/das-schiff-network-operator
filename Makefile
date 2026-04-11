@@ -66,7 +66,9 @@ vet: ## Run go vet against code.
 
 .PHONY: test
 test: manifests generate fmt vet envtest ## Run tests.
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" go test $(shell go list ./... 2>/dev/null | grep -v -e /e2etests -e /e2e/ || true) -coverprofile cover.out
+	@PKGS=$$(go list -tags=integration ./... | grep -v -e /e2etests -e /e2e/); \
+	if [ -z "$$PKGS" ]; then echo "go list returned no packages — check for build errors" >&2; exit 1; fi; \
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" go test -tags=integration $$PKGS -coverprofile cover.out
 
 ##@ Build
 
