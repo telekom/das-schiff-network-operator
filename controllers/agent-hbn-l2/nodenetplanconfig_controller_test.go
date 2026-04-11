@@ -18,6 +18,7 @@ package agent_hbn_l2 //nolint:revive
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
@@ -28,6 +29,16 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
+
+type fakeNodeNetplanConfigReconciler struct {
+	err    error
+	called bool
+}
+
+func (f *fakeNodeNetplanConfigReconciler) Reconcile(_ context.Context) error {
+	f.called = true
+	return f.err
+}
 
 func newNodeNetplanConfig(name string) client.Object {
 	return &networkv1alpha1.NodeNetplanConfig{ObjectMeta: metav1.ObjectMeta{Name: name}}
@@ -57,5 +68,31 @@ func TestReconcile_NilReconcilerReturnsError(t *testing.T) {
 	_, err := r.Reconcile(context.Background(), ctrl.Request{})
 	if err == nil {
 		t.Error("expected error when Reconciler is nil, got none")
+	}
+}
+
+func TestReconcile_DelegatesAndReturnsDefaultRequeue(t *testing.T) {
+	fake := &fakeNodeNetplanConfigReconciler{err: nil}
+	r := &NodeNetplanConfigReconciler{Reconciler: fake}
+
+	result, err := r.Reconcile(context.Background(), ctrl.Request{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !fake.called {
+		t.Error("expected inner Reconcile to be called")
+	}
+	if result.RequeueAfter != requeueTime {
+		t.Errorf("expected RequeueAfter=%v, got %v", requeueTime, result.RequeueAfter)
+	}
+}
+
+func TestReconcile_PropagatesInnerError(t *testing.T) {
+	fake := &fakeNodeNetplanConfigReconciler{err: errors.New("inner error")}
+	r := &NodeNetplanConfigReconciler{Reconciler: fake}
+
+	_, err := r.Reconcile(context.Background(), ctrl.Request{})
+	if err == nil {
+		t.Error("expected error from inner Reconcile, got nil")
 	}
 }
