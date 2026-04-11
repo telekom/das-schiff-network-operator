@@ -549,8 +549,14 @@ func (n *NeighborSync) EnsureNeighborSuppression(bridgeID, vethID int) error {
 
 	_, existing := n.sendGratuitousNeighbor.Load(bridgeID)
 
-	// Populate maps before BPF attach so that syncKernelNeighbors (called below on
-	// first registration) can see the bridge as active and emit gratuitous neighbors.
+	// Attach BPF before updating in-memory state so that a failed attach
+	// does not leave stale entries in the maps claiming suppression is active.
+	if err := n.bpfAttachFn(nlLink); err != nil {
+		return fmt.Errorf("failed to attach BPF program: %w", err)
+	}
+
+	// Populate maps after successful BPF attach so that syncKernelNeighbors
+	// (triggered only on first registration) can see the bridge as active.
 	n.sendGratuitousNeighbor.Store(bridgeID, struct{}{})
 	n.receiveNeighbors.Store(vethID, struct{}{})
 
@@ -558,16 +564,6 @@ func (n *NeighborSync) EnsureNeighborSuppression(bridgeID, vethID int) error {
 		n.syncKernelNeighbors(bridgeID)
 	}
 
-	if err := n.bpfAttachFn(nlLink); err != nil {
-		// Roll back only newly added state so callers see a consistent error:
-		// if BPF attach fails, kernel-side suppression is not active, so the
-		// maps must not claim it is. Preserve any pre-existing bridge registration.
-		if !existing {
-			n.sendGratuitousNeighbor.Delete(bridgeID)
-		}
-		n.receiveNeighbors.Delete(vethID)
-		return fmt.Errorf("failed to attach BPF program: %w", err)
-	}
 	return nil
 }
 
