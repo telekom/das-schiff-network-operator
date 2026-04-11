@@ -26,10 +26,11 @@ jobs:
         id: versions
         run: |
           if [ ! -f versions.env ]; then
-            echo "versions.env not found, skipping"
+            echo "versions.env not found — skipping update check"
             echo "skip=true" >> $GITHUB_OUTPUT
             exit 0
           fi
+          # Parse only KEY=VALUE lines to avoid executing arbitrary shell content.
           get_version() {
             local val
             val=$(grep -E "^${1}=" versions.env | head -1 | sed 's/^[^=]*=//')
@@ -39,10 +40,16 @@ jobs:
             fi
             echo "$val"
           }
+          # Capture each version separately so failures from get_version are visible.
+          # If a key is absent the output will be empty and check_github_release will
+          # emit a warning and set check_failed=true rather than comparing against "".
+          kustomize_ver=$(get_version KUSTOMIZE_VERSION) || true
+          controller_tools_ver=$(get_version CONTROLLER_TOOLS_VERSION) || true
+          golangci_lint_ver=$(get_version GOLANGCI_LINT_VERSION) || true
           echo "skip=false" >> $GITHUB_OUTPUT
-          echo "kustomize=$(get_version KUSTOMIZE_VERSION)" >> $GITHUB_OUTPUT
-          echo "controller_tools=$(get_version CONTROLLER_TOOLS_VERSION)" >> $GITHUB_OUTPUT
-          echo "golangci_lint=$(get_version GOLANGCI_LINT_VERSION)" >> $GITHUB_OUTPUT
+          echo "kustomize=$kustomize_ver" >> $GITHUB_OUTPUT
+          echo "controller_tools=$controller_tools_ver" >> $GITHUB_OUTPUT
+          echo "golangci_lint=$golangci_lint_ver" >> $GITHUB_OUTPUT
 
       - name: Check for updates
         if: steps.versions.outputs.skip != 'true'
