@@ -19,6 +19,7 @@ package shared
 import (
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -29,12 +30,20 @@ import (
 // BuildNamePredicates returns a predicate.Funcs that filters events to only those
 // where the object name contains the current node's name (from the NODE_NAME env var).
 // Create and Update events are filtered; Delete and Generic always return false.
+//
+// When NODE_NAME is unset the warning is logged at most once per predicate instance
+// (via sync.Once) to prevent log spam in misconfigured deployments where every
+// incoming event would otherwise produce a log line.
 func BuildNamePredicates() predicate.Funcs {
+	var createWarnOnce sync.Once
+	var updateWarnOnce sync.Once
 	return predicate.Funcs{
 		CreateFunc: func(e event.CreateEvent) bool {
 			nodeName := os.Getenv(healthcheck.NodenameEnv)
 			if nodeName == "" {
-				log.Log.V(1).Info("NODE_NAME env not set, rejecting event", "object", e.Object.GetName())
+				createWarnOnce.Do(func() {
+					log.Log.V(1).Info("NODE_NAME env not set, rejecting Create events (logged once per controller)")
+				})
 				return false
 			}
 			return strings.Contains(e.Object.GetName(), nodeName)
@@ -42,7 +51,9 @@ func BuildNamePredicates() predicate.Funcs {
 		UpdateFunc: func(e event.UpdateEvent) bool {
 			nodeName := os.Getenv(healthcheck.NodenameEnv)
 			if nodeName == "" {
-				log.Log.V(1).Info("NODE_NAME env not set, rejecting event", "object", e.ObjectNew.GetName())
+				updateWarnOnce.Do(func() {
+					log.Log.V(1).Info("NODE_NAME env not set, rejecting Update events (logged once per controller)")
+				})
 				return false
 			}
 			return strings.Contains(e.ObjectNew.GetName(), nodeName)
