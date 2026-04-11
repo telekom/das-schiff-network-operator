@@ -32,25 +32,23 @@ var _ = Describe("VIP Failover", Label("failover"), func() {
 				`CRA_PID=$(cat /proc/$P/task/*/children 2>/dev/null | head -1 | tr -d " \n"); ` +
 				`[ -n "$CRA_PID" ] && nsenter -t $CRA_PID -m -n -- bridge fdb show | grep -v "permanent\|33:33:" | head -30`})
 		GinkgoWriter.Printf("%s CRA FDB (dynamic):\n%s\n", node, out)
+	}
 
-	// determineIPv6Prefix inspects the interface in the given pod and returns the prefix string (e.g. "/64").
 	determineIPv6Prefix := func(ctx context.Context, podNamespace, podName, iface string) string {
-		out, _, _ := f.ExecInPod(ctx, podNamespace, podName, "", []string{"ip", "-6", "-o", "addr", "show", "dev", iface})
-		for _, line := range strings.Split(out, "
-") {
+		out, _, err := f.ExecInPod(ctx, podNamespace, podName, "", []string{"ip", "-6", "-o", "addr", "show", "dev", iface})
+		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("failed to inspect IPv6 addresses on %s/%s interface %q", podNamespace, podName, iface))
+		for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
 			for _, field := range strings.Fields(line) {
 				if strings.Contains(field, "/") && strings.Contains(field, ":") {
 					parts := strings.SplitN(field, "/", 2)
-					if len(parts) == 2 {
+					if len(parts) == 2 && parts[1] != "" {
 						return "/" + parts[1]
 					}
 				}
 			}
 		}
-		// default to /64 if we cannot determine
-		return "/64"
-	}
-
+		Fail(fmt.Sprintf("failed to determine IPv6 prefix for %s/%s interface %q from output: %q", podNamespace, podName, iface, out))
+		return ""
 	}
 
 	BeforeEach(func() {
@@ -148,7 +146,7 @@ var _ = Describe("VIP Failover", Label("failover"), func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		_, _, err = f.ExecInPod(ctx, ns, "failover-src", "", []string{
-			"ip", "addr", "add", vipV6 + determineIPv6Prefix(ctx, ns, "failover-dst", "net1"), "dev", "net1",
+			"ip", "addr", "add", vipV6 + determineIPv6Prefix(ctx, ns, "failover-src", "net1"), "dev", "net1",
 		})
 		Expect(err).NotTo(HaveOccurred())
 
@@ -209,7 +207,7 @@ var _ = Describe("VIP Failover", Label("failover"), func() {
 			"ip", "addr", "del", vipV4 + "/24", "dev", "net1",
 		})
 		_, _, _ = f.ExecInPod(ctx, ns, "failover-src", "", []string{
-			"ip", "addr", "del", vipV6 + determineIPv6Prefix(ctx, ns, "failover-dst", "net1"), "dev", "net1",
+			"ip", "addr", "del", vipV6 + determineIPv6Prefix(ctx, ns, "failover-src", "net1"), "dev", "net1",
 		})
 	})
 })
