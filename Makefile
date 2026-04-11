@@ -200,6 +200,10 @@ kustomize: ## Download kustomize locally if necessary.
 
 ENVTEST = $(shell pwd)/bin/setup-envtest
 .PHONY: envtest
+# setup-envtest is pinned to a specific pseudo-version rather than @latest to ensure
+# reproducible builds and avoid breakage from upstream API changes. The pinned version
+# is the earliest release that works with controller-runtime v0.17+ and supports the
+# envtest binaries used by the integration tests in this repo.
 envtest: ## Download envtest-setup locally if necessary.
 	$(call go-get-tool,$(ENVTEST),sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.0.0-20260305142021-f9589b9f2b9d)
 
