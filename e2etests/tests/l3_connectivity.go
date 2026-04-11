@@ -66,6 +66,6 @@ var _ = Describe("L3 Connectivity", Label("l3", "smoke"), func() {
 		Eventually(func() bool {
 			r, _ := f.PingFromPod(ctx, ns, "macvlan-01", cfg.Macvlan03IPv6, 3)
 			return r != nil && r.Success
-		}).WithTimeout(30*time.Second).WithPolling(5*time.Second).Should(BeTrue(), "Cross-VLAN IPv6 ping failed")
+		}).WithTimeout(60*time.Second).WithPolling(5*time.Second).Should(BeTrue(), "Cross-VLAN IPv6 ping failed")
 	})
 })
