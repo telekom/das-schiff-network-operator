@@ -35,7 +35,7 @@ jobs:
             local val
             val=$(grep -E "^${1}=" versions.env | head -1 | sed 's/^[^=]*=//')
             if [ -z "$val" ]; then
-              echo "::warning::Key ${1} not found or empty in versions.env"
+              echo "::warning::Key ${1} not found or empty in versions.env" >&2
               return 1
             fi
             echo "$val"
