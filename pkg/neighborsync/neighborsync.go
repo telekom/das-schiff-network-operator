@@ -559,10 +559,12 @@ func (n *NeighborSync) EnsureNeighborSuppression(bridgeID, vethID int) error {
 	}
 
 	if err := n.bpfAttachFn(nlLink); err != nil {
-		// Roll back the in-memory state so callers see a consistent error:
+		// Roll back only newly added state so callers see a consistent error:
 		// if BPF attach fails, kernel-side suppression is not active, so the
-		// maps must not claim it is.
-		n.sendGratuitousNeighbor.Delete(bridgeID)
+		// maps must not claim it is. Preserve any pre-existing bridge registration.
+		if !existing {
+			n.sendGratuitousNeighbor.Delete(bridgeID)
+		}
 		n.receiveNeighbors.Delete(vethID)
 		return fmt.Errorf("failed to attach BPF program: %w", err)
 	}

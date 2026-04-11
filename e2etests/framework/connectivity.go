@@ -143,6 +143,9 @@ func (f *Framework) WaitForIPv6DADComplete(ctx context.Context, namespace, podNa
 					continue
 				}
 				if lineAddr == canonical {
+					if strings.Contains(line, "dadfailed") {
+						return false, fmt.Errorf("DAD failed for address %s on interface %s", ipv6Addr, iface)
+					}
 					return true, nil
 				}
 			}
@@ -156,8 +159,8 @@ func parseCanonicalIPv6(s string) (netip.Addr, error) {
 	if err != nil {
 		return netip.Addr{}, err
 	}
-	if !addr.Is6() && !addr.Is4In6() {
-		return netip.Addr{}, fmt.Errorf("%q is not an IPv6 address", s)
+	if !addr.Is6() || addr.Is4In6() {
+		return netip.Addr{}, fmt.Errorf("%q is not a true IPv6 address (IPv4-mapped addresses are not accepted)", s)
 	}
 	return addr, nil
 }
