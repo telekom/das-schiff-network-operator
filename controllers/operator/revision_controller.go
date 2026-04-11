@@ -36,12 +36,20 @@ const (
 	revisionRequeueTime = 1 * time.Minute
 )
 
+// revisionReconciler is the interface satisfied by the real reconciler and fakes used in tests.
+type revisionReconciler interface {
+	Reconcile(ctx context.Context)
+}
+
+// Ensure *operator.ConfigRevisionReconciler satisfies the interface.
+var _ revisionReconciler = (*operator.ConfigRevisionReconciler)(nil)
+
 // NetworkConfigRevisionReconciler reconciles a NetworkConfigRevision object.
 type RevisionReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 
-	Reconciler *operator.ConfigRevisionReconciler
+	Reconciler revisionReconciler
 }
 
 //+kubebuilder:rbac:groups=core,resources=nodes,verbs=get;list;update;watch
@@ -58,7 +66,10 @@ type RevisionReconciler struct {
 func (r *RevisionReconciler) Reconcile(ctx context.Context, _ ctrl.Request) (ctrl.Result, error) {
 	_ = log.FromContext(ctx)
 
-	// Run ReconcileDebounced through debouncer
+	if r.Reconciler == nil {
+		return ctrl.Result{}, fmt.Errorf("reconciler is not initialized")
+	}
+
 	r.Reconciler.Reconcile(ctx)
 
 	return ctrl.Result{RequeueAfter: revisionRequeueTime}, nil
