@@ -33,12 +33,18 @@ import (
 
 const requeueTime = 10 * time.Minute
 
+type nodeNetworkConfigReconciler interface {
+	Reconcile(ctx context.Context) (ctrl.Result, error)
+}
+
+var _ nodeNetworkConfigReconciler = (*reconcilervsr.NodeNetworkConfigReconciler)(nil)
+
 // NodeNetworkConfigReconciler reconciles a NodeNetworkConfig object.
 type NodeNetworkConfigReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 
-	Reconciler *reconcilervsr.NodeNetworkConfigReconciler
+	Reconciler nodeNetworkConfigReconciler
 }
 
 //+kubebuilder:rbac:groups=network.t-caas.telekom.com,resources=nodenetworkconfigs,verbs=get;list;watch;create;update;patch;delete

@@ -33,12 +33,20 @@ import (
 
 const requeueTime = 10 * time.Minute
 
+// configReconciler is the interface satisfied by the real reconciler and fakes used in tests.
+type configReconciler interface {
+	Reconcile(ctx context.Context)
+}
+
+// Ensure *operator.ConfigReconciler satisfies the interface.
+var _ configReconciler = (*operator.ConfigReconciler)(nil)
+
 // ConfigReconciler reconciles a Layer2NetworkConfiguration, RoutingTable and VRFRouteConfiguration objects.
 type ConfigReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 
-	Reconciler *operator.ConfigReconciler
+	Reconciler configReconciler
 }
 
 //+kubebuilder:rbac:groups=network.t-caas.telekom.com,resources=layer2networkconfigurations,verbs=get;list;watch;create;update;patch;delete
@@ -63,6 +71,10 @@ type ConfigReconciler struct {
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.11.0/pkg/reconcile
 func (r *ConfigReconciler) Reconcile(ctx context.Context, _ ctrl.Request) (ctrl.Result, error) {
 	_ = log.FromContext(ctx)
+
+	if r.Reconciler == nil {
+		return ctrl.Result{}, fmt.Errorf("reconciler is not initialized")
+	}
 
 	r.Reconciler.Reconcile(ctx)
 
