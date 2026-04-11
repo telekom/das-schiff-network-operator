@@ -18,7 +18,9 @@ package agent_cra_vsr //nolint:revive
 
 import (
 	"context"
+	"errors"
 	"testing"
+	"time"
 
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/controllers/shared"
@@ -28,6 +30,17 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
+
+type fakeNodeNetworkConfigReconciler struct {
+	result ctrl.Result
+	err    error
+	called bool
+}
+
+func (f *fakeNodeNetworkConfigReconciler) Reconcile(_ context.Context) (ctrl.Result, error) {
+	f.called = true
+	return f.result, f.err
+}
 
 func newNodeNetworkConfig(name string) client.Object {
 	return &networkv1alpha1.NodeNetworkConfig{ObjectMeta: metav1.ObjectMeta{Name: name}}
@@ -57,5 +70,45 @@ func TestReconcile_NilReconcilerReturnsError(t *testing.T) {
 	_, err := r.Reconcile(context.Background(), ctrl.Request{})
 	if err == nil {
 		t.Error("expected error when Reconciler is nil, got none")
+	}
+}
+
+func TestReconcile_DelegatesAndReturnsDefaultRequeue(t *testing.T) {
+	fake := &fakeNodeNetworkConfigReconciler{result: ctrl.Result{}, err: nil}
+	r := &NodeNetworkConfigReconciler{Reconciler: fake}
+
+	result, err := r.Reconcile(context.Background(), ctrl.Request{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !fake.called {
+		t.Error("expected inner Reconcile to be called")
+	}
+	if result.RequeueAfter != requeueTime {
+		t.Errorf("expected RequeueAfter=%v, got %v", requeueTime, result.RequeueAfter)
+	}
+}
+
+func TestReconcile_PropagatesInnerRequeueAfter(t *testing.T) {
+	customRequeue := 5 * time.Minute
+	fake := &fakeNodeNetworkConfigReconciler{result: ctrl.Result{RequeueAfter: customRequeue}, err: nil}
+	r := &NodeNetworkConfigReconciler{Reconciler: fake}
+
+	result, err := r.Reconcile(context.Background(), ctrl.Request{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.RequeueAfter != customRequeue {
+		t.Errorf("expected RequeueAfter=%v, got %v", customRequeue, result.RequeueAfter)
+	}
+}
+
+func TestReconcile_PropagatesInnerError(t *testing.T) {
+	fake := &fakeNodeNetworkConfigReconciler{err: errors.New("inner error")}
+	r := &NodeNetworkConfigReconciler{Reconciler: fake}
+
+	_, err := r.Reconcile(context.Background(), ctrl.Request{})
+	if err == nil {
+		t.Error("expected error from inner Reconcile, got nil")
 	}
 }
