@@ -62,10 +62,10 @@ var _ = Describe("Gateway Connectivity", Label("gateway", "smoke"), func() {
 				r, _ := f.PingFromPod(ctx, ns, "macvlan-01", cfg.M2MGWIPv6, 3)
 				if r != nil && !r.Success {
 					GinkgoWriter.Printf("IPv6 ping to m2mgw failed: %s\n", r.Output)
-					neighOut, _, _ := f.ExecInPod(ctx, ns, "macvlan-01", "", []string{"ip", "-6", "neigh", "show"})
-					addrOut, _, _ := f.ExecInPod(ctx, ns, "macvlan-01", "", []string{"ip", "-6", "addr", "show"})
-					GinkgoWriter.Printf("macvlan-01 IPv6 neigh:\n%s\n", neighOut)
-					GinkgoWriter.Printf("macvlan-01 IPv6 addr:\n%s\n", addrOut)
+					neighOut, neighErr, neighExecErr := f.ExecInPod(ctx, ns, "macvlan-01", "", []string{"ip", "-6", "neigh", "show"})
+					addrOut, addrErr, addrExecErr := f.ExecInPod(ctx, ns, "macvlan-01", "", []string{"ip", "-6", "addr", "show"})
+					GinkgoWriter.Printf("macvlan-01 IPv6 neigh:\n%s\nstderr: %s\nerr: %v\n", neighOut, neighErr, neighExecErr)
+					GinkgoWriter.Printf("macvlan-01 IPv6 addr:\n%s\nstderr: %s\nerr: %v\n", addrOut, addrErr, addrExecErr)
 				}
 				return r != nil && r.Success
 			}).WithTimeout(60*time.Second).WithPolling(5*time.Second).Should(BeTrue(), "Ping to m2mgw IPv6 failed")
@@ -105,10 +105,10 @@ var _ = Describe("Gateway Connectivity", Label("gateway", "smoke"), func() {
 				r, _ := f.PingFromPod(ctx, ns, "macvlan-04", cfg.C2MGWIPv6, 3)
 				if r != nil && !r.Success {
 					GinkgoWriter.Printf("IPv6 ping to c2mgw failed: %s\n", r.Output)
-					neighOut, _, _ := f.ExecInPod(ctx, ns, "macvlan-04", "", []string{"ip", "-6", "neigh", "show"})
-					addrOut, _, _ := f.ExecInPod(ctx, ns, "macvlan-04", "", []string{"ip", "-6", "addr", "show"})
-					GinkgoWriter.Printf("macvlan-04 IPv6 neigh:\n%s\n", neighOut)
-					GinkgoWriter.Printf("macvlan-04 IPv6 addr:\n%s\n", addrOut)
+					neighOut, neighErr, neighExecErr := f.ExecInPod(ctx, ns, "macvlan-04", "", []string{"ip", "-6", "neigh", "show"})
+					addrOut, addrErr, addrExecErr := f.ExecInPod(ctx, ns, "macvlan-04", "", []string{"ip", "-6", "addr", "show"})
+					GinkgoWriter.Printf("macvlan-04 IPv6 neigh:\n%s\nstderr: %s\nerr: %v\n", neighOut, neighErr, neighExecErr)
+					GinkgoWriter.Printf("macvlan-04 IPv6 addr:\n%s\nstderr: %s\nerr: %v\n", addrOut, addrErr, addrExecErr)
 				}
 				return r != nil && r.Success
 			}).WithTimeout(60*time.Second).WithPolling(5*time.Second).Should(BeTrue(), "Ping to c2mgw IPv6 failed")
