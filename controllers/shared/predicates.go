@@ -28,21 +28,23 @@ import (
 
 // BuildNamePredicates returns a predicate.Funcs that filters events to only those
 // where the object name contains the current node's name (from the NODE_NAME env var).
-// Create and Update events are filtered; Delete and Generic always return false.
+// The NODE_NAME value is read once at predicate build time. If NODE_NAME is unset,
+// all Create and Update events are rejected with a single log message.
+// Delete and Generic always return false.
 func BuildNamePredicates() predicate.Funcs {
+	nodeName := os.Getenv(healthcheck.NodenameEnv)
+	if nodeName == "" {
+		log.Log.V(1).Info("NODE_NAME env not set, all events will be rejected")
+	}
 	return predicate.Funcs{
 		CreateFunc: func(e event.CreateEvent) bool {
-			nodeName := os.Getenv(healthcheck.NodenameEnv)
 			if nodeName == "" {
-				log.Log.V(1).Info("NODE_NAME env not set, rejecting event", "object", e.Object.GetName())
 				return false
 			}
 			return strings.Contains(e.Object.GetName(), nodeName)
 		},
 		UpdateFunc: func(e event.UpdateEvent) bool {
-			nodeName := os.Getenv(healthcheck.NodenameEnv)
 			if nodeName == "" {
-				log.Log.V(1).Info("NODE_NAME env not set, rejecting event", "object", e.ObjectNew.GetName())
 				return false
 			}
 			return strings.Contains(e.ObjectNew.GetName(), nodeName)
