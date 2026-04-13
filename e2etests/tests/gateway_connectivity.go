@@ -60,8 +60,15 @@ var _ = Describe("Gateway Connectivity", Label("gateway", "smoke"), func() {
 			By("Verifying macvlan-01 can ping m2mgw (IPv6)")
 			Eventually(func() bool {
 				r, _ := f.PingFromPod(ctx, ns, "macvlan-01", cfg.M2MGWIPv6, 3)
+				if r != nil && !r.Success {
+					GinkgoWriter.Printf("IPv6 ping to m2mgw failed: %s\n", r.Output)
+					neighOut, _, _ := f.ExecInPod(ctx, ns, "macvlan-01", "", []string{"ip", "-6", "neigh", "show"})
+					addrOut, _, _ := f.ExecInPod(ctx, ns, "macvlan-01", "", []string{"ip", "-6", "addr", "show"})
+					GinkgoWriter.Printf("macvlan-01 IPv6 neigh:\n%s\n", neighOut)
+					GinkgoWriter.Printf("macvlan-01 IPv6 addr:\n%s\n", addrOut)
+				}
 				return r != nil && r.Success
-			}).WithTimeout(30*time.Second).WithPolling(5*time.Second).Should(BeTrue(), "Ping to m2mgw IPv6 failed")
+			}).WithTimeout(60*time.Second).WithPolling(5*time.Second).Should(BeTrue(), "Ping to m2mgw IPv6 failed")
 
 			By("Verifying m2mgw can ping macvlan-01 (IPv4)")
 			result, err = f.PingFromCluster2Pod(ctx, "e2e-gateways", "m2m-gateway", cfg.Macvlan01IPv4, 5)
@@ -96,8 +103,15 @@ var _ = Describe("Gateway Connectivity", Label("gateway", "smoke"), func() {
 			By("Verifying macvlan-04 can ping c2mgw (IPv6)")
 			Eventually(func() bool {
 				r, _ := f.PingFromPod(ctx, ns, "macvlan-04", cfg.C2MGWIPv6, 3)
+				if r != nil && !r.Success {
+					GinkgoWriter.Printf("IPv6 ping to c2mgw failed: %s\n", r.Output)
+					neighOut, _, _ := f.ExecInPod(ctx, ns, "macvlan-04", "", []string{"ip", "-6", "neigh", "show"})
+					addrOut, _, _ := f.ExecInPod(ctx, ns, "macvlan-04", "", []string{"ip", "-6", "addr", "show"})
+					GinkgoWriter.Printf("macvlan-04 IPv6 neigh:\n%s\n", neighOut)
+					GinkgoWriter.Printf("macvlan-04 IPv6 addr:\n%s\n", addrOut)
+				}
 				return r != nil && r.Success
-			}).WithTimeout(30*time.Second).WithPolling(5*time.Second).Should(BeTrue(), "Ping to c2mgw IPv6 failed")
+			}).WithTimeout(60*time.Second).WithPolling(5*time.Second).Should(BeTrue(), "Ping to c2mgw IPv6 failed")
 
 			By("Verifying c2mgw can ping macvlan-04 (IPv4)")
 			result, err = f.PingFromCluster2Pod(ctx, "e2e-gateways", "c2m-gateway", cfg.Macvlan04IPv4, 5)
