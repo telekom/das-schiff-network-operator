@@ -883,10 +883,8 @@ func PhaseCluster2Gateway(cluster *Cluster, repoRoot string) error {
 			Logf("  cluster2 VLANs: CRA PID lookup failed: %v", err)
 			return false, nil
 		}
-		_, err601 := DockerExecShell(cp.Name,
-			fmt.Sprintf("nsenter -t %s -m -n -- ip link show vlan.601", craPID))
-		_, err602 := DockerExecShell(cp.Name,
-			fmt.Sprintf("nsenter -t %s -m -n -- ip link show vlan.602", craPID))
+		_, err601 := DockerExec(cp.Name, "nsenter", "-t", craPID, "-m", "-n", "--", "ip", "link", "show", "vlan.601")
+		_, err602 := DockerExec(cp.Name, "nsenter", "-t", craPID, "-m", "-n", "--", "ip", "link", "show", "vlan.602")
 		if err601 != nil || err602 != nil {
 			missing := ""
 			if err601 != nil {
@@ -909,11 +907,15 @@ func PhaseCluster2Gateway(cluster *Cluster, repoRoot string) error {
 			"kubectl --kubeconfig=%s -n kube-system get pods -l app.kubernetes.io/name=network-operator -o wide 2>&1 || true",
 			kubeconfigPath)); diagErr == nil {
 			Logf("  operator/agent pods:\n%s", out)
+		} else {
+			Logf("  failed to collect operator/agent pods diagnostics: %v", diagErr)
 		}
 		if out, diagErr := DockerExecShell(cp.Name, fmt.Sprintf(
 			"kubectl --kubeconfig=%s get layer2networkconfigurations.network.t-caas.telekom.com -A -o yaml 2>&1 || true",
 			kubeconfigPath)); diagErr == nil {
 			Logf("  network configs:\n%s", out)
+		} else {
+			Logf("  failed to collect network configs diagnostics: %v", diagErr)
 		}
 		return fmt.Errorf("waiting for cluster2 VLANs: %w", err)
 	}
