@@ -873,16 +873,50 @@ func PhaseCluster2Gateway(cluster *Cluster, repoRoot string) error {
 		return fmt.Errorf("applying cluster2 network configs: %w", err)
 	}
 
-	// Wait for VLANs to be created by the operator
+	// Wait for VLANs to be created by the operator.
+	// Use a generous timeout (5m) because on CI the operator/agent on the
+	// single-node cluster-2 can take longer to reconcile than cluster-1.
 	Logf("Cluster-2: Waiting for VLAN interfaces...")
-	if err := WaitFor("cluster2 VLANs", 120*time.Second, 5*time.Second, func() (bool, error) {
-		_, err := DockerExecShell(cp.Name,
-			`P=$(systemctl show cra.service -p MainPID --value); `+
-				`CRA_PID=$(cat /proc/$P/task/*/children | head -1 | tr -d " \n"); `+
-				`nsenter -t $CRA_PID -m -n -- ip link show vlan.601 2>/dev/null && `+
-				`nsenter -t $CRA_PID -m -n -- ip link show vlan.602 2>/dev/null`)
-		return err == nil, nil
+	if err := WaitFor("cluster2 VLANs", 5*time.Minute, 5*time.Second, func() (bool, error) {
+		craPID, err := getCRAPID(cp.Name)
+		if err != nil {
+			Logf("  cluster2 VLANs: CRA PID lookup failed: %v", err)
+			return false, nil
+		}
+		_, err601 := DockerExec(cp.Name, "nsenter", "-t", craPID, "-m", "-n", "--", "ip", "link", "show", "vlan.601")
+		_, err602 := DockerExec(cp.Name, "nsenter", "-t", craPID, "-m", "-n", "--", "ip", "link", "show", "vlan.602")
+		if err601 != nil || err602 != nil {
+			missing := ""
+			if err601 != nil {
+				missing += fmt.Sprintf("vlan.601 (%v)", err601)
+			}
+			if err602 != nil {
+				if missing != "" {
+					missing += ", "
+				}
+				missing += fmt.Sprintf("vlan.602 (%v)", err602)
+			}
+			Logf("  cluster2 VLANs: missing %s", missing)
+			return false, nil
+		}
+		return true, nil
 	}); err != nil {
+		// Dump diagnostic info to help triage future failures.
+		Logf("Cluster-2 VLAN wait failed — collecting diagnostics...")
+		if out, diagErr := DockerExecShell(cp.Name, fmt.Sprintf(
+			"kubectl --kubeconfig=%s -n kube-system get pods -l app.kubernetes.io/name=network-operator -o wide 2>&1 || true",
+			kubeconfigPath)); diagErr == nil {
+			Logf("  operator/agent pods:\n%s", out)
+		} else {
+			Logf("  failed to collect operator/agent pods diagnostics: %v", diagErr)
+		}
+		if out, diagErr := DockerExecShell(cp.Name, fmt.Sprintf(
+			"kubectl --kubeconfig=%s get layer2networkconfigurations.network.t-caas.telekom.com -A -o yaml 2>&1 || true",
+			kubeconfigPath)); diagErr == nil {
+			Logf("  network configs:\n%s", out)
+		} else {
+			Logf("  failed to collect network configs diagnostics: %v", diagErr)
+		}
 		return fmt.Errorf("waiting for cluster2 VLANs: %w", err)
 	}
 
