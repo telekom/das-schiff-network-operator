@@ -3,7 +3,6 @@ package framework
 import (
 	"context"
 	"fmt"
-	"net/netip"
 	"strings"
 	"time"
 )
@@ -99,15 +98,4 @@ func (f *Framework) CurlFromCluster2Pod(ctx context.Context, namespace, podName,
 		return "200", nil
 	}
 	return "", fmt.Errorf("unexpected wget response: %s", stderr)
-}
-
-func parseCanonicalIPv6(s string) (netip.Addr, error) {
-	addr, err := netip.ParseAddr(s)
-	if err != nil {
-		return netip.Addr{}, err
-	}
-	if !addr.Is6() || addr.Is4In6() {
-		return netip.Addr{}, fmt.Errorf("%q is not a true IPv6 address (IPv4-mapped addresses are not accepted)", s)
-	}
-	return addr, nil
 }
