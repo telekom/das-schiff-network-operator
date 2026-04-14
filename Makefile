@@ -55,12 +55,6 @@ generate: controller-gen bpf-generate ## Generate code containing DeepCopy, Deep
 fmt: ## Run go fmt against code.
 	go fmt ./...
 
-GOLANGCI_LINT ?= golangci-lint
-
-.PHONY: lint
-lint: ## Run golangci-lint.
-	$(GOLANGCI_LINT) run ./...
-
 .PHONY: vet
 vet: ## Run go vet against code.
 	go vet ./...
