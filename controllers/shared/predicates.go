@@ -18,7 +18,6 @@ package shared
 
 import (
 	"os"
-	"strings"
 
 	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -41,13 +40,13 @@ func BuildNamePredicates() predicate.Funcs {
 			if nodeName == "" {
 				return false
 			}
-			return strings.Contains(e.Object.GetName(), nodeName)
+			return e.Object.GetName() == nodeName
 		},
 		UpdateFunc: func(e event.UpdateEvent) bool {
 			if nodeName == "" {
 				return false
 			}
-			return strings.Contains(e.ObjectNew.GetName(), nodeName)
+			return e.ObjectNew.GetName() == nodeName
 		},
 		DeleteFunc:  func(event.DeleteEvent) bool { return false },
 		GenericFunc: func(event.GenericEvent) bool { return false },

@@ -33,15 +33,15 @@ func TestBuildNamePredicates_Create(t *testing.T) {
 		want     bool
 	}{
 		{
-			name:     "matching node name accepts event",
+			name:     "exact node name accepts event",
 			nodeName: "worker-1",
-			objName:  "config-worker-1-rev1",
+			objName:  "worker-1",
 			want:     true,
 		},
 		{
-			name:     "non-matching node name rejects event",
+			name:     "prefix mismatch rejects event",
 			nodeName: "worker-1",
-			objName:  "config-worker-2-rev1",
+			objName:  "worker-10",
 			want:     false,
 		},
 		{
@@ -76,15 +76,15 @@ func TestBuildNamePredicates_Update(t *testing.T) {
 		want     bool
 	}{
 		{
-			name:     "matching node name accepts event",
+			name:     "exact node name accepts event",
 			nodeName: "worker-1",
-			objName:  "config-worker-1-rev1",
+			objName:  "worker-1",
 			want:     true,
 		},
 		{
-			name:     "non-matching node name rejects event",
+			name:     "prefix mismatch rejects event",
 			nodeName: "worker-1",
-			objName:  "config-worker-2-rev1",
+			objName:  "worker-10",
 			want:     false,
 		},
 		{
