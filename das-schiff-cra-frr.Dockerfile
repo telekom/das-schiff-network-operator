@@ -28,7 +28,7 @@ RUN cd pkg/bpf/ && go generate
 ARG ldflags
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags "${ldflags}" -a -o frr-cra main.go
 
-FROM docker.io/library/ubuntu:25.10
+FROM docker.io/library/ubuntu:26.04
 
 ENV FRRVER="frr-stable"
 ARG DEBIAN_FRONTEND=noninteractive
