@@ -49,7 +49,7 @@ type NeighborSync struct {
 	bpfAttachFn func(link netlink.Link) error
 	// bpfDetachFn detaches the BPF program from an interface. Injectable for testing.
 	bpfDetachFn        func(link netlink.Link) error
-	neighSubscribeFn   func(updates chan netlink.NeighUpdate, done chan struct{}, options netlink.NeighSubscribeOptions) error
+	neighSubscribeFn   func(updates chan<- netlink.NeighUpdate, done <-chan struct{}, options netlink.NeighSubscribeOptions) error
 	newRingbufReaderFn func() (*ringbuf.Reader, error)
 
 	initOnce sync.Once
