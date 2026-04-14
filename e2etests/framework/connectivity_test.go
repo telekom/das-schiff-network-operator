@@ -1,23 +1,14 @@
 package framework
 
 import (
-	"net"
 	"testing"
 )
 
-// isIPv6Target mirrors the IPv6 detection logic used in PingFromPod and
-// PingFromCluster2Pod: parse the address with net.ParseIP then reject it if
-// To4() returns non-nil (which means it is an IPv4 or IPv4-mapped address).
-//
-// Tests in this file verify that the net.ParseIP-based approach correctly
-// classifies addresses — in particular that it does NOT produce the false
-// positives that the former strings.Contains(target, ":") approach could
-// produce (e.g. a hostname containing a colon).
-func isIPv6Target(target string) bool {
-	ip := net.ParseIP(target)
-	return ip != nil && ip.To4() == nil
-}
-
+// TestIsIPv6Target exercises the shared isIPv6Target helper (defined in
+// connectivity.go) to guard against regressions in IPv6 address detection.
+// In particular, it verifies that the net.ParseIP-based approach does NOT
+// produce the false positives that the former strings.Contains(target, ":")
+// approach could produce (e.g. a hostname containing a colon).
 func TestIsIPv6Target(t *testing.T) {
 	t.Parallel()
 
