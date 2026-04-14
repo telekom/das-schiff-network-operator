@@ -3,7 +3,7 @@ module github.com/telekom/das-schiff-network-operator
 go 1.25.0
 
 require (
-	github.com/cilium/ebpf v0.19.0
+	github.com/cilium/ebpf v0.21.0
 	github.com/cnf/structhash v0.0.0-20250313080605-df4c6cc74a9a
 	github.com/coreos/go-systemd/v22 v22.6.0
 	github.com/go-logr/logr v1.4.3
@@ -78,7 +78,7 @@ require (
 	github.com/mxk/go-flowrate v0.0.0-20140419014527-cca7078d478f // indirect
 	github.com/nxadm/tail v1.4.8 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
-	github.com/pmezard/go-difflib v1.0.0 // indirect
+	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.67.2 // indirect
 	github.com/prometheus/procfs v0.19.2 // indirect
