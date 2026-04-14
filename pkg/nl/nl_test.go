@@ -98,7 +98,7 @@ var _ = Describe("ListL3()", func() {
 		Expect(err).ToNot(HaveOccurred())
 		Expect(result).To(BeEmpty())
 	})
-	It("returns no error if cannot get bridge, vxlan and vrf links by name", func() {
+	It("returns no error if cannot get bridge and vxlan links by name", func() {
 		mockctrl := gomock.NewController(GinkgoT())
 		defer mockctrl.Finish()
 
