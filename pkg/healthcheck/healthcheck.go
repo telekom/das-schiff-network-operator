@@ -507,7 +507,11 @@ func NewTCPDialer(dialerTimeout string) TCPDialerInterface {
 			logger.Info("unable to parse TCP dialer timeout provided in HealtCheck config as integer, will use default Timeout", "timeout", fmt.Sprintf("%ds", defaultTCPTimeout), "value", dialerTimeout)
 			timeout = time.Second * defaultTCPTimeout
 		} else {
-			timeout = time.Second * time.Duration(seconds)
+			timeout, err = time.ParseDuration(fmt.Sprintf("%ds", seconds))
+			if err != nil {
+				logger.Info("unable to parse TCP dialer timeout provided in HealtCheck config as duration", "timeout", timeout, "value", dialerTimeout)
+				timeout = time.Second * defaultTCPTimeout
+			}
 		}
 	}
 	return &net.Dialer{Timeout: timeout}
