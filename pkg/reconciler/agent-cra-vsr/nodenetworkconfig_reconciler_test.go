@@ -86,10 +86,11 @@ func newTestScheme(t *testing.T) *runtime.Scheme {
 	return s
 }
 
-// newTestNNC creates a NodeNetworkConfig with the given name and revision.
-func newTestNNC(name, revision string) *v1alpha1.NodeNetworkConfig {
+// newTestNNC creates a NodeNetworkConfig for the canonical test node with the
+// given revision.
+func newTestNNC(revision string) *v1alpha1.NodeNetworkConfig {
 	return &v1alpha1.NodeNetworkConfig{
-		ObjectMeta: metav1.ObjectMeta{Name: name},
+		ObjectMeta: metav1.ObjectMeta{Name: "test-node"},
 		Spec:       v1alpha1.NodeNetworkConfigSpec{Revision: revision},
 	}
 }
@@ -186,7 +187,7 @@ func TestCRAVSRConfigApplier_ApplyConfig_SuccessOnNoError(t *testing.T) {
 func TestCRAVSR_Reconcile_ApplyPath(t *testing.T) {
 	t.Setenv("NODE_NAME", "test-node")
 
-	nnc := newTestNNC("test-node", "rev-1")
+	nnc := newTestNNC("rev-1")
 	hc := &stubHealthChecker{taintsRemoved: true}
 	configPath := filepath.Join(t.TempDir(), "config.yaml")
 
@@ -203,7 +204,7 @@ func TestCRAVSR_Reconcile_ApplyPath(t *testing.T) {
 func TestCRAVSR_Reconcile_ErrorPropagation(t *testing.T) {
 	t.Setenv("NODE_NAME", "test-node")
 
-	nnc := newTestNNC("test-node", "rev-1")
+	nnc := newTestNNC("rev-1")
 	hc := &stubHealthChecker{taintsRemoved: true}
 	configPath := filepath.Join(t.TempDir(), "config.yaml")
 	applyErr := errors.New("netconf commit failed")
@@ -225,7 +226,7 @@ func TestCRAVSR_Reconcile_ErrorPropagation(t *testing.T) {
 func TestCRAVSR_Reconcile_NoRestoreOnFailure(t *testing.T) {
 	t.Setenv("NODE_NAME", "test-node")
 
-	nnc := newTestNNC("test-node", "rev-2")
+	nnc := newTestNNC("rev-2")
 	hc := &stubHealthChecker{taintsRemoved: true}
 	configPath := filepath.Join(t.TempDir(), "config.yaml")
 	applyErr := errors.New("netconf commit failed")
@@ -296,7 +297,7 @@ func newCRAVSRTestReconcilerWithApplier(
 func TestCRAVSR_Reconcile_Idempotent(t *testing.T) {
 	t.Setenv("NODE_NAME", "test-node")
 
-	nnc := newTestNNC("test-node", "rev-1")
+	nnc := newTestNNC("rev-1")
 	nnc.Status.ConfigStatus = operator.StatusProvisioned
 	hc := &stubHealthChecker{taintsRemoved: true}
 	configPath := filepath.Join(t.TempDir(), "config.yaml")
@@ -314,7 +315,7 @@ func TestCRAVSR_Reconcile_Idempotent(t *testing.T) {
 	)
 
 	// Simulate that this revision was already applied by pre-loading the in-memory config.
-	r.NodeNetworkConfigReconciler.NodeNetworkConfig = newTestNNC("test-node", "rev-1")
+	r.NodeNetworkConfigReconciler.NodeNetworkConfig = newTestNNC("rev-1")
 
 	// Write a config file so storeConfig can persist the idempotent reconcile.
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o750); err != nil {
