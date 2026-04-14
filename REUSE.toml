@@ -127,13 +127,6 @@ precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Deutsche Telekom AG"
 SPDX-License-Identifier = "CC0-1.0"
 
-# Root-level markdown and owner files - CC0-1.0
-[[annotations]]
-path = ["CODEOWNERS"]
-precedence = "aggregate"
-SPDX-FileCopyrightText = "2026 Deutsche Telekom AG"
-SPDX-License-Identifier = "CC0-1.0"
-
 # e2e test infrastructure - Apache-2.0
 [[annotations]]
 path = ["e2e/**"]
