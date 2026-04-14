@@ -36,10 +36,8 @@ The das-schiff-network-operator project is committed to security by design:
 
 This project uses multiple security tools to maintain code quality:
 
-- **CodeQL** - Static analysis for security vulnerabilities
-- **Dependabot** - Dependency vulnerability tracking
+- **Dependabot** - Dependency vulnerability tracking and automated updates
 - **golangci-lint** - Go code quality and security linting
-- **REUSE** - License compliance verification
 
 ### Dependencies
 
