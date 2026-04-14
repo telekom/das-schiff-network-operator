@@ -3,6 +3,7 @@ package tests
 import (
 	"context"
 	"fmt"
+	"net"
 	"strings"
 	"time"
 
@@ -96,7 +97,7 @@ var _ = Describe("LoadBalancer Service", Label("lb"), func() {
 
 			By(fmt.Sprintf("Verifying m2mgw can curl LB VIP %s (IPv4)", lbIPv4))
 			statusCode, err := f.CurlFromCluster2Pod(ctx, "e2e-gateways", "m2m-gateway",
-				fmt.Sprintf("http://%s:80", lbIPv4))
+				fmt.Sprintf("http://%s", net.JoinHostPort(lbIPv4, "80")))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(statusCode).To(Equal("200"), "Expected HTTP 200 from LB VIP IPv4")
 
@@ -108,7 +109,7 @@ var _ = Describe("LoadBalancer Service", Label("lb"), func() {
 
 			By("Verifying c2mgw CANNOT reach m2m LB VIP (cross-VRF isolation, IPv4)")
 			_, err = f.CurlFromCluster2Pod(ctx, "e2e-gateways", "c2m-gateway",
-				fmt.Sprintf("http://%s:80", lbIPv4))
+				fmt.Sprintf("http://%s", net.JoinHostPort(lbIPv4, "80")))
 			Expect(err).To(HaveOccurred(), "c2mgw should NOT reach m2m LB VIP IPv4")
 
 			By("Verifying c2mgw CANNOT reach m2m LB VIP (cross-VRF isolation, IPv6)")
@@ -186,7 +187,7 @@ var _ = Describe("LoadBalancer Service", Label("lb"), func() {
 
 			By(fmt.Sprintf("Verifying c2mgw can curl c2m LB VIP %s (IPv4)", lbIPv4))
 			statusCode, err := f.CurlFromCluster2Pod(ctx, "e2e-gateways", "c2m-gateway",
-				fmt.Sprintf("http://%s:80", lbIPv4))
+				fmt.Sprintf("http://%s", net.JoinHostPort(lbIPv4, "80")))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(statusCode).To(Equal("200"), "Expected HTTP 200 from c2m LB VIP IPv4")
 
@@ -198,7 +199,7 @@ var _ = Describe("LoadBalancer Service", Label("lb"), func() {
 
 			By("Verifying m2mgw CANNOT reach c2m LB VIP (cross-VRF isolation, IPv4)")
 			_, err = f.CurlFromCluster2Pod(ctx, "e2e-gateways", "m2m-gateway",
-				fmt.Sprintf("http://%s:80", lbIPv4))
+				fmt.Sprintf("http://%s", net.JoinHostPort(lbIPv4, "80")))
 			Expect(err).To(HaveOccurred(), "m2mgw should NOT reach c2m LB VIP IPv4")
 
 			By("Verifying m2mgw CANNOT reach c2m LB VIP (cross-VRF isolation, IPv6)")

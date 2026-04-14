@@ -401,12 +401,12 @@ func (m *Manager) SendHttpRequest(ctx context.Context, url string) ([]byte, erro
 		Timeout: m.timeout,
 	}
 
-	req, err := http.NewRequest(http.MethodGet, url, http.NoBody)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("error creating request: %w", err)
 	}
 
-	res, err := httpClient.Do(req.WithContext(ctx))
+	res, err := httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("error when sending request: %w", err)
 	}
@@ -434,7 +434,7 @@ func (m *Manager) GetKPIMetrics(ctx context.Context) ([]byte, error) {
 
 	for _, kpiClient := range ns.KPI.Telegraf.Clients {
 		//nolint:revive
-		url := fmt.Sprintf("http://%s:%d/metrics", kpiClient.Address, kpiClient.Port)
+		url := fmt.Sprintf("http://%s/metrics", net.JoinHostPort(kpiClient.Address, fmt.Sprintf("%d", kpiClient.Port)))
 
 		resBody, err := m.SendHttpRequest(ctx, url)
 		if err != nil {
