@@ -18,8 +18,6 @@ package shared
 
 import (
 	"os"
-	"strings"
-	"sync"
 
 	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -28,39 +26,27 @@ import (
 )
 
 // BuildNamePredicates returns a predicate.Funcs that filters events to only those
-// where the object name contains the current node's name (from the NODE_NAME env var).
-// Create and Update events are filtered; Delete and Generic always return false.
-// When NODE_NAME is unset, the warning is logged at most once to avoid log spam.
+// where the object name exactly matches the current node's name (from the NODE_NAME env var).
+// The NODE_NAME value is read once at predicate build time. If NODE_NAME is unset,
+// all Create and Update events are rejected with a single log message.
+// Delete and Generic always return false.
 func BuildNamePredicates() predicate.Funcs {
-	var logOnce sync.Once
+	nodeName := os.Getenv(healthcheck.NodenameEnv)
+	if nodeName == "" {
+		log.Log.V(1).Info("NODE_NAME env not set, all events will be rejected")
+	}
 	return predicate.Funcs{
 		CreateFunc: func(e event.CreateEvent) bool {
-			if e.Object == nil {
-				log.Log.V(1).Info("Create event has nil object, rejecting event")
-				return false
-			}
-			nodeName := os.Getenv(healthcheck.NodenameEnv)
 			if nodeName == "" {
-				logOnce.Do(func() {
-					log.Log.V(1).Info("NODE_NAME env not set, rejecting all events until it is configured")
-				})
 				return false
 			}
-			return strings.Contains(e.Object.GetName(), nodeName)
+			return e.Object.GetName() == nodeName
 		},
 		UpdateFunc: func(e event.UpdateEvent) bool {
-			if e.ObjectNew == nil {
-				log.Log.V(1).Info("Update event has nil ObjectNew, rejecting event")
-				return false
-			}
-			nodeName := os.Getenv(healthcheck.NodenameEnv)
 			if nodeName == "" {
-				logOnce.Do(func() {
-					log.Log.V(1).Info("NODE_NAME env not set, rejecting all events until it is configured")
-				})
 				return false
 			}
-			return strings.Contains(e.ObjectNew.GetName(), nodeName)
+			return e.ObjectNew.GetName() == nodeName
 		},
 		DeleteFunc:  func(event.DeleteEvent) bool { return false },
 		GenericFunc: func(event.GenericEvent) bool { return false },
