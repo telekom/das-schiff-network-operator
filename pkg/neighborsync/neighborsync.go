@@ -538,6 +538,10 @@ func (n *NeighborSync) EnsureARPRefresh(interfaceID int) {
 func (n *NeighborSync) EnsureNeighborSuppression(bridgeID, vethID int) error {
 	n.initDefaults()
 
+	if _, alreadyTracked := n.receiveNeighbors.Load(vethID); alreadyTracked {
+		return nil
+	}
+
 	// Validate the link exists before mutating any state, so a bad vethID
 	// does not leave the maps in an inconsistent state.
 	nlLink, err := n.nlOps.LinkByIndex(vethID)
@@ -554,7 +558,7 @@ func (n *NeighborSync) EnsureNeighborSuppression(bridgeID, vethID int) error {
 	}
 
 	_, existing := n.sendGratuitousNeighbor.LoadOrStore(bridgeID, struct{}{})
-	n.receiveNeighbors.LoadOrStore(vethID, struct{}{})
+	n.receiveNeighbors.Store(vethID, struct{}{})
 
 	if !existing {
 		n.syncKernelNeighbors(bridgeID)
