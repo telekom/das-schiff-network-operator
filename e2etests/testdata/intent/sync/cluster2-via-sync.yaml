@@ -1,0 +1,87 @@
+# Sync E2E: Intent CRDs created in sync namespace on cluster-1 (mgmt cluster).
+# Uses unique names to avoid collision with cluster2-configs.yaml (applied directly).
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: VRF
+metadata:
+  name: vrf-sync-m2m
+spec:
+  vrf: "m2m"
+  vni: 2002026
+  routeTarget: "65188:2026"
+---
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: VRF
+metadata:
+  name: vrf-sync-c2m
+spec:
+  vrf: "c2m"
+  vni: 2002027
+  routeTarget: "65188:2027"
+---
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Network
+metadata:
+  name: net-sync-vlan601
+spec:
+  vlan: 601
+  vni: 5000002
+  ipv4:
+    cidr: "10.102.0.254/24"
+  ipv6:
+    cidr: "fda5:25c1:193c::fe/64"
+---
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Network
+metadata:
+  name: net-sync-vlan602
+spec:
+  vlan: 602
+  vni: 5000004
+  ipv4:
+    cidr: "10.102.1.254/24"
+  ipv6:
+    cidr: "fda5:25c1:193d::fe/64"
+---
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Destination
+metadata:
+  name: dest-sync-m2m
+  labels:
+    type: sync-gateway-export
+spec:
+  vrfRef: "vrf-sync-m2m"
+  prefixes:
+    - "10.102.0.0/24"
+    - "fda5:25c1:193c::/64"
+---
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Destination
+metadata:
+  name: dest-sync-c2m
+  labels:
+    type: sync-gateway-export-c2m
+spec:
+  vrfRef: "vrf-sync-c2m"
+  prefixes:
+    - "10.102.1.0/24"
+    - "fda5:25c1:193d::/64"
+---
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Layer2Attachment
+metadata:
+  name: l2a-sync-vlan601
+spec:
+  networkRef: "net-sync-vlan601"
+  destinations:
+    matchLabels:
+      type: sync-gateway-export
+---
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Layer2Attachment
+metadata:
+  name: l2a-sync-vlan602
+spec:
+  networkRef: "net-sync-vlan602"
+  destinations:
+    matchLabels:
+      type: sync-gateway-export-c2m

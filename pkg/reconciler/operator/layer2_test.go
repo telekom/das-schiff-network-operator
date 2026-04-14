@@ -3,8 +3,9 @@ package operator
 import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 )
 
 var _ = Describe("Layer2 building", func() {

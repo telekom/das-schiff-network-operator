@@ -36,6 +36,12 @@ type ToolkitInterface interface {
 	LinkSetNoMaster(link netlink.Link) error
 	LinkGetProtinfo(link netlink.Link) (netlink.Protinfo, error)
 	LinkSetMaster(link netlink.Link, master netlink.Link) error
+	QdiscAdd(qdisc netlink.Qdisc) error
+	QdiscDel(qdisc netlink.Qdisc) error
+	QdiscList(link netlink.Link) ([]netlink.Qdisc, error)
+	FilterAdd(filter netlink.Filter) error
+	FilterDel(filter netlink.Filter) error
+	FilterList(link netlink.Link, parent uint32) ([]netlink.Filter, error)
 }
 
 type Toolkit struct{}
@@ -142,4 +148,28 @@ func (*Toolkit) LinkSetMaster(link, master netlink.Link) error {
 
 func (*Toolkit) AddrDel(link netlink.Link, addr *netlink.Addr) error {
 	return netlink.AddrDel(link, addr)
+}
+
+func (*Toolkit) QdiscAdd(qdisc netlink.Qdisc) error {
+	return netlink.QdiscAdd(qdisc)
+}
+
+func (*Toolkit) QdiscDel(qdisc netlink.Qdisc) error {
+	return netlink.QdiscDel(qdisc)
+}
+
+func (*Toolkit) QdiscList(link netlink.Link) ([]netlink.Qdisc, error) {
+	return netlink.QdiscList(link)
+}
+
+func (*Toolkit) FilterAdd(filter netlink.Filter) error {
+	return netlink.FilterAdd(filter)
+}
+
+func (*Toolkit) FilterDel(filter netlink.Filter) error {
+	return netlink.FilterDel(filter)
+}
+
+func (*Toolkit) FilterList(link netlink.Link, parent uint32) ([]netlink.Filter, error) {
+	return netlink.FilterList(link, parent)
 }

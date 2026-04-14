@@ -1,0 +1,34 @@
+# GlobalNetworkPolicy allowing egress gateway pods to reach cluster
+# infrastructure (API server, DNS, Coil webhooks). These endpoints
+# live on node IPs or service ClusterIPs which are not reachable
+# through Kubernetes NetworkPolicy namespaceSelector rules when
+# Calico evaluates after kube-proxy DNAT.
+#
+# This policy is evaluated before K8s NetworkPolicy (Calico tier ordering).
+# The per-Outbound K8s NetworkPolicy handles FoU (UDP 5555) and
+# destination prefix rules.
+apiVersion: crd.projectcalico.org/v1
+kind: GlobalNetworkPolicy
+metadata:
+  name: allow-egress-gateway-infra
+spec:
+  # Select pods labelled by the Coil platform controller.
+  selector: has(network-connector.sylvaproject.org/outbound)
+  types:
+    - Egress
+  egress:
+    # Allow DNS (UDP+TCP 53) to any destination.
+    - action: Allow
+      protocol: UDP
+      destination:
+        ports:
+          - 53
+    - action: Allow
+      protocol: TCP
+      destination:
+        ports:
+          - 53
+    # Allow egress to cluster infrastructure (nodes + services).
+    - action: Allow
+      destination:
+        selector: role == 'cluster-infra'

@@ -7,11 +7,12 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
 	"github.com/telekom/das-schiff-network-operator/e2etests/framework"
 )
 
 // TC-07: BGP Peering (BGPaaS).
-var _ = Describe("BGP Peering", Label("bgp"), func() {
+var _ = Describe("BGP Peering", Label("bgp", "intent"), func() {
 	var (
 		f   *framework.Framework
 		ctx context.Context
@@ -82,27 +83,31 @@ var _ = Describe("BGP Peering", Label("bgp"), func() {
 		}).WithTimeout(cfg.BGPTimeout).WithPolling(10*time.Second).Should(BeTrue(),
 			"BGPaaS IPv6 peer did not reach Established state")
 
-		By("Verifying BGPaaS-imported IPv4 routes appear in m2m VRF routing table")
+		By("Verifying BGP-learned IPv4 /32 route from BIRD in m2m VRF routing table")
 		Eventually(func() bool {
 			output, err := f.VtyshExecOnKindNode(ctx, cfg.WorkerNode1,
 				"show ip route vrf m2m")
 			if err != nil {
 				return false
 			}
-			return strings.Contains(output, "10.250.3")
-		}).WithTimeout(30*time.Second).WithPolling(5*time.Second).Should(BeTrue(),
-			"BGPaaS IPv4 routes not found in m2m VRF routing table")
+			// Must match the specific /32 host route advertised by BIRD, not the
+			// static blackhole aggregate 10.250.3.0/24 which is always present.
+			return strings.Contains(output, "10.250.3.1/32")
+		}).WithTimeout(90*time.Second).WithPolling(5*time.Second).Should(BeTrue(),
+			"BGP-learned route 10.250.3.1/32 not found in m2m VRF (blackhole /24 doesn't count)")
 
-		By("Verifying BGPaaS-imported IPv6 routes appear in m2m VRF routing table")
+		By("Verifying BGP-learned IPv6 /128 route from BIRD in m2m VRF routing table")
 		Eventually(func() bool {
 			output, err := f.VtyshExecOnKindNode(ctx, cfg.WorkerNode1,
 				"show ipv6 route vrf m2m")
 			if err != nil {
 				return false
 			}
-			return strings.Contains(output, "fd75:2d70:f7f7")
-		}).WithTimeout(30*time.Second).WithPolling(5*time.Second).Should(BeTrue(),
-			"BGPaaS IPv6 routes not found in m2m VRF routing table")
+			// Must match the specific /128 host route advertised by BIRD, not the
+			// static blackhole aggregate fd75:2d70:f7f7::/64 which is always present.
+			return strings.Contains(output, "fd75:2d70:f7f7::1/128")
+		}).WithTimeout(90*time.Second).WithPolling(5*time.Second).Should(BeTrue(),
+			"BGP-learned route fd75:2d70:f7f7::1/128 not found in m2m VRF (blackhole /64 doesn't count)")
 
 		By("Verifying Bird received routes from CRA-FRR")
 		Eventually(func() bool {

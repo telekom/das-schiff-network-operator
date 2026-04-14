@@ -9,6 +9,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
 	"github.com/telekom/das-schiff-network-operator/e2etests/framework"
 )
 
@@ -48,18 +49,22 @@ var _ = Describe("L2 Connectivity", Label("l2", "smoke"), func() {
 			"k8s.v1.cni.cncf.io/networks": fmt.Sprintf(
 				`[{"name": "macvlan-vlan501", "ips": ["%s/24", "%s/64"]}]`,
 				cfg.Macvlan01IPv4, cfg.Macvlan01IPv6),
-		})).To(Succeed())
+		}, framework.WithNetAdmin())).To(Succeed())
 
 		By("Creating macvlan-02 on worker-2 (VLAN 501, m2m)")
 		Expect(f.CreateTestPod(ctx, ns, "macvlan-02", cfg.WorkerNode2, map[string]string{
 			"k8s.v1.cni.cncf.io/networks": fmt.Sprintf(
 				`[{"name": "macvlan-vlan501", "ips": ["%s/24", "%s/64"]}]`,
 				cfg.Macvlan02IPv4, cfg.Macvlan02IPv6),
-		})).To(Succeed())
+		}, framework.WithNetAdmin())).To(Succeed())
 
 		By("Waiting for pods to be ready")
 		Expect(f.WaitForPodReady(ctx, ns, "macvlan-01", cfg.PodReadyTimeout)).To(Succeed())
 		Expect(f.WaitForPodReady(ctx, ns, "macvlan-02", cfg.PodReadyTimeout)).To(Succeed())
+
+		By("Disabling IPv6 DAD and re-adding addresses")
+		Expect(f.EnsureIPv6NoDad(ctx, ns, "macvlan-01", cfg.Macvlan01IPv6, "net1")).To(Succeed())
+		Expect(f.EnsureIPv6NoDad(ctx, ns, "macvlan-02", cfg.Macvlan02IPv6, "net1")).To(Succeed())
 
 		By("Verifying IPv4 connectivity: macvlan-01 → macvlan-02")
 		Eventually(func() bool {

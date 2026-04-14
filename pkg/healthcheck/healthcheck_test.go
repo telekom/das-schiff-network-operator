@@ -12,7 +12,6 @@ import (
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
-	mock_healthcheck "github.com/telekom/das-schiff-network-operator/pkg/healthcheck/mock"
 	"github.com/vishvananda/netlink"
 	"go.uber.org/mock/gomock"
 	corev1 "k8s.io/api/core/v1"
@@ -20,6 +19,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	mock_healthcheck "github.com/telekom/das-schiff-network-operator/pkg/healthcheck/mock"
 )
 
 const testHostname = "worker"

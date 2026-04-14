@@ -1,10 +1,31 @@
-# Egress NAT test manifests (Coil + test pod)
+# Egress NAT test manifests — m2m VRF
 #
-# Calico IPPools (m2m-egress-v4, m2m-egress-v6) are created in
-# install-components.sh. The Egress template annotations select those
-# pools so the egress gateway pod gets an IP from the m2m-egress range
-# (10.250.2.0/30). That source IP matches the PBR rule on HBN, routing
-# traffic into VRF s-m2m which has routes to 10.102.0.0/24 via the DCGW.
+# IPPools + Coil Egress + test pod. The pools are created and deleted
+# together with the rest of the test resources so nothing leaks.
+apiVersion: crd.projectcalico.org/v1
+kind: IPPool
+metadata:
+  name: m2m-egress-v4
+spec:
+  cidr: 10.250.2.0/30
+  natOutgoing: false
+  blockSize: 32
+  nodeSelector: "!all()"
+  allowedUses:
+    - Workload
+---
+apiVersion: crd.projectcalico.org/v1
+kind: IPPool
+metadata:
+  name: m2m-egress-v6
+spec:
+  cidr: fd90:4dbf:396d::/126
+  natOutgoing: false
+  blockSize: 128
+  nodeSelector: "!all()"
+  allowedUses:
+    - Workload
+---
 apiVersion: coil.cybozu.com/v2
 kind: Egress
 metadata:

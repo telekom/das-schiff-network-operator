@@ -10,6 +10,7 @@ import (
 	netwrangler "github.com/rackn/netwrangler/netplan"
 	"github.com/rackn/netwrangler/util"
 	"github.com/sirupsen/logrus"
+
 	"github.com/telekom/das-schiff-network-operator/pkg/helpers/slice"
 	"github.com/telekom/das-schiff-network-operator/pkg/network/netplan"
 )
