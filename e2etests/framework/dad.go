@@ -15,11 +15,11 @@ func (f *Framework) WaitForIPv6DADComplete(ctx context.Context, namespace, podNa
 	defer cancel()
 
 	return Poll(ctx, 2*time.Second, func() (bool, error) {
-		stdout, _, err := f.ExecInPod(ctx, namespace, podName, "", []string{
+		stdout, stderr, err := f.ExecInPod(ctx, namespace, podName, "", []string{
 			"ip", "-6", "addr", "show", "dev", ifName,
 		})
 		if err != nil {
-			return false, nil
+			return false, fmt.Errorf("ip addr show failed (stderr=%s): %w", stderr, err)
 		}
 		for _, line := range strings.Split(stdout, "\n") {
 			if !strings.Contains(line, ipv6Addr) {
