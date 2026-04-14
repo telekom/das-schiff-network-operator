@@ -48,7 +48,9 @@ type NeighborSync struct {
 	// bpfAttachFn attaches the BPF program to an interface. Injectable for testing.
 	bpfAttachFn func(link netlink.Link) error
 	// bpfDetachFn detaches the BPF program from an interface. Injectable for testing.
-	bpfDetachFn func(link netlink.Link) error
+	bpfDetachFn        func(link netlink.Link) error
+	neighSubscribeFn   func(updates chan netlink.NeighUpdate, done chan struct{}, options netlink.NeighSubscribeOptions) error
+	newRingbufReaderFn func() (*ringbuf.Reader, error)
 
 	initOnce sync.Once
 }
@@ -278,7 +280,7 @@ func (n *NeighborSync) receiveUpdates() {
 	for {
 		updates := make(chan netlink.NeighUpdate)
 		done := make(chan struct{})
-		err := netlink.NeighSubscribeWithOptions(updates, done, netlink.NeighSubscribeOptions{ListExisting: true})
+		err := n.neighSubscribeFn(updates, done, netlink.NeighSubscribeOptions{ListExisting: true})
 		if err != nil {
 			log.Printf("failed to subscribe to neighbor updates: %v", err)
 			break
@@ -342,7 +344,7 @@ func (n *NeighborSync) runNeighborCheck() {
 
 func (n *NeighborSync) runBpfNeighborSync() {
 	log.Println("BPF ringbuf reader goroutine started")
-	rd, err := ringbuf.NewReader(bpf.EbpfNeighborRingbuf())
+	rd, err := n.newRingbufReaderFn()
 	if err != nil {
 		log.Printf("failed to open ringbuf reader: %v", err)
 		return
@@ -492,6 +494,12 @@ func (n *NeighborSync) initDefaults() {
 		if n.bpfDetachFn == nil {
 			n.bpfDetachFn = bpf.DetachNeighborHandlerFromInterface
 		}
+		if n.neighSubscribeFn == nil {
+			n.neighSubscribeFn = netlink.NeighSubscribeWithOptions
+		}
+		if n.newRingbufReaderFn == nil {
+			n.newRingbufReaderFn = func() (*ringbuf.Reader, error) { return ringbuf.NewReader(bpf.EbpfNeighborRingbuf()) }
+		}
 	})
 }
 
@@ -545,10 +553,8 @@ func (n *NeighborSync) EnsureNeighborSuppression(bridgeID, vethID int) error {
 		return fmt.Errorf("failed to attach BPF program: %w", err)
 	}
 
-	_, existing := n.sendGratuitousNeighbor.Load(bridgeID)
-
-	n.sendGratuitousNeighbor.Store(bridgeID, struct{}{})
-	n.receiveNeighbors.Store(vethID, struct{}{})
+	_, existing := n.sendGratuitousNeighbor.LoadOrStore(bridgeID, struct{}{})
+	n.receiveNeighbors.LoadOrStore(vethID, struct{}{})
 
 	if !existing {
 		n.syncKernelNeighbors(bridgeID)
@@ -574,7 +580,10 @@ func (n *NeighborSync) DisableNeighborSuppression(bridgeID, vethID int) error {
 		return fmt.Errorf("failed to get link by index: %w", err)
 	}
 	if err := n.bpfDetachFn(nlLink); err != nil {
-		return fmt.Errorf("failed to detach BPF program: %w", err)
+		var notFoundErr netlink.LinkNotFoundError
+		if !errors.As(err, &notFoundErr) {
+			return fmt.Errorf("failed to detach BPF program: %w", err)
+		}
 	}
 
 	n.sendGratuitousNeighbor.Delete(bridgeID)
