@@ -21,5 +21,4 @@ Makefile
 *.Dockerfile
 REUSE.toml
 
-# Keep license files available for Dockerfile COPY
-# (LICENSE and NOTICE are needed in the image, not LICENSES/)
+# Keep the top-level license files in the build context
