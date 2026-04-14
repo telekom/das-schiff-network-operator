@@ -65,6 +65,11 @@ func TestNamePredicate_EmptyNodeName(t *testing.T) {
 	testutil.RunEmptyNodeNameTest(t, shared.BuildNamePredicates(), newNodeNetworkConfig)
 }
 
+func TestNamePredicate_NilObject(t *testing.T) {
+	t.Setenv(healthcheck.NodenameEnv, "worker-node-01")
+	testutil.RunNilObjectSafetyTest(t, shared.BuildNamePredicates())
+}
+
 func TestReconcile_NilReconcilerReturnsError(t *testing.T) {
 	r := &NodeNetworkConfigReconciler{}
 	_, err := r.Reconcile(context.Background(), ctrl.Request{})

@@ -105,6 +105,22 @@ func RunEmptyNodeNameTest(t *testing.T, pred predicate.Funcs, newObj ObjectWithN
 	}
 }
 
+// RunNilObjectSafetyTest asserts that the predicate returns false (and does not panic)
+// when a nil object is delivered in Create or Update events.
+func RunNilObjectSafetyTest(t *testing.T, pred predicate.Funcs) {
+	t.Helper()
+
+	// Create event with nil Object must not panic and must return false.
+	if got := pred.Create(event.CreateEvent{Object: nil}); got {
+		t.Error("Create: expected false when Object is nil")
+	}
+
+	// Update event with nil ObjectNew must not panic and must return false.
+	if got := pred.Update(event.UpdateEvent{ObjectNew: nil}); got {
+		t.Error("Update: expected false when ObjectNew is nil")
+	}
+}
+
 // NewObjectMeta returns an ObjectMeta with the given name, for use with ObjectWithName factories.
 func NewObjectMeta(name string) metav1.ObjectMeta {
 	return metav1.ObjectMeta{Name: name}
