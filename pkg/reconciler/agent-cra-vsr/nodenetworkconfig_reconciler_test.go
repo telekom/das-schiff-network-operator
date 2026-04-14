@@ -59,8 +59,8 @@ func (s *stubHealthChecker) CheckInterfaces() error                 { return s.c
 func (s *stubHealthChecker) CheckReachability() error               { return s.checkReachabilityErr }
 func (s *stubHealthChecker) CheckAPIServer(_ context.Context) error { return s.checkAPIServerErr }
 func (s *stubHealthChecker) TaintsRemoved() bool                    { return s.taintsRemoved }
-func (s *stubHealthChecker) RemoveTaints(_ context.Context) error   { return nil }
-func (s *stubHealthChecker) UpdateReadinessCondition(_ context.Context, _ corev1.ConditionStatus, _, _ string) error {
+func (*stubHealthChecker) RemoveTaints(_ context.Context) error     { return nil }
+func (*stubHealthChecker) UpdateReadinessCondition(_ context.Context, _ corev1.ConditionStatus, _, _ string) error {
 	return nil
 }
 
