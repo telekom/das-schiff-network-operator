@@ -73,6 +73,37 @@ type NodeNetworkConfigReconciler struct {
 	restoreOnReconcileFailure bool
 }
 
+// NewNodeNetworkConfigReconcilerForTesting creates a NodeNetworkConfigReconciler
+// with a caller-supplied HealthCheckerInterface. This bypasses the real
+// healthcheck initialisation (LoadConfig, TCP dialer) and is intended for
+// unit tests that need to inject a stub or mock healthchecker.
+// Do NOT use this in production code.
+func NewNodeNetworkConfigReconcilerForTesting(
+	clusterClient client.Client,
+	logger logr.Logger,
+	configApplier ConfigApplier,
+	nodeNetworkConfigPath string,
+	opts ReconcilerOptions,
+	hc healthcheck.HealthCheckerInterface,
+) (*NodeNetworkConfigReconciler, error) {
+	reconciler := &NodeNetworkConfigReconciler{
+		client:                    clusterClient,
+		logger:                    logger,
+		configApplier:             configApplier,
+		healthChecker:             hc,
+		NodeNetworkConfigPath:     nodeNetworkConfigPath,
+		restoreOnReconcileFailure: opts.RestoreOnReconcileFailure,
+	}
+
+	var err error
+	reconciler.NodeNetworkConfig, err = ReadNodeNetworkConfig(reconciler.NodeNetworkConfigPath)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("error reading NodeNetworkConfig from disk: %w", err)
+	}
+
+	return reconciler, nil
+}
+
 // NewNodeNetworkConfigReconciler creates a new NodeNetworkConfigReconciler.
 func NewNodeNetworkConfigReconciler(
 	clusterClient client.Client,
