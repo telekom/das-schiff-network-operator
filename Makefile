@@ -66,7 +66,9 @@ vet: ## Run go vet against code.
 
 .PHONY: test
 test: manifests generate fmt vet envtest ## Run tests.
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" go test $(shell go list ./... 2>/dev/null | grep -v -e /e2etests -e /e2e/ || true) -coverprofile cover.out
+	packages="$$(go list -tags=integration ./... | grep -v -e /e2etests -e /e2e/)"; \
+	if [ -z "$$packages" ]; then echo "ERROR: go list returned no packages to test" >&2; exit 1; fi; \
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" go test -tags=integration $$packages -coverprofile cover.out
 
 ##@ Build
 
@@ -201,6 +203,9 @@ kustomize: ## Download kustomize locally if necessary.
 ENVTEST = $(shell pwd)/bin/setup-envtest
 .PHONY: envtest
 envtest: ## Download envtest-setup locally if necessary.
+	# Pinned to a specific pseudo-version rather than @latest to ensure reproducible test runs
+	# across developer machines and CI. To update, run: go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
+	# and update the version below to match the new pseudo-version.
 	$(call go-get-tool,$(ENVTEST),sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.0.0-20260305142021-f9589b9f2b9d)
 
 GO_LICENSES = $(shell pwd)/bin/go-licenses

@@ -19,30 +19,32 @@ package agent_netplan //nolint:revive
 import (
 	"context"
 	"fmt"
-	"os"
-	"strings"
 	"time"
 
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
-	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
+	"github.com/telekom/das-schiff-network-operator/controllers/shared"
 	agentnetplan "github.com/telekom/das-schiff-network-operator/pkg/reconciler/agent-netplan"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
 )
 
 const requeueTime = 10 * time.Minute
+
+type nodeNetplanConfigReconciler interface {
+	Reconcile(ctx context.Context) error
+}
+
+var _ nodeNetplanConfigReconciler = (*agentnetplan.NodeNetplanConfigReconciler)(nil)
 
 // NodeNetplanConfigReconciler reconciles a NodeNetplanConfig object.
 type NodeNetplanConfigReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 
-	Reconciler *agentnetplan.NodeNetplanConfigReconciler
+	Reconciler nodeNetplanConfigReconciler
 }
 
 //+kubebuilder:rbac:groups=network.t-caas.telekom.com,resources=nodenetplanconfigs,verbs=get;list;watch;create;update;patch;delete
@@ -59,9 +61,13 @@ type NodeNetplanConfigReconciler struct {
 func (r *NodeNetplanConfigReconciler) Reconcile(ctx context.Context, _ ctrl.Request) (ctrl.Result, error) {
 	_ = log.FromContext(ctx)
 
+	if r.Reconciler == nil {
+		return ctrl.Result{}, fmt.Errorf("reconciler is not initialized")
+	}
+
 	// Run ReconcileDebounced through debouncer
 	if err := r.Reconciler.Reconcile(ctx); err != nil {
-		return ctrl.Result{}, fmt.Errorf("reconicliation error: %w", err)
+		return ctrl.Result{}, fmt.Errorf("reconciliation error: %w", err)
 	}
 
 	return ctrl.Result{RequeueAfter: requeueTime}, nil
@@ -69,19 +75,8 @@ func (r *NodeNetplanConfigReconciler) Reconcile(ctx context.Context, _ ctrl.Requ
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *NodeNetplanConfigReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	namePredicates := predicate.Funcs{
-		CreateFunc: func(e event.CreateEvent) bool {
-			return strings.Contains(e.Object.GetName(), os.Getenv(healthcheck.NodenameEnv))
-		},
-		UpdateFunc: func(e event.UpdateEvent) bool {
-			return strings.Contains(e.ObjectNew.GetName(), os.Getenv(healthcheck.NodenameEnv))
-		},
-		DeleteFunc:  func(event.DeleteEvent) bool { return false },
-		GenericFunc: func(event.GenericEvent) bool { return false },
-	}
-
 	err := ctrl.NewControllerManagedBy(mgr).
-		For(&networkv1alpha1.NodeNetplanConfig{}, builder.WithPredicates(namePredicates)).
+		For(&networkv1alpha1.NodeNetplanConfig{}, builder.WithPredicates(shared.BuildNamePredicates())).
 		Complete(r)
 	if err != nil {
 		return fmt.Errorf("error creating controller: %w", err)
