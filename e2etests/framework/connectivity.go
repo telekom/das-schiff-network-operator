@@ -14,11 +14,18 @@ type PingResult struct {
 	Output  string
 }
 
+// isIPv6Target reports whether target is a pure IPv6 address (not IPv4 or
+// IPv4-mapped). It is used to select between ping and ping6.
+func isIPv6Target(target string) bool {
+	ip := net.ParseIP(target)
+	return ip != nil && ip.To4() == nil
+}
+
 // PingFromPod executes a ping from a pod to a target address.
 // Uses ping6 when target parses as an IPv6 address, otherwise ping (IPv4).
 func (f *Framework) PingFromPod(ctx context.Context, namespace, podName, target string, count int) (*PingResult, error) {
 	cmd := "ping"
-	if ip := net.ParseIP(target); ip != nil && ip.To4() == nil {
+	if isIPv6Target(target) {
 		cmd = "ping6"
 	}
 
@@ -73,7 +80,7 @@ func (f *Framework) AssertNoConnectivity(ctx context.Context, namespace, podName
 // PingFromCluster2Pod executes a ping from a pod on cluster-2.
 func (f *Framework) PingFromCluster2Pod(ctx context.Context, namespace, podName, target string, count int) (*PingResult, error) {
 	cmd := "ping"
-	if ip := net.ParseIP(target); ip != nil && ip.To4() == nil {
+	if isIPv6Target(target) {
 		cmd = "ping6"
 	}
 	args := []string{cmd, "-c", fmt.Sprintf("%d", count), "-W", "3", target}
