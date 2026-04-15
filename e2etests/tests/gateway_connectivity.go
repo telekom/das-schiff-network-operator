@@ -48,7 +48,7 @@ var _ = Describe("Gateway Connectivity", Label("gateway", "smoke"), func() {
 				"k8s.v1.cni.cncf.io/networks": fmt.Sprintf(
 					`[{"name": "macvlan-vlan501", "ips": ["%s/24", "%s/64"]}]`,
 					cfg.Macvlan01IPv4, cfg.Macvlan01IPv6),
-			})).To(Succeed())
+			}, framework.WithNetAdmin())).To(Succeed())
 
 			Expect(f.WaitForPodReady(ctx, ns, "macvlan-01", cfg.PodReadyTimeout)).To(Succeed())
 
@@ -84,7 +84,7 @@ var _ = Describe("Gateway Connectivity", Label("gateway", "smoke"), func() {
 				"k8s.v1.cni.cncf.io/networks": fmt.Sprintf(
 					`[{"name": "macvlan-vlan503", "ips": ["%s/24", "%s/64"]}]`,
 					cfg.Macvlan04IPv4, cfg.Macvlan04IPv6),
-			})).To(Succeed())
+			}, framework.WithNetAdmin())).To(Succeed())
 
 			Expect(f.WaitForPodReady(ctx, ns, "macvlan-04", cfg.PodReadyTimeout)).To(Succeed())
 
@@ -120,14 +120,14 @@ var _ = Describe("Gateway Connectivity", Label("gateway", "smoke"), func() {
 				"k8s.v1.cni.cncf.io/networks": fmt.Sprintf(
 					`[{"name": "macvlan-vlan501", "ips": ["%s/24", "%s/64"]}]`,
 					cfg.Macvlan01IPv4, cfg.Macvlan01IPv6),
-			})).To(Succeed())
+			}, framework.WithNetAdmin())).To(Succeed())
 
 			By("Creating macvlan-04 on worker-2 (VLAN 503, c2m)")
 			Expect(f.CreateTestPod(ctx, ns, "macvlan-04", cfg.WorkerNode2, map[string]string{
 				"k8s.v1.cni.cncf.io/networks": fmt.Sprintf(
 					`[{"name": "macvlan-vlan503", "ips": ["%s/24", "%s/64"]}]`,
 					cfg.Macvlan04IPv4, cfg.Macvlan04IPv6),
-			})).To(Succeed())
+			}, framework.WithNetAdmin())).To(Succeed())
 
 			Expect(f.WaitForPodReady(ctx, ns, "macvlan-01", cfg.PodReadyTimeout)).To(Succeed())
 			Expect(f.WaitForPodReady(ctx, ns, "macvlan-04", cfg.PodReadyTimeout)).To(Succeed())

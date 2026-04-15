@@ -380,8 +380,3 @@ func SetStatus(
 
 	return nil
 }
-
-// GetNodeNetworkConfig returns the current in-memory NodeNetworkConfig.
-func (r *NodeNetworkConfigReconciler) GetNodeNetworkConfig() *v1alpha1.NodeNetworkConfig {
-	return r.NodeNetworkConfig
-}
