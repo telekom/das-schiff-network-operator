@@ -579,11 +579,18 @@ func (n *NeighborSync) DisableNeighborSuppression(bridgeID, vethID int) error {
 	// Detach the BPF program before removing in-memory state. If detach fails
 	// the kernel-side suppression is still active and the maps should continue
 	// to reflect that, so callers can observe a consistent error.
+	//
+	// A "link not found" error from LinkByIndex means the veth has already been
+	// deleted; there is nothing left to detach, so proceed to clear in-memory
+	// state to avoid leaking stale suppression entries.
 	nlLink, err := n.nlOps.LinkByIndex(vethID)
 	if err != nil {
-		return fmt.Errorf("failed to get link by index: %w", err)
-	}
-	if err := n.bpfDetachFn(nlLink); err != nil {
+		var notFoundErr netlink.LinkNotFoundError
+		if !errors.As(err, &notFoundErr) {
+			return fmt.Errorf("failed to get link by index: %w", err)
+		}
+		// Veth already gone — no BPF to detach; fall through to clear maps.
+	} else if err := n.bpfDetachFn(nlLink); err != nil {
 		var notFoundErr netlink.LinkNotFoundError
 		if !errors.As(err, &notFoundErr) {
 			return fmt.Errorf("failed to detach BPF program: %w", err)

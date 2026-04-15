@@ -186,3 +186,78 @@ var _ = Describe("EnsureNeighborSuppression", func() {
 		Expect(gratuitous).To(BeFalse())
 	})
 })
+
+var _ = Describe("DisableNeighborSuppression", func() {
+	var ns *NeighborSync
+	var fakeLink netlink.Link
+
+	BeforeEach(func() {
+		fakeLink = &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Index: 10, MasterIndex: 20}}
+
+		ns = &NeighborSync{
+			nlOps:                    mockNlOps,
+			sendNeighborRequestFn:    noopSendNeighborRequest,
+			sendGratuitousNeighborFn: noopSendGratuitous,
+			bpfAttachFn:              func(_ netlink.Link) error { return nil },
+			bpfDetachFn:              func(_ netlink.Link) error { return nil },
+		}
+		ns.initOnce = sync.Once{}
+	})
+
+	It("clears in-memory maps on success", func() {
+		mockNlOps.EXPECT().LinkByIndex(10).Return(fakeLink, nil).Times(1)
+		ns.sendGratuitousNeighbor.Store(20, struct{}{})
+		ns.receiveNeighbors.Store(10, struct{}{})
+
+		err := ns.DisableNeighborSuppression(20, 10)
+		Expect(err).ToNot(HaveOccurred())
+
+		_, tracked := ns.receiveNeighbors.Load(10)
+		Expect(tracked).To(BeFalse())
+		_, gratuitous := ns.sendGratuitousNeighbor.Load(20)
+		Expect(gratuitous).To(BeFalse())
+	})
+
+	It("returns error when LinkByIndex fails with a non-not-found error", func() {
+		mockNlOps.EXPECT().LinkByIndex(10).Return(nil, errors.New("netlink io error")).Times(1)
+		ns.sendGratuitousNeighbor.Store(20, struct{}{})
+		ns.receiveNeighbors.Store(10, struct{}{})
+
+		err := ns.DisableNeighborSuppression(20, 10)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("failed to get link by index"))
+
+		_, tracked := ns.receiveNeighbors.Load(10)
+		Expect(tracked).To(BeTrue())
+	})
+
+	It("treats LinkByIndex link-not-found as benign and clears in-memory maps", func() {
+		mockNlOps.EXPECT().LinkByIndex(10).Return(nil, netlink.LinkNotFoundError{}).Times(1)
+		ns.sendGratuitousNeighbor.Store(20, struct{}{})
+		ns.receiveNeighbors.Store(10, struct{}{})
+
+		err := ns.DisableNeighborSuppression(20, 10)
+		Expect(err).ToNot(HaveOccurred())
+
+		_, tracked := ns.receiveNeighbors.Load(10)
+		Expect(tracked).To(BeFalse())
+		_, gratuitous := ns.sendGratuitousNeighbor.Load(20)
+		Expect(gratuitous).To(BeFalse())
+	})
+
+	It("returns error when bpfDetachFn fails with non-not-found error", func() {
+		ns.bpfDetachFn = func(_ netlink.Link) error {
+			return errors.New("bpf detach failed")
+		}
+		mockNlOps.EXPECT().LinkByIndex(10).Return(fakeLink, nil).Times(1)
+		ns.sendGratuitousNeighbor.Store(20, struct{}{})
+		ns.receiveNeighbors.Store(10, struct{}{})
+
+		err := ns.DisableNeighborSuppression(20, 10)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("failed to detach BPF program"))
+
+		_, tracked := ns.receiveNeighbors.Load(10)
+		Expect(tracked).To(BeTrue())
+	})
+})
