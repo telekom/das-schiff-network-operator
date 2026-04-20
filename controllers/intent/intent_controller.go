@@ -23,6 +23,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -85,20 +86,28 @@ func (r *Controller) SetupWithManager(mgr ctrl.Manager) error {
 		},
 	)
 
+	// Filter intent CRD updates to spec/label/annotation changes only,
+	// so the controller does not re-trigger itself when it writes back
+	// status (e.g. Collector.status.nodeAddresses, Conditions).
+	intentPred := builder.WithPredicates(intentCRDPredicate())
+	// Filter Node updates to changes that can affect intent
+	// (labels, taints, Ready transitions); ignore heartbeats.
+	nodePred := builder.WithPredicates(nodePredicate())
+
 	err := ctrl.NewControllerManagedBy(mgr).
 		Named("intent-reconciler").
-		Watches(&nc.VRF{}, h).
-		Watches(&nc.Network{}, h).
-		Watches(&nc.Destination{}, h).
-		Watches(&nc.Layer2Attachment{}, h).
-		Watches(&nc.Inbound{}, h).
-		Watches(&nc.Outbound{}, h).
-		Watches(&nc.PodNetwork{}, h).
-		Watches(&nc.BGPPeering{}, h).
-		Watches(&nc.Collector{}, h).
-		Watches(&nc.TrafficMirror{}, h).
-		Watches(&nc.AnnouncementPolicy{}, h).
-		Watches(&corev1.Node{}, h).
+		Watches(&nc.VRF{}, h, intentPred).
+		Watches(&nc.Network{}, h, intentPred).
+		Watches(&nc.Destination{}, h, intentPred).
+		Watches(&nc.Layer2Attachment{}, h, intentPred).
+		Watches(&nc.Inbound{}, h, intentPred).
+		Watches(&nc.Outbound{}, h, intentPred).
+		Watches(&nc.PodNetwork{}, h, intentPred).
+		Watches(&nc.BGPPeering{}, h, intentPred).
+		Watches(&nc.Collector{}, h, intentPred).
+		Watches(&nc.TrafficMirror{}, h, intentPred).
+		Watches(&nc.AnnouncementPolicy{}, h, intentPred).
+		Watches(&corev1.Node{}, h, nodePred).
 		Complete(r)
 	if err != nil {
 		return fmt.Errorf("error creating intent controller: %w", err)
