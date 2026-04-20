@@ -109,7 +109,7 @@ func (LayerBGP) mkStaticRoute(routing *Routing, routes ...StaticRoute) {
 	}
 }
 
-func (LayerBGP) mkRule(routing *Routing, rules ...Rule) {
+func (l *LayerBGP) mkRule(routing *Routing, rules ...Rule) {
 	if routing.PBR == nil {
 		routing.PBR = &PolicyBasedRouting{}
 	}
@@ -127,7 +127,7 @@ func (LayerBGP) mkRule(routing *Routing, rules ...Rule) {
 			routing.PBR.IPv4 = append(routing.PBR.IPv4, rule)
 		} else {
 			if rule.Match != nil {
-				rule.Match.Interface = nil
+				rule.Match.Interface = types.ToPtr(l.mgr.baseConfig.ClusterVRF.Name)
 			}
 			routing.PBR.IPv6 = append(routing.PBR.IPv6, rule)
 		}
