@@ -231,6 +231,83 @@ func TestBGPPeeringBuilder_LoopbackPeer(t *testing.T) {
 	}
 }
 
+// TestBGPPeeringBuilder_PasswordInjection verifies that buildBasePeer inlines
+// the resolved password from ResolvedData.BGPPasswords into every BGPPeer
+// produced for a BGPPeering with AuthSecretRef.
+func TestBGPPeeringBuilder_PasswordInjection(t *testing.T) {
+	b := NewBGPPeeringBuilder()
+
+	bp := nc.BGPPeering{
+		ObjectMeta: metav1.ObjectMeta{Name: "loopback-peer", Namespace: "tenant-a"},
+		Spec: nc.BGPPeeringSpec{
+			Mode: nc.BGPPeeringModeLoopbackPeer,
+			Ref: nc.BGPPeeringRef{
+				InboundRefs: []string{"my-inbound"},
+			},
+			WorkloadAS:    ptr(int64(65200)),
+			AuthSecretRef: &corev1.LocalObjectReference{Name: "bgp-auth"},
+		},
+	}
+
+	data := &resolver.ResolvedData{
+		Nodes: []corev1.Node{
+			{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
+		},
+		BGPPeerings: []nc.BGPPeering{bp},
+		BGPPasswords: map[string]string{
+			"tenant-a/loopback-peer": "s3cret",
+		},
+	}
+
+	result, err := b.Build(context.Background(), data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	contrib := result["node-1"]
+	if contrib == nil || contrib.ClusterVRF == nil || len(contrib.ClusterVRF.BGPPeers) != 1 {
+		t.Fatalf("expected 1 BGPPeer on ClusterVRF, got %#v", contrib)
+	}
+	peer := contrib.ClusterVRF.BGPPeers[0]
+	if peer.Password == nil {
+		t.Fatalf("expected password to be inlined, got nil")
+	}
+	if *peer.Password != "s3cret" {
+		t.Errorf("expected password 's3cret', got %q", *peer.Password)
+	}
+}
+
+// TestBGPPeeringBuilder_PasswordMissingInMap leaves Password unset when no
+// resolved password exists (e.g. Secret missing or no AuthSecretRef).
+func TestBGPPeeringBuilder_PasswordMissingInMap(t *testing.T) {
+	b := NewBGPPeeringBuilder()
+
+	bp := nc.BGPPeering{
+		ObjectMeta: metav1.ObjectMeta{Name: "lp", Namespace: "tenant-a"},
+		Spec: nc.BGPPeeringSpec{
+			Mode:          nc.BGPPeeringModeLoopbackPeer,
+			Ref:           nc.BGPPeeringRef{InboundRefs: []string{"x"}},
+			WorkloadAS:    ptr(int64(65200)),
+			AuthSecretRef: &corev1.LocalObjectReference{Name: "missing"},
+		},
+	}
+
+	data := &resolver.ResolvedData{
+		Nodes:        []corev1.Node{{ObjectMeta: metav1.ObjectMeta{Name: "n1"}}},
+		BGPPeerings:  []nc.BGPPeering{bp},
+		BGPPasswords: map[string]string{},
+	}
+
+	result, err := b.Build(context.Background(), data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	peer := result["n1"].ClusterVRF.BGPPeers[0]
+	if peer.Password != nil {
+		t.Errorf("expected nil Password when no resolved entry, got %q", *peer.Password)
+	}
+}
+
 func TestBGPPeeringBuilder_UnknownMode(t *testing.T) {
 	b := NewBGPPeeringBuilder()
 

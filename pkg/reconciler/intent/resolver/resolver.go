@@ -60,4 +60,8 @@ type ResolvedData struct {
 	Collectors           []nc.Collector
 	TrafficMirrors       []nc.TrafficMirror
 	AnnouncementPolicies []nc.AnnouncementPolicy
+
+	// BGPPasswords holds resolved BGP session passwords keyed by
+	// "<namespace>/<name>" of the BGPPeering.
+	BGPPasswords map[string]string
 }

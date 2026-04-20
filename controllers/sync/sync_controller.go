@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -103,6 +104,15 @@ func (r *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 					return ctrl.Result{}, err
 				}
 			}
+		}
+	}
+
+	// Sync Secrets referenced by BGPPeering.spec.authSecretRef into the remote
+	// namespace so the workload-side intent compiler can resolve the password
+	// without any cross-cluster Secret access.
+	for _, remoteClient := range remoteClients {
+		if err := r.syncBGPSecrets(ctx, log, remoteClient, req.Namespace); err != nil {
+			return ctrl.Result{}, err
 		}
 	}
 
@@ -297,6 +307,95 @@ func (r *Controller) deleteRemote(ctx context.Context, remoteClient client.Clien
 		return fmt.Errorf("deleting remote object %s/%s: %w", remote.GetNamespace(), remote.GetName(), err)
 	}
 	return nil
+}
+
+// syncBGPSecrets mirrors Secrets referenced by BGPPeering.spec.authSecretRef
+// from the management namespace to the remote workload namespace, and sweeps
+// remote Secrets we previously synced that are no longer referenced.
+func (r *Controller) syncBGPSecrets(ctx context.Context, log logr.Logger, remoteClient client.Client, namespace string) error {
+	bpList := &nc.BGPPeeringList{}
+	if err := r.Client.List(ctx, bpList, client.InNamespace(namespace)); err != nil {
+		return fmt.Errorf("listing BGPPeerings for secret sync: %w", err)
+	}
+
+	desired := map[string]struct{}{}
+	for i := range bpList.Items {
+		bp := &bpList.Items[i]
+		if !bp.GetDeletionTimestamp().IsZero() {
+			continue
+		}
+		if bp.Spec.AuthSecretRef == nil || bp.Spec.AuthSecretRef.Name == "" {
+			continue
+		}
+		desired[bp.Spec.AuthSecretRef.Name] = struct{}{}
+	}
+
+	for name := range desired {
+		src := &corev1.Secret{}
+		if err := r.Client.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, src); err != nil {
+			if apierrors.IsNotFound(err) {
+				log.Info("BGPPeering authSecretRef target Secret missing; skipping",
+					"namespace", namespace, "name", name)
+				continue
+			}
+			return fmt.Errorf("getting BGP auth Secret %s/%s: %w", namespace, name, err)
+		}
+		remote := r.buildRemoteSecret(src, namespace)
+		if err := r.applyRemote(ctx, remoteClient, remote); err != nil {
+			return fmt.Errorf("syncing BGP auth Secret %s/%s: %w", namespace, name, err)
+		}
+	}
+
+	// Sweep orphaned remote Secrets we previously synced.
+	remoteSecrets := &corev1.SecretList{}
+	if err := remoteClient.List(ctx, remoteSecrets,
+		client.InNamespace(r.remoteNamespace()),
+		client.MatchingLabels{labelManagedBy: labelManagedByValue},
+	); err != nil {
+		return fmt.Errorf("listing remote Secrets for sweep: %w", err)
+	}
+	for i := range remoteSecrets.Items {
+		s := &remoteSecrets.Items[i]
+		// Only sweep Secrets that originated from this management namespace.
+		if s.Annotations[annotationSourceNS] != namespace {
+			continue
+		}
+		if _, keep := desired[s.Name]; keep {
+			continue
+		}
+		log.Info("Sweeping orphan synced Secret on workload cluster",
+			"namespace", s.Namespace, "name", s.Name)
+		if err := remoteClient.Delete(ctx, s); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("deleting orphan remote Secret %s/%s: %w", s.Namespace, s.Name, err)
+		}
+	}
+
+	return nil
+}
+
+// buildRemoteSecret prepares a Secret for application to the remote cluster,
+// preserving Data/Type but resetting metadata and stamping our managed-by label.
+func (r *Controller) buildRemoteSecret(src *corev1.Secret, sourceNamespace string) *corev1.Secret {
+	dst := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      src.Name,
+			Namespace: r.remoteNamespace(),
+			Labels: map[string]string{
+				labelManagedBy: labelManagedByValue,
+			},
+			Annotations: map[string]string{
+				annotationSourceNS: sourceNamespace,
+			},
+		},
+		Type: src.Type,
+		Data: map[string][]byte{},
+	}
+	for k, v := range src.Data {
+		b := make([]byte, len(v))
+		copy(b, v)
+		dst.Data[k] = b
+	}
+	return dst
 }
 
 // SetupWithManager registers watches for all intent CRD types.

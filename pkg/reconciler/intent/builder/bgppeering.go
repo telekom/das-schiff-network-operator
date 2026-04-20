@@ -20,6 +20,8 @@ import (
 	"context"
 	"fmt"
 
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/resolver"
@@ -95,7 +97,7 @@ func (b *BGPPeeringBuilder) buildListenRange(bp *nc.BGPPeering, data *resolver.R
 
 	// Build BGPPeer with ListenRange, import filter from Inbound addresses,
 	// and EVPN export items for those same addresses.
-	peers := b.buildListenRangePeers(bp, net, inboundIPv4, inboundIPv6)
+	peers := b.buildListenRangePeers(bp, net, inboundIPv4, inboundIPv6, data)
 	evpnExportItems := b.inboundEVPNExportItems(inboundIPv4, inboundIPv6)
 
 	// Apply to all nodes (no nodeSelector on BGPPeering).
@@ -128,7 +130,7 @@ func (b *BGPPeeringBuilder) buildListenRange(bp *nc.BGPPeering, data *resolver.R
 
 // buildLoopbackPeer creates BGPPeer entries with Address on the ClusterVRF.
 func (b *BGPPeeringBuilder) buildLoopbackPeer(bp *nc.BGPPeering, data *resolver.ResolvedData, result map[string]*NodeContribution) {
-	peer := b.buildBasePeer(bp)
+	peer := b.buildBasePeer(bp, data)
 	// Loopback peer address is TBD — set to nil (auto-generated ULA by agent).
 
 	// Build address families.
@@ -170,11 +172,11 @@ func (*BGPPeeringBuilder) resolveL2AVRF(l2a *nc.Layer2Attachment, data *resolver
 // buildListenRangePeers creates BGPPeer entries with ListenRange from Network CIDRs.
 // Import filter is scoped to the Inbound addresses (what the workload may advertise).
 // Export filter is permit-all (workload sees all VRF routes).
-func (b *BGPPeeringBuilder) buildListenRangePeers(bp *nc.BGPPeering, net *resolver.ResolvedNetwork, inboundIPv4, inboundIPv6 []string) []networkv1alpha1.BGPPeer {
+func (b *BGPPeeringBuilder) buildListenRangePeers(bp *nc.BGPPeering, net *resolver.ResolvedNetwork, inboundIPv4, inboundIPv6 []string, data *resolver.ResolvedData) []networkv1alpha1.BGPPeer {
 	var peers []networkv1alpha1.BGPPeer
 
 	if net.Spec.IPv4 != nil {
-		peer := b.buildBasePeer(bp)
+		peer := b.buildBasePeer(bp, data)
 		cidr := net.Spec.IPv4.CIDR
 		peer.ListenRange = &cidr
 		peer.IPv4 = b.buildPeerAF(bp, inboundIPv4, true)
@@ -182,7 +184,7 @@ func (b *BGPPeeringBuilder) buildListenRangePeers(bp *nc.BGPPeering, net *resolv
 	}
 
 	if net.Spec.IPv6 != nil {
-		peer := b.buildBasePeer(bp)
+		peer := b.buildBasePeer(bp, data)
 		cidr := net.Spec.IPv6.CIDR
 		peer.ListenRange = &cidr
 		peer.IPv6 = b.buildPeerAF(bp, inboundIPv6, false)
@@ -283,7 +285,9 @@ func (*BGPPeeringBuilder) inboundEVPNExportItems(ipv4, ipv6 []string) []networkv
 }
 
 // buildBasePeer creates a BGPPeer with common fields from the BGPPeering spec.
-func (*BGPPeeringBuilder) buildBasePeer(bp *nc.BGPPeering) networkv1alpha1.BGPPeer {
+// When data is non-nil and a BGPPassword for bp is present, the password is
+// inlined into the peer (resolved earlier from bp.Spec.AuthSecretRef).
+func (*BGPPeeringBuilder) buildBasePeer(bp *nc.BGPPeering, data *resolver.ResolvedData) networkv1alpha1.BGPPeer {
 	peer := networkv1alpha1.BGPPeer{}
 
 	if bp.Spec.WorkloadAS != nil {
@@ -296,6 +300,13 @@ func (*BGPPeeringBuilder) buildBasePeer(bp *nc.BGPPeering) networkv1alpha1.BGPPe
 	if bp.Spec.EnableBFD != nil && *bp.Spec.EnableBFD && bp.Spec.BFDProfile != nil {
 		peer.BFDProfile = &networkv1alpha1.BFDProfile{
 			MinInterval: bp.Spec.BFDProfile.MinInterval,
+		}
+	}
+
+	if data != nil && bp.Spec.AuthSecretRef != nil {
+		key := client.ObjectKeyFromObject(bp).String()
+		if pw, ok := data.BGPPasswords[key]; ok && pw != "" {
+			peer.Password = &pw
 		}
 	}
 

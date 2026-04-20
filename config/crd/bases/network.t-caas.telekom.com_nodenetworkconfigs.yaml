@@ -660,6 +660,12 @@ spec:
                             the BGP peer.
                           format: int32
                           type: integer
+                        password:
+                          description: |-
+                            Password is an optional MD5/TCP-AO password for the BGP session.
+                            Resolved on the controller side from the intent BGPPeering's AuthSecretRef
+                            (key "password") and inlined here so node agents do not need Secret RBAC.
+                          type: string
                         remoteAsn:
                           description: RemoteASN is the remote Autonomous System Number.
                           format: int32
@@ -1846,6 +1852,12 @@ spec:
                               the BGP peer.
                             format: int32
                             type: integer
+                          password:
+                            description: |-
+                              Password is an optional MD5/TCP-AO password for the BGP session.
+                              Resolved on the controller side from the intent BGPPeering's AuthSecretRef
+                              (key "password") and inlined here so node agents do not need Secret RBAC.
+                            type: string
                           remoteAsn:
                             description: RemoteASN is the remote Autonomous System
                               Number.
@@ -3297,6 +3309,12 @@ spec:
                               the BGP peer.
                             format: int32
                             type: integer
+                          password:
+                            description: |-
+                              Password is an optional MD5/TCP-AO password for the BGP session.
+                              Resolved on the controller side from the intent BGPPeering's AuthSecretRef
+                              (key "password") and inlined here so node agents do not need Secret RBAC.
+                            type: string
                           remoteAsn:
                             description: RemoteASN is the remote Autonomous System
                               Number.

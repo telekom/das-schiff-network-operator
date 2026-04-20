@@ -312,7 +312,44 @@ func (r *Reconciler) fetchAll(ctx context.Context) (*resolver.FetchedResources, 
 		return nil, fmt.Errorf("error listing AnnouncementPolicies: %w", err)
 	}
 
+	// Resolve BGPPeering AuthSecretRefs to inline passwords. Skipping (with a
+	// log) is preferred over failing the whole reconcile: a missing or
+	// malformed Secret should degrade only the affected peering.
+	f.BGPPasswords = r.resolveBGPPasswords(ctx, f.BGPPeerings)
+
 	return f, nil
+}
+
+// resolveBGPPasswords fetches the Secret referenced by each BGPPeering's
+// AuthSecretRef (in the same namespace) and returns a map keyed by
+// "<namespace>/<name>" of the BGPPeering. Missing/malformed Secrets are
+// logged and skipped — the affected BGPPeering will simply have no password.
+func (r *Reconciler) resolveBGPPasswords(ctx context.Context, peerings []nc.BGPPeering) map[string]string {
+	out := map[string]string{}
+	for i := range peerings {
+		bp := &peerings[i]
+		if bp.Spec.AuthSecretRef == nil || bp.Spec.AuthSecretRef.Name == "" {
+			continue
+		}
+		secret := &corev1.Secret{}
+		key := client.ObjectKey{Namespace: bp.Namespace, Name: bp.Spec.AuthSecretRef.Name}
+		if err := r.client.Get(ctx, key, secret); err != nil {
+			r.logger.Info("BGPPeering authSecretRef not resolvable; peering will have no password",
+				"bgppeering", client.ObjectKeyFromObject(bp).String(),
+				"secret", key.String(),
+				"error", err.Error())
+			continue
+		}
+		raw, ok := secret.Data["password"]
+		if !ok || len(raw) == 0 {
+			r.logger.Info("BGPPeering authSecretRef Secret has no 'password' key; peering will have no password",
+				"bgppeering", client.ObjectKeyFromObject(bp).String(),
+				"secret", key.String())
+			continue
+		}
+		out[client.ObjectKeyFromObject(bp).String()] = string(raw)
+	}
+	return out
 }
 
 const originsAnnotation = "network-connector.sylvaproject.org/origins"

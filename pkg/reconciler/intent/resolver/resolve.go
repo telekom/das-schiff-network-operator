@@ -39,6 +39,12 @@ type FetchedResources struct {
 	TrafficMirrors       []nc.TrafficMirror
 	AnnouncementPolicies []nc.AnnouncementPolicy
 
+	// BGPPasswords holds resolved BGP session passwords keyed by
+	// "<namespace>/<name>" of the BGPPeering. Populated by the reconciler from
+	// each BGPPeering's AuthSecretRef so builders can inline the password into
+	// per-node NodeNetworkConfig (avoiding Secret RBAC on the node agent).
+	BGPPasswords map[string]string
+
 	// AllNetworks, AllVRFs, AllDestinations include items being deleted
 	// (DeletionTimestamp set). The finalizer manager needs these to remove
 	// finalizers and unblock deletion.
@@ -71,5 +77,6 @@ func ResolveAll(fetched *FetchedResources) (*ResolvedData, error) {
 		Collectors:           fetched.Collectors,
 		TrafficMirrors:       fetched.TrafficMirrors,
 		AnnouncementPolicies: fetched.AnnouncementPolicies,
+		BGPPasswords:         fetched.BGPPasswords,
 	}, nil
 }

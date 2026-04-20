@@ -143,6 +143,11 @@ type BGPPeer struct {
 	HoldTime *metav1.Duration `json:"holdTime,omitempty"`
 	// KeepaliveTime is the keepalive time for the BGP session, default is 30s.
 	KeepaliveTime *metav1.Duration `json:"keepaliveTime,omitempty"`
+	// Password is an optional MD5/TCP-AO password for the BGP session.
+	// Resolved on the controller side from the intent BGPPeering's AuthSecretRef
+	// (key "password") and inlined here so node agents do not need Secret RBAC.
+	// +optional
+	Password *string `json:"password,omitempty"`
 }
 
 // BFDProfile represents a BFD profile configuration.

@@ -444,5 +444,83 @@ func TestSyncMultipleCRDTypes(t *testing.T) {
 func ptrInt32(v int32) *int32    { return &v }
 func ptrString(v string) *string { return &v }
 
+// TestSyncBGPSecretsMirrorsReferencedSecret verifies that a Secret referenced
+// by a BGPPeering.spec.authSecretRef is copied into the remote namespace,
+// stamped with our managed-by label, and contains the same Data.
+func TestSyncBGPSecretsMirrorsReferencedSecret(t *testing.T) {
+	bp := &nc.BGPPeering{
+		ObjectMeta: metav1.ObjectMeta{Name: "lp", Namespace: "test-cluster"},
+		Spec: nc.BGPPeeringSpec{
+			Mode:          nc.BGPPeeringModeLoopbackPeer,
+			Ref:           nc.BGPPeeringRef{InboundRefs: []string{"x"}},
+			AuthSecretRef: &corev1.LocalObjectReference{Name: "bgp-auth"},
+		},
+	}
+	src := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "bgp-auth", Namespace: "test-cluster"},
+		Type:       corev1.SecretTypeOpaque,
+		Data:       map[string][]byte{"password": []byte("s3cret")},
+	}
+
+	sc, remoteClient := newFakeSyncController([]client.Object{bp, src}, nil)
+	ctx := context.Background()
+
+	if _, err := sc.Reconcile(ctx, ctrl.Request{
+		NamespacedName: types.NamespacedName{Namespace: "test-cluster", Name: "sync"},
+	}); err != nil {
+		t.Fatalf("Reconcile failed: %v", err)
+	}
+
+	got := &corev1.Secret{}
+	if err := remoteClient.Get(ctx, types.NamespacedName{
+		Namespace: testRemoteNamespace, Name: "bgp-auth",
+	}, got); err != nil {
+		t.Fatalf("Remote Secret not found: %v", err)
+	}
+	if string(got.Data["password"]) != "s3cret" {
+		t.Errorf("Expected password 's3cret', got %q", string(got.Data["password"]))
+	}
+	if got.Labels[labelManagedBy] != labelManagedByValue {
+		t.Errorf("Expected managed-by label, got %v", got.Labels)
+	}
+	if got.Annotations[annotationSourceNS] != "test-cluster" {
+		t.Errorf("Expected source-namespace annotation, got %v", got.Annotations)
+	}
+}
+
+// TestSyncBGPSecretsSweepsOrphan verifies that a previously-synced Secret
+// (managed-by label + source-namespace annotation) is removed from the
+// remote namespace once no live BGPPeering references it any more.
+func TestSyncBGPSecretsSweepsOrphan(t *testing.T) {
+	orphan := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "stale-auth",
+			Namespace: testRemoteNamespace,
+			Labels:    map[string]string{labelManagedBy: labelManagedByValue},
+			Annotations: map[string]string{
+				annotationSourceNS: "test-cluster",
+			},
+		},
+		Data: map[string][]byte{"password": []byte("old")},
+	}
+
+	sc, remoteClient := newFakeSyncController(nil, []client.Object{orphan})
+	ctx := context.Background()
+
+	if _, err := sc.Reconcile(ctx, ctrl.Request{
+		NamespacedName: types.NamespacedName{Namespace: "test-cluster", Name: "sync"},
+	}); err != nil {
+		t.Fatalf("Reconcile failed: %v", err)
+	}
+
+	got := &corev1.Secret{}
+	err := remoteClient.Get(ctx, types.NamespacedName{
+		Namespace: testRemoteNamespace, Name: "stale-auth",
+	}, got)
+	if err == nil {
+		t.Fatalf("Expected orphan Secret to be deleted, but it still exists")
+	}
+}
+
 // Ensure corev1 import is used (for scheme registration).
 var _ = &corev1.Secret{}
