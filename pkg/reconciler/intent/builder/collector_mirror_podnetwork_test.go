@@ -278,6 +278,12 @@ func TestMirrorBuilder_InboundSource(t *testing.T) {
 				VRFSpec: &nc.VRFSpec{VRF: "prod", VNI: ptr(int32(5001)), RouteTarget: ptr("65000:5001")},
 			},
 		},
+		RawDestinations: []nc.Destination{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "corp-dc", Labels: map[string]string{"env": "prod"}},
+				Spec:       nc.DestinationSpec{VRFRef: ptr("prod-vrf")},
+			},
+		},
 		Collectors: []nc.Collector{
 			{
 				ObjectMeta: metav1.ObjectMeta{Name: "col-1"},
@@ -353,6 +359,80 @@ func TestMirrorBuilder_InboundSource(t *testing.T) {
 	}
 	if acl.TrafficMatch.SrcPrefix == nil || *acl.TrafficMatch.SrcPrefix != "10.0.0.0/8" {
 		t.Errorf("expected src prefix '10.0.0.0/8', got %v", acl.TrafficMatch.SrcPrefix)
+	}
+}
+
+func TestMirrorBuilder_InboundSourceFanOut(t *testing.T) {
+	// C2: when an Inbound's Destinations selector matches multiple Destinations
+	// across multiple VRFs, the MirrorACL must land on every matched VRF.
+	b := NewMirrorBuilder()
+
+	prodSpec := &nc.VRFSpec{VRF: "prod", VNI: ptr(int32(5001)), RouteTarget: ptr("65000:5001")}
+	dmzSpec := &nc.VRFSpec{VRF: "dmz", VNI: ptr(int32(5002)), RouteTarget: ptr("65000:5002")}
+
+	data := &resolver.ResolvedData{
+		Nodes: []corev1.Node{{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}}},
+		VRFs: map[string]*resolver.ResolvedVRF{
+			"prod-vrf": {Name: "prod-vrf", Spec: *prodSpec},
+			"dmz-vrf":  {Name: "dmz-vrf", Spec: *dmzSpec},
+		},
+		Destinations: map[string]*resolver.ResolvedDestination{
+			"prod-dest": {Name: "prod-dest", Spec: nc.DestinationSpec{VRFRef: ptr("prod-vrf")}, VRFSpec: prodSpec},
+			"dmz-dest":  {Name: "dmz-dest", Spec: nc.DestinationSpec{VRFRef: ptr("dmz-vrf")}, VRFSpec: dmzSpec},
+		},
+		RawDestinations: []nc.Destination{
+			{ObjectMeta: metav1.ObjectMeta{Name: "prod-dest", Labels: map[string]string{"tier": "shared"}},
+				Spec: nc.DestinationSpec{VRFRef: ptr("prod-vrf")}},
+			{ObjectMeta: metav1.ObjectMeta{Name: "dmz-dest", Labels: map[string]string{"tier": "shared"}},
+				Spec: nc.DestinationSpec{VRFRef: ptr("dmz-vrf")}},
+		},
+		Collectors: []nc.Collector{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "col-1"},
+				Spec: nc.CollectorSpec{
+					Address:   "10.0.0.50",
+					Protocol:  "l3gre",
+					MirrorVRF: nc.MirrorVRFRef{Name: "mirror-vrf", Loopback: nc.LoopbackConfig{Name: "lo.mir"}},
+				},
+			},
+		},
+		Inbounds: []nc.Inbound{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "shared-inbound"},
+				Spec: nc.InboundSpec{
+					NetworkRef:   "svc-net",
+					Destinations: &metav1.LabelSelector{MatchLabels: map[string]string{"tier": "shared"}},
+				},
+			},
+		},
+		TrafficMirrors: []nc.TrafficMirror{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "tm"},
+				Spec: nc.TrafficMirrorSpec{
+					Source:    nc.MirrorSource{Kind: "Inbound", Name: "shared-inbound"},
+					Collector: "col-1",
+					Direction: "both",
+				},
+			},
+		},
+	}
+
+	result, err := b.Build(context.Background(), data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	contrib := result["node-1"]
+	if contrib == nil {
+		t.Fatal("expected contribution")
+	}
+	for _, vrf := range []string{"prod", "dmz"} {
+		fvrf, ok := contrib.FabricVRFs[vrf]
+		if !ok {
+			t.Fatalf("expected MirrorACL on FabricVRF %q, keys=%v", vrf, keys(contrib.FabricVRFs))
+		}
+		if len(fvrf.MirrorACLs) != 1 {
+			t.Errorf("VRF %q: expected 1 MirrorACL, got %d", vrf, len(fvrf.MirrorACLs))
+		}
 	}
 }
 

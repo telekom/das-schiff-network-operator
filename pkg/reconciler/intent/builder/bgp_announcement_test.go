@@ -171,6 +171,81 @@ func TestBGPPeeringBuilder_ListenRange(t *testing.T) { //nolint:funlen // table-
 	}
 }
 
+// TestBGPPeeringBuilder_ListenRangeFanOut verifies that when a Layer2Attachment
+// destinations selector matches multiple Destinations across multiple VRFs,
+// the listen-range peer is installed on each matched VRF. Persona review C2.
+func TestBGPPeeringBuilder_ListenRangeFanOut(t *testing.T) {
+	b := NewBGPPeeringBuilder()
+
+	prodSpec := &nc.VRFSpec{VRF: "prod", VNI: ptr(int32(5001)), RouteTarget: ptr("65000:5001")}
+	dmzSpec := &nc.VRFSpec{VRF: "dmz", VNI: ptr(int32(5002)), RouteTarget: ptr("65000:5002")}
+
+	data := &resolver.ResolvedData{
+		Nodes: []corev1.Node{{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}}},
+		Networks: map[string]*resolver.ResolvedNetwork{
+			"transfer-net": {
+				Name: "transfer-net",
+				Spec: nc.NetworkSpec{
+					VLAN: ptr(int32(100)),
+					VNI:  ptr(int32(10100)),
+					IPv4: &nc.IPNetwork{CIDR: "10.100.0.0/24"},
+				},
+			},
+		},
+		VRFs: map[string]*resolver.ResolvedVRF{
+			"prod-vrf": {Name: "prod-vrf", Spec: *prodSpec},
+			"dmz-vrf":  {Name: "dmz-vrf", Spec: *dmzSpec},
+		},
+		Destinations: map[string]*resolver.ResolvedDestination{
+			"prod-dest": {Name: "prod-dest", Spec: nc.DestinationSpec{VRFRef: ptr("prod-vrf")}, VRFSpec: prodSpec},
+			"dmz-dest":  {Name: "dmz-dest", Spec: nc.DestinationSpec{VRFRef: ptr("dmz-vrf")}, VRFSpec: dmzSpec},
+		},
+		RawDestinations: []nc.Destination{
+			{ObjectMeta: metav1.ObjectMeta{Name: "prod-dest", Labels: map[string]string{"tier": "shared"}},
+				Spec: nc.DestinationSpec{VRFRef: ptr("prod-vrf")}},
+			{ObjectMeta: metav1.ObjectMeta{Name: "dmz-dest", Labels: map[string]string{"tier": "shared"}},
+				Spec: nc.DestinationSpec{VRFRef: ptr("dmz-vrf")}},
+		},
+		Layer2Attachments: []nc.Layer2Attachment{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "transfer-l2a"},
+				Spec: nc.Layer2AttachmentSpec{
+					NetworkRef:   "transfer-net",
+					Destinations: &metav1.LabelSelector{MatchLabels: map[string]string{"tier": "shared"}},
+				},
+			},
+		},
+		BGPPeerings: []nc.BGPPeering{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "lp"},
+				Spec: nc.BGPPeeringSpec{
+					Mode:       nc.BGPPeeringModeListenRange,
+					Ref:        nc.BGPPeeringRef{AttachmentRef: ptr("transfer-l2a")},
+					WorkloadAS: ptr(int64(65100)),
+				},
+			},
+		},
+	}
+
+	result, err := b.Build(context.Background(), data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	contrib := result["node-1"]
+	if contrib == nil {
+		t.Fatal("expected node-1 contribution")
+	}
+	for _, vrf := range []string{"prod", "dmz"} {
+		fvrf, ok := contrib.FabricVRFs[vrf]
+		if !ok {
+			t.Fatalf("expected listen-range peer fanned out to FabricVRF %q, got keys %v", vrf, keys(contrib.FabricVRFs))
+		}
+		if len(fvrf.BGPPeers) != 1 {
+			t.Errorf("VRF %q: expected 1 BGPPeer, got %d", vrf, len(fvrf.BGPPeers))
+		}
+	}
+}
+
 func TestBGPPeeringBuilder_LoopbackPeer(t *testing.T) {
 	b := NewBGPPeeringBuilder()
 

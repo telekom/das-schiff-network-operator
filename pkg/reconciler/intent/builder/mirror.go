@@ -19,6 +19,7 @@ package builder
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
@@ -169,44 +170,44 @@ func (*MirrorBuilder) addToLayer2(l2aName string, acl *networkv1alpha1.MirrorACL
 	return nil
 }
 
-// addToInboundVRF adds MirrorACL to the VRF associated with an Inbound on all nodes.
+// addToInboundVRF adds MirrorACL to every VRF associated with an Inbound's
+// Destinations selector, on all nodes. When the selector matches multiple
+// Destinations across different VRFs, the ACL is fanned out to each VRF.
 func (b *MirrorBuilder) addToInboundVRF(ibName string, acl *networkv1alpha1.MirrorACL, data *resolver.ResolvedData, result map[string]*NodeContribution) error {
-	vrfName, vrfSpec, err := b.resolveInboundVRF(ibName, data)
+	vrfs, err := b.resolveInboundVRFs(ibName, data)
 	if err != nil {
 		return err
 	}
-	if vrfName == "" {
+	if len(vrfs) == 0 {
 		return fmt.Errorf("inbound %q has no VRF", ibName)
 	}
-
-	for i := range data.Nodes {
-		node := &data.Nodes[i]
-		contrib, ok := result[node.Name]
-		if !ok {
-			contrib = NewNodeContribution()
-			result[node.Name] = contrib
-		}
-
-		fvrf, exists := contrib.FabricVRFs[vrfName]
-		if !exists {
-			fvrf = buildFabricVRF(vrfSpec)
-		}
-		fvrf.MirrorACLs = append(fvrf.MirrorACLs, *acl)
-		contrib.FabricVRFs[vrfName] = fvrf
-	}
-
+	b.applyMirrorACLToVRFs(vrfs, acl, data, result)
 	return nil
 }
 
-// addToOutboundVRF adds MirrorACL to the VRF associated with an Outbound on all nodes.
+// addToOutboundVRF adds MirrorACL to every VRF associated with an Outbound's
+// Destinations selector, on all nodes.
 func (b *MirrorBuilder) addToOutboundVRF(obName string, acl *networkv1alpha1.MirrorACL, data *resolver.ResolvedData, result map[string]*NodeContribution) error {
-	vrfName, vrfSpec, err := b.resolveOutboundVRF(obName, data)
+	vrfs, err := b.resolveOutboundVRFs(obName, data)
 	if err != nil {
 		return err
 	}
-	if vrfName == "" {
+	if len(vrfs) == 0 {
 		return fmt.Errorf("outbound %q has no VRF", obName)
 	}
+	b.applyMirrorACLToVRFs(vrfs, acl, data, result)
+	return nil
+}
+
+// applyMirrorACLToVRFs writes the ACL into each named VRF on every node,
+// creating the FabricVRF entry on demand.
+func (*MirrorBuilder) applyMirrorACLToVRFs(vrfs map[string]*nc.VRFSpec, acl *networkv1alpha1.MirrorACL, data *resolver.ResolvedData, result map[string]*NodeContribution) {
+	// Sorted iteration for deterministic output.
+	names := make([]string, 0, len(vrfs))
+	for n := range vrfs {
+		names = append(names, n)
+	}
+	sort.Strings(names)
 
 	for i := range data.Nodes {
 		node := &data.Nodes[i]
@@ -215,54 +216,46 @@ func (b *MirrorBuilder) addToOutboundVRF(obName string, acl *networkv1alpha1.Mir
 			contrib = NewNodeContribution()
 			result[node.Name] = contrib
 		}
-
-		fvrf, exists := contrib.FabricVRFs[vrfName]
-		if !exists {
-			fvrf = buildFabricVRF(vrfSpec)
+		for _, vrfName := range names {
+			fvrf, exists := contrib.FabricVRFs[vrfName]
+			if !exists {
+				fvrf = buildFabricVRF(vrfs[vrfName])
+			}
+			fvrf.MirrorACLs = append(fvrf.MirrorACLs, *acl)
+			contrib.FabricVRFs[vrfName] = fvrf
 		}
-		fvrf.MirrorACLs = append(fvrf.MirrorACLs, *acl)
-		contrib.FabricVRFs[vrfName] = fvrf
 	}
-
-	return nil
 }
 
-// resolveInboundVRF finds the VRF name and spec for a named Inbound.
-func (*MirrorBuilder) resolveInboundVRF(name string, data *resolver.ResolvedData) (string, *nc.VRFSpec, error) {
+// resolveInboundVRFs returns every VRF (name → spec) matched by the Inbound's
+// Destinations selector. An empty map means the Inbound has no Destinations,
+// which is valid (consumer is purely informational).
+func (*MirrorBuilder) resolveInboundVRFs(name string, data *resolver.ResolvedData) (map[string]*nc.VRFSpec, error) {
 	for i := range data.Inbounds {
 		if data.Inbounds[i].Name != name {
 			continue
 		}
 		ib := &data.Inbounds[i]
 		if ib.Spec.Destinations == nil {
-			return "", nil, nil
+			return nil, nil
 		}
-		for _, resolved := range data.Destinations {
-			if resolved.VRFSpec != nil && resolved.Spec.VRFRef != nil {
-				return resolved.VRFSpec.VRF, resolved.VRFSpec, nil
-			}
-		}
-		return "", nil, nil
+		return resolveSelectorVRFs(ib.Spec.Destinations, data), nil
 	}
-	return "", nil, fmt.Errorf("inbound %q not found", name)
+	return nil, fmt.Errorf("inbound %q not found", name)
 }
 
-// resolveOutboundVRF finds the VRF name and spec for a named Outbound.
-func (*MirrorBuilder) resolveOutboundVRF(name string, data *resolver.ResolvedData) (string, *nc.VRFSpec, error) {
+// resolveOutboundVRFs returns every VRF (name → spec) matched by the Outbound's
+// Destinations selector.
+func (*MirrorBuilder) resolveOutboundVRFs(name string, data *resolver.ResolvedData) (map[string]*nc.VRFSpec, error) {
 	for i := range data.Outbounds {
 		if data.Outbounds[i].Name != name {
 			continue
 		}
 		ob := &data.Outbounds[i]
 		if ob.Spec.Destinations == nil {
-			return "", nil, nil
+			return nil, nil
 		}
-		for _, resolved := range data.Destinations {
-			if resolved.VRFSpec != nil && resolved.Spec.VRFRef != nil {
-				return resolved.VRFSpec.VRF, resolved.VRFSpec, nil
-			}
-		}
-		return "", nil, nil
+		return resolveSelectorVRFs(ob.Spec.Destinations, data), nil
 	}
-	return "", nil, fmt.Errorf("outbound %q not found", name)
+	return nil, fmt.Errorf("outbound %q not found", name)
 }

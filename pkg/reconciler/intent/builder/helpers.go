@@ -340,6 +340,35 @@ func appendUniqueStaticRoute(routes []networkv1alpha1.StaticRoute, route network
 	return append(routes, route)
 }
 
+// resolveSelectorVRFs returns ALL VRFs (name → spec) matched by a Destination
+// LabelSelector. Used by consumers (Inbound, Outbound, Layer2Attachment) that
+// must fan out to every matched VRF rather than picking the first match.
+func resolveSelectorVRFs(sel *metav1.LabelSelector, data *resolver.ResolvedData) map[string]*nc.VRFSpec {
+	if sel == nil {
+		return nil
+	}
+	selector, err := metav1.LabelSelectorAsSelector(sel)
+	if err != nil {
+		return nil
+	}
+	out := map[string]*nc.VRFSpec{}
+	for i := range data.RawDestinations {
+		rawDest := &data.RawDestinations[i]
+		if !selector.Matches(labels.Set(rawDest.Labels)) {
+			continue
+		}
+		if rawDest.Spec.VRFRef == nil {
+			continue
+		}
+		resolved, ok := data.Destinations[rawDest.Name]
+		if !ok || resolved.VRFSpec == nil {
+			continue
+		}
+		out[resolved.VRFSpec.VRF] = resolved.VRFSpec
+	}
+	return out
+}
+
 // groupDestinationsByVRF resolves a label selector against raw destinations and
 // groups ALL matching destinations by their vrfRef. Destinations without vrfRef
 // (using nextHop instead) are skipped.
