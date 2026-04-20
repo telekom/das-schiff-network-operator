@@ -80,7 +80,14 @@ func (r *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 	remoteClients := r.Remotes.GetByNamespace(req.Namespace)
 	if len(remoteClients) == 0 {
-		// No remote client yet — ClusterController hasn't set it up.
+		// No remote client — either the workload cluster's CAPI Cluster has been
+		// deleted (or never reached Ready). Drain our finalizer from any intent
+		// CRs that are mid-deletion; otherwise they would block forever waiting
+		// for a remote cluster that no longer exists.
+		if err := r.drainFinalizersForLostRemote(ctx, log, req.Namespace); err != nil {
+			return ctrl.Result{}, err
+		}
+		// ClusterController hasn't set up a client (yet) — wait and retry.
 		return ctrl.Result{RequeueAfter: syncRequeueInterval}, nil
 	}
 
@@ -100,6 +107,39 @@ func (r *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	}
 
 	return ctrl.Result{}, nil
+}
+
+// drainFinalizersForLostRemote walks every intent CRD type in the namespace and
+// strips our finalizer from any object that is being deleted. Used when the
+// workload cluster's CAPI Cluster (and therefore the remote client) is gone:
+// the remote object cannot be deleted, but neither can it leak — the cluster
+// it lived in no longer exists. Without this drain, a deleted CAPI Cluster
+// wedges every intent CR in the namespace in Terminating forever.
+func (r *Controller) drainFinalizersForLostRemote(ctx context.Context, log logr.Logger, namespace string) error {
+	for _, list := range intentCRDLists() {
+		if err := r.Client.List(ctx, list, client.InNamespace(namespace)); err != nil {
+			return fmt.Errorf("listing %T while draining finalizers: %w", list, err)
+		}
+		items := extractItems(list)
+		for i := range items {
+			obj := items[i]
+			if obj.GetDeletionTimestamp().IsZero() {
+				continue
+			}
+			if !controllerutil.ContainsFinalizer(obj, finalizerName) {
+				continue
+			}
+			log.Info("Remote cluster gone; releasing finalizer without remote delete",
+				"kind", obj.GetObjectKind().GroupVersionKind().Kind,
+				"name", obj.GetName())
+			controllerutil.RemoveFinalizer(obj, finalizerName)
+			if err := r.Client.Update(ctx, obj); err != nil {
+				return fmt.Errorf("removing finalizer from %s/%s during drain: %w",
+					obj.GetObjectKind().GroupVersionKind().Kind, obj.GetName(), err)
+			}
+		}
+	}
+	return nil
 }
 
 // syncObject handles create/update/delete for a single intent CRD object.

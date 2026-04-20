@@ -271,6 +271,87 @@ func TestSyncNoRemoteClient(t *testing.T) {
 	}
 }
 
+// TestSyncDrainsFinalizerWhenRemoteGone verifies that when no remote client
+// exists for the namespace (workload cluster deleted), an intent CR being
+// deleted has our finalizer removed so it can complete deletion. Without this,
+// deleting a CAPI Cluster wedges every intent CR in Terminating forever.
+func TestSyncDrainsFinalizerWhenRemoteGone(t *testing.T) {
+	now := metav1.Now()
+	vrf := &nc.VRF{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "vrf-stuck",
+			Namespace:         "orphaned-cluster",
+			Finalizers:        []string{finalizerName},
+			DeletionTimestamp: &now,
+		},
+		Spec: nc.VRFSpec{VRF: "stuck", VNI: ptrInt32(2002099), RouteTarget: ptrString("65188:99")},
+	}
+
+	s := testScheme()
+	mgmtClient := fake.NewClientBuilder().WithScheme(s).WithObjects(vrf).Build()
+	remotes := NewRemoteClientManager(s, RemoteClientConfig{})
+
+	sc := &Controller{
+		Client:  mgmtClient,
+		Scheme:  s,
+		Log:     zap.New(zap.UseDevMode(true)),
+		Remotes: remotes,
+	}
+
+	if _, err := sc.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Namespace: "orphaned-cluster", Name: "sync"},
+	}); err != nil {
+		t.Fatalf("Reconcile returned error: %v", err)
+	}
+
+	// VRF should now be gone (fake client GCs once last finalizer is removed).
+	got := &nc.VRF{}
+	err := mgmtClient.Get(context.Background(), types.NamespacedName{Namespace: "orphaned-cluster", Name: "vrf-stuck"}, got)
+	if err == nil {
+		if len(got.Finalizers) != 0 {
+			t.Errorf("Expected finalizer to be drained, still present: %v", got.Finalizers)
+		}
+	}
+}
+
+// TestSyncNoRemoteClientLeavesActiveCRsAlone verifies that when no remote
+// client exists, intent CRs that are NOT being deleted are left untouched
+// (no finalizer added, no error).
+func TestSyncNoRemoteClientLeavesActiveCRsAlone(t *testing.T) {
+	vrf := &nc.VRF{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "vrf-alive",
+			Namespace: "pending-cluster",
+		},
+		Spec: nc.VRFSpec{VRF: "alive", VNI: ptrInt32(2002098), RouteTarget: ptrString("65188:98")},
+	}
+
+	s := testScheme()
+	mgmtClient := fake.NewClientBuilder().WithScheme(s).WithObjects(vrf).Build()
+	remotes := NewRemoteClientManager(s, RemoteClientConfig{})
+
+	sc := &Controller{
+		Client:  mgmtClient,
+		Scheme:  s,
+		Log:     zap.New(zap.UseDevMode(true)),
+		Remotes: remotes,
+	}
+
+	if _, err := sc.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Namespace: "pending-cluster", Name: "sync"},
+	}); err != nil {
+		t.Fatalf("Reconcile returned error: %v", err)
+	}
+
+	got := &nc.VRF{}
+	if err := mgmtClient.Get(context.Background(), types.NamespacedName{Namespace: "pending-cluster", Name: "vrf-alive"}, got); err != nil {
+		t.Fatalf("VRF should still exist: %v", err)
+	}
+	if len(got.Finalizers) != 0 {
+		t.Errorf("Expected no finalizer added without remote client, got: %v", got.Finalizers)
+	}
+}
+
 // TestSyncRefusesUnmanagedObject verifies we don't overwrite objects we don't own.
 func TestSyncRefusesUnmanagedObject(t *testing.T) {
 	vrf := &nc.VRF{

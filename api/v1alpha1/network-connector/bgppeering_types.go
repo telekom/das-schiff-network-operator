@@ -86,11 +86,10 @@ type BGPPeeringSpec struct {
 
 	// WorkloadAS is the autonomous system number for the workload/tenant side.
 	// Uses asplain notation; for 4-byte ASNs use the full 32-bit integer.
-	// When omitted, the controller auto-generates a deterministic ASN.
-	// +optional
+	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=4294967295
-	WorkloadAS *int64 `json:"workloadAS,omitempty"`
+	WorkloadAS *int64 `json:"workloadAS"`
 
 	// AddressFamilies specifies which BGP address families to negotiate.
 	// If omitted, defaults to dual-stack (both IPv4 and IPv6 unicast).
@@ -132,7 +131,7 @@ type BGPPeeringStatus struct {
 	// NeighborASNumber is the AS number of the remote peer (observed).
 	NeighborASNumber *int64 `json:"neighborASNumber,omitempty"`
 
-	// WorkloadASNumber is the AS number assigned to the workload (observed/auto-generated).
+	// WorkloadASNumber is the AS number assigned to the workload (observed; mirrors spec.workloadAS).
 	WorkloadASNumber *int64 `json:"workloadASNumber,omitempty"`
 
 	// Conditions represent the latest available observations of the

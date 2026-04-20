@@ -159,7 +159,6 @@ spec:
                 description: |-
                   WorkloadAS is the autonomous system number for the workload/tenant side.
                   Uses asplain notation; for 4-byte ASNs use the full 32-bit integer.
-                  When omitted, the controller auto-generates a deterministic ASN.
                 format: int64
                 maximum: 4294967295
                 minimum: 1
@@ -167,6 +166,7 @@ spec:
             required:
             - mode
             - ref
+            - workloadAS
             type: object
             x-kubernetes-validations:
             - message: attachmentRef is required for listenRange mode and forbidden
@@ -264,7 +264,7 @@ spec:
                 type: integer
               workloadASNumber:
                 description: WorkloadASNumber is the AS number assigned to the workload
-                  (observed/auto-generated).
+                  (observed; mirrors spec.workloadAS).
                 format: int64
                 type: integer
             type: object

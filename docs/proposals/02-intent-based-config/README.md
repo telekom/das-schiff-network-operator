@@ -63,7 +63,7 @@ The `ConfigReconciler` watches all three CRDs, snapshots them into a `NetworkCon
 
 ### 3.1 New Intent-Driven CRDs
 
-We introduce twelve new cluster-scoped CRDs under `network.t-caas.telekom.com/v1alpha1`:
+We introduce twelve new namespaced CRDs under `network-connector.sylvaproject.org/v1alpha1`. They are namespaced (not cluster-scoped) because intent is authored in the management cluster per workload-cluster tenant: each workload cluster's intent CRs live in the namespace that contains its CAPI `Cluster` object, and the `network-sync` controller copies them into the workload cluster where the intent compiler turns them into per-node `NodeNetworkConfig` / `NodeNetplanConfig` (which remain cluster-scoped on the workload cluster):
 
 | CRD | Purpose |
 |---|---|

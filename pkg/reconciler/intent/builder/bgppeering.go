@@ -287,7 +287,7 @@ func (*BGPPeeringBuilder) buildBasePeer(bp *nc.BGPPeering) networkv1alpha1.BGPPe
 	peer := networkv1alpha1.BGPPeer{}
 
 	if bp.Spec.WorkloadAS != nil {
-		peer.RemoteASN = uint32(*bp.Spec.WorkloadAS) //nolint:gosec // value validated by CRD schema (positive integer)
+		peer.RemoteASN = uint32(*bp.Spec.WorkloadAS) //nolint:gosec // value validated by CRD schema: required, range [1, 4294967295]
 	}
 
 	peer.HoldTime = bp.Spec.HoldTime
