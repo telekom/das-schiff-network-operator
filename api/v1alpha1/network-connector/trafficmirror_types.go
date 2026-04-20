@@ -31,10 +31,12 @@ type TrafficMirrorSpec struct {
 	// +kubebuilder:validation:MinLength=1
 	Collector string `json:"collector"`
 
-	// Direction is the mirror direction.
-	// +kubebuilder:validation:Required
+	// Direction is the mirror direction. Defaults to "both" to match the underlying
+	// NodeNetworkConfig MirrorACL behavior when the field is omitted.
+	// +optional
+	// +kubebuilder:default=both
 	// +kubebuilder:validation:Enum=ingress;egress;both
-	Direction string `json:"direction"`
+	Direction string `json:"direction,omitempty"`
 
 	// TrafficMatch optionally filters which traffic to mirror.
 	// +optional

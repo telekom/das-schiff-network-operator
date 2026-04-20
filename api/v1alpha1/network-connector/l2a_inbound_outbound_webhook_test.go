@@ -301,6 +301,16 @@ func TestInboundValidateCreate_BothCountAndAddresses(t *testing.T) {
 	}
 }
 
+func TestInboundValidateCreate_NeitherCountNorAddresses(t *testing.T) {
+	ib := &Inbound{Spec: InboundSpec{
+		NetworkRef:    "net-1",
+		Advertisement: AdvertisementConfig{Type: "bgp"},
+	}}
+	if _, err := ib.ValidateCreate(context.Background(), ib); err == nil {
+		t.Fatal("expected error when neither count nor addresses is set, got nil")
+	}
+}
+
 func TestInboundValidateCreate_InvalidIPv4CIDR(t *testing.T) {
 	ib := &Inbound{Spec: InboundSpec{
 		NetworkRef: "net-1",
@@ -414,6 +424,13 @@ func TestOutboundValidateCreate_BothCountAndAddresses(t *testing.T) {
 	}}
 	if _, err := ob.ValidateCreate(context.Background(), ob); err == nil {
 		t.Fatal("expected error for both count and addresses, got nil")
+	}
+}
+
+func TestOutboundValidateCreate_NeitherCountNorAddresses(t *testing.T) {
+	ob := &Outbound{Spec: OutboundSpec{NetworkRef: "net-1"}}
+	if _, err := ob.ValidateCreate(context.Background(), ob); err == nil {
+		t.Fatal("expected error when neither count nor addresses is set, got nil")
 	}
 }
 

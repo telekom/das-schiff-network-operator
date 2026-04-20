@@ -41,7 +41,7 @@ func newFakeSyncController(mgmtObjs, remoteObjs []client.Object) (*Controller, c
 		WithObjects(remoteObjs...).
 		Build()
 
-	remotes := NewRemoteClientManager(s)
+	remotes := NewRemoteClientManager(s, RemoteClientConfig{})
 	remotes.clients[types.NamespacedName{Namespace: "test-cluster", Name: "test-cluster"}] = remoteClient
 
 	return &Controller{
@@ -251,7 +251,7 @@ func TestSyncIPAMPromotion(t *testing.T) {
 func TestSyncNoRemoteClient(t *testing.T) {
 	s := testScheme()
 	mgmtClient := fake.NewClientBuilder().WithScheme(s).Build()
-	remotes := NewRemoteClientManager(s)
+	remotes := NewRemoteClientManager(s, RemoteClientConfig{})
 
 	sc := &Controller{
 		Client:  mgmtClient,
@@ -304,7 +304,7 @@ func TestSyncRefusesUnmanagedObject(t *testing.T) {
 // TestRemoteClientManager tests basic CRUD on the client manager.
 func TestRemoteClientManager(t *testing.T) {
 	s := testScheme()
-	m := NewRemoteClientManager(s)
+	m := NewRemoteClientManager(s, RemoteClientConfig{})
 
 	if m.Has(types.NamespacedName{Namespace: "ns1", Name: "c1"}) {
 		t.Error("Should not have ns1/c1 initially")

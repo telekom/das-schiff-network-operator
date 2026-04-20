@@ -113,6 +113,9 @@ func (r *Inbound) validateInbound() error {
 	if r.Spec.Count != nil && r.Spec.Addresses != nil {
 		return fmt.Errorf("spec.count and spec.addresses are mutually exclusive")
 	}
+	if r.Spec.Count == nil && r.Spec.Addresses == nil {
+		return fmt.Errorf("exactly one of spec.count or spec.addresses must be set")
+	}
 	if r.Spec.Addresses != nil {
 		if err := validateAddressAllocation(r.Spec.Addresses); err != nil {
 			return err
@@ -154,6 +157,9 @@ func (r *Outbound) validateOutbound() error {
 	}
 	if r.Spec.Count != nil && r.Spec.Addresses != nil {
 		return fmt.Errorf("spec.count and spec.addresses are mutually exclusive")
+	}
+	if r.Spec.Count == nil && r.Spec.Addresses == nil {
+		return fmt.Errorf("exactly one of spec.count or spec.addresses must be set")
 	}
 	if r.Spec.Addresses != nil {
 		if err := validateAddressAllocation(r.Spec.Addresses); err != nil {

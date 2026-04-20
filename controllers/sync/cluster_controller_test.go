@@ -34,7 +34,7 @@ func newClusterController(objs ...client.Object) *ClusterController {
 	return &ClusterController{
 		Client:  fakeClient,
 		Log:     zap.New(zap.UseDevMode(true)),
-		Remotes: NewRemoteClientManager(s),
+		Remotes: NewRemoteClientManager(s, RemoteClientConfig{}),
 	}
 }
 

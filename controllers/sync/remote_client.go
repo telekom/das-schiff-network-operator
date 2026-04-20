@@ -3,6 +3,7 @@ package sync
 import (
 	"fmt"
 	"sync"
+	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -11,18 +12,54 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+// RemoteClientConfig holds tunables applied to every remote workload-cluster client
+// constructed by RemoteClientManager. Zero values are replaced by defaults at
+// construction time via NewRemoteClientManager.
+type RemoteClientConfig struct {
+	// QPS is the maximum requests-per-second allowed by the rest.Config rate limiter.
+	QPS float32
+	// Burst is the maximum burst size allowed by the rest.Config rate limiter.
+	Burst int
+	// Timeout is the per-request timeout applied to the remote rest.Config.
+	// A zero value means no timeout (the controller-runtime default).
+	Timeout time.Duration
+}
+
+// Default values used when a field of RemoteClientConfig is left at its zero value.
+const (
+	DefaultRemoteClientQPS     float32       = 50
+	DefaultRemoteClientBurst   int           = 100
+	DefaultRemoteClientTimeout time.Duration = 30 * time.Second
+)
+
+func (c RemoteClientConfig) withDefaults() RemoteClientConfig {
+	if c.QPS == 0 {
+		c.QPS = DefaultRemoteClientQPS
+	}
+	if c.Burst == 0 {
+		c.Burst = DefaultRemoteClientBurst
+	}
+	if c.Timeout == 0 {
+		c.Timeout = DefaultRemoteClientTimeout
+	}
+	return c
+}
+
 // RemoteClientManager maintains a thread-safe map of cluster (namespace/name) → remote client.Client.
 type RemoteClientManager struct {
 	mu      sync.RWMutex
 	clients map[types.NamespacedName]client.Client
 	scheme  *runtime.Scheme
+	cfg     RemoteClientConfig
 }
 
-// NewRemoteClientManager creates a new manager.
-func NewRemoteClientManager(scheme *runtime.Scheme) *RemoteClientManager {
+// NewRemoteClientManager creates a new manager with the given remote-client tunables.
+// Any zero-valued fields in cfg are replaced with the package defaults.
+func NewRemoteClientManager(scheme *runtime.Scheme, cfg RemoteClientConfig) *RemoteClientManager {
 	return &RemoteClientManager{
 		clients: make(map[types.NamespacedName]client.Client),
 		scheme:  scheme,
+		cfg:     cfg.withDefaults(),
 	}
 }
 
@@ -46,19 +83,15 @@ func (m *RemoteClientManager) GetByNamespace(namespace string) []client.Client {
 	return result
 }
 
-const (
-	remoteClientQPS   = 50
-	remoteClientBurst = 100
-)
-
 // UpdateFromKubeconfig parses raw kubeconfig bytes and creates/replaces the cached client.
 func (m *RemoteClientManager) UpdateFromKubeconfig(key types.NamespacedName, kubeconfig []byte) error {
 	cfg, err := clientcmd.RESTConfigFromKubeConfig(kubeconfig)
 	if err != nil {
 		return fmt.Errorf("parsing kubeconfig for %q: %w", key, err)
 	}
-	cfg.QPS = remoteClientQPS
-	cfg.Burst = remoteClientBurst
+	cfg.QPS = m.cfg.QPS
+	cfg.Burst = m.cfg.Burst
+	cfg.Timeout = m.cfg.Timeout
 
 	return m.updateFromConfig(key, cfg)
 }

@@ -61,6 +61,9 @@ func (r *ClusterController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}, secret)
 	if apierrors.IsNotFound(err) {
 		log.Info("kubeconfig Secret not found yet, waiting", "secret", secretName)
+		// Drop any previously-cached client so subsequent reconciles don't operate on
+		// stale credentials if the Secret was just deleted out from under us.
+		r.Remotes.Remove(req.NamespacedName)
 		return ctrl.Result{RequeueAfter: secretRequeueInterval}, nil
 	}
 	if err != nil {
@@ -70,14 +73,19 @@ func (r *ClusterController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	kubeconfig, ok := secret.Data["value"]
 	if !ok {
 		log.Info("kubeconfig Secret missing 'value' key", "secret", secretName)
+		r.Remotes.Remove(req.NamespacedName)
 		return ctrl.Result{RequeueAfter: secretRequeueInterval}, nil
 	}
 	if len(kubeconfig) == 0 {
 		log.Info("kubeconfig Secret has empty 'value' key", "secret", secretName)
+		r.Remotes.Remove(req.NamespacedName)
 		return ctrl.Result{RequeueAfter: secretRequeueInterval}, nil
 	}
 
 	if err := r.Remotes.UpdateFromKubeconfig(req.NamespacedName, kubeconfig); err != nil {
+		// Parsing/connection failed — evict the cached client so we don't keep using
+		// stale credentials while the user fixes the Secret.
+		r.Remotes.Remove(req.NamespacedName)
 		return ctrl.Result{}, fmt.Errorf("updating remote client for %q: %w", req.NamespacedName, err)
 	}
 
@@ -104,6 +112,11 @@ func (r *ClusterController) SetupWithManager(mgr ctrl.Manager) error {
 				return nil
 			}
 			clusterName := strings.TrimSuffix(name, suffix)
+			if clusterName == "" {
+				// Defensive: a Secret literally named "-kubeconfig" would otherwise
+				// enqueue a reconcile for an empty Name and pollute logs/metrics.
+				return nil
+			}
 			return []reconcile.Request{{
 				NamespacedName: types.NamespacedName{
 					Namespace: secret.GetNamespace(),

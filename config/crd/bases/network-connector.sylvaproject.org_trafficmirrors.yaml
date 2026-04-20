@@ -66,7 +66,10 @@ spec:
                 minLength: 1
                 type: string
               direction:
-                description: Direction is the mirror direction.
+                default: both
+                description: |-
+                  Direction is the mirror direction. Defaults to "both" to match the underlying
+                  NodeNetworkConfig MirrorACL behavior when the field is omitted.
                 enum:
                 - ingress
                 - egress
@@ -128,7 +131,6 @@ spec:
                     && self.protocol != 'ICMP')
             required:
             - collector
-            - direction
             - source
             type: object
           status:

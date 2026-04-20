@@ -568,7 +568,7 @@ func (in *CollectorSpec) DeepCopyInto(out *CollectorSpec) {
 	*out = *in
 	if in.Key != nil {
 		in, out := &in.Key, &out.Key
-		*out = new(uint32)
+		*out = new(int64)
 		**out = **in
 	}
 	in.MirrorVRF.DeepCopyInto(&out.MirrorVRF)

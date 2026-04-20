@@ -32,9 +32,12 @@ type CollectorSpec struct {
 	// +kubebuilder:validation:Enum=l3gre;l2gre
 	Protocol string `json:"protocol"`
 
-	// Key is the GRE tunnel key.
+	// Key is the GRE tunnel key. The full unsigned 32-bit range is permitted;
+	// stored as int64 so values above the signed 32-bit range round-trip cleanly.
 	// +optional
-	Key *uint32 `json:"key,omitempty"`
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=4294967295
+	Key *int64 `json:"key,omitempty"`
 
 	// MirrorVRF references a VRF for the mirror VRF.
 	// +kubebuilder:validation:Required

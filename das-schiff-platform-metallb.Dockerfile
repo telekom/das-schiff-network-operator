@@ -7,13 +7,13 @@ COPY go.mod go.mod
 COPY go.sum go.sum
 RUN go mod download
 
-COPY cmd/platform-metallb/main.go main.go
+COPY cmd/platform-metallb/ cmd/platform-metallb/
 COPY api/ api/
 COPY controllers/ controllers/
 COPY pkg/ pkg/
 
 ARG ldflags
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags "${ldflags}" -a -o platform-metallb main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags "${ldflags}" -a -o platform-metallb ./cmd/platform-metallb
 
 FROM alpine:3.21
 

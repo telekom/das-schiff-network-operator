@@ -19,6 +19,7 @@ package main
 import (
 	"flag"
 	"os"
+	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -44,10 +45,19 @@ func main() {
 	var metricsAddr string
 	var probeAddr string
 	var remoteNamespace string
+	var remoteQPS float64
+	var remoteBurst int
+	var remoteTimeout time.Duration
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.StringVar(&remoteNamespace, "remote-namespace", "default", "Target namespace on workload clusters for synced CRDs.")
+	flag.Float64Var(&remoteQPS, "remote-client-qps", float64(syncctrl.DefaultRemoteClientQPS),
+		"QPS limit applied to each remote workload-cluster client.")
+	flag.IntVar(&remoteBurst, "remote-client-burst", syncctrl.DefaultRemoteClientBurst,
+		"Burst limit applied to each remote workload-cluster client.")
+	flag.DurationVar(&remoteTimeout, "remote-client-timeout", syncctrl.DefaultRemoteClientTimeout,
+		"Per-request timeout applied to each remote workload-cluster client; 0 disables the timeout.")
 
 	opts := zap.Options{Development: true}
 	opts.BindFlags(flag.CommandLine)
@@ -68,7 +78,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	remotes := syncctrl.NewRemoteClientManager(scheme)
+	remotes := syncctrl.NewRemoteClientManager(scheme, syncctrl.RemoteClientConfig{
+		QPS:     float32(remoteQPS),
+		Burst:   remoteBurst,
+		Timeout: remoteTimeout,
+	})
 
 	if err = (&syncctrl.ClusterController{
 		Client:  mgr.GetClient(),

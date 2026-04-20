@@ -64,8 +64,12 @@ spec:
                 description: Address is the remote collector IP address.
                 type: string
               key:
-                description: Key is the GRE tunnel key.
-                format: int32
+                description: |-
+                  Key is the GRE tunnel key. The full unsigned 32-bit range is permitted;
+                  stored as int64 so values above the signed 32-bit range round-trip cleanly.
+                format: int64
+                maximum: 4294967295
+                minimum: 0
                 type: integer
               mirrorVRF:
                 description: MirrorVRF references a VRF for the mirror VRF.
