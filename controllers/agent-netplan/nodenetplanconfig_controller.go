@@ -21,14 +21,15 @@ import (
 	"fmt"
 	"time"
 
-	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
-	"github.com/telekom/das-schiff-network-operator/controllers/shared"
-	agentnetplan "github.com/telekom/das-schiff-network-operator/pkg/reconciler/agent-netplan"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+
+	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
+	"github.com/telekom/das-schiff-network-operator/controllers/shared"
+	agentnetplan "github.com/telekom/das-schiff-network-operator/pkg/reconciler/agent-netplan"
 )
 
 const requeueTime = 10 * time.Minute
