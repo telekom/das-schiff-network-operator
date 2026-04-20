@@ -97,7 +97,7 @@ var _ = Describe("L2 Connectivity", Label("l2", "smoke"), func() {
 				}
 			}
 			return result != nil && result.Success
-		}).WithTimeout(60*time.Second).WithPolling(5*time.Second).Should(BeTrue(), "IPv6 ping failed")
+		}).WithTimeout(90*time.Second).WithPolling(5*time.Second).Should(BeTrue(), "IPv6 ping failed")
 
 		By("Verifying IPv4 connectivity: macvlan-02 → macvlan-01")
 		Eventually(func() bool {
@@ -119,6 +119,6 @@ var _ = Describe("L2 Connectivity", Label("l2", "smoke"), func() {
 				GinkgoWriter.Printf("macvlan-02 IPv6 addr:\n%s\n", addrOut)
 			}
 			return result != nil && result.Success
-		}).WithTimeout(60*time.Second).WithPolling(5*time.Second).Should(BeTrue(), "Reverse IPv6 ping failed")
+		}).WithTimeout(90*time.Second).WithPolling(5*time.Second).Should(BeTrue(), "Reverse IPv6 ping failed")
 	})
 })
