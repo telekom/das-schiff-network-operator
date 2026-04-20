@@ -74,8 +74,15 @@ func TestCollectorBuilder_BasicCollector(t *testing.T) {
 					MirrorVRF: nc.MirrorVRFRef{
 						Name: "mirror-vrf",
 						Loopback: nc.LoopbackConfig{
-							Name: "lo.mir",
+							Name:   "lo.mir",
+							Subnet: "10.250.0.0/24",
 						},
+					},
+				},
+				Status: nc.CollectorStatus{
+					NodeAddresses: map[string]string{
+						"node-1": "10.250.0.1",
+						"node-2": "10.250.0.2",
 					},
 				},
 			},
@@ -110,8 +117,11 @@ func TestCollectorBuilder_BasicCollector(t *testing.T) {
 		if !ok {
 			t.Fatalf("expected loopback 'lo.mir' for %s", nodeName)
 		}
-		if len(lb.IPAddresses) != 1 || lb.IPAddresses[0] != "10.0.0.99" {
-			t.Errorf("expected loopback IP [10.0.0.99], got %v", lb.IPAddresses)
+		// The loopback IP must be the per-node allocation from
+		// status.nodeAddresses, NOT spec.address (which is the remote GRE peer).
+		expected := map[string]string{"node-1": "10.250.0.1", "node-2": "10.250.0.2"}[nodeName]
+		if len(lb.IPAddresses) != 1 || lb.IPAddresses[0] != expected {
+			t.Errorf("node %s: expected loopback IP [%s], got %v", nodeName, expected, lb.IPAddresses)
 		}
 	}
 }

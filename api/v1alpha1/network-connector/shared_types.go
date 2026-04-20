@@ -215,17 +215,24 @@ type MirrorVRFRef struct {
 	Loopback LoopbackConfig `json:"loopback"`
 }
 
-// LoopbackConfig defines a loopback interface backed by a CAPI IPAM pool.
+// LoopbackConfig defines a loopback interface whose per-node source address
+// is allocated from a CIDR by the intent controller. Allocations are
+// persisted in Collector.status.nodeAddresses and remain stable across
+// reconciles unless the node is removed from the cluster.
 type LoopbackConfig struct {
 	// Name is the loopback interface name (e.g. "lo.mir").
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
 	Name string `json:"name"`
 
-	// PoolRef references a Cluster API IPAM pool for per-node IP allocation.
-	// On the workload cluster this references an InClusterIPPool or similar.
-	// Must reference a resource in the same namespace (cross-namespace not supported).
-	PoolRef corev1.TypedLocalObjectReference `json:"poolRef"`
+	// Subnet is the CIDR from which per-node loopback source addresses are
+	// allocated by the intent controller. Each in-scope node receives one
+	// host address from this subnet, recorded in Collector.status.nodeAddresses.
+	// The subnet must be large enough to accommodate every node in scope; an
+	// IPv4 /29 yields 6 usable hosts after skipping network and broadcast.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Subnet string `json:"subnet"`
 }
 
 // BFDProfile represents BFD timer configuration.

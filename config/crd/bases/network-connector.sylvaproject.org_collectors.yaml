@@ -84,32 +84,18 @@ spec:
                         description: Name is the loopback interface name (e.g. "lo.mir").
                         minLength: 1
                         type: string
-                      poolRef:
+                      subnet:
                         description: |-
-                          PoolRef references a Cluster API IPAM pool for per-node IP allocation.
-                          On the workload cluster this references an InClusterIPPool or similar.
-                          Must reference a resource in the same namespace (cross-namespace not supported).
-                        properties:
-                          apiGroup:
-                            description: |-
-                              APIGroup is the group for the resource being referenced.
-                              If APIGroup is not specified, the specified Kind must be in the core API group.
-                              For any other third-party types, APIGroup is required.
-                            type: string
-                          kind:
-                            description: Kind is the type of resource being referenced
-                            type: string
-                          name:
-                            description: Name is the name of resource being referenced
-                            type: string
-                        required:
-                        - kind
-                        - name
-                        type: object
-                        x-kubernetes-map-type: atomic
+                          Subnet is the CIDR from which per-node loopback source addresses are
+                          allocated by the intent controller. Each in-scope node receives one
+                          host address from this subnet, recorded in Collector.status.nodeAddresses.
+                          The subnet must be large enough to accommodate every node in scope; an
+                          IPv4 /29 yields 6 usable hosts after skipping network and broadcast.
+                        minLength: 1
+                        type: string
                     required:
                     - name
-                    - poolRef
+                    - subnet
                     type: object
                   name:
                     description: Name of the VRF resource.
@@ -205,6 +191,16 @@ spec:
               greInterface:
                 description: GREInterface is the GRE interface name generated.
                 type: string
+              nodeAddresses:
+                additionalProperties:
+                  type: string
+                description: |-
+                  NodeAddresses maps node name to the loopback source address allocated
+                  from spec.mirrorVRF.loopback.subnet. Allocations are persisted across
+                  reconciles; an entry is removed only when the corresponding node leaves
+                  the cluster. This is the sole source of truth for per-node GRE source
+                  IPs — it is intentionally not mirrored to a ConfigMap.
+                type: object
               observedGeneration:
                 description: ObservedGeneration is the most recent generation observed
                   by the controller.

@@ -59,6 +59,14 @@ type CollectorStatus struct {
 	// ActiveNodes is the number of nodes where the collector is active.
 	ActiveNodes int32 `json:"activeNodes,omitempty"`
 
+	// NodeAddresses maps node name to the loopback source address allocated
+	// from spec.mirrorVRF.loopback.subnet. Allocations are persisted across
+	// reconciles; an entry is removed only when the corresponding node leaves
+	// the cluster. This is the sole source of truth for per-node GRE source
+	// IPs — it is intentionally not mirrored to a ConfigMap.
+	// +optional
+	NodeAddresses map[string]string `json:"nodeAddresses,omitempty"`
+
 	// Conditions represent the latest available observations of the Collector's state.
 	// +optional
 	// +listType=map
@@ -67,6 +75,11 @@ type CollectorStatus struct {
 	// +patchMergeKey=type
 	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
 }
+
+// CollectorConditionAddressesAllocated is the condition type reporting whether
+// the controller has been able to allocate a loopback source address for every
+// in-scope node from spec.mirrorVRF.loopback.subnet.
+const CollectorConditionAddressesAllocated = "AddressesAllocated"
 
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status

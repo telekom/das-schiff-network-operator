@@ -19,8 +19,6 @@ package networkconnector
 import (
 	"context"
 	"testing"
-
-	corev1 "k8s.io/api/core/v1"
 )
 
 // ---------------------------------------------------------------------------
@@ -214,12 +212,8 @@ func validCollector() *Collector {
 		MirrorVRF: MirrorVRFRef{
 			Name: "mirror-vrf",
 			Loopback: LoopbackConfig{
-				Name: "lo.mir",
-				PoolRef: corev1.TypedLocalObjectReference{
-					APIGroup: strPtr("ipam.cluster.x-k8s.io"),
-					Kind:     "InClusterIPPool",
-					Name:     "pool-1",
-				},
+				Name:   "lo.mir",
+				Subnet: "10.250.0.0/24",
 			},
 		},
 	}}
@@ -269,6 +263,22 @@ func TestCollectorValidateCreate_EmptyLoopbackName(t *testing.T) {
 	r.Spec.MirrorVRF.Loopback.Name = ""
 	if _, err := r.ValidateCreate(context.Background(), r); err == nil {
 		t.Fatal("expected error for empty mirrorVRF.loopback.name, got nil")
+	}
+}
+
+func TestCollectorValidateCreate_EmptyLoopbackSubnet(t *testing.T) {
+	r := validCollector()
+	r.Spec.MirrorVRF.Loopback.Subnet = ""
+	if _, err := r.ValidateCreate(context.Background(), r); err == nil {
+		t.Fatal("expected error for empty mirrorVRF.loopback.subnet, got nil")
+	}
+}
+
+func TestCollectorValidateCreate_InvalidLoopbackSubnet(t *testing.T) {
+	r := validCollector()
+	r.Spec.MirrorVRF.Loopback.Subnet = "not-a-cidr"
+	if _, err := r.ValidateCreate(context.Background(), r); err == nil {
+		t.Fatal("expected error for invalid mirrorVRF.loopback.subnet, got nil")
 	}
 }
 

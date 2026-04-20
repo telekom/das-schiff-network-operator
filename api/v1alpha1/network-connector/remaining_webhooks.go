@@ -185,6 +185,12 @@ func (r *Collector) validateCollector() error {
 	if r.Spec.MirrorVRF.Loopback.Name == "" {
 		return fmt.Errorf("spec.mirrorVRF.loopback.name must not be empty")
 	}
+	if r.Spec.MirrorVRF.Loopback.Subnet == "" {
+		return fmt.Errorf("spec.mirrorVRF.loopback.subnet must not be empty")
+	}
+	if _, _, err := net.ParseCIDR(r.Spec.MirrorVRF.Loopback.Subnet); err != nil {
+		return fmt.Errorf("spec.mirrorVRF.loopback.subnet must be a valid CIDR, got %q: %w", r.Spec.MirrorVRF.Loopback.Subnet, err)
+	}
 	return nil
 }
 

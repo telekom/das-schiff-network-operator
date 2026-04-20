@@ -38,6 +38,10 @@ func (*CollectorBuilder) Name() string {
 }
 
 // Build produces per-node FabricVRF loopback contributions from Collector resources.
+// Each Collector's loopback source IP is taken from Collector.status.nodeAddresses
+// (allocated by the intent reconciler from spec.mirrorVRF.loopback.subnet).
+// Nodes without an allocation are skipped silently — the reconciler raises a
+// degraded AddressesAllocated condition in that case.
 func (*CollectorBuilder) Build(_ context.Context, data *resolver.ResolvedData) (map[string]*NodeContribution, error) {
 	result := make(map[string]*NodeContribution)
 
@@ -54,18 +58,22 @@ func (*CollectorBuilder) Build(_ context.Context, data *resolver.ResolvedData) (
 		// matching the convention used by L2A and SBR builders.
 		backboneVRF := resolvedVRF.Spec.VRF
 
-		// Build loopback entry from the MirrorVRF config.
 		loopbackName := col.Spec.MirrorVRF.Loopback.Name
-		loopback := networkv1alpha1.Loopback{
-			IPAddresses: []string{col.Spec.Address},
-		}
 
-		// Apply to all nodes.
+		// Apply to all nodes that have an allocated loopback address.
 		for i := range data.Nodes {
-			contrib, ok := result[data.Nodes[i].Name]
+			nodeName := data.Nodes[i].Name
+			addr, ok := col.Status.NodeAddresses[nodeName]
+			if !ok || addr == "" {
+				// No allocation yet — skip; the reconciler reports
+				// the degraded condition on the Collector itself.
+				continue
+			}
+
+			contrib, ok := result[nodeName]
 			if !ok {
 				contrib = NewNodeContribution()
-				result[data.Nodes[i].Name] = contrib
+				result[nodeName] = contrib
 			}
 
 			fvrf, exists := contrib.FabricVRFs[backboneVRF]
@@ -76,7 +84,9 @@ func (*CollectorBuilder) Build(_ context.Context, data *resolver.ResolvedData) (
 			if fvrf.Loopbacks == nil {
 				fvrf.Loopbacks = make(map[string]networkv1alpha1.Loopback)
 			}
-			fvrf.Loopbacks[loopbackName] = loopback
+			fvrf.Loopbacks[loopbackName] = networkv1alpha1.Loopback{
+				IPAddresses: []string{addr},
+			}
 
 			contrib.FabricVRFs[backboneVRF] = fvrf
 		}

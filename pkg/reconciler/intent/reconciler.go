@@ -147,6 +147,13 @@ func (r *Reconciler) ReconcileDebounced(ctx context.Context) error {
 		// Continue — partial allocation is acceptable.
 	}
 
+	// 4b. Per-Collector loopback subnet allocation. Each Collector carries
+	// spec.mirrorVRF.loopback.subnet; the controller allocates one host
+	// address per in-scope node and persists the map in
+	// Collector.status.nodeAddresses. The Collector builder later uses
+	// these addresses as the per-node loopback source IPs.
+	r.reconcileCollectorAddresses(timeoutCtx, fetched)
+
 	// 5. Run all builders → per-node contributions.
 	contributions := make(map[string][]*builder.NodeContribution) // nodeName → contributions
 	for _, b := range r.builders {
@@ -655,4 +662,98 @@ func (r *Reconciler) cleanupOrphanedNetplanConfigs(ctx context.Context, nodes []
 		}
 	}
 	return nil
+}
+
+// reconcileCollectorAddresses allocates per-node loopback addresses for every
+// Collector from its mirrorVRF.loopback.subnet and persists the resulting map
+// (and AddressesAllocated condition) in Collector.status.
+//
+// Allocations are stable: an entry is preserved across reconciles for as long
+// as the corresponding node is still in the cluster, so loopback IPs do not
+// reshuffle on unrelated reconciles. The function mutates fetched.Collectors
+// in place so downstream builders see the up-to-date status.
+func (r *Reconciler) reconcileCollectorAddresses(ctx context.Context, fetched *resolver.FetchedResources) {
+	if len(fetched.Collectors) == 0 {
+		return
+	}
+	nodeNames := make([]string, 0, len(fetched.Nodes))
+	for i := range fetched.Nodes {
+		nodeNames = append(nodeNames, fetched.Nodes[i].Name)
+	}
+
+	for i := range fetched.Collectors {
+		col := &fetched.Collectors[i]
+		subnet := col.Spec.MirrorVRF.Loopback.Subnet
+		if subnet == "" {
+			continue
+		}
+		res, err := ipam.AllocateSubnet(subnet, nodeNames, col.Status.NodeAddresses)
+		if err != nil {
+			r.logger.Error(err, "subnet allocation failed", "collector", col.Name, "subnet", subnet)
+			cond := newCollectorCondition(col.Generation, metav1.ConditionFalse, "InvalidSubnet", err.Error())
+			r.applyCollectorCondition(ctx, col, &cond)
+			continue
+		}
+		// Skip Status update when nothing changed, to avoid resourceVersion churn.
+		if mapsEqual(col.Status.NodeAddresses, res.Updated) {
+			continue
+		}
+		col.Status.NodeAddresses = res.Updated
+		reason := "AllAllocated"
+		msg := fmt.Sprintf("allocated %d/%d node addresses from %s", len(res.Updated), len(nodeNames), subnet)
+		condStatus := metav1.ConditionTrue
+		if len(res.Unallocated) > 0 {
+			condStatus = metav1.ConditionFalse
+			reason = "SubnetExhausted"
+			msg = fmt.Sprintf("subnet %s exhausted: %d node(s) unallocated: %v", subnet, len(res.Unallocated), res.Unallocated)
+		}
+		cond := newCollectorCondition(col.Generation, condStatus, reason, msg)
+		r.applyCollectorCondition(ctx, col, &cond)
+	}
+}
+
+// applyCollectorCondition upserts the given condition on the Collector and
+// persists the status. Errors are logged but not returned so a single failure
+// does not abort the wider reconcile.
+func (r *Reconciler) applyCollectorCondition(ctx context.Context, col *nc.Collector, cond *metav1.Condition) {
+	upsertCondition(&col.Status.Conditions, cond)
+	if err := r.client.Status().Update(ctx, col); err != nil {
+		r.logger.Error(err, "failed to update Collector status", "collector", col.Name)
+	}
+}
+
+func newCollectorCondition(generation int64, condStatus metav1.ConditionStatus, reason, message string) metav1.Condition {
+	return metav1.Condition{
+		Type:               nc.CollectorConditionAddressesAllocated,
+		Status:             condStatus,
+		Reason:             reason,
+		Message:            message,
+		ObservedGeneration: generation,
+		LastTransitionTime: metav1.Now(),
+	}
+}
+
+func upsertCondition(conds *[]metav1.Condition, cond *metav1.Condition) {
+	for i := range *conds {
+		if (*conds)[i].Type == cond.Type {
+			if (*conds)[i].Status == cond.Status {
+				cond.LastTransitionTime = (*conds)[i].LastTransitionTime
+			}
+			(*conds)[i] = *cond
+			return
+		}
+	}
+	*conds = append(*conds, *cond)
+}
+
+func mapsEqual(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if bv, ok := b[k]; !ok || bv != v {
+			return false
+		}
+	}
+	return true
 }

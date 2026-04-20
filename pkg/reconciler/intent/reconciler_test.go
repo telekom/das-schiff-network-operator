@@ -699,12 +699,8 @@ func TestTrafficMirrorL2ASource(t *testing.T) {
 			MirrorVRF: nc.MirrorVRFRef{
 				Name: "vrf-mir-col",
 				Loopback: nc.LoopbackConfig{
-					Name: "lo.mir",
-					PoolRef: corev1.TypedLocalObjectReference{
-						APIGroup: ptr("ipam.cluster.x-k8s.io"),
-						Kind:     "InClusterIPPool",
-						Name:     "mirror-pool",
-					},
+					Name:   "lo.mir",
+					Subnet: "10.250.0.0/24",
 				},
 			},
 		},
