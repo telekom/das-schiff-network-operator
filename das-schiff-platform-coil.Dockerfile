@@ -12,7 +12,8 @@ COPY api/ api/
 COPY controllers/ controllers/
 COPY pkg/ pkg/
 
-RUN CGO_ENABLED=0 GOOS=linux go build -a -o platform-coil main.go
+ARG ldflags
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags "${ldflags}" -a -o platform-coil main.go
 
 FROM alpine:3.21
 
