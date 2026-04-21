@@ -54,10 +54,7 @@ spec:
     name: "vrf-mirror"
     loopback:
       name: "mirror"
-      poolRef:
-        apiGroup: "ipam.cluster.x-k8s.io"
-        kind: "InClusterIPPool"
-        name: "mirror-pool"
+      subnet: "10.250.91.0/29"
 ---
 apiVersion: network-connector.sylvaproject.org/v1alpha1
 kind: Inbound

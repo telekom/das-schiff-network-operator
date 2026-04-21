@@ -749,7 +749,7 @@ func TestTrafficMirrorL2ASource(t *testing.T) {
 	require.NotNil(t, mirVRF.Loopbacks, "expected Loopbacks in mirror VRF")
 	lo, ok := mirVRF.Loopbacks["lo.mir"]
 	require.True(t, ok, "expected Loopback 'lo.mir'")
-	assert.Contains(t, lo.IPAddresses, "192.168.100.1")
+	assert.Contains(t, lo.IPAddresses, "10.250.0.1")
 }
 
 // --- AnnouncementPolicy Tests ---
