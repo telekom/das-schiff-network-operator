@@ -1,0 +1,109 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: network-sync
+  namespace: system
+  labels:
+    app.kubernetes.io/component: network-sync
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: network-sync-role
+  labels:
+    app.kubernetes.io/component: network-sync
+rules:
+  # CAPI Cluster objects: source of truth for workload clusters.
+  - apiGroups:
+      - cluster.x-k8s.io
+    resources:
+      - clusters
+    verbs:
+      - get
+      - list
+      - watch
+  # Kubeconfig secrets associated with each Cluster (`<cluster>-kubeconfig`).
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+    verbs:
+      - get
+      - list
+      - watch
+  # Intent CRDs that are synced from management to workload clusters.
+  - apiGroups:
+      - network-connector.sylvaproject.org
+    resources:
+      - networks
+      - podnetworks
+      - vrfs
+      - layer2attachments
+      - inbounds
+      - outbounds
+      - destinations
+      - bgppeerings
+      - announcementpolicies
+      - collectors
+      - interfaceconfigs
+      - trafficmirrors
+    verbs:
+      - get
+      - list
+      - watch
+  # Status sub-resources for mirroring remote state back into management.
+  - apiGroups:
+      - network-connector.sylvaproject.org
+    resources:
+      - networks/status
+      - podnetworks/status
+      - vrfs/status
+      - layer2attachments/status
+      - inbounds/status
+      - outbounds/status
+      - destinations/status
+      - bgppeerings/status
+      - announcementpolicies/status
+      - collectors/status
+      - interfaceconfigs/status
+      - trafficmirrors/status
+    verbs:
+      - get
+      - patch
+      - update
+  # NodeNetworkStatus is published per workload node and aggregated centrally.
+  - apiGroups:
+      - network-connector.sylvaproject.org
+    resources:
+      - nodenetworkstatuses
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+  # Events for diagnostics.
+  - apiGroups:
+      - ""
+    resources:
+      - events
+    verbs:
+      - create
+      - patch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: network-sync-rolebinding
+  labels:
+    app.kubernetes.io/component: network-sync
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: network-sync-role
+subjects:
+  - kind: ServiceAccount
+    name: network-sync
+    namespace: system

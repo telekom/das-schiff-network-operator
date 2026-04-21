@@ -49,10 +49,10 @@ e2e/setup/e2e/
 vendor/
 
 # Built binaries
-kubectl-nnc
-lin-nnc
-network-sync
-platform-coil
-platform-metallb
-operator
-frr-cra
+/kubectl-nnc
+/lin-nnc
+/network-sync
+/platform-coil
+/platform-metallb
+/operator
+/frr-cra
