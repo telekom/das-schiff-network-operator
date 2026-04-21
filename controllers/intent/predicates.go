@@ -22,6 +22,9 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
+
+	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
+	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/operator"
 )
 
 // intentCRDPredicate accepts only events that should trigger an intent
@@ -85,4 +88,31 @@ func findReadyStatus(n *corev1.Node) corev1.ConditionStatus {
 		}
 	}
 	return corev1.ConditionUnknown
+}
+
+// nncStatusPredicate fires intent reconciliation when an NNC transitions
+// out of the "provisioning" state. The intent reconciler skips spec writes
+// while the on-node agent is still applying the previous spec
+// (NodeNetworkConfig.Status.ConfigStatus == "provisioning"). Without this
+// watch the skipped node would remain on the stale spec until the next
+// unrelated intent CRD change, which causes test flakes when an L2A or
+// similar object is created during a brief provisioning window.
+//
+// Other transitions (Create, Delete, status churn within "provisioning")
+// are intentionally ignored to avoid extra reconcile work.
+func nncStatusPredicate() predicate.Predicate {
+	return predicate.Funcs{
+		CreateFunc:  func(event.CreateEvent) bool { return false },
+		DeleteFunc:  func(event.DeleteEvent) bool { return false },
+		GenericFunc: func(event.GenericEvent) bool { return false },
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			oldNNC, okOld := e.ObjectOld.(*networkv1alpha1.NodeNetworkConfig)
+			newNNC, okNew := e.ObjectNew.(*networkv1alpha1.NodeNetworkConfig)
+			if !okOld || !okNew {
+				return false
+			}
+			return oldNNC.Status.ConfigStatus == operator.StatusProvisioning &&
+				newNNC.Status.ConfigStatus != operator.StatusProvisioning
+		},
+	}
 }

@@ -29,6 +29,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 	intentreconciler "github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent"
 )
@@ -108,6 +109,7 @@ func (r *Controller) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(&nc.TrafficMirror{}, h, intentPred).
 		Watches(&nc.AnnouncementPolicy{}, h, intentPred).
 		Watches(&corev1.Node{}, h, nodePred).
+		Watches(&networkv1alpha1.NodeNetworkConfig{}, h, builder.WithPredicates(nncStatusPredicate())).
 		Complete(r)
 	if err != nil {
 		return fmt.Errorf("error creating intent controller: %w", err)
