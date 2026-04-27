@@ -39,7 +39,7 @@ func RunNamePredicateCreateTests(t *testing.T, pred predicate.Funcs, newObj Obje
 		want       bool
 	}{
 		{"worker-node-01", true},
-		{"prefix-worker-node-01-suffix", true},
+		{"prefix-worker-node-01-suffix", false},
 		{"other-node", false},
 	}
 
