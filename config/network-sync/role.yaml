@@ -1,0 +1,81 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: network-sync-role
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - cluster.x-k8s.io
+  resources:
+  - clusters
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - network-connector.sylvaproject.org
+  resources:
+  - announcementpolicies
+  - bgppeerings
+  - collectors
+  - destinations
+  - inbounds
+  - interfaceconfigs
+  - layer2attachments
+  - networks
+  - outbounds
+  - podnetworks
+  - trafficmirrors
+  - vrfs
+  verbs:
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - network-connector.sylvaproject.org
+  resources:
+  - announcementpolicies/status
+  - bgppeerings/status
+  - collectors/status
+  - destinations/status
+  - inbounds/status
+  - interfaceconfigs/status
+  - layer2attachments/status
+  - networks/status
+  - outbounds/status
+  - podnetworks/status
+  - trafficmirrors/status
+  - vrfs/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - network-connector.sylvaproject.org
+  resources:
+  - nodenetworkstatuses
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
