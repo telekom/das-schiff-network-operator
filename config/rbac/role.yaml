@@ -49,16 +49,12 @@ rules:
   resources:
   - announcementpolicies
   - bgppeerings
-  - collectors
-  - destinations
   - inbounds
   - interfaceconfigs
   - layer2attachments
-  - networks
   - outbounds
   - podnetworks
   - trafficmirrors
-  - vrfs
   verbs:
   - get
   - list
@@ -82,6 +78,19 @@ rules:
   - get
   - patch
   - update
+- apiGroups:
+  - network-connector.sylvaproject.org
+  resources:
+  - collectors
+  - destinations
+  - networks
+  - vrfs
+  verbs:
+  - get
+  - list
+  - patch
+  - update
+  - watch
 - apiGroups:
   - network-connector.sylvaproject.org
   resources:
