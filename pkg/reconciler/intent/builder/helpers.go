@@ -221,10 +221,13 @@ func cidrFilterItems(cidr string, maxLen, hostLen int, ap *nc.AnnouncementPolicy
 func addressFilterItems(addresses []string, ap *nc.AnnouncementPolicy) []networkv1alpha1.FilterItem {
 	items := make([]networkv1alpha1.FilterItem, 0, len(addresses))
 	for _, addr := range addresses {
-		le := 32
+		le := ipv4MaxPrefixLen
+		suffix := "/32"
 		if strings.Contains(addr, ":") {
-			le = 128
+			le = ipv6MaxPrefixLen
+			suffix = "/128"
 		}
+		prefix := ensureCIDR(addr, suffix)
 		action := networkv1alpha1.Action{Type: networkv1alpha1.Accept}
 		if ap != nil && ap.Spec.HostRoutes != nil && len(ap.Spec.HostRoutes.Communities) > 0 {
 			additive := true
@@ -236,7 +239,7 @@ func addressFilterItems(addresses []string, ap *nc.AnnouncementPolicy) []network
 		items = append(items, networkv1alpha1.FilterItem{
 			Action: action,
 			Matcher: networkv1alpha1.Matcher{
-				Prefix: &networkv1alpha1.PrefixMatcher{Prefix: addr, Le: &le},
+				Prefix: &networkv1alpha1.PrefixMatcher{Prefix: prefix, Le: &le},
 			},
 		})
 	}
