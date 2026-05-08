@@ -282,7 +282,10 @@ func (r *Controller) reconcileIPAM(ctx context.Context, namespace string) error 
 	}
 	networks := resolver.ResolveNetworks(fetched.Networks)
 
-	return r.IPAMAllocator.ReconcileAllocations(ctx, fetched, networks)
+	if err := r.IPAMAllocator.ReconcileAllocations(ctx, fetched, networks); err != nil {
+		return fmt.Errorf("IPAM allocation: %w", err)
+	}
+	return nil
 }
 
 // promoteIPAMAddresses copies status.addresses into spec.addresses for Inbound/Outbound
