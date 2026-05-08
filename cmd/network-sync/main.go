@@ -32,6 +32,7 @@ import (
 
 	networkconnector "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 	syncctrl "github.com/telekom/das-schiff-network-operator/controllers/sync"
+	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/ipam"
 )
 
 var scheme = runtime.NewScheme()
@@ -99,6 +100,7 @@ func main() {
 		Log:             mgr.GetLogger().WithName("SyncController"),
 		Remotes:         remotes,
 		RemoteNamespace: remoteNamespace,
+		IPAMAllocator:   ipam.NewAllocator(mgr.GetClient(), mgr.GetLogger()),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Sync")
 		os.Exit(1)

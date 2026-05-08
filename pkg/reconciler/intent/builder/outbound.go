@@ -126,13 +126,18 @@ func (*OutboundBuilder) resolveVRFSpec(dests []nc.Destination, data *resolver.Re
 	return resolved.VRFSpec
 }
 
-// collectAddresses gathers explicit addresses from the Outbound spec.
+// collectAddresses gathers addresses from the Outbound.
+// It prefers status.addresses (IPAM-allocated) over spec.addresses (explicit).
 func (*OutboundBuilder) collectAddresses(ob *nc.Outbound) []string {
-	if ob.Spec.Addresses == nil {
+	src := ob.Status.Addresses
+	if src == nil {
+		src = ob.Spec.Addresses
+	}
+	if src == nil {
 		return nil
 	}
-	addrs := make([]string, 0, len(ob.Spec.Addresses.IPv4)+len(ob.Spec.Addresses.IPv6))
-	addrs = append(addrs, ob.Spec.Addresses.IPv4...)
-	addrs = append(addrs, ob.Spec.Addresses.IPv6...)
+	addrs := make([]string, 0, len(src.IPv4)+len(src.IPv6))
+	addrs = append(addrs, src.IPv4...)
+	addrs = append(addrs, src.IPv6...)
 	return addrs
 }

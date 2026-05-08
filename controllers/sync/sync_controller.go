@@ -19,6 +19,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
+	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/ipam"
+	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/resolver"
 )
 
 const (
@@ -38,6 +40,7 @@ type Controller struct {
 	Log             logr.Logger
 	Remotes         *RemoteClientManager
 	RemoteNamespace string
+	IPAMAllocator   *ipam.Allocator
 }
 
 // intentCRDTypes returns fresh instances of all intent CRD types to sync.
@@ -97,6 +100,15 @@ func (r *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		}
 		// ClusterController hasn't set up a client (yet) — wait and retry.
 		return ctrl.Result{RequeueAfter: syncRequeueInterval}, nil
+	}
+
+	// Run IPAM allocation for count-mode Inbound/Outbound before syncing,
+	// so that promoteIPAMAddresses can copy status→spec for the remote copy.
+	if r.IPAMAllocator != nil {
+		if err := r.reconcileIPAM(ctx, req.Namespace); err != nil {
+			log.Error(err, "IPAM allocation failed")
+			// Continue — partial allocation should not block syncing.
+		}
 	}
 
 	// List and sync every intent CRD type in this namespace.
@@ -239,6 +251,38 @@ func (r *Controller) buildRemoteObject(src client.Object, sourceNamespace string
 	r.promoteIPAMAddresses(dst)
 
 	return dst
+}
+
+// reconcileIPAM runs IPAM allocation for count-mode Inbound/Outbound in the given namespace.
+// Allocated IPs are written to status.addresses on the management-cluster resources so that
+// promoteIPAMAddresses can copy them into spec.addresses for the remote copy.
+func (r *Controller) reconcileIPAM(ctx context.Context, namespace string) error {
+	inboundList := &nc.InboundList{}
+	if err := r.Client.List(ctx, inboundList, client.InNamespace(namespace)); err != nil {
+		return fmt.Errorf("listing Inbounds for IPAM: %w", err)
+	}
+	outboundList := &nc.OutboundList{}
+	if err := r.Client.List(ctx, outboundList, client.InNamespace(namespace)); err != nil {
+		return fmt.Errorf("listing Outbounds for IPAM: %w", err)
+	}
+	networkList := &nc.NetworkList{}
+	if err := r.Client.List(ctx, networkList, client.InNamespace(namespace)); err != nil {
+		return fmt.Errorf("listing Networks for IPAM: %w", err)
+	}
+	l2aList := &nc.Layer2AttachmentList{}
+	if err := r.Client.List(ctx, l2aList, client.InNamespace(namespace)); err != nil {
+		return fmt.Errorf("listing Layer2Attachments for IPAM: %w", err)
+	}
+
+	fetched := &resolver.FetchedResources{
+		Inbounds:          inboundList.Items,
+		Outbounds:         outboundList.Items,
+		Networks:          networkList.Items,
+		Layer2Attachments: l2aList.Items,
+	}
+	networks := resolver.ResolveNetworks(fetched.Networks)
+
+	return r.IPAMAllocator.ReconcileAllocations(ctx, fetched, networks)
 }
 
 // promoteIPAMAddresses copies status.addresses into spec.addresses for Inbound/Outbound

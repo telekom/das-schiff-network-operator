@@ -141,14 +141,19 @@ func (*InboundBuilder) resolveVRFSpec(vrfName string, grouped map[string][]nc.De
 	return resolved.VRFSpec
 }
 
-// collectAddresses gathers explicit addresses from the Inbound spec.
+// collectAddresses gathers addresses from the Inbound.
+// It prefers status.addresses (IPAM-allocated) over spec.addresses (explicit).
 func (*InboundBuilder) collectAddresses(ib *nc.Inbound) []string {
-	if ib.Spec.Addresses == nil {
+	src := ib.Status.Addresses
+	if src == nil {
+		src = ib.Spec.Addresses
+	}
+	if src == nil {
 		return nil
 	}
-	addrs := make([]string, 0, len(ib.Spec.Addresses.IPv4)+len(ib.Spec.Addresses.IPv6))
-	addrs = append(addrs, ib.Spec.Addresses.IPv4...)
-	addrs = append(addrs, ib.Spec.Addresses.IPv6...)
+	addrs := make([]string, 0, len(src.IPv4)+len(src.IPv6))
+	addrs = append(addrs, src.IPv4...)
+	addrs = append(addrs, src.IPv6...)
 	return addrs
 }
 
