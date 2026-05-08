@@ -19,6 +19,7 @@ package platform
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/go-logr/logr"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -101,6 +102,7 @@ func resolvePoolName(inbound *nc.Inbound) string {
 }
 
 // collectAddresses prefers Status.Addresses (IPAM-resolved), falling back to Spec.Addresses.
+// Ensures each address is in CIDR notation (MetalLB requires it).
 func collectAddresses(inbound *nc.Inbound) []interface{} {
 	src := inbound.Status.Addresses
 	if src == nil {
@@ -111,12 +113,20 @@ func collectAddresses(inbound *nc.Inbound) []interface{} {
 	}
 	addrs := make([]interface{}, 0, len(src.IPv4)+len(src.IPv6))
 	for _, a := range src.IPv4 {
-		addrs = append(addrs, a)
+		addrs = append(addrs, ensureCIDR(a, "/32"))
 	}
 	for _, a := range src.IPv6 {
-		addrs = append(addrs, a)
+		addrs = append(addrs, ensureCIDR(a, "/128"))
 	}
 	return addrs
+}
+
+// ensureCIDR appends defaultPrefix if the address has no slash.
+func ensureCIDR(addr, defaultPrefix string) string {
+	if strings.Contains(addr, "/") {
+		return addr
+	}
+	return addr + defaultPrefix
 }
 
 // managedLabels returns labels applied to every MetalLB object we create.
