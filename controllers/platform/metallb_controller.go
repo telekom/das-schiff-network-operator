@@ -36,16 +36,17 @@ import (
 )
 
 const (
-	metallbFinalizer = "network-connector.sylvaproject.org/metallb-cleanup"
-	metallbNamespace = "metallb-system"
+	metallbFinalizer        = "network-connector.sylvaproject.org/metallb-cleanup"
+	defaultMetalLBNamespace = "metallb-system"
 )
 
 // MetalLBReconciler watches Inbound resources and reconciles MetalLB
 // IPAddressPool resources using unstructured objects.
 type MetalLBReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
-	Log    logr.Logger
+	Scheme           *runtime.Scheme
+	Log              logr.Logger
+	MetalLBNamespace string
 }
 
 //+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=inbounds,verbs=get;list;watch
@@ -126,8 +127,15 @@ func managedLabels(inboundName string) map[string]interface{} {
 	}
 }
 
+func (r *MetalLBReconciler) metallbNS() string {
+	if r.MetalLBNamespace != "" {
+		return r.MetalLBNamespace
+	}
+	return defaultMetalLBNamespace
+}
+
 // newIPAddressPool builds an unstructured IPAddressPool.
-func newIPAddressPool(poolName, inboundName string, addresses []interface{}) *unstructured.Unstructured {
+func newIPAddressPool(poolName, inboundName, namespace string, addresses []interface{}) *unstructured.Unstructured {
 	pool := &unstructured.Unstructured{}
 	pool.SetGroupVersionKind(schema.GroupVersionKind{
 		Group:   "metallb.io",
@@ -135,7 +143,7 @@ func newIPAddressPool(poolName, inboundName string, addresses []interface{}) *un
 		Kind:    "IPAddressPool",
 	})
 	pool.SetName(poolName)
-	pool.SetNamespace(metallbNamespace)
+	pool.SetNamespace(namespace)
 	pool.SetLabels(toStringLabels(managedLabels(inboundName)))
 	if err := unstructured.SetNestedSlice(pool.Object, addresses, "spec", "addresses"); err != nil {
 		// addresses is always []interface{} of strings; this cannot fail in practice.
@@ -144,7 +152,7 @@ func newIPAddressPool(poolName, inboundName string, addresses []interface{}) *un
 	return pool
 }
 
-func newL2Advertisement(poolName, inboundName string) *unstructured.Unstructured {
+func newL2Advertisement(poolName, inboundName, namespace string) *unstructured.Unstructured {
 	adv := &unstructured.Unstructured{}
 	adv.SetGroupVersionKind(schema.GroupVersionKind{
 		Group:   "metallb.io",
@@ -152,7 +160,7 @@ func newL2Advertisement(poolName, inboundName string) *unstructured.Unstructured
 		Kind:    "L2Advertisement",
 	})
 	adv.SetName(poolName)
-	adv.SetNamespace(metallbNamespace)
+	adv.SetNamespace(namespace)
 	adv.SetLabels(toStringLabels(managedLabels(inboundName)))
 	if err := unstructured.SetNestedStringSlice(adv.Object, []string{poolName}, "spec", "ipAddressPools"); err != nil {
 		panic(fmt.Sprintf("bug: SetNestedStringSlice: %v", err))
@@ -164,7 +172,7 @@ func (r *MetalLBReconciler) reconcilePool(ctx context.Context, inbound *nc.Inbou
 	poolName := resolvePoolName(inbound)
 	addresses := collectAddresses(inbound)
 
-	desiredPool := newIPAddressPool(poolName, inbound.Name, addresses)
+	desiredPool := newIPAddressPool(poolName, inbound.Name, r.metallbNS(), addresses)
 	if err := r.applyUnstructured(ctx, desiredPool, logger); err != nil {
 		return fmt.Errorf("error reconciling IPAddressPool %q: %w", poolName, err)
 	}
@@ -172,7 +180,7 @@ func (r *MetalLBReconciler) reconcilePool(ctx context.Context, inbound *nc.Inbou
 	// Only create an L2Advertisement for l2 mode.
 	// For bgp mode, kube-vip handles advertisement — no MetalLB advertisement object needed.
 	if inbound.Spec.Advertisement.Type == "l2" {
-		desiredAdv := newL2Advertisement(poolName, inbound.Name)
+		desiredAdv := newL2Advertisement(poolName, inbound.Name, r.metallbNS())
 		if err := r.applyUnstructured(ctx, desiredAdv, logger); err != nil {
 			return fmt.Errorf("error reconciling L2Advertisement %q: %w", poolName, err)
 		}
@@ -223,7 +231,7 @@ func (r *MetalLBReconciler) handleDeletion(ctx context.Context, inbound *nc.Inbo
 	pool := &unstructured.Unstructured{}
 	pool.SetGroupVersionKind(schema.GroupVersionKind{Group: "metallb.io", Version: "v1beta1", Kind: "IPAddressPool"})
 	pool.SetName(poolName)
-	pool.SetNamespace(metallbNamespace)
+	pool.SetNamespace(r.metallbNS())
 	if err := r.Delete(ctx, pool); err != nil && !apierrors.IsNotFound(err) {
 		return ctrl.Result{}, fmt.Errorf("error deleting IPAddressPool %q: %w", poolName, err)
 	}
@@ -232,7 +240,7 @@ func (r *MetalLBReconciler) handleDeletion(ctx context.Context, inbound *nc.Inbo
 	adv := &unstructured.Unstructured{}
 	adv.SetGroupVersionKind(schema.GroupVersionKind{Group: "metallb.io", Version: "v1beta1", Kind: "L2Advertisement"})
 	adv.SetName(poolName)
-	adv.SetNamespace(metallbNamespace)
+	adv.SetNamespace(r.metallbNS())
 	if err := r.Delete(ctx, adv); err != nil && !apierrors.IsNotFound(err) {
 		return ctrl.Result{}, fmt.Errorf("error deleting L2Advertisement %q: %w", poolName, err)
 	}

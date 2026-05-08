@@ -62,9 +62,9 @@ func getUnstructured(t *testing.T, c client.Client, gvk schema.GroupVersionKind,
 	t.Helper()
 	obj := &unstructured.Unstructured{}
 	obj.SetGroupVersionKind(gvk)
-	err := c.Get(context.Background(), types.NamespacedName{Name: name, Namespace: metallbNamespace}, obj)
+	err := c.Get(context.Background(), types.NamespacedName{Name: name, Namespace: defaultMetalLBNamespace}, obj)
 	if err != nil {
-		t.Fatalf("failed to get %s %s/%s: %v", gvk.Kind, metallbNamespace, name, err)
+		t.Fatalf("failed to get %s %s/%s: %v", gvk.Kind, defaultMetalLBNamespace, name, err)
 	}
 	return obj
 }
@@ -108,7 +108,7 @@ func TestMetalLBReconciler_BGPAdvertisement(t *testing.T) {
 
 	adv := &unstructured.Unstructured{}
 	adv.SetGroupVersionKind(bgpGVK)
-	err := c.Get(context.Background(), types.NamespacedName{Name: "test-bgp", Namespace: metallbNamespace}, adv)
+	err := c.Get(context.Background(), types.NamespacedName{Name: "test-bgp", Namespace: defaultMetalLBNamespace}, adv)
 	if err == nil {
 		t.Error("expected NO BGPAdvertisement (kube-vip handles BGP advertisement)")
 	}
@@ -149,7 +149,7 @@ func TestMetalLBReconciler_CustomPoolName(t *testing.T) {
 
 	adv := &unstructured.Unstructured{}
 	adv.SetGroupVersionKind(bgpGVK)
-	err := c.Get(context.Background(), types.NamespacedName{Name: "my-custom-pool", Namespace: metallbNamespace}, adv)
+	err := c.Get(context.Background(), types.NamespacedName{Name: "my-custom-pool", Namespace: defaultMetalLBNamespace}, adv)
 	if err == nil {
 		t.Error("expected NO BGPAdvertisement")
 	}
@@ -235,14 +235,14 @@ func TestMetalLBReconciler_Deletion(t *testing.T) {
 
 	obj := &unstructured.Unstructured{}
 	obj.SetGroupVersionKind(ipPoolGVK)
-	err := c.Get(context.Background(), types.NamespacedName{Name: "test-delete", Namespace: metallbNamespace}, obj)
+	err := c.Get(context.Background(), types.NamespacedName{Name: "test-delete", Namespace: defaultMetalLBNamespace}, obj)
 	if err == nil {
 		t.Error("expected IPAddressPool to be deleted")
 	}
 
 	advObj := &unstructured.Unstructured{}
 	advObj.SetGroupVersionKind(l2GVK)
-	if err := c.Get(context.Background(), types.NamespacedName{Name: "test-delete", Namespace: metallbNamespace}, advObj); err == nil {
+	if err := c.Get(context.Background(), types.NamespacedName{Name: "test-delete", Namespace: defaultMetalLBNamespace}, advObj); err == nil {
 		t.Error("expected L2Advertisement to be deleted")
 	}
 
