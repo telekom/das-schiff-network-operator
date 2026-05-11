@@ -925,12 +925,18 @@ func TestInboundBuilder_WithAnnouncementPolicy(t *testing.T) {
 	}
 
 	// Inbound addresses are host routes — should have community.
-	if len(fvrf.EVPNExportFilter.Items) != 1 {
-		t.Fatalf("expected 1 EVPN filter item, got %d", len(fvrf.EVPNExportFilter.Items))
+	// Plus the aggregate prefix (no community since aggregate.communities not set).
+	if len(fvrf.EVPNExportFilter.Items) != 2 {
+		t.Fatalf("expected 2 EVPN filter items (1 address + 1 aggregate), got %d", len(fvrf.EVPNExportFilter.Items))
 	}
 	item := fvrf.EVPNExportFilter.Items[0]
 	if item.Action.ModifyRoute == nil || item.Action.ModifyRoute.AddCommunities[0] != "65000:500" {
 		t.Errorf("expected community 65000:500 on inbound address, got %v", item.Action.ModifyRoute)
+	}
+	// Aggregate item should have no community (aggregate.communities not set in this test).
+	aggItem := fvrf.EVPNExportFilter.Items[1]
+	if aggItem.Matcher.Prefix.Prefix != "10.1.0.0/24" {
+		t.Errorf("expected aggregate prefix 10.1.0.0/24, got %q", aggItem.Matcher.Prefix.Prefix)
 	}
 
 	// VRFImport should have plain items.

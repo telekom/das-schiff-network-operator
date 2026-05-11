@@ -267,7 +267,8 @@ func matchNodes(nodes []corev1.Node, selector *metav1.LabelSelector) ([]corev1.N
 	return matched, nil
 }
 
-// addAggregateRoutes adds the Network CIDR(s) as aggregate static routes to the FabricVRF.
+// addAggregateRoutes adds the Network CIDR(s) as aggregate static routes to the FabricVRF
+// and adds matching entries to the EVPN export filter so the aggregates are announced.
 // By default, the covering prefix is always added so the fabric can export it via EVPN.
 // When an AP is provided its aggregate config controls prefix length and suppression.
 func addAggregateRoutes(fvrf *networkv1alpha1.FabricVRF, net *resolver.ResolvedNetwork, ap *nc.AnnouncementPolicy) {
@@ -280,6 +281,15 @@ func addAggregateRoutes(fvrf *networkv1alpha1.FabricVRF, net *resolver.ResolvedN
 		aggCfg = ap.Spec.Aggregate
 	}
 
+	action := networkv1alpha1.Action{Type: networkv1alpha1.Accept}
+	if ap != nil && ap.Spec.Aggregate != nil && len(ap.Spec.Aggregate.Communities) > 0 {
+		additive := true
+		action.ModifyRoute = &networkv1alpha1.ModifyRouteAction{
+			AddCommunities:      ap.Spec.Aggregate.Communities,
+			AdditiveCommunities: &additive,
+		}
+	}
+
 	if net.Spec.IPv4 != nil && net.Spec.IPv4.CIDR != "" {
 		var overrideLen *int32
 		if aggCfg != nil {
@@ -289,6 +299,12 @@ func addAggregateRoutes(fvrf *networkv1alpha1.FabricVRF, net *resolver.ResolvedN
 		fvrf.StaticRoutes = appendUniqueStaticRoute(fvrf.StaticRoutes, networkv1alpha1.StaticRoute{
 			Prefix: prefix,
 		})
+		if fvrf.EVPNExportFilter != nil {
+			fvrf.EVPNExportFilter.Items = appendUniqueFilterItem(fvrf.EVPNExportFilter.Items, networkv1alpha1.FilterItem{
+				Action:  action,
+				Matcher: networkv1alpha1.Matcher{Prefix: &networkv1alpha1.PrefixMatcher{Prefix: prefix}},
+			})
+		}
 	}
 	if net.Spec.IPv6 != nil && net.Spec.IPv6.CIDR != "" {
 		var overrideLen *int32
@@ -299,7 +315,24 @@ func addAggregateRoutes(fvrf *networkv1alpha1.FabricVRF, net *resolver.ResolvedN
 		fvrf.StaticRoutes = appendUniqueStaticRoute(fvrf.StaticRoutes, networkv1alpha1.StaticRoute{
 			Prefix: prefix,
 		})
+		if fvrf.EVPNExportFilter != nil {
+			fvrf.EVPNExportFilter.Items = appendUniqueFilterItem(fvrf.EVPNExportFilter.Items, networkv1alpha1.FilterItem{
+				Action:  action,
+				Matcher: networkv1alpha1.Matcher{Prefix: &networkv1alpha1.PrefixMatcher{Prefix: prefix}},
+			})
+		}
 	}
+}
+
+// appendUniqueFilterItem appends a filter item only if no item with the same prefix exists.
+func appendUniqueFilterItem(items []networkv1alpha1.FilterItem, item networkv1alpha1.FilterItem) []networkv1alpha1.FilterItem {
+	for _, existing := range items {
+		if existing.Matcher.Prefix != nil && item.Matcher.Prefix != nil &&
+			existing.Matcher.Prefix.Prefix == item.Matcher.Prefix.Prefix {
+			return items
+		}
+	}
+	return append(items, item)
 }
 
 // computeAggregatePrefix applies an optional prefix-length override to a Network CIDR.

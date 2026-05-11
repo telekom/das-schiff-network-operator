@@ -124,12 +124,12 @@ func TestInboundBuilder_BasicInbound(t *testing.T) {
 		t.Errorf("unexpected EVPNImportRouteTargets: %v", fvrf.EVPNImportRouteTargets)
 	}
 
-	// EVPN export filter should contain items for both addresses.
+	// EVPN export filter should contain items for both addresses plus the aggregate.
 	if fvrf.EVPNExportFilter == nil {
 		t.Fatal("expected non-nil EVPNExportFilter")
 	}
-	if len(fvrf.EVPNExportFilter.Items) != 2 {
-		t.Fatalf("expected 2 EVPN export filter items, got %d", len(fvrf.EVPNExportFilter.Items))
+	if len(fvrf.EVPNExportFilter.Items) != 3 {
+		t.Fatalf("expected 3 EVPN export filter items (2 addresses + 1 aggregate), got %d", len(fvrf.EVPNExportFilter.Items))
 	}
 	// First item is IPv4.
 	if fvrf.EVPNExportFilter.Items[0].Matcher.Prefix.Prefix != "10.250.1.0/24" {
@@ -144,6 +144,10 @@ func TestInboundBuilder_BasicInbound(t *testing.T) {
 	}
 	if *fvrf.EVPNExportFilter.Items[1].Matcher.Prefix.Le != 128 {
 		t.Errorf("expected IPv6 Le=128, got %d", *fvrf.EVPNExportFilter.Items[1].Matcher.Prefix.Le)
+	}
+	// Third item is the aggregate (Network CIDR).
+	if fvrf.EVPNExportFilter.Items[2].Matcher.Prefix.Prefix != "10.200.0.0/24" {
+		t.Errorf("expected aggregate prefix 10.200.0.0/24, got %q", fvrf.EVPNExportFilter.Items[2].Matcher.Prefix.Prefix)
 	}
 
 	// VRFImports filter should mirror the same items.
@@ -331,15 +335,18 @@ func TestOutboundBuilder_BasicOutbound(t *testing.T) {
 		t.Errorf("expected VNI 3000, got %d", fvrf.VNI)
 	}
 
-	// EVPN export filter items for the address.
+	// EVPN export filter items for the address plus aggregate.
 	if fvrf.EVPNExportFilter == nil {
 		t.Fatal("expected non-nil EVPNExportFilter")
 	}
-	if len(fvrf.EVPNExportFilter.Items) != 1 {
-		t.Fatalf("expected 1 EVPN export filter item, got %d", len(fvrf.EVPNExportFilter.Items))
+	if len(fvrf.EVPNExportFilter.Items) != 2 {
+		t.Fatalf("expected 2 EVPN export filter items (1 address + 1 aggregate), got %d", len(fvrf.EVPNExportFilter.Items))
 	}
 	if fvrf.EVPNExportFilter.Items[0].Matcher.Prefix.Prefix != testOutboundPrefix {
 		t.Errorf("expected prefix %s, got %q", testOutboundPrefix, fvrf.EVPNExportFilter.Items[0].Matcher.Prefix.Prefix)
+	}
+	if fvrf.EVPNExportFilter.Items[1].Matcher.Prefix.Prefix != "10.200.0.0/24" {
+		t.Errorf("expected aggregate prefix 10.200.0.0/24, got %q", fvrf.EVPNExportFilter.Items[1].Matcher.Prefix.Prefix)
 	}
 
 	// VRFImport filter items mirror the same.
