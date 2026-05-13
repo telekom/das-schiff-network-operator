@@ -859,6 +859,59 @@ func TestBuildNetplanState(t *testing.T) {
 		state := buildNetplanState(spec)
 		assert.Empty(t, state.Network.VLans)
 	})
+
+	t.Run("InterfaceName overrides VLAN key", func(t *testing.T) {
+		spec := &networkv1alpha1.NodeNetworkConfigSpec{
+			Layer2s: map[string]networkv1alpha1.Layer2{
+				"501": {VLAN: 501, VNI: 10501, MTU: 9000, InterfaceName: "chris-l2"},
+			},
+		}
+		state := buildNetplanState(spec)
+		require.Len(t, state.Network.VLans, 1)
+
+		_, defaultExists := state.Network.VLans["vlan.501"]
+		assert.False(t, defaultExists, "should not use default vlan.501 key")
+
+		dev, ok := state.Network.VLans["chris-l2"]
+		require.True(t, ok, "expected chris-l2 in netplan VLans")
+		var vlan map[string]interface{}
+		require.NoError(t, json.Unmarshal(dev.Raw, &vlan))
+		assert.Equal(t, float64(501), vlan["id"])
+		assert.Equal(t, "hbn", vlan["link"])
+	})
+
+	t.Run("InterfaceRef overrides link", func(t *testing.T) {
+		spec := &networkv1alpha1.NodeNetworkConfigSpec{
+			Layer2s: map[string]networkv1alpha1.Layer2{
+				"502": {VLAN: 502, VNI: 10502, MTU: 1500, InterfaceRef: "bond0"},
+			},
+		}
+		state := buildNetplanState(spec)
+		require.Len(t, state.Network.VLans, 1)
+
+		dev, ok := state.Network.VLans["vlan.502"]
+		require.True(t, ok)
+		var vlan map[string]interface{}
+		require.NoError(t, json.Unmarshal(dev.Raw, &vlan))
+		assert.Equal(t, "bond0", vlan["link"])
+	})
+
+	t.Run("InterfaceName and InterfaceRef together", func(t *testing.T) {
+		spec := &networkv1alpha1.NodeNetworkConfigSpec{
+			Layer2s: map[string]networkv1alpha1.Layer2{
+				"503": {VLAN: 503, MTU: 9000, InterfaceName: "mgmt", InterfaceRef: "eno1"},
+			},
+		}
+		state := buildNetplanState(spec)
+		require.Len(t, state.Network.VLans, 1)
+
+		dev, ok := state.Network.VLans["mgmt"]
+		require.True(t, ok, "expected mgmt in netplan VLans")
+		var vlan map[string]interface{}
+		require.NoError(t, json.Unmarshal(dev.Raw, &vlan))
+		assert.Equal(t, float64(503), vlan["id"])
+		assert.Equal(t, "eno1", vlan["link"])
+	})
 }
 
 func TestReconcileCreatesNodeNetplanConfig(t *testing.T) {

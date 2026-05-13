@@ -563,9 +563,14 @@ func buildNetplanState(spec *networkv1alpha1.NodeNetworkConfigSpec) *netplan.Sta
 			continue
 		}
 
+		link := "hbn"
+		if l2.InterfaceRef != "" {
+			link = l2.InterfaceRef
+		}
+
 		vlan := map[string]interface{}{
 			"id":         l2.VLAN,
-			"link":       "hbn",
+			"link":       link,
 			"mtu":        l2.MTU,
 			"critical":   true,
 			"link-local": []interface{}{},
@@ -576,7 +581,12 @@ func buildNetplanState(spec *networkv1alpha1.NodeNetworkConfigSpec) *netplan.Sta
 			continue
 		}
 
-		state.Network.VLans[fmt.Sprintf("vlan.%d", l2.VLAN)] = netplan.Device{
+		ifName := fmt.Sprintf("vlan.%d", l2.VLAN)
+		if l2.InterfaceName != "" {
+			ifName = l2.InterfaceName
+		}
+
+		state.Network.VLans[ifName] = netplan.Device{
 			Raw: rawVlan,
 		}
 	}

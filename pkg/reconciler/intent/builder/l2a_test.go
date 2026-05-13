@@ -21,6 +21,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -545,4 +547,38 @@ func TestL2ABuilder_NodeIPs_NotInIRB(t *testing.T) {
 	if n1Layer2.IRB.IPAddresses[0] != "10.0.1.1/24" {
 		t.Errorf("IRB IP should be anycast 10.0.1.1/24, got %s", n1Layer2.IRB.IPAddresses[0])
 	}
+}
+
+func TestL2ABuilder_InterfaceNameAndRef(t *testing.T) {
+	b := NewL2ABuilder()
+	vlan := int32(501)
+	vni := int32(10501)
+	ifName := "chris-l2"
+	ifRef := "bond0"
+	data := &resolver.ResolvedData{
+		Nodes: []corev1.Node{{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}}},
+		Networks: map[string]*resolver.ResolvedNetwork{
+			"net-vlan501": {Name: "net-vlan501", Spec: nc.NetworkSpec{VLAN: &vlan, VNI: &vni, IPv4: &nc.IPNetwork{CIDR: "10.0.1.1/24"}}},
+		},
+		Layer2Attachments: []nc.Layer2Attachment{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "l2a-named"},
+				Spec: nc.Layer2AttachmentSpec{
+					NetworkRef:    "net-vlan501",
+					InterfaceName: &ifName,
+					InterfaceRef:  &ifRef,
+				},
+			},
+		},
+	}
+
+	result, err := b.Build(context.Background(), data)
+	require.NoError(t, err)
+	require.Contains(t, result, "node-1")
+
+	contrib := result["node-1"]
+	l2, ok := contrib.Layer2s["501"]
+	require.True(t, ok, "expected layer2 key 501")
+	assert.Equal(t, "chris-l2", l2.InterfaceName, "InterfaceName should be propagated")
+	assert.Equal(t, "bond0", l2.InterfaceRef, "InterfaceRef should be propagated")
 }

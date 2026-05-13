@@ -194,6 +194,13 @@ func (b *L2ABuilder) buildLayer2(l2a *nc.Layer2Attachment, net *resolver.Resolve
 		MTU:         b.mtu(l2a),
 	}
 
+	if l2a.Spec.InterfaceName != nil && *l2a.Spec.InterfaceName != "" {
+		layer2.InterfaceName = *l2a.Spec.InterfaceName
+	}
+	if l2a.Spec.InterfaceRef != nil && *l2a.Spec.InterfaceRef != "" {
+		layer2.InterfaceRef = *l2a.Spec.InterfaceRef
+	}
+
 	// Build IRB if anycast is not disabled and we have a VRF.
 	if vrfName != "" && (l2a.Spec.DisableAnycast == nil || !*l2a.Spec.DisableAnycast) {
 		irb, err := b.buildIRB(l2a, net, vrfName)
