@@ -79,8 +79,8 @@ func intentCRDLists() []client.ObjectList {
 	}
 }
 
-//+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=vrfs;networks;destinations;layer2attachments;inbounds;outbounds;podnetworks;bgppeerings;collectors;trafficmirrors;announcementpolicies;interfaceconfigs,verbs=get;list;watch;update;patch
-//+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=vrfs/status;networks/status;destinations/status;layer2attachments/status;inbounds/status;outbounds/status;podnetworks/status;bgppeerings/status;collectors/status;trafficmirrors/status;announcementpolicies/status;interfaceconfigs/status,verbs=get;patch;update
+//+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=vrfs;networks;destinations;layer2attachments;inbounds;outbounds;podnetworks;bgppeerings;collectors;trafficmirrors;announcementpolicies;nodeattachments;interfaceconfigs,verbs=get;list;watch;update;patch
+//+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=vrfs/status;networks/status;destinations/status;layer2attachments/status;inbounds/status;outbounds/status;podnetworks/status;bgppeerings/status;collectors/status;trafficmirrors/status;announcementpolicies/status;nodeattachments/status;interfaceconfigs/status,verbs=get;patch;update
 //+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=nodenetworkstatuses,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 //+kubebuilder:rbac:groups="",resources=events,verbs=create;patch

@@ -67,6 +67,8 @@ type Controller struct {
 //+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=trafficmirrors/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=announcementpolicies,verbs=get;list;watch
 //+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=announcementpolicies/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=nodeattachments,verbs=get;list;watch
+//+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=nodeattachments/status,verbs=get;update;patch
 
 // Reconcile handles any intent CRD change by triggering the debounced reconciler.
 func (r *Controller) Reconcile(ctx context.Context, _ ctrl.Request) (ctrl.Result, error) {
@@ -108,6 +110,7 @@ func (r *Controller) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(&nc.Collector{}, h, intentPred).
 		Watches(&nc.TrafficMirror{}, h, intentPred).
 		Watches(&nc.AnnouncementPolicy{}, h, intentPred).
+		Watches(&nc.NodeAttachment{}, h, intentPred).
 		Watches(&corev1.Node{}, h, nodePred).
 		Watches(&networkv1alpha1.NodeNetworkConfig{}, h, builder.WithPredicates(nncStatusPredicate())).
 		Complete(r)

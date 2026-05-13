@@ -83,6 +83,7 @@ func NewReconciler(clusterClient client.Client, logger logr.Logger, timeout time
 			builder.NewCollectorBuilder(),
 			builder.NewMirrorBuilder(),
 			builder.NewAnnouncementBuilder(),
+			builder.NewNodeAttachmentBuilder(),
 			builder.NewSBRBuilder(),
 		},
 		finalizerManager: finalizer.NewManager(clusterClient, logger),
@@ -317,6 +318,12 @@ func (r *Reconciler) fetchAll(ctx context.Context) (*resolver.FetchedResources, 
 		f.AnnouncementPolicies = append(f.AnnouncementPolicies, filterActive(l.Items)...)
 	}); err != nil {
 		return nil, fmt.Errorf("error listing AnnouncementPolicies: %w", err)
+	}
+
+	if err := listInto[*nc.NodeAttachmentList](ctx, r.client, nsOpts, func(l *nc.NodeAttachmentList) {
+		f.NodeAttachments = append(f.NodeAttachments, filterActive(l.Items)...)
+	}); err != nil {
+		return nil, fmt.Errorf("error listing NodeAttachments: %w", err)
 	}
 
 	// Resolve BGPPeering AuthSecretRefs to inline passwords. Skipping (with a

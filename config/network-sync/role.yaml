@@ -38,6 +38,7 @@ rules:
   - interfaceconfigs
   - layer2attachments
   - networks
+  - nodeattachments
   - outbounds
   - podnetworks
   - trafficmirrors
@@ -59,6 +60,7 @@ rules:
   - interfaceconfigs/status
   - layer2attachments/status
   - networks/status
+  - nodeattachments/status
   - outbounds/status
   - podnetworks/status
   - trafficmirrors/status

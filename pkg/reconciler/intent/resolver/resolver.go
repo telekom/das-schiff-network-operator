@@ -60,6 +60,7 @@ type ResolvedData struct {
 	Collectors           []nc.Collector
 	TrafficMirrors       []nc.TrafficMirror
 	AnnouncementPolicies []nc.AnnouncementPolicy
+	NodeAttachments      []nc.NodeAttachment
 
 	// BGPPasswords holds resolved BGP session passwords keyed by
 	// "<namespace>/<name>" of the BGPPeering.

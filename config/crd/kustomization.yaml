@@ -16,6 +16,7 @@ resources:
 - bases/network-connector.sylvaproject.org_interfaceconfigs.yaml
 - bases/network-connector.sylvaproject.org_layer2attachments.yaml
 - bases/network-connector.sylvaproject.org_networks.yaml
+- bases/network-connector.sylvaproject.org_nodeattachments.yaml
 - bases/network-connector.sylvaproject.org_nodenetworkstatuses.yaml
 - bases/network-connector.sylvaproject.org_outbounds.yaml
 - bases/network-connector.sylvaproject.org_podnetworks.yaml
