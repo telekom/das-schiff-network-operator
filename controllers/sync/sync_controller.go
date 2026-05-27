@@ -57,6 +57,7 @@ func intentCRDTypes() []client.Object {
 		&nc.Collector{},
 		&nc.TrafficMirror{},
 		&nc.AnnouncementPolicy{},
+		&nc.NodeAttachment{},
 		&nc.InterfaceConfig{},
 	}
 }

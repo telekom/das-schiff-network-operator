@@ -110,6 +110,9 @@ func (u *Updater) UpdateConditions(ctx context.Context, fetched *resolver.Fetche
 	if err := u.updateTrafficMirrorConditions(ctx, fetched, resolved); err != nil {
 		return fmt.Errorf("trafficMirror conditions: %w", err)
 	}
+	if err := u.updateNodeAttachmentConditions(ctx, fetched, resolved); err != nil {
+		return fmt.Errorf("nodeAttachment conditions: %w", err)
+	}
 	return nil
 }
 
@@ -314,6 +317,37 @@ func (u *Updater) updateTrafficMirrorConditions(ctx context.Context, fetched *re
 			t.Status.ObservedGeneration = t.Generation
 		}); err != nil {
 			return fmt.Errorf("updating TrafficMirror %q status: %w", tm.Name, err)
+		}
+	}
+	return nil
+}
+
+func (u *Updater) updateNodeAttachmentConditions(ctx context.Context, fetched *resolver.FetchedResources, resolved *resolver.ResolvedData) error {
+	for i := range fetched.NodeAttachments {
+		na := &fetched.NodeAttachments[i]
+		resolvedStatus := metav1.ConditionTrue
+		resolvedReason := reasonAllResolved
+		resolvedMsg := msgAllResolved
+
+		if _, ok := resolved.VRFs[na.Spec.VRFRef]; !ok {
+			resolvedStatus = metav1.ConditionFalse
+			resolvedReason = "VRFNotFound"
+			resolvedMsg = fmt.Sprintf("referenced VRF %q not found", na.Spec.VRFRef)
+		}
+
+		readyStatus := resolvedStatus
+		readyMsg := "NodeAttachment is ready"
+		if resolvedStatus != metav1.ConditionTrue {
+			readyMsg = resolvedMsg
+		}
+
+		if err := u.statusUpdateWithRetry(ctx, na, func(obj client.Object) {
+			n := obj.(*nc.NodeAttachment)
+			setCondition(&n.Status.Conditions, nc.ConditionTypeResolved, resolvedStatus, resolvedReason, resolvedMsg, n.Generation)
+			setCondition(&n.Status.Conditions, nc.ConditionTypeReady, readyStatus, resolvedReason, readyMsg, n.Generation)
+			n.Status.ObservedGeneration = n.Generation
+		}); err != nil {
+			return fmt.Errorf("updating NodeAttachment %q status: %w", na.Name, err)
 		}
 	}
 	return nil
