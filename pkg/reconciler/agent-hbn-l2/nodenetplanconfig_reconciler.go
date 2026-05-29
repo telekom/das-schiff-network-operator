@@ -3,6 +3,7 @@ package agent_hbn_l2 //nolint:revive
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -30,6 +31,11 @@ const (
 	vlanInterfaceType   = "vlan"
 	bridgeInterfaceType = "bridge"
 	dummyInterfaceType  = "dummy"
+
+	// rtprotHBN is the custom route protocol used to tag routes managed by the
+	// HBN-L2 agent. Only routes with this protocol are cleaned up during
+	// reconciliation, leaving kernel and other routes untouched.
+	rtprotHBN = 196
 )
 
 var (
@@ -42,9 +48,15 @@ type addresses struct {
 }
 
 type netplanVlan struct {
-	addresses `json:",inline"`
-	ID        int `json:"id"`
-	Mtu       int `json:"mtu"`
+	addresses `json:",inline" yaml:",inline"`
+	ID        int           `json:"id" yaml:"id"`
+	Mtu       int           `json:"mtu" yaml:"mtu"`
+	Routes    []routeConfig `json:"routes,omitempty" yaml:"routes,omitempty"`
+}
+
+type routeConfig struct {
+	To  string `json:"to" yaml:"to"`
+	Via string `json:"via" yaml:"via"`
 }
 
 type NodeNetplanConfigReconciler struct {
@@ -115,6 +127,9 @@ func createVLAN(masterInterface netlink.Link, vlanConfig *netplanVlan, name stri
 	}
 	if err := reconcileAddresses(&link, vlan); err != nil {
 		return fmt.Errorf("error reconciling addresses for vlan %s: %w", name, err)
+	}
+	if err := reconcileRoutes(&link, vlan); err != nil {
+		return fmt.Errorf("error reconciling routes for vlan %s: %w", name, err)
 	}
 	if bridge != nil {
 		vlanID, err := parseVlanID(vlanConfig.ID)
@@ -257,6 +272,9 @@ func reconcileExistingAddresses(existingInterface netlink.Link, device netplan.D
 	}
 	if err := reconcileAddresses(existingInterface, device); err != nil {
 		return fmt.Errorf("error reconciling addresses for %s: %w", existingInterface.Attrs().Name, err)
+	}
+	if err := reconcileRoutes(existingInterface, device); err != nil {
+		return fmt.Errorf("error reconciling routes for %s: %w", existingInterface.Attrs().Name, err)
 	}
 	return nil
 }
@@ -423,4 +441,118 @@ func parseAddresses(device netplan.Device) (*addresses, error) {
 		return nil, fmt.Errorf("error unmarshalling address config: %w", err)
 	}
 	return addr, nil
+}
+
+// parseRoutes extracts routes from a netplan device YAML.
+func parseRoutes(device netplan.Device) ([]routeConfig, error) {
+	var cfg struct {
+		Routes []routeConfig `yaml:"routes"`
+	}
+	if err := yaml.Unmarshal(device.Raw, &cfg); err != nil {
+		return nil, fmt.Errorf("error unmarshalling routes config: %w", err)
+	}
+	return cfg.Routes, nil
+}
+
+// reconcileRoutes adds/replaces desired routes on a link and removes stale
+// HBN-managed routes (identified by protocol rtprotHBN) that are no longer desired.
+func reconcileRoutes(link netlink.Link, device netplan.Device) error {
+	desired, err := parseRoutes(device)
+	if err != nil {
+		return fmt.Errorf("error parsing routes: %w", err)
+	}
+
+	nlRoutes := make([]netlink.Route, 0, len(desired))
+	for _, r := range desired {
+		nlRoute, err := toNetlinkRoute(link.Attrs().Index, r)
+		if err != nil {
+			return fmt.Errorf("error converting route {to: %s, via: %s}: %w", r.To, r.Via, err)
+		}
+		nlRoutes = append(nlRoutes, *nlRoute)
+	}
+
+	for i := range nlRoutes {
+		if err := netlink.RouteReplace(&nlRoutes[i]); err != nil {
+			return fmt.Errorf("error adding route to %s via %s: %w", nlRoutes[i].Dst, nlRoutes[i].Gw, err)
+		}
+	}
+
+	if err := removeStaleRoutes(link, nlRoutes, unix.AF_INET); err != nil {
+		return fmt.Errorf("error removing stale IPv4 routes: %w", err)
+	}
+	if err := removeStaleRoutes(link, nlRoutes, unix.AF_INET6); err != nil {
+		return fmt.Errorf("error removing stale IPv6 routes: %w", err)
+	}
+
+	return nil
+}
+
+// toNetlinkRoute converts a netplan route config to a netlink.Route.
+func toNetlinkRoute(linkIndex int, r routeConfig) (*netlink.Route, error) {
+	gw := net.ParseIP(r.Via)
+	if gw == nil {
+		return nil, fmt.Errorf("invalid gateway %q", r.Via)
+	}
+
+	route := &netlink.Route{
+		LinkIndex: linkIndex,
+		Gw:        gw,
+		Protocol:  rtprotHBN,
+	}
+
+	if r.To == "default" {
+		if gw.To4() != nil {
+			_, dst, _ := net.ParseCIDR("0.0.0.0/0")
+			route.Dst = dst
+		} else {
+			_, dst, _ := net.ParseCIDR("::/0")
+			route.Dst = dst
+		}
+	} else {
+		_, dst, err := net.ParseCIDR(r.To)
+		if err != nil {
+			return nil, fmt.Errorf("invalid destination %q: %w", r.To, err)
+		}
+		route.Dst = dst
+	}
+
+	return route, nil
+}
+
+// removeStaleRoutes deletes routes with protocol rtprotHBN on the link
+// that are not in the desired list.
+func removeStaleRoutes(link netlink.Link, desired []netlink.Route, family int) error {
+	existing, err := netlink.RouteList(link, family)
+	if err != nil {
+		return fmt.Errorf("error listing routes: %w", err)
+	}
+	for i := range existing {
+		if existing[i].Protocol != rtprotHBN {
+			continue
+		}
+		if !isDesiredRoute(&existing[i], desired) {
+			if err := netlink.RouteDel(&existing[i]); err != nil {
+				return fmt.Errorf("error deleting route to %s: %w", existing[i].Dst, err)
+			}
+		}
+	}
+	return nil
+}
+
+func isDesiredRoute(candidate *netlink.Route, desired []netlink.Route) bool {
+	for i := range desired {
+		if candidate.LinkIndex != desired[i].LinkIndex {
+			continue
+		}
+		if !candidate.Gw.Equal(desired[i].Gw) {
+			continue
+		}
+		if candidate.Dst == nil && desired[i].Dst == nil {
+			return true
+		}
+		if candidate.Dst != nil && desired[i].Dst != nil && candidate.Dst.String() == desired[i].Dst.String() {
+			return true
+		}
+	}
+	return false
 }
