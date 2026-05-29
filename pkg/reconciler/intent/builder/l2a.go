@@ -19,6 +19,8 @@ package builder
 import (
 	"context"
 	"fmt"
+	gonet "net"
+	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -113,6 +115,13 @@ func (b *L2ABuilder) applyL2AToNodes(
 
 		contrib := ensureContrib(result, node.Name)
 		contrib.Layer2s[mapKey] = *layer2
+
+		// Populate netplan node IPs when nodeIPs is enabled and this node has allocations.
+		if l2a.Spec.NodeIPs != nil && l2a.Spec.NodeIPs.Enabled {
+			if nodeIP := buildNetplanNodeIP(l2a, net, node.Name); nodeIP != nil {
+				contrib.NetplanNodeIPs[mapKey] = *nodeIP
+			}
+		}
 
 		if vrfName != "" && vrfSpec != nil {
 			if err := b.applyVRFContrib(l2a, net, vrfName, vrfSpec, data, contrib); err != nil {
@@ -270,4 +279,58 @@ func (*L2ABuilder) mtu(l2a *nc.Layer2Attachment) uint16 {
 // into the VRF, corrupting the nexthop router MAC.
 func (*L2ABuilder) routeTarget(_ *resolver.ResolvedNetwork, _ *nc.VRFSpec) string {
 	return ""
+}
+
+// buildNetplanNodeIP creates a NetplanNodeIP for a node from the L2A's allocated
+// per-node addresses and the Network's CIDRs. The addresses get the network's
+// prefix length, and routes point to the IRB anycast gateway.
+func buildNetplanNodeIP(l2a *nc.Layer2Attachment, nw *resolver.ResolvedNetwork, nodeName string) *NetplanNodeIP {
+	alloc, ok := l2a.Status.NodeAddresses[nodeName]
+	if !ok {
+		return nil
+	}
+
+	result := &NetplanNodeIP{}
+
+	if nw.Spec.IPv4 != nil && len(alloc.IPv4) > 0 {
+		gwIP, prefixLen := parseCIDRParts(nw.Spec.IPv4.CIDR)
+		if gwIP != "" {
+			for _, ip := range alloc.IPv4 {
+				result.Addresses = append(result.Addresses, fmt.Sprintf("%s/%s", ip, prefixLen))
+			}
+			result.Gateways = append(result.Gateways, gwIP)
+		}
+	}
+
+	if nw.Spec.IPv6 != nil && len(alloc.IPv6) > 0 {
+		gwIP, prefixLen := parseCIDRParts(nw.Spec.IPv6.CIDR)
+		if gwIP != "" {
+			for _, ip := range alloc.IPv6 {
+				result.Addresses = append(result.Addresses, fmt.Sprintf("%s/%s", ip, prefixLen))
+			}
+			result.Gateways = append(result.Gateways, gwIP)
+		}
+	}
+
+	if len(result.Addresses) == 0 {
+		return nil
+	}
+	return result
+}
+
+// parseCIDRParts extracts the host IP and prefix length string from a CIDR
+// like "10.0.1.1/24" → ("10.0.1.1", "24").
+func parseCIDRParts(cidr string) (gatewayIP, prefixLen string) {
+	ip, ipNet, err := gonet.ParseCIDR(cidr)
+	if err != nil {
+		return "", ""
+	}
+	ones, _ := ipNet.Mask.Size()
+
+	// The Network CIDR host part is the gateway (e.g., "10.0.1.1/24" → gw "10.0.1.1").
+	gwIP := ip.String()
+	if strings.Contains(cidr, ":") && ip.To4() == nil {
+		gwIP = ip.String()
+	}
+	return gwIP, fmt.Sprintf("%d", ones)
 }

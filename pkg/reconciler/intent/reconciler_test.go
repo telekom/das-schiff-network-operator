@@ -39,6 +39,7 @@ import (
 
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
+	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/builder"
 )
 
 var (
@@ -812,12 +813,12 @@ func TestBuildNetplanState(t *testing.T) {
 		spec := &networkv1alpha1.NodeNetworkConfigSpec{
 			Layer2s: map[string]networkv1alpha1.Layer2{},
 		}
-		state := buildNetplanState(spec)
+		state := buildNetplanState(spec, nil)
 		assert.Empty(t, state.Network.VLans)
 	})
 
 	t.Run("nil spec produces empty state", func(t *testing.T) {
-		state := buildNetplanState(nil)
+		state := buildNetplanState(nil, nil)
 		assert.Empty(t, state.Network.VLans)
 	})
 
@@ -828,7 +829,7 @@ func TestBuildNetplanState(t *testing.T) {
 				"502": {VLAN: 502, VNI: 10502, MTU: 1500},
 			},
 		}
-		state := buildNetplanState(spec)
+		state := buildNetplanState(spec, nil)
 		require.Len(t, state.Network.VLans, 2)
 
 		// Check vlan.501
@@ -856,7 +857,7 @@ func TestBuildNetplanState(t *testing.T) {
 				"0": {VLAN: 0, VNI: 100, MTU: 1500},
 			},
 		}
-		state := buildNetplanState(spec)
+		state := buildNetplanState(spec, nil)
 		assert.Empty(t, state.Network.VLans)
 	})
 
@@ -866,7 +867,7 @@ func TestBuildNetplanState(t *testing.T) {
 				"501": {VLAN: 501, VNI: 10501, MTU: 9000, InterfaceName: "chris-l2"},
 			},
 		}
-		state := buildNetplanState(spec)
+		state := buildNetplanState(spec, nil)
 		require.Len(t, state.Network.VLans, 1)
 
 		_, defaultExists := state.Network.VLans["vlan.501"]
@@ -886,7 +887,7 @@ func TestBuildNetplanState(t *testing.T) {
 				"502": {VLAN: 502, VNI: 10502, MTU: 1500, InterfaceRef: "bond0"},
 			},
 		}
-		state := buildNetplanState(spec)
+		state := buildNetplanState(spec, nil)
 		require.Len(t, state.Network.VLans, 1)
 
 		dev, ok := state.Network.VLans["vlan.502"]
@@ -902,7 +903,7 @@ func TestBuildNetplanState(t *testing.T) {
 				"503": {VLAN: 503, MTU: 9000, InterfaceName: "mgmt", InterfaceRef: "eno1"},
 			},
 		}
-		state := buildNetplanState(spec)
+		state := buildNetplanState(spec, nil)
 		require.Len(t, state.Network.VLans, 1)
 
 		dev, ok := state.Network.VLans["mgmt"]
@@ -911,6 +912,84 @@ func TestBuildNetplanState(t *testing.T) {
 		require.NoError(t, json.Unmarshal(dev.Raw, &vlan))
 		assert.Equal(t, float64(503), vlan["id"])
 		assert.Equal(t, "eno1", vlan["link"])
+	})
+
+	t.Run("nodeIPs adds addresses and routes to VLAN device", func(t *testing.T) {
+		spec := &networkv1alpha1.NodeNetworkConfigSpec{
+			Layer2s: map[string]networkv1alpha1.Layer2{
+				"501": {VLAN: 501, VNI: 10501, MTU: 9000},
+			},
+		}
+		nodeIPs := map[string]builder.NetplanNodeIP{
+			"501": {
+				Addresses: []string{"10.0.1.10/24"},
+				Gateways:  []string{"10.0.1.1"},
+			},
+		}
+		state := buildNetplanState(spec, nodeIPs)
+		require.Len(t, state.Network.VLans, 1)
+
+		dev, ok := state.Network.VLans["vlan.501"]
+		require.True(t, ok)
+		var vlan map[string]interface{}
+		require.NoError(t, json.Unmarshal(dev.Raw, &vlan))
+
+		// Check addresses.
+		addrs, ok := vlan["addresses"].([]interface{})
+		require.True(t, ok, "expected addresses in VLAN device")
+		require.Len(t, addrs, 1)
+		assert.Equal(t, "10.0.1.10/24", addrs[0])
+
+		// Check routes.
+		routes, ok := vlan["routes"].([]interface{})
+		require.True(t, ok, "expected routes in VLAN device")
+		require.Len(t, routes, 1)
+		route := routes[0].(map[string]interface{})
+		assert.Equal(t, "default", route["to"])
+		assert.Equal(t, "10.0.1.1", route["via"])
+	})
+
+	t.Run("nodeIPs dual-stack adds both IPv4 and IPv6", func(t *testing.T) {
+		spec := &networkv1alpha1.NodeNetworkConfigSpec{
+			Layer2s: map[string]networkv1alpha1.Layer2{
+				"501": {VLAN: 501, VNI: 10501, MTU: 9000},
+			},
+		}
+		nodeIPs := map[string]builder.NetplanNodeIP{
+			"501": {
+				Addresses: []string{"10.0.1.10/24", "2001:db8::10/64"},
+				Gateways:  []string{"10.0.1.1", "2001:db8::1"},
+			},
+		}
+		state := buildNetplanState(spec, nodeIPs)
+		dev := state.Network.VLans["vlan.501"]
+		var vlan map[string]interface{}
+		require.NoError(t, json.Unmarshal(dev.Raw, &vlan))
+
+		addrs := vlan["addresses"].([]interface{})
+		require.Len(t, addrs, 2)
+		assert.Equal(t, "10.0.1.10/24", addrs[0])
+		assert.Equal(t, "2001:db8::10/64", addrs[1])
+
+		routes := vlan["routes"].([]interface{})
+		require.Len(t, routes, 2)
+	})
+
+	t.Run("VLAN without nodeIPs has no addresses", func(t *testing.T) {
+		spec := &networkv1alpha1.NodeNetworkConfigSpec{
+			Layer2s: map[string]networkv1alpha1.Layer2{
+				"501": {VLAN: 501, VNI: 10501, MTU: 9000},
+			},
+		}
+		nodeIPs := map[string]builder.NetplanNodeIP{
+			"999": {Addresses: []string{"10.0.9.10/24"}, Gateways: []string{"10.0.9.1"}},
+		}
+		state := buildNetplanState(spec, nodeIPs)
+		dev := state.Network.VLans["vlan.501"]
+		var vlan map[string]interface{}
+		require.NoError(t, json.Unmarshal(dev.Raw, &vlan))
+		_, hasAddrs := vlan["addresses"]
+		assert.False(t, hasAddrs, "VLAN 501 should not have addresses from non-matching key")
 	})
 }
 

@@ -192,7 +192,7 @@ func (r *Reconciler) ReconcileDebounced(ctx context.Context) error {
 		}
 
 		// 8. Create or update NodeNetplanConfig (host-side VLANs for HBN-L2 agent).
-		netplanState := buildNetplanState(result.Spec)
+		netplanState := buildNetplanState(result.Spec, result.NetplanNodeIPs)
 		if err := r.applyNetplanConfig(timeoutCtx, node, netplanState); err != nil {
 			r.logger.Error(err, "failed to apply NodeNetplanConfig", "node", node.Name)
 			continue
@@ -543,7 +543,9 @@ func (r *Reconciler) cleanupOrphanedNNCs(ctx context.Context, nodes []corev1.Nod
 // It creates VLAN devices from the NNC Layer2 entries. The hbn parent
 // ethernet is defined in a static netplan config on the node (10-hbn.yaml),
 // so netplan can wire VLANs to it when this state is applied.
-func buildNetplanState(spec *networkv1alpha1.NodeNetworkConfigSpec) *netplan.State {
+// When nodeIPs are allocated, the VLAN device also gets per-node addresses
+// and routes pointing to the IRB anycast gateway.
+func buildNetplanState(spec *networkv1alpha1.NodeNetworkConfigSpec, nodeIPs map[string]builder.NetplanNodeIP) *netplan.State {
 	state := netplan.NewEmptyState()
 
 	if spec == nil || len(spec.Layer2s) == 0 {
@@ -574,6 +576,26 @@ func buildNetplanState(spec *networkv1alpha1.NodeNetworkConfigSpec) *netplan.Sta
 			"mtu":        l2.MTU,
 			"critical":   true,
 			"link-local": []interface{}{},
+		}
+
+		// Add per-node IP addresses and gateway routes when nodeIPs is enabled.
+		if nip, ok := nodeIPs[k]; ok && len(nip.Addresses) > 0 {
+			addrs := make([]interface{}, 0, len(nip.Addresses))
+			for _, a := range nip.Addresses {
+				addrs = append(addrs, a)
+			}
+			vlan["addresses"] = addrs
+
+			if len(nip.Gateways) > 0 {
+				routes := make([]interface{}, 0, len(nip.Gateways))
+				for _, gw := range nip.Gateways {
+					routes = append(routes, map[string]interface{}{
+						"to":  "default",
+						"via": gw,
+					})
+				}
+				vlan["routes"] = routes
+			}
 		}
 
 		rawVlan, err := json.Marshal(vlan)

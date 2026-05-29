@@ -547,6 +547,90 @@ func TestL2ABuilder_NodeIPs_NotInIRB(t *testing.T) {
 	if n1Layer2.IRB.IPAddresses[0] != "10.0.1.1/24" {
 		t.Errorf("IRB IP should be anycast 10.0.1.1/24, got %s", n1Layer2.IRB.IPAddresses[0])
 	}
+
+	// NetplanNodeIPs should be populated with the per-node IP and gateway.
+	nip, ok := result["node-1"].NetplanNodeIPs["501"]
+	if !ok {
+		t.Fatal("expected NetplanNodeIPs entry for key 501")
+	}
+	assert.Equal(t, []string{"10.0.1.10/24"}, nip.Addresses)
+	assert.Equal(t, []string{"10.0.1.1"}, nip.Gateways)
+}
+
+func TestL2ABuilder_NodeIPs_DualStack(t *testing.T) {
+	b := NewL2ABuilder()
+	vlan := int32(501)
+	vni := int32(10501)
+	data := &resolver.ResolvedData{
+		Nodes: []corev1.Node{
+			{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
+		},
+		Networks: map[string]*resolver.ResolvedNetwork{
+			"net-vlan501": {Name: "net-vlan501", Spec: nc.NetworkSpec{
+				VLAN: &vlan, VNI: &vni,
+				IPv4: &nc.IPNetwork{CIDR: "10.0.1.1/24"},
+				IPv6: &nc.IPNetwork{CIDR: "2001:db8::1/64"},
+			}},
+		},
+		RawDestinations: []nc.Destination{
+			{ObjectMeta: metav1.ObjectMeta{Name: "dest-gw", Labels: map[string]string{"type": "gateway"}},
+				Spec: nc.DestinationSpec{VRFRef: ptr("vrf-m2m")}},
+		},
+		Destinations: map[string]*resolver.ResolvedDestination{
+			"dest-gw": {Name: "dest-gw", Spec: nc.DestinationSpec{VRFRef: ptr("vrf-m2m")}, VRFSpec: &nc.VRFSpec{VRF: "m2m", VNI: ptr(int32(100))}},
+		},
+		Layer2Attachments: []nc.Layer2Attachment{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "l2a-nodeips"},
+				Spec: nc.Layer2AttachmentSpec{
+					NetworkRef:   "net-vlan501",
+					Destinations: &metav1.LabelSelector{MatchLabels: map[string]string{"type": "gateway"}},
+					NodeIPs:      &nc.NodeIPConfig{Enabled: true},
+				},
+				Status: nc.Layer2AttachmentStatus{
+					NodeAddresses: map[string]nc.AddressAllocation{
+						"node-1": {IPv4: []string{"10.0.1.10"}, IPv6: []string{"2001:db8::10"}},
+					},
+				},
+			},
+		},
+	}
+
+	result, err := b.Build(context.Background(), data)
+	require.NoError(t, err)
+
+	nip := result["node-1"].NetplanNodeIPs["501"]
+	assert.Equal(t, []string{"10.0.1.10/24", "2001:db8::10/64"}, nip.Addresses)
+	assert.Equal(t, []string{"10.0.1.1", "2001:db8::1"}, nip.Gateways)
+}
+
+func TestL2ABuilder_NodeIPs_NotEnabled(t *testing.T) {
+	b := NewL2ABuilder()
+	vlan := int32(501)
+	vni := int32(10501)
+	data := &resolver.ResolvedData{
+		Nodes: []corev1.Node{
+			{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
+		},
+		Networks: map[string]*resolver.ResolvedNetwork{
+			"net-vlan501": {Name: "net-vlan501", Spec: nc.NetworkSpec{
+				VLAN: &vlan, VNI: &vni,
+				IPv4: &nc.IPNetwork{CIDR: "10.0.1.1/24"},
+			}},
+		},
+		Layer2Attachments: []nc.Layer2Attachment{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "l2a-no-nodeips"},
+				Spec: nc.Layer2AttachmentSpec{
+					NetworkRef: "net-vlan501",
+				},
+			},
+		},
+	}
+
+	result, err := b.Build(context.Background(), data)
+	require.NoError(t, err)
+	assert.Empty(t, result["node-1"].NetplanNodeIPs, "NetplanNodeIPs should be empty when nodeIPs is not enabled")
 }
 
 func TestL2ABuilder_InterfaceNameAndRef(t *testing.T) {

@@ -25,18 +25,21 @@ import (
 type AssembleResult struct {
 	Spec    *networkv1alpha1.NodeNetworkConfigSpec
 	Origins map[string]string
+	// NetplanNodeIPs maps Layer2 keys to per-node IP info for netplan config.
+	NetplanNodeIPs map[string]builder.NetplanNodeIP
 }
 
 // Assemble merges multiple NodeContributions into a single NodeNetworkConfigSpec.
 // Contributions are merged deterministically: Layer2s and VRFs are merged by key,
 // ClusterVRF BGPPeers and routes are appended. Origins are merged for traceability.
-func Assemble(contributions []*builder.NodeContribution) (*AssembleResult, error) { //nolint:gocognit // assembly logic is inherently complex
+func Assemble(contributions []*builder.NodeContribution) (*AssembleResult, error) { //nolint:gocognit,cyclop // assembly logic is inherently complex
 	spec := &networkv1alpha1.NodeNetworkConfigSpec{
 		Layer2s:    make(map[string]networkv1alpha1.Layer2),
 		FabricVRFs: make(map[string]networkv1alpha1.FabricVRF),
 		LocalVRFs:  make(map[string]networkv1alpha1.VRF),
 	}
 	origins := make(map[string]string)
+	netplanNodeIPs := make(map[string]builder.NetplanNodeIP)
 
 	for _, c := range contributions {
 		if c == nil {
@@ -142,9 +145,14 @@ func Assemble(contributions []*builder.NodeContribution) (*AssembleResult, error
 		for k, v := range c.Origins {
 			origins[k] = v
 		}
+
+		// Merge netplan node IPs.
+		for k, v := range c.NetplanNodeIPs {
+			netplanNodeIPs[k] = v
+		}
 	}
 
-	return &AssembleResult{Spec: spec, Origins: origins}, nil
+	return &AssembleResult{Spec: spec, Origins: origins, NetplanNodeIPs: netplanNodeIPs}, nil
 }
 
 // mergeStringSlice merges two string slices, deduplicating entries.

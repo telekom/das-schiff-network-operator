@@ -23,6 +23,16 @@ import (
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/resolver"
 )
 
+// NetplanNodeIP holds per-node IP addressing info for a VLAN device in netplan.
+// When NodeIPConfig is enabled on an L2A, each node gets a unique IP on the
+// VLAN interface. Routes point to the IRB anycast gateway.
+type NetplanNodeIP struct {
+	// Addresses are per-node IPs with prefix length (e.g., "10.0.1.10/24").
+	Addresses []string
+	// Gateways are the IRB anycast gateway IPs (e.g., "10.0.1.1").
+	Gateways []string
+}
+
 // NodeContribution is what each builder produces for a single node.
 // The assembler merges contributions from all builders into a final NNC spec.
 type NodeContribution struct {
@@ -30,6 +40,9 @@ type NodeContribution struct {
 	FabricVRFs map[string]networkv1alpha1.FabricVRF
 	LocalVRFs  map[string]networkv1alpha1.VRF
 	ClusterVRF *networkv1alpha1.VRF
+	// NetplanNodeIPs maps Layer2 keys to per-node IP info for netplan config.
+	// Populated by the L2A builder when nodeIPs.enabled is set.
+	NetplanNodeIPs map[string]NetplanNodeIP
 	// Origins maps NNC section keys to their source intent CRDs
 	// (e.g., "layer2s/prod-vlan100" → "Layer2Attachment/my-l2a").
 	Origins map[string]string
@@ -38,10 +51,11 @@ type NodeContribution struct {
 // NewNodeContribution creates an initialized NodeContribution.
 func NewNodeContribution() *NodeContribution {
 	return &NodeContribution{
-		Layer2s:    make(map[string]networkv1alpha1.Layer2),
-		FabricVRFs: make(map[string]networkv1alpha1.FabricVRF),
-		LocalVRFs:  make(map[string]networkv1alpha1.VRF),
-		Origins:    make(map[string]string),
+		Layer2s:        make(map[string]networkv1alpha1.Layer2),
+		FabricVRFs:     make(map[string]networkv1alpha1.FabricVRF),
+		LocalVRFs:      make(map[string]networkv1alpha1.VRF),
+		NetplanNodeIPs: make(map[string]NetplanNodeIP),
+		Origins:        make(map[string]string),
 	}
 }
 
