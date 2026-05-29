@@ -66,6 +66,8 @@ type CoilReconciler struct {
 	APIReader client.Reader
 	Scheme    *runtime.Scheme
 	Log       logr.Logger
+	// ImagePullSecrets is the list of secret names to set on Egress pod templates.
+	ImagePullSecrets []string
 }
 
 //+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=outbounds,verbs=get;list;watch
@@ -217,7 +219,7 @@ func (r *CoilReconciler) upsertCalicoIPPool(ctx context.Context, ob *nc.Outbound
 	return nil
 }
 
-func (r *CoilReconciler) upsertCoilEgress(ctx context.Context, ob *nc.Outbound, prefixes []string, addresses *nc.AddressAllocation, logger logr.Logger) error {
+func (r *CoilReconciler) upsertCoilEgress(ctx context.Context, ob *nc.Outbound, prefixes []string, addresses *nc.AddressAllocation, logger logr.Logger) error { //nolint:revive,cyclop // building unstructured object requires sequential field-setting
 	replicas := int64(1)
 	if ob.Spec.Replicas != nil {
 		replicas = int64(*ob.Spec.Replicas)
@@ -267,6 +269,16 @@ func (r *CoilReconciler) upsertCoilEgress(ctx context.Context, ob *nc.Outbound, 
 	}
 	if err := unstructured.SetNestedStringMap(desired.Object, templateLabels, "spec", "template", "metadata", "labels"); err != nil {
 		return fmt.Errorf("error setting template labels: %w", err)
+	}
+
+	if len(r.ImagePullSecrets) > 0 {
+		secrets := make([]interface{}, len(r.ImagePullSecrets))
+		for i, name := range r.ImagePullSecrets {
+			secrets[i] = map[string]interface{}{"name": name}
+		}
+		if err := unstructured.SetNestedSlice(desired.Object, secrets, "spec", "template", "spec", "imagePullSecrets"); err != nil {
+			return fmt.Errorf("error setting imagePullSecrets: %w", err)
+		}
 	}
 
 	existing := &unstructured.Unstructured{}

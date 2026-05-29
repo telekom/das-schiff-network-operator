@@ -19,6 +19,7 @@ package main
 import (
 	"flag"
 	"os"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -45,10 +46,12 @@ func main() {
 	var metricsAddr string
 	var probeAddr string
 	var watchNamespace string
+	var imagePullSecrets string
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.StringVar(&watchNamespace, "namespace", "", "Namespace to watch for Outbound resources. Empty means all namespaces.")
+	flag.StringVar(&imagePullSecrets, "image-pull-secrets", "", "Comma-separated list of image pull secret names to set on Egress pod templates.")
 
 	opts := zap.Options{Development: true}
 	opts.BindFlags(flag.CommandLine)
@@ -78,11 +81,17 @@ func main() {
 		os.Exit(1)
 	}
 
+	var secrets []string
+	if imagePullSecrets != "" {
+		secrets = strings.Split(imagePullSecrets, ",")
+	}
+
 	if err = (&platform.CoilReconciler{
-		Client:    mgr.GetClient(),
-		APIReader: mgr.GetAPIReader(),
-		Scheme:    mgr.GetScheme(),
-		Log:       mgr.GetLogger().WithName("CoilReconciler"),
+		Client:           mgr.GetClient(),
+		APIReader:        mgr.GetAPIReader(),
+		Scheme:           mgr.GetScheme(),
+		Log:              mgr.GetLogger().WithName("CoilReconciler"),
+		ImagePullSecrets: secrets,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Coil")
 		os.Exit(1)

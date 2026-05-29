@@ -655,3 +655,90 @@ func TestCoilReconciler_MapDestinationToOutbounds(t *testing.T) {
 		t.Errorf("expected ob-match, got %s", requests[0].Name)
 	}
 }
+
+func TestCoilReconciler_ImagePullSecrets(t *testing.T) {
+	scheme := newScheme()
+
+	ob := &nc.Outbound{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "with-secrets",
+			Namespace: "default",
+		},
+		Spec: nc.OutboundSpec{
+			NetworkRef: "net-ips",
+			Addresses: &nc.AddressAllocation{
+				IPv4: []string{"10.200.99.0/28"},
+			},
+		},
+	}
+
+	cli := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ob).Build()
+	r := &CoilReconciler{
+		Client:           cli,
+		APIReader:        cli,
+		Scheme:           scheme,
+		ImagePullSecrets: []string{"my-secret", "other-secret"},
+	}
+
+	reconcileOnce(t, r, "with-secrets")
+	reconcileOnce(t, r, "with-secrets")
+
+	egress := getEgress(t, r, "with-secrets")
+	if egress == nil {
+		t.Fatal("expected Egress to exist")
+	}
+
+	secrets, found, err := unstructured.NestedSlice(egress.Object, "spec", "template", "spec", "imagePullSecrets")
+	if err != nil {
+		t.Fatalf("error reading imagePullSecrets: %v", err)
+	}
+	if !found {
+		t.Fatal("imagePullSecrets not found on Egress template")
+	}
+	if len(secrets) != 2 {
+		t.Fatalf("expected 2 imagePullSecrets, got %d", len(secrets))
+	}
+
+	for i, expected := range []string{"my-secret", "other-secret"} {
+		m, ok := secrets[i].(map[string]interface{})
+		if !ok {
+			t.Fatalf("secret[%d] not a map", i)
+		}
+		if m["name"] != expected {
+			t.Errorf("secret[%d]: expected name %q, got %q", i, expected, m["name"])
+		}
+	}
+}
+
+func TestCoilReconciler_NoImagePullSecrets(t *testing.T) {
+	scheme := newScheme()
+
+	ob := &nc.Outbound{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "no-secrets",
+			Namespace: "default",
+		},
+		Spec: nc.OutboundSpec{
+			NetworkRef: "net-nosec",
+			Addresses: &nc.AddressAllocation{
+				IPv4: []string{"10.200.98.0/28"},
+			},
+		},
+	}
+
+	cli := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ob).Build()
+	r := &CoilReconciler{Client: cli, APIReader: cli, Scheme: scheme}
+
+	reconcileOnce(t, r, "no-secrets")
+	reconcileOnce(t, r, "no-secrets")
+
+	egress := getEgress(t, r, "no-secrets")
+	if egress == nil {
+		t.Fatal("expected Egress to exist")
+	}
+
+	_, found, _ := unstructured.NestedSlice(egress.Object, "spec", "template", "spec", "imagePullSecrets")
+	if found {
+		t.Error("expected no imagePullSecrets when ImagePullSecrets is empty")
+	}
+}
