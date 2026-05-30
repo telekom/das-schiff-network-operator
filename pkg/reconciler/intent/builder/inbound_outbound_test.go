@@ -30,6 +30,7 @@ import (
 )
 
 const testOutboundPrefix = "10.100.0.0/24"
+const testNetworkCIDR = "10.200.0.0/24"
 
 // baseInboundData returns a minimal ResolvedData with one node, one Network,
 // one VRF-backed Destination, and a matching RawDestination for label-selector matching.
@@ -43,7 +44,7 @@ func baseInboundData() *resolver.ResolvedData {
 		},
 		Networks: map[string]*resolver.ResolvedNetwork{
 			"net-1": {Name: "net-1", Spec: nc.NetworkSpec{
-				IPv4: &nc.IPNetwork{CIDR: "10.200.0.0/24"},
+				IPv4: &nc.IPNetwork{CIDR: testNetworkCIDR},
 			}},
 		},
 		Destinations: map[string]*resolver.ResolvedDestination{
@@ -146,7 +147,7 @@ func TestInboundBuilder_BasicInbound(t *testing.T) {
 		t.Errorf("expected IPv6 Le=128, got %d", *fvrf.EVPNExportFilter.Items[1].Matcher.Prefix.Le)
 	}
 	// Third item is the aggregate (Network CIDR).
-	if fvrf.EVPNExportFilter.Items[2].Matcher.Prefix.Prefix != "10.200.0.0/24" {
+	if fvrf.EVPNExportFilter.Items[2].Matcher.Prefix.Prefix != testNetworkCIDR {
 		t.Errorf("expected aggregate prefix 10.200.0.0/24, got %q", fvrf.EVPNExportFilter.Items[2].Matcher.Prefix.Prefix)
 	}
 
@@ -168,7 +169,7 @@ func TestInboundBuilder_BasicInbound(t *testing.T) {
 	if len(fvrf.Redistribute.Connected.Items) != 1 {
 		t.Fatalf("expected 1 redistribute item, got %d", len(fvrf.Redistribute.Connected.Items))
 	}
-	if fvrf.Redistribute.Connected.Items[0].Matcher.Prefix.Prefix != "10.200.0.0/24" {
+	if fvrf.Redistribute.Connected.Items[0].Matcher.Prefix.Prefix != testNetworkCIDR {
 		t.Errorf("expected redistribute prefix 10.200.0.0/24, got %q", fvrf.Redistribute.Connected.Items[0].Matcher.Prefix.Prefix)
 	}
 	if fvrf.Redistribute.Connected.DefaultAction.Type != networkv1alpha1.Reject {
@@ -227,7 +228,7 @@ func TestInboundBuilder_DualStackRedistribute(t *testing.T) {
 	data.Networks["net-1"] = &resolver.ResolvedNetwork{
 		Name: "net-1",
 		Spec: nc.NetworkSpec{
-			IPv4: &nc.IPNetwork{CIDR: "10.200.0.0/24"},
+			IPv4: &nc.IPNetwork{CIDR: testNetworkCIDR},
 			IPv6: &nc.IPNetwork{CIDR: "fd00:200::/64"},
 		},
 	}
@@ -269,7 +270,7 @@ func TestInboundBuilder_DualStackRedistribute(t *testing.T) {
 	for _, item := range fvrf.Redistribute.Connected.Items {
 		prefixes[item.Matcher.Prefix.Prefix] = true
 	}
-	if !prefixes["10.200.0.0/24"] {
+	if !prefixes[testNetworkCIDR] {
 		t.Error("expected IPv4 redistribute prefix 10.200.0.0/24")
 	}
 	if !prefixes["fd00:200::/64"] {
@@ -345,7 +346,7 @@ func TestOutboundBuilder_BasicOutbound(t *testing.T) {
 	if fvrf.EVPNExportFilter.Items[0].Matcher.Prefix.Prefix != testOutboundPrefix {
 		t.Errorf("expected prefix %s, got %q", testOutboundPrefix, fvrf.EVPNExportFilter.Items[0].Matcher.Prefix.Prefix)
 	}
-	if fvrf.EVPNExportFilter.Items[1].Matcher.Prefix.Prefix != "10.200.0.0/24" {
+	if fvrf.EVPNExportFilter.Items[1].Matcher.Prefix.Prefix != testNetworkCIDR {
 		t.Errorf("expected aggregate prefix 10.200.0.0/24, got %q", fvrf.EVPNExportFilter.Items[1].Matcher.Prefix.Prefix)
 	}
 

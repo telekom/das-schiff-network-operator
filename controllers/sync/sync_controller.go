@@ -77,6 +77,7 @@ func intentCRDLists() []client.ObjectList {
 		&nc.TrafficMirrorList{},
 		&nc.AnnouncementPolicyList{},
 		&nc.InterfaceConfigList{},
+		&nc.NodeAttachmentList{},
 	}
 }
 

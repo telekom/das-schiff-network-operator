@@ -261,7 +261,7 @@ jobs:
           # Network-sync controller logs (cluster-1)
           docker exec nwop-control-plane bash -c \
             'POD=$(kubectl --kubeconfig=/etc/kubernetes/admin.conf -n kube-system \
-              get pods -l app.kubernetes.io/name=network-sync -o name | head -1); \
+              get pods -l app=network-sync -o name | head -1); \
              [ -n "$POD" ] && kubectl --kubeconfig=/etc/kubernetes/admin.conf \
               -n kube-system logs "$POD" --all-containers' \
             > /tmp/e2e-logs/network-sync-logs.log 2>&1 || true

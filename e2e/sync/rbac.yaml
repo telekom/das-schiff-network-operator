@@ -33,6 +33,7 @@ rules:
   - trafficmirrors
   - announcementpolicies
   - interfaceconfigs
+  - nodeattachments
   verbs: ["get", "list", "watch", "update", "patch"]
 # Read intent CRD status (for IPAM promotion)
 - apiGroups: ["network-connector.sylvaproject.org"]

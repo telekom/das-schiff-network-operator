@@ -35,7 +35,7 @@ const (
 	// rtprotHBN is the custom route protocol used to tag routes managed by the
 	// HBN-L2 agent. Only routes with this protocol are cleaned up during
 	// reconciliation, leaving kernel and other routes untouched.
-	rtprotHBN = 196
+	rtprotHBN netlink.RouteProtocol = 196
 )
 
 var (
