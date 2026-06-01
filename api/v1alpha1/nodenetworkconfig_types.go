@@ -51,13 +51,6 @@ type Layer2 struct {
 	// +kubebuilder:validation:ExclusiveMaximum=false
 	// MTU is the Maximum Transmission Unit size.
 	MTU uint16 `json:"mtu"`
-	// InterfaceName overrides the default VLAN sub-interface name (vlan.<ID>).
-	// +optional
-	InterfaceName string `json:"interfaceName,omitempty"`
-	// InterfaceRef is the parent/master interface for the VLAN sub-interface.
-	// Defaults to the HBN trunk interface if empty.
-	// +optional
-	InterfaceRef string `json:"interfaceRef,omitempty"`
 	// IRB is the Integrated Routing and Bridging configuration.
 	IRB *IRB `json:"irb,omitempty"`
 	// MirrorACLs is a list of mirror ACLs.

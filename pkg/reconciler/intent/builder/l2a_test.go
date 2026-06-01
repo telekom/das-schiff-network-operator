@@ -661,8 +661,10 @@ func TestL2ABuilder_InterfaceNameAndRef(t *testing.T) {
 	require.Contains(t, result, "node-1")
 
 	contrib := result["node-1"]
-	l2, ok := contrib.Layer2s["501"]
+	_, ok := contrib.Layer2s["501"]
 	require.True(t, ok, "expected layer2 key 501")
-	assert.Equal(t, "chris-l2", l2.InterfaceName, "InterfaceName should be propagated")
-	assert.Equal(t, "bond0", l2.InterfaceRef, "InterfaceRef should be propagated")
+	nip, ok := contrib.NetplanNodeIPs["501"]
+	require.True(t, ok, "expected NetplanNodeIPs entry for key 501")
+	assert.Equal(t, "chris-l2", nip.InterfaceName, "InterfaceName should be propagated to netplan device")
+	assert.Equal(t, "bond0", nip.InterfaceRef, "InterfaceRef should be propagated to netplan device")
 }

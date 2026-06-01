@@ -116,11 +116,10 @@ func (b *L2ABuilder) applyL2AToNodes(
 		contrib := ensureContrib(result, node.Name)
 		contrib.Layer2s[mapKey] = *layer2
 
-		// Populate netplan node IPs when nodeIPs is enabled and this node has allocations.
-		if l2a.Spec.NodeIPs != nil && l2a.Spec.NodeIPs.Enabled {
-			if nodeIP := buildNetplanNodeIP(l2a, net, node.Name); nodeIP != nil {
-				contrib.NetplanNodeIPs[mapKey] = *nodeIP
-			}
+		// Carry netplan-only device info for this VLAN (interface name/parent
+		// overrides plus, when enabled, per-node IPs). Kept off the NNC API.
+		if dev, ok := buildNetplanDevice(l2a, net, node.Name); ok {
+			contrib.NetplanNodeIPs[mapKey] = dev
 		}
 
 		if vrfName != "" && vrfSpec != nil {
@@ -203,13 +202,6 @@ func (b *L2ABuilder) buildLayer2(l2a *nc.Layer2Attachment, net *resolver.Resolve
 		MTU:         b.mtu(l2a),
 	}
 
-	if l2a.Spec.InterfaceName != nil && *l2a.Spec.InterfaceName != "" {
-		layer2.InterfaceName = *l2a.Spec.InterfaceName
-	}
-	if l2a.Spec.InterfaceRef != nil && *l2a.Spec.InterfaceRef != "" {
-		layer2.InterfaceRef = *l2a.Spec.InterfaceRef
-	}
-
 	// Build IRB if anycast is not disabled and we have a VRF.
 	if vrfName != "" && (l2a.Spec.DisableAnycast == nil || !*l2a.Spec.DisableAnycast) {
 		irb, err := b.buildIRB(l2a, net, vrfName)
@@ -279,6 +271,31 @@ func (*L2ABuilder) mtu(l2a *nc.Layer2Attachment) uint16 {
 // into the VRF, corrupting the nexthop router MAC.
 func (*L2ABuilder) routeTarget(_ *resolver.ResolvedNetwork, _ *nc.VRFSpec) string {
 	return ""
+}
+
+// buildNetplanDevice assembles the netplan-only device info for a VLAN on a
+// node: optional interface name/parent overrides plus, when NodeIPConfig is
+// enabled, the per-node IP addresses and IRB anycast gateways. It returns false
+// when there is nothing to carry. This data is intentionally kept off the
+// NodeNetworkConfig API and only rendered into the NodeNetplanConfig.
+func buildNetplanDevice(l2a *nc.Layer2Attachment, nw *resolver.ResolvedNetwork, nodeName string) (NetplanNodeIP, bool) {
+	var dev NetplanNodeIP
+	if l2a.Spec.InterfaceName != nil && *l2a.Spec.InterfaceName != "" {
+		dev.InterfaceName = *l2a.Spec.InterfaceName
+	}
+	if l2a.Spec.InterfaceRef != nil && *l2a.Spec.InterfaceRef != "" {
+		dev.InterfaceRef = *l2a.Spec.InterfaceRef
+	}
+	if l2a.Spec.NodeIPs != nil && l2a.Spec.NodeIPs.Enabled {
+		if nodeIP := buildNetplanNodeIP(l2a, nw, nodeName); nodeIP != nil {
+			dev.Addresses = nodeIP.Addresses
+			dev.Gateways = nodeIP.Gateways
+		}
+	}
+	if dev.InterfaceName == "" && dev.InterfaceRef == "" && len(dev.Addresses) == 0 && len(dev.Gateways) == 0 {
+		return NetplanNodeIP{}, false
+	}
+	return dev, true
 }
 
 // buildNetplanNodeIP creates a NetplanNodeIP for a node from the L2A's allocated

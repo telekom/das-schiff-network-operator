@@ -23,14 +23,20 @@ import (
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/resolver"
 )
 
-// NetplanNodeIP holds per-node IP addressing info for a VLAN device in netplan.
-// When NodeIPConfig is enabled on an L2A, each node gets a unique IP on the
-// VLAN interface. Routes point to the IRB anycast gateway.
+// NetplanNodeIP holds per-VLAN netplan device info that is rendered into the
+// NodeNetplanConfig but does not belong on the NodeNetworkConfig API surface.
+// It carries the optional interface name/parent overrides and, when NodeIPConfig
+// is enabled on an L2A, the per-node IP addresses and IRB anycast gateways.
 type NetplanNodeIP struct {
 	// Addresses are per-node IPs with prefix length (e.g., "10.0.1.10/24").
 	Addresses []string
 	// Gateways are the IRB anycast gateway IPs (e.g., "10.0.1.1").
 	Gateways []string
+	// InterfaceName overrides the default VLAN sub-interface name (vlan.<ID>).
+	InterfaceName string
+	// InterfaceRef is the parent/master interface for the VLAN sub-interface.
+	// Defaults to the HBN trunk interface if empty.
+	InterfaceRef string
 }
 
 // NodeContribution is what each builder produces for a single node.

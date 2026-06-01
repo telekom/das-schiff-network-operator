@@ -565,9 +565,11 @@ func buildNetplanState(spec *networkv1alpha1.NodeNetworkConfigSpec, nodeIPs map[
 			continue
 		}
 
+		nip, hasNip := nodeIPs[k]
+
 		link := "hbn"
-		if l2.InterfaceRef != "" {
-			link = l2.InterfaceRef
+		if hasNip && nip.InterfaceRef != "" {
+			link = nip.InterfaceRef
 		}
 
 		vlan := map[string]interface{}{
@@ -579,7 +581,7 @@ func buildNetplanState(spec *networkv1alpha1.NodeNetworkConfigSpec, nodeIPs map[
 		}
 
 		// Add per-node IP addresses and gateway routes when nodeIPs is enabled.
-		if nip, ok := nodeIPs[k]; ok && len(nip.Addresses) > 0 {
+		if hasNip && len(nip.Addresses) > 0 {
 			addrs := make([]interface{}, 0, len(nip.Addresses))
 			for _, a := range nip.Addresses {
 				addrs = append(addrs, a)
@@ -604,8 +606,8 @@ func buildNetplanState(spec *networkv1alpha1.NodeNetworkConfigSpec, nodeIPs map[
 		}
 
 		ifName := fmt.Sprintf("vlan.%d", l2.VLAN)
-		if l2.InterfaceName != "" {
-			ifName = l2.InterfaceName
+		if hasNip && nip.InterfaceName != "" {
+			ifName = nip.InterfaceName
 		}
 
 		state.Network.VLans[ifName] = netplan.Device{

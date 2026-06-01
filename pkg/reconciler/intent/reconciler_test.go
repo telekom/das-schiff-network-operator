@@ -864,10 +864,13 @@ func TestBuildNetplanState(t *testing.T) {
 	t.Run("InterfaceName overrides VLAN key", func(t *testing.T) {
 		spec := &networkv1alpha1.NodeNetworkConfigSpec{
 			Layer2s: map[string]networkv1alpha1.Layer2{
-				"501": {VLAN: 501, VNI: 10501, MTU: 9000, InterfaceName: "chris-l2"},
+				"501": {VLAN: 501, VNI: 10501, MTU: 9000},
 			},
 		}
-		state := buildNetplanState(spec, nil)
+		nodeIPs := map[string]builder.NetplanNodeIP{
+			"501": {InterfaceName: "chris-l2"},
+		}
+		state := buildNetplanState(spec, nodeIPs)
 		require.Len(t, state.Network.VLans, 1)
 
 		_, defaultExists := state.Network.VLans["vlan.501"]
@@ -884,10 +887,13 @@ func TestBuildNetplanState(t *testing.T) {
 	t.Run("InterfaceRef overrides link", func(t *testing.T) {
 		spec := &networkv1alpha1.NodeNetworkConfigSpec{
 			Layer2s: map[string]networkv1alpha1.Layer2{
-				"502": {VLAN: 502, VNI: 10502, MTU: 1500, InterfaceRef: "bond0"},
+				"502": {VLAN: 502, VNI: 10502, MTU: 1500},
 			},
 		}
-		state := buildNetplanState(spec, nil)
+		nodeIPs := map[string]builder.NetplanNodeIP{
+			"502": {InterfaceRef: "bond0"},
+		}
+		state := buildNetplanState(spec, nodeIPs)
 		require.Len(t, state.Network.VLans, 1)
 
 		dev, ok := state.Network.VLans["vlan.502"]
@@ -900,10 +906,13 @@ func TestBuildNetplanState(t *testing.T) {
 	t.Run("InterfaceName and InterfaceRef together", func(t *testing.T) {
 		spec := &networkv1alpha1.NodeNetworkConfigSpec{
 			Layer2s: map[string]networkv1alpha1.Layer2{
-				"503": {VLAN: 503, MTU: 9000, InterfaceName: "mgmt", InterfaceRef: "eno1"},
+				"503": {VLAN: 503, MTU: 9000},
 			},
 		}
-		state := buildNetplanState(spec, nil)
+		nodeIPs := map[string]builder.NetplanNodeIP{
+			"503": {InterfaceName: "mgmt", InterfaceRef: "eno1"},
+		}
+		state := buildNetplanState(spec, nodeIPs)
 		require.Len(t, state.Network.VLans, 1)
 
 		dev, ok := state.Network.VLans["mgmt"]
