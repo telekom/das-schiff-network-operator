@@ -241,59 +241,30 @@ func less(a, b interface{}) bool {
 func SanitizeDeviceName(name string) string {
 	return strings.ReplaceAll(name, ".", "\\.")
 }
-func GetChangedVirtualInterfaces(source, target *State) ([]net.Interface, error) {
+
+// GetRemovedVirtualInterfaces returns the virtual interfaces (VLANs, bonds, bridges) that
+// exist in source but no longer exist in target, i.e. interfaces removed from the desired
+// configuration. Only these must be deleted before running `netplan apply`: netplan does
+// not clean up orphaned virtual interfaces on its own. Interfaces that merely changed are
+// reconfigured in place by netplan/networkctl, so deleting them would needlessly flush
+// their neighbor/FDB tables and disrupt live traffic (e.g. EVPN type-2 withdrawal).
+func GetRemovedVirtualInterfaces(source, target *State) []net.Interface {
 	log := logrus.WithField("name", "netplan")
 	result := make([]net.Interface, 0)
-	compare := func(t net.InterfaceType, sourceMap, targetMap map[string]Device) ([]net.Interface, error) {
-		compareResult := make([]net.Interface, 0)
+	collect := func(t net.InterfaceType, sourceMap, targetMap map[string]Device) {
 		for sourceKey := range sourceMap {
 			if _, targetExists := targetMap[sourceKey]; !targetExists {
 				log.Infof("virtual interface %s was removed", sourceKey)
-				i := net.Interface{
-					Type: t,
-					Name: sourceKey,
-				}
-				compareResult = append(compareResult, i)
+				result = append(result, net.Interface{Type: t, Name: sourceKey})
 			}
 		}
-		for targetKey, targetValue := range targetMap {
-			if sourceValue, sourceExists := sourceMap[targetKey]; sourceExists {
-				isEqual, err := sourceValue.EqualsIgnoringSorting(targetValue)
-				if err != nil {
-					return nil, fmt.Errorf("failed to compare YAMLs: %w", err)
-				}
-				if !isEqual {
-					log.Infof("virtual interface %s changed from %s to %s", targetKey, sourceValue, targetValue)
-					i := net.Interface{
-						Type: t,
-						Name: targetKey,
-					}
-					result = append(result, i)
-				}
-			}
-		}
-		return compareResult, nil
 	}
 
-	vlans, err := compare(net.InterfaceTypeVLan, source.Network.VLans, target.Network.VLans)
-	if err != nil {
-		return nil, fmt.Errorf("failed to compare vlans: %w", err)
-	}
-	result = append(result, vlans...)
+	collect(net.InterfaceTypeVLan, source.Network.VLans, target.Network.VLans)
+	collect(net.InterfaceTypeBond, source.Network.Bonds, target.Network.Bonds)
+	collect(net.InterfaceTypeBridge, source.Network.Bridges, target.Network.Bridges)
 
-	bonds, err := compare(net.InterfaceTypeBond, source.Network.Bonds, target.Network.Bonds)
-	if err != nil {
-		return nil, fmt.Errorf("failed to compare bonds: %w", err)
-	}
-	result = append(result, bonds...)
-
-	bridges, err := compare(net.InterfaceTypeBridge, source.Network.Bridges, target.Network.Bridges)
-	if err != nil {
-		return nil, fmt.Errorf("failed to compare bridges: %w", err)
-	}
-	result = append(result, bridges...)
-
-	return result, nil
+	return result
 }
 
 func (d *Device) merge(d2 Device) error {

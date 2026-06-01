@@ -218,15 +218,11 @@ func (config *Config) Apply() netplan.Error {
 	source := config.initialState
 	if target, err := config.Get(); err != nil {
 		return err
-	} else {
-		if virtualInterfacesToRemove, err := netplan.GetChangedVirtualInterfaces(source, target); err != nil {
-			return netplan.ParseError(err)
-		} else if len(virtualInterfacesToRemove) > 0 {
-			config.log.Warnf("removing existing links for virtual interfaces before netplan apply")
-			for _, link := range virtualInterfacesToRemove {
-				if err := config.netManager.Delete(link); err != nil {
-					config.log.Warnf("error deleting %s link %s. err: %s", link.Type, link.Name, err)
-				}
+	} else if virtualInterfacesToRemove := netplan.GetRemovedVirtualInterfaces(source, target); len(virtualInterfacesToRemove) > 0 {
+		config.log.Warnf("removing links for virtual interfaces removed from configuration before netplan apply")
+		for _, link := range virtualInterfacesToRemove {
+			if err := config.netManager.Delete(link); err != nil {
+				config.log.Warnf("error deleting %s link %s. err: %s", link.Type, link.Name, err)
 			}
 		}
 	}
