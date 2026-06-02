@@ -109,7 +109,7 @@ func (LayerBGP) mkStaticRoute(routing *Routing, routes ...StaticRoute) {
 	}
 }
 
-func (l *LayerBGP) mkRule(routing *Routing, rules ...Rule) {
+func (LayerBGP) mkRule(routing *Routing, rules ...Rule) {
 	if routing.PBR == nil {
 		routing.PBR = &PolicyBasedRouting{}
 	}
@@ -126,9 +126,6 @@ func (l *LayerBGP) mkRule(routing *Routing, rules ...Rule) {
 		if isIPv4(ip) {
 			routing.PBR.IPv4 = append(routing.PBR.IPv4, rule)
 		} else {
-			if rule.Match != nil {
-				rule.Match.Interface = types.ToPtr(l.mgr.baseConfig.ClusterVRF.Name)
-			}
 			routing.PBR.IPv6 = append(routing.PBR.IPv6, rule)
 		}
 	}
@@ -307,10 +304,24 @@ func (l *LayerBGP) setupPolicyRoute(i int, conf v1alpha1.PolicyRoute) error {
 		return fmt.Errorf("invalid policy-route nexthop vrf: %s", *conf.NextHop.Vrf)
 	}
 
+	// Select the inbound (source) interface based on the rule's address family.
+	// For IPv4 the kernel's receive path matches on the trunk interface, while
+	// for IPv6 it sets flowi6_iif to the cluster VRF device; matching the trunk
+	// there would cause the subsequent table lookup to repeat the same lookup,
+	// resulting in circular routing.
+	matchIP := conf.TrafficMatch.SrcPrefix
+	if matchIP == nil || *matchIP == "" {
+		matchIP = conf.TrafficMatch.DstPrefix
+	}
+	iface := &l.mgr.baseConfig.TrunkInterfaceName
+	if !isIPv4(*matchIP) {
+		iface = &l.mgr.baseConfig.ClusterVRF.Name
+	}
+
 	l.mkRule(l.ns.Routing, Rule{
 		Priority: i,
 		Match: &RuleMatch{
-			Interface:     &l.mgr.baseConfig.TrunkInterfaceName,
+			Interface:     iface,
 			SourceIP:      conf.TrafficMatch.SrcPrefix,
 			DestinationIP: conf.TrafficMatch.DstPrefix,
 		},
