@@ -24,7 +24,7 @@ jobs:
       - name: run code generators
         run: make generate
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@1e7e51e771db61008b38414a730f564565cf7c20 # v9.2.0
+        uses: golangci/golangci-lint-action@82606bf257cbaff209d206a39f5134f0cfbfd2ee # v9.2.1
         with:
           version: v2.8.0
           args: --timeout=10m
@@ -45,7 +45,7 @@ jobs:
         # Note: codecov-action v6 requires the Node.js 24 Actions runtime.
         # GitHub-hosted runners (ubuntu-latest) include node24; self-hosted runners
         # and GHES environments may need to be updated before upgrading to v6.
-        uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6.0.0
+        uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6.0.1
         with:
           files: cover.out
           fail_ci_if_error: false
