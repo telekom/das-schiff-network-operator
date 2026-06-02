@@ -708,6 +708,19 @@ func TestCoilReconciler_ImagePullSecrets(t *testing.T) {
 			t.Errorf("secret[%d]: expected name %q, got %q", i, expected, m["name"])
 		}
 	}
+
+	// Materializing template.spec requires a container to satisfy the Egress
+	// CRD schema; Coil fills in the image for the container named "egress".
+	containers, found, err := unstructured.NestedSlice(egress.Object, "spec", "template", "spec", "containers")
+	if err != nil {
+		t.Fatalf("error reading containers: %v", err)
+	}
+	if !found || len(containers) != 1 {
+		t.Fatalf("expected 1 egress container, found=%v len=%d", found, len(containers))
+	}
+	if c, ok := containers[0].(map[string]interface{}); !ok || c["name"] != "egress" {
+		t.Errorf("expected container named %q, got %v", "egress", containers[0])
+	}
 }
 
 func TestCoilReconciler_NoImagePullSecrets(t *testing.T) {
@@ -740,5 +753,11 @@ func TestCoilReconciler_NoImagePullSecrets(t *testing.T) {
 	_, found, _ := unstructured.NestedSlice(egress.Object, "spec", "template", "spec", "imagePullSecrets")
 	if found {
 		t.Error("expected no imagePullSecrets when ImagePullSecrets is empty")
+	}
+
+	// Without imagePullSecrets we must not materialize template.spec at all,
+	// so Coil's mutating webhook injects the egress container.
+	if _, found, _ := unstructured.NestedSlice(egress.Object, "spec", "template", "spec", "containers"); found {
+		t.Error("expected no containers when ImagePullSecrets is empty")
 	}
 }

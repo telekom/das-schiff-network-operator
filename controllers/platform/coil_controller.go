@@ -279,6 +279,14 @@ func (r *CoilReconciler) upsertCoilEgress(ctx context.Context, ob *nc.Outbound, 
 		if err := unstructured.SetNestedSlice(desired.Object, secrets, "spec", "template", "spec", "imagePullSecrets"); err != nil {
 			return fmt.Errorf("error setting imagePullSecrets: %w", err)
 		}
+		// Setting spec.template.spec materializes the embedded PodSpec, whose
+		// CRD schema requires at least one container. Coil's egress controller
+		// fills in the image/command for the container named "egress", so we
+		// inject the same placeholder its mutating webhook would.
+		containers := []interface{}{map[string]interface{}{"name": "egress"}}
+		if err := unstructured.SetNestedSlice(desired.Object, containers, "spec", "template", "spec", "containers"); err != nil {
+			return fmt.Errorf("error setting egress container: %w", err)
+		}
 	}
 
 	existing := &unstructured.Unstructured{}
