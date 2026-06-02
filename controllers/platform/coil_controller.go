@@ -118,17 +118,25 @@ func (r *CoilReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		addresses = outbound.Spec.Addresses
 	}
 
+	// The egress source IPs come from the allocated addresses. Without them the
+	// Coil Egress pods would get arbitrary cluster IPs instead of the intended
+	// routed pool, so do not apply anything until allocation has happened.
+	// The status update that populates addresses re-triggers this reconcile.
+	if addresses == nil || len(addresses.IPv4)+len(addresses.IPv6) == 0 {
+		logger.Info("Outbound has no allocated addresses yet, deferring Coil Egress reconciliation",
+			"name", outbound.Name, "namespace", outbound.Namespace)
+		return ctrl.Result{}, nil
+	}
+
 	// Reconcile Calico IPPools.
-	if addresses != nil {
-		if len(addresses.IPv4) > 0 {
-			if err := r.upsertCalicoIPPool(ctx, outbound, addresses.IPv4[0], ipv4HostPrefixLen, "v4", logger); err != nil {
-				return ctrl.Result{}, fmt.Errorf("error reconciling IPv4 IPPool: %w", err)
-			}
+	if len(addresses.IPv4) > 0 {
+		if err := r.upsertCalicoIPPool(ctx, outbound, addresses.IPv4[0], ipv4HostPrefixLen, "v4", logger); err != nil {
+			return ctrl.Result{}, fmt.Errorf("error reconciling IPv4 IPPool: %w", err)
 		}
-		if len(addresses.IPv6) > 0 {
-			if err := r.upsertCalicoIPPool(ctx, outbound, addresses.IPv6[0], ipv6HostPrefixLen, "v6", logger); err != nil {
-				return ctrl.Result{}, fmt.Errorf("error reconciling IPv6 IPPool: %w", err)
-			}
+	}
+	if len(addresses.IPv6) > 0 {
+		if err := r.upsertCalicoIPPool(ctx, outbound, addresses.IPv6[0], ipv6HostPrefixLen, "v6", logger); err != nil {
+			return ctrl.Result{}, fmt.Errorf("error reconciling IPv6 IPPool: %w", err)
 		}
 	}
 

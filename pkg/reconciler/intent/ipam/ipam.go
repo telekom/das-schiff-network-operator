@@ -91,7 +91,7 @@ func (a *Allocator) reconcileInboundAllocations(ctx context.Context, fetched *re
 		if inb.Status.Addresses != nil && len(inb.Status.Addresses.IPv4)+len(inb.Status.Addresses.IPv6) > 0 {
 			continue
 		}
-		addrs, err := a.allocate(inb.Spec.NetworkRef, int(*inb.Spec.Count), networks, pools)
+		addrs, err := a.allocate(inb.Spec.NetworkRef, int(*inb.Spec.Count), networks, pools, true)
 		if err != nil {
 			a.logger.Error(err, "IPAM allocation failed for Inbound", "inbound", inb.Name)
 			continue
@@ -114,7 +114,7 @@ func (a *Allocator) reconcileOutboundAllocations(ctx context.Context, fetched *r
 		if outb.Status.Addresses != nil && len(outb.Status.Addresses.IPv4)+len(outb.Status.Addresses.IPv6) > 0 {
 			continue
 		}
-		addrs, err := a.allocate(outb.Spec.NetworkRef, int(*outb.Spec.Count), networks, pools)
+		addrs, err := a.allocate(outb.Spec.NetworkRef, int(*outb.Spec.Count), networks, pools, true)
 		if err != nil {
 			a.logger.Error(err, "IPAM allocation failed for Outbound", "outbound", outb.Name)
 			continue
@@ -223,7 +223,7 @@ func (a *Allocator) reconcileNodeIPs(ctx context.Context, l2a *nc.Layer2Attachme
 			continue // already allocated
 		}
 
-		addrs, err := a.allocate(l2a.Spec.NetworkRef, 1, networks, pools)
+		addrs, err := a.allocate(l2a.Spec.NetworkRef, 1, networks, pools, false)
 		if err != nil {
 			return fmt.Errorf("allocating node IP for %q on network %q: %w", nodeName, l2a.Spec.NetworkRef, err)
 		}
@@ -241,7 +241,13 @@ func (a *Allocator) reconcileNodeIPs(ctx context.Context, l2a *nc.Layer2Attachme
 }
 
 // allocate allocates count IPs from the given network's CIDR pool.
-func (*Allocator) allocate(networkRef string, count int, networks map[string]*resolver.ResolvedNetwork, pools map[string]*networkPool) (*nc.AddressAllocation, error) {
+//
+// l3 selects the addressing semantics. For L3 routing pools (Inbound/Outbound
+// egress, whose IPs are advertised as individual routed /32s) every address in
+// the CIDR is usable, including the network and broadcast addresses. For L2
+// subnets (Layer2Attachment node IPs on a real VLAN) the network and broadcast
+// addresses are reserved.
+func (*Allocator) allocate(networkRef string, count int, networks map[string]*resolver.ResolvedNetwork, pools map[string]*networkPool, l3 bool) (*nc.AddressAllocation, error) {
 	netObj, ok := networks[networkRef]
 	if !ok {
 		return nil, fmt.Errorf("network %q not found", networkRef)
@@ -250,7 +256,7 @@ func (*Allocator) allocate(networkRef string, count int, networks map[string]*re
 	alloc := &nc.AddressAllocation{}
 
 	if netObj.Spec.IPv4 != nil {
-		ips, err := allocateFromCIDR(networkRef+"/v4", netObj.Spec.IPv4.CIDR, count, pools)
+		ips, err := allocateFromCIDR(networkRef+"/v4", netObj.Spec.IPv4.CIDR, count, pools, l3)
 		if err != nil {
 			return nil, fmt.Errorf("IPv4 allocation from network %q: %w", networkRef, err)
 		}
@@ -258,7 +264,7 @@ func (*Allocator) allocate(networkRef string, count int, networks map[string]*re
 	}
 
 	if netObj.Spec.IPv6 != nil {
-		ips, err := allocateFromCIDR(networkRef+"/v6", netObj.Spec.IPv6.CIDR, count, pools)
+		ips, err := allocateFromCIDR(networkRef+"/v6", netObj.Spec.IPv6.CIDR, count, pools, l3)
 		if err != nil {
 			return nil, fmt.Errorf("IPv6 allocation from network %q: %w", networkRef, err)
 		}
@@ -268,20 +274,30 @@ func (*Allocator) allocate(networkRef string, count int, networks map[string]*re
 	return alloc, nil
 }
 
-// allocateFromCIDR sequentially allocates count IPs from a CIDR, skipping network and broadcast addresses.
-func allocateFromCIDR(poolKey, cidr string, count int, pools map[string]*networkPool) ([]string, error) {
+// allocateFromCIDR sequentially allocates count IPs from a CIDR. For L2 subnets
+// it skips the network and broadcast addresses; for L3 routing pools every
+// address in the CIDR is usable.
+func allocateFromCIDR(poolKey, cidr string, count int, pools map[string]*networkPool, l3 bool) ([]string, error) {
 	pool, ok := pools[poolKey]
 	if !ok {
 		_, ipNet, err := net.ParseCIDR(cidr)
 		if err != nil {
 			return nil, fmt.Errorf("parsing CIDR %q: %w", cidr, err)
 		}
-		// Start allocation from the first host address (skip network address).
-		firstHost := nextAddr(ipNet.IP)
-		pool = &networkPool{
-			network:   ipNet,
-			nextIP:    firstHost,
-			broadcast: broadcastAddr(ipNet),
+		if l3 {
+			// Routed pool: the network and broadcast addresses are usable.
+			pool = &networkPool{
+				network:   ipNet,
+				nextIP:    cloneIP(ipNet.IP),
+				broadcast: nil,
+			}
+		} else {
+			// L2 subnet: start past the network address and reserve broadcast.
+			pool = &networkPool{
+				network:   ipNet,
+				nextIP:    nextAddr(ipNet.IP),
+				broadcast: broadcastAddr(ipNet),
+			}
 		}
 		pools[poolKey] = pool
 	}
@@ -299,6 +315,13 @@ func allocateFromCIDR(poolKey, cidr string, count int, pools map[string]*network
 		pool.nextIP = nextAddr(pool.nextIP)
 	}
 	return result, nil
+}
+
+// cloneIP returns a copy of ip to avoid aliasing the parsed CIDR's address.
+func cloneIP(ip net.IP) net.IP {
+	out := make(net.IP, len(ip))
+	copy(out, ip)
+	return out
 }
 
 // broadcastAddr computes the broadcast address for an IPv4 subnet.

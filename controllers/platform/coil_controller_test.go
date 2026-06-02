@@ -761,3 +761,30 @@ func TestCoilReconciler_NoImagePullSecrets(t *testing.T) {
 		t.Error("expected no containers when ImagePullSecrets is empty")
 	}
 }
+
+func TestCoilReconciler_NoEgressWithoutAddresses(t *testing.T) {
+	scheme := newScheme()
+
+	// Outbound that uses Count-based allocation but has not yet been allocated
+	// any addresses (Status.Addresses nil, Spec.Addresses nil).
+	count := int32(4)
+	ob := &nc.Outbound{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "pending-alloc",
+			Namespace: "default",
+		},
+		Spec: nc.OutboundSpec{
+			NetworkRef: "net-pending",
+			Count:      &count,
+		},
+	}
+
+	cli := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ob).Build()
+	r := &CoilReconciler{Client: cli, APIReader: cli, Scheme: scheme}
+
+	reconcileOnce(t, r, "pending-alloc")
+
+	if egress := getEgress(t, r, "pending-alloc"); egress != nil {
+		t.Fatal("expected no Egress to be created when addresses are missing")
+	}
+}
