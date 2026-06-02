@@ -18,8 +18,14 @@ package platform
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	mathbits "math/bits"
+	"net"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -48,6 +54,7 @@ const (
 	coilFinalizer      = "network-connector.sylvaproject.org/coil-cleanup"
 	ipv4HostPrefixLen  = 32
 	ipv6HostPrefixLen  = 128
+	bitsPerByte        = 8
 	crdRequeueInterval = 30 * time.Second
 
 	// managedByValue is the label value for app.kubernetes.io/managed-by across all platform controllers.
@@ -130,12 +137,12 @@ func (r *CoilReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 
 	// Reconcile Calico IPPools.
 	if len(addresses.IPv4) > 0 {
-		if err := r.upsertCalicoIPPool(ctx, outbound, addresses.IPv4[0], ipv4HostPrefixLen, "v4", logger); err != nil {
+		if err := r.upsertCalicoIPPool(ctx, outbound, addresses.IPv4, ipv4HostPrefixLen, "v4", logger); err != nil {
 			return ctrl.Result{}, fmt.Errorf("error reconciling IPv4 IPPool: %w", err)
 		}
 	}
 	if len(addresses.IPv6) > 0 {
-		if err := r.upsertCalicoIPPool(ctx, outbound, addresses.IPv6[0], ipv6HostPrefixLen, "v6", logger); err != nil {
+		if err := r.upsertCalicoIPPool(ctx, outbound, addresses.IPv6, ipv6HostPrefixLen, "v6", logger); err != nil {
 			return ctrl.Result{}, fmt.Errorf("error reconciling IPv6 IPPool: %w", err)
 		}
 	}
@@ -179,8 +186,13 @@ func (r *CoilReconciler) resolveDestinations(ctx context.Context, ob *nc.Outboun
 	return prefixes, nil
 }
 
-func (r *CoilReconciler) upsertCalicoIPPool(ctx context.Context, ob *nc.Outbound, cidr string, blockSize int64, suffix string, logger logr.Logger) error {
+func (r *CoilReconciler) upsertCalicoIPPool(ctx context.Context, ob *nc.Outbound, addrs []string, blockSize int64, suffix string, logger logr.Logger) error {
 	poolName := fmt.Sprintf("%s-%s", ob.Name, suffix)
+
+	cidr, err := poolCIDR(addrs, int(blockSize))
+	if err != nil {
+		return fmt.Errorf("error determining IPPool CIDR for %s: %w", poolName, err)
+	}
 
 	desired := &unstructured.Unstructured{}
 	desired.SetGroupVersionKind(calicoIPPoolGVK)
@@ -207,7 +219,7 @@ func (r *CoilReconciler) upsertCalicoIPPool(ctx context.Context, ob *nc.Outbound
 
 	existing := &unstructured.Unstructured{}
 	existing.SetGroupVersionKind(calicoIPPoolGVK)
-	err := r.Get(ctx, types.NamespacedName{Name: poolName}, existing)
+	err = r.Get(ctx, types.NamespacedName{Name: poolName}, existing)
 	if apierrors.IsNotFound(err) {
 		logger.Info("creating Calico IPPool", "name", poolName)
 		if err := r.Create(ctx, desired); err != nil {
@@ -227,6 +239,96 @@ func (r *CoilReconciler) upsertCalicoIPPool(ctx context.Context, ob *nc.Outbound
 	return nil
 }
 
+// poolCIDR derives the Calico IPPool CIDR from allocated addresses.
+//
+// IPAM stores allocated addresses as bare IPs, while explicit Spec.Addresses may
+// already be CIDR blocks. When a single CIDR block is given it is used verbatim
+// (preserving the explicit-block behaviour). Otherwise the smallest CIDR that
+// covers all bare IPs is computed so the pool spans every allocated egress IP
+// (e.g. 10.100.16.236..239 -> 10.100.16.236/30).
+func poolCIDR(addrs []string, hostPrefix int) (string, error) {
+	if len(addrs) == 0 {
+		return "", fmt.Errorf("no addresses provided")
+	}
+	if len(addrs) == 1 && strings.Contains(addrs[0], "/") {
+		return addrs[0], nil
+	}
+
+	bits := hostPrefix
+	var minIP, maxIP net.IP
+	for _, a := range addrs {
+		ipStr := a
+		if idx := strings.IndexByte(ipStr, '/'); idx >= 0 {
+			ipStr = ipStr[:idx]
+		}
+		ip := net.ParseIP(ipStr)
+		if ip == nil {
+			return "", fmt.Errorf("invalid address %q", a)
+		}
+		if hostPrefix == ipv4HostPrefixLen {
+			ip = ip.To4()
+			if ip == nil {
+				return "", fmt.Errorf("address %q is not IPv4", a)
+			}
+		} else {
+			ip = ip.To16()
+		}
+		if minIP == nil || bytesCompare(ip, minIP) < 0 {
+			minIP = ip
+		}
+		if maxIP == nil || bytesCompare(ip, maxIP) > 0 {
+			maxIP = ip
+		}
+	}
+
+	// Smallest prefix whose block contains both min and max: count the leading
+	// bits min and max have in common.
+	prefixLen := bits
+	for i := 0; i < len(minIP); i++ {
+		diff := minIP[i] ^ maxIP[i]
+		if diff == 0 {
+			continue
+		}
+		prefixLen = i*bitsPerByte + mathbits.LeadingZeros8(diff)
+		break
+	}
+
+	mask := net.CIDRMask(prefixLen, bits)
+	base := minIP.Mask(mask)
+	return fmt.Sprintf("%s/%d", base.String(), prefixLen), nil
+}
+
+// bytesCompare compares two equal-length byte slices lexicographically.
+func bytesCompare(a, b net.IP) int {
+	for i := range a {
+		switch {
+		case a[i] < b[i]:
+			return -1
+		case a[i] > b[i]:
+			return 1
+		}
+	}
+	return 0
+}
+
+// addressHash returns a short, stable hash of the allocated addresses. It is
+// used as a pod-template annotation so that any change to the assigned IPs
+// triggers a rollout of the egress pods. Returns "" when no addresses are set.
+func addressHash(addresses *nc.AddressAllocation) string {
+	if addresses == nil {
+		return ""
+	}
+	all := make([]string, 0, len(addresses.IPv4)+len(addresses.IPv6))
+	all = append(all, addresses.IPv4...)
+	all = append(all, addresses.IPv6...)
+	if len(all) == 0 {
+		return ""
+	}
+	sort.Strings(all)
+	sum := sha256.Sum256([]byte(strings.Join(all, ",")))
+	return hex.EncodeToString(sum[:8])
+}
+
 func (r *CoilReconciler) upsertCoilEgress(ctx context.Context, ob *nc.Outbound, prefixes []string, addresses *nc.AddressAllocation, logger logr.Logger) error { //nolint:revive,cyclop // building unstructured object requires sequential field-setting
 	replicas := int64(1)
 	if ob.Spec.Replicas != nil {
@@ -242,6 +344,12 @@ func (r *CoilReconciler) upsertCoilEgress(ctx context.Context, ob *nc.Outbound, 
 	if addresses != nil && len(addresses.IPv6) > 0 {
 		poolRef, _ := json.Marshal([]string{fmt.Sprintf("%s-v6", ob.Name)})
 		annotations["cni.projectcalico.org/ipv6pools"] = string(poolRef)
+	}
+	// Hash the allocated addresses into the pod template so that a change in the
+	// underlying IPs rolls the egress pods (they re-pull an address from the
+	// updated pool).
+	if hash := addressHash(addresses); hash != "" {
+		annotations["network-connector.sylvaproject.org/address-hash"] = hash
 	}
 
 	// Convert prefixes to []interface{} for unstructured.

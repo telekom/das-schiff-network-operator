@@ -788,3 +788,92 @@ func TestCoilReconciler_NoEgressWithoutAddresses(t *testing.T) {
 		t.Fatal("expected no Egress to be created when addresses are missing")
 	}
 }
+
+func TestPoolCIDR(t *testing.T) {
+	tests := []struct {
+		name       string
+		addrs      []string
+		hostPrefix int
+		want       string
+	}{
+		{"explicit CIDR block kept verbatim", []string{"10.200.0.0/28"}, 32, "10.200.0.0/28"},
+		{"single bare IPv4 -> /32", []string{"10.100.16.236"}, 32, "10.100.16.236/32"},
+		{"full /30 of bare IPs", []string{"10.100.16.236", "10.100.16.237", "10.100.16.238", "10.100.16.239"}, 32, "10.100.16.236/30"},
+		{"unordered bare IPs", []string{"10.100.16.239", "10.100.16.236"}, 32, "10.100.16.236/30"},
+		{"two bare IPs -> /31", []string{"10.100.16.236", "10.100.16.237"}, 32, "10.100.16.236/31"},
+		{"single bare IPv6 -> /128", []string{"2a01:598:40a:54a1::"}, 128, "2a01:598:40a:54a1::/128"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := poolCIDR(tt.addrs, tt.hostPrefix)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("poolCIDR(%v) = %q, want %q", tt.addrs, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAddressHash(t *testing.T) {
+	a := &nc.AddressAllocation{IPv4: []string{"10.0.0.1", "10.0.0.2"}}
+	b := &nc.AddressAllocation{IPv4: []string{"10.0.0.2", "10.0.0.1"}}
+	c := &nc.AddressAllocation{IPv4: []string{"10.0.0.1", "10.0.0.3"}}
+
+	if h := addressHash(a); h == "" {
+		t.Fatal("expected non-empty hash")
+	}
+	if addressHash(a) != addressHash(b) {
+		t.Error("hash must be order-independent")
+	}
+	if addressHash(a) == addressHash(c) {
+		t.Error("hash must change when addresses change")
+	}
+	if addressHash(nil) != "" || addressHash(&nc.AddressAllocation{}) != "" {
+		t.Error("expected empty hash for no addresses")
+	}
+}
+
+func TestCoilReconciler_BareIPsCoveringPool(t *testing.T) {
+	scheme := newScheme()
+
+	ob := &nc.Outbound{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "bare-ips",
+			Namespace: "default",
+		},
+		Spec: nc.OutboundSpec{
+			NetworkRef: "net-bare",
+		},
+		Status: nc.OutboundStatus{
+			Addresses: &nc.AddressAllocation{
+				IPv4: []string{"10.100.16.236", "10.100.16.237", "10.100.16.238", "10.100.16.239"},
+			},
+		},
+	}
+
+	cli := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ob).Build()
+	r := &CoilReconciler{Client: cli, APIReader: cli, Scheme: scheme}
+
+	reconcileOnce(t, r, "bare-ips")
+	reconcileOnce(t, r, "bare-ips")
+
+	pool := getIPPool(t, r, "bare-ips-v4")
+	if pool == nil {
+		t.Fatal("expected bare-ips-v4 IPPool to exist")
+	}
+	cidr, _, _ := unstructured.NestedString(pool.Object, "spec", "cidr")
+	if cidr != "10.100.16.236/30" {
+		t.Errorf("expected covering cidr 10.100.16.236/30, got %s", cidr)
+	}
+
+	egress := getEgress(t, r, "bare-ips")
+	if egress == nil {
+		t.Fatal("expected egress to exist")
+	}
+	hash, found, _ := unstructured.NestedString(egress.Object, "spec", "template", "metadata", "annotations", "network-connector.sylvaproject.org/address-hash")
+	if !found || hash == "" {
+		t.Error("expected address-hash annotation on egress pod template")
+	}
+}
