@@ -18,7 +18,8 @@ package builder
 
 import (
 	"context"
-	"fmt"
+
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
@@ -41,7 +42,8 @@ func (*InboundBuilder) Name() string {
 // Build produces per-node FabricVRF contributions from Inbound resources.
 // A single Inbound may select multiple Destinations across different VRFs
 // via its label selector — FabricVRF entries are produced for each matched VRF.
-func (b *InboundBuilder) Build(_ context.Context, data *resolver.ResolvedData) (map[string]*NodeContribution, error) {
+func (b *InboundBuilder) Build(ctx context.Context, data *resolver.ResolvedData) (map[string]*NodeContribution, error) {
+	logger := log.FromContext(ctx).WithName("inbound-builder")
 	result := make(map[string]*NodeContribution)
 
 	for i := range data.Inbounds {
@@ -50,7 +52,9 @@ func (b *InboundBuilder) Build(_ context.Context, data *resolver.ResolvedData) (
 		// Resolve the referenced Network.
 		net, ok := data.Networks[ib.Spec.NetworkRef]
 		if !ok {
-			return nil, fmt.Errorf("inbound %q references unknown Network %q", ib.Name, ib.Spec.NetworkRef)
+			logger.Info("skipping Inbound with unknown Network reference",
+				"inbound", ib.Name, "networkRef", ib.Spec.NetworkRef)
+			continue
 		}
 
 		if ib.Spec.Destinations == nil {
@@ -62,6 +66,25 @@ func (b *InboundBuilder) Build(_ context.Context, data *resolver.ResolvedData) (
 			continue
 		}
 
+		// Validate AnnouncementPolicy resolution for every matched VRF up front so
+		// an ambiguous policy skips the whole Inbound rather than leaving a
+		// partially-applied VRF behind.
+		aps := make(map[string]*nc.AnnouncementPolicy, len(grouped))
+		ambiguous := false
+		for vrfName := range grouped {
+			ap, err := findMatchingAP(ib.Labels, vrfName, data)
+			if err != nil {
+				logger.Info("skipping Inbound with ambiguous announcement policy",
+					"inbound", ib.Name, "error", err.Error())
+				ambiguous = true
+				break
+			}
+			aps[vrfName] = ap
+		}
+		if ambiguous {
+			continue
+		}
+
 		// Collect allocated addresses for EVPN export and cluster vrfImport filters.
 		addresses := b.collectAddresses(ib)
 
@@ -70,16 +93,11 @@ func (b *InboundBuilder) Build(_ context.Context, data *resolver.ResolvedData) (
 
 		// Produce FabricVRF contributions for each matched VRF.
 		for vrfName := range grouped {
-			ap, err := findMatchingAP(ib.Labels, vrfName, data)
-			if err != nil {
-				return nil, fmt.Errorf("inbound %q: %w", ib.Name, err)
-			}
-
 			vrfSpec := b.resolveVRFSpec(vrfName, grouped, data)
 			if vrfSpec == nil {
 				continue
 			}
-			b.applyInboundToNodes(vrfName, vrfSpec, addresses, redistribute, net, data, result, ap)
+			b.applyInboundToNodes(vrfName, vrfSpec, addresses, redistribute, net, data, result, aps[vrfName])
 		}
 	}
 

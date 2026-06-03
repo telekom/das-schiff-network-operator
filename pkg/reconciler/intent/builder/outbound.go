@@ -20,6 +20,9 @@ import (
 	"context"
 	"fmt"
 
+	"sigs.k8s.io/controller-runtime/pkg/log"
+
+	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/resolver"
 )
@@ -40,7 +43,8 @@ func (*OutboundBuilder) Name() string {
 // Build produces per-node FabricVRF contributions from Outbound resources.
 // A single Outbound may select multiple Destinations across different VRFs
 // via its label selector — FabricVRF entries are produced for each matched VRF.
-func (b *OutboundBuilder) Build(_ context.Context, data *resolver.ResolvedData) (map[string]*NodeContribution, error) {
+func (b *OutboundBuilder) Build(ctx context.Context, data *resolver.ResolvedData) (map[string]*NodeContribution, error) {
+	logger := log.FromContext(ctx).WithName("outbound-builder")
 	result := make(map[string]*NodeContribution)
 
 	for i := range data.Outbounds {
@@ -56,14 +60,28 @@ func (b *OutboundBuilder) Build(_ context.Context, data *resolver.ResolvedData) 
 		}
 
 		if err := b.applyOutbound(ob, net, data, result); err != nil {
-			return nil, err
+			logger.Info("skipping Outbound with ambiguous announcement policy",
+				"outbound", ob.Name, "error", err.Error())
+			continue
 		}
 	}
 
 	return result, nil
 }
 
+// outboundVRFContrib holds the pre-validated per-VRF data for one Outbound.
+type outboundVRFContrib struct {
+	vrfName    string
+	vrfSpec    *nc.VRFSpec
+	ap         *nc.AnnouncementPolicy
+	evpnItems  []networkv1alpha1.FilterItem
+	plainItems []networkv1alpha1.FilterItem
+}
+
 // applyOutbound fans a single Outbound across its matched VRFs and all nodes.
+// All AnnouncementPolicy resolution is performed up front so a validation error
+// (e.g. ambiguous policy) skips the whole Outbound without leaving a partially
+// applied VRF behind.
 func (b *OutboundBuilder) applyOutbound(
 	ob *nc.Outbound,
 	net *resolver.ResolvedNetwork,
@@ -77,37 +95,47 @@ func (b *OutboundBuilder) applyOutbound(
 
 	addresses := b.collectAddresses(ob)
 
+	// Validate and resolve every VRF before mutating any node contribution.
+	contribs := make([]outboundVRFContrib, 0, len(grouped))
 	for vrfName, dests := range grouped {
 		ap, err := findMatchingAP(ob.Labels, vrfName, data)
 		if err != nil {
 			return fmt.Errorf("outbound %q: %w", ob.Name, err)
 		}
 
-		evpnItems := addressFilterItems(addresses, ap)
-		plainItems := addressFilterItems(addresses, nil)
-
 		vrfSpec := b.resolveVRFSpec(dests, data)
 		if vrfSpec == nil {
 			continue
 		}
 
+		contribs = append(contribs, outboundVRFContrib{
+			vrfName:    vrfName,
+			vrfSpec:    vrfSpec,
+			ap:         ap,
+			evpnItems:  addressFilterItems(addresses, ap),
+			plainItems: addressFilterItems(addresses, nil),
+		})
+	}
+
+	for ci := range contribs {
+		c := &contribs[ci]
 		for i := range data.Nodes {
 			contrib := ensureContrib(result, data.Nodes[i].Name)
 
-			fvrf, exists := contrib.FabricVRFs[vrfName]
+			fvrf, exists := contrib.FabricVRFs[c.vrfName]
 			if !exists {
-				fvrf = buildFabricVRF(vrfSpec)
+				fvrf = buildFabricVRF(c.vrfSpec)
 			}
 
 			if fvrf.EVPNExportFilter != nil {
-				fvrf.EVPNExportFilter.Items = append(fvrf.EVPNExportFilter.Items, evpnItems...)
+				fvrf.EVPNExportFilter.Items = append(fvrf.EVPNExportFilter.Items, c.evpnItems...)
 			}
 			if len(fvrf.VRFImports) > 0 {
-				fvrf.VRFImports[0].Filter.Items = append(fvrf.VRFImports[0].Filter.Items, plainItems...)
+				fvrf.VRFImports[0].Filter.Items = append(fvrf.VRFImports[0].Filter.Items, c.plainItems...)
 			}
 
-			addAggregateRoutes(&fvrf, net, ap)
-			contrib.FabricVRFs[vrfName] = fvrf
+			addAggregateRoutes(&fvrf, net, c.ap)
+			contrib.FabricVRFs[c.vrfName] = fvrf
 		}
 	}
 

@@ -18,7 +18,6 @@ package builder
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -483,12 +482,22 @@ func TestL2ABuilder_DuplicateInterfaceNameOnSameNode(t *testing.T) {
 		},
 	}
 
-	_, err := b.Build(context.Background(), data)
-	if err == nil {
-		t.Fatal("expected error for duplicate interface name on same node, got nil")
+	// Isolation: the second L2A claiming an already-owned interface name is
+	// skipped; the first L2A (l2a-a, VLAN 501) is still applied. The whole
+	// builder must not fail.
+	result, err := b.Build(context.Background(), data)
+	if err != nil {
+		t.Fatalf("expected no error (conflicting L2A skipped), got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "both claim interface name") {
-		t.Errorf("unexpected error message: %v", err)
+	contrib, ok := result["node-1"]
+	if !ok {
+		t.Fatal("expected node-1 contribution from the first L2A")
+	}
+	if _, ok := contrib.Layer2s["501"]; !ok {
+		t.Errorf("expected first L2A (VLAN 501) to be applied, keys=%v", keys(contrib.Layer2s))
+	}
+	if _, ok := contrib.Layer2s["502"]; ok {
+		t.Error("expected conflicting L2A (VLAN 502) to be skipped")
 	}
 }
 

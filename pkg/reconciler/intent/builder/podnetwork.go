@@ -22,6 +22,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
@@ -42,7 +43,8 @@ func (*PodNetworkBuilder) Name() string {
 }
 
 // Build produces per-node FabricVRF contributions from PodNetwork resources.
-func (b *PodNetworkBuilder) Build(_ context.Context, data *resolver.ResolvedData) (map[string]*NodeContribution, error) {
+func (b *PodNetworkBuilder) Build(ctx context.Context, data *resolver.ResolvedData) (map[string]*NodeContribution, error) {
+	logger := log.FromContext(ctx).WithName("podnetwork-builder")
 	result := make(map[string]*NodeContribution)
 
 	for i := range data.PodNetworks {
@@ -51,13 +53,17 @@ func (b *PodNetworkBuilder) Build(_ context.Context, data *resolver.ResolvedData
 		// Resolve the referenced Network.
 		net, ok := data.Networks[pn.Spec.NetworkRef]
 		if !ok {
-			return nil, fmt.Errorf("PodNetwork %q references unknown Network %q", pn.Name, pn.Spec.NetworkRef)
+			logger.Info("skipping PodNetwork with unknown Network reference",
+				"podnetwork", pn.Name, "networkRef", pn.Spec.NetworkRef)
+			continue
 		}
 
 		// Resolve destinations to find VRF.
 		vrfName, vrfSpec, err := b.resolveDestinationVRF(pn, data)
 		if err != nil {
-			return nil, fmt.Errorf("PodNetwork %q destination resolution failed: %w", pn.Name, err)
+			logger.Info("skipping PodNetwork with unresolvable destinations",
+				"podnetwork", pn.Name, "error", err.Error())
+			continue
 		}
 
 		if vrfName == "" || vrfSpec == nil {
@@ -67,7 +73,9 @@ func (b *PodNetworkBuilder) Build(_ context.Context, data *resolver.ResolvedData
 		// Resolve matching announcement policy for this PodNetwork.
 		ap, err := findMatchingAP(pn.Labels, vrfName, data)
 		if err != nil {
-			return nil, fmt.Errorf("PodNetwork %q: %w", pn.Name, err)
+			logger.Info("skipping PodNetwork with ambiguous announcement policy",
+				"podnetwork", pn.Name, "error", err.Error())
+			continue
 		}
 
 		// Build redistribute connected filter for pod CIDR.

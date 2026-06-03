@@ -401,12 +401,14 @@ func TestBGPPeeringBuilder_UnknownMode(t *testing.T) {
 		},
 	}
 
-	_, err := b.Build(context.Background(), data)
-	if err == nil {
-		t.Fatal("expected error for unknown mode, got nil")
+	// Isolation: an unknown mode skips the offending BGPPeering without
+	// failing the whole builder.
+	result, err := b.Build(context.Background(), data)
+	if err != nil {
+		t.Fatalf("expected no error (offending peering skipped), got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "unknown mode") {
-		t.Errorf("expected 'unknown mode' in error, got: %v", err)
+	if len(result) != 0 {
+		t.Errorf("expected no contributions for skipped peering, got %d", len(result))
 	}
 }
 
@@ -429,12 +431,14 @@ func TestBGPPeeringBuilder_MissingAttachmentRef(t *testing.T) {
 		},
 	}
 
-	_, err := b.Build(context.Background(), data)
-	if err == nil {
-		t.Fatal("expected error for missing attachmentRef, got nil")
+	// Isolation: a listenRange peering missing its attachmentRef is skipped
+	// without failing the whole builder.
+	result, err := b.Build(context.Background(), data)
+	if err != nil {
+		t.Fatalf("expected no error (offending peering skipped), got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "attachmentRef") {
-		t.Errorf("expected 'attachmentRef' in error, got: %v", err)
+	if len(result) != 0 {
+		t.Errorf("expected no contributions for skipped peering, got %d", len(result))
 	}
 }
 

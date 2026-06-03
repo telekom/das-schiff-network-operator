@@ -18,7 +18,8 @@ package builder
 
 import (
 	"context"
-	"fmt"
+
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/resolver"
@@ -42,7 +43,8 @@ func (*CollectorBuilder) Name() string {
 // (allocated by the intent reconciler from spec.mirrorVRF.loopback.subnet).
 // Nodes without an allocation are skipped silently — the reconciler raises a
 // degraded AddressesAllocated condition in that case.
-func (*CollectorBuilder) Build(_ context.Context, data *resolver.ResolvedData) (map[string]*NodeContribution, error) {
+func (*CollectorBuilder) Build(ctx context.Context, data *resolver.ResolvedData) (map[string]*NodeContribution, error) {
+	logger := log.FromContext(ctx).WithName("collector-builder")
 	result := make(map[string]*NodeContribution)
 
 	for i := range data.Collectors {
@@ -52,7 +54,9 @@ func (*CollectorBuilder) Build(_ context.Context, data *resolver.ResolvedData) (
 		vrfName := col.Spec.MirrorVRF.Name
 		resolvedVRF, ok := data.VRFs[vrfName]
 		if !ok {
-			return nil, fmt.Errorf("collector %q references unknown VRF %q", col.Name, vrfName)
+			logger.Info("skipping Collector with unknown VRF reference",
+				"collector", col.Name, "vrf", vrfName)
+			continue
 		}
 		// Use the backbone VRF name (spec.vrf) for the FabricVRF map key,
 		// matching the convention used by L2A and SBR builders.

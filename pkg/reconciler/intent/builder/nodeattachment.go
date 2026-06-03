@@ -18,10 +18,10 @@ package builder
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
@@ -44,7 +44,8 @@ func (*NodeAttachmentBuilder) Name() string {
 }
 
 // Build produces per-node FabricVRF contributions from NodeAttachment resources.
-func (b *NodeAttachmentBuilder) Build(_ context.Context, data *resolver.ResolvedData) (map[string]*NodeContribution, error) {
+func (b *NodeAttachmentBuilder) Build(ctx context.Context, data *resolver.ResolvedData) (map[string]*NodeContribution, error) {
+	logger := log.FromContext(ctx).WithName("nodeattachment-builder")
 	result := make(map[string]*NodeContribution)
 
 	for i := range data.NodeAttachments {
@@ -59,7 +60,9 @@ func (b *NodeAttachmentBuilder) Build(_ context.Context, data *resolver.Resolved
 		// Filter nodes by selector.
 		matchedNodes, err := matchNodes(data.Nodes, na.Spec.NodeSelector)
 		if err != nil {
-			return nil, fmt.Errorf("nodeattachment %q: %w", na.Name, err)
+			logger.Info("skipping NodeAttachment with invalid node selector",
+				"nodeattachment", na.Name, "error", err.Error())
+			continue
 		}
 		if len(matchedNodes) == 0 {
 			continue
@@ -73,7 +76,7 @@ func (b *NodeAttachmentBuilder) Build(_ context.Context, data *resolver.Resolved
 			}
 
 			// Collect all destination prefixes for this VRF.
-			var destPrefixes []string
+			destPrefixes := make([]string, 0, len(dests))
 			for di := range dests {
 				destPrefixes = append(destPrefixes, dests[di].Spec.Prefixes...)
 			}

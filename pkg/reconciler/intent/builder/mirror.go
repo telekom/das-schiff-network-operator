@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"sort"
 
+	"sigs.k8s.io/controller-runtime/pkg/log"
+
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/resolver"
@@ -40,7 +42,8 @@ func (*MirrorBuilder) Name() string {
 }
 
 // Build produces per-node MirrorACL contributions from TrafficMirror resources.
-func (b *MirrorBuilder) Build(_ context.Context, data *resolver.ResolvedData) (map[string]*NodeContribution, error) {
+func (b *MirrorBuilder) Build(ctx context.Context, data *resolver.ResolvedData) (map[string]*NodeContribution, error) {
+	logger := log.FromContext(ctx).WithName("mirror-builder")
 	result := make(map[string]*NodeContribution)
 
 	for i := range data.TrafficMirrors {
@@ -49,28 +52,32 @@ func (b *MirrorBuilder) Build(_ context.Context, data *resolver.ResolvedData) (m
 		// Resolve collector.
 		col, err := b.resolveCollector(tm.Spec.Collector, data)
 		if err != nil {
-			return nil, fmt.Errorf("TrafficMirror %q collector resolution failed: %w", tm.Name, err)
+			logger.Info("skipping TrafficMirror with unresolvable collector",
+				"trafficmirror", tm.Name, "error", err.Error())
+			continue
 		}
 
 		// Build MirrorACL.
 		mirrorACL := b.buildMirrorACL(tm, col)
 
 		// Resolve the source attachment and determine where to place the ACL.
+		var srcErr error
 		switch tm.Spec.Source.Kind {
 		case "Layer2Attachment":
-			if err := b.addToLayer2(tm.Spec.Source.Name, &mirrorACL, data, result); err != nil {
-				return nil, fmt.Errorf("TrafficMirror %q source resolution failed: %w", tm.Name, err)
-			}
+			srcErr = b.addToLayer2(tm.Spec.Source.Name, &mirrorACL, data, result)
 		case "Inbound":
-			if err := b.addToInboundVRF(tm.Spec.Source.Name, &mirrorACL, data, result); err != nil {
-				return nil, fmt.Errorf("TrafficMirror %q source resolution failed: %w", tm.Name, err)
-			}
+			srcErr = b.addToInboundVRF(tm.Spec.Source.Name, &mirrorACL, data, result)
 		case "Outbound":
-			if err := b.addToOutboundVRF(tm.Spec.Source.Name, &mirrorACL, data, result); err != nil {
-				return nil, fmt.Errorf("TrafficMirror %q source resolution failed: %w", tm.Name, err)
-			}
+			srcErr = b.addToOutboundVRF(tm.Spec.Source.Name, &mirrorACL, data, result)
 		default:
-			return nil, fmt.Errorf("TrafficMirror %q has unknown source kind %q", tm.Name, tm.Spec.Source.Kind)
+			logger.Info("skipping TrafficMirror with unknown source kind",
+				"trafficmirror", tm.Name, "kind", tm.Spec.Source.Kind)
+			continue
+		}
+		if srcErr != nil {
+			logger.Info("skipping TrafficMirror with unresolvable source",
+				"trafficmirror", tm.Name, "error", srcErr.Error())
+			continue
 		}
 	}
 

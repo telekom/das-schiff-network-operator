@@ -155,20 +155,51 @@ func (r *Reconciler) ReconcileDebounced(ctx context.Context) error {
 	// these addresses as the per-node loopback source IPs.
 	r.reconcileCollectorAddresses(timeoutCtx, fetched)
 
-	// 5. Run all builders → per-node contributions.
+	// 5. Run all builders → per-node contributions. A builder failure must not
+	// abort the whole pass: builders isolate per-resource data errors internally,
+	// so a returned error is unexpected. When one occurs, skip applying the
+	// (potentially incomplete) contribution set — fail closed, preserving the
+	// last-good NNC — but still run the status update so the failure surfaces.
 	contributions := make(map[string][]*builder.NodeContribution) // nodeName → contributions
+	buildFailed := false
 	for _, b := range r.builders {
 		nodeContribs, err := b.Build(ctx, resolved)
 		if err != nil {
 			r.logger.Error(err, "builder failed", "builder", b.Name())
-			return fmt.Errorf("builder %s failed: %w", b.Name(), err)
+			buildFailed = true
+			continue
 		}
 		for nodeName, contrib := range nodeContribs {
 			contributions[nodeName] = append(contributions[nodeName], contrib)
 		}
 	}
 
-	// 6. Assemble NNC spec per node.
+	// 6-8. Assemble and apply NNC + netplan per node. Skipped when a builder
+	// failed, because an incomplete contribution set could push partially-wired
+	// VRFs (e.g. an IRB without its BGP/redistribute config) to the fabric.
+	if buildFailed {
+		r.logger.Info("skipping NodeNetworkConfig apply due to builder failure; preserving last-good config")
+	} else {
+		r.applyNodeConfigs(timeoutCtx, fetched, contributions)
+	}
+
+	// 9. Update status conditions on all intent CRDs.
+	if err := r.statusUpdater.UpdateConditions(timeoutCtx, fetched, resolved); err != nil {
+		r.logger.Error(err, "status condition update failed")
+	}
+
+	r.logger.Info("intent reconciliation complete")
+	return nil
+}
+
+// applyNodeConfigs assembles each node's contributions and applies the resulting
+// NodeNetworkConfig and NodeNetplanConfig. Per-node failures are logged and
+// skipped so one bad node does not block the others.
+func (r *Reconciler) applyNodeConfigs(
+	ctx context.Context,
+	fetched *resolver.FetchedResources,
+	contributions map[string][]*builder.NodeContribution,
+) {
 	for i := range fetched.Nodes {
 		node := &fetched.Nodes[i]
 		result, err := assembler.Assemble(contributions[node.Name])
@@ -186,26 +217,18 @@ func (r *Reconciler) ReconcileDebounced(ctx context.Context) error {
 		result.Spec.Revision = revision
 
 		// 7. Create or update NNC.
-		if err := r.applyNNC(timeoutCtx, node, result.Spec, result.Origins); err != nil {
+		if err := r.applyNNC(ctx, node, result.Spec, result.Origins); err != nil {
 			r.logger.Error(err, "failed to apply NodeNetworkConfig", "node", node.Name)
 			continue
 		}
 
 		// 8. Create or update NodeNetplanConfig (host-side VLANs for HBN-L2 agent).
 		netplanState := buildNetplanState(result.Spec, result.NetplanNodeIPs)
-		if err := r.applyNetplanConfig(timeoutCtx, node, netplanState); err != nil {
+		if err := r.applyNetplanConfig(ctx, node, netplanState); err != nil {
 			r.logger.Error(err, "failed to apply NodeNetplanConfig", "node", node.Name)
 			continue
 		}
 	}
-
-	// 9. Update status conditions on all intent CRDs.
-	if err := r.statusUpdater.UpdateConditions(timeoutCtx, fetched, resolved); err != nil {
-		r.logger.Error(err, "status condition update failed")
-	}
-
-	r.logger.Info("intent reconciliation complete")
-	return nil
 }
 
 // filterActive returns only items without a DeletionTimestamp (not being deleted).

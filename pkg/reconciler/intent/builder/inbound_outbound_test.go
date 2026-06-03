@@ -18,7 +18,6 @@ package builder
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -177,6 +176,43 @@ func TestInboundBuilder_BasicInbound(t *testing.T) {
 	}
 }
 
+// TestInboundBuilder_IsolatesBadSibling verifies that one Inbound with a
+// dangling Network reference is skipped without dropping a healthy sibling
+// Inbound that feeds the same kind of contribution.
+func TestInboundBuilder_IsolatesBadSibling(t *testing.T) {
+	data := baseInboundData()
+	data.Inbounds = []nc.Inbound{
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "bad-inbound"},
+			Spec: nc.InboundSpec{
+				NetworkRef:   "nonexistent",
+				Destinations: &metav1.LabelSelector{MatchLabels: map[string]string{"type": "gw"}},
+			},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "good-inbound"},
+			Spec: nc.InboundSpec{
+				NetworkRef:   "net-1",
+				Destinations: &metav1.LabelSelector{MatchLabels: map[string]string{"type": "gw"}},
+				Addresses:    &nc.AddressAllocation{IPv4: []string{"10.250.1.0/24"}},
+			},
+		},
+	}
+
+	b := NewInboundBuilder()
+	result, err := b.Build(context.Background(), data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	contrib, ok := result["node-1"]
+	if !ok {
+		t.Fatal("expected the healthy sibling to still produce a contribution")
+	}
+	if _, ok := contrib.FabricVRFs["gateway"]; !ok {
+		t.Errorf("expected FabricVRF 'gateway' from the healthy Inbound, keys=%v", keys(contrib.FabricVRFs))
+	}
+}
+
 func TestInboundBuilder_UnknownNetwork(t *testing.T) {
 	data := baseInboundData()
 	data.Inbounds = []nc.Inbound{
@@ -190,12 +226,12 @@ func TestInboundBuilder_UnknownNetwork(t *testing.T) {
 	}
 
 	b := NewInboundBuilder()
-	_, err := b.Build(context.Background(), data)
-	if err == nil {
-		t.Fatal("expected error for unknown Network reference, got nil")
+	result, err := b.Build(context.Background(), data)
+	if err != nil {
+		t.Fatalf("expected no error (offending Inbound skipped), got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "unknown Network") {
-		t.Errorf("expected 'unknown Network' in error, got: %v", err)
+	if len(result) != 0 {
+		t.Errorf("expected no contributions for skipped Inbound, got %d", len(result))
 	}
 }
 

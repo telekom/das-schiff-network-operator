@@ -22,6 +22,7 @@ import (
 	"sort"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
@@ -42,7 +43,8 @@ func (*BGPPeeringBuilder) Name() string {
 }
 
 // Build produces per-node BGPPeer contributions from BGPPeering resources.
-func (b *BGPPeeringBuilder) Build(_ context.Context, data *resolver.ResolvedData) (map[string]*NodeContribution, error) {
+func (b *BGPPeeringBuilder) Build(ctx context.Context, data *resolver.ResolvedData) (map[string]*NodeContribution, error) {
+	logger := log.FromContext(ctx).WithName("bgppeering-builder")
 	result := make(map[string]*NodeContribution)
 
 	for i := range data.BGPPeerings {
@@ -51,12 +53,16 @@ func (b *BGPPeeringBuilder) Build(_ context.Context, data *resolver.ResolvedData
 		switch bp.Spec.Mode {
 		case nc.BGPPeeringModeListenRange:
 			if err := b.buildListenRange(bp, data, result); err != nil {
-				return nil, fmt.Errorf("BGPPeering %q (listenRange) failed: %w", bp.Name, err)
+				logger.Info("skipping BGPPeering with unresolvable listenRange",
+					"bgppeering", bp.Name, "error", err.Error())
+				continue
 			}
 		case nc.BGPPeeringModeLoopbackPeer:
 			b.buildLoopbackPeer(bp, data, result)
 		default:
-			return nil, fmt.Errorf("BGPPeering %q has unknown mode %q", bp.Name, bp.Spec.Mode)
+			logger.Info("skipping BGPPeering with unknown mode",
+				"bgppeering", bp.Name, "mode", bp.Spec.Mode)
+			continue
 		}
 	}
 

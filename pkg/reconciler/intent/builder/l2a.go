@@ -74,7 +74,8 @@ func (b *L2ABuilder) Build(ctx context.Context, data *resolver.ResolvedData) (ma
 		}
 
 		if err := b.applyL2AToNodes(l2a, net, vrfName, vrfSpec, data, result, ifOwner); err != nil {
-			return nil, err
+			logger.Info("skipping Layer2Attachment", "l2a", l2a.Name, "error", err.Error())
+			continue
 		}
 	}
 
@@ -82,6 +83,13 @@ func (b *L2ABuilder) Build(ctx context.Context, data *resolver.ResolvedData) (ma
 }
 
 // applyL2AToNodes fans out a single L2A to every matching node.
+//
+// It runs in two phases: a validation phase that resolves everything which can
+// fail (node selector, Layer2 config / route-target collision, the IRB
+// AnnouncementPolicy, and interface-name ownership) without mutating any state,
+// followed by a mutation phase that cannot fail. This guarantees a misconfigured
+// L2A is skipped cleanly by the caller without leaving partially-applied node
+// contributions or interface claims behind.
 func (b *L2ABuilder) applyL2AToNodes(
 	l2a *nc.Layer2Attachment,
 	net *resolver.ResolvedNetwork,
@@ -98,21 +106,41 @@ func (b *L2ABuilder) applyL2AToNodes(
 		return fmt.Errorf("Layer2Attachment %q node selector error: %w", l2a.Name, err)
 	}
 
+	// Layer2 config is node-independent; this guards the L2/L3 route-target collision.
+	layer2, err := b.buildLayer2(l2a, net, vrfName, vrfSpec)
+	if err != nil {
+		return fmt.Errorf("Layer2Attachment %q config build failed: %w", l2a.Name, err)
+	}
+
+	// Resolve the IRB AnnouncementPolicy once (node-independent).
+	var ap *nc.AnnouncementPolicy
+	if vrfName != "" && vrfSpec != nil {
+		ap, err = findMatchingAP(l2a.Labels, vrfName, data)
+		if err != nil {
+			return fmt.Errorf("Layer2Attachment %q: %w", l2a.Name, err)
+		}
+	}
+
+	// Detect interface-name ownership conflicts across L2As before claiming any.
+	var ifKeys []string
+	if l2a.Spec.InterfaceName != nil && *l2a.Spec.InterfaceName != "" {
+		for i := range matchingNodes {
+			ifKey := matchingNodes[i].Name + "/" + *l2a.Spec.InterfaceName
+			if prev, exists := ifOwner[ifKey]; exists {
+				return fmt.Errorf("Layer2Attachments %q and %q both claim interface name %q on node %q",
+					prev, l2a.Name, *l2a.Spec.InterfaceName, matchingNodes[i].Name)
+			}
+			ifKeys = append(ifKeys, ifKey)
+		}
+	}
+
+	// Mutation phase — validation passed, so nothing below can fail.
+	for _, ifKey := range ifKeys {
+		ifOwner[ifKey] = l2a.Name
+	}
+
 	for i := range matchingNodes {
 		node := &matchingNodes[i]
-		if l2a.Spec.InterfaceName != nil && *l2a.Spec.InterfaceName != "" {
-			ifKey := node.Name + "/" + *l2a.Spec.InterfaceName
-			if prev, exists := ifOwner[ifKey]; exists {
-				return fmt.Errorf("Layer2Attachments %q and %q both claim interface name %q on node %q", prev, l2a.Name, *l2a.Spec.InterfaceName, node.Name)
-			}
-			ifOwner[ifKey] = l2a.Name
-		}
-
-		layer2, err := b.buildLayer2(l2a, net, vrfName, vrfSpec)
-		if err != nil {
-			return fmt.Errorf("Layer2Attachment %q config build failed: %w", l2a.Name, err)
-		}
-
 		contrib := ensureContrib(result, node.Name)
 		contrib.Layer2s[mapKey] = *layer2
 
@@ -123,9 +151,7 @@ func (b *L2ABuilder) applyL2AToNodes(
 		}
 
 		if vrfName != "" && vrfSpec != nil {
-			if err := b.applyVRFContrib(l2a, net, vrfName, vrfSpec, data, contrib); err != nil {
-				return err
-			}
+			b.applyVRFContrib(net, vrfName, vrfSpec, contrib, ap)
 		}
 	}
 
@@ -134,18 +160,12 @@ func (b *L2ABuilder) applyL2AToNodes(
 
 // applyVRFContrib updates the FabricVRF entry for a single node from an L2A.
 func (*L2ABuilder) applyVRFContrib(
-	l2a *nc.Layer2Attachment,
 	net *resolver.ResolvedNetwork,
 	vrfName string,
 	vrfSpec *nc.VRFSpec,
-	data *resolver.ResolvedData,
 	contrib *NodeContribution,
-) error {
-	ap, err := findMatchingAP(l2a.Labels, vrfName, data)
-	if err != nil {
-		return fmt.Errorf("Layer2Attachment %q: %w", l2a.Name, err)
-	}
-
+	ap *nc.AnnouncementPolicy,
+) {
 	fvrf, exists := contrib.FabricVRFs[vrfName]
 	if !exists {
 		fvrf = buildFabricVRF(vrfSpec)
@@ -153,8 +173,6 @@ func (*L2ABuilder) applyVRFContrib(
 	fvrf = addNetworkToFabricVRF(&fvrf, net, ap)
 	addAggregateRoutes(&fvrf, net, ap)
 	contrib.FabricVRFs[vrfName] = fvrf
-
-	return nil
 }
 
 // resolveDestinationVRF finds the VRF for IRB plumbing by selecting Destinations

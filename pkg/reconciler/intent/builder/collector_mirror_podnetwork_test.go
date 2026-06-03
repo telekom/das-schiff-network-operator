@@ -18,7 +18,6 @@ package builder
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -149,12 +148,12 @@ func TestCollectorBuilder_UnknownVRF(t *testing.T) {
 		},
 	}
 
-	_, err := b.Build(context.Background(), data)
-	if err == nil {
-		t.Fatal("expected error for unknown VRF, got nil")
+	result, err := b.Build(context.Background(), data)
+	if err != nil {
+		t.Fatalf("expected no error (offending collector skipped), got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "unknown VRF") {
-		t.Errorf("expected 'unknown VRF' in error, got: %v", err)
+	if len(result) != 0 {
+		t.Errorf("expected no contributions for skipped collector, got %d", len(result))
 	}
 }
 
@@ -468,12 +467,12 @@ func TestMirrorBuilder_UnknownCollector(t *testing.T) {
 		},
 	}
 
-	_, err := b.Build(context.Background(), data)
-	if err == nil {
-		t.Fatal("expected error for unknown collector, got nil")
+	result, err := b.Build(context.Background(), data)
+	if err != nil {
+		t.Fatalf("expected no error (offending TrafficMirror skipped), got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "not found") {
-		t.Errorf("expected 'not found' in error, got: %v", err)
+	if len(result) != 0 {
+		t.Errorf("expected no contributions for skipped TrafficMirror, got %d", len(result))
 	}
 }
 
@@ -512,12 +511,12 @@ func TestMirrorBuilder_UnknownSourceKind(t *testing.T) {
 		},
 	}
 
-	_, err := b.Build(context.Background(), data)
-	if err == nil {
-		t.Fatal("expected error for unknown source kind, got nil")
+	result, err := b.Build(context.Background(), data)
+	if err != nil {
+		t.Fatalf("expected no error (offending TrafficMirror skipped), got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "unknown source kind") {
-		t.Errorf("expected 'unknown source kind' in error, got: %v", err)
+	if len(result) != 0 {
+		t.Errorf("expected no contributions for skipped TrafficMirror, got %d", len(result))
 	}
 }
 
@@ -721,12 +720,12 @@ func TestPodNetworkBuilder_UnknownNetwork(t *testing.T) {
 		},
 	}
 
-	_, err := b.Build(context.Background(), data)
-	if err == nil {
-		t.Fatal("expected error for unknown Network, got nil")
+	result, err := b.Build(context.Background(), data)
+	if err != nil {
+		t.Fatalf("expected no error (offending PodNetwork skipped), got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "unknown Network") {
-		t.Errorf("expected 'unknown Network' in error, got: %v", err)
+	if len(result) != 0 {
+		t.Errorf("expected no contributions for skipped PodNetwork, got %d", len(result))
 	}
 }
 
