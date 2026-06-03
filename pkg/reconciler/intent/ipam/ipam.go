@@ -49,25 +49,33 @@ type networkPool struct {
 	network   *net.IPNet
 	nextIP    net.IP
 	broadcast net.IP // nil for IPv6 and for L3 routing pools
+	gateway   net.IP // anycast gateway to reserve on L2 subnets; nil for L3 pools
 }
 
 // newPool creates an allocation pool for a CIDR with the correct addressing
-// semantics. For L3 routing pools (Inbound/Outbound, whose IPs are advertised
-// as individual routed /32s) every address in the CIDR is usable, including the
-// network and broadcast addresses. For L2 subnets (Layer2Attachment node IPs on
-// a real VLAN) the network and broadcast addresses are reserved.
-func newPool(ipNet *net.IPNet, l3 bool) *networkPool {
+// semantics. The ip argument is the host part of the authored CIDR (e.g.
+// 10.0.1.1 for "10.0.1.1/24"); on L2 subnets it is the anycast gateway shared by
+// the IRB and must not be handed out to a node.
+//
+// For L3 routing pools (Inbound/Outbound, whose IPs are advertised as individual
+// routed /32s) every address in the CIDR is usable, including the network and
+// broadcast addresses, and there is no gateway to reserve. For L2 subnets
+// (Layer2Attachment node IPs on a real VLAN) the network, broadcast and gateway
+// addresses are reserved.
+func newPool(ip net.IP, ipNet *net.IPNet, l3 bool) *networkPool {
 	if l3 {
 		return &networkPool{
 			network:   ipNet,
 			nextIP:    cloneIP(ipNet.IP),
 			broadcast: nil,
+			gateway:   nil,
 		}
 	}
 	return &networkPool{
 		network:   ipNet,
 		nextIP:    nextAddr(ipNet.IP),
 		broadcast: broadcastAddr(ipNet),
+		gateway:   cloneIP(ip),
 	}
 }
 
@@ -191,11 +199,11 @@ func seedPoolFromAddresses(poolKey string, ipFamily *nc.IPNetwork, addresses []s
 
 	pool, ok := pools[poolKey]
 	if !ok {
-		_, ipNet, err := net.ParseCIDR(ipFamily.CIDR)
+		ip, ipNet, err := net.ParseCIDR(ipFamily.CIDR)
 		if err != nil {
 			return
 		}
-		pool = newPool(ipNet, l3)
+		pool = newPool(ip, ipNet, l3)
 		pools[poolKey] = pool
 	}
 
@@ -301,16 +309,21 @@ func (*Allocator) allocate(networkRef string, count int, networks map[string]*re
 func allocateFromCIDR(poolKey, cidr string, count int, pools map[string]*networkPool, l3 bool) ([]string, error) {
 	pool, ok := pools[poolKey]
 	if !ok {
-		_, ipNet, err := net.ParseCIDR(cidr)
+		ip, ipNet, err := net.ParseCIDR(cidr)
 		if err != nil {
 			return nil, fmt.Errorf("parsing CIDR %q: %w", cidr, err)
 		}
-		pool = newPool(ipNet, l3)
+		pool = newPool(ip, ipNet, l3)
 		pools[poolKey] = pool
 	}
 
 	result := make([]string, 0, count)
 	for range count {
+		// Skip the anycast gateway address; on L2 subnets it is owned by the IRB
+		// and handing it to a node would create a duplicate IP on the segment.
+		if pool.gateway != nil && pool.nextIP.Equal(pool.gateway) {
+			pool.nextIP = nextAddr(pool.nextIP)
+		}
 		// Skip broadcast address for IPv4 subnets.
 		if pool.broadcast != nil && pool.nextIP.Equal(pool.broadcast) {
 			return nil, fmt.Errorf("CIDR %q exhausted (reached broadcast)", cidr)

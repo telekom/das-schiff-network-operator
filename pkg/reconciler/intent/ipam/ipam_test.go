@@ -149,6 +149,30 @@ func TestAllocateFromCIDR(t *testing.T) {
 		assert.Equal(t, "fd00::1", ips[0])
 		assert.Equal(t, "fd00::2", ips[1])
 	})
+
+	t.Run("L2 pool reserves the anycast gateway", func(t *testing.T) {
+		pools := make(map[string]*networkPool)
+		// The Network CIDR's host part (.1) is the IRB anycast gateway; node IP
+		// allocation must skip it to avoid a duplicate IP on the segment.
+		ips, err := allocateFromCIDR("test/v4", "10.0.1.1/24", 3, pools, false)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"10.0.1.2", "10.0.1.3", "10.0.1.4"}, ips)
+	})
+
+	t.Run("L2 pool reserves a mid-range gateway", func(t *testing.T) {
+		pools := make(map[string]*networkPool)
+		// Gateway authored mid-range (.3) must be skipped wherever it falls.
+		ips, err := allocateFromCIDR("test/v4", "10.0.2.3/29", 4, pools, false)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"10.0.2.1", "10.0.2.2", "10.0.2.4", "10.0.2.5"}, ips)
+	})
+
+	t.Run("L2 IPv6 pool reserves the anycast gateway", func(t *testing.T) {
+		pools := make(map[string]*networkPool)
+		ips, err := allocateFromCIDR("test/v6", "fd00::1/120", 2, pools, false)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"fd00::2", "fd00::3"}, ips)
+	})
 }
 
 func TestCompareIPs(t *testing.T) {
