@@ -55,6 +55,7 @@ func (b *BGPPeeringBuilder) Build(ctx context.Context, data *resolver.ResolvedDa
 			if err := b.buildListenRange(bp, data, result); err != nil {
 				logger.Info("skipping BGPPeering with unresolvable listenRange",
 					"bgppeering", bp.Name, "error", err.Error())
+				reportSkip(ctx, "BGPPeering", bp.Name, "ListenRangeUnresolved", err.Error())
 				continue
 			}
 		case nc.BGPPeeringModeLoopbackPeer:
@@ -62,6 +63,8 @@ func (b *BGPPeeringBuilder) Build(ctx context.Context, data *resolver.ResolvedDa
 		default:
 			logger.Info("skipping BGPPeering with unknown mode",
 				"bgppeering", bp.Name, "mode", bp.Spec.Mode)
+			reportSkip(ctx, "BGPPeering", bp.Name, "UnknownMode",
+				fmt.Sprintf("unknown BGPPeering mode %q", bp.Spec.Mode))
 			continue
 		}
 	}

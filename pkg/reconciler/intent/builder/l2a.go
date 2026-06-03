@@ -75,6 +75,7 @@ func (b *L2ABuilder) Build(ctx context.Context, data *resolver.ResolvedData) (ma
 
 		if err := b.applyL2AToNodes(l2a, net, vrfName, vrfSpec, data, result, ifOwner); err != nil {
 			logger.Info("skipping Layer2Attachment", "l2a", l2a.Name, "error", err.Error())
+			reportSkip(ctx, "Layer2Attachment", l2a.Name, "BuildFailed", err.Error())
 			continue
 		}
 	}

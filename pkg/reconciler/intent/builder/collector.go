@@ -18,6 +18,7 @@ package builder
 
 import (
 	"context"
+	"fmt"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -56,6 +57,8 @@ func (*CollectorBuilder) Build(ctx context.Context, data *resolver.ResolvedData)
 		if !ok {
 			logger.Info("skipping Collector with unknown VRF reference",
 				"collector", col.Name, "vrf", vrfName)
+			reportSkip(ctx, "Collector", col.Name, "VRFNotFound",
+				fmt.Sprintf("referenced VRF %q not found", vrfName))
 			continue
 		}
 		// Use the backbone VRF name (spec.vrf) for the FabricVRF map key,

@@ -54,6 +54,7 @@ func (b *MirrorBuilder) Build(ctx context.Context, data *resolver.ResolvedData) 
 		if err != nil {
 			logger.Info("skipping TrafficMirror with unresolvable collector",
 				"trafficmirror", tm.Name, "error", err.Error())
+			reportSkip(ctx, "TrafficMirror", tm.Name, "CollectorResolutionFailed", err.Error())
 			continue
 		}
 
@@ -72,11 +73,14 @@ func (b *MirrorBuilder) Build(ctx context.Context, data *resolver.ResolvedData) 
 		default:
 			logger.Info("skipping TrafficMirror with unknown source kind",
 				"trafficmirror", tm.Name, "kind", tm.Spec.Source.Kind)
+			reportSkip(ctx, "TrafficMirror", tm.Name, "UnknownSourceKind",
+				fmt.Sprintf("unknown source kind %q", tm.Spec.Source.Kind))
 			continue
 		}
 		if srcErr != nil {
 			logger.Info("skipping TrafficMirror with unresolvable source",
 				"trafficmirror", tm.Name, "error", srcErr.Error())
+			reportSkip(ctx, "TrafficMirror", tm.Name, "SourceResolutionFailed", srcErr.Error())
 			continue
 		}
 	}

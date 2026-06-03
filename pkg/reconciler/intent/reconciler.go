@@ -162,8 +162,10 @@ func (r *Reconciler) ReconcileDebounced(ctx context.Context) error {
 	// last-good NNC — but still run the status update so the failure surfaces.
 	contributions := make(map[string][]*builder.NodeContribution) // nodeName → contributions
 	buildFailed := false
+	report := builder.NewBuildReport()
+	buildCtx := builder.WithReport(ctx, report)
 	for _, b := range r.builders {
-		nodeContribs, err := b.Build(ctx, resolved)
+		nodeContribs, err := b.Build(buildCtx, resolved)
 		if err != nil {
 			r.logger.Error(err, "builder failed", "builder", b.Name())
 			buildFailed = true
@@ -183,8 +185,16 @@ func (r *Reconciler) ReconcileDebounced(ctx context.Context) error {
 		r.applyNodeConfigs(timeoutCtx, fetched, contributions)
 	}
 
-	// 9. Update status conditions on all intent CRDs.
-	if err := r.statusUpdater.UpdateConditions(timeoutCtx, fetched, resolved); err != nil {
+	// 9. Update status conditions on all intent CRDs. Build issues recorded by
+	// the builders surface as Ready=False on the specific offending resource.
+	issuesMap := make(map[string]status.ResourceIssue)
+	for _, issue := range report.Issues() {
+		issuesMap[status.IssueKey(issue.Kind, issue.Name)] = status.ResourceIssue{
+			Reason:  issue.Reason,
+			Message: issue.Message,
+		}
+	}
+	if err := r.statusUpdater.UpdateConditions(timeoutCtx, fetched, resolved, issuesMap); err != nil {
 		r.logger.Error(err, "status condition update failed")
 	}
 
