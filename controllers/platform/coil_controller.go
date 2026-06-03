@@ -22,8 +22,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	mathbits "math/bits"
-	"net"
 	"sort"
 	"strings"
 	"time"
@@ -54,7 +52,6 @@ const (
 	coilFinalizer      = "network-connector.sylvaproject.org/coil-cleanup"
 	ipv4HostPrefixLen  = 32
 	ipv6HostPrefixLen  = 128
-	bitsPerByte        = 8
 	crdRequeueInterval = 30 * time.Second
 
 	// managedByValue is the label value for app.kubernetes.io/managed-by across all platform controllers.
@@ -135,20 +132,21 @@ func (r *CoilReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		return ctrl.Result{}, nil
 	}
 
-	// Reconcile Calico IPPools.
-	if len(addresses.IPv4) > 0 {
-		if err := r.upsertCalicoIPPool(ctx, outbound, addresses.IPv4, ipv4HostPrefixLen, "v4", logger); err != nil {
-			return ctrl.Result{}, fmt.Errorf("error reconciling IPv4 IPPool: %w", err)
-		}
+	// Reconcile Calico IPPools. Each allocated address becomes its own host
+	// pool (/32 or /128) so that two Outbounds sharing a Network -- whose IPAM
+	// ranges are adjacent -- never produce overlapping IPPools, which Calico
+	// rejects.
+	v4Pools, err := r.reconcileCalicoIPPools(ctx, outbound, addresses.IPv4, ipv4HostPrefixLen, "v4", "/32", logger)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("error reconciling IPv4 IPPools: %w", err)
 	}
-	if len(addresses.IPv6) > 0 {
-		if err := r.upsertCalicoIPPool(ctx, outbound, addresses.IPv6, ipv6HostPrefixLen, "v6", logger); err != nil {
-			return ctrl.Result{}, fmt.Errorf("error reconciling IPv6 IPPool: %w", err)
-		}
+	v6Pools, err := r.reconcileCalicoIPPools(ctx, outbound, addresses.IPv6, ipv6HostPrefixLen, "v6", "/128", logger)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("error reconciling IPv6 IPPools: %w", err)
 	}
 
 	// Reconcile Coil Egress.
-	if err := r.upsertCoilEgress(ctx, outbound, prefixes, addresses, logger); err != nil {
+	if err := r.upsertCoilEgress(ctx, outbound, prefixes, addresses, v4Pools, v6Pools, logger); err != nil {
 		return ctrl.Result{}, fmt.Errorf("error reconciling Coil Egress: %w", err)
 	}
 
@@ -186,20 +184,61 @@ func (r *CoilReconciler) resolveDestinations(ctx context.Context, ob *nc.Outboun
 	return prefixes, nil
 }
 
-func (r *CoilReconciler) upsertCalicoIPPool(ctx context.Context, ob *nc.Outbound, addrs []string, blockSize int64, suffix string, logger logr.Logger) error {
-	poolName := fmt.Sprintf("%s-%s", ob.Name, suffix)
-
-	cidr, err := poolCIDR(addrs, int(blockSize))
-	if err != nil {
-		return fmt.Errorf("error determining IPPool CIDR for %s: %w", poolName, err)
+// reconcileCalicoIPPools emits one Calico IPPool per allocated address (a /32 or
+// /128 host pool, or an explicit CIDR block kept verbatim) and prunes any pools
+// for this Outbound/family that are no longer backed by an allocated address.
+// It returns the names of the desired pools so the Egress pod template can
+// reference them via the cni.projectcalico.org/ipv4pools annotation.
+//
+// Host pools are used instead of a single covering CIDR because IPAM allocates
+// addresses sequentially across every consumer of a Network: two Outbounds
+// sharing a Network receive adjacent ranges whose covering CIDRs would overlap,
+// and Calico rejects overlapping IPPools. Exact host pools never overlap because
+// each allocated address is unique.
+func (r *CoilReconciler) reconcileCalicoIPPools(ctx context.Context, ob *nc.Outbound, addrs []string, blockSize int64, family, defaultPrefix string, logger logr.Logger) ([]string, error) {
+	desired := make(map[string]string, len(addrs)) // poolName -> cidr
+	poolNames := make([]string, 0, len(addrs))
+	for _, a := range addrs {
+		cidr := ensureCIDR(a, defaultPrefix)
+		name := calicoPoolName(ob.Name, family, cidr)
+		if _, seen := desired[name]; seen {
+			continue
+		}
+		desired[name] = cidr
+		poolNames = append(poolNames, name)
 	}
 
+	for name, cidr := range desired {
+		if err := r.upsertCalicoIPPool(ctx, ob, name, cidr, family, blockSize, logger); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := r.pruneCalicoIPPools(ctx, ob, family, desired, logger); err != nil {
+		return nil, err
+	}
+
+	sort.Strings(poolNames)
+	return poolNames, nil
+}
+
+// calicoPoolName derives a stable, DNS-safe IPPool name from the Outbound name,
+// address family and CIDR. The CIDR is hashed because it may contain characters
+// (dots, colons, slashes) that are not valid in object names and to keep the
+// name length bounded for IPv6.
+func calicoPoolName(obName, family, cidr string) string {
+	sum := sha256.Sum256([]byte(cidr))
+	return fmt.Sprintf("%s-%s-%s", obName, family, hex.EncodeToString(sum[:4]))
+}
+
+func (r *CoilReconciler) upsertCalicoIPPool(ctx context.Context, ob *nc.Outbound, poolName, cidr, family string, blockSize int64, logger logr.Logger) error {
 	desired := &unstructured.Unstructured{}
 	desired.SetGroupVersionKind(calicoIPPoolGVK)
 	desired.SetName(poolName)
 	desired.SetLabels(map[string]string{
 		"app.kubernetes.io/managed-by":                managedByValue,
 		"network-connector.sylvaproject.org/outbound": ob.Name,
+		"network-connector.sylvaproject.org/family":   family,
 	})
 	if err := unstructured.SetNestedField(desired.Object, cidr, "spec", "cidr"); err != nil {
 		return fmt.Errorf("error setting cidr: %w", err)
@@ -219,9 +258,9 @@ func (r *CoilReconciler) upsertCalicoIPPool(ctx context.Context, ob *nc.Outbound
 
 	existing := &unstructured.Unstructured{}
 	existing.SetGroupVersionKind(calicoIPPoolGVK)
-	err = r.Get(ctx, types.NamespacedName{Name: poolName}, existing)
+	err := r.Get(ctx, types.NamespacedName{Name: poolName}, existing)
 	if apierrors.IsNotFound(err) {
-		logger.Info("creating Calico IPPool", "name", poolName)
+		logger.Info("creating Calico IPPool", "name", poolName, "cidr", cidr)
 		if err := r.Create(ctx, desired); err != nil {
 			return fmt.Errorf("error creating Calico IPPool %s: %w", poolName, err)
 		}
@@ -239,76 +278,28 @@ func (r *CoilReconciler) upsertCalicoIPPool(ctx context.Context, ob *nc.Outbound
 	return nil
 }
 
-// poolCIDR derives the Calico IPPool CIDR from allocated addresses.
-//
-// IPAM stores allocated addresses as bare IPs, while explicit Spec.Addresses may
-// already be CIDR blocks. When a single CIDR block is given it is used verbatim
-// (preserving the explicit-block behaviour). Otherwise the smallest CIDR that
-// covers all bare IPs is computed so the pool spans every allocated egress IP
-// (e.g. 10.100.16.236..239 -> 10.100.16.236/30).
-func poolCIDR(addrs []string, hostPrefix int) (string, error) {
-	if len(addrs) == 0 {
-		return "", fmt.Errorf("no addresses provided")
+// pruneCalicoIPPools deletes IPPools owned by this Outbound and family that are
+// not in the desired set (e.g. after an address reroll shrinks the allocation).
+func (r *CoilReconciler) pruneCalicoIPPools(ctx context.Context, ob *nc.Outbound, family string, desired map[string]string, logger logr.Logger) error {
+	list := &unstructured.UnstructuredList{}
+	list.SetGroupVersionKind(calicoIPPoolGVK)
+	if err := r.List(ctx, list, client.MatchingLabels{
+		"network-connector.sylvaproject.org/outbound": ob.Name,
+		"network-connector.sylvaproject.org/family":   family,
+	}); err != nil {
+		return fmt.Errorf("error listing Calico IPPools for prune: %w", err)
 	}
-	if len(addrs) == 1 && strings.Contains(addrs[0], "/") {
-		return addrs[0], nil
-	}
-
-	bits := hostPrefix
-	var minIP, maxIP net.IP
-	for _, a := range addrs {
-		ipStr := a
-		if idx := strings.IndexByte(ipStr, '/'); idx >= 0 {
-			ipStr = ipStr[:idx]
-		}
-		ip := net.ParseIP(ipStr)
-		if ip == nil {
-			return "", fmt.Errorf("invalid address %q", a)
-		}
-		if hostPrefix == ipv4HostPrefixLen {
-			ip = ip.To4()
-			if ip == nil {
-				return "", fmt.Errorf("address %q is not IPv4", a)
-			}
-		} else {
-			ip = ip.To16()
-		}
-		if minIP == nil || bytesCompare(ip, minIP) < 0 {
-			minIP = ip
-		}
-		if maxIP == nil || bytesCompare(ip, maxIP) > 0 {
-			maxIP = ip
-		}
-	}
-
-	// Smallest prefix whose block contains both min and max: count the leading
-	// bits min and max have in common.
-	prefixLen := bits
-	for i := 0; i < len(minIP); i++ {
-		diff := minIP[i] ^ maxIP[i]
-		if diff == 0 {
+	for i := range list.Items {
+		name := list.Items[i].GetName()
+		if _, keep := desired[name]; keep {
 			continue
 		}
-		prefixLen = i*bitsPerByte + mathbits.LeadingZeros8(diff)
-		break
-	}
-
-	mask := net.CIDRMask(prefixLen, bits)
-	base := minIP.Mask(mask)
-	return fmt.Sprintf("%s/%d", base.String(), prefixLen), nil
-}
-
-// bytesCompare compares two equal-length byte slices lexicographically.
-func bytesCompare(a, b net.IP) int {
-	for i := range a {
-		switch {
-		case a[i] < b[i]:
-			return -1
-		case a[i] > b[i]:
-			return 1
+		if err := r.Delete(ctx, &list.Items[i]); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("error deleting stale Calico IPPool %s: %w", name, err)
 		}
+		logger.Info("deleted stale Calico IPPool", "name", name)
 	}
-	return 0
+	return nil
 }
 
 // addressHash returns a short, stable hash of the allocated addresses. It is
@@ -329,20 +320,21 @@ func addressHash(addresses *nc.AddressAllocation) string {
 	return hex.EncodeToString(sum[:8])
 }
 
-func (r *CoilReconciler) upsertCoilEgress(ctx context.Context, ob *nc.Outbound, prefixes []string, addresses *nc.AddressAllocation, logger logr.Logger) error { //nolint:revive,cyclop // building unstructured object requires sequential field-setting
+func (r *CoilReconciler) upsertCoilEgress(ctx context.Context, ob *nc.Outbound, prefixes []string, addresses *nc.AddressAllocation, v4Pools, v6Pools []string, logger logr.Logger) error { //nolint:revive,cyclop // building unstructured object requires sequential field-setting
 	replicas := int64(1)
 	if ob.Spec.Replicas != nil {
 		replicas = int64(*ob.Spec.Replicas)
 	}
 
-	// Build pool annotations.
+	// Build pool annotations. Each allocated address has its own host IPPool, so
+	// reference the full set for the family.
 	annotations := map[string]string{}
-	if addresses != nil && len(addresses.IPv4) > 0 {
-		poolRef, _ := json.Marshal([]string{fmt.Sprintf("%s-v4", ob.Name)})
+	if len(v4Pools) > 0 {
+		poolRef, _ := json.Marshal(v4Pools)
 		annotations["cni.projectcalico.org/ipv4pools"] = string(poolRef)
 	}
-	if addresses != nil && len(addresses.IPv6) > 0 {
-		poolRef, _ := json.Marshal([]string{fmt.Sprintf("%s-v6", ob.Name)})
+	if len(v6Pools) > 0 {
+		poolRef, _ := json.Marshal(v6Pools)
 		annotations["cni.projectcalico.org/ipv6pools"] = string(poolRef)
 	}
 	// Hash the allocated addresses into the pod template so that a change in the
@@ -538,15 +530,19 @@ func (r *CoilReconciler) handleOutboundDeletion(ctx context.Context, ob *nc.Outb
 	}
 	logger.Info("deleted egress NetworkPolicy", "name", np.Name)
 
-	// Delete Calico IPPools.
-	for _, suffix := range []string{"v4", "v6"} {
-		pool := &unstructured.Unstructured{}
-		pool.SetGroupVersionKind(calicoIPPoolGVK)
-		pool.SetName(fmt.Sprintf("%s-%s", ob.Name, suffix))
-		if err := r.Delete(ctx, pool); err != nil && !apierrors.IsNotFound(err) {
-			return ctrl.Result{}, fmt.Errorf("error deleting Calico IPPool %s: %w", pool.GetName(), err)
+	// Delete Calico IPPools owned by this Outbound (one host pool per address).
+	pools := &unstructured.UnstructuredList{}
+	pools.SetGroupVersionKind(calicoIPPoolGVK)
+	if err := r.List(ctx, pools, client.MatchingLabels{
+		"network-connector.sylvaproject.org/outbound": ob.Name,
+	}); err != nil {
+		return ctrl.Result{}, fmt.Errorf("error listing Calico IPPools for deletion: %w", err)
+	}
+	for i := range pools.Items {
+		if err := r.Delete(ctx, &pools.Items[i]); err != nil && !apierrors.IsNotFound(err) {
+			return ctrl.Result{}, fmt.Errorf("error deleting Calico IPPool %s: %w", pools.Items[i].GetName(), err)
 		}
-		logger.Info("deleted Calico IPPool", "name", pool.GetName())
+		logger.Info("deleted Calico IPPool", "name", pools.Items[i].GetName())
 	}
 
 	controllerutil.RemoveFinalizer(ob, coilFinalizer)

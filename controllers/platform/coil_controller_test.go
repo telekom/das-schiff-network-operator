@@ -18,6 +18,7 @@ package platform
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -27,6 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
@@ -58,6 +60,22 @@ func getIPPool(t *testing.T, r *CoilReconciler, name string) *unstructured.Unstr
 		return nil
 	}
 	return obj
+}
+
+// listIPPools returns all Calico IPPools owned by the given outbound, optionally
+// filtered to a single address family ("v4"/"v6"; empty means both).
+func listIPPools(t *testing.T, r *CoilReconciler, outbound, family string) []unstructured.Unstructured {
+	t.Helper()
+	list := &unstructured.UnstructuredList{}
+	list.SetGroupVersionKind(calicoIPPoolGVK)
+	sel := client.MatchingLabels{"network-connector.sylvaproject.org/outbound": outbound}
+	if family != "" {
+		sel["network-connector.sylvaproject.org/family"] = family
+	}
+	if err := r.List(context.Background(), list, sel); err != nil {
+		t.Fatalf("error listing IPPools: %v", err)
+	}
+	return list.Items
 }
 
 func getEgress(t *testing.T, r *CoilReconciler, name string) *unstructured.Unstructured {
@@ -112,9 +130,9 @@ func TestCoilReconciler_CreateIPPoolsAndEgress(t *testing.T) { //nolint:funlen /
 	reconcileOnce(t, r, "egress-a")
 
 	// Verify IPv4 IPPool.
-	poolV4 := getIPPool(t, r, "egress-a-v4")
+	poolV4 := getIPPool(t, r, calicoPoolName("egress-a", "v4", "10.200.0.0/28"))
 	if poolV4 == nil {
-		t.Fatal("expected egress-a-v4 IPPool to exist")
+		t.Fatal("expected egress-a IPv4 IPPool to exist")
 	}
 	cidr, _, _ := unstructured.NestedString(poolV4.Object, "spec", "cidr")
 	if cidr != "10.200.0.0/28" {
@@ -138,9 +156,9 @@ func TestCoilReconciler_CreateIPPoolsAndEgress(t *testing.T) { //nolint:funlen /
 	}
 
 	// Verify IPv6 IPPool.
-	poolV6 := getIPPool(t, r, "egress-a-v6")
+	poolV6 := getIPPool(t, r, calicoPoolName("egress-a", "v6", "fd00:200::/112"))
 	if poolV6 == nil {
-		t.Fatal("expected egress-a-v6 IPPool to exist")
+		t.Fatal("expected egress-a IPv6 IPPool to exist")
 	}
 	cidrV6, _, _ := unstructured.NestedString(poolV6.Object, "spec", "cidr")
 	if cidrV6 != "fd00:200::/112" {
@@ -165,12 +183,14 @@ func TestCoilReconciler_CreateIPPoolsAndEgress(t *testing.T) { //nolint:funlen /
 		t.Errorf("expected replicas 3, got %d", egressReplicas)
 	}
 	v4Annotation, _, _ := unstructured.NestedString(egress.Object, "spec", "template", "metadata", "annotations", "cni.projectcalico.org/ipv4pools")
-	if v4Annotation != `["egress-a-v4"]` {
-		t.Errorf("expected ipv4pools annotation '[\"egress-a-v4\"]', got %s", v4Annotation)
+	wantV4Ann := `["` + calicoPoolName("egress-a", "v4", "10.200.0.0/28") + `"]`
+	if v4Annotation != wantV4Ann {
+		t.Errorf("expected ipv4pools annotation %s, got %s", wantV4Ann, v4Annotation)
 	}
 	v6Annotation, _, _ := unstructured.NestedString(egress.Object, "spec", "template", "metadata", "annotations", "cni.projectcalico.org/ipv6pools")
-	if v6Annotation != `["egress-a-v6"]` {
-		t.Errorf("expected ipv6pools annotation '[\"egress-a-v6\"]', got %s", v6Annotation)
+	wantV6Ann := `["` + calicoPoolName("egress-a", "v6", "fd00:200::/112") + `"]`
+	if v6Annotation != wantV6Ann {
+		t.Errorf("expected ipv6pools annotation %s, got %s", wantV6Ann, v6Annotation)
 	}
 
 	// Verify managed-by label on IPPool.
@@ -284,13 +304,13 @@ func TestCoilReconciler_SkipIPv4Pool(t *testing.T) {
 	reconcileOnce(t, r, "ipv6-only")
 
 	// IPv4 pool should NOT exist.
-	if pool := getIPPool(t, r, "ipv6-only-v4"); pool != nil {
+	if pools := listIPPools(t, r, "ipv6-only", "v4"); len(pools) != 0 {
 		t.Error("expected no IPv4 IPPool for IPv6-only outbound")
 	}
 
 	// IPv6 pool should exist.
-	if pool := getIPPool(t, r, "ipv6-only-v6"); pool == nil {
-		t.Error("expected IPv6 IPPool to exist")
+	if pools := listIPPools(t, r, "ipv6-only", "v6"); len(pools) != 1 {
+		t.Errorf("expected 1 IPv6 IPPool, got %d", len(pools))
 	}
 
 	// Egress should only have IPv6 pool annotation.
@@ -303,8 +323,9 @@ func TestCoilReconciler_SkipIPv4Pool(t *testing.T) {
 		t.Errorf("expected no ipv4pools annotation, got %s", v4Ann)
 	}
 	v6Ann, _, _ := unstructured.NestedString(egress.Object, "spec", "template", "metadata", "annotations", "cni.projectcalico.org/ipv6pools")
-	if v6Ann != `["ipv6-only-v6"]` {
-		t.Errorf("expected ipv6pools annotation, got %s", v6Ann)
+	wantV6Ann := `["` + calicoPoolName("ipv6-only", "v6", "fd00:300::/112") + `"]`
+	if v6Ann != wantV6Ann {
+		t.Errorf("expected ipv6pools annotation %s, got %s", wantV6Ann, v6Ann)
 	}
 }
 
@@ -330,10 +351,10 @@ func TestCoilReconciler_SkipIPv6Pool(t *testing.T) {
 	reconcileOnce(t, r, "ipv4-only")
 	reconcileOnce(t, r, "ipv4-only")
 
-	if pool := getIPPool(t, r, "ipv4-only-v4"); pool == nil {
-		t.Error("expected IPv4 IPPool to exist")
+	if pools := listIPPools(t, r, "ipv4-only", "v4"); len(pools) != 1 {
+		t.Errorf("expected 1 IPv4 IPPool, got %d", len(pools))
 	}
-	if pool := getIPPool(t, r, "ipv4-only-v6"); pool != nil {
+	if pools := listIPPools(t, r, "ipv4-only", "v6"); len(pools) != 0 {
 		t.Error("expected no IPv6 IPPool for IPv4-only outbound")
 	}
 }
@@ -396,10 +417,10 @@ func TestCoilReconciler_DeletionCleanup(t *testing.T) {
 	reconcileOnce(t, r, "to-delete")
 
 	// Verify resources exist.
-	if getIPPool(t, r, "to-delete-v4") == nil {
+	if pools := listIPPools(t, r, "to-delete", "v4"); len(pools) == 0 {
 		t.Fatal("expected v4 IPPool to exist before deletion")
 	}
-	if getIPPool(t, r, "to-delete-v6") == nil {
+	if pools := listIPPools(t, r, "to-delete", "v6"); len(pools) == 0 {
 		t.Fatal("expected v6 IPPool to exist before deletion")
 	}
 	if getEgress(t, r, "to-delete") == nil {
@@ -422,10 +443,10 @@ func TestCoilReconciler_DeletionCleanup(t *testing.T) {
 	reconcileOnce(t, r, "to-delete")
 
 	// Verify resources are deleted.
-	if getIPPool(t, r, "to-delete-v4") != nil {
+	if pools := listIPPools(t, r, "to-delete", "v4"); len(pools) != 0 {
 		t.Error("expected v4 IPPool to be deleted")
 	}
-	if getIPPool(t, r, "to-delete-v6") != nil {
+	if pools := listIPPools(t, r, "to-delete", "v6"); len(pools) != 0 {
 		t.Error("expected v6 IPPool to be deleted")
 	}
 	if getEgress(t, r, "to-delete") != nil {
@@ -596,7 +617,7 @@ func TestCoilReconciler_StatusAddressesPreferred(t *testing.T) {
 	reconcileOnce(t, r, "status-pref")
 	reconcileOnce(t, r, "status-pref")
 
-	pool := getIPPool(t, r, "status-pref-v4")
+	pool := getIPPool(t, r, calicoPoolName("status-pref", "v4", "10.200.99.0/28"))
 	if pool == nil {
 		t.Fatal("expected IPv4 pool to exist")
 	}
@@ -789,30 +810,78 @@ func TestCoilReconciler_NoEgressWithoutAddresses(t *testing.T) {
 	}
 }
 
-func TestPoolCIDR(t *testing.T) {
-	tests := []struct {
-		name       string
-		addrs      []string
-		hostPrefix int
-		want       string
-	}{
-		{"explicit CIDR block kept verbatim", []string{"10.200.0.0/28"}, 32, "10.200.0.0/28"},
-		{"single bare IPv4 -> /32", []string{"10.100.16.236"}, 32, "10.100.16.236/32"},
-		{"full /30 of bare IPs", []string{"10.100.16.236", "10.100.16.237", "10.100.16.238", "10.100.16.239"}, 32, "10.100.16.236/30"},
-		{"unordered bare IPs", []string{"10.100.16.239", "10.100.16.236"}, 32, "10.100.16.236/30"},
-		{"two bare IPs -> /31", []string{"10.100.16.236", "10.100.16.237"}, 32, "10.100.16.236/31"},
-		{"single bare IPv6 -> /128", []string{"2a01:598:40a:54a1::"}, 128, "2a01:598:40a:54a1::/128"},
+func TestCalicoPoolName(t *testing.T) {
+	// Same inputs must produce the same DNS-safe name; different CIDRs differ.
+	n1 := calicoPoolName("egress-a", "v4", "10.0.0.1/32")
+	n2 := calicoPoolName("egress-a", "v4", "10.0.0.1/32")
+	n3 := calicoPoolName("egress-a", "v4", "10.0.0.2/32")
+	if n1 != n2 {
+		t.Errorf("expected stable name, got %q and %q", n1, n2)
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := poolCIDR(tt.addrs, tt.hostPrefix)
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if got != tt.want {
-				t.Errorf("poolCIDR(%v) = %q, want %q", tt.addrs, got, tt.want)
-			}
-		})
+	if n1 == n3 {
+		t.Errorf("expected distinct names for distinct CIDRs, both %q", n1)
+	}
+	if !strings.HasPrefix(n1, "egress-a-v4-") {
+		t.Errorf("expected name prefixed with outbound and family, got %q", n1)
+	}
+	// Names must be valid DNS-1123 (no dots, colons or slashes).
+	if strings.ContainsAny(n1, "./:") {
+		t.Errorf("name %q contains characters invalid for an object name", n1)
+	}
+	v6 := calicoPoolName("egress-a", "v6", "2a01:598:40a:54a1::/128")
+	if strings.ContainsAny(v6, "./:") {
+		t.Errorf("IPv6-derived name %q contains invalid characters", v6)
+	}
+}
+
+func TestCoilReconciler_PrunesStaleHostPools(t *testing.T) {
+	scheme := newScheme()
+
+	ob := &nc.Outbound{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "reroll",
+			Namespace: "default",
+		},
+		Spec: nc.OutboundSpec{
+			NetworkRef: "net-reroll",
+		},
+		Status: nc.OutboundStatus{
+			Addresses: &nc.AddressAllocation{
+				IPv4: []string{"10.50.0.1", "10.50.0.2", "10.50.0.3"},
+			},
+		},
+	}
+
+	cli := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ob).Build()
+	r := &CoilReconciler{Client: cli, APIReader: cli, Scheme: scheme}
+
+	reconcileOnce(t, r, "reroll")
+	reconcileOnce(t, r, "reroll")
+
+	if pools := listIPPools(t, r, "reroll", "v4"); len(pools) != 3 {
+		t.Fatalf("expected 3 host IPPools, got %d", len(pools))
+	}
+
+	// Simulate an address reroll that shrinks the allocation to two IPs; the
+	// stale pool for the removed address must be pruned.
+	fresh := &nc.Outbound{}
+	if err := r.Get(context.Background(), types.NamespacedName{Name: "reroll", Namespace: "default"}, fresh); err != nil {
+		t.Fatalf("error fetching outbound: %v", err)
+	}
+	fresh.Status.Addresses = &nc.AddressAllocation{IPv4: []string{"10.50.0.1", "10.50.0.2"}}
+	if err := r.Update(context.Background(), fresh); err != nil {
+		t.Fatalf("error updating outbound: %v", err)
+	}
+
+	reconcileOnce(t, r, "reroll")
+
+	pools := listIPPools(t, r, "reroll", "v4")
+	if len(pools) != 2 {
+		t.Fatalf("expected 2 host IPPools after reroll, got %d", len(pools))
+	}
+	staleName := calicoPoolName("reroll", "v4", "10.50.0.3/32")
+	if getIPPool(t, r, staleName) != nil {
+		t.Errorf("expected stale pool %s to be pruned", staleName)
 	}
 }
 
@@ -859,18 +928,42 @@ func TestCoilReconciler_BareIPsCoveringPool(t *testing.T) {
 	reconcileOnce(t, r, "bare-ips")
 	reconcileOnce(t, r, "bare-ips")
 
-	pool := getIPPool(t, r, "bare-ips-v4")
-	if pool == nil {
-		t.Fatal("expected bare-ips-v4 IPPool to exist")
+	// Each bare IP becomes its own /32 host pool (no covering CIDR), so two
+	// Outbounds sharing a Network never produce overlapping IPPools.
+	wantCIDRs := map[string]bool{
+		"10.100.16.236/32": false,
+		"10.100.16.237/32": false,
+		"10.100.16.238/32": false,
+		"10.100.16.239/32": false,
 	}
-	cidr, _, _ := unstructured.NestedString(pool.Object, "spec", "cidr")
-	if cidr != "10.100.16.236/30" {
-		t.Errorf("expected covering cidr 10.100.16.236/30, got %s", cidr)
+	pools := listIPPools(t, r, "bare-ips", "v4")
+	if len(pools) != len(wantCIDRs) {
+		t.Fatalf("expected %d host IPPools, got %d", len(wantCIDRs), len(pools))
+	}
+	for i := range pools {
+		cidr, _, _ := unstructured.NestedString(pools[i].Object, "spec", "cidr")
+		if _, ok := wantCIDRs[cidr]; !ok {
+			t.Errorf("unexpected IPPool cidr %s", cidr)
+			continue
+		}
+		wantCIDRs[cidr] = true
+	}
+	for cidr, seen := range wantCIDRs {
+		if !seen {
+			t.Errorf("expected host IPPool for %s", cidr)
+		}
 	}
 
 	egress := getEgress(t, r, "bare-ips")
 	if egress == nil {
 		t.Fatal("expected egress to exist")
+	}
+	v4Ann, _, _ := unstructured.NestedString(egress.Object, "spec", "template", "metadata", "annotations", "cni.projectcalico.org/ipv4pools")
+	for cidr := range wantCIDRs {
+		name := calicoPoolName("bare-ips", "v4", cidr)
+		if !strings.Contains(v4Ann, name) {
+			t.Errorf("expected ipv4pools annotation to reference pool %s, got %s", name, v4Ann)
+		}
 	}
 	hash, found, _ := unstructured.NestedString(egress.Object, "spec", "template", "metadata", "annotations", "network-connector.sylvaproject.org/address-hash")
 	if !found || hash == "" {
