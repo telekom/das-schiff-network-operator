@@ -48,8 +48,9 @@ func NewAllocator(c client.Client, logger logr.Logger) *Allocator {
 type networkPool struct {
 	network   *net.IPNet
 	nextIP    net.IP
-	broadcast net.IP // nil for IPv6 and for L3 routing pools
-	gateway   net.IP // anycast gateway to reserve on L2 subnets; nil for L3 pools
+	broadcast net.IP       // nil for IPv6 and for L3 routing pools
+	gateway   net.IP       // anycast gateway to reserve on L2 subnets; nil for L3 pools
+	reserved  []*net.IPNet // ranges reserved for pod use, never allocated to nodes
 }
 
 // newPool creates an allocation pool for a CIDR with the correct addressing
@@ -119,7 +120,7 @@ func (a *Allocator) reconcileInboundAllocations(ctx context.Context, fetched *re
 		if inb.Status.Addresses != nil && len(inb.Status.Addresses.IPv4)+len(inb.Status.Addresses.IPv6) > 0 {
 			continue
 		}
-		addrs, err := a.allocate(inb.Spec.NetworkRef, int(*inb.Spec.Count), networks, pools, true)
+		addrs, err := a.allocate(inb.Spec.NetworkRef, int(*inb.Spec.Count), networks, pools, true, nil)
 		if err != nil {
 			a.logger.Error(err, "IPAM allocation failed for Inbound", "inbound", inb.Name)
 			continue
@@ -142,7 +143,7 @@ func (a *Allocator) reconcileOutboundAllocations(ctx context.Context, fetched *r
 		if outb.Status.Addresses != nil && len(outb.Status.Addresses.IPv4)+len(outb.Status.Addresses.IPv6) > 0 {
 			continue
 		}
-		addrs, err := a.allocate(outb.Spec.NetworkRef, int(*outb.Spec.Count), networks, pools, true)
+		addrs, err := a.allocate(outb.Spec.NetworkRef, int(*outb.Spec.Count), networks, pools, true, nil)
 		if err != nil {
 			a.logger.Error(err, "IPAM allocation failed for Outbound", "outbound", outb.Name)
 			continue
@@ -240,9 +241,19 @@ func compareIPs(a, b net.IP) int {
 
 // reconcileNodeIPs allocates one IP per node for an L2A with nodeIPs.enabled.
 // Existing allocations are preserved; new nodes get the next available IP.
+// IPs that fall within nodeIPs.reservedRanges (reserved for pod use) are skipped.
 func (a *Allocator) reconcileNodeIPs(ctx context.Context, l2a *nc.Layer2Attachment, nodes []corev1.Node, networks map[string]*resolver.ResolvedNetwork, pools map[string]*networkPool) error {
 	if l2a.Status.NodeAddresses == nil {
 		l2a.Status.NodeAddresses = make(map[string]nc.AddressAllocation)
+	}
+
+	var reserved []*net.IPNet
+	if l2a.Spec.NodeIPs != nil {
+		parsed, err := parseReservedRanges(l2a.Spec.NodeIPs.ReservedRanges)
+		if err != nil {
+			return fmt.Errorf("parsing reservedRanges for Layer2Attachment %q: %w", l2a.Name, err)
+		}
+		reserved = parsed
 	}
 
 	changed := false
@@ -252,7 +263,7 @@ func (a *Allocator) reconcileNodeIPs(ctx context.Context, l2a *nc.Layer2Attachme
 			continue // already allocated
 		}
 
-		addrs, err := a.allocate(l2a.Spec.NetworkRef, 1, networks, pools, false)
+		addrs, err := a.allocate(l2a.Spec.NetworkRef, 1, networks, pools, false, reserved)
 		if err != nil {
 			return fmt.Errorf("allocating node IP for %q on network %q: %w", nodeName, l2a.Spec.NetworkRef, err)
 		}
@@ -269,14 +280,33 @@ func (a *Allocator) reconcileNodeIPs(ctx context.Context, l2a *nc.Layer2Attachme
 	return nil
 }
 
+// parseReservedRanges parses a list of CIDR strings into IPNets, rejecting any
+// malformed entry so a misconfigured reservation fails loudly rather than being
+// silently ignored.
+func parseReservedRanges(ranges []string) ([]*net.IPNet, error) {
+	if len(ranges) == 0 {
+		return nil, nil
+	}
+	out := make([]*net.IPNet, 0, len(ranges))
+	for _, r := range ranges {
+		_, ipNet, err := net.ParseCIDR(r)
+		if err != nil {
+			return nil, fmt.Errorf("invalid reserved range %q: %w", r, err)
+		}
+		out = append(out, ipNet)
+	}
+	return out, nil
+}
+
 // allocate allocates count IPs from the given network's CIDR pool.
 //
 // l3 selects the addressing semantics. For L3 routing pools (Inbound/Outbound
 // egress, whose IPs are advertised as individual routed /32s) every address in
 // the CIDR is usable, including the network and broadcast addresses. For L2
 // subnets (Layer2Attachment node IPs on a real VLAN) the network and broadcast
-// addresses are reserved.
-func (*Allocator) allocate(networkRef string, count int, networks map[string]*resolver.ResolvedNetwork, pools map[string]*networkPool, l3 bool) (*nc.AddressAllocation, error) {
+// addresses are reserved. reserved lists CIDR ranges (typically pod ranges) that
+// must never be handed out; it is nil for L3 consumers.
+func (*Allocator) allocate(networkRef string, count int, networks map[string]*resolver.ResolvedNetwork, pools map[string]*networkPool, l3 bool, reserved []*net.IPNet) (*nc.AddressAllocation, error) {
 	netObj, ok := networks[networkRef]
 	if !ok {
 		return nil, fmt.Errorf("network %q not found", networkRef)
@@ -285,7 +315,7 @@ func (*Allocator) allocate(networkRef string, count int, networks map[string]*re
 	alloc := &nc.AddressAllocation{}
 
 	if netObj.Spec.IPv4 != nil {
-		ips, err := allocateFromCIDR(networkRef+"/v4", netObj.Spec.IPv4.CIDR, count, pools, l3)
+		ips, err := allocateFromCIDR(networkRef+"/v4", netObj.Spec.IPv4.CIDR, count, pools, l3, reserved)
 		if err != nil {
 			return nil, fmt.Errorf("IPv4 allocation from network %q: %w", networkRef, err)
 		}
@@ -293,7 +323,7 @@ func (*Allocator) allocate(networkRef string, count int, networks map[string]*re
 	}
 
 	if netObj.Spec.IPv6 != nil {
-		ips, err := allocateFromCIDR(networkRef+"/v6", netObj.Spec.IPv6.CIDR, count, pools, l3)
+		ips, err := allocateFromCIDR(networkRef+"/v6", netObj.Spec.IPv6.CIDR, count, pools, l3, reserved)
 		if err != nil {
 			return nil, fmt.Errorf("IPv6 allocation from network %q: %w", networkRef, err)
 		}
@@ -306,7 +336,7 @@ func (*Allocator) allocate(networkRef string, count int, networks map[string]*re
 // allocateFromCIDR sequentially allocates count IPs from a CIDR. For L2 subnets
 // it skips the network and broadcast addresses; for L3 routing pools every
 // address in the CIDR is usable.
-func allocateFromCIDR(poolKey, cidr string, count int, pools map[string]*networkPool, l3 bool) ([]string, error) {
+func allocateFromCIDR(poolKey, cidr string, count int, pools map[string]*networkPool, l3 bool, reserved []*net.IPNet) ([]string, error) {
 	pool, ok := pools[poolKey]
 	if !ok {
 		ip, ipNet, err := net.ParseCIDR(cidr)
@@ -316,25 +346,62 @@ func allocateFromCIDR(poolKey, cidr string, count int, pools map[string]*network
 		pool = newPool(ip, ipNet, l3)
 		pools[poolKey] = pool
 	}
+	pool.reserved = mergeReserved(pool.reserved, reserved)
 
 	result := make([]string, 0, count)
 	for range count {
-		// Skip the anycast gateway address; on L2 subnets it is owned by the IRB
-		// and handing it to a node would create a duplicate IP on the segment.
-		if pool.gateway != nil && pool.nextIP.Equal(pool.gateway) {
-			pool.nextIP = nextAddr(pool.nextIP)
-		}
-		// Skip broadcast address for IPv4 subnets.
-		if pool.broadcast != nil && pool.nextIP.Equal(pool.broadcast) {
-			return nil, fmt.Errorf("CIDR %q exhausted (reached broadcast)", cidr)
-		}
-		if !pool.network.Contains(pool.nextIP) {
-			return nil, fmt.Errorf("CIDR %q exhausted", cidr)
+		// Advance to the first usable address, skipping the anycast gateway (owned
+		// by the IRB on L2 subnets) and any ranges reserved for pod use. Handing
+		// out either would create a duplicate IP on the shared segment.
+		for {
+			// Skip broadcast address for IPv4 subnets.
+			if pool.broadcast != nil && pool.nextIP.Equal(pool.broadcast) {
+				return nil, fmt.Errorf("CIDR %q exhausted (reached broadcast)", cidr)
+			}
+			if !pool.network.Contains(pool.nextIP) {
+				return nil, fmt.Errorf("CIDR %q exhausted", cidr)
+			}
+			if (pool.gateway != nil && pool.nextIP.Equal(pool.gateway)) || inReserved(pool.reserved, pool.nextIP) {
+				pool.nextIP = nextAddr(pool.nextIP)
+				continue
+			}
+			break
 		}
 		result = append(result, pool.nextIP.String())
 		pool.nextIP = nextAddr(pool.nextIP)
 	}
 	return result, nil
+}
+
+// inReserved reports whether ip falls within any of the reserved ranges.
+func inReserved(reserved []*net.IPNet, ip net.IP) bool {
+	for _, r := range reserved {
+		if r.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// mergeReserved unions two sets of reserved ranges, deduplicating by CIDR string
+// so repeated allocations on the same pool don't grow the set unbounded.
+func mergeReserved(existing, add []*net.IPNet) []*net.IPNet {
+	if len(add) == 0 {
+		return existing
+	}
+	seen := make(map[string]struct{}, len(existing)+len(add))
+	for _, r := range existing {
+		seen[r.String()] = struct{}{}
+	}
+	out := existing
+	for _, r := range add {
+		if _, ok := seen[r.String()]; ok {
+			continue
+		}
+		seen[r.String()] = struct{}{}
+		out = append(out, r)
+	}
+	return out
 }
 
 // cloneIP returns a copy of ip to avoid aliasing the parsed CIDR's address.

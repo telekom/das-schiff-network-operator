@@ -89,18 +89,18 @@ func TestBroadcastAddr(t *testing.T) {
 func TestAllocateFromCIDR(t *testing.T) {
 	t.Run("basic sequential allocation", func(t *testing.T) {
 		pools := make(map[string]*networkPool)
-		ips, err := allocateFromCIDR("test/v4", "10.0.0.0/24", 3, pools, false)
+		ips, err := allocateFromCIDR("test/v4", "10.0.0.0/24", 3, pools, false, nil)
 		require.NoError(t, err)
 		assert.Equal(t, []string{"10.0.0.1", "10.0.0.2", "10.0.0.3"}, ips)
 	})
 
 	t.Run("continues from previous allocation", func(t *testing.T) {
 		pools := make(map[string]*networkPool)
-		ips1, err := allocateFromCIDR("test/v4", "10.0.0.0/24", 2, pools, false)
+		ips1, err := allocateFromCIDR("test/v4", "10.0.0.0/24", 2, pools, false, nil)
 		require.NoError(t, err)
 		assert.Equal(t, []string{"10.0.0.1", "10.0.0.2"}, ips1)
 
-		ips2, err := allocateFromCIDR("test/v4", "10.0.0.0/24", 2, pools, false)
+		ips2, err := allocateFromCIDR("test/v4", "10.0.0.0/24", 2, pools, false, nil)
 		require.NoError(t, err)
 		assert.Equal(t, []string{"10.0.0.3", "10.0.0.4"}, ips2)
 	})
@@ -109,12 +109,12 @@ func TestAllocateFromCIDR(t *testing.T) {
 		pools := make(map[string]*networkPool)
 		// /30 has 4 addresses: .0 (network), .1, .2, .3 (broadcast)
 		// Usable: .1, .2 only
-		ips, err := allocateFromCIDR("test/v4", "10.0.0.0/30", 2, pools, false)
+		ips, err := allocateFromCIDR("test/v4", "10.0.0.0/30", 2, pools, false, nil)
 		require.NoError(t, err)
 		assert.Equal(t, []string{"10.0.0.1", "10.0.0.2"}, ips)
 
 		// Third allocation should fail — .3 is broadcast
-		_, err = allocateFromCIDR("test/v4", "10.0.0.0/30", 1, pools, false)
+		_, err = allocateFromCIDR("test/v4", "10.0.0.0/30", 1, pools, false, nil)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "broadcast")
 	})
@@ -122,7 +122,7 @@ func TestAllocateFromCIDR(t *testing.T) {
 	t.Run("exhaustion", func(t *testing.T) {
 		pools := make(map[string]*networkPool)
 		// /30 has 2 usable hosts
-		_, err := allocateFromCIDR("test/v4", "10.0.0.0/30", 3, pools, false)
+		_, err := allocateFromCIDR("test/v4", "10.0.0.0/30", 3, pools, false, nil)
 		assert.Error(t, err)
 	})
 
@@ -130,20 +130,20 @@ func TestAllocateFromCIDR(t *testing.T) {
 		pools := make(map[string]*networkPool)
 		// L3 routing pool: network and broadcast addresses are usable too.
 		// /30 yields all 4 addresses.
-		ips, err := allocateFromCIDR("test/v4", "10.100.16.236/30", 4, pools, true)
+		ips, err := allocateFromCIDR("test/v4", "10.100.16.236/30", 4, pools, true, nil)
 		require.NoError(t, err)
 		assert.Equal(t, []string{"10.100.16.236", "10.100.16.237", "10.100.16.238", "10.100.16.239"}, ips)
 	})
 
 	t.Run("L3 pool exhaustion past CIDR", func(t *testing.T) {
 		pools := make(map[string]*networkPool)
-		_, err := allocateFromCIDR("test/v4", "10.0.0.0/30", 5, pools, true)
+		_, err := allocateFromCIDR("test/v4", "10.0.0.0/30", 5, pools, true, nil)
 		assert.Error(t, err)
 	})
 
 	t.Run("IPv6 allocation", func(t *testing.T) {
 		pools := make(map[string]*networkPool)
-		ips, err := allocateFromCIDR("test/v6", "fd00::/120", 2, pools, false)
+		ips, err := allocateFromCIDR("test/v6", "fd00::/120", 2, pools, false, nil)
 		require.NoError(t, err)
 		assert.Len(t, ips, 2)
 		assert.Equal(t, "fd00::1", ips[0])
@@ -154,7 +154,7 @@ func TestAllocateFromCIDR(t *testing.T) {
 		pools := make(map[string]*networkPool)
 		// The Network CIDR's host part (.1) is the IRB anycast gateway; node IP
 		// allocation must skip it to avoid a duplicate IP on the segment.
-		ips, err := allocateFromCIDR("test/v4", "10.0.1.1/24", 3, pools, false)
+		ips, err := allocateFromCIDR("test/v4", "10.0.1.1/24", 3, pools, false, nil)
 		require.NoError(t, err)
 		assert.Equal(t, []string{"10.0.1.2", "10.0.1.3", "10.0.1.4"}, ips)
 	})
@@ -162,16 +162,41 @@ func TestAllocateFromCIDR(t *testing.T) {
 	t.Run("L2 pool reserves a mid-range gateway", func(t *testing.T) {
 		pools := make(map[string]*networkPool)
 		// Gateway authored mid-range (.3) must be skipped wherever it falls.
-		ips, err := allocateFromCIDR("test/v4", "10.0.2.3/29", 4, pools, false)
+		ips, err := allocateFromCIDR("test/v4", "10.0.2.3/29", 4, pools, false, nil)
 		require.NoError(t, err)
 		assert.Equal(t, []string{"10.0.2.1", "10.0.2.2", "10.0.2.4", "10.0.2.5"}, ips)
 	})
 
 	t.Run("L2 IPv6 pool reserves the anycast gateway", func(t *testing.T) {
 		pools := make(map[string]*networkPool)
-		ips, err := allocateFromCIDR("test/v6", "fd00::1/120", 2, pools, false)
+		ips, err := allocateFromCIDR("test/v6", "fd00::1/120", 2, pools, false, nil)
 		require.NoError(t, err)
 		assert.Equal(t, []string{"fd00::2", "fd00::3"}, ips)
+	})
+
+	t.Run("skips pod-reserved ranges", func(t *testing.T) {
+		pools := make(map[string]*networkPool)
+		_, reserved, _ := net.ParseCIDR("10.0.0.0/28") // .0-.15 reserved for pods
+		ips, err := allocateFromCIDR("test/v4", "10.0.0.0/24", 3, pools, false, []*net.IPNet{reserved})
+		require.NoError(t, err)
+		// .1 gateway + .1-.15 reserved skipped; allocation starts at .16.
+		assert.Equal(t, []string{"10.0.0.16", "10.0.0.17", "10.0.0.18"}, ips)
+	})
+
+	t.Run("skips multiple disjoint reserved ranges", func(t *testing.T) {
+		pools := make(map[string]*networkPool)
+		_, r1, _ := net.ParseCIDR("10.0.0.4/30") // .4-.7
+		_, r2, _ := net.ParseCIDR("10.0.0.8/30") // .8-.11
+		ips, err := allocateFromCIDR("test/v4", "10.0.0.0/24", 4, pools, false, []*net.IPNet{r1, r2})
+		require.NoError(t, err)
+		assert.Equal(t, []string{"10.0.0.1", "10.0.0.2", "10.0.0.3", "10.0.0.12"}, ips)
+	})
+
+	t.Run("exhaustion when reserved range fills the subnet", func(t *testing.T) {
+		pools := make(map[string]*networkPool)
+		_, reserved, _ := net.ParseCIDR("10.0.0.0/29") // covers all usable hosts in /29
+		_, err := allocateFromCIDR("test/v4", "10.0.0.0/29", 1, pools, false, []*net.IPNet{reserved})
+		assert.Error(t, err)
 	})
 }
 
@@ -226,7 +251,7 @@ func TestSeedPoolFromAddresses(t *testing.T) {
 		assert.Nil(t, pools["net/v4"].broadcast)
 
 		// Allocating the remaining three addresses must succeed (incl. broadcast).
-		ips, err := allocateFromCIDR("net/v4", family.CIDR, 3, pools, true)
+		ips, err := allocateFromCIDR("net/v4", family.CIDR, 3, pools, true, nil)
 		require.NoError(t, err)
 		assert.Equal(t, []string{"10.100.16.237", "10.100.16.238", "10.100.16.239"}, ips)
 	})
@@ -241,11 +266,11 @@ func TestSeedPoolFromAddresses(t *testing.T) {
 		assert.NotNil(t, pools["net/v4"].broadcast)
 
 		// Only .2 remains usable; .3 is broadcast.
-		ips, err := allocateFromCIDR("net/v4", family.CIDR, 1, pools, false)
+		ips, err := allocateFromCIDR("net/v4", family.CIDR, 1, pools, false, nil)
 		require.NoError(t, err)
 		assert.Equal(t, []string{"10.0.0.2"}, ips)
 
-		_, err = allocateFromCIDR("net/v4", family.CIDR, 1, pools, false)
+		_, err = allocateFromCIDR("net/v4", family.CIDR, 1, pools, false, nil)
 		assert.Error(t, err)
 	})
 }
