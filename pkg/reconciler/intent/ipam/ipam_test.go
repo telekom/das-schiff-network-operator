@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
+	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/resolver"
 )
 
 func TestNextAddr(t *testing.T) {
@@ -272,5 +273,49 @@ func TestSeedPoolFromAddresses(t *testing.T) {
 
 		_, err = allocateFromCIDR("net/v4", family.CIDR, 1, pools, false, nil)
 		assert.Error(t, err)
+	})
+}
+
+func TestAllocateDualStack(t *testing.T) {
+	newNetworks := func() map[string]*resolver.ResolvedNetwork {
+		return map[string]*resolver.ResolvedNetwork{
+			"net": {
+				Name: "net",
+				Spec: nc.NetworkSpec{
+					IPv4: &nc.IPNetwork{CIDR: "10.0.0.0/24"},
+					IPv6: &nc.IPNetwork{CIDR: "fd00::/128"}, // only one routed address
+				},
+			},
+		}
+	}
+
+	a := &Allocator{}
+
+	t.Run("IPv6 exhaustion does not discard IPv4 allocation", func(t *testing.T) {
+		pools := make(map[string]*networkPool)
+		// Request 2 addresses: IPv4 /24 has room, IPv6 /128 is exhausted past 1.
+		alloc, err := a.allocate("net", 2, newNetworks(), pools, true, nil)
+		require.Error(t, err)
+		require.NotNil(t, alloc)
+		assert.Len(t, alloc.IPv4, 2)
+		assert.Empty(t, alloc.IPv6)
+		assert.Contains(t, err.Error(), "IPv6")
+	})
+
+	t.Run("both families succeed when both have room", func(t *testing.T) {
+		nets := newNetworks()
+		nets["net"].Spec.IPv6 = &nc.IPNetwork{CIDR: "fd00::/120"}
+		pools := make(map[string]*networkPool)
+		alloc, err := a.allocate("net", 2, nets, pools, true, nil)
+		require.NoError(t, err)
+		assert.Len(t, alloc.IPv4, 2)
+		assert.Len(t, alloc.IPv6, 2)
+	})
+
+	t.Run("network not found returns nil allocation", func(t *testing.T) {
+		pools := make(map[string]*networkPool)
+		alloc, err := a.allocate("missing", 1, newNetworks(), pools, true, nil)
+		require.Error(t, err)
+		assert.Nil(t, alloc)
 	})
 }

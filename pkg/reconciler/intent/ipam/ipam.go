@@ -19,6 +19,7 @@ package ipam
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"net"
 
@@ -121,8 +122,14 @@ func (a *Allocator) reconcileInboundAllocations(ctx context.Context, fetched *re
 			continue
 		}
 		addrs, err := a.allocate(inb.Spec.NetworkRef, int(*inb.Spec.Count), networks, pools, true, nil)
-		if err != nil {
+		if addrs == nil {
 			a.logger.Error(err, "IPAM allocation failed for Inbound", "inbound", inb.Name)
+			continue
+		}
+		if err != nil {
+			a.logger.Error(err, "IPAM allocation partially failed for Inbound", "inbound", inb.Name)
+		}
+		if len(addrs.IPv4)+len(addrs.IPv6) == 0 {
 			continue
 		}
 		inb.Status.Addresses = addrs
@@ -144,8 +151,14 @@ func (a *Allocator) reconcileOutboundAllocations(ctx context.Context, fetched *r
 			continue
 		}
 		addrs, err := a.allocate(outb.Spec.NetworkRef, int(*outb.Spec.Count), networks, pools, true, nil)
-		if err != nil {
+		if addrs == nil {
 			a.logger.Error(err, "IPAM allocation failed for Outbound", "outbound", outb.Name)
+			continue
+		}
+		if err != nil {
+			a.logger.Error(err, "IPAM allocation partially failed for Outbound", "outbound", outb.Name)
+		}
+		if len(addrs.IPv4)+len(addrs.IPv6) == 0 {
 			continue
 		}
 		outb.Status.Addresses = addrs
@@ -264,8 +277,15 @@ func (a *Allocator) reconcileNodeIPs(ctx context.Context, l2a *nc.Layer2Attachme
 		}
 
 		addrs, err := a.allocate(l2a.Spec.NetworkRef, 1, networks, pools, false, reserved)
-		if err != nil {
+		if addrs == nil {
+			// Hard failure (e.g. network not resolved): abort this L2A.
 			return fmt.Errorf("allocating node IP for %q on network %q: %w", nodeName, l2a.Spec.NetworkRef, err)
+		}
+		if err != nil {
+			a.logger.Error(err, "node IP allocation partially failed", "l2a", l2a.Name, "node", nodeName)
+		}
+		if len(addrs.IPv4)+len(addrs.IPv6) == 0 {
+			continue
 		}
 		l2a.Status.NodeAddresses[nodeName] = *addrs
 		changed = true
@@ -306,6 +326,12 @@ func parseReservedRanges(ranges []string) ([]*net.IPNet, error) {
 // subnets (Layer2Attachment node IPs on a real VLAN) the network and broadcast
 // addresses are reserved. reserved lists CIDR ranges (typically pod ranges) that
 // must never be handed out; it is nil for L3 consumers.
+//
+// Allocation is per-family and non-atomic: if one address family is exhausted
+// the other family's addresses are still returned, and the per-family failure is
+// reported via the returned error. This prevents one family's exhaustion from
+// blocking exposure of the other. A nil allocation is returned only when the
+// network itself cannot be resolved.
 func (*Allocator) allocate(networkRef string, count int, networks map[string]*resolver.ResolvedNetwork, pools map[string]*networkPool, l3 bool, reserved []*net.IPNet) (*nc.AddressAllocation, error) {
 	netObj, ok := networks[networkRef]
 	if !ok {
@@ -313,24 +339,27 @@ func (*Allocator) allocate(networkRef string, count int, networks map[string]*re
 	}
 
 	alloc := &nc.AddressAllocation{}
+	var errs []error
 
 	if netObj.Spec.IPv4 != nil {
 		ips, err := allocateFromCIDR(networkRef+"/v4", netObj.Spec.IPv4.CIDR, count, pools, l3, reserved)
 		if err != nil {
-			return nil, fmt.Errorf("IPv4 allocation from network %q: %w", networkRef, err)
+			errs = append(errs, fmt.Errorf("IPv4 allocation from network %q: %w", networkRef, err))
+		} else {
+			alloc.IPv4 = ips
 		}
-		alloc.IPv4 = ips
 	}
 
 	if netObj.Spec.IPv6 != nil {
 		ips, err := allocateFromCIDR(networkRef+"/v6", netObj.Spec.IPv6.CIDR, count, pools, l3, reserved)
 		if err != nil {
-			return nil, fmt.Errorf("IPv6 allocation from network %q: %w", networkRef, err)
+			errs = append(errs, fmt.Errorf("IPv6 allocation from network %q: %w", networkRef, err))
+		} else {
+			alloc.IPv6 = ips
 		}
-		alloc.IPv6 = ips
 	}
 
-	return alloc, nil
+	return alloc, errors.Join(errs...)
 }
 
 // allocateFromCIDR sequentially allocates count IPs from a CIDR. For L2 subnets
