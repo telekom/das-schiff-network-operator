@@ -22,6 +22,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 )
 
 func TestNextAddr(t *testing.T) {
@@ -180,8 +182,46 @@ func TestSeedPoolFromAddresses(t *testing.T) {
 		}
 
 		// Simulate 10.0.0.1 and 10.0.0.3 already allocated
-		seedPoolFromAddresses("net1/v4", nil, []string{"10.0.0.1", "10.0.0.3"}, pools)
+		seedPoolFromAddresses("net1/v4", nil, []string{"10.0.0.1", "10.0.0.3"}, pools, false)
 		// nil ipFamily means no-op
 		assert.Equal(t, "10.0.0.1", pools["net1/v4"].nextIP.String())
+	})
+
+	t.Run("seeded L3 pool keeps routed semantics across reconcile", func(t *testing.T) {
+		// Regression: seeding must not downgrade an L3 routing pool to L2
+		// semantics. A /30 routed pool already holding .236 should still be able
+		// to hand out the network (.236) and broadcast (.239) addresses.
+		pools := make(map[string]*networkPool)
+		family := &nc.IPNetwork{CIDR: "10.100.16.236/30"}
+
+		// Simulate a prior reconcile having allocated the first routed address.
+		seedPoolFromAddresses("net/v4", family, []string{"10.100.16.236"}, pools, true)
+
+		// The pool must not reserve the broadcast address.
+		require.NotNil(t, pools["net/v4"])
+		assert.Nil(t, pools["net/v4"].broadcast)
+
+		// Allocating the remaining three addresses must succeed (incl. broadcast).
+		ips, err := allocateFromCIDR("net/v4", family.CIDR, 3, pools, true)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"10.100.16.237", "10.100.16.238", "10.100.16.239"}, ips)
+	})
+
+	t.Run("seeded L2 pool keeps subnet semantics", func(t *testing.T) {
+		pools := make(map[string]*networkPool)
+		family := &nc.IPNetwork{CIDR: "10.0.0.0/30"}
+
+		seedPoolFromAddresses("net/v4", family, []string{"10.0.0.1"}, pools, false)
+
+		require.NotNil(t, pools["net/v4"])
+		assert.NotNil(t, pools["net/v4"].broadcast)
+
+		// Only .2 remains usable; .3 is broadcast.
+		ips, err := allocateFromCIDR("net/v4", family.CIDR, 1, pools, false)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"10.0.0.2"}, ips)
+
+		_, err = allocateFromCIDR("net/v4", family.CIDR, 1, pools, false)
+		assert.Error(t, err)
 	})
 }

@@ -48,7 +48,27 @@ func NewAllocator(c client.Client, logger logr.Logger) *Allocator {
 type networkPool struct {
 	network   *net.IPNet
 	nextIP    net.IP
-	broadcast net.IP // nil for IPv6
+	broadcast net.IP // nil for IPv6 and for L3 routing pools
+}
+
+// newPool creates an allocation pool for a CIDR with the correct addressing
+// semantics. For L3 routing pools (Inbound/Outbound, whose IPs are advertised
+// as individual routed /32s) every address in the CIDR is usable, including the
+// network and broadcast addresses. For L2 subnets (Layer2Attachment node IPs on
+// a real VLAN) the network and broadcast addresses are reserved.
+func newPool(ipNet *net.IPNet, l3 bool) *networkPool {
+	if l3 {
+		return &networkPool{
+			network:   ipNet,
+			nextIP:    cloneIP(ipNet.IP),
+			broadcast: nil,
+		}
+	}
+	return &networkPool{
+		network:   ipNet,
+		nextIP:    nextAddr(ipNet.IP),
+		broadcast: broadcastAddr(ipNet),
+	}
 }
 
 // ReconcileAllocations checks Inbound/Outbound resources with count mode
@@ -130,8 +150,11 @@ func (a *Allocator) reconcileOutboundAllocations(ctx context.Context, fetched *r
 
 // seedExistingAllocations scans resources with existing status.addresses and
 // advances pool cursors past the highest already-allocated IP per network CIDR.
+// Pools are created with the same L2/L3 semantics that the live allocation path
+// uses for that consumer, so a routed (L3) pool keeps the network and broadcast
+// addresses usable across reconciles.
 func (*Allocator) seedExistingAllocations(fetched *resolver.FetchedResources, pools map[string]*networkPool, networks map[string]*resolver.ResolvedNetwork) {
-	collectAddresses := func(networkRef string, addrs *nc.AddressAllocation) {
+	collectAddresses := func(networkRef string, addrs *nc.AddressAllocation, l3 bool) {
 		if addrs == nil {
 			return
 		}
@@ -139,27 +162,29 @@ func (*Allocator) seedExistingAllocations(fetched *resolver.FetchedResources, po
 		if !ok {
 			return
 		}
-		seedPoolFromAddresses(networkRef+"/v4", netObj.Spec.IPv4, addrs.IPv4, pools)
-		seedPoolFromAddresses(networkRef+"/v6", netObj.Spec.IPv6, addrs.IPv6, pools)
+		seedPoolFromAddresses(networkRef+"/v4", netObj.Spec.IPv4, addrs.IPv4, pools, l3)
+		seedPoolFromAddresses(networkRef+"/v6", netObj.Spec.IPv6, addrs.IPv6, pools, l3)
 	}
 
+	// Seed L3 routing pools (Inbound/Outbound) first so a Network shared with an
+	// L2 attachment keeps routed semantics for its already-allocated addresses.
 	for i := range fetched.Inbounds {
-		collectAddresses(fetched.Inbounds[i].Spec.NetworkRef, fetched.Inbounds[i].Status.Addresses)
+		collectAddresses(fetched.Inbounds[i].Spec.NetworkRef, fetched.Inbounds[i].Status.Addresses, true)
 	}
 	for i := range fetched.Outbounds {
-		collectAddresses(fetched.Outbounds[i].Spec.NetworkRef, fetched.Outbounds[i].Status.Addresses)
+		collectAddresses(fetched.Outbounds[i].Spec.NetworkRef, fetched.Outbounds[i].Status.Addresses, true)
 	}
-	// Seed from L2A per-node allocations.
+	// Seed from L2A per-node allocations (L2 subnet semantics).
 	for i := range fetched.Layer2Attachments {
 		l2a := &fetched.Layer2Attachments[i]
 		for _, addrs := range l2a.Status.NodeAddresses {
-			collectAddresses(l2a.Spec.NetworkRef, &addrs)
+			collectAddresses(l2a.Spec.NetworkRef, &addrs, false)
 		}
 	}
 }
 
 // seedPoolFromAddresses ensures the pool cursor is past any already-allocated IPs.
-func seedPoolFromAddresses(poolKey string, ipFamily *nc.IPNetwork, addresses []string, pools map[string]*networkPool) {
+func seedPoolFromAddresses(poolKey string, ipFamily *nc.IPNetwork, addresses []string, pools map[string]*networkPool, l3 bool) {
 	if ipFamily == nil || len(addresses) == 0 {
 		return
 	}
@@ -170,11 +195,7 @@ func seedPoolFromAddresses(poolKey string, ipFamily *nc.IPNetwork, addresses []s
 		if err != nil {
 			return
 		}
-		pool = &networkPool{
-			network:   ipNet,
-			nextIP:    nextAddr(ipNet.IP),
-			broadcast: broadcastAddr(ipNet),
-		}
+		pool = newPool(ipNet, l3)
 		pools[poolKey] = pool
 	}
 
@@ -284,21 +305,7 @@ func allocateFromCIDR(poolKey, cidr string, count int, pools map[string]*network
 		if err != nil {
 			return nil, fmt.Errorf("parsing CIDR %q: %w", cidr, err)
 		}
-		if l3 {
-			// Routed pool: the network and broadcast addresses are usable.
-			pool = &networkPool{
-				network:   ipNet,
-				nextIP:    cloneIP(ipNet.IP),
-				broadcast: nil,
-			}
-		} else {
-			// L2 subnet: start past the network address and reserve broadcast.
-			pool = &networkPool{
-				network:   ipNet,
-				nextIP:    nextAddr(ipNet.IP),
-				broadcast: broadcastAddr(ipNet),
-			}
-		}
+		pool = newPool(ipNet, l3)
 		pools[poolKey] = pool
 	}
 
