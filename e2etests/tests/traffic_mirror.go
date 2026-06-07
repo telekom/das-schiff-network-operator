@@ -3,9 +3,6 @@ package tests
 import (
 	"context"
 	"fmt"
-	"strconv"
-	"strings"
-	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -134,61 +131,6 @@ func removeMirrorACLsFromNNC(ctx context.Context, f *framework.Framework, nodeNa
 // captureIface is the interface on capturePod to listen on (e.g. "net1").
 // srcPod and srcPodNS identify the pod from which to send test traffic.
 // targetIP is the ping destination.
-func verifyMirrorCapture(
-	ctx context.Context,
-	f *framework.Framework,
-	ns, capturePod, captureIface string,
-	srcPodNS, srcPod, targetIP string,
-) {
-	GinkgoHelper()
-
-	captureCtx, captureCancel := context.WithTimeout(ctx, 2*time.Minute)
-	defer captureCancel()
-
-	By(fmt.Sprintf("Starting tcpdump on %s/%s iface=%s", ns, capturePod, captureIface))
-	// Start tcpdump in the background; write to /tmp/capture.pcap and echo the PID.
-	// We use "& echo $!" so we can reliably retrieve the PID for readiness polling.
-	_, _, err := f.ExecInPod(captureCtx, ns, capturePod, "",
-		[]string{"sh", "-c",
-			"tcpdump -i " + captureIface + " -w /tmp/capture.pcap -q >/dev/null 2>/tmp/tcpdump.err & echo $! > /tmp/tcpdump.pid"})
-	Expect(err).NotTo(HaveOccurred(), "failed to start tcpdump")
-
-	By("Waiting for tcpdump to be active (checking PID)")
-	// Poll until the PID file exists and the process is alive.
-	pollCtx, pollCancel := context.WithTimeout(captureCtx, 15*time.Second)
-	defer pollCancel()
-	Expect(framework.Poll(pollCtx, time.Second, func() (bool, error) {
-		// Use pollCtx (not outer ctx) so the exec respects the poll timeout
-		stdout, _, pollErr := f.ExecInPod(pollCtx, ns, capturePod, "",
-			[]string{"sh", "-c",
-				"PID=$(cat /tmp/tcpdump.pid 2>/dev/null) && [ -n \"$PID\" ] && kill -0 $PID 2>/dev/null && echo active"})
-		if pollErr != nil {
-			return false, nil
-		}
-		return strings.TrimSpace(stdout) == "active", nil
-	})).To(Succeed(), "tcpdump did not become active within timeout")
-
-	By(fmt.Sprintf("Sending ping traffic from %s/%s to %s", srcPodNS, srcPod, targetIP))
-	result, err := f.PingFromPod(captureCtx, srcPodNS, srcPod, targetIP, 5)
-	Expect(err).NotTo(HaveOccurred())
-	Expect(result.Success).To(BeTrue(), "ping failed: %s", result.Output)
-
-	By("Stopping tcpdump and collecting capture")
-	//nolint:errcheck // best-effort kill; tcpdump may already have exited
-	f.ExecInPod(captureCtx, ns, capturePod, "",
-		[]string{"sh", "-c", "PID=$(cat /tmp/tcpdump.pid 2>/dev/null) && [ -n \"$PID\" ] && kill -INT $PID; sleep 1"})
-
-	By("Asserting captured packets are non-empty")
-	// Use tcpdump -r to count actual packets; wc -c would pass even for an empty capture
-	// because libpcap always writes a 24-byte global header.
-	stdout, _, err := f.ExecInPod(captureCtx, ns, capturePod, "",
-		[]string{"sh", "-c", "tcpdump -r /tmp/capture.pcap 2>/dev/null | wc -l"})
-	Expect(err).NotTo(HaveOccurred(), "failed to count captured packets")
-	count, convErr := strconv.Atoi(strings.TrimSpace(stdout))
-	Expect(convErr).NotTo(HaveOccurred(), "unexpected output from tcpdump -r: %q", stdout)
-	Expect(count).To(BeNumerically(">", 0), "no mirrored packets captured in /tmp/capture.pcap")
-}
-
 // TC-09: Traffic Mirroring (MirrorACL).
 var _ = Describe("Traffic Mirroring", Label("mirror"), func() {
 	var (
