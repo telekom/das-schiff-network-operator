@@ -51,6 +51,12 @@ func RunNamePredicateCreateTests(t *testing.T, pred predicate.Funcs, newObj Obje
 			}
 		})
 	}
+
+	t.Run("nil object", func(t *testing.T) {
+		if pred.Create(event.CreateEvent{}) {
+			t.Error("Create predicate(nil object) = true, want false")
+		}
+	})
 }
 
 // RunNamePredicateUpdateTests exercises the Update predicate for the given predicate.Funcs.
@@ -73,6 +79,12 @@ func RunNamePredicateUpdateTests(t *testing.T, pred predicate.Funcs, newObj Obje
 			}
 		})
 	}
+
+	t.Run("nil new object", func(t *testing.T) {
+		if pred.Update(event.UpdateEvent{}) {
+			t.Error("Update predicate(nil new object) = true, want false")
+		}
+	})
 }
 
 // RunDeleteAndGenericAlwaysFalse asserts that Delete and Generic predicates always return false.
