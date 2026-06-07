@@ -31,6 +31,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
@@ -39,10 +41,14 @@ var _ common.ConfigApplier = &CRAVSRConfigApplier{}
 // stubCRAManager is a test stub for the CRA manager that returns a
 // configurable error from ApplyConfiguration.
 type stubCRAManager struct {
-	err error
+	err     error
+	calls   int
+	lastCfg *v1alpha1.NodeNetworkConfigSpec
 }
 
-func (s *stubCRAManager) ApplyConfiguration(_ context.Context, _ *v1alpha1.NodeNetworkConfigSpec) error {
+func (s *stubCRAManager) ApplyConfiguration(_ context.Context, cfg *v1alpha1.NodeNetworkConfigSpec) error {
+	s.calls++
+	s.lastCfg = cfg
 	return s.err
 }
 
@@ -104,7 +110,7 @@ func newCRAVSRTestReconciler(
 	hc healthcheck.HealthCheckerInterface,
 	configPath string,
 	initialObjects ...interface{},
-) *NodeNetworkConfigReconciler {
+) (*NodeNetworkConfigReconciler, client.Client) {
 	t.Helper()
 	s := newTestScheme(t)
 	b := fake.NewClientBuilder().WithScheme(s)
@@ -115,23 +121,25 @@ func newCRAVSRTestReconciler(
 	}
 	c := b.Build()
 	applier := &CRAVSRConfigApplier{craManager: mgr}
-	r, err := common.NewNodeNetworkConfigReconcilerForTesting(
+	r, err := common.NewNodeNetworkConfigReconciler(
 		c,
 		logr.Discard(),
 		applier,
 		configPath,
-		common.ReconcilerOptions{RestoreOnReconcileFailure: false},
-		hc,
+		common.ReconcilerOptions{
+			RestoreOnReconcileFailure: false,
+			HealthChecker:             hc,
+		},
 	)
 	if err != nil {
-		t.Fatalf("NewNodeNetworkConfigReconcilerForTesting: %v", err)
+		t.Fatalf("NewNodeNetworkConfigReconciler: %v", err)
 	}
-	return &NodeNetworkConfigReconciler{NodeNetworkConfigReconciler: r}
+	return &NodeNetworkConfigReconciler{NodeNetworkConfigReconciler: r}, c
 }
 
-// TestNewNodeNetworkConfigReconciler_RestoreOnReconcileFailure verifies that the
-// factory sets RestoreOnReconcileFailure=false (VSR uses transactional commits).
-func TestNewNodeNetworkConfigReconciler_RestoreOnReconcileFailure(t *testing.T) {
+// TestNewNodeNetworkConfigReconciler_ConstructsCommonReconciler verifies that
+// the factory wires a common reconciler for CRA-VSR.
+func TestNewNodeNetworkConfigReconciler_ConstructsCommonReconciler(t *testing.T) {
 	writeMiniHealthcheckConfig(t)
 	s := newTestScheme(t)
 	fakeClient := fake.NewClientBuilder().WithScheme(s).Build()
@@ -150,9 +158,6 @@ func TestNewNodeNetworkConfigReconciler_RestoreOnReconcileFailure(t *testing.T) 
 	}
 	if reconciler.NodeNetworkConfigReconciler == nil {
 		t.Fatal("embedded NodeNetworkConfigReconciler is nil")
-	}
-	if reconciler.NodeNetworkConfigReconciler.RestoreOnReconcileFailure() {
-		t.Error("expected RestoreOnReconcileFailure=false for CRA-VSR reconciler, got true")
 	}
 }
 
@@ -190,13 +195,21 @@ func TestCRAVSR_Reconcile_ApplyPath(t *testing.T) {
 	nnc := newTestNNC("rev-1")
 	hc := &stubHealthChecker{taintsRemoved: true}
 	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	mgr := &stubCRAManager{err: nil}
 
-	r := newCRAVSRTestReconciler(t, &stubCRAManager{err: nil}, hc, configPath, nnc)
+	r, c := newCRAVSRTestReconciler(t, mgr, hc, configPath, nnc)
 
 	_, err := r.Reconcile(context.Background())
 	if err != nil {
 		t.Fatalf("Reconcile returned unexpected error: %v", err)
 	}
+	if mgr.calls != 1 {
+		t.Fatalf("expected ApplyConfiguration to be called once, got %d", mgr.calls)
+	}
+	if mgr.lastCfg == nil || mgr.lastCfg.Revision != "rev-1" {
+		t.Fatalf("expected ApplyConfiguration to receive revision rev-1, got %#v", mgr.lastCfg)
+	}
+	expectNNCStatus(t, c, "rev-1", operator.StatusProvisioned)
 }
 
 // TestCRAVSR_Reconcile_ErrorPropagation verifies that when the CRA manager fails,
@@ -208,8 +221,9 @@ func TestCRAVSR_Reconcile_ErrorPropagation(t *testing.T) {
 	hc := &stubHealthChecker{taintsRemoved: true}
 	configPath := filepath.Join(t.TempDir(), "config.yaml")
 	applyErr := errors.New("netconf commit failed")
+	mgr := &stubCRAManager{err: applyErr}
 
-	r := newCRAVSRTestReconciler(t, &stubCRAManager{err: applyErr}, hc, configPath, nnc)
+	r, c := newCRAVSRTestReconciler(t, mgr, hc, configPath, nnc)
 
 	_, err := r.Reconcile(context.Background())
 	if err == nil {
@@ -218,6 +232,10 @@ func TestCRAVSR_Reconcile_ErrorPropagation(t *testing.T) {
 	if !errors.Is(err, applyErr) {
 		t.Errorf("expected error chain to contain applyErr, got: %v", err)
 	}
+	if mgr.calls != 1 {
+		t.Fatalf("expected ApplyConfiguration to be called once, got %d", mgr.calls)
+	}
+	expectNNCStatus(t, c, "rev-1", operator.StatusInvalid)
 }
 
 // TestCRAVSR_Reconcile_NoRestoreOnFailure verifies the key VSR invariant:
@@ -237,7 +255,7 @@ func TestCRAVSR_Reconcile_NoRestoreOnFailure(t *testing.T) {
 		callsPtr: &trackedCalls,
 	}
 
-	r := newCRAVSRTestReconcilerWithApplier(
+	r, _ := newCRAVSRTestReconcilerWithApplier(
 		t,
 		&CRAVSRConfigApplier{craManager: trackingApplier},
 		hc,
@@ -268,7 +286,7 @@ func newCRAVSRTestReconcilerWithApplier(
 	hc healthcheck.HealthCheckerInterface,
 	configPath string,
 	initialObjects ...interface{},
-) *NodeNetworkConfigReconciler {
+) (*NodeNetworkConfigReconciler, client.Client) {
 	t.Helper()
 	s := newTestScheme(t)
 	b := fake.NewClientBuilder().WithScheme(s)
@@ -278,18 +296,20 @@ func newCRAVSRTestReconcilerWithApplier(
 		}
 	}
 	c := b.Build()
-	r, err := common.NewNodeNetworkConfigReconcilerForTesting(
+	r, err := common.NewNodeNetworkConfigReconciler(
 		c,
 		logr.Discard(),
 		applier,
 		configPath,
-		common.ReconcilerOptions{RestoreOnReconcileFailure: false},
-		hc,
+		common.ReconcilerOptions{
+			RestoreOnReconcileFailure: false,
+			HealthChecker:             hc,
+		},
 	)
 	if err != nil {
-		t.Fatalf("NewNodeNetworkConfigReconcilerForTesting: %v", err)
+		t.Fatalf("NewNodeNetworkConfigReconciler: %v", err)
 	}
-	return &NodeNetworkConfigReconciler{NodeNetworkConfigReconciler: r}
+	return &NodeNetworkConfigReconciler{NodeNetworkConfigReconciler: r}, c
 }
 
 // TestCRAVSR_Reconcile_Idempotent verifies that when the in-memory config has
@@ -303,7 +323,7 @@ func TestCRAVSR_Reconcile_Idempotent(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.yaml")
 
 	trackedCalls := 0
-	r := newCRAVSRTestReconcilerWithApplier(
+	r, _ := newCRAVSRTestReconcilerWithApplier(
 		t,
 		&CRAVSRConfigApplier{craManager: &trackingCRAManager{
 			err:      nil,
@@ -328,5 +348,20 @@ func TestCRAVSR_Reconcile_Idempotent(t *testing.T) {
 	}
 	if trackedCalls != 0 {
 		t.Errorf("expected 0 ApplyConfiguration calls for idempotent reconcile, got %d", trackedCalls)
+	}
+}
+
+func expectNNCStatus(t *testing.T, c client.Client, revision, status string) {
+	t.Helper()
+
+	current := &v1alpha1.NodeNetworkConfig{}
+	if err := c.Get(context.Background(), types.NamespacedName{Name: "test-node"}, current); err != nil {
+		t.Fatalf("get NodeNetworkConfig: %v", err)
+	}
+	if current.Status.ConfigStatus != status {
+		t.Fatalf("expected NodeNetworkConfig status %q, got %q", status, current.Status.ConfigStatus)
+	}
+	if current.Status.LastAppliedRevision != revision {
+		t.Fatalf("expected LastAppliedRevision %q, got %q", revision, current.Status.LastAppliedRevision)
 	}
 }

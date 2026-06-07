@@ -67,6 +67,10 @@ type ReconcilerOptions struct {
 	// node's NodeNetworkConfig.status.asNumber so the operator can report the
 	// server ASN on BGPPeering status. Zero means unset (nothing is surfaced).
 	LocalASN int
+
+	// HealthChecker overrides the default healthchecker. It is primarily used by
+	// tests that need to inject a stub without loading node-local configuration.
+	HealthChecker healthcheck.HealthCheckerInterface
 }
 
 // NodeNetworkConfigReconciler handles the common reconciliation logic for NodeNetworkConfig.
@@ -98,18 +102,24 @@ func NewNodeNetworkConfigReconciler(
 		localASN:                  int64(opts.LocalASN),
 	}
 
-	nc, err := healthcheck.LoadConfig(healthcheck.NetHealthcheckFile)
-	if err != nil {
-		return nil, fmt.Errorf("error loading networking healthcheck config: %w", err)
-	}
+	var err error
+	if opts.HealthChecker != nil {
+		reconciler.healthChecker = opts.HealthChecker
+	} else {
+		var nc *healthcheck.NetHealthcheckConfig
+		nc, err = healthcheck.LoadConfig(healthcheck.NetHealthcheckFile)
+		if err != nil {
+			return nil, fmt.Errorf("error loading networking healthcheck config: %w", err)
+		}
 
-	tcpDialer := healthcheck.NewTCPDialer(nc.Timeout)
-	reconciler.healthChecker, err = healthcheck.NewHealthChecker(
-		reconciler.client,
-		healthcheck.NewDefaultHealthcheckToolkit(tcpDialer),
-		nc)
-	if err != nil {
-		return nil, fmt.Errorf("error creating networking healthchecker: %w", err)
+		tcpDialer := healthcheck.NewTCPDialer(nc.Timeout)
+		reconciler.healthChecker, err = healthcheck.NewHealthChecker(
+			reconciler.client,
+			healthcheck.NewDefaultHealthcheckToolkit(tcpDialer),
+			nc)
+		if err != nil {
+			return nil, fmt.Errorf("error creating networking healthchecker: %w", err)
+		}
 	}
 
 	reconciler.NodeNetworkConfig, err = ReadNodeNetworkConfig(reconciler.NodeNetworkConfigPath)
