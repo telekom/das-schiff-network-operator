@@ -60,6 +60,10 @@ type ReconcilerOptions struct {
 	// configs can be partially applied. Set to false for agents like VSR where
 	// invalid configs cannot be committed.
 	RestoreOnReconcileFailure bool
+
+	// HealthChecker overrides the default healthchecker. It is primarily used by
+	// tests that need to inject a stub without loading node-local configuration.
+	HealthChecker healthcheck.HealthCheckerInterface
 }
 
 // NodeNetworkConfigReconciler handles the common reconciliation logic for NodeNetworkConfig.
@@ -89,18 +93,24 @@ func NewNodeNetworkConfigReconciler(
 		restoreOnReconcileFailure: opts.RestoreOnReconcileFailure,
 	}
 
-	nc, err := healthcheck.LoadConfig(healthcheck.NetHealthcheckFile)
-	if err != nil {
-		return nil, fmt.Errorf("error loading networking healthcheck config: %w", err)
-	}
+	var err error
+	if opts.HealthChecker != nil {
+		reconciler.healthChecker = opts.HealthChecker
+	} else {
+		var nc *healthcheck.NetHealthcheckConfig
+		nc, err = healthcheck.LoadConfig(healthcheck.NetHealthcheckFile)
+		if err != nil {
+			return nil, fmt.Errorf("error loading networking healthcheck config: %w", err)
+		}
 
-	tcpDialer := healthcheck.NewTCPDialer(nc.Timeout)
-	reconciler.healthChecker, err = healthcheck.NewHealthChecker(
-		reconciler.client,
-		healthcheck.NewDefaultHealthcheckToolkit(tcpDialer),
-		nc)
-	if err != nil {
-		return nil, fmt.Errorf("error creating networking healthchecker: %w", err)
+		tcpDialer := healthcheck.NewTCPDialer(nc.Timeout)
+		reconciler.healthChecker, err = healthcheck.NewHealthChecker(
+			reconciler.client,
+			healthcheck.NewDefaultHealthcheckToolkit(tcpDialer),
+			nc)
+		if err != nil {
+			return nil, fmt.Errorf("error creating networking healthchecker: %w", err)
+		}
 	}
 
 	reconciler.NodeNetworkConfig, err = ReadNodeNetworkConfig(reconciler.NodeNetworkConfigPath)
