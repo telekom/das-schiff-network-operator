@@ -255,7 +255,7 @@ func TestCRAVSR_Reconcile_NoRestoreOnFailure(t *testing.T) {
 		callsPtr: &trackedCalls,
 	}
 
-	r, _ := newCRAVSRTestReconcilerWithApplier(
+	r := newCRAVSRTestReconcilerWithApplier(
 		t,
 		&CRAVSRConfigApplier{craManager: trackingApplier},
 		hc,
@@ -286,7 +286,7 @@ func newCRAVSRTestReconcilerWithApplier(
 	hc healthcheck.HealthCheckerInterface,
 	configPath string,
 	initialObjects ...interface{},
-) (*NodeNetworkConfigReconciler, client.Client) {
+) *NodeNetworkConfigReconciler {
 	t.Helper()
 	s := newTestScheme(t)
 	b := fake.NewClientBuilder().WithScheme(s)
@@ -309,7 +309,7 @@ func newCRAVSRTestReconcilerWithApplier(
 	if err != nil {
 		t.Fatalf("NewNodeNetworkConfigReconciler: %v", err)
 	}
-	return &NodeNetworkConfigReconciler{NodeNetworkConfigReconciler: r}, c
+	return &NodeNetworkConfigReconciler{NodeNetworkConfigReconciler: r}
 }
 
 // TestCRAVSR_Reconcile_Idempotent verifies that when the in-memory config has
@@ -323,7 +323,7 @@ func TestCRAVSR_Reconcile_Idempotent(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.yaml")
 
 	trackedCalls := 0
-	r, _ := newCRAVSRTestReconcilerWithApplier(
+	r := newCRAVSRTestReconcilerWithApplier(
 		t,
 		&CRAVSRConfigApplier{craManager: &trackingCRAManager{
 			err:      nil,
