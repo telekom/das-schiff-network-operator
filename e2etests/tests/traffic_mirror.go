@@ -201,14 +201,6 @@ var _ = Describe("Traffic Mirroring", Label("mirror"), func() {
 		f = framework.Global
 		Expect(f).NotTo(BeNil())
 		ctx = context.Background()
-
-		By("Creating test namespace")
-		Expect(f.CreateNamespace(ctx, ns)).To(Succeed())
-
-		By("Applying L2 NADs")
-		nad, err := readTestdata("l2-connectivity/nad.yaml")
-		Expect(err).NotTo(HaveOccurred())
-		Expect(f.ApplyManifestInNamespace(ctx, nad, ns)).To(Succeed())
 	})
 
 	AfterEach(func() {
@@ -221,31 +213,8 @@ var _ = Describe("Traffic Mirroring", Label("mirror"), func() {
 		_ = removeMirrorACLsFromNNC(ctx, f, cfg.WorkerNode1, cfg.VRFM2M)
 	})
 
-	It("should mirror ingress traffic to a capture pod when MirrorACLs are configured", func() {
+	It("should persist MirrorACLs in NNC spec when configured", func() {
 		cfg := f.Config
-
-		By("Creating mirror-src on worker-1 (VLAN 501, m2m)")
-		Expect(f.CreateTestPod(ctx, ns, "mirror-src", cfg.WorkerNode1, map[string]string{
-			"k8s.v1.cni.cncf.io/networks": fmt.Sprintf(
-				`[{"name": "macvlan-vlan501", "ips": ["%s/24", "%s/64"]}]`,
-				cfg.Macvlan01IPv4, cfg.Macvlan01IPv6),
-		}, framework.WithNetAdmin())).To(Succeed())
-
-		By("Creating mirror-capture on worker-2 (VLAN 501, m2m) — receives mirrored GRE-encapsulated packets")
-		// Use nicolaka/netshoot instead of busybox: busybox does not ship tcpdump,
-		// which verifyMirrorCapture requires to capture packets on the net1 interface.
-		Expect(f.CreateTestPod(ctx, ns, "mirror-capture", cfg.WorkerNode2, map[string]string{
-			"k8s.v1.cni.cncf.io/networks": fmt.Sprintf(
-				`[{"name": "macvlan-vlan501", "ips": ["%s/24", "%s/64"]}]`,
-				cfg.Macvlan02IPv4, cfg.Macvlan02IPv6),
-		}, framework.WithImage("nicolaka/netshoot:v0.13"), framework.WithNetAdmin())).To(Succeed())
-
-		By("Waiting for test pods to be ready")
-		Expect(f.WaitForPodReady(ctx, ns, "mirror-src", cfg.PodReadyTimeout)).To(Succeed())
-		Expect(f.WaitForPodReady(ctx, ns, "mirror-capture", cfg.PodReadyTimeout)).To(Succeed())
-
-		By("Waiting for IPv6 DAD to complete on mirror-src")
-		Expect(f.WaitForIPv6DADComplete(ctx, ns, "mirror-src", cfg.Macvlan01IPv6, "net1", 60*time.Second)).To(Succeed())
 
 		By("Adding MirrorACL to NNC for worker-1 via read-modify-write")
 		srcPrefix := cfg.Macvlan01IPv4 + "/32"
@@ -280,14 +249,9 @@ var _ = Describe("Traffic Mirroring", Label("mirror"), func() {
 			acls, _, _ := unstructured.NestedSlice(vrf, "mirrorAcls")
 			Expect(acls).NotTo(BeEmpty(), "mirrorAcls not persisted in NNC spec after update")
 		}
+	})
 
-		By("Verifying mirrored traffic is captured on mirror-capture")
-		// CRA agents (FRR/VSR) do not yet implement mirrorAcl programming so no packets
-		// will ever be captured. Skip here to avoid a guaranteed assertion failure.
-		Skip("CRA agents do not yet implement mirrorAcl programming — skip traffic capture verification until mirror support lands")
-		verifyMirrorCapture(ctx, f,
-			ns, "mirror-capture", "net1",
-			ns, "mirror-src", cfg.Macvlan02IPv4,
-		)
+	It("should mirror ingress traffic to a capture pod when MirrorACLs are configured", func() {
+		Skip("CRA agents do not yet implement mirrorAcl programming; skip traffic capture verification until mirror support lands")
 	})
 })
