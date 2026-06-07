@@ -37,13 +37,13 @@ func BuildNamePredicates() predicate.Funcs {
 	}
 	return predicate.Funcs{
 		CreateFunc: func(e event.CreateEvent) bool {
-			if nodeName == "" {
+			if nodeName == "" || e.Object == nil {
 				return false
 			}
 			return e.Object.GetName() == nodeName
 		},
 		UpdateFunc: func(e event.UpdateEvent) bool {
-			if nodeName == "" {
+			if nodeName == "" || e.ObjectNew == nil {
 				return false
 			}
 			return e.ObjectNew.GetName() == nodeName
