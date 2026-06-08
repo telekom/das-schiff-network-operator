@@ -134,13 +134,13 @@ func initComponents(mgr manager.Manager) error {
 	return nil
 }
 
-func setupReconcilers(mgr manager.Manager) (*reconcileropi.NodeopiConfigReconciler, error) {
-	r, err := reconcileropi.NewNodeopiConfigReconciler(mgr.GetClient(), mgr.GetLogger())
+func setupReconcilers(mgr manager.Manager) (*reconcileropi.NodeNetworkConfigReconciler, error) {
+	r, err := reconcileropi.NewNodeNetworkConfigReconciler(mgr.GetClient(), mgr.GetLogger(), "")
 	if err != nil {
 		return nil, fmt.Errorf("unable to create debounced reconciler: %w", err)
 	}
 
-	if err = (&controlleropi.NodeopiConfigReconciler{
+	if err = (&controlleropi.NodeNetworkConfigReconciler{
 		Client:     mgr.GetClient(),
 		Scheme:     mgr.GetScheme(),
 		Reconciler: r,

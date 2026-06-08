@@ -1,25 +1,22 @@
-package agent_opi
+package agent_opi //nolint:revive
 
 import (
 	"context"
 	"fmt"
 	"os"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-
 	"github.com/go-logr/logr"
+	godpunet "github.com/opiproject/godpu/network"
 	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	godpunet "github.com/opiproject/godpu/network"
 )
 
 type NodeNetworkConfigReconciler struct {
 	client                client.Client
 	logger                logr.Logger
-	healthChecker         *healthcheck.HealthChecker
 	NodeNetworkConfig     *v1alpha1.NodeNetworkConfig
 	NodeNetworkConfigPath string
 }
@@ -56,7 +53,7 @@ func (reconciler *NodeNetworkConfigReconciler) Reconcile(ctx context.Context) er
 
 	dpuAddress := os.Getenv("DPU_ADDRESS")
 
-	cfg, err := r.fetchNodeConfig(ctx)
+	_, err := r.fetchNodeConfig(ctx)
 	if err != nil {
 		// discard IsNotFound error
 		if apierrors.IsNotFound(err) {
@@ -65,17 +62,17 @@ func (reconciler *NodeNetworkConfigReconciler) Reconcile(ctx context.Context) er
 		return err
 	}
 
-	bridgeClient, err := godpunet.NewLogicalBridge(dpuAddress)
+	_, err = godpunet.NewLogicalBridge(dpuAddress)
 	if err != nil {
 		return fmt.Errorf("error creating bridge client: %w", err)
 	}
 
-	sviClient, err := godpunet.NewSVI(dpuAddress)
+	_, err = godpunet.NewSVI(dpuAddress)
 	if err != nil {
 		return fmt.Errorf("error creating svi client: %w", err)
 	}
 
-	vrfClient, err := godpunet.NewVRF(dpuAddress)
+	_, err = godpunet.NewVRF(dpuAddress)
 	if err != nil {
 		return fmt.Errorf("error creating vrf client: %w", err)
 	}
