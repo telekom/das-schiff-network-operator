@@ -17,8 +17,8 @@ const (
 
 // WaitForIPv6DADComplete waits until the given IPv6 address on the specified
 // interface inside a pod is no longer in "tentative" or "dadfailed" state.
-// If the address is already stuck in DAD, the helper disables DAD for the
-// interface and re-adds the address once.
+// If the address is already stuck in DAD, the helper temporarily disables DAD
+// for the interface and re-adds the address once.
 func (f *Framework) WaitForIPv6DADComplete(ctx context.Context, namespace, podName, ipv6Addr, ifName string, timeout time.Duration) error {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -77,14 +77,45 @@ func parseIPv6DADState(ipAddrOutput, ipv6Addr string) (string, ipv6DADState, boo
 }
 
 func (f *Framework) resetIPv6AddressWithoutDAD(ctx context.Context, namespace, podName, cidr, ifName string) error {
-	_, stderr, err := f.ExecInPod(ctx, namespace, podName, "", []string{
-		"sh", "-c", "printf 0 > /proc/sys/net/ipv6/conf/$1/accept_dad", "disable-dad", ifName,
-	})
+	previous, err := f.readIPv6AcceptDAD(ctx, namespace, podName, ifName)
 	if err != nil {
-		return fmt.Errorf("disable IPv6 DAD for %s failed (stderr=%s): %w", ifName, stderr, err)
+		return err
 	}
 
-	_, stderr, err = f.ExecInPod(ctx, namespace, podName, "", []string{
+	if err := f.writeIPv6AcceptDAD(ctx, namespace, podName, ifName, "0"); err != nil {
+		return err
+	}
+
+	if err := f.readdIPv6Address(ctx, namespace, podName, cidr, ifName); err != nil {
+		_ = f.writeIPv6AcceptDAD(ctx, namespace, podName, ifName, previous)
+		return err
+	}
+
+	return f.writeIPv6AcceptDAD(ctx, namespace, podName, ifName, previous)
+}
+
+func (f *Framework) readIPv6AcceptDAD(ctx context.Context, namespace, podName, ifName string) (string, error) {
+	stdout, stderr, err := f.ExecInPod(ctx, namespace, podName, "", []string{
+		"cat", "/proc/sys/net/ipv6/conf/" + ifName + "/accept_dad",
+	})
+	if err != nil {
+		return "", fmt.Errorf("read IPv6 DAD setting for %s failed (stderr=%s): %w", ifName, stderr, err)
+	}
+	return strings.TrimSpace(stdout), nil
+}
+
+func (f *Framework) writeIPv6AcceptDAD(ctx context.Context, namespace, podName, ifName, value string) error {
+	_, stderr, err := f.ExecInPod(ctx, namespace, podName, "", []string{
+		"sh", "-c", "printf '%s' \"$2\" > /proc/sys/net/ipv6/conf/$1/accept_dad", "set-dad", ifName, value,
+	})
+	if err != nil {
+		return fmt.Errorf("write IPv6 DAD setting %s=%s failed (stderr=%s): %w", ifName, value, stderr, err)
+	}
+	return nil
+}
+
+func (f *Framework) readdIPv6Address(ctx context.Context, namespace, podName, cidr, ifName string) error {
+	_, stderr, err := f.ExecInPod(ctx, namespace, podName, "", []string{
 		"ip", "-6", "addr", "del", cidr, "dev", ifName,
 	})
 	if err != nil {
