@@ -49,13 +49,13 @@ jobs:
           controller_tools_ver=$(get_version CONTROLLER_TOOLS_VERSION) || true
           golangci_lint_ver=$(get_version GOLANGCI_LINT_VERSION) || true
           echo "skip=false" >> $GITHUB_OUTPUT
-          if [ -n "$kustomize_ver" ] && [[ $kustomize_ver != ::warning::* ]]; then
+          if [ -n "$kustomize_ver" ]; then
             echo "kustomize=$kustomize_ver" >> $GITHUB_OUTPUT
           fi
-          if [ -n "$controller_tools_ver" ] && [[ $controller_tools_ver != ::warning::* ]]; then
+          if [ -n "$controller_tools_ver" ]; then
             echo "controller_tools=$controller_tools_ver" >> $GITHUB_OUTPUT
           fi
-          if [ -n "$golangci_lint_ver" ] && [[ $golangci_lint_ver != ::warning::* ]]; then
+          if [ -n "$golangci_lint_ver" ]; then
             echo "golangci_lint=$golangci_lint_ver" >> $GITHUB_OUTPUT
           fi
 
