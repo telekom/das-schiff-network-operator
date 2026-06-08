@@ -3,6 +3,7 @@ package framework
 import (
 	"context"
 	"fmt"
+	"net/netip"
 	"strings"
 	"time"
 )
@@ -56,13 +57,19 @@ func (f *Framework) WaitForIPv6DADComplete(ctx context.Context, namespace, podNa
 }
 
 func parseIPv6DADState(ipAddrOutput, ipv6Addr string) (string, ipv6DADState, bool) {
+	target, err := netip.ParseAddr(ipv6Addr)
+	if err != nil {
+		return "", ipv6DADReady, false
+	}
+
 	for _, line := range strings.Split(ipAddrOutput, "\n") {
 		fields := strings.Fields(line)
 		if len(fields) < 2 || fields[0] != "inet6" {
 			continue
 		}
 		cidr := fields[1]
-		if !strings.HasPrefix(cidr, ipv6Addr+"/") {
+		prefix, err := netip.ParsePrefix(cidr)
+		if err != nil || prefix.Addr() != target {
 			continue
 		}
 		if strings.Contains(line, "dadfailed") {
