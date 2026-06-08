@@ -100,7 +100,12 @@ func (reconciler *NodeNetplanConfigReconciler) Reconcile(ctx context.Context) er
 		return fmt.Errorf("error setting desired state: %w", err)
 	}
 
-	if err := netplanConfig.Apply(); err != nil {
+	if netplanConfig.IsSynced() {
+		reconciler.logger.Info("netplan configuration already in sync, skipping apply")
+		if err := netplanConfig.Discard(); err != nil {
+			reconciler.logger.Error(err, "failed to discard pending netplan configuration")
+		}
+	} else if err := netplanConfig.Apply(); err != nil {
 		_ = reconciler.healthChecker.UpdateReadinessCondition(ctx, corev1.ConditionFalse, healthcheck.ReasonNetplanApplyFailed, err.Error())
 		return fmt.Errorf("error applying desired state: %w", err)
 	}
