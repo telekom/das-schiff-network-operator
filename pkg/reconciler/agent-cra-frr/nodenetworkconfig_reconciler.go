@@ -45,10 +45,11 @@ func (a *CRAFRRConfigApplier) ApplyConfig(ctx context.Context, cfg *v1alpha1.Nod
 func (a *CRAFRRConfigApplier) convertNodeConfigToNetlink(nodeCfg *v1alpha1.NodeNetworkConfig) (netlinkConfig nl.NetlinkConfiguration) {
 	for _, layer2 := range nodeCfg.Spec.Layer2s {
 		nlLayer2 := nl.Layer2Information{
-			VlanID:     int(layer2.VLAN),
-			MTU:        int(layer2.MTU),
-			VNI:        int(layer2.VNI),
-			AnycastMAC: new(string),
+			VlanID:              int(layer2.VLAN),
+			MTU:                 int(layer2.MTU),
+			VNI:                 int(layer2.VNI),
+			AnycastMAC:          new(string),
+			DisableSegmentation: layer2.DisableSegmentation,
 		}
 
 		if layer2.IRB != nil {

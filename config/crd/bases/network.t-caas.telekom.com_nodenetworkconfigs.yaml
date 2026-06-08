@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.17.2
+    controller-gen.kubebuilder.io/version: v0.20.0
   name: nodenetworkconfigs.network.t-caas.telekom.com
 spec:
   group: network.t-caas.telekom.com
@@ -2558,6 +2558,10 @@ spec:
                 additionalProperties:
                   description: Layer2 represents a Layer 2 network configuration.
                   properties:
+                    disableSegmentation:
+                      description: DisableSegmentation indicates whether to disable
+                        segmentation for the Layer 2 network.
+                      type: boolean
                     irb:
                       description: IRB is the Integrated Routing and Bridging configuration.
                       properties:
