@@ -122,11 +122,21 @@ func (f *Framework) readdIPv6Address(ctx context.Context, namespace, podName, ci
 		return fmt.Errorf("remove tentative IPv6 address %s from %s failed (stderr=%s): %w", cidr, ifName, stderr, err)
 	}
 
-	args := []string{"ip", "-6", "addr", "add", cidr, "dev", ifName}
 	if noDAD {
-		args = append(args, "nodad")
+		if err := f.addIPv6Address(ctx, namespace, podName, cidr, ifName, []string{"dev", ifName, "nodad"}); err == nil {
+			return nil
+		}
+		if err := f.addIPv6Address(ctx, namespace, podName, cidr, ifName, []string{"nodad", "dev", ifName}); err == nil {
+			return nil
+		}
 	}
-	_, stderr, err = f.ExecInPod(ctx, namespace, podName, "", args)
+
+	return f.addIPv6Address(ctx, namespace, podName, cidr, ifName, []string{"dev", ifName})
+}
+
+func (f *Framework) addIPv6Address(ctx context.Context, namespace, podName, cidr, ifName string, options []string) error {
+	args := append([]string{"ip", "-6", "addr", "add", cidr}, options...)
+	_, stderr, err := f.ExecInPod(ctx, namespace, podName, "", args)
 	if err != nil {
 		return fmt.Errorf("re-add IPv6 address %s to %s failed (stderr=%s): %w", cidr, ifName, stderr, err)
 	}
