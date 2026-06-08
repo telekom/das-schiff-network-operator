@@ -61,8 +61,8 @@ var _ = Describe("L2 Connectivity", Label("l2", "smoke"), func() {
 		By("Waiting for pods to be ready")
 		Expect(f.WaitForPodReady(ctx, ns, "macvlan-01", cfg.PodReadyTimeout)).To(Succeed())
 		Expect(f.WaitForPodReady(ctx, ns, "macvlan-02", cfg.PodReadyTimeout)).To(Succeed())
-		Expect(waitForNet1IPv6Ready(ctx, f, ns, "macvlan-01", cfg.Macvlan01IPv6)).To(Succeed())
-		Expect(waitForNet1IPv6Ready(ctx, f, ns, "macvlan-02", cfg.Macvlan02IPv6)).To(Succeed())
+		Expect(waitForNet1IPv6Ready(ctx, f, ns, "macvlan-01", cfg.Macvlan01IPv6, cfg.PodReadyTimeout)).To(Succeed())
+		Expect(waitForNet1IPv6Ready(ctx, f, ns, "macvlan-02", cfg.Macvlan02IPv6, cfg.PodReadyTimeout)).To(Succeed())
 
 		By("Disabling IPv6 DAD and re-adding addresses")
 		Expect(f.EnsureIPv6NoDad(ctx, ns, "macvlan-01", cfg.Macvlan01IPv6, "net1")).To(Succeed())
