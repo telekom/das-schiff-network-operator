@@ -240,7 +240,7 @@ func TestCRAVSR_Reconcile_ErrorPropagation(t *testing.T) {
 
 // TestCRAVSR_Reconcile_NoRestoreOnFailure verifies the key VSR invariant:
 // when reconciliation fails, the previous config is NOT reapplied (no restore).
-// This is the opposite of FRR-like behavior (RestoreOnReconcileFailure=false).
+// FRR-like reconcilers restore on failure; VSR intentionally sets RestoreOnReconcileFailure=false.
 func TestCRAVSR_Reconcile_NoRestoreOnFailure(t *testing.T) {
 	t.Setenv("NODE_NAME", "test-node")
 
