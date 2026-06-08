@@ -276,7 +276,7 @@ type trackingCRAManager struct {
 }
 
 func (m *trackingCRAManager) ApplyConfiguration(_ context.Context, _ *v1alpha1.NodeNetworkConfigSpec) error {
-	*m.callsPtr++
+	(*m.callsPtr)++
 	return m.err
 }
 
