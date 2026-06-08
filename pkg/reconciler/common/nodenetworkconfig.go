@@ -414,3 +414,8 @@ func SetStatusWithError(
 
 	return nil
 }
+
+// GetNodeNetworkConfig returns the in-memory NodeNetworkConfig used by this reconciler.
+func (r *NodeNetworkConfigReconciler) GetNodeNetworkConfig() *v1alpha1.NodeNetworkConfig {
+	return r.NodeNetworkConfig
+}
