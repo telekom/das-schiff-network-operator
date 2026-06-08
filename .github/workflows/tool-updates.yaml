@@ -27,7 +27,7 @@ jobs:
         run: |
           if [ ! -f versions.env ]; then
             echo "versions.env not found — skipping update check"
-            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           # Parse only KEY=VALUE lines to avoid executing arbitrary shell content.
@@ -48,15 +48,15 @@ jobs:
           kustomize_ver=$(get_version KUSTOMIZE_VERSION) || true
           controller_tools_ver=$(get_version CONTROLLER_TOOLS_VERSION) || true
           golangci_lint_ver=$(get_version GOLANGCI_LINT_VERSION) || true
-          echo "skip=false" >> $GITHUB_OUTPUT
+          echo "skip=false" >> "$GITHUB_OUTPUT"
           if [ -n "$kustomize_ver" ]; then
-            echo "kustomize=$kustomize_ver" >> $GITHUB_OUTPUT
+            echo "kustomize=$kustomize_ver" >> "$GITHUB_OUTPUT"
           fi
           if [ -n "$controller_tools_ver" ]; then
-            echo "controller_tools=$controller_tools_ver" >> $GITHUB_OUTPUT
+            echo "controller_tools=$controller_tools_ver" >> "$GITHUB_OUTPUT"
           fi
           if [ -n "$golangci_lint_ver" ]; then
-            echo "golangci_lint=$golangci_lint_ver" >> $GITHUB_OUTPUT
+            echo "golangci_lint=$golangci_lint_ver" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Check for updates
@@ -97,7 +97,7 @@ jobs:
           check_github_release "golangci/golangci-lint" "${{ steps.versions.outputs.golangci_lint }}" "golangci-lint"
 
           if [ "$found_any" = "true" ]; then
-            echo "found=true" >> $GITHUB_OUTPUT
+            echo "found=true" >> "$GITHUB_OUTPUT"
             # Write updates.md only when there are actual updates to report.
             {
               echo "## Tool Update Report"
@@ -112,7 +112,7 @@ jobs:
             cat updates.md
           fi
           if [ "$check_failed" = "true" ]; then
-            echo "check_failed=true" >> $GITHUB_OUTPUT
+            echo "check_failed=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Create or update issue
