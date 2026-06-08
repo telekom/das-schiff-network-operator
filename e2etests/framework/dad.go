@@ -123,6 +123,8 @@ func (f *Framework) readdIPv6Address(ctx context.Context, namespace, podName, ci
 	}
 
 	if noDAD {
+		// iproute2 and BusyBox differ on nodad support and argument ordering.
+		// Prefer disabling DAD, but keep E2E setup usable with minimal pod images.
 		if err := f.addIPv6Address(ctx, namespace, podName, cidr, ifName, []string{"dev", ifName, "nodad"}); err == nil {
 			return nil
 		}
