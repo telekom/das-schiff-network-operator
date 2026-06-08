@@ -49,9 +49,10 @@ var _ = Describe("Gateway Connectivity", Label("gateway", "smoke"), func() {
 				"k8s.v1.cni.cncf.io/networks": fmt.Sprintf(
 					`[{"name": "macvlan-vlan501", "ips": ["%s/24", "%s/64"]}]`,
 					cfg.Macvlan01IPv4, cfg.Macvlan01IPv6),
-			})).To(Succeed())
+			}, framework.WithNetAdmin())).To(Succeed())
 
 			Expect(f.WaitForPodReady(ctx, ns, "macvlan-01", cfg.PodReadyTimeout)).To(Succeed())
+			Expect(waitForNet1IPv6Ready(ctx, f, ns, "macvlan-01", cfg.Macvlan01IPv6)).To(Succeed())
 
 			By("Verifying macvlan-01 can ping m2mgw (IPv4)")
 			result, err := f.PingFromPod(ctx, ns, "macvlan-01", cfg.M2MGWIPv4, 5)
@@ -92,9 +93,10 @@ var _ = Describe("Gateway Connectivity", Label("gateway", "smoke"), func() {
 				"k8s.v1.cni.cncf.io/networks": fmt.Sprintf(
 					`[{"name": "macvlan-vlan503", "ips": ["%s/24", "%s/64"]}]`,
 					cfg.Macvlan04IPv4, cfg.Macvlan04IPv6),
-			})).To(Succeed())
+			}, framework.WithNetAdmin())).To(Succeed())
 
 			Expect(f.WaitForPodReady(ctx, ns, "macvlan-04", cfg.PodReadyTimeout)).To(Succeed())
+			Expect(waitForNet1IPv6Ready(ctx, f, ns, "macvlan-04", cfg.Macvlan04IPv6)).To(Succeed())
 
 			By("Verifying macvlan-04 can ping c2mgw (IPv4)")
 			result, err := f.PingFromPod(ctx, ns, "macvlan-04", cfg.C2MGWIPv4, 5)
@@ -135,17 +137,19 @@ var _ = Describe("Gateway Connectivity", Label("gateway", "smoke"), func() {
 				"k8s.v1.cni.cncf.io/networks": fmt.Sprintf(
 					`[{"name": "macvlan-vlan501", "ips": ["%s/24", "%s/64"]}]`,
 					cfg.Macvlan01IPv4, cfg.Macvlan01IPv6),
-			})).To(Succeed())
+			}, framework.WithNetAdmin())).To(Succeed())
 
 			By("Creating macvlan-04 on worker-2 (VLAN 503, c2m)")
 			Expect(f.CreateTestPod(ctx, ns, "macvlan-04", cfg.WorkerNode2, map[string]string{
 				"k8s.v1.cni.cncf.io/networks": fmt.Sprintf(
 					`[{"name": "macvlan-vlan503", "ips": ["%s/24", "%s/64"]}]`,
 					cfg.Macvlan04IPv4, cfg.Macvlan04IPv6),
-			})).To(Succeed())
+			}, framework.WithNetAdmin())).To(Succeed())
 
 			Expect(f.WaitForPodReady(ctx, ns, "macvlan-01", cfg.PodReadyTimeout)).To(Succeed())
 			Expect(f.WaitForPodReady(ctx, ns, "macvlan-04", cfg.PodReadyTimeout)).To(Succeed())
+			Expect(waitForNet1IPv6Ready(ctx, f, ns, "macvlan-01", cfg.Macvlan01IPv6)).To(Succeed())
+			Expect(waitForNet1IPv6Ready(ctx, f, ns, "macvlan-04", cfg.Macvlan04IPv6)).To(Succeed())
 
 			By("Verifying m2mgw CANNOT reach c2m pod macvlan-04 (IPv4)")
 			result, _ := f.PingFromCluster2Pod(ctx, "e2e-gateways", "m2m-gateway", cfg.Macvlan04IPv4, 3)
