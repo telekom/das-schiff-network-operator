@@ -14,12 +14,47 @@ on:
 
 permissions:
   contents: read
+  issues: write
   pull-requests: write
 
 jobs:
+  ensure-labels:
+    name: Ensure Labels Exist
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create missing labels
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ensure_label() {
+            local name="$1"
+            local color="$2"
+            local description="$3"
+            if gh label view "$name" >/dev/null 2>&1; then
+              gh label edit "$name" --color "$color" --description "$description"
+            else
+              gh label create "$name" --color "$color" --description "$description"
+            fi
+          }
+
+          ensure_label "api" "ededed" "API changes"
+          ensure_label "controller" "ededed" "Controller changes"
+          ensure_label "documentation" "0075ca" "Improvements or additions to documentation"
+          ensure_label "ci" "ededed" "CI/CD changes"
+          ensure_label "tests" "ededed" "Test changes"
+          ensure_label "dependencies" "ededed" "Dependency changes"
+          ensure_label "config" "ededed" "Configuration changes"
+          ensure_label "pkg" "ededed" "Package or networking changes"
+          ensure_label "size/XS" "ededed" "Extra small PR"
+          ensure_label "size/S" "ededed" "Small PR"
+          ensure_label "size/M" "ededed" "Medium PR"
+          ensure_label "size/L" "ededed" "Large PR"
+          ensure_label "size/XL" "ededed" "Extra large PR"
+
   labeler:
     name: Add Labels to PR
     runs-on: ubuntu-latest
+    needs: ensure-labels
     steps:
       - name: Add labels based on changed files
         uses: actions/labeler@634933edcd8ababfe52f92936142cc22ac488b1b # v6.0.1
@@ -30,6 +65,7 @@ jobs:
   size-label:
     name: Add Size Label
     runs-on: ubuntu-latest
+    needs: ensure-labels
     steps:
       - name: Add size label
         uses: codelytv/pr-size-labeler@4ec67706cd878fbc1c8db0a5dcd28b6bb412e85a # v1.10.3
