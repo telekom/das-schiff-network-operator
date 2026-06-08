@@ -120,6 +120,20 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          ensure_label() {
+            local name="$1"
+            local color="$2"
+            local description="$3"
+            if gh label view "$name" >/dev/null 2>&1; then
+              gh label edit "$name" --color "$color" --description "$description"
+            else
+              gh label create "$name" --color "$color" --description "$description"
+            fi
+          }
+
+          ensure_label "dependencies" "ededed" "Dependency changes"
+          ensure_label "automation" "ededed" "Automation-generated issue"
+
           ISSUE_TITLE="🔧 Tool Updates Available"
           EXISTING_ISSUE=$(gh issue list --label "dependencies" --label "automation" --state open --search "in:title $ISSUE_TITLE" --json number --jq '.[0].number // empty' || echo "")
           if [ -n "$EXISTING_ISSUE" ]; then
