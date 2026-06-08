@@ -45,18 +45,20 @@ var _ = Describe("L3 Connectivity", Label("l3", "smoke"), func() {
 			"k8s.v1.cni.cncf.io/networks": fmt.Sprintf(
 				`[{"name": "macvlan-vlan501", "ips": ["%s/24", "%s/64"]}]`,
 				cfg.Macvlan01IPv4, cfg.Macvlan01IPv6),
-		})).To(Succeed())
+		}, framework.WithNetAdmin())).To(Succeed())
 
 		By("Creating macvlan-03 on worker-2 (VLAN 502, m2m)")
 		Expect(f.CreateTestPod(ctx, ns, "macvlan-03", cfg.WorkerNode2, map[string]string{
 			"k8s.v1.cni.cncf.io/networks": fmt.Sprintf(
 				`[{"name": "macvlan-vlan502", "ips": ["%s/24", "%s/64"]}]`,
 				cfg.Macvlan03IPv4, cfg.Macvlan03IPv6),
-		})).To(Succeed())
+		}, framework.WithNetAdmin())).To(Succeed())
 
 		By("Waiting for pods to be ready")
 		Expect(f.WaitForPodReady(ctx, ns, "macvlan-01", cfg.PodReadyTimeout)).To(Succeed())
 		Expect(f.WaitForPodReady(ctx, ns, "macvlan-03", cfg.PodReadyTimeout)).To(Succeed())
+		Expect(waitForNet1IPv6Ready(ctx, f, ns, "macvlan-01", cfg.Macvlan01IPv6)).To(Succeed())
+		Expect(waitForNet1IPv6Ready(ctx, f, ns, "macvlan-03", cfg.Macvlan03IPv6)).To(Succeed())
 
 		By("Verifying IPv4 cross-VLAN connectivity: macvlan-01 (501) → macvlan-03 (502)")
 		result, err := f.PingFromPod(ctx, ns, "macvlan-01", cfg.Macvlan03IPv4, 5)
