@@ -79,14 +79,14 @@ func parseIPv6DADState(ipAddrOutput, ipv6Addr string) (string, ipv6DADState, boo
 func (f *Framework) resetIPv6AddressWithoutDAD(ctx context.Context, namespace, podName, cidr, ifName string) error {
 	previous, err := f.readIPv6AcceptDAD(ctx, namespace, podName, ifName)
 	if err != nil {
-		return err
+		return f.readdIPv6Address(ctx, namespace, podName, cidr, ifName, true)
 	}
 
 	if err := f.writeIPv6AcceptDAD(ctx, namespace, podName, ifName, "0"); err != nil {
-		return err
+		return f.readdIPv6Address(ctx, namespace, podName, cidr, ifName, true)
 	}
 
-	if err := f.readdIPv6Address(ctx, namespace, podName, cidr, ifName); err != nil {
+	if err := f.readdIPv6Address(ctx, namespace, podName, cidr, ifName, false); err != nil {
 		_ = f.writeIPv6AcceptDAD(ctx, namespace, podName, ifName, previous)
 		return err
 	}
@@ -114,7 +114,7 @@ func (f *Framework) writeIPv6AcceptDAD(ctx context.Context, namespace, podName, 
 	return nil
 }
 
-func (f *Framework) readdIPv6Address(ctx context.Context, namespace, podName, cidr, ifName string) error {
+func (f *Framework) readdIPv6Address(ctx context.Context, namespace, podName, cidr, ifName string, noDAD bool) error {
 	_, stderr, err := f.ExecInPod(ctx, namespace, podName, "", []string{
 		"ip", "-6", "addr", "del", cidr, "dev", ifName,
 	})
@@ -122,9 +122,11 @@ func (f *Framework) readdIPv6Address(ctx context.Context, namespace, podName, ci
 		return fmt.Errorf("remove tentative IPv6 address %s from %s failed (stderr=%s): %w", cidr, ifName, stderr, err)
 	}
 
-	_, stderr, err = f.ExecInPod(ctx, namespace, podName, "", []string{
-		"ip", "-6", "addr", "add", cidr, "dev", ifName,
-	})
+	args := []string{"ip", "-6", "addr", "add", cidr, "dev", ifName}
+	if noDAD {
+		args = append(args, "nodad")
+	}
+	_, stderr, err = f.ExecInPod(ctx, namespace, podName, "", args)
 	if err != nil {
 		return fmt.Errorf("re-add IPv6 address %s to %s failed (stderr=%s): %w", cidr, ifName, stderr, err)
 	}
