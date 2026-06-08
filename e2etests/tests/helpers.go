@@ -21,6 +21,6 @@ func readTestdata(path string) ([]byte, error) {
 	return os.ReadFile("testdata/" + path)
 }
 
-func waitForNet1IPv6Ready(ctx context.Context, f *framework.Framework, namespace, podName, ipv6Addr string) error {
-	return f.WaitForIPv6DADComplete(ctx, namespace, podName, ipv6Addr, "net1", 30*time.Second)
+func waitForNet1IPv6Ready(ctx context.Context, f *framework.Framework, namespace, podName, ipv6Addr string, timeout time.Duration) error {
+	return f.WaitForIPv6DADComplete(ctx, namespace, podName, ipv6Addr, "net1", timeout)
 }

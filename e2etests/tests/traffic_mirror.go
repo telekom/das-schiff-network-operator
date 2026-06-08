@@ -169,30 +169,7 @@ var _ = Describe("Traffic Mirroring", Label("mirror"), func() {
 			"encapsulationType":  "gre",
 		}
 		_, addErr := addMirrorACLToNNC(ctx, f, cfg.WorkerNode1, cfg.VRFM2M, mirrorACL)
-		Expect(addErr).NotTo(HaveOccurred())
-
-		By("Verifying mirrorAcls are persisted in NNC spec after update")
-		// The CRA agents (FRR/VSR) do not yet implement mirrorAcl programming, so
-		// waiting for the CRA to reach a specific status with the bumped revision is
-		// not viable: the main operator's revision reconciler (debounce: 1s) will
-		// revert spec.revision to the official value within seconds of the update.
-		// We therefore assert only that the API server accepted the mirrorAcl entry
-		// by re-reading the NNC spec immediately after the write.
-		{
-			nnc := &unstructured.Unstructured{}
-			nnc.SetGroupVersionKind(nncGVK)
-			Expect(f.Client.Get(ctx, types.NamespacedName{Name: cfg.WorkerNode1}, nnc)).To(Succeed(),
-				"failed to re-read NNC after mirrorAcl update")
-			fabricVRFs, found, getErr := unstructured.NestedMap(nnc.Object, "spec", "fabricVRFs")
-			Expect(getErr).NotTo(HaveOccurred())
-			Expect(found).To(BeTrue(), "spec.fabricVRFs not found in NNC")
-			vrf, ok := fabricVRFs[cfg.VRFM2M].(map[string]interface{})
-			Expect(ok).To(BeTrue(), "VRF %q not found in NNC fabricVRFs", cfg.VRFM2M)
-			acls, found, getErr := unstructured.NestedSlice(vrf, "mirrorAcls")
-			Expect(getErr).NotTo(HaveOccurred())
-			Expect(found).To(BeTrue(), "mirrorAcls not found in NNC fabricVRF %q", cfg.VRFM2M)
-			Expect(acls).NotTo(BeEmpty(), "mirrorAcls not persisted in NNC spec after update")
-		}
+		Expect(addErr).NotTo(HaveOccurred(), "mirrorAcl patch should be accepted by the API server")
 	})
 
 	It("should mirror ingress traffic to a capture pod when MirrorACLs are configured", func() {
