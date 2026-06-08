@@ -3,9 +3,11 @@ package tests
 import (
 	"context"
 	"fmt"
+	"reflect"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/telekom/das-schiff-network-operator/e2etests/config"
 	"github.com/telekom/das-schiff-network-operator/e2etests/framework"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -71,13 +73,17 @@ func addMirrorACLToNNC(ctx context.Context, f *framework.Framework, nodeName, vr
 		return "", fmt.Errorf("bump revision: %w", err)
 	}
 
-	return newRev, f.Client.Patch(ctx, nnc, client.MergeFrom(base))
+	if err := f.Client.Patch(ctx, nnc, client.MergeFrom(base)); err != nil {
+		return "", fmt.Errorf("patch NNC %s mirrorACL: %w", nodeName, err)
+	}
+
+	return newRev, nil
 }
 
-// removeMirrorACLsFromNNC reads the NNC for the given node, removes all mirrorAcls
-// from spec.fabricVRFs[vrfName], and patches the object using a merge-patch (MergeFrom).
+// removeMirrorACLFromNNC reads the NNC for the given node, removes the mirrorACL
+// added by this test, and patches the object using a merge-patch (MergeFrom).
 // Using Patch instead of Update avoids resourceVersion conflicts from concurrent status updates.
-func removeMirrorACLsFromNNC(ctx context.Context, f *framework.Framework, nodeName, vrfName string) error {
+func removeMirrorACLFromNNC(ctx context.Context, f *framework.Framework, nodeName, vrfName string, mirrorACL map[string]interface{}) error {
 	nnc := &unstructured.Unstructured{}
 	nnc.SetGroupVersionKind(nncGVK)
 	if err := f.Client.Get(ctx, types.NamespacedName{Name: nodeName}, nnc); err != nil {
@@ -100,7 +106,26 @@ func removeMirrorACLsFromNNC(ctx context.Context, f *framework.Framework, nodeNa
 		return nil
 	}
 
-	delete(vrf, "mirrorAcls")
+	existing, ok := vrf["mirrorAcls"].([]interface{})
+	if !ok {
+		return nil
+	}
+
+	remaining := make([]interface{}, 0, len(existing))
+	for _, acl := range existing {
+		if reflect.DeepEqual(acl, mirrorACL) {
+			continue
+		}
+		remaining = append(remaining, acl)
+	}
+	if len(remaining) == len(existing) {
+		return nil
+	}
+	if len(remaining) == 0 {
+		delete(vrf, "mirrorAcls")
+	} else {
+		vrf["mirrorAcls"] = remaining
+	}
 	fabricVRFs[vrfName] = vrf
 
 	if err := unstructured.SetNestedMap(nnc.Object, fabricVRFs, "spec", "fabricVRFs"); err != nil {
@@ -121,6 +146,17 @@ func removeMirrorACLsFromNNC(ctx context.Context, f *framework.Framework, nodeNa
 	}
 
 	return f.Client.Patch(ctx, nnc, client.MergeFrom(base))
+}
+
+func testMirrorACL(cfg *config.Config) map[string]interface{} {
+	return map[string]interface{}{
+		"trafficMatch": map[string]interface{}{
+			"srcPrefix": cfg.Macvlan01IPv4 + "/32",
+		},
+		"destinationAddress": cfg.Macvlan02IPv4,
+		"destinationVrf":     cfg.VRFM2M,
+		"encapsulationType":  "gre",
+	}
 }
 
 // verifyMirrorCapture verifies that traffic is mirrored to a capture pod.
@@ -152,22 +188,14 @@ var _ = Describe("Traffic Mirroring", Label("mirror"), func() {
 
 		By("Cleaning up traffic mirror configuration (removing mirrorAcls from NNC)")
 		cfg := f.Config
-		_ = removeMirrorACLsFromNNC(ctx, f, cfg.WorkerNode1, cfg.VRFM2M)
+		_ = removeMirrorACLFromNNC(ctx, f, cfg.WorkerNode1, cfg.VRFM2M, testMirrorACL(cfg))
 	})
 
 	It("should persist MirrorACLs in NNC spec when configured", func() {
 		cfg := f.Config
 
 		By("Adding MirrorACL to NNC for worker-1 via read-modify-write")
-		srcPrefix := cfg.Macvlan01IPv4 + "/32"
-		mirrorACL := map[string]interface{}{
-			"trafficMatch": map[string]interface{}{
-				"srcPrefix": srcPrefix,
-			},
-			"destinationAddress": cfg.Macvlan02IPv4,
-			"destinationVrf":     cfg.VRFM2M,
-			"encapsulationType":  "gre",
-		}
+		mirrorACL := testMirrorACL(cfg)
 		_, addErr := addMirrorACLToNNC(ctx, f, cfg.WorkerNode1, cfg.VRFM2M, mirrorACL)
 		Expect(addErr).NotTo(HaveOccurred(), "mirrorAcl patch should be accepted by the API server")
 	})
