@@ -5,9 +5,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
-	"github.com/telekom/das-schiff-network-operator/e2etests/config"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -18,6 +18,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/telekom/das-schiff-network-operator/e2etests/config"
 )
 
 // Global is the shared framework instance, set during BeforeSuite.
@@ -31,6 +33,7 @@ type Framework struct {
 
 	// Cluster-2 (gateway cluster) clients — initialized when Cluster2Kubeconfig is set.
 	Cluster2KubeClient kubernetes.Interface
+	cluster2Client     client.Client
 
 	// Track namespaces created during tests for cleanup.
 	testNamespaces []string
@@ -71,11 +74,52 @@ func (f *Framework) InitCluster2() error {
 	if err != nil {
 		return fmt.Errorf("create cluster2 kubernetes client: %w", err)
 	}
+	f.cluster2Client, err = client.New(restCfg, client.Options{})
+	if err != nil {
+		return fmt.Errorf("create cluster2 controller-runtime client: %w", err)
+	}
 	return nil
 }
 
+// Cluster2Client returns the controller-runtime client for cluster-2.
+func (f *Framework) Cluster2Client() client.Client {
+	return f.cluster2Client
+}
+
+// ObjectKey returns a client.ObjectKey for the given namespace and name.
+func ObjectKey(namespace, name string) types.NamespacedName {
+	return types.NamespacedName{Namespace: namespace, Name: name}
+}
+
 // CreateNamespace creates a namespace and tracks it for cleanup.
+// If the namespace is in Terminating state, it waits (up to 60s, ctx-bounded) for it to be gone.
+// Only namespaces actually created by this call are tracked for cleanup.
 func (f *Framework) CreateNamespace(ctx context.Context, name string) error {
+	// If namespace is terminating from a previous test, wait for it to be gone.
+	deadline := time.Now().Add(60 * time.Second)
+	for {
+		existing := &corev1.Namespace{}
+		if err := f.Client.Get(ctx, types.NamespacedName{Name: name}, existing); err != nil {
+			if apierrors.IsNotFound(err) {
+				break
+			}
+			return err
+		}
+		if existing.Status.Phase != corev1.NamespaceTerminating {
+			// Namespace exists and is active — do not track for cleanup to avoid
+			// accidentally deleting a namespace not created by this test run.
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("namespace %q still Terminating after 60s", name)
+		}
+		select {
+		case <-time.After(1 * time.Second):
+		case <-ctx.Done():
+			return fmt.Errorf("context cancelled while waiting for namespace %q to terminate: %w", name, ctx.Err())
+		}
+	}
+
 	ns := &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{Name: name},
 	}
@@ -83,9 +127,19 @@ func (f *Framework) CreateNamespace(ctx context.Context, name string) error {
 		if !apierrors.IsAlreadyExists(err) {
 			return err
 		}
+		// Created between our Get and Create — not tracked since we didn't create it.
+		return nil
 	}
+	// Only track namespaces we actually created.
 	f.testNamespaces = append(f.testNamespaces, name)
 	return nil
+}
+
+// DeleteNamespace deletes a namespace. Subsequent CreateNamespace calls for the
+// same name will wait for termination to complete before recreating.
+func (f *Framework) DeleteNamespace(ctx context.Context, name string) error {
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name}}
+	return client.IgnoreNotFound(f.Client.Delete(ctx, ns))
 }
 
 // CleanupTestNamespaces deletes all namespaces created during the test run.
@@ -144,18 +198,59 @@ func (f *Framework) applySingleObject(ctx context.Context, yamlData []byte, ns s
 		obj.SetNamespace(ns)
 	}
 
-	// Try to get existing object first; if it exists, update it.
-	existing := obj.DeepCopy()
 	key := types.NamespacedName{
 		Name:      obj.GetName(),
 		Namespace: obj.GetNamespace(),
 	}
-	if err := f.Client.Get(ctx, key, existing); err == nil {
-		obj.SetResourceVersion(existing.GetResourceVersion())
-		return f.Client.Update(ctx, obj)
-	}
 
-	return f.Client.Create(ctx, obj)
+	// Retry on conflict (operator may update resource version concurrently)
+	// and on transient webhook failures (connection reset after operator restart).
+	for attempt := 0; attempt < 10; attempt++ {
+		existing := obj.DeepCopy()
+		if err := f.Client.Get(ctx, key, existing); err == nil {
+			obj.SetResourceVersion(existing.GetResourceVersion())
+			err = f.Client.Update(ctx, obj)
+			if apierrors.IsConflict(err) || isWebhookTransient(err) {
+				time.Sleep(time.Duration(attempt+1) * 500 * time.Millisecond)
+				continue
+			}
+			return err
+		} else if !apierrors.IsNotFound(err) {
+			if isWebhookTransient(err) {
+				time.Sleep(time.Duration(attempt+1) * 500 * time.Millisecond)
+				continue
+			}
+			return fmt.Errorf("get %s/%s: %w", obj.GetKind(), obj.GetName(), err)
+		}
+		err = f.Client.Create(ctx, obj)
+		if isWebhookTransient(err) {
+			time.Sleep(time.Duration(attempt+1) * 500 * time.Millisecond)
+			continue
+		}
+		if apierrors.IsAlreadyExists(err) || apierrors.IsConflict(err) {
+			// Race: object was created between our Get and Create; retry the loop.
+			time.Sleep(500 * time.Millisecond)
+			continue
+		}
+		return err
+	}
+	return fmt.Errorf("failed to apply %s/%s after retries", obj.GetKind(), obj.GetName())
+}
+
+// isWebhookTransient returns true for transient webhook errors (connection reset,
+// refused, EOF) that occur briefly after an operator restart.
+func isWebhookTransient(err error) bool {
+	if err == nil {
+		return false
+	}
+	if apierrors.IsInternalError(err) {
+		msg := err.Error()
+		return strings.Contains(msg, "connection reset by peer") ||
+			strings.Contains(msg, "connection refused") ||
+			strings.Contains(msg, "EOF") ||
+			strings.Contains(msg, "webhook")
+	}
+	return false
 }
 
 // splitYAMLDocuments splits multi-document YAML into individual documents.
@@ -179,12 +274,14 @@ func (f *Framework) DeleteManifest(ctx context.Context, yamlData []byte) error {
 
 // DeleteManifestInNamespace deletes a YAML manifest with a namespace override.
 // If ns is non-empty, it overrides metadata.namespace on each object before deletion.
+// Deletes in reverse order to respect dependency ordering (dependents before parents).
 func (f *Framework) DeleteManifestInNamespace(ctx context.Context, yamlData []byte, ns string) error {
 	docs := splitYAMLDocuments(yamlData)
-	for _, doc := range docs {
+	// Delete in reverse order so dependents are removed before their references.
+	for i := len(docs) - 1; i >= 0; i-- {
 		obj := &unstructured.Unstructured{}
 		dec := yaml.NewDecodingSerializer(unstructured.UnstructuredJSONScheme)
-		if _, _, err := dec.Decode(doc, nil, obj); err != nil {
+		if _, _, err := dec.Decode(docs[i], nil, obj); err != nil {
 			return fmt.Errorf("decode manifest: %w", err)
 		}
 		if ns != "" {
@@ -195,6 +292,12 @@ func (f *Framework) DeleteManifestInNamespace(ctx context.Context, yamlData []by
 		}
 	}
 	return nil
+}
+
+// DynamicGet fetches an unstructured object by namespace and name.
+// The caller must set the GVK on obj before calling.
+func (f *Framework) DynamicGet(ctx context.Context, namespace, name string, obj *unstructured.Unstructured) error {
+	return f.Client.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, obj)
 }
 
 // WaitForNodesReady waits for all nodes to report Ready.
@@ -239,5 +342,23 @@ func (f *Framework) WaitForDaemonSetReady(namespace, name string, timeout time.D
 		}
 		return ds.Status.DesiredNumberScheduled > 0 &&
 			ds.Status.DesiredNumberScheduled == ds.Status.NumberReady, nil
+	})
+}
+
+// WaitForDeploymentReady waits for a Deployment to have all replicas available.
+func (f *Framework) WaitForDeploymentReady(namespace, name string, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	return Poll(ctx, 5*time.Second, func() (bool, error) {
+		deploy, err := f.KubeClient.AppsV1().Deployments(namespace).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return false, nil
+		}
+		if deploy.Spec.Replicas == nil {
+			return false, nil
+		}
+		return deploy.Status.AvailableReplicas == *deploy.Spec.Replicas &&
+			deploy.Status.UpdatedReplicas == *deploy.Spec.Replicas, nil
 	})
 }

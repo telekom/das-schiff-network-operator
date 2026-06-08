@@ -7,6 +7,7 @@ import (
 
 	. "github.com/onsi/gomega"
 	"github.com/sirupsen/logrus"
+
 	"github.com/telekom/das-schiff-network-operator/pkg/network/netplan"
 )
 

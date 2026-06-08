@@ -10,6 +10,7 @@ import (
 	netwrangler "github.com/rackn/netwrangler/netplan"
 	"github.com/rackn/netwrangler/util"
 	"github.com/sirupsen/logrus"
+
 	"github.com/telekom/das-schiff-network-operator/pkg/helpers/slice"
 	"github.com/telekom/das-schiff-network-operator/pkg/network/netplan"
 )
@@ -106,12 +107,9 @@ func (config *Config) Apply() (applyErr netplan.Error) {
 	if nperr != nil {
 		return nperr
 	}
-	virtualInterfacesToRemove, err := netplan.GetChangedVirtualInterfaces(source, target)
-	if err != nil {
-		return netplan.ParseError(err)
-	}
+	virtualInterfacesToRemove := netplan.GetRemovedVirtualInterfaces(source, target)
 	if len(virtualInterfacesToRemove) > 0 {
-		config.log.Warnf("removing existing links for virtual interfaces before netplan apply")
+		config.log.Warnf("removing links for virtual interfaces removed from configuration before netplan apply")
 		for _, link := range virtualInterfacesToRemove {
 			config.log.Warnf("would remove link %s if not dummy", link.Name)
 		}

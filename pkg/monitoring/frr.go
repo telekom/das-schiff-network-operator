@@ -6,11 +6,12 @@ import (
 	"sync"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"golang.org/x/sys/unix"
+	ctrl "sigs.k8s.io/controller-runtime"
+
 	"github.com/telekom/das-schiff-network-operator/pkg/frr"
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
 	"github.com/telekom/das-schiff-network-operator/pkg/route"
-	"golang.org/x/sys/unix"
-	ctrl "sigs.k8s.io/controller-runtime"
 )
 
 const secondToMillisecond = 1000

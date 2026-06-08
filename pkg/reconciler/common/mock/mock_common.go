@@ -8,8 +8,9 @@ import (
 	context "context"
 	reflect "reflect"
 
-	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	gomock "go.uber.org/mock/gomock"
+
+	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 )
 
 // MockConfigApplier is a mock of ConfigApplier interface.

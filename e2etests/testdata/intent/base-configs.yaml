@@ -1,0 +1,201 @@
+# Base VRFs, Networks, and Destinations for E2E intent tests.
+# These mirror the existing e2e network-operator-configs.yaml but using intent CRDs.
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: VRF
+metadata:
+  name: vrf-m2m
+  namespace: default
+spec:
+  vrf: "m2m"
+  vni: 2002026
+  routeTarget: "65188:2026"
+---
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: VRF
+metadata:
+  name: vrf-c2m
+  namespace: default
+spec:
+  vrf: "c2m"
+  vni: 2002027
+  routeTarget: "65188:2027"
+---
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Network
+metadata:
+  name: net-vlan501
+  namespace: default
+spec:
+  vlan: 501
+  vni: 4000002
+  ipv4:
+    cidr: "10.250.0.1/24"
+  ipv6:
+    cidr: "fd94:685b:30cf:501::1/64"
+---
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Network
+metadata:
+  name: net-vlan502
+  namespace: default
+spec:
+  vlan: 502
+  vni: 4000003
+  ipv4:
+    cidr: "10.250.1.1/24"
+  ipv6:
+    cidr: "fd94:685b:30cf:502::1/64"
+---
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Network
+metadata:
+  name: net-vlan503
+  namespace: default
+spec:
+  vlan: 503
+  vni: 4000004
+  ipv4:
+    cidr: "10.250.30.1/24"
+  ipv6:
+    cidr: "fd94:685b:30cf:503::1/64"
+---
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Destination
+metadata:
+  name: dest-dcgw
+  namespace: default
+  labels:
+    type: gateway
+spec:
+  vrfRef: "vrf-m2m"
+  prefixes:
+    - "10.102.0.0/16"
+    - "fda5:25c1:193c::/48"
+---
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Destination
+metadata:
+  name: dest-dcgw-c2m
+  namespace: default
+  labels:
+    type: gateway-c2m
+spec:
+  vrfRef: "vrf-c2m"
+  prefixes:
+    - "10.102.1.0/24"
+    - "fda5:25c1:193d::/48"
+---
+# Base L2As: ensure both VRFs have at least one L2A so the intent reconciler
+# creates fabricVRF entries from the start.  Tests that need specific L2A
+# combinations apply their own on top of these.
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Layer2Attachment
+metadata:
+  name: l2a-base-vlan501
+  namespace: default
+spec:
+  networkRef: "net-vlan501"
+  destinations:
+    matchLabels:
+      type: gateway
+---
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Layer2Attachment
+metadata:
+  name: l2a-base-vlan503
+  namespace: default
+spec:
+  networkRef: "net-vlan503"
+  destinations:
+    matchLabels:
+      type: gateway-c2m
+---
+# L2A for VLAN 502 — needed by legacy L3 cross-VLAN test.
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Layer2Attachment
+metadata:
+  name: l2a-base-vlan502
+  namespace: default
+spec:
+  networkRef: "net-vlan502"
+  destinations:
+    matchLabels:
+      type: gateway
+---
+# Outbound for m2m egress — provides SBR policy routes for egress NAT.
+# Calico IPPools and Coil Egress are created by the legacy tests themselves;
+# this CRD ensures the PBR rules exist so traffic from egress IPs hits the right VRF.
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Outbound
+metadata:
+  name: ob-m2m-base
+  namespace: default
+spec:
+  networkRef: "net-vlan501"
+  destinations:
+    matchLabels:
+      type: gateway
+  addresses:
+    ipv4:
+      - "10.250.2.0/30"
+    ipv6:
+      - "fd90:4dbf:396e::/126"
+---
+# Outbound for c2m egress
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Outbound
+metadata:
+  name: ob-c2m-base
+  namespace: default
+spec:
+  networkRef: "net-vlan503"
+  destinations:
+    matchLabels:
+      type: gateway-c2m
+  addresses:
+    ipv4:
+      - "10.250.3.0/30"
+    ipv6:
+      - "fde8:e5cf:d314::/126"
+---
+# Inbound for m2m LB — populates clusterImportCIDRs so kube-vip VIPs
+# leak from the cluster VRF into the m2m VRF.
+# poolName matches the IPAddressPool created by install-components.
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Inbound
+metadata:
+  name: ib-m2m-base
+  namespace: default
+spec:
+  networkRef: "net-vlan501"
+  poolName: "m2m-pool"
+  destinations:
+    matchLabels:
+      type: gateway
+  addresses:
+    ipv4:
+      - "10.250.4.0/24"
+    ipv6:
+      - "fdbb:6b17:90ba::/64"
+  advertisement:
+    type: bgp
+---
+# Inbound for c2m LB
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Inbound
+metadata:
+  name: ib-c2m-base
+  namespace: default
+spec:
+  networkRef: "net-vlan503"
+  poolName: "c2m-pool"
+  destinations:
+    matchLabels:
+      type: gateway-c2m
+  addresses:
+    ipv4:
+      - "10.250.5.0/24"
+    ipv6:
+      - "fdb2:e3e1:fcbf::/64"
+  advertisement:
+    type: bgp

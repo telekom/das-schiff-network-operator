@@ -11,11 +11,12 @@ import (
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
-	"github.com/telekom/das-schiff-network-operator/pkg/config"
-	mock_nl "github.com/telekom/das-schiff-network-operator/pkg/nl/mock"
 	"github.com/vishvananda/netlink"
 	"go.uber.org/mock/gomock"
 	"golang.org/x/sys/unix"
+
+	"github.com/telekom/das-schiff-network-operator/pkg/config"
+	mock_nl "github.com/telekom/das-schiff-network-operator/pkg/nl/mock"
 )
 
 const (
@@ -312,6 +313,15 @@ var _ = Describe("CleanupL3()", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
 		nm := NewManager(netlinkMock, &config.BaseConfig{})
 		netlinkMock.EXPECT().LinkDel(gomock.Any()).Return(nil).Times(3)
+		err := nm.CleanupL3("name")
+		Expect(err).To(BeEmpty())
+	})
+	It("ignores EINVAL and ENODEV errors (link already gone)", func() {
+		mockctrl := gomock.NewController(GinkgoT())
+		defer mockctrl.Finish()
+		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
+		nm := NewManager(netlinkMock, &config.BaseConfig{})
+		netlinkMock.EXPECT().LinkDel(gomock.Any()).Return(unix.EINVAL).Times(3)
 		err := nm.CleanupL3("name")
 		Expect(err).To(BeEmpty())
 	})

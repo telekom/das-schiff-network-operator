@@ -1,0 +1,23 @@
+# Layer2Attachments for both VRFs — validates Destination routing for each VRF.
+# vlan501 → vrf-m2m via dest-dcgw, vlan503 → vrf-c2m via dest-dcgw-c2m
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Layer2Attachment
+metadata:
+  name: l2a-dest-gw-m2m
+  namespace: default
+spec:
+  networkRef: "net-vlan501"
+  destinations:
+    matchLabels:
+      type: gateway
+---
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Layer2Attachment
+metadata:
+  name: l2a-dest-gw-c2m
+  namespace: default
+spec:
+  networkRef: "net-vlan503"
+  destinations:
+    matchLabels:
+      type: gateway-c2m

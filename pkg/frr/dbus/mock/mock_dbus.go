@@ -13,8 +13,9 @@ import (
 	context "context"
 	reflect "reflect"
 
-	dbus "github.com/telekom/das-schiff-network-operator/pkg/frr/dbus"
 	gomock "go.uber.org/mock/gomock"
+
+	dbus "github.com/telekom/das-schiff-network-operator/pkg/frr/dbus"
 )
 
 // MockSystem is a mock of System interface.

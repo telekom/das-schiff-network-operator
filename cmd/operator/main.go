@@ -23,34 +23,36 @@ import (
 	"flag"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
-
-	operator2 "github.com/telekom/das-schiff-network-operator/controllers/operator"
-	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/operator"
-	"github.com/telekom/das-schiff-network-operator/pkg/utils"
-	"sigs.k8s.io/controller-runtime/pkg/healthz"
-	"sigs.k8s.io/controller-runtime/pkg/webhook"
-
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
-	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
-	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
-
-	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
-	"github.com/telekom/das-schiff-network-operator/pkg/version"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.) //nolint:gci
 	// to ensure that exec-entrypoint and run can make use of them.
 	"github.com/open-policy-agent/cert-controller/pkg/rotator"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
-	//nolint:gci // kubebuilder import
-	//+kubebuilder:scaffold:imports
+	"sigs.k8s.io/controller-runtime/pkg/webhook"
+
+	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
+	networkconnector "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
+	intentctrl "github.com/telekom/das-schiff-network-operator/controllers/intent"
+	operator2 "github.com/telekom/das-schiff-network-operator/controllers/operator"
+	"github.com/telekom/das-schiff-network-operator/controllers/platform"
+	intentreconciler "github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent"
+	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/operator"
+	"github.com/telekom/das-schiff-network-operator/pkg/utils"
+	"github.com/telekom/das-schiff-network-operator/pkg/version"
 )
 
 var (
@@ -62,6 +64,7 @@ func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
 	utilruntime.Must(networkv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(networkconnector.AddToScheme(scheme))
 	//+kubebuilder:scaffold:scheme
 }
 
@@ -73,6 +76,8 @@ type operatorConfig struct {
 	disableCertRotation          bool
 	disableRestartOnCertRefresh  bool
 	processImportsAsStaticRoutes bool
+	enableIntentReconciler       bool
+	intentNamespace              string
 	healthAddr                   string
 	metricsAddr                  string
 	webhookAddr                  string
@@ -101,6 +106,11 @@ func parseFlags() *operatorConfig {
 		"Disables operator's restart after certificates refresh was performed.")
 	flag.BoolVar(&cfg.processImportsAsStaticRoutes, "process-imports-as-static-routes", false,
 		"If set to true, the operator will process imports as static routes.")
+	flag.BoolVar(&cfg.enableIntentReconciler, "enable-intent-reconciler", false,
+		"Enable the intent-based reconciler (network-connector.sylvaproject.org CRDs). Disables legacy ConfigReconciler when active.")
+	flag.StringVar(&cfg.intentNamespace, "intent-namespace", "default",
+		"Namespace to watch for intent CRDs. Empty string means all namespaces (cluster-wide). "+
+			"Defaults to 'default' to avoid accidentally reconciling CRDs from all namespaces on first deployment.")
 	flag.StringVar(&cfg.healthAddr, "health-addr", ":7085",
 		"bind address of health/readiness probes")
 	flag.StringVar(&cfg.metricsAddr, "metrics-addr", ":7084",
@@ -133,6 +143,10 @@ func main() {
 		os.Exit(1)
 	}
 
+	certDir := "/tmp/k8s-webhook-server/serving-certs"
+	certPath := filepath.Join(certDir, "tls.crt")
+	keyPath := filepath.Join(certDir, "tls.key")
+
 	options := ctrl.Options{
 		Scheme:                  scheme,
 		LeaderElection:          true,
@@ -145,8 +159,19 @@ func main() {
 		WebhookServer: webhook.NewServer(webhook.Options{
 			Host:    host,
 			Port:    port,
-			CertDir: "/tmp/k8s-webhook-server/serving-certs",
-			TLSOpts: []func(c *tls.Config){func(c *tls.Config) { c.MinVersion = tls.VersionTLS13 }},
+			CertDir: certDir,
+			TLSOpts: []func(*tls.Config){
+				func(c *tls.Config) {
+					c.MinVersion = tls.VersionTLS13
+					c.GetCertificate = func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+						cert, err := tls.LoadX509KeyPair(certPath, keyPath)
+						if err != nil {
+							return nil, fmt.Errorf("webhook cert not yet available: %w", err)
+						}
+						return &cert, nil
+					}
+				},
+			},
 		}),
 	}
 
@@ -165,61 +190,43 @@ func main() {
 		setupLog.Error(err, "unable to set up ready check")
 		os.Exit(1)
 	}
-
-	var setupFinished chan struct{}
+	if err := mgr.AddReadyzCheck("webhook-cert", func(_ *http.Request) error {
+		if _, err := os.Stat(certPath); err != nil {
+			return fmt.Errorf("webhook cert not yet available: %w", err)
+		}
+		return nil
+	}); err != nil {
+		setupLog.Error(err, "unable to set up webhook cert readiness check")
+		os.Exit(1)
+	}
 
 	if !cfg.disableCertRotation {
-		setupFinished, err = setupRotator(mgr, cfg.disableRestartOnCertRefresh)
-		if err != nil {
+		if err := setupRotator(mgr, cfg.disableRestartOnCertRefresh); err != nil {
 			setupLog.Error(err, "failed to setup add Rotator")
 			os.Exit(1)
 		}
 	}
 
-	setupErr := make(chan error)
-
-	go func() {
-		setupErr <- setupReconcilers(mgr, cfg.apiTimeout, cfg.configTimeout, cfg.preconfigTimeout, cfg.maxUpdating, cfg.processImportsAsStaticRoutes, setupFinished)
-		close(setupErr)
-	}()
+	// Register all controllers and webhooks BEFORE starting the manager.
+	// controller-runtime requires SetupWithManager calls to happen before
+	// mgr.Start() so that informers are properly registered and started.
+	if err := setupReconcilers(mgr, cfg); err != nil {
+		setupLog.Error(err, "unable to setup reconcilers")
+		os.Exit(1)
+	}
 
 	ctx, cancel := context.WithCancel(ctrl.SetupSignalHandler())
 
 	setupLog.Info("starting manager")
-	mgrErr := make(chan error)
-	go func() {
-		if err := mgr.Start(ctx); err != nil {
-			mgrErr <- err
-		}
-		close(mgrErr)
-	}()
-
-	if err := waitForExit(setupErr, mgrErr, cancel); err != nil {
-		setupLog.Error(err, "error")
+	if err := mgr.Start(ctx); err != nil {
+		cancel()
+		setupLog.Error(err, "manager error")
 		os.Exit(1)
 	}
-
-	os.Exit(0)
+	cancel()
 }
 
-func waitForExit(setupErr, mgrErr chan error, cancel context.CancelFunc) error {
-	for {
-		select {
-		case err := <-setupErr:
-			if err != nil {
-				setupLog.Error(err, "unable to setup reconcilers")
-				cancel()
-			}
-		case err := <-mgrErr:
-			if err != nil {
-				return fmt.Errorf("manager error: %w", err)
-			}
-			return nil
-		}
-	}
-}
-
-func setupRotator(mgr ctrl.Manager, disableRestartOnCertRefresh bool) (chan struct{}, error) {
+func setupRotator(mgr ctrl.Manager, disableRestartOnCertRefresh bool) error {
 	webhooks := []rotator.WebhookInfo{
 		{
 			Name: "network-operator-validating-webhook-configuration",
@@ -250,46 +257,119 @@ func setupRotator(mgr ctrl.Manager, disableRestartOnCertRefresh bool) (chan stru
 		RestartOnSecretRefresh: !disableRestartOnCertRefresh,
 	}); err != nil {
 		close(setupFinished)
-		return nil, fmt.Errorf("unable to set up cert rotation: %w", err)
+		return fmt.Errorf("unable to set up cert rotation: %w", err)
 	}
 
-	return setupFinished, nil
+	return nil
 }
 
-func setupReconcilers(mgr manager.Manager, apiTimeout, configTimeout, preconfigTimeout string, maxUpdating int, processImportsAsStaticRoutes bool, setupFinished chan struct{}) error {
-	apiTimoutVal, err := time.ParseDuration(apiTimeout)
+func setupReconcilers(mgr manager.Manager, cfg *operatorConfig) error {
+	apiTimoutVal, err := time.ParseDuration(cfg.apiTimeout)
 	if err != nil {
-		return fmt.Errorf("error parsing API timeout value %s: %w", apiTimeout, err)
+		return fmt.Errorf("error parsing API timeout value %s: %w", cfg.apiTimeout, err)
 	}
 
-	configTimeoutVal, err := time.ParseDuration(configTimeout)
-	if err != nil {
-		return fmt.Errorf("error parsing config timeout value %s: %w", configTimeout, err)
+	if cfg.enableIntentReconciler {
+		return setupIntentReconciler(mgr, apiTimoutVal, cfg)
 	}
 
-	preconfigTimeoutVal, err := time.ParseDuration(preconfigTimeout)
+	return setupLegacyReconcilers(mgr, apiTimoutVal, cfg)
+}
+
+func setupIntentReconciler(mgr manager.Manager, apiTimeout time.Duration, cfg *operatorConfig) error {
+	ir, err := intentreconciler.NewReconciler(mgr.GetClient(), mgr.GetLogger().WithName("IntentReconciler"), apiTimeout, cfg.intentNamespace)
 	if err != nil {
-		return fmt.Errorf("error parsing preconfig timeout value %s: %w", preconfigTimeout, err)
+		return fmt.Errorf("unable to create intent reconciler: %w", err)
 	}
 
-	cr, err := operator.NewConfigReconciler(mgr.GetClient(), mgr.GetLogger().WithName("ConfigReconciler"), apiTimoutVal)
+	if err = (&intentctrl.Controller{
+		Client:     mgr.GetClient(),
+		Scheme:     mgr.GetScheme(),
+		Reconciler: ir,
+	}).SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to create intent controller: %w", err)
+	}
+
+	// InterfaceConfig controller stays in the operator — it produces
+	// NodeNetplanConfig resources which are our own CRD, not opinionated.
+	// MetalLB and Coil controllers are separate binaries (cmd/platform-*/).
+	if err = (&platform.InterfaceConfigReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+		Log:    mgr.GetLogger().WithName("InterfaceConfigReconciler"),
+	}).SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to create InterfaceConfig controller: %w", err)
+	}
+
+	if err = (&networkv1alpha1.VRFRouteConfiguration{}).SetupWebhookWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to create webhook for VRFRouteConfiguration: %w", err)
+	}
+
+	if err = (&networkconnector.Network{}).SetupWebhookWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to create webhook for Network: %w", err)
+	}
+	if err = (&networkconnector.VRF{}).SetupWebhookWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to create webhook for VRF: %w", err)
+	}
+	if err = (&networkconnector.Layer2Attachment{}).SetupWebhookWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to create webhook for Layer2Attachment: %w", err)
+	}
+	if err = (&networkconnector.Inbound{}).SetupWebhookWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to create webhook for Inbound: %w", err)
+	}
+	if err = (&networkconnector.Outbound{}).SetupWebhookWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to create webhook for Outbound: %w", err)
+	}
+	if err = (&networkconnector.BGPPeering{}).SetupWebhookWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to create webhook for BGPPeering: %w", err)
+	}
+	if err = (&networkconnector.Collector{}).SetupWebhookWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to create webhook for Collector: %w", err)
+	}
+	if err = (&networkconnector.Destination{}).SetupWebhookWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to create webhook for Destination: %w", err)
+	}
+	if err = (&networkconnector.TrafficMirror{}).SetupWebhookWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to create webhook for TrafficMirror: %w", err)
+	}
+	if err = (&networkconnector.PodNetwork{}).SetupWebhookWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to create webhook for PodNetwork: %w", err)
+	}
+	if err = (&networkconnector.AnnouncementPolicy{}).SetupWebhookWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to create webhook for AnnouncementPolicy: %w", err)
+	}
+	if err = (&networkconnector.InterfaceConfig{}).SetupWebhookWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to create webhook for InterfaceConfig: %w", err)
+	}
+
+	setupLog.Info("intent reconciler enabled — legacy ConfigReconciler disabled")
+	return nil
+}
+
+func setupLegacyReconcilers(mgr manager.Manager, apiTimeout time.Duration, cfg *operatorConfig) error {
+	configTimeoutVal, err := time.ParseDuration(cfg.configTimeout)
+	if err != nil {
+		return fmt.Errorf("error parsing config timeout value %s: %w", cfg.configTimeout, err)
+	}
+
+	preconfigTimeoutVal, err := time.ParseDuration(cfg.preconfigTimeout)
+	if err != nil {
+		return fmt.Errorf("error parsing preconfig timeout value %s: %w", cfg.preconfigTimeout, err)
+	}
+
+	cr, err := operator.NewConfigReconciler(mgr.GetClient(), mgr.GetLogger().WithName("ConfigReconciler"), apiTimeout)
 	if err != nil {
 		return fmt.Errorf("unable to create config reconciler reconciler: %w", err)
 	}
 
 	importMode := operator.ImportModeImport
-	if processImportsAsStaticRoutes {
+	if cfg.processImportsAsStaticRoutes {
 		importMode = operator.ImportModeStaticRoute
 	}
 
-	ncr, err := operator.NewNodeConfigReconciler(mgr.GetClient(), mgr.GetLogger().WithName("NodeConfigReconciler"), apiTimoutVal, configTimeoutVal, preconfigTimeoutVal, mgr.GetScheme(), maxUpdating, importMode)
+	ncr, err := operator.NewNodeConfigReconciler(mgr.GetClient(), mgr.GetLogger().WithName("NodeConfigReconciler"), apiTimeout, configTimeoutVal, preconfigTimeoutVal, mgr.GetScheme(), cfg.maxUpdating, importMode)
 	if err != nil {
 		return fmt.Errorf("unable to create node reconciler: %w", err)
-	}
-
-	if setupFinished != nil {
-		<-setupFinished
-		setupLog.Info("cert setup finished")
 	}
 
 	initialSetup := newOnLeaderElectionEvent(cr)

@@ -8,6 +8,8 @@ resources:
   - ippool-default-ipv4.yaml
   - ippool-default-ipv6.yaml
   - felixconfiguration-default.yaml
+  - globalnetworkset-nodes.yaml
+  - globalnetworkpolicy-egress-infra.yaml
 patches:
   - path: patch-calico-config.yaml
   - path: patch-calico-node-env.yaml

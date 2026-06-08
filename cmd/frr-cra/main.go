@@ -19,12 +19,16 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/vishvananda/netlink"
+	"golang.org/x/sys/unix"
+
 	"github.com/telekom/das-schiff-network-operator/pkg/bpf"
 	"github.com/telekom/das-schiff-network-operator/pkg/config"
 	"github.com/telekom/das-schiff-network-operator/pkg/cra-frr"
@@ -33,8 +37,6 @@ import (
 	"github.com/telekom/das-schiff-network-operator/pkg/neighborsync"
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
 	"github.com/telekom/das-schiff-network-operator/pkg/utils"
-	"github.com/vishvananda/netlink"
-	"golang.org/x/sys/unix"
 )
 
 const (
@@ -53,13 +55,14 @@ var (
 	nlManager      *nl.Manager
 	neighborSyncer *neighborsync.NeighborSync
 	baseConfig     *config.BaseConfig
+	applyMu        sync.Mutex // serializes applyConfig to prevent concurrent FRR/netlink races
 )
 
 // sanitizeLog removes newlines and carriage returns from log messages
 // to prevent log injection attacks (CodeQL: Log entries created from user input).
 var logSanitizer = strings.NewReplacer("\n", "", "\r", "")
 
-func deleteLayer2(cfg nl.NetlinkConfiguration) error {
+func deleteLayer2(cfg *nl.NetlinkConfiguration) error {
 	existing, err := nlManager.ListL2()
 	if err != nil {
 		return fmt.Errorf("error listing L2: %w", err)
@@ -94,7 +97,7 @@ func deleteLayer2(cfg nl.NetlinkConfiguration) error {
 	return nil
 }
 
-func createLayer2(cfg nl.NetlinkConfiguration) error {
+func createLayer2(cfg *nl.NetlinkConfiguration) error {
 	existing, err := nlManager.ListL2()
 	if err != nil {
 		return fmt.Errorf("error listing L2: %w", err)
@@ -123,7 +126,7 @@ func createLayer2(cfg nl.NetlinkConfiguration) error {
 	return nil
 }
 
-func reconcileNeighborSync(cfg nl.NetlinkConfiguration) {
+func reconcileNeighborSync(cfg *nl.NetlinkConfiguration) {
 	if neighborSyncer == nil {
 		return
 	}
@@ -360,7 +363,7 @@ func protoNumber(proto string) int {
 	}
 }
 
-func getVRFsToDelete(cfg nl.NetlinkConfiguration) ([]nl.VRFInformation, error) {
+func getVRFsToDelete(cfg *nl.NetlinkConfiguration) ([]nl.VRFInformation, error) {
 	existing, err := nlManager.ListL3()
 	if err != nil {
 		return nil, fmt.Errorf("error listing L3 VRF information: %w", err)
@@ -388,12 +391,17 @@ func getVRFsToDelete(cfg nl.NetlinkConfiguration) ([]nl.VRFInformation, error) {
 	return toDelete, nil
 }
 
-func createVRFs(cfg nl.NetlinkConfiguration) error {
+// createVRFs creates VRF devices, L3VNI bridges, and VXLAN interfaces but
+// leaves bridges/VXLANs DOWN.  Callers must invoke upNewVRFs after FRR reload
+// so that the SVI-up event makes FRR read the bridge hardware address as the
+// EVPN Router-MAC (see zebra_vxlan_svi_up → process_l3vni_oper_up in FRR).
+func createVRFs(cfg *nl.NetlinkConfiguration) ([]nl.VRFInformation, error) {
 	existing, err := nlManager.ListL3()
 	if err != nil {
-		return fmt.Errorf("error listing L3 VRF information: %w", err)
+		return nil, fmt.Errorf("error listing L3 VRF information: %w", err)
 	}
 
+	var created []nl.VRFInformation
 	for i := range cfg.VRFs {
 		alreadyExists := false
 		for j := range existing {
@@ -404,46 +412,60 @@ func createVRFs(cfg nl.NetlinkConfiguration) error {
 			}
 		}
 		if !alreadyExists {
-			log.Println("Creating VRF", cfg.VRFs[i].Name)
+			log.Print(logSanitizer.Replace(fmt.Sprintf("Creating VRF %s", cfg.VRFs[i].Name)))
 			if err := nlManager.CreateL3(cfg.VRFs[i]); err != nil {
-				return fmt.Errorf("error creating L3 (VRF: %s): %w", cfg.VRFs[i].Name, err)
+				return created, fmt.Errorf("error creating L3 (VRF: %s): %w", cfg.VRFs[i].Name, err)
 			}
-			if err := nlManager.UpL3(cfg.VRFs[i]); err != nil {
-				return fmt.Errorf("error setting up L3 (VRF: %s): %w", cfg.VRFs[i].Name, err)
-			}
+			created = append(created, cfg.VRFs[i])
 		}
 	}
 
+	return created, nil
+}
+
+// upNewVRFs brings up bridges/VXLANs that were created by createVRFs.
+// Must be called AFTER FRR reload so that FRR already knows the L3VNI→VRF
+// mapping.  The SVI-up netlink event causes zebra to read the bridge MAC and
+// advertise the correct EVPN Router-MAC.
+func upNewVRFs(vrfs []nl.VRFInformation) error {
+	for i := range vrfs {
+		log.Print(logSanitizer.Replace(fmt.Sprintf("Bringing up VRF interfaces %s", vrfs[i].Name)))
+		if err := nlManager.UpL3(vrfs[i]); err != nil {
+			return fmt.Errorf("error setting up L3 (VRF: %s): %w", vrfs[i].Name, err)
+		}
+	}
 	return nil
 }
 
-func reconcileLayer3(cfg nl.NetlinkConfiguration) error {
+// reconcileLayer3 deletes stale VRFs and creates new ones (bridges/VXLANs
+// DOWN).  Returns the list of newly created VRFs so the caller can bring them
+// UP after FRR reload.
+func reconcileLayer3(cfg *nl.NetlinkConfiguration) ([]nl.VRFInformation, error) {
 	vrfsToDelete, err := getVRFsToDelete(cfg)
 	if err != nil {
-		return fmt.Errorf("error getting VRFs to delete: %w", err)
+		return nil, fmt.Errorf("error getting VRFs to delete: %w", err)
 	}
 
 	for i := range vrfsToDelete {
 		errors := nlManager.CleanupL3(vrfsToDelete[i].Name)
 		if len(errors) > 0 {
-			return fmt.Errorf("error cleaning up L3 (VRF: %s): %v", vrfsToDelete[i].Name, errors)
+			return nil, fmt.Errorf("error cleaning up L3 (VRF: %s): %v", vrfsToDelete[i].Name, errors)
 		}
 	}
 
-	if len(vrfsToDelete) > 0 {
-		err := reloadFRR()
-		if err != nil {
-			return fmt.Errorf("error reloading FRR: %w", err)
-		}
+	// Create VRFs and L3 VNI bridges but keep DOWN.
+	// FRR reads the bridge hardware address as the EVPN Router-MAC only when
+	// the SVI comes UP (zebra_vxlan_svi_up).  Bringing bridges UP before FRR
+	// knows the L3VNI→VRF mapping would cause FRR to treat them as L2VNI
+	// (broadcast storm with hairpin).  Bringing them UP after reload ensures
+	// FRR has the VNI config and the SVI-up event triggers correct RMAC
+	// advertisement.
+	created, err := createVRFs(cfg)
+	if err != nil {
+		return created, fmt.Errorf("error creating VRFs: %w", err)
 	}
 
-	time.Sleep(defaultSleep)
-
-	if err := createVRFs(cfg); err != nil {
-		return fmt.Errorf("error creating VRFs: %w", err)
-	}
-
-	return nil
+	return created, nil
 }
 
 func reloadFRR() error {
@@ -461,86 +483,193 @@ func reloadFRR() error {
 	return nil
 }
 
+const (
+	vniPollInterval = 500 * time.Millisecond
+	vniPollTimeout  = 10 * time.Second
+)
+
+// waitForL3VNIs polls FRR's "show vrf vni" until all newly created L3VNIs
+// appear in the output.  This ensures zebra has processed the reload config
+// and registered the VNI→VRF mappings before we bring bridges UP.
+func waitForL3VNIs(vrfs []nl.VRFInformation) {
+	// Collect non-local VNIs we need to see.
+	needed := map[int]bool{}
+	for _, v := range vrfs {
+		if !v.LocalOnly && v.VNI != 0 {
+			needed[v.VNI] = true
+		}
+	}
+	if len(needed) == 0 {
+		return
+	}
+
+	deadline := time.Now().Add(vniPollTimeout)
+	for time.Now().Before(deadline) {
+		vrfVni, err := frrManager.Cli.ShowVRFVnis()
+		if err == nil {
+			found := 0
+			for _, spec := range vrfVni.Vrfs {
+				if needed[spec.Vni] {
+					found++
+				}
+			}
+			if found >= len(needed) {
+				log.Printf("All %d L3VNIs registered in FRR", found)
+				return
+			}
+		}
+		time.Sleep(vniPollInterval)
+	}
+	log.Printf("Warning: timed out waiting for L3VNIs in FRR (needed %d)", len(needed))
+}
+
+func reconcileMirrors(cfg *nl.NetlinkConfiguration) error {
+	// 1. Create loopback (dummy) interfaces in mirror VRFs
+	if err := nlManager.ReconcileLoopbacks(cfg.Loopbacks); err != nil {
+		return fmt.Errorf("error reconciling loopbacks: %w", err)
+	}
+
+	// 2. Create GRE tunnels for mirror rules
+	tunnelIndex, err := nlManager.ReconcileGRETunnels(cfg.Mirrors)
+	if err != nil {
+		return fmt.Errorf("error reconciling GRE tunnels: %w", err)
+	}
+
+	// 3. Set up tc mirror filters
+	if err := nlManager.ReconcileTcMirrors(cfg.Mirrors, tunnelIndex); err != nil {
+		return fmt.Errorf("error reconciling tc mirrors: %w", err)
+	}
+
+	// 4. Clean up stale GRE tunnels
+	if err := nlManager.CleanupMirrors(cfg.Mirrors); err != nil {
+		return fmt.Errorf("error cleaning up mirrors: %w", err)
+	}
+
+	return nil
+}
+
 func applyConfig(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+
+	// Serialize config applications — concurrent requests race on FRR/netlink state.
+	applyMu.Lock()
+	defer applyMu.Unlock()
+
 	// Parse Body into NetlinkConfiguration
 	var craConfiguration cra.Configuration
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		log.Println("Failed to read request body", err)
-		http.Error(w, "Failed to read request body", http.StatusInternalServerError)
-		return
-	}
-	defer r.Body.Close()
-
-	err = json.Unmarshal(body, &craConfiguration)
-	if err != nil {
-		log.Println("Failed to unmarshal request body", err)
-		http.Error(w, "Failed to unmarshal request body", http.StatusInternalServerError)
+	if err := parseApplyRequest(r, &craConfiguration); err != nil {
+		log.Print(logSanitizer.Replace(fmt.Sprintf("Failed to parse request: %v", err)))
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// Write FRR config
-	file, err := os.OpenFile(frrConfigPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600) //nolint:mnd
-	if err != nil {
-		log.Println("Failed to open FRR config file", err)
-		http.Error(w, "Failed to open FRR config file", http.StatusInternalServerError)
-		return
-	}
-	defer file.Close()
-	_, err = io.Copy(file, strings.NewReader(craConfiguration.FRRConfiguration))
-	if err != nil {
-		log.Println("Failed to write FRR config", err)
-		http.Error(w, "Failed to write FRR config", http.StatusInternalServerError)
+	if err := writeFRRConfig(craConfiguration.FRRConfiguration); err != nil {
+		log.Print(logSanitizer.Replace(fmt.Sprintf("Failed to write FRR config: %v", err)))
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// Reload FRR
-	err = reloadFRR()
-	if err != nil {
-		log.Println("Failed to reload FRR", err)
-		http.Error(w, fmt.Sprintf("Failed to reload FRR: %v", err), http.StatusInternalServerError)
+	if err := reconcileNetlink(&craConfiguration.NetlinkConfiguration); err != nil {
+		log.Print(logSanitizer.Replace(fmt.Sprintf("Failed to reconcile netlink: %v", err)))
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-
-	// Delete Layer2
-	err = deleteLayer2(craConfiguration.NetlinkConfiguration)
-	if err != nil {
-		log.Println("Failed to reconcile Layer2", err)
-		http.Error(w, fmt.Sprintf("Failed to reconcile Layer2: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	// Reconcile Layer3
-	err = reconcileLayer3(craConfiguration.NetlinkConfiguration)
-	if err != nil {
-		log.Println("Failed to reconcile Layer3", err)
-		http.Error(w, fmt.Sprintf("Failed to reconcile Layer3: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	// Recreate Layer2
-	err = createLayer2(craConfiguration.NetlinkConfiguration)
-	if err != nil {
-		log.Println("Failed to reconcile Layer2", err)
-		http.Error(w, fmt.Sprintf("Failed to reconcile Layer2: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	// Reconcile neighbor sync for ARP/NDP refresh
-	reconcileNeighborSync(craConfiguration.NetlinkConfiguration)
 
 	// Reconcile SBR policy routes as ip rules
 	if err := reconcilePolicyRoutes(craConfiguration.PolicyRoutes); err != nil {
-		log.Println("Failed to reconcile policy routes", err)
+		log.Print(logSanitizer.Replace(fmt.Sprintf("Failed to reconcile policy routes: %v", err)))
 		http.Error(w, fmt.Sprintf("Failed to reconcile policy routes: %v", err), http.StatusInternalServerError)
 		return
 	}
 
+	// Reconcile mirror loopbacks, GRE tunnels, and tc filters
+	if err := reconcileMirrors(&craConfiguration.NetlinkConfiguration); err != nil {
+		log.Print(logSanitizer.Replace(fmt.Sprintf("Failed to reconcile mirrors: %v", err)))
+		http.Error(w, fmt.Sprintf("Failed to reconcile mirrors: %v", err), http.StatusInternalServerError)
+		return
+	}
+
 	w.WriteHeader(http.StatusOK)
+}
+
+// parseApplyRequest reads and unmarshals the HTTP request body into cfg.
+func parseApplyRequest(r *http.Request, cfg *cra.Configuration) error {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read request body: %w", err)
+	}
+	defer r.Body.Close()
+
+	if err = json.Unmarshal(body, cfg); err != nil {
+		return fmt.Errorf("failed to unmarshal request body: %w", err)
+	}
+	return nil
+}
+
+// writeFRRConfig writes the FRR daemon configuration to disk.
+func writeFRRConfig(frrConfig string) error {
+	file, err := os.OpenFile(frrConfigPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600) //nolint:mnd
+	if err != nil {
+		return fmt.Errorf("failed to open FRR config file: %w", err)
+	}
+	if _, err = io.Copy(file, strings.NewReader(frrConfig)); err != nil {
+		_ = file.Close()
+		return fmt.Errorf("failed to write FRR config: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("failed to close FRR config file: %w", err)
+	}
+	return nil
+}
+
+// reconcileNetlink drives the ordered netlink/FRR reconcile sequence.
+func reconcileNetlink(cfg *nl.NetlinkConfiguration) error {
+	if err := deleteLayer2(cfg); err != nil {
+		return fmt.Errorf("failed to reconcile Layer2 (delete): %w", err)
+	}
+
+	// Phase 1: Create VRF devices and L3VNI bridges/VXLANs (DOWN).
+	// Bridges must exist (with correct MAC) before FRR reload so zebra can
+	// map VNI→SVI, but must stay DOWN to avoid L2VNI broadcast storms.
+	newVRFs, err := reconcileLayer3(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to reconcile Layer3: %w", err)
+	}
+
+	// Phase 2: Reload FRR so it learns VNI→VRF mapping from the config file.
+	// At this point bridges exist (zebra knows the interfaces) but are DOWN,
+	// so is_l3vni_oper_up() is false and no RMAC is advertised yet.
+	if err := reloadFRR(); err != nil {
+		return fmt.Errorf("failed to reload FRR: %w", err)
+	}
+
+	// Give zebra time to process the reload and learn VNI→VRF mappings.
+	// Without this, the SVI-up event from Phase 3 may arrive before zebra
+	// has associated the L3VNI, causing it to treat the VNI as L2.
+	if len(newVRFs) > 0 {
+		waitForL3VNIs(newVRFs)
+	}
+
+	// Phase 3: Bring new bridges/VXLANs UP.  The SVI-up netlink event makes
+	// zebra call zebra_vxlan_svi_up → process_l3vni_oper_up which reads the
+	// bridge hardware address and advertises the correct EVPN Router-MAC.
+	if len(newVRFs) > 0 {
+		if err := upNewVRFs(newVRFs); err != nil {
+			return fmt.Errorf("failed to bring up new VRFs: %w", err)
+		}
+	}
+
+	time.Sleep(defaultSleep)
+
+	if err := createLayer2(cfg); err != nil {
+		return fmt.Errorf("failed to reconcile Layer2 (create): %w", err)
+	}
+
+	reconcileNeighborSync(cfg)
+	return nil
 }
 
 func executeFrr(w http.ResponseWriter, r *http.Request) {
@@ -604,7 +733,11 @@ func setupTLS(address net.IP) error {
 		Type:  "CERTIFICATE",
 		Bytes: certBytes,
 	}); err != nil {
+		certOut.Close()
 		return fmt.Errorf("failed to encode certificate: %w", err)
+	}
+	if err := certOut.Close(); err != nil {
+		return fmt.Errorf("failed to close certificate file: %w", err)
 	}
 
 	certPrivKeyPEM, err := os.Create(serverKey)
@@ -615,7 +748,11 @@ func setupTLS(address net.IP) error {
 		Type:  "RSA PRIVATE KEY",
 		Bytes: x509.MarshalPKCS1PrivateKey(certPrivKey),
 	}); err != nil {
+		certPrivKeyPEM.Close()
 		return fmt.Errorf("failed to encode private key: %w", err)
+	}
+	if err := certPrivKeyPEM.Close(); err != nil {
+		return fmt.Errorf("failed to close private key file: %w", err)
 	}
 	return nil
 }

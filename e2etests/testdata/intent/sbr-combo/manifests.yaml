@@ -1,0 +1,35 @@
+# Multi-VRF combo SBR test: Outbound selecting destinations in BOTH m2m and c2m VRFs.
+# Should produce a single combo LocalVRF "s-<hash>" with static routes to both VRFs,
+# and ClusterVRF PolicyRoute with source-only matching (no dst prefix).
+#
+# Also needs an L2A so the NNC pipeline activates for the network.
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Layer2Attachment
+metadata:
+  name: l2a-sbr-combo
+  namespace: default
+spec:
+  networkRef: "net-vlan501"
+  destinations:
+    matchLabels:
+      type: gateway
+---
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Outbound
+metadata:
+  name: ob-sbr-combo
+  namespace: default
+spec:
+  networkRef: "net-vlan501"
+  destinations:
+    matchExpressions:
+      - key: type
+        operator: In
+        values:
+          - gateway
+          - gateway-c2m
+  addresses:
+    ipv4:
+      - "10.250.4.50/32"
+    ipv6:
+      - "fd94:685b:30cf:501::50/128"

@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
+
+	yaml "gopkg.in/yaml.v2"
 
 	"github.com/telekom/das-schiff-network-operator/pkg/helpers/slice"
-	yaml "gopkg.in/yaml.v2"
 )
 
 type (
@@ -89,7 +91,8 @@ func merge(into, from interface{}, strict bool) (interface{}, error) {
 		return from, nil
 	}
 	if IsSequence(into) && IsSequence(from) {
-		return mergeSequence(into.(sequence), from.(sequence)), nil
+		merged, err := mergeSequence(into.(sequence), from.(sequence))
+		return merged, err
 	}
 	if IsMapping(into) && IsMapping(from) {
 		return mergeMapping(into.(mapping), from.(mapping), strict)
@@ -117,14 +120,17 @@ func mergeMapping(into, from mapping, strict bool) (mapping, error) {
 	}
 	return merged, nil
 }
-func mergeSequence(into, from sequence) sequence {
+func mergeSequence(into, from sequence) (sequence, error) {
+	if len(into) > math.MaxInt-len(from) {
+		return nil, fmt.Errorf("sequence merge: combined length %d + %d overflows", len(into), len(from))
+	}
 	merged := make(sequence, len(into)+len(from))
 	copy(merged, into)
 	for k := range from {
 		merged[k+len(into)] = from[k]
 	}
 
-	return slice.Deduplicate(merged)
+	return slice.Deduplicate(merged), nil
 }
 
 // IsMapping reports whether a type is a mapping in YAML, represented as a

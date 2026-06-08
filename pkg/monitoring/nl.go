@@ -5,10 +5,11 @@ import (
 	"sync"
 
 	"github.com/prometheus/client_golang/prometheus"
+	ctrl "sigs.k8s.io/controller-runtime"
+
 	"github.com/telekom/das-schiff-network-operator/pkg/config"
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
 	"github.com/telekom/das-schiff-network-operator/pkg/route"
-	ctrl "sigs.k8s.io/controller-runtime"
 )
 
 const nlCollectorName = "netlink"

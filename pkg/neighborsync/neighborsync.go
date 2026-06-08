@@ -15,10 +15,11 @@ import (
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/mdlayher/arp"
 	"github.com/mdlayher/ndp"
-	"github.com/telekom/das-schiff-network-operator/pkg/bpf"
-	"github.com/telekom/das-schiff-network-operator/pkg/nl"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
+
+	"github.com/telekom/das-schiff-network-operator/pkg/bpf"
+	"github.com/telekom/das-schiff-network-operator/pkg/nl"
 )
 
 const hardwareAddrLen = 6

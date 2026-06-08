@@ -10,6 +10,246 @@ webhooks:
     service:
       name: webhook-service
       namespace: system
+      path: /validate-network-connector-sylvaproject-org-v1alpha1-announcementpolicy
+  failurePolicy: Fail
+  name: vannouncementpolicy.kb.io
+  rules:
+  - apiGroups:
+    - network-connector.sylvaproject.org
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - announcementpolicies
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /validate-network-connector-sylvaproject-org-v1alpha1-bgppeering
+  failurePolicy: Fail
+  name: vbgppeering.kb.io
+  rules:
+  - apiGroups:
+    - network-connector.sylvaproject.org
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - bgppeerings
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /validate-network-connector-sylvaproject-org-v1alpha1-collector
+  failurePolicy: Fail
+  name: vcollector.kb.io
+  rules:
+  - apiGroups:
+    - network-connector.sylvaproject.org
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - collectors
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /validate-network-connector-sylvaproject-org-v1alpha1-destination
+  failurePolicy: Fail
+  name: vdestination.kb.io
+  rules:
+  - apiGroups:
+    - network-connector.sylvaproject.org
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - destinations
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /validate-network-connector-sylvaproject-org-v1alpha1-inbound
+  failurePolicy: Fail
+  name: vinbound.kb.io
+  rules:
+  - apiGroups:
+    - network-connector.sylvaproject.org
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - inbounds
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /validate-network-connector-sylvaproject-org-v1alpha1-interfaceconfig
+  failurePolicy: Fail
+  name: vinterfaceconfig.kb.io
+  rules:
+  - apiGroups:
+    - network-connector.sylvaproject.org
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - interfaceconfigs
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /validate-network-connector-sylvaproject-org-v1alpha1-layer2attachment
+  failurePolicy: Fail
+  name: vlayer2attachment.kb.io
+  rules:
+  - apiGroups:
+    - network-connector.sylvaproject.org
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - layer2attachments
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /validate-network-connector-sylvaproject-org-v1alpha1-network
+  failurePolicy: Fail
+  name: vnetwork.kb.io
+  rules:
+  - apiGroups:
+    - network-connector.sylvaproject.org
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - networks
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /validate-network-connector-sylvaproject-org-v1alpha1-outbound
+  failurePolicy: Fail
+  name: voutbound.kb.io
+  rules:
+  - apiGroups:
+    - network-connector.sylvaproject.org
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - outbounds
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /validate-network-connector-sylvaproject-org-v1alpha1-podnetwork
+  failurePolicy: Fail
+  name: vpodnetwork.kb.io
+  rules:
+  - apiGroups:
+    - network-connector.sylvaproject.org
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - podnetworks
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /validate-network-connector-sylvaproject-org-v1alpha1-trafficmirror
+  failurePolicy: Fail
+  name: vtrafficmirror.kb.io
+  rules:
+  - apiGroups:
+    - network-connector.sylvaproject.org
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - trafficmirrors
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /validate-network-connector-sylvaproject-org-v1alpha1-vrf
+  failurePolicy: Fail
+  name: vvrf.kb.io
+  rules:
+  - apiGroups:
+    - network-connector.sylvaproject.org
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - vrfs
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
       path: /validate-network-t-caas-telekom-com-v1alpha1-vrfrouteconfiguration
   failurePolicy: Fail
   name: vvrfrouteconfiguration.kb.io

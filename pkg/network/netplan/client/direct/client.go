@@ -10,8 +10,9 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
-	"github.com/telekom/das-schiff-network-operator/pkg/network/netplan"
 	"k8s.io/apimachinery/pkg/util/yaml"
+
+	"github.com/telekom/das-schiff-network-operator/pkg/network/netplan"
 )
 
 const defaultNetplanBinary = "netplan"

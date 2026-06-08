@@ -6,12 +6,7 @@ kind: Namespace
 metadata:
   name: e2e-gateways
 ---
-# NAD for VLAN 601 (m2m gateway).
-# Uses CNI conflist to chain macvlan with the tuning meta-plugin.
-# The tuning plugin disables IPv6 DAD (Duplicate Address Detection) at
-# CNI-chain time, preventing addresses from entering "dadfailed" state
-# in containerlab/Kind environments where CRA bridge agents respond to
-# DAD probes.
+# NAD for VLAN 601 (m2m gateway)
 apiVersion: k8s.cni.cncf.io/v1
 kind: NetworkAttachmentDefinition
 metadata:
@@ -35,6 +30,8 @@ spec:
               {"dst": "fda5:25c1:193c::/48", "gw": "fda5:25c1:193c::fe"},
               {"dst": "fdbb:6b17:90ba::/64", "gw": "fda5:25c1:193c::fe"},
               {"dst": "fd90:4dbf:396d::/126", "gw": "fda5:25c1:193c::fe"},
+              {"dst": "fd90:4dbf:396e::/126", "gw": "fda5:25c1:193c::fe"},
+              {"dst": "fd90:4dbf:396f::/126", "gw": "fda5:25c1:193c::fe"},
               {"dst": "fd75:2d70:f7f7::/64", "gw": "fda5:25c1:193c::fe"}
             ]
           }
@@ -48,8 +45,7 @@ spec:
       ]
     }
 ---
-# NAD for VLAN 602 (c2m gateway).
-# See VLAN 601 NAD above for DAD workaround rationale.
+# NAD for VLAN 602 (c2m gateway)
 apiVersion: k8s.cni.cncf.io/v1
 kind: NetworkAttachmentDefinition
 metadata:

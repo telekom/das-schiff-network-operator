@@ -6,15 +6,16 @@ import (
 	"os"
 
 	"github.com/go-logr/logr"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
 	"github.com/telekom/das-schiff-network-operator/pkg/network/net"
 	netplanclient "github.com/telekom/das-schiff-network-operator/pkg/network/netplan/client"
 	"github.com/telekom/das-schiff-network-operator/pkg/network/netplan/client/dbus"
-	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 type NodeNetplanConfigReconciler struct {
@@ -100,7 +101,12 @@ func (reconciler *NodeNetplanConfigReconciler) Reconcile(ctx context.Context) er
 		return fmt.Errorf("error setting desired state: %w", err)
 	}
 
-	if err := netplanConfig.Apply(); err != nil {
+	if netplanConfig.IsSynced() {
+		reconciler.logger.Info("netplan configuration already in sync, skipping apply")
+		if err := netplanConfig.Discard(); err != nil {
+			reconciler.logger.Error(err, "failed to discard pending netplan configuration")
+		}
+	} else if err := netplanConfig.Apply(); err != nil {
 		_ = reconciler.healthChecker.UpdateReadinessCondition(ctx, corev1.ConditionFalse, healthcheck.ReasonNetplanApplyFailed, err.Error())
 		return fmt.Errorf("error applying desired state: %w", err)
 	}

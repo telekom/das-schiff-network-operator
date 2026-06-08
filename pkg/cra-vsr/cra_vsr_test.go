@@ -25,10 +25,6 @@ import (
 	"github.com/go-logr/logr"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
-	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
-	"github.com/telekom/das-schiff-network-operator/pkg/config"
-	"github.com/telekom/das-schiff-network-operator/pkg/helpers/types"
-	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/operator"
 	"gopkg.in/yaml.v2"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -36,6 +32,11 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
+	"github.com/telekom/das-schiff-network-operator/pkg/config"
+	"github.com/telekom/das-schiff-network-operator/pkg/helpers/types"
+	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/operator"
 )
 
 func TestCraVsr(t *testing.T) {

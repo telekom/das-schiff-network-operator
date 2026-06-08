@@ -23,15 +23,9 @@ import (
 	"fmt"
 	"os"
 
-	controllernetplan "github.com/telekom/das-schiff-network-operator/controllers/agent-netplan"
-	reconcilernetplan "github.com/telekom/das-schiff-network-operator/pkg/reconciler/agent-netplan"
-
-	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
-	"github.com/telekom/das-schiff-network-operator/pkg/version"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
-
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.) //nolint:gci
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
@@ -40,8 +34,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
-	//nolint:gci // kubebuilder import
-	//+kubebuilder:scaffold:imports
+
+	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
+	controllernetplan "github.com/telekom/das-schiff-network-operator/controllers/agent-netplan"
+	reconcilernetplan "github.com/telekom/das-schiff-network-operator/pkg/reconciler/agent-netplan"
+	"github.com/telekom/das-schiff-network-operator/pkg/version"
 )
 
 var (

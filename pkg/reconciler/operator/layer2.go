@@ -5,9 +5,10 @@ import (
 	"fmt"
 	"sort"
 
+	corev1 "k8s.io/api/core/v1"
+
 	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/pkg/network/netplan"
-	corev1 "k8s.io/api/core/v1"
 )
 
 func buildNodeLayer2(node *corev1.Node, revision *v1alpha1.NetworkConfigRevision, c *v1alpha1.NodeNetworkConfig) error {
@@ -58,9 +59,10 @@ func buildNetplanVLANs(node *corev1.Node, revision *v1alpha1.NetworkConfigRevisi
 		}
 
 		vlan := map[string]interface{}{
-			"id":   l2.ID,
-			"link": "hbn",
-			"mtu":  l2.MTU,
+			"id":       l2.ID,
+			"link":     "hbn",
+			"mtu":      l2.MTU,
+			"critical": true,
 		}
 
 		rawVlan, err := json.Marshal(vlan)

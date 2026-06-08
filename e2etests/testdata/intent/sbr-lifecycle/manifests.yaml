@@ -1,0 +1,28 @@
+# SBR lifecycle test: unique Outbound with distinct addresses to avoid
+# collisions with the single-VRF SBR test (sbr-single).
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Layer2Attachment
+metadata:
+  name: l2a-sbr-lifecycle
+  namespace: default
+spec:
+  networkRef: "net-vlan501"
+  destinations:
+    matchLabels:
+      type: gateway
+---
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Outbound
+metadata:
+  name: ob-sbr-lifecycle
+  namespace: default
+spec:
+  networkRef: "net-vlan501"
+  destinations:
+    matchLabels:
+      type: gateway
+  addresses:
+    ipv4:
+      - "10.250.4.99/32"
+    ipv6:
+      - "fd94:685b:30cf:501::99/128"

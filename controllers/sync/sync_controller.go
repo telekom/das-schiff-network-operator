@@ -1,0 +1,513 @@
+package sync
+
+import (
+	"context"
+	"fmt"
+	"reflect"
+	"time"
+
+	"github.com/go-logr/logr"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
+	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/ipam"
+	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/resolver"
+)
+
+const (
+	finalizerName       = "network-sync.telekom.com/cleanup"
+	labelManagedBy      = "network-sync.telekom.com/managed-by"
+	labelManagedByValue = "network-sync"
+	annotationSourceNS  = "network-sync.telekom.com/source-namespace"
+)
+
+const syncRequeueInterval = 10 * time.Second
+
+// Controller watches intent CRDs on the management cluster and syncs them
+// to workload clusters via the RemoteClientManager.
+type Controller struct {
+	Client          client.Client
+	Scheme          *runtime.Scheme
+	Log             logr.Logger
+	Remotes         *RemoteClientManager
+	RemoteNamespace string
+	IPAMAllocator   *ipam.Allocator
+}
+
+// intentCRDTypes returns fresh instances of all intent CRD types to sync.
+func intentCRDTypes() []client.Object {
+	return []client.Object{
+		&nc.VRF{},
+		&nc.Network{},
+		&nc.Destination{},
+		&nc.Layer2Attachment{},
+		&nc.Inbound{},
+		&nc.Outbound{},
+		&nc.PodNetwork{},
+		&nc.BGPPeering{},
+		&nc.Collector{},
+		&nc.TrafficMirror{},
+		&nc.AnnouncementPolicy{},
+		&nc.NodeAttachment{},
+		&nc.InterfaceConfig{},
+	}
+}
+
+// intentCRDLists returns fresh list instances for all intent CRD types.
+func intentCRDLists() []client.ObjectList {
+	return []client.ObjectList{
+		&nc.VRFList{},
+		&nc.NetworkList{},
+		&nc.DestinationList{},
+		&nc.Layer2AttachmentList{},
+		&nc.InboundList{},
+		&nc.OutboundList{},
+		&nc.PodNetworkList{},
+		&nc.BGPPeeringList{},
+		&nc.CollectorList{},
+		&nc.TrafficMirrorList{},
+		&nc.AnnouncementPolicyList{},
+		&nc.InterfaceConfigList{},
+		&nc.NodeAttachmentList{},
+	}
+}
+
+//+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=vrfs;networks;destinations;layer2attachments;inbounds;outbounds;podnetworks;bgppeerings;collectors;trafficmirrors;announcementpolicies;nodeattachments;interfaceconfigs,verbs=get;list;watch;update;patch
+//+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=vrfs/status;networks/status;destinations/status;layer2attachments/status;inbounds/status;outbounds/status;podnetworks/status;bgppeerings/status;collectors/status;trafficmirrors/status;announcementpolicies/status;nodeattachments/status;interfaceconfigs/status,verbs=get;patch;update
+//+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=nodenetworkstatuses,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
+//+kubebuilder:rbac:groups="",resources=events,verbs=create;patch
+//+kubebuilder:rbac:groups=cluster.x-k8s.io,resources=clusters,verbs=get;list;watch
+
+func (r *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	log := r.Log.WithValues("namespace", req.Namespace)
+
+	remoteClients := r.Remotes.GetByNamespace(req.Namespace)
+	if len(remoteClients) == 0 {
+		// No remote client — either the workload cluster's CAPI Cluster has been
+		// deleted (or never reached Ready). Drain our finalizer from any intent
+		// CRs that are mid-deletion; otherwise they would block forever waiting
+		// for a remote cluster that no longer exists.
+		if err := r.drainFinalizersForLostRemote(ctx, log, req.Namespace); err != nil {
+			return ctrl.Result{}, err
+		}
+		// ClusterController hasn't set up a client (yet) — wait and retry.
+		return ctrl.Result{RequeueAfter: syncRequeueInterval}, nil
+	}
+
+	// Run IPAM allocation for count-mode Inbound/Outbound before syncing,
+	// so that promoteIPAMAddresses can copy status→spec for the remote copy.
+	if r.IPAMAllocator != nil {
+		if err := r.reconcileIPAM(ctx, req.Namespace); err != nil {
+			log.Error(err, "IPAM allocation failed")
+			// Continue — partial allocation should not block syncing.
+		}
+	}
+
+	// List and sync every intent CRD type in this namespace.
+	for _, list := range intentCRDLists() {
+		if err := r.Client.List(ctx, list, client.InNamespace(req.Namespace)); err != nil {
+			return ctrl.Result{}, fmt.Errorf("listing %T: %w", list, err)
+		}
+		items := extractItems(list)
+		for i := range items {
+			for _, remoteClient := range remoteClients {
+				if err := r.syncObject(ctx, log, remoteClient, items[i]); err != nil {
+					return ctrl.Result{}, err
+				}
+			}
+		}
+	}
+
+	// Sync Secrets referenced by BGPPeering.spec.authSecretRef into the remote
+	// namespace so the workload-side intent compiler can resolve the password
+	// without any cross-cluster Secret access.
+	for _, remoteClient := range remoteClients {
+		if err := r.syncBGPSecrets(ctx, log, remoteClient, req.Namespace); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
+	return ctrl.Result{}, nil
+}
+
+// drainFinalizersForLostRemote walks every intent CRD type in the namespace and
+// strips our finalizer from any object that is being deleted. Used when the
+// workload cluster's CAPI Cluster (and therefore the remote client) is gone:
+// the remote object cannot be deleted, but neither can it leak — the cluster
+// it lived in no longer exists. Without this drain, a deleted CAPI Cluster
+// wedges every intent CR in the namespace in Terminating forever.
+func (r *Controller) drainFinalizersForLostRemote(ctx context.Context, log logr.Logger, namespace string) error {
+	for _, list := range intentCRDLists() {
+		if err := r.Client.List(ctx, list, client.InNamespace(namespace)); err != nil {
+			return fmt.Errorf("listing %T while draining finalizers: %w", list, err)
+		}
+		items := extractItems(list)
+		for i := range items {
+			obj := items[i]
+			if obj.GetDeletionTimestamp().IsZero() {
+				continue
+			}
+			if !controllerutil.ContainsFinalizer(obj, finalizerName) {
+				continue
+			}
+			log.Info("Remote cluster gone; releasing finalizer without remote delete",
+				"kind", obj.GetObjectKind().GroupVersionKind().Kind,
+				"name", obj.GetName())
+			controllerutil.RemoveFinalizer(obj, finalizerName)
+			if err := r.Client.Update(ctx, obj); err != nil {
+				return fmt.Errorf("removing finalizer from %s/%s during drain: %w",
+					obj.GetObjectKind().GroupVersionKind().Kind, obj.GetName(), err)
+			}
+		}
+	}
+	return nil
+}
+
+// syncObject handles create/update/delete for a single intent CRD object.
+func (r *Controller) syncObject(ctx context.Context, log logr.Logger, remoteClient client.Client, obj client.Object) error {
+	name := obj.GetName()
+	kind := obj.GetObjectKind().GroupVersionKind().Kind
+	ns := obj.GetNamespace()
+
+	// Handle deletion: if marked for deletion and our finalizer is present,
+	// delete remote object, then remove finalizer.
+	if !obj.GetDeletionTimestamp().IsZero() {
+		if controllerutil.ContainsFinalizer(obj, finalizerName) {
+			log.Info("Deleting remote object", "kind", kind, "name", name)
+			if err := r.deleteRemote(ctx, remoteClient, obj); err != nil {
+				return fmt.Errorf("deleting remote %s/%s: %w", kind, name, err)
+			}
+			controllerutil.RemoveFinalizer(obj, finalizerName)
+			if err := r.Client.Update(ctx, obj); err != nil {
+				return fmt.Errorf("removing finalizer from %s/%s: %w", kind, name, err)
+			}
+		}
+		return nil
+	}
+
+	// Ensure our finalizer is present.
+	if !controllerutil.ContainsFinalizer(obj, finalizerName) {
+		controllerutil.AddFinalizer(obj, finalizerName)
+		if err := r.Client.Update(ctx, obj); err != nil {
+			return fmt.Errorf("adding finalizer to %s/%s: %w", kind, name, err)
+		}
+	}
+
+	// Build the desired remote object and apply it.
+	remote := r.buildRemoteObject(obj, ns)
+	if remote == nil {
+		return fmt.Errorf("buildRemoteObject returned nil for %s/%s", kind, name)
+	}
+	log.V(1).Info("Syncing to remote", "kind", kind, "name", name)
+	return r.applyRemote(ctx, remoteClient, remote)
+}
+
+// buildRemoteObject creates the desired remote object from the mgmt-side source.
+func (r *Controller) buildRemoteObject(src client.Object, sourceNamespace string) client.Object {
+	dst, ok := src.DeepCopyObject().(client.Object)
+	if !ok {
+		return nil
+	}
+
+	// Reset metadata for remote cluster.
+	dst.SetNamespace(r.remoteNamespace())
+	dst.SetResourceVersion("")
+	dst.SetUID("")
+	dst.SetCreationTimestamp(metav1.Time{})
+	dst.SetDeletionTimestamp(nil)
+	dst.SetDeletionGracePeriodSeconds(nil)
+	dst.SetGenerateName("")
+	dst.SetSelfLink("")
+	dst.SetManagedFields(nil)
+	dst.SetFinalizers(nil)      // Remote objects don't need our finalizer
+	dst.SetOwnerReferences(nil) // No cross-cluster owner refs
+
+	// Set sync labels/annotations.
+	labels := dst.GetLabels()
+	if labels == nil {
+		labels = make(map[string]string)
+	}
+	labels[labelManagedBy] = labelManagedByValue
+	dst.SetLabels(labels)
+
+	annotations := dst.GetAnnotations()
+	if annotations == nil {
+		annotations = make(map[string]string)
+	}
+	annotations[annotationSourceNS] = sourceNamespace
+	// Remove system annotations.
+	delete(annotations, "kubectl.kubernetes.io/last-applied-configuration")
+	dst.SetAnnotations(annotations)
+
+	// IPAM promotion: copy status.addresses → spec.addresses for Inbound/Outbound.
+	r.promoteIPAMAddresses(dst)
+
+	return dst
+}
+
+// reconcileIPAM runs IPAM allocation for count-mode Inbound/Outbound in the given namespace.
+// Allocated IPs are written to status.addresses on the management-cluster resources so that
+// promoteIPAMAddresses can copy them into spec.addresses for the remote copy.
+func (r *Controller) reconcileIPAM(ctx context.Context, namespace string) error {
+	inboundList := &nc.InboundList{}
+	if err := r.Client.List(ctx, inboundList, client.InNamespace(namespace)); err != nil {
+		return fmt.Errorf("listing Inbounds for IPAM: %w", err)
+	}
+	outboundList := &nc.OutboundList{}
+	if err := r.Client.List(ctx, outboundList, client.InNamespace(namespace)); err != nil {
+		return fmt.Errorf("listing Outbounds for IPAM: %w", err)
+	}
+	networkList := &nc.NetworkList{}
+	if err := r.Client.List(ctx, networkList, client.InNamespace(namespace)); err != nil {
+		return fmt.Errorf("listing Networks for IPAM: %w", err)
+	}
+	l2aList := &nc.Layer2AttachmentList{}
+	if err := r.Client.List(ctx, l2aList, client.InNamespace(namespace)); err != nil {
+		return fmt.Errorf("listing Layer2Attachments for IPAM: %w", err)
+	}
+
+	fetched := &resolver.FetchedResources{
+		Inbounds:          inboundList.Items,
+		Outbounds:         outboundList.Items,
+		Networks:          networkList.Items,
+		Layer2Attachments: l2aList.Items,
+	}
+	networks := resolver.ResolveNetworks(fetched.Networks)
+
+	if err := r.IPAMAllocator.ReconcileAllocations(ctx, fetched, networks); err != nil {
+		return fmt.Errorf("IPAM allocation: %w", err)
+	}
+	return nil
+}
+
+// promoteIPAMAddresses copies status.addresses into spec.addresses for Inbound/Outbound
+// so the workload operator sees pre-allocated IPs from mgmt-cluster IPAM.
+func (*Controller) promoteIPAMAddresses(obj client.Object) {
+	switch v := obj.(type) {
+	case *nc.Inbound:
+		if v.Spec.Addresses == nil && v.Status.Addresses != nil &&
+			(len(v.Status.Addresses.IPv4) > 0 || len(v.Status.Addresses.IPv6) > 0) {
+			v.Spec.Addresses = v.Status.Addresses.DeepCopy()
+			v.Spec.Count = nil // Switch from count → manual mode
+		}
+	case *nc.Outbound:
+		if v.Spec.Addresses == nil && v.Status.Addresses != nil &&
+			(len(v.Status.Addresses.IPv4) > 0 || len(v.Status.Addresses.IPv6) > 0) {
+			v.Spec.Addresses = v.Status.Addresses.DeepCopy()
+			v.Spec.Count = nil
+		}
+	}
+}
+
+// applyRemote creates or updates the object on the remote cluster.
+func (*Controller) applyRemote(ctx context.Context, remoteClient client.Client, desired client.Object) error {
+	existing, ok := desired.DeepCopyObject().(client.Object)
+	if !ok {
+		return fmt.Errorf("DeepCopyObject did not return client.Object for %s/%s", desired.GetNamespace(), desired.GetName())
+	}
+	err := remoteClient.Get(ctx, types.NamespacedName{
+		Namespace: desired.GetNamespace(),
+		Name:      desired.GetName(),
+	}, existing)
+
+	if apierrors.IsNotFound(err) {
+		if err := remoteClient.Create(ctx, desired); err != nil {
+			return fmt.Errorf("creating remote object %s/%s: %w", desired.GetNamespace(), desired.GetName(), err)
+		}
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("getting remote object: %w", err)
+	}
+
+	// Verify we own this object.
+	labels := existing.GetLabels()
+	if labels[labelManagedBy] != labelManagedByValue {
+		return fmt.Errorf("remote object %s/%s exists but not managed by us", desired.GetNamespace(), desired.GetName())
+	}
+
+	// Preserve remote resourceVersion for update.
+	desired.SetResourceVersion(existing.GetResourceVersion())
+	desired.SetUID(existing.GetUID())
+	if err := remoteClient.Update(ctx, desired); err != nil {
+		return fmt.Errorf("updating remote object %s/%s: %w", desired.GetNamespace(), desired.GetName(), err)
+	}
+	return nil
+}
+
+// deleteRemote removes the object from the remote cluster.
+func (r *Controller) deleteRemote(ctx context.Context, remoteClient client.Client, src client.Object) error {
+	remote, ok := src.DeepCopyObject().(client.Object)
+	if !ok {
+		return fmt.Errorf("DeepCopyObject did not return client.Object for %s/%s", src.GetNamespace(), src.GetName())
+	}
+	remote.SetNamespace(r.remoteNamespace())
+	remote.SetResourceVersion("")
+	remote.SetUID("")
+
+	err := remoteClient.Delete(ctx, remote)
+	if apierrors.IsNotFound(err) {
+		return nil // Already gone.
+	}
+	if err != nil {
+		return fmt.Errorf("deleting remote object %s/%s: %w", remote.GetNamespace(), remote.GetName(), err)
+	}
+	return nil
+}
+
+// syncBGPSecrets mirrors Secrets referenced by BGPPeering.spec.authSecretRef
+// from the management namespace to the remote workload namespace, and sweeps
+// remote Secrets we previously synced that are no longer referenced.
+func (r *Controller) syncBGPSecrets(ctx context.Context, log logr.Logger, remoteClient client.Client, namespace string) error {
+	bpList := &nc.BGPPeeringList{}
+	if err := r.Client.List(ctx, bpList, client.InNamespace(namespace)); err != nil {
+		return fmt.Errorf("listing BGPPeerings for secret sync: %w", err)
+	}
+
+	desired := map[string]struct{}{}
+	for i := range bpList.Items {
+		bp := &bpList.Items[i]
+		if !bp.GetDeletionTimestamp().IsZero() {
+			continue
+		}
+		if bp.Spec.AuthSecretRef == nil || bp.Spec.AuthSecretRef.Name == "" {
+			continue
+		}
+		desired[bp.Spec.AuthSecretRef.Name] = struct{}{}
+	}
+
+	for name := range desired {
+		src := &corev1.Secret{}
+		if err := r.Client.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, src); err != nil {
+			if apierrors.IsNotFound(err) {
+				log.Info("BGPPeering authSecretRef target Secret missing; skipping",
+					"namespace", namespace, "name", name)
+				continue
+			}
+			return fmt.Errorf("getting BGP auth Secret %s/%s: %w", namespace, name, err)
+		}
+		remote := r.buildRemoteSecret(src, namespace)
+		if err := r.applyRemote(ctx, remoteClient, remote); err != nil {
+			return fmt.Errorf("syncing BGP auth Secret %s/%s: %w", namespace, name, err)
+		}
+	}
+
+	// Sweep orphaned remote Secrets we previously synced.
+	remoteSecrets := &corev1.SecretList{}
+	if err := remoteClient.List(ctx, remoteSecrets,
+		client.InNamespace(r.remoteNamespace()),
+		client.MatchingLabels{labelManagedBy: labelManagedByValue},
+	); err != nil {
+		return fmt.Errorf("listing remote Secrets for sweep: %w", err)
+	}
+	for i := range remoteSecrets.Items {
+		s := &remoteSecrets.Items[i]
+		// Only sweep Secrets that originated from this management namespace.
+		if s.Annotations[annotationSourceNS] != namespace {
+			continue
+		}
+		if _, keep := desired[s.Name]; keep {
+			continue
+		}
+		log.Info("Sweeping orphan synced Secret on workload cluster",
+			"namespace", s.Namespace, "name", s.Name)
+		if err := remoteClient.Delete(ctx, s); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("deleting orphan remote Secret %s/%s: %w", s.Namespace, s.Name, err)
+		}
+	}
+
+	return nil
+}
+
+// buildRemoteSecret prepares a Secret for application to the remote cluster,
+// preserving Data/Type but resetting metadata and stamping our managed-by label.
+func (r *Controller) buildRemoteSecret(src *corev1.Secret, sourceNamespace string) *corev1.Secret {
+	dst := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      src.Name,
+			Namespace: r.remoteNamespace(),
+			Labels: map[string]string{
+				labelManagedBy: labelManagedByValue,
+			},
+			Annotations: map[string]string{
+				annotationSourceNS: sourceNamespace,
+			},
+		},
+		Type: src.Type,
+		Data: map[string][]byte{},
+	}
+	for k, v := range src.Data {
+		b := make([]byte, len(v))
+		copy(b, v)
+		dst.Data[k] = b
+	}
+	return dst
+}
+
+// SetupWithManager registers watches for all intent CRD types.
+func (r *Controller) SetupWithManager(mgr ctrl.Manager) error {
+	// Map any intent CRD change → reconcile for its namespace.
+	enqueueNS := handler.EnqueueRequestsFromMapFunc(
+		func(_ context.Context, obj client.Object) []reconcile.Request {
+			return []reconcile.Request{{
+				NamespacedName: types.NamespacedName{
+					Namespace: obj.GetNamespace(),
+					Name:      "sync", // Synthetic key; we reconcile the whole namespace.
+				},
+			}}
+		},
+	)
+
+	builder := ctrl.NewControllerManagedBy(mgr).
+		Named("sync-controller")
+
+	for _, obj := range intentCRDTypes() {
+		builder = builder.Watches(obj, enqueueNS)
+	}
+
+	if err := builder.Complete(r); err != nil {
+		return fmt.Errorf("setting up sync controller: %w", err)
+	}
+	return nil
+}
+
+// remoteNamespace returns the target namespace on workload clusters.
+// Defaults to "default" if not configured.
+func (r *Controller) remoteNamespace() string {
+	if r.RemoteNamespace != "" {
+		return r.RemoteNamespace
+	}
+	return "default"
+}
+
+// extractItems pulls []client.Object from a typed ObjectList using reflection
+// to iterate the Items field. This avoids a per-type switch that grows with
+// each new CRD and triggers cyclomatic complexity linters.
+func extractItems(list client.ObjectList) []client.Object {
+	v := reflect.ValueOf(list).Elem()
+	items := v.FieldByName("Items")
+	if !items.IsValid() || items.Kind() != reflect.Slice {
+		return nil
+	}
+
+	out := make([]client.Object, items.Len())
+	for i := range items.Len() {
+		obj, ok := items.Index(i).Addr().Interface().(client.Object)
+		if !ok {
+			return nil
+		}
+		out[i] = obj
+	}
+
+	return out
+}

@@ -21,10 +21,11 @@ import (
 	"fmt"
 
 	"github.com/go-logr/logr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	cra "github.com/telekom/das-schiff-network-operator/pkg/cra-vsr"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/common"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // CRAVSRConfigApplier implements the common.ConfigApplier interface for CRA-VSR.
