@@ -50,6 +50,25 @@ func TestParseIPv6DADState(t *testing.T) {
 			wantState: ipv6DADReady,
 			wantFound: false,
 		},
+		{
+			name: "matches expanded target to compressed output",
+			output: `5: net1@if11: <BROADCAST,MULTICAST,UP,LOWER_UP,M-DOWN> mtu 1500 qlen 1000
+    inet6 fd94:685b:30cf:501::10/64 scope global
+       valid_lft forever preferred_lft forever`,
+			addr:      "fd94:685b:30cf:501:0:0:0:10",
+			wantCIDR:  "fd94:685b:30cf:501::10/64",
+			wantState: ipv6DADReady,
+			wantFound: true,
+		},
+		{
+			name: "invalid target",
+			output: `5: net1@if11: <BROADCAST,MULTICAST,UP,LOWER_UP,M-DOWN> mtu 1500 qlen 1000
+    inet6 fd94:685b:30cf:501::10/64 scope global
+       valid_lft forever preferred_lft forever`,
+			addr:      "not-an-ip",
+			wantState: ipv6DADReady,
+			wantFound: false,
+		},
 	}
 
 	for _, tt := range tests {
