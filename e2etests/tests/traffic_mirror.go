@@ -188,7 +188,9 @@ var _ = Describe("Traffic Mirroring", Label("mirror"), func() {
 			Expect(found).To(BeTrue(), "spec.fabricVRFs not found in NNC")
 			vrf, ok := fabricVRFs[cfg.VRFM2M].(map[string]interface{})
 			Expect(ok).To(BeTrue(), "VRF %q not found in NNC fabricVRFs", cfg.VRFM2M)
-			acls, _, _ := unstructured.NestedSlice(vrf, "mirrorAcls")
+			acls, found, getErr := unstructured.NestedSlice(vrf, "mirrorAcls")
+			Expect(getErr).NotTo(HaveOccurred())
+			Expect(found).To(BeTrue(), "mirrorAcls not found in NNC fabricVRF %q", cfg.VRFM2M)
 			Expect(acls).NotTo(BeEmpty(), "mirrorAcls not persisted in NNC spec after update")
 		}
 	})
