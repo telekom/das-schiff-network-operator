@@ -201,6 +201,10 @@ kustomize: ## Download kustomize locally if necessary.
 ENVTEST = $(shell pwd)/bin/setup-envtest
 .PHONY: envtest
 envtest: ## Download envtest-setup locally if necessary.
+	# Pinned to a specific pseudo-version (not @latest) because the Go 1.25
+	# toolchain removed support for the "GO111MODULE=off" mode that earlier
+	# setup-envtest releases relied on.  This exact version is the first
+	# published build that is compatible with Go 1.25.
 	$(call go-get-tool,$(ENVTEST),sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.0.0-20260305142021-f9589b9f2b9d)
 
 GO_LICENSES = $(shell pwd)/bin/go-licenses
