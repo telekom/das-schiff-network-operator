@@ -29,6 +29,18 @@ func WithDNS(nameservers []string) PodOption {
 	}
 }
 
+// WithImage overrides the container image for the pod's first container.
+// The default image used by CreateTestPod is busybox:1.37 (no tcpdump).
+// Use this option when the test needs network tools that busybox does not ship,
+// e.g. framework.WithImage("nicolaka/netshoot:v0.13") for tcpdump/tcpreplay.
+func WithImage(image string) PodOption {
+	return func(spec *corev1.PodSpec) {
+		if len(spec.Containers) > 0 {
+			spec.Containers[0].Image = image
+		}
+	}
+}
+
 // WithNetAdmin adds NET_ADMIN capability to the pod's first container.
 func WithNetAdmin() PodOption {
 	return func(spec *corev1.PodSpec) {

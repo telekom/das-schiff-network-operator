@@ -1,0 +1,145 @@
+package framework
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"time"
+)
+
+type ipv6DADState int
+
+const (
+	ipv6DADReady ipv6DADState = iota
+	ipv6DADTentative
+	ipv6DADFailed
+)
+
+// WaitForIPv6DADComplete waits until the given IPv6 address on the specified
+// interface inside a pod is no longer in "tentative" or "dadfailed" state.
+// If the address is already stuck in DAD, the helper temporarily disables DAD
+// for the interface and re-adds the address once.
+func (f *Framework) WaitForIPv6DADComplete(ctx context.Context, namespace, podName, ipv6Addr, ifName string, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	repaired := false
+
+	return Poll(ctx, 2*time.Second, func() (bool, error) {
+		stdout, stderr, err := f.ExecInPod(ctx, namespace, podName, "", []string{
+			"ip", "-6", "addr", "show", "dev", ifName,
+		})
+		if err != nil {
+			return false, fmt.Errorf("ip addr show failed (stderr=%s): %w", stderr, err)
+		}
+
+		cidr, state, found := parseIPv6DADState(stdout, ipv6Addr)
+		if !found {
+			return false, nil
+		}
+		switch state {
+		case ipv6DADReady:
+			return true, nil
+		case ipv6DADTentative, ipv6DADFailed:
+			if repaired {
+				return false, fmt.Errorf("IPv6 DAD did not clear for %s on %s", ipv6Addr, ifName)
+			}
+			if err := f.resetIPv6AddressWithoutDAD(ctx, namespace, podName, cidr, ifName); err != nil {
+				return false, err
+			}
+			repaired = true
+			return false, nil
+		default:
+			return false, fmt.Errorf("unknown IPv6 DAD state for %s on %s", ipv6Addr, ifName)
+		}
+	})
+}
+
+func parseIPv6DADState(ipAddrOutput, ipv6Addr string) (string, ipv6DADState, bool) {
+	for _, line := range strings.Split(ipAddrOutput, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 || fields[0] != "inet6" {
+			continue
+		}
+		cidr := fields[1]
+		if !strings.HasPrefix(cidr, ipv6Addr+"/") {
+			continue
+		}
+		if strings.Contains(line, "dadfailed") {
+			return cidr, ipv6DADFailed, true
+		}
+		if strings.Contains(line, "tentative") {
+			return cidr, ipv6DADTentative, true
+		}
+		return cidr, ipv6DADReady, true
+	}
+	return "", ipv6DADReady, false
+}
+
+func (f *Framework) resetIPv6AddressWithoutDAD(ctx context.Context, namespace, podName, cidr, ifName string) error {
+	previous, err := f.readIPv6AcceptDAD(ctx, namespace, podName, ifName)
+	if err != nil {
+		return f.readdIPv6Address(ctx, namespace, podName, cidr, ifName, true)
+	}
+
+	if err := f.writeIPv6AcceptDAD(ctx, namespace, podName, ifName, "0"); err != nil {
+		return f.readdIPv6Address(ctx, namespace, podName, cidr, ifName, true)
+	}
+
+	if err := f.readdIPv6Address(ctx, namespace, podName, cidr, ifName, false); err != nil {
+		_ = f.writeIPv6AcceptDAD(ctx, namespace, podName, ifName, previous)
+		return err
+	}
+
+	return f.writeIPv6AcceptDAD(ctx, namespace, podName, ifName, previous)
+}
+
+func (f *Framework) readIPv6AcceptDAD(ctx context.Context, namespace, podName, ifName string) (string, error) {
+	stdout, stderr, err := f.ExecInPod(ctx, namespace, podName, "", []string{
+		"cat", "/proc/sys/net/ipv6/conf/" + ifName + "/accept_dad",
+	})
+	if err != nil {
+		return "", fmt.Errorf("read IPv6 DAD setting for %s failed (stderr=%s): %w", ifName, stderr, err)
+	}
+	return strings.TrimSpace(stdout), nil
+}
+
+func (f *Framework) writeIPv6AcceptDAD(ctx context.Context, namespace, podName, ifName, value string) error {
+	_, stderr, err := f.ExecInPod(ctx, namespace, podName, "", []string{
+		"sh", "-c", "printf '%s' \"$2\" > /proc/sys/net/ipv6/conf/$1/accept_dad", "set-dad", ifName, value,
+	})
+	if err != nil {
+		return fmt.Errorf("write IPv6 DAD setting %s=%s failed (stderr=%s): %w", ifName, value, stderr, err)
+	}
+	return nil
+}
+
+func (f *Framework) readdIPv6Address(ctx context.Context, namespace, podName, cidr, ifName string, noDAD bool) error {
+	_, stderr, err := f.ExecInPod(ctx, namespace, podName, "", []string{
+		"ip", "-6", "addr", "del", cidr, "dev", ifName,
+	})
+	if err != nil {
+		return fmt.Errorf("remove tentative IPv6 address %s from %s failed (stderr=%s): %w", cidr, ifName, stderr, err)
+	}
+
+	if noDAD {
+		if err := f.addIPv6Address(ctx, namespace, podName, cidr, ifName, []string{"dev", ifName, "nodad"}); err == nil {
+			return nil
+		}
+		if err := f.addIPv6Address(ctx, namespace, podName, cidr, ifName, []string{"nodad", "dev", ifName}); err == nil {
+			return nil
+		}
+	}
+
+	return f.addIPv6Address(ctx, namespace, podName, cidr, ifName, []string{"dev", ifName})
+}
+
+func (f *Framework) addIPv6Address(ctx context.Context, namespace, podName, cidr, ifName string, options []string) error {
+	args := append([]string{"ip", "-6", "addr", "add", cidr}, options...)
+	_, stderr, err := f.ExecInPod(ctx, namespace, podName, "", args)
+	if err != nil {
+		return fmt.Errorf("re-add IPv6 address %s to %s failed (stderr=%s): %w", cidr, ifName, stderr, err)
+	}
+
+	return nil
+}
