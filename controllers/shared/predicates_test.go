@@ -66,6 +66,15 @@ func TestBuildNamePredicates_Create(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("nil object rejects event", func(t *testing.T) {
+		t.Setenv(healthcheck.NodenameEnv, "worker-1")
+
+		p := BuildNamePredicates()
+		if got := p.Create(event.CreateEvent{}); got {
+			t.Errorf("Create() = true, want false")
+		}
+	})
 }
 
 func TestBuildNamePredicates_Update(t *testing.T) {
@@ -109,6 +118,15 @@ func TestBuildNamePredicates_Update(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("nil new object rejects event", func(t *testing.T) {
+		t.Setenv(healthcheck.NodenameEnv, "worker-1")
+
+		p := BuildNamePredicates()
+		if got := p.Update(event.UpdateEvent{}); got {
+			t.Errorf("Update() = true, want false")
+		}
+	})
 }
 
 func TestBuildNamePredicates_DeleteAndGeneric(t *testing.T) {
