@@ -3,7 +3,7 @@ description: |
   Submit a bug report about das-schiff-network-operator. Include a reproducible example and
   detailed environment information. For security vulnerabilities, use the security advisory form instead.
 title: '[BUG] <brief description>'
-labels: ['bug', 'triage-needed']
+labels: ['bug']
 
 body:
   - type: markdown
