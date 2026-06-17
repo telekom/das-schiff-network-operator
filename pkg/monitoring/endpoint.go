@@ -426,20 +426,24 @@ func withNodename(data *[]byte) (*[]byte, error) {
 }
 
 func passRequest(r *http.Request, addr, query string, results chan []byte, errors chan error) {
-	s := strings.Split(r.Host, ":")
-	port := ""
-	if len(s) > 1 {
-		port = s[1]
-	}
+	_, port, _ := net.SplitHostPort(r.Host)
 
 	protocol := "http"
 	if r.TLS != nil {
 		protocol = "https"
 	}
 
-	url := fmt.Sprintf("%s://%s:%s%s", protocol, addr, port, query)
-	//nolint:gosec
-	resp, err := http.Get(url) //nolint:noctx
+	host := addr
+	if port != "" {
+		host = net.JoinHostPort(addr, port)
+	}
+	url := fmt.Sprintf("%s://%s%s", protocol, host, query)
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, url, http.NoBody) //nolint:gosec // URL is built from trusted monitoring endpoint addresses
+	if err != nil {
+		errors <- fmt.Errorf("error creating request for %s: %w", addr, err)
+		return
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		errors <- fmt.Errorf("error getting data from %s: %w", addr, err)
 		return

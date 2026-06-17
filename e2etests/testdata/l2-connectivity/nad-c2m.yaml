@@ -1,4 +1,9 @@
 # NetworkAttachmentDefinition for VLAN 503 (c2m VRF, isolation test)
+# Uses CNI conflist to chain macvlan with the tuning meta-plugin.
+# The tuning plugin disables IPv6 DAD (Duplicate Address Detection) at
+# CNI-chain time, preventing addresses from entering "dadfailed" state
+# in containerlab/Kind environments where CRA bridge agents respond to
+# DAD probes.
 apiVersion: k8s.cni.cncf.io/v1
 kind: NetworkAttachmentDefinition
 metadata:
@@ -9,17 +14,28 @@ metadata:
 spec:
   config: |
     {
-      "cniVersion": "0.3.1",
-      "type": "macvlan",
-      "master": "vlan.503",
-      "mode": "bridge",
-      "ipam": {
-        "type": "static",
-        "routes": [
-          {"dst": "10.250.0.0/16", "gw": "10.250.30.1"},
-          {"dst": "10.102.0.0/16", "gw": "10.250.30.1"},
-          {"dst": "fd94:685b:30cf::/48", "gw": "fd94:685b:30cf:503::1"},
-          {"dst": "fda5:25c1:193d::/48", "gw": "fd94:685b:30cf:503::1"}
-        ]
-      }
+      "cniVersion": "0.4.0",
+      "name": "macvlan-vlan503",
+      "plugins": [
+        {
+          "type": "macvlan",
+          "master": "vlan.503",
+          "mode": "bridge",
+          "ipam": {
+            "type": "static",
+            "routes": [
+              {"dst": "10.250.0.0/16", "gw": "10.250.30.1"},
+              {"dst": "10.102.0.0/16", "gw": "10.250.30.1"},
+              {"dst": "fd94:685b:30cf::/48", "gw": "fd94:685b:30cf:503::1"},
+              {"dst": "fda5:25c1:193d::/48", "gw": "fd94:685b:30cf:503::1"}
+            ]
+          }
+        },
+        {
+          "type": "tuning",
+          "sysctl": {
+            "net.ipv6.conf.IFNAME.accept_dad": "0"
+          }
+        }
+      ]
     }

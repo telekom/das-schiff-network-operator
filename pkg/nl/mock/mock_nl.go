@@ -329,6 +329,20 @@ func (mr *MockToolkitInterfaceMockRecorder) NeighList(linkIndex, family any) *go
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NeighList", reflect.TypeOf((*MockToolkitInterface)(nil).NeighList), linkIndex, family)
 }
 
+// NeighSet mocks base method.
+func (m *MockToolkitInterface) NeighSet(neigh *netlink.Neigh) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "NeighSet", neigh)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// NeighSet indicates an expected call of NeighSet.
+func (mr *MockToolkitInterfaceMockRecorder) NeighSet(neigh any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NeighSet", reflect.TypeOf((*MockToolkitInterface)(nil).NeighSet), neigh)
+}
+
 // NewIPNet mocks base method.
 func (m *MockToolkitInterface) NewIPNet(ip net.IP) *net.IPNet {
 	m.ctrl.T.Helper()

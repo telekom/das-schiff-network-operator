@@ -36,7 +36,7 @@ func (n *Manager) listNeighbors() ([]netlink.Neigh, error) {
 }
 
 func (n *Manager) ListVRFInterfaces() (map[int]VRFInformation, error) {
-	// TODO: find a way to merge this with ListL3
+	// TODO(preexisting): find a way to merge this with ListL3
 	infos := map[int]VRFInformation{}
 	links, err := n.toolkit.LinkList()
 	if err != nil {

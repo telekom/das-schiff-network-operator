@@ -141,11 +141,3 @@ func (n *Manager) GetVRFInterfaceIdxByName(name string) (int, error) {
 	}
 	return -1, fmt.Errorf("no VRF with name %s", name)
 }
-
-//nolint:unused
-func (info VRFInformation) linkMTU() int {
-	if info.MTU == 0 {
-		return DefaultMtu
-	}
-	return info.MTU
-}
