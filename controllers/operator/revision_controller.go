@@ -69,6 +69,8 @@ func (r *RevisionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	err := ctrl.NewControllerManagedBy(mgr).
 		For(&networkv1alpha1.NetworkConfigRevision{}).
 		Watches(&corev1.Node{}, &handler.EnqueueRequestForObject{}).
+		Watches(&networkv1alpha1.MirrorTarget{}, &handler.EnqueueRequestForObject{}).
+		Watches(&networkv1alpha1.MirrorSelector{}, &handler.EnqueueRequestForObject{}).
 		Owns(&networkv1alpha1.NodeNetworkConfig{}, builder.MatchEveryOwner).
 		Complete(r)
 	if err != nil {

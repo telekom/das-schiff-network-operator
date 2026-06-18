@@ -17,6 +17,7 @@ limitations under the License.
 package cra
 
 import (
+	"context"
 	"encoding/xml"
 	"os"
 	"path/filepath"
@@ -365,7 +366,7 @@ var _ = Describe("CRA-VSR", func() {
 		node := &corev1.Node{}
 		node.Name = "server1"
 
-		nodeConfig, err := reconciler.CreateNodeNetworkConfig(node, revision)
+		nodeConfig, err := reconciler.CreateNodeNetworkConfig(context.Background(), node, revision)
 		Expect(err).ToNot(HaveOccurred())
 
 		nodeConfig.Spec.ClusterVRF.PolicyRoutes = []v1alpha1.PolicyRoute{
