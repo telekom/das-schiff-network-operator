@@ -58,6 +58,11 @@ func (a *CRAFRRConfigApplier) convertNodeConfigToNetlink(nodeCfg *v1alpha1.NodeN
 		}
 
 		netlinkConfig.Layer2s = append(netlinkConfig.Layer2s, nlLayer2)
+
+		source := nl.MirrorSourceL2(int(layer2.VLAN))
+		for j := range layer2.MirrorACLs {
+			netlinkConfig.Mirrors = append(netlinkConfig.Mirrors, convertMirrorACL(&layer2.MirrorACLs[j], source))
+		}
 	}
 
 	// Skip adding management VRF
@@ -66,13 +71,16 @@ func (a *CRAFRRConfigApplier) convertNodeConfigToNetlink(nodeCfg *v1alpha1.NodeN
 			continue
 		}
 
+		vrf := nodeCfg.Spec.FabricVRFs[name]
 		nlVrf := nl.VRFInformation{
 			Name: name,
-			VNI:  int(nodeCfg.Spec.FabricVRFs[name].VNI),
+			VNI:  int(vrf.VNI),
 			MTU:  nl.DefaultMtu,
 		}
 
 		netlinkConfig.VRFs = append(netlinkConfig.VRFs, nlVrf)
+
+		appendMirrorVRFConfig(&netlinkConfig, name, &vrf)
 	}
 
 	for name := range nodeCfg.Spec.LocalVRFs {
@@ -85,6 +93,65 @@ func (a *CRAFRRConfigApplier) convertNodeConfigToNetlink(nodeCfg *v1alpha1.NodeN
 	}
 
 	return netlinkConfig
+}
+
+// appendMirrorVRFConfig adds the GRE tunnels, loopbacks and mirror rules carried by
+// a fabric VRF to the netlink configuration.
+func appendMirrorVRFConfig(netlinkConfig *nl.NetlinkConfiguration, vrfName string, vrf *v1alpha1.FabricVRF) {
+	for loName := range vrf.Loopbacks {
+		netlinkConfig.Loopbacks = append(netlinkConfig.Loopbacks, nl.LoopbackConfig{
+			Name:      loName,
+			VRF:       vrfName,
+			Addresses: vrf.Loopbacks[loName].IPAddresses,
+		})
+	}
+
+	for greName := range vrf.GREs {
+		gre := vrf.GREs[greName]
+		netlinkConfig.GRETunnels = append(netlinkConfig.GRETunnels, nl.GRETunnel{
+			Name:   greName,
+			VRF:    vrfName,
+			Local:  gre.SourceAddress,
+			Remote: gre.DestinationAddress,
+			Key:    gre.EncapsulationKey,
+			Layer2: gre.Layer == v1alpha1.GRELayer2,
+		})
+	}
+
+	source := nl.MirrorSourceVRF(vrfName)
+	for j := range vrf.MirrorACLs {
+		netlinkConfig.Mirrors = append(netlinkConfig.Mirrors, convertMirrorACL(&vrf.MirrorACLs[j], source))
+	}
+}
+
+// convertMirrorACL maps a NodeNetworkConfig MirrorACL to a netlink MirrorRule for
+// the given source interface.
+func convertMirrorACL(acl *v1alpha1.MirrorACL, sourceIface string) nl.MirrorRule {
+	direction := string(acl.Direction)
+	if direction == "" {
+		direction = "both"
+	}
+	rule := nl.MirrorRule{
+		SourceInterface: sourceIface,
+		Direction:       direction,
+		GREInterface:    acl.MirrorDestination,
+	}
+	if acl.TrafficMatch.Protocol != nil {
+		rule.Protocol = *acl.TrafficMatch.Protocol
+	}
+	if acl.TrafficMatch.SrcPrefix != nil {
+		rule.SrcPrefix = *acl.TrafficMatch.SrcPrefix
+	}
+	if acl.TrafficMatch.DstPrefix != nil {
+		rule.DstPrefix = *acl.TrafficMatch.DstPrefix
+	}
+	if acl.TrafficMatch.SrcPort != nil {
+		rule.SrcPort = *acl.TrafficMatch.SrcPort
+	}
+	if acl.TrafficMatch.DstPort != nil {
+		rule.DstPort = *acl.TrafficMatch.DstPort
+	}
+	return rule
 }
 
 func convertPolicyRoutes(nodeCfg *v1alpha1.NodeNetworkConfig) []cra.PolicyRoute {
