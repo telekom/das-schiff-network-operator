@@ -37,7 +37,7 @@ var _ = Describe("Traffic Mirror", Label("mirror"), func() {
 	}
 
 	// mirrorSelectorYAML generates a MirrorSelector manifest for the given source and direction.
-	mirrorSelectorYAML := func(name, sourceKind, sourceName, direction string) []byte {
+	mirrorSelectorYAML := func(name, sourceKind, sourceName, direction, targetName string) []byte {
 		return []byte(fmt.Sprintf(`apiVersion: network.t-caas.telekom.com/v1alpha1
 kind: MirrorSelector
 metadata:
@@ -48,13 +48,13 @@ spec:
   mirrorTarget:
     apiGroup: network.t-caas.telekom.com
     kind: MirrorTarget
-    name: collector-prod
+    name: %s
   mirrorSource:
     apiGroup: network.t-caas.telekom.com
     kind: %s
     name: %q
   direction: %s
-`, name, sourceKind, sourceName, direction))
+`, name, targetName, sourceKind, sourceName, direction))
 	}
 
 	BeforeEach(func() {
@@ -90,9 +90,9 @@ spec:
 
 	// createTrafficPods creates the mirror-capture, traffic-src and traffic-dst pods.
 	createTrafficPods := func(cfg *config.Config) {
-		By("Creating mirror-capture pod on worker-1 (VLAN 590 / mirror VRF)")
+		By("Creating mirror-capture pod on worker-1 (VLAN 590 / mirror VRF, dual-stack)")
 		Expect(f.CreateTestPod(ctx, ns, "mirror-capture", cfg.WorkerNode1, map[string]string{
-			"k8s.v1.cni.cncf.io/networks": `[{"name": "macvlan-vlan590", "ips": ["10.250.90.100/24"]}]`,
+			"k8s.v1.cni.cncf.io/networks": `[{"name": "macvlan-vlan590", "ips": ["10.250.90.100/24", "fd94:685b:30cf:590::100/64"]}]`,
 		}, withNetToolImage)).To(Succeed())
 
 		By("Creating traffic-src pod on worker-1 (VLAN 501)")
@@ -113,8 +113,10 @@ spec:
 		Expect(f.WaitForPodReady(ctx, ns, "traffic-dst", cfg.PodReadyTimeout)).To(Succeed())
 	}
 
-	// verifyMirrorCapture sends pings and verifies GRE packets are captured at the collector.
-	verifyMirrorCapture := func(dstIP, label string) {
+	// verifyMirrorCapture sends pings and verifies GRE packets are captured at the
+	// collector. captureFilter is the tcpdump expression selecting the GRE traffic
+	// ("proto gre" for IPv4 transport, "ip6 proto gre" for IP6GRE).
+	verifyMirrorCapture := func(dstIP, captureFilter, label string) {
 		By(fmt.Sprintf("Sending ICMP traffic from traffic-src → traffic-dst (%s)", label))
 		Eventually(func() bool {
 			result, _ := f.PingFromPod(ctx, ns, "traffic-src", dstIP, 5)
@@ -125,7 +127,7 @@ spec:
 		By(fmt.Sprintf("Verifying mirrored GRE packets at collector (%s)", label))
 		captureCmd := []string{
 			"sh", "-c",
-			"timeout 30 tcpdump -i net1 -c 5 proto gre 2>/dev/null | wc -l",
+			fmt.Sprintf("timeout 30 tcpdump -i net1 -c 5 %s 2>/dev/null | wc -l", captureFilter),
 		}
 		Eventually(func() bool {
 			stdout, stderr, err := f.ExecInPod(ctx, ns, "mirror-capture", "tester", captureCmd)
@@ -140,11 +142,11 @@ spec:
 			fmt.Sprintf("Mirror-capture should receive GRE packets (%s)", label))
 	}
 
-	runMirrorCase := func(name, sourceKind, sourceName, direction, label string) {
+	runMirrorCase := func(name, sourceKind, sourceName, direction, targetName, captureFilter, label string) {
 		cfg := f.Config
 
 		By(fmt.Sprintf("Applying %s MirrorSelector", label))
-		sel := mirrorSelectorYAML(name, sourceKind, sourceName, direction)
+		sel := mirrorSelectorYAML(name, sourceKind, sourceName, direction, targetName)
 		Expect(f.ApplyManifest(ctx, sel)).To(Succeed())
 		DeferCleanup(func() {
 			_ = f.DeleteManifest(context.Background(), sel)
@@ -154,26 +156,45 @@ spec:
 		time.Sleep(15 * time.Second)
 
 		createTrafficPods(cfg)
-		verifyMirrorCapture(cfg.Macvlan02IPv4, label)
+		verifyMirrorCapture(cfg.Macvlan02IPv4, captureFilter, label)
 	}
 
-	Context("Layer2 source", func() {
+	Context("Layer2 source (IPv4 GRE)", func() {
 		It("should capture GRE packets with ingress-only mirror on VLAN 501", func() {
-			runMirrorCase("mirror-l2-ingress", "Layer2NetworkConfiguration", "vlan1", "ingress", "L2 ingress-only")
+			runMirrorCase("mirror-l2-ingress", "Layer2NetworkConfiguration", "vlan1", "ingress",
+				"collector-prod", "proto gre", "L2 ingress-only")
 		})
 
 		It("should capture GRE packets with egress-only mirror on VLAN 501", func() {
-			runMirrorCase("mirror-l2-egress", "Layer2NetworkConfiguration", "vlan1", "egress", "L2 egress-only")
+			runMirrorCase("mirror-l2-egress", "Layer2NetworkConfiguration", "vlan1", "egress",
+				"collector-prod", "proto gre", "L2 egress-only")
 		})
 	})
 
-	Context("VRF source", func() {
+	Context("VRF source (IPv4 GRE)", func() {
 		It("should capture GRE packets with ingress-only mirror on m2m VRF", func() {
-			runMirrorCase("mirror-vrf-ingress", "VRFRouteConfiguration", "m2m-test-vrf", "ingress", "VRF ingress-only")
+			runMirrorCase("mirror-vrf-ingress", "VRFRouteConfiguration", "m2m-test-vrf", "ingress",
+				"collector-prod", "proto gre", "VRF ingress-only")
 		})
 
 		It("should capture GRE packets with egress-only mirror on m2m VRF", func() {
-			runMirrorCase("mirror-vrf-egress", "VRFRouteConfiguration", "m2m-test-vrf", "egress", "VRF egress-only")
+			runMirrorCase("mirror-vrf-egress", "VRFRouteConfiguration", "m2m-test-vrf", "egress",
+				"collector-prod", "proto gre", "VRF egress-only")
+		})
+	})
+
+	// IP6GRE: the same IPv4 ICMP traffic is mirrored over an IPv6 GRE tunnel to the
+	// IPv6 collector, proving the transport is IPv6 and is independent of the matched
+	// traffic's address family.
+	Context("IPv6 transport (IP6GRE)", func() {
+		It("should capture IP6GRE packets for an L2 ingress mirror", func() {
+			runMirrorCase("mirror-l2-ingress-v6", "Layer2NetworkConfiguration", "vlan1", "ingress",
+				"collector-prod-v6", "ip6 proto gre", "L2 ingress-only / IP6GRE")
+		})
+
+		It("should capture IP6GRE packets for a VRF ingress mirror", func() {
+			runMirrorCase("mirror-vrf-ingress-v6", "VRFRouteConfiguration", "m2m-test-vrf", "ingress",
+				"collector-prod-v6", "ip6 proto gre", "VRF ingress-only / IP6GRE")
 		})
 	})
 })

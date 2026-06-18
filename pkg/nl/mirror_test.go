@@ -1,6 +1,8 @@
 package nl
 
 import (
+	"net"
+
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	"github.com/telekom/das-schiff-network-operator/pkg/config"
@@ -52,6 +54,28 @@ var _ = Describe("mirror helpers", func() {
 		Expect(gre.OKey).To(Equal(uint32(1001)))
 		Expect(gre.IFlags).To(Equal(greKeyFlag))
 		Expect(gre.Attrs().MasterIndex).To(Equal(10))
+	})
+
+	It("selects the GRE kind from the endpoint address family", func() {
+		v4 := greLink(&GRETunnel{Name: "gre4"}, 10, net.ParseIP("1.1.1.1"), net.ParseIP("2.2.2.2"))
+		Expect(v4.Type()).To(Equal("gre"))
+
+		v6 := greLink(&GRETunnel{Name: "gre6"}, 10, net.ParseIP("fd00::1"), net.ParseIP("fd00::2"))
+		Expect(v6.Type()).To(Equal("ip6gre"))
+
+		v6tap := greLink(&GRETunnel{Name: "gtap6", Layer2: true}, 10, net.ParseIP("fd00::1"), net.ParseIP("fd00::2"))
+		Expect(v6tap.Type()).To(Equal("ip6gretap"))
+	})
+
+	It("rejects mixed-family GRE endpoints", func() {
+		mockctrl := gomock.NewController(GinkgoT())
+		defer mockctrl.Finish()
+		tk := mock_nl.NewMockToolkitInterface(mockctrl)
+		nm := mirrorManager(tk)
+
+		tk.EXPECT().LinkByName("gre-mixed").Return(nil, notFound())
+		_, err := nm.ensureGRETunnel(&GRETunnel{Name: "gre-mixed", VRF: "mirror", Local: "fd00::1", Remote: "2.2.2.2"})
+		Expect(err).To(MatchError(ContainSubstring("same address family")))
 	})
 
 	It("builds a layer2 GRETAP link when requested", func() {

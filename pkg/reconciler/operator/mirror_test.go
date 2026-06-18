@@ -236,6 +236,42 @@ var _ = Describe("Mirror building", func() {
 			Expect(crr.buildNodeMirror(context.Background(), node, mirrorRevision(), c)).To(Succeed())
 			Expect(c.Spec.Layer2s["100"].MirrorACLs).To(BeEmpty())
 		})
+
+		It("allocates IPv6 source addresses and a /128 loopback for an IPv6 collector", func() {
+			node := makeNode("node1", true)
+			target := &v1alpha1.MirrorTarget{
+				ObjectMeta: metav1.ObjectMeta{Name: "collector"},
+				Spec: v1alpha1.MirrorTargetSpec{
+					Type:           v1alpha1.MirrorTargetTypeL3GRE,
+					DestinationIP:  "fd00:caa5:9000::100",
+					DestinationVrf: "mirror",
+					SourceLoopback: "lo.mir",
+				},
+			}
+			sel := mirrorSelector("sel-l2", "Layer2NetworkConfiguration", "vlan100", v1alpha1.MirrorDirectionIngress)
+			revision := mirrorRevision()
+			revision.Spec.Vrf[0].Loopbacks = []v1alpha1.VRFLoopback{{Name: "lo.mir", Subnet: "fd00:caa5:5599::/125"}}
+
+			crr := mirrorTestReconciler(node, target, sel)
+			c := nodeConfigWithVRFsAndL2()
+
+			Expect(crr.buildNodeMirror(context.Background(), node, revision, c)).To(Succeed())
+
+			mirrorVrf := c.Spec.FabricVRFs["mirror"]
+			Expect(mirrorVrf.Loopbacks["lo.mir"].IPAddresses).To(ConsistOf("fd00:caa5:5599::1/128"))
+
+			greName := greInterfaceName("collector", v1alpha1.MirrorTargetTypeL3GRE)
+			Expect(mirrorVrf.GREs[greName].SourceAddress).To(Equal("fd00:caa5:5599::1"))
+			Expect(mirrorVrf.GREs[greName].DestinationAddress).To(Equal("fd00:caa5:9000::100"))
+
+			var hasPermit bool
+			for _, item := range mirrorVrf.EVPNExportFilter.Items {
+				if item.Matcher.Prefix != nil && item.Matcher.Prefix.Prefix == "fd00:caa5:5599::1/128" {
+					hasPermit = item.Action.Type == v1alpha1.Accept
+				}
+			}
+			Expect(hasPermit).To(BeTrue(), "IPv6 mirror source /128 should be permitted in the EVPN export filter")
+		})
 	})
 
 	Describe("reconcileMirrorStatus", func() {

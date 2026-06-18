@@ -149,6 +149,9 @@ func (n *Manager) ensureGRETunnel(t *GRETunnel) (int, error) {
 	if localIP == nil || remoteIP == nil {
 		return 0, fmt.Errorf("invalid GRE IPs: local=%s remote=%s", t.Local, t.Remote)
 	}
+	if (localIP.To4() == nil) != (remoteIP.To4() == nil) {
+		return 0, fmt.Errorf("GRE local %s and remote %s must be the same address family", t.Local, t.Remote)
+	}
 
 	vrfLink, err := n.toolkit.LinkByName(t.VRF)
 	if err != nil {
@@ -169,6 +172,10 @@ func (n *Manager) ensureGRETunnel(t *GRETunnel) (int, error) {
 	return link.Attrs().Index, nil
 }
 
+// greLink builds the netlink GRE/GRETAP link for a tunnel. The netlink library
+// selects the kind from the address family of the endpoints: IPv4 endpoints yield
+// "gre"/"gretap", IPv6 endpoints yield "ip6gre"/"ip6gretap" (IP6GRE). The endpoints
+// are validated to share a family by the caller.
 func greLink(t *GRETunnel, masterIndex int, local, remote net.IP) netlink.Link {
 	attrs := netlink.LinkAttrs{Name: t.Name, MasterIndex: masterIndex}
 	var iKey, oKey uint32
