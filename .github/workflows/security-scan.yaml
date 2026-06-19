@@ -42,18 +42,9 @@ jobs:
         run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
 
       - name: Run govulncheck
-        # govulncheck exits 3 when vulnerabilities are found and 0 when clean.
-        # Any other non-zero exit code indicates a genuine execution error
-        # (e.g., module download/build failure) that should fail the job.
-        run: |
-          set +e
-          govulncheck ./...
-          exit_code=$?
-          set -e
-          if [ "$exit_code" -eq 0 ] || [ "$exit_code" -eq 3 ]; then
-            exit 0
-          fi
-          exit "$exit_code"
+        # govulncheck exits non-zero for both vulnerabilities and execution
+        # errors; either case should fail the security job.
+        run: govulncheck ./...
 
   trivy-fs:
     name: Trivy Filesystem Scan
