@@ -33,9 +33,9 @@ func TestParseCanonicalIPv6(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:    "IPv4-mapped IPv6 (::ffff:192.0.2.1)",
+			name:    "IPv4-mapped IPv6 is rejected",
 			input:   "::ffff:192.0.2.1",
-			wantErr: false, // Is4In6 is accepted by parseCanonicalIPv6
+			wantErr: true,
 		},
 		{
 			name:    "plain IPv4 is rejected",
