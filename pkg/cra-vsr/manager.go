@@ -98,13 +98,19 @@ type Metrics struct {
 func NewManager(
 	urls []string,
 	user, password string,
+	knownHostsPath string,
 	timeout time.Duration,
 	logger logr.Logger,
 ) (*Manager, error) {
+	netconfClient, err := NewNetconf(urls, user, password, knownHostsPath, timeout)
+	if err != nil {
+		return nil, err
+	}
+
 	m := &Manager{
 		logger:  logger,
 		timeout: timeout,
-		nc:      NewNetconf(urls, user, password, timeout),
+		nc:      netconfClient,
 	}
 	ctx := context.Background()
 
