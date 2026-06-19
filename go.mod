@@ -1,6 +1,6 @@
 module github.com/telekom/das-schiff-network-operator
 
-go 1.25.0
+go 1.25.11
 
 require (
 	github.com/cilium/ebpf v0.21.0
@@ -24,7 +24,7 @@ require (
 	github.com/vishvananda/netlink v1.3.1
 	github.com/vishvananda/netns v0.0.5
 	go.uber.org/mock v0.6.0
-	golang.org/x/crypto v0.51.0
+	golang.org/x/crypto v0.52.0
 	golang.org/x/exp v0.0.0-20251113190631-e25ba8c21ef6
 	golang.org/x/sys v0.46.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
