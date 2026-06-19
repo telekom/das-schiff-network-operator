@@ -7,13 +7,6 @@ rules:
 - apiGroups:
   - ""
   resources:
-  - events
-  verbs:
-  - create
-  - patch
-- apiGroups:
-  - ""
-  resources:
   - nodes
   - secrets
   verbs:
@@ -52,34 +45,20 @@ rules:
   - update
   - watch
 - apiGroups:
-  - cluster.x-k8s.io
-  resources:
-  - clusters
-  verbs:
-  - get
-  - list
-  - watch
-- apiGroups:
   - network-connector.sylvaproject.org
   resources:
   - announcementpolicies
   - bgppeerings
-  - collectors
-  - destinations
   - inbounds
   - interfaceconfigs
   - layer2attachments
-  - networks
   - nodeattachments
   - outbounds
   - podnetworks
   - trafficmirrors
-  - vrfs
   verbs:
   - get
   - list
-  - patch
-  - update
   - watch
 - apiGroups:
   - network-connector.sylvaproject.org
@@ -104,6 +83,19 @@ rules:
 - apiGroups:
   - network-connector.sylvaproject.org
   resources:
+  - collectors
+  - destinations
+  - networks
+  - vrfs
+  verbs:
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - network-connector.sylvaproject.org
+  resources:
   - collectors/finalizers
   - destinations/finalizers
   - inbounds/finalizers
@@ -113,18 +105,6 @@ rules:
   - vrfs/finalizers
   verbs:
   - update
-- apiGroups:
-  - network-connector.sylvaproject.org
-  resources:
-  - nodenetworkstatuses
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
 - apiGroups:
   - network.t-caas.telekom.com
   resources:
