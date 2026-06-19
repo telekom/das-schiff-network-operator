@@ -8,6 +8,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -61,6 +62,10 @@ var (
 // sanitizeLog removes newlines and carriage returns from log messages
 // to prevent log injection attacks (CodeQL: Log entries created from user input).
 var logSanitizer = strings.NewReplacer("\n", "", "\r", "")
+
+func logSafef(format string, args ...any) {
+	log.Print(logSanitizer.Replace(fmt.Sprintf(format, args...)))
+}
 
 func deleteLayer2(cfg *nl.NetlinkConfiguration) error {
 	existing, err := nlManager.ListL2()
@@ -412,7 +417,7 @@ func createVRFs(cfg *nl.NetlinkConfiguration) ([]nl.VRFInformation, error) {
 			}
 		}
 		if !alreadyExists {
-			log.Print(logSanitizer.Replace(fmt.Sprintf("Creating VRF %s", cfg.VRFs[i].Name)))
+			logSafef("Creating VRF %s", cfg.VRFs[i].Name)
 			if err := nlManager.CreateL3(cfg.VRFs[i]); err != nil {
 				return created, fmt.Errorf("error creating L3 (VRF: %s): %w", cfg.VRFs[i].Name, err)
 			}
@@ -542,20 +547,20 @@ func applyConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := writeFRRConfig(craConfiguration.FRRConfiguration); err != nil {
-		log.Print(logSanitizer.Replace(fmt.Sprintf("Failed to write FRR config: %v", err)))
+		logSafef("Failed to write FRR config: %v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	if err := reconcileNetlink(&craConfiguration.NetlinkConfiguration); err != nil {
-		log.Print(logSanitizer.Replace(fmt.Sprintf("Failed to reconcile netlink: %v", err)))
+		logSafef("Failed to reconcile netlink: %v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	// Reconcile SBR policy routes as ip rules
 	if err := reconcilePolicyRoutes(craConfiguration.PolicyRoutes); err != nil {
-		log.Print(logSanitizer.Replace(fmt.Sprintf("Failed to reconcile policy routes: %v", err)))
+		logSafef("Failed to reconcile policy routes: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to reconcile policy routes: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -591,7 +596,9 @@ func writeFRRConfig(frrConfig string) error {
 		return fmt.Errorf("failed to open FRR config file: %w", err)
 	}
 	if _, err = io.Copy(file, strings.NewReader(frrConfig)); err != nil {
-		_ = file.Close()
+		if closeErr := file.Close(); closeErr != nil {
+			err = errors.Join(err, closeErr)
+		}
 		return fmt.Errorf("failed to write FRR config: %w", err)
 	}
 	if err := file.Close(); err != nil {

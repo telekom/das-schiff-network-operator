@@ -175,7 +175,12 @@ func createCraManager() (*cra.Manager, error) {
 		return nil, fmt.Errorf("no CRA password provided")
 	}
 
-	craManager, err := cra.NewManager(urls, user, pwd, timeout)
+	knownHostsPath := os.Getenv("CRA_KNOWN_HOSTS")
+	if knownHostsPath == "" {
+		return nil, fmt.Errorf("no CRA known hosts file provided")
+	}
+
+	craManager, err := cra.NewManager(urls, user, pwd, knownHostsPath, timeout)
 	if err != nil {
 		return nil, fmt.Errorf("error creating CRA manager: %w", err)
 	}
