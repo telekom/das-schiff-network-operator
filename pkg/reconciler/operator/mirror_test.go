@@ -204,6 +204,7 @@ var _ = Describe("Mirror building", func() {
 			Expect(mirrorVrf.GREs).To(HaveKey(greName))
 			gre := mirrorVrf.GREs[greName]
 			Expect(gre.SourceAddress).To(Equal("10.99.0.1"))
+			Expect(gre.SourceInterface).To(Equal("lo.mir"))
 			Expect(gre.DestinationAddress).To(Equal("10.250.0.100"))
 			Expect(gre.Layer).To(Equal(v1alpha1.GRELayer3))
 			Expect(gre.EncapsulationKey).ToNot(BeNil())

@@ -692,6 +692,14 @@ spec:
                           description: SourceAddress is the source address of the
                             GRE interface.
                           type: string
+                        sourceInterface:
+                          description: |-
+                            SourceInterface is the name of the interface that owns the source address
+                            (used as the tunnel's link-interface). The kernel validates the tunnel
+                            source against this interface, so it must be the loopback carrying
+                            SourceAddress; otherwise an IPv6 GRE refuses to originate traffic
+                            ("Local address not yet configured").
+                          type: string
                       required:
                       - destinationAddress
                       - layer
@@ -2037,6 +2045,14 @@ spec:
                             description: SourceAddress is the source address of the
                               GRE interface.
                             type: string
+                          sourceInterface:
+                            description: |-
+                              SourceInterface is the name of the interface that owns the source address
+                              (used as the tunnel's link-interface). The kernel validates the tunnel
+                              source against this interface, so it must be the loopback carrying
+                              SourceAddress; otherwise an IPv6 GRE refuses to originate traffic
+                              ("Local address not yet configured").
+                            type: string
                         required:
                         - destinationAddress
                         - layer
@@ -3349,6 +3365,14 @@ spec:
                           sourceAddress:
                             description: SourceAddress is the source address of the
                               GRE interface.
+                            type: string
+                          sourceInterface:
+                            description: |-
+                              SourceInterface is the name of the interface that owns the source address
+                              (used as the tunnel's link-interface). The kernel validates the tunnel
+                              source against this interface, so it must be the loopback carrying
+                              SourceAddress; otherwise an IPv6 GRE refuses to originate traffic
+                              ("Local address not yet configured").
                             type: string
                         required:
                         - destinationAddress

@@ -502,6 +502,7 @@
           <name>gre.cluster6</name>
           <local>dead:fb::3</local>
           <remote>dead:fc::4</remote>
+          <link-interface>lo.cluster</link-interface>
           <mtu>1500</mtu>
           <key>
             <both>35</both>

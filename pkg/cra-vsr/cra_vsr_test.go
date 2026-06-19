@@ -397,6 +397,7 @@ var _ = Describe("CRA-VSR", func() {
 				Layer:              v1alpha1.GRELayer3,
 				DestinationAddress: "dead:fc::4",
 				SourceAddress:      "dead:fb::3",
+				SourceInterface:    "lo.cluster",
 				EncapsulationKey:   types.ToPtr(uint32(35)),
 			},
 			"gretap1": {

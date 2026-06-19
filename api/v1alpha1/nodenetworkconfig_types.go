@@ -306,6 +306,12 @@ type GRE struct {
 	DestinationAddress string `json:"destinationAddress"`
 	// SourceAddress is the source address of the GRE interface.
 	SourceAddress string `json:"sourceAddress"`
+	// SourceInterface is the name of the interface that owns the source address
+	// (used as the tunnel's link-interface). The kernel validates the tunnel
+	// source against this interface, so it must be the loopback carrying
+	// SourceAddress; otherwise an IPv6 GRE refuses to originate traffic
+	// ("Local address not yet configured").
+	SourceInterface string `json:"sourceInterface,omitempty"`
 	// Layer is the GRE encapsulation layer.
 	// +kubebuilder:validation:Enum=layer2;layer3
 	// +kubebuilder:default=layer3

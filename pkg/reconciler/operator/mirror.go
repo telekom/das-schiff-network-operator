@@ -116,6 +116,7 @@ func ensureMirrorTunnel(node *corev1.Node, target *v1alpha1.MirrorTargetRevision
 	}
 	fabricVrf.GREs[greName] = v1alpha1.GRE{
 		SourceAddress:      srcIP,
+		SourceInterface:    target.SourceLoopback,
 		DestinationAddress: target.DestinationIP,
 		Layer:              greLayer(target.Type),
 		EncapsulationKey:   target.TunnelKey,

@@ -200,6 +200,14 @@ func (*Layer3) setupGRE(vrf *VRF, name string, conf v1alpha1.GRE) {
 		KeyBoth: conf.EncapsulationKey,
 	}
 
+	// Bind the tunnel to the interface that owns the source address. For IPv6
+	// GRE the kernel validates the local address against this link-interface;
+	// without it the tunnel refuses to originate ("Local address not yet
+	// configured").
+	if conf.SourceInterface != "" {
+		gre.LinkInterface = types.ToPtr(conf.SourceInterface)
+	}
+
 	if conf.Layer == v1alpha1.GRELayer2 {
 		vrf.Interfaces.GRETaps = append(vrf.Interfaces.GRETaps, GRETap{
 			GRE: gre,

@@ -377,15 +377,16 @@ type Loopback struct {
 }
 
 type GRE struct {
-	XMLName      xml.Name      `xml:"urn:6wind:vrouter/gre gre"`
-	Name         string        `xml:"name"`
-	Local        string        `xml:"local"`
-	Remote       *string       `xml:"remote,omitempty"`
-	MTU          *int          `xml:"mtu,omitempty"`
-	KeyInput     *uint32       `xml:"key>input,omitempty"`
-	KeyOutput    *uint32       `xml:"key>output,omitempty"`
-	KeyBoth      *uint32       `xml:"key>both,omitempty"`
-	NetworkStack *NetworkStack `xml:"network-stack,omitempty"`
+	XMLName       xml.Name      `xml:"urn:6wind:vrouter/gre gre"`
+	Name          string        `xml:"name"`
+	Local         string        `xml:"local"`
+	Remote        *string       `xml:"remote,omitempty"`
+	LinkInterface *string       `xml:"link-interface,omitempty"`
+	MTU           *int          `xml:"mtu,omitempty"`
+	KeyInput      *uint32       `xml:"key>input,omitempty"`
+	KeyOutput     *uint32       `xml:"key>output,omitempty"`
+	KeyBoth       *uint32       `xml:"key>both,omitempty"`
+	NetworkStack  *NetworkStack `xml:"network-stack,omitempty"`
 }
 
 type GRETap struct {
