@@ -22,6 +22,8 @@ resources:
 - bases/network-connector.sylvaproject.org_podnetworks.yaml
 - bases/network-connector.sylvaproject.org_trafficmirrors.yaml
 - bases/network-connector.sylvaproject.org_vrfs.yaml
+- bases/network.t-caas.telekom.com_mirrortargets.yaml
+- bases/network.t-caas.telekom.com_mirrorselectors.yaml
 #+kubebuilder:scaffold:crdkustomizeresource
 
 # [WEBHOOK] To enable webhook, uncomment all the sections with [WEBHOOK] prefix.

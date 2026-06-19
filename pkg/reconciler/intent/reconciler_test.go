@@ -23,6 +23,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -734,9 +735,10 @@ func TestTrafficMirrorL2ASource(t *testing.T) {
 	require.NotEmpty(t, l2.MirrorACLs, "expected MirrorACLs on Layer2")
 
 	acl := l2.MirrorACLs[0]
-	assert.Equal(t, "192.168.100.1", acl.DestinationAddress)
-	assert.Equal(t, "vrf-mir-col", acl.DestinationVrf)
-	assert.Equal(t, networkv1alpha1.EncapsulationTypeGRE, acl.EncapsulationType)
+	// The ACL references the collector's GRE interface by name (legacy
+	// NodeNetworkConfig model); for an l3gre collector the name is "gre-<hash>".
+	assert.True(t, strings.HasPrefix(acl.MirrorDestination, "gre-"), "expected gre- interface, got %q", acl.MirrorDestination)
+	assert.Equal(t, networkv1alpha1.MirrorDirectionIngress, acl.Direction)
 
 	// TrafficMatch should be converted
 	require.NotNil(t, acl.TrafficMatch.Protocol)
@@ -750,7 +752,20 @@ func TestTrafficMirrorL2ASource(t *testing.T) {
 	require.NotNil(t, mirVRF.Loopbacks, "expected Loopbacks in mirror VRF")
 	lo, ok := mirVRF.Loopbacks["lo.mir"]
 	require.True(t, ok, "expected Loopback 'lo.mir'")
-	assert.Contains(t, lo.IPAddresses, "10.250.0.1")
+	// Loopback source address is host-prefixed (/32) to match the legacy operator model.
+	assert.Contains(t, lo.IPAddresses, "10.250.0.1/32")
+
+	// The Collector builder also emits the named GRE tunnel bound to the loopback.
+	require.NotNil(t, mirVRF.GREs, "expected GREs in mirror VRF")
+	var gre networkv1alpha1.GRE
+	for name := range mirVRF.GREs {
+		if strings.HasPrefix(name, "gre-") {
+			gre = mirVRF.GREs[name]
+		}
+	}
+	assert.Equal(t, "10.250.0.1", gre.SourceAddress, "GRE source is the bare per-node loopback IP")
+	assert.Equal(t, "192.168.100.1", gre.DestinationAddress, "GRE destination is the collector address")
+	assert.Equal(t, "lo.mir", gre.SourceInterface, "GRE bound to its source loopback")
 }
 
 // --- AnnouncementPolicy Tests ---

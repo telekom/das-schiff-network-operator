@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.20.0
+    controller-gen.kubebuilder.io/version: v0.17.2
   name: vrfrouteconfigurations.network.t-caas.telekom.com
 spec:
   group: network.t-caas.telekom.com
@@ -123,6 +123,29 @@ spec:
                   - cidr
                   type: object
                 maxItems: 4294967295
+                type: array
+              loopbacks:
+                description: |-
+                  Loopbacks defines loopback interfaces for the VRF with per-node IP
+                  allocation from a subnet. The operator allocates a deterministic per-node
+                  address from each loopback's subnet (used e.g. as a mirror GRE tunnel
+                  source) and advertises it via the VRF's EVPN export filter.
+                items:
+                  description: |-
+                    VRFLoopback defines a loopback interface inside a VRF whose address is
+                    allocated per-node from a subnet.
+                  properties:
+                    name:
+                      description: Name is the loopback interface name (e.g. "lo.mir").
+                      type: string
+                    subnet:
+                      description: Subnet is the CIDR from which a unique per-node
+                        loopback IP is allocated.
+                      type: string
+                  required:
+                  - name
+                  - subnet
+                  type: object
                 type: array
               nodeSelector:
                 description: Select nodes to create VRF on

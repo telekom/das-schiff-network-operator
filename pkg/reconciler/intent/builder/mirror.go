@@ -58,18 +58,18 @@ func (b *MirrorBuilder) Build(ctx context.Context, data *resolver.ResolvedData) 
 			continue
 		}
 
-		// Build MirrorACL.
-		mirrorACL := b.buildMirrorACL(tm, col)
+		// Build MirrorACLs (one per direction; "both" expands to ingress + egress).
+		mirrorACLs := b.buildMirrorACLs(tm, col)
 
-		// Resolve the source attachment and determine where to place the ACL.
+		// Resolve the source attachment and determine where to place the ACLs.
 		var srcErr error
 		switch tm.Spec.Source.Kind {
 		case "Layer2Attachment":
-			srcErr = b.addToLayer2(tm.Spec.Source.Name, &mirrorACL, data, result)
+			srcErr = b.addToLayer2(tm.Spec.Source.Name, mirrorACLs, data, result)
 		case "Inbound":
-			srcErr = b.addToInboundVRF(tm.Spec.Source.Name, &mirrorACL, data, result)
+			srcErr = b.addToInboundVRF(tm.Spec.Source.Name, mirrorACLs, data, result)
 		case "Outbound":
-			srcErr = b.addToOutboundVRF(tm.Spec.Source.Name, &mirrorACL, data, result)
+			srcErr = b.addToOutboundVRF(tm.Spec.Source.Name, mirrorACLs, data, result)
 		default:
 			logger.Info("skipping TrafficMirror with unknown source kind",
 				"trafficmirror", tm.Name, "kind", tm.Spec.Source.Kind)
@@ -98,20 +98,27 @@ func (*MirrorBuilder) resolveCollector(name string, data *resolver.ResolvedData)
 	return nil, fmt.Errorf("collector %q not found", name)
 }
 
-// buildMirrorACL creates a MirrorACL from a TrafficMirror and its resolved Collector.
-func (b *MirrorBuilder) buildMirrorACL(tm *nc.TrafficMirror, col *nc.Collector) networkv1alpha1.MirrorACL {
-	acl := networkv1alpha1.MirrorACL{
-		DestinationAddress: col.Spec.Address,
-		DestinationVrf:     col.Spec.MirrorVRF.Name,
-		EncapsulationType:  networkv1alpha1.EncapsulationTypeGRE,
-		Direction:          tm.Spec.Direction,
-	}
-
+// buildMirrorACLs creates the MirrorACLs for a TrafficMirror and its resolved
+// Collector. The ACL references the Collector's GRE interface by name; a "both"
+// direction (or unset) expands to one ingress and one egress ACL because the
+// NodeNetworkConfig MirrorACL direction is single-valued.
+func (b *MirrorBuilder) buildMirrorACLs(tm *nc.TrafficMirror, col *nc.Collector) []networkv1alpha1.MirrorACL {
+	var match networkv1alpha1.TrafficMatch
 	if tm.Spec.TrafficMatch != nil {
-		acl.TrafficMatch = b.convertTrafficMatch(tm.Spec.TrafficMatch)
+		match = b.convertTrafficMatch(tm.Spec.TrafficMatch)
 	}
 
-	return acl
+	greName := collectorGREName(col)
+	directions := mirrorDirections(tm.Spec.Direction)
+	acls := make([]networkv1alpha1.MirrorACL, 0, len(directions))
+	for _, dir := range directions {
+		acls = append(acls, networkv1alpha1.MirrorACL{
+			TrafficMatch:      match,
+			MirrorDestination: greName,
+			Direction:         dir,
+		})
+	}
+	return acls
 }
 
 // convertTrafficMatch converts a nc.TrafficMatch to a networkv1alpha1.TrafficMatch.
@@ -136,8 +143,8 @@ func (*MirrorBuilder) convertTrafficMatch(tm *nc.TrafficMatch) networkv1alpha1.T
 	return result
 }
 
-// addToLayer2 adds MirrorACL to a Layer2 entry identified by L2A name on all nodes.
-func (*MirrorBuilder) addToLayer2(l2aName string, acl *networkv1alpha1.MirrorACL, data *resolver.ResolvedData, result map[string]*NodeContribution) error {
+// addToLayer2 adds the MirrorACLs to a Layer2 entry identified by L2A name on all nodes.
+func (*MirrorBuilder) addToLayer2(l2aName string, acls []networkv1alpha1.MirrorACL, data *resolver.ResolvedData, result map[string]*NodeContribution) error {
 	// Find the L2A.
 	var l2a *nc.Layer2Attachment
 	for j := range data.Layer2Attachments {
@@ -174,7 +181,7 @@ func (*MirrorBuilder) addToLayer2(l2aName string, acl *networkv1alpha1.MirrorACL
 		if !exists {
 			layer2 = networkv1alpha1.Layer2{}
 		}
-		layer2.MirrorACLs = append(layer2.MirrorACLs, *acl)
+		layer2.MirrorACLs = append(layer2.MirrorACLs, acls...)
 		contrib.Layer2s[mapKey] = layer2
 	}
 
@@ -184,7 +191,7 @@ func (*MirrorBuilder) addToLayer2(l2aName string, acl *networkv1alpha1.MirrorACL
 // addToInboundVRF adds MirrorACL to every VRF associated with an Inbound's
 // Destinations selector, on all nodes. When the selector matches multiple
 // Destinations across different VRFs, the ACL is fanned out to each VRF.
-func (b *MirrorBuilder) addToInboundVRF(ibName string, acl *networkv1alpha1.MirrorACL, data *resolver.ResolvedData, result map[string]*NodeContribution) error {
+func (b *MirrorBuilder) addToInboundVRF(ibName string, acls []networkv1alpha1.MirrorACL, data *resolver.ResolvedData, result map[string]*NodeContribution) error {
 	vrfs, err := b.resolveInboundVRFs(ibName, data)
 	if err != nil {
 		return err
@@ -192,13 +199,13 @@ func (b *MirrorBuilder) addToInboundVRF(ibName string, acl *networkv1alpha1.Mirr
 	if len(vrfs) == 0 {
 		return fmt.Errorf("inbound %q has no VRF", ibName)
 	}
-	b.applyMirrorACLToVRFs(vrfs, acl, data, result)
+	b.applyMirrorACLToVRFs(vrfs, acls, data, result)
 	return nil
 }
 
 // addToOutboundVRF adds MirrorACL to every VRF associated with an Outbound's
 // Destinations selector, on all nodes.
-func (b *MirrorBuilder) addToOutboundVRF(obName string, acl *networkv1alpha1.MirrorACL, data *resolver.ResolvedData, result map[string]*NodeContribution) error {
+func (b *MirrorBuilder) addToOutboundVRF(obName string, acls []networkv1alpha1.MirrorACL, data *resolver.ResolvedData, result map[string]*NodeContribution) error {
 	vrfs, err := b.resolveOutboundVRFs(obName, data)
 	if err != nil {
 		return err
@@ -206,13 +213,13 @@ func (b *MirrorBuilder) addToOutboundVRF(obName string, acl *networkv1alpha1.Mir
 	if len(vrfs) == 0 {
 		return fmt.Errorf("outbound %q has no VRF", obName)
 	}
-	b.applyMirrorACLToVRFs(vrfs, acl, data, result)
+	b.applyMirrorACLToVRFs(vrfs, acls, data, result)
 	return nil
 }
 
-// applyMirrorACLToVRFs writes the ACL into each named VRF on every node,
+// applyMirrorACLToVRFs writes the ACLs into each named VRF on every node,
 // creating the FabricVRF entry on demand.
-func (*MirrorBuilder) applyMirrorACLToVRFs(vrfs map[string]*nc.VRFSpec, acl *networkv1alpha1.MirrorACL, data *resolver.ResolvedData, result map[string]*NodeContribution) {
+func (*MirrorBuilder) applyMirrorACLToVRFs(vrfs map[string]*nc.VRFSpec, acls []networkv1alpha1.MirrorACL, data *resolver.ResolvedData, result map[string]*NodeContribution) {
 	// Sorted iteration for deterministic output.
 	names := make([]string, 0, len(vrfs))
 	for n := range vrfs {
@@ -232,7 +239,7 @@ func (*MirrorBuilder) applyMirrorACLToVRFs(vrfs map[string]*nc.VRFSpec, acl *net
 			if !exists {
 				fvrf = buildFabricVRF(vrfs[vrfName])
 			}
-			fvrf.MirrorACLs = append(fvrf.MirrorACLs, *acl)
+			fvrf.MirrorACLs = append(fvrf.MirrorACLs, acls...)
 			contrib.FabricVRFs[vrfName] = fvrf
 		}
 	}

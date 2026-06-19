@@ -4,34 +4,34 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.17.2
-  name: podnetworks.network-connector.sylvaproject.org
+  name: mirrortargets.network.t-caas.telekom.com
 spec:
-  group: network-connector.sylvaproject.org
+  group: network.t-caas.telekom.com
   names:
-    kind: PodNetwork
-    listKind: PodNetworkList
-    plural: podnetworks
+    kind: MirrorTarget
+    listKind: MirrorTargetList
+    plural: mirrortargets
     shortNames:
-    - pnet
-    singular: podnetwork
-  scope: Namespaced
+    - mirrortarget
+    singular: mirrortarget
+  scope: Cluster
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .spec.networkRef
-      name: NetworkRef
+    - jsonPath: .spec.type
+      name: Type
       type: string
-    - jsonPath: .status.conditions[?(@.type=="Ready")].status
-      name: Ready
+    - jsonPath: .spec.destinationIP
+      name: Destination
       type: string
-    - jsonPath: .metadata.creationTimestamp
-      name: Age
-      type: date
+    - jsonPath: .spec.destinationVrf
+      name: VRF
+      type: string
     name: v1alpha1
     schema:
       openAPIV3Schema:
         description: |-
-          PodNetwork is the Schema for the podnetworks API.
-          It allocates additional pod-level networks from a Network for CNI integration.
+          MirrorTarget is the Schema for the mirrortargets API. It describes where
+          mirrored traffic is sent (a remote GRE-encapsulated collector).
         properties:
           apiVersion:
             description: |-
@@ -51,73 +51,58 @@ spec:
           metadata:
             type: object
           spec:
-            description: PodNetworkSpec defines the desired state of PodNetwork.
+            description: |-
+              MirrorTargetSpec defines where mirrored traffic is sent. It describes the GRE
+              tunnel properties and which VRF and loopback the tunnel source binds to. The
+              per-node source IP is allocated from the referenced loopback's subnet on the
+              VRFRouteConfiguration.
             properties:
-              destinations:
-                description: Destinations selects the destination workloads that may
-                  use this pod network.
-                properties:
-                  matchExpressions:
-                    description: matchExpressions is a list of label selector requirements.
-                      The requirements are ANDed.
-                    items:
-                      description: |-
-                        A label selector requirement is a selector that contains values, a key, and an operator that
-                        relates the key and values.
-                      properties:
-                        key:
-                          description: key is the label key that the selector applies
-                            to.
-                          type: string
-                        operator:
-                          description: |-
-                            operator represents a key's relationship to a set of values.
-                            Valid operators are In, NotIn, Exists and DoesNotExist.
-                          type: string
-                        values:
-                          description: |-
-                            values is an array of string values. If the operator is In or NotIn,
-                            the values array must be non-empty. If the operator is Exists or DoesNotExist,
-                            the values array must be empty. This array is replaced during a strategic
-                            merge patch.
-                          items:
-                            type: string
-                          type: array
-                          x-kubernetes-list-type: atomic
-                      required:
-                      - key
-                      - operator
-                      type: object
-                    type: array
-                    x-kubernetes-list-type: atomic
-                  matchLabels:
-                    additionalProperties:
-                      type: string
-                    description: |-
-                      matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
-                      map is equivalent to an element of matchExpressions, whose key field is "key", the
-                      operator is "In", and the values array contains only "value". The requirements are ANDed.
-                    type: object
-                type: object
-                x-kubernetes-map-type: atomic
-              networkRef:
-                description: NetworkRef is the name of the Network resource this PodNetwork
-                  allocates from.
-                minLength: 1
+              destinationIP:
+                description: DestinationIP is the remote collector IP the tunnel points
+                  to.
+                type: string
+              destinationVrf:
+                description: |-
+                  DestinationVrf is the VRF in which the GRE tunnel lives. It must be a
+                  user-created VRFRouteConfiguration (with VNI + route-target).
+                maxLength: 12
+                type: string
+              key:
+                description: TunnelKey is an optional GRE encapsulation key.
+                format: int32
+                type: integer
+              sourceLoopback:
+                description: |-
+                  SourceLoopback is the name of the loopback (defined on the destination
+                  VRF's VRFRouteConfiguration) whose per-node allocated IP is used as the
+                  GRE tunnel source address.
+                type: string
+              type:
+                description: Type is the GRE encapsulation type of the tunnel.
+                enum:
+                - l2gre
+                - l3gre
                 type: string
             required:
-            - networkRef
+            - destinationIP
+            - destinationVrf
+            - sourceLoopback
+            - type
             type: object
-            x-kubernetes-validations:
-            - message: networkRef is immutable
-              rule: self.networkRef == oldSelf.networkRef
           status:
-            description: PodNetworkStatus defines the observed state of PodNetwork.
+            description: MirrorTargetStatus defines the observed state of MirrorTarget.
             properties:
+              activeNodes:
+                description: ActiveNodes is the number of nodes where the tunnel is
+                  configured.
+                type: integer
+              activeSelectors:
+                description: ActiveSelectors is the number of MirrorSelectors that
+                  reference this target.
+                type: integer
               conditions:
-                description: |-
-                  Conditions represent the latest available observations of the
-                  PodNetwork's current state.
+                description: Conditions represent the latest available observations
+                  of the target state.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -173,14 +158,6 @@ spec:
                   - type
                   type: object
                 type: array
-                x-kubernetes-list-map-keys:
-                - type
-                x-kubernetes-list-type: map
-              observedGeneration:
-                description: ObservedGeneration is the most recent generation observed
-                  by the controller.
-                format: int64
-                type: integer
             type: object
         type: object
     served: true

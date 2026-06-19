@@ -39,6 +39,7 @@ type InfoL2 struct {
 	vrf    string
 	mac    string
 	ips    []string
+	acls   []v1alpha1.MirrorACL
 }
 
 func NewLayer2(
@@ -60,6 +61,7 @@ func (l *Layer2) setupInformations() {
 			vlanID: int(l2.VLAN),
 			mtu:    int(l2.MTU),
 			vni:    int(l2.VNI),
+			acls:   l2.MirrorACLs,
 		}
 
 		if l2.IRB != nil {
@@ -151,6 +153,10 @@ func (l *Layer2) setup() error {
 		br := l.setupBridge(&info, intfs)
 		l.setupVXLAN(&info, br, l.ns.Interfaces)
 		l.mgr.createVLAN(info.vlanID, info.mtu, br, l.ns.Interfaces)
+
+		for i := range info.acls {
+			l.mgr.createMirrorTraffic(l.ns, br.Name, &info.acls[i])
+		}
 	}
 
 	return nil

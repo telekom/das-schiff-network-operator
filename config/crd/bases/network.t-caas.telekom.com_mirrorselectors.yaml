@@ -4,42 +4,34 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.17.2
-  name: trafficmirrors.network-connector.sylvaproject.org
+  name: mirrorselectors.network.t-caas.telekom.com
 spec:
-  group: network-connector.sylvaproject.org
+  group: network.t-caas.telekom.com
   names:
-    kind: TrafficMirror
-    listKind: TrafficMirrorList
-    plural: trafficmirrors
+    kind: MirrorSelector
+    listKind: MirrorSelectorList
+    plural: mirrorselectors
     shortNames:
-    - tmir
-    singular: trafficmirror
-  scope: Namespaced
+    - mirrorselector
+    singular: mirrorselector
+  scope: Cluster
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .spec.source.kind
-      name: SourceKind
-      type: string
-    - jsonPath: .spec.source.name
-      name: SourceName
-      type: string
-    - jsonPath: .spec.collector
-      name: Collector
-      type: string
     - jsonPath: .spec.direction
       name: Direction
       type: string
-    - jsonPath: .status.conditions[?(@.type=="Ready")].status
-      name: Ready
+    - jsonPath: .spec.mirrorSource.name
+      name: Source
       type: string
-    - jsonPath: .metadata.creationTimestamp
-      name: Age
-      type: date
+    - jsonPath: .spec.mirrorTarget.name
+      name: Target
+      type: string
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: TrafficMirror declaratively mirrors traffic from an attachment
-          to a Collector.
+        description: |-
+          MirrorSelector is the Schema for the mirrorselectors API. It describes what
+          traffic to capture and in which direction.
         properties:
           apiVersion:
             description: |-
@@ -59,91 +51,104 @@ spec:
           metadata:
             type: object
           spec:
-            description: TrafficMirrorSpec defines the desired state of TrafficMirror.
+            description: |-
+              MirrorSelectorSpec defines what traffic to capture and in which direction.
+              It references a MirrorTarget (where to send the mirrored traffic) and a
+              MirrorSource (which Layer2NetworkConfiguration or VRFRouteConfiguration to
+              capture from).
             properties:
-              collector:
-                description: Collector is the name of the Collector resource.
-                minLength: 1
-                type: string
               direction:
-                default: both
-                description: |-
-                  Direction is the mirror direction. Defaults to "both" to match the underlying
-                  NodeNetworkConfig MirrorACL behavior when the field is omitted.
+                description: Direction is the direction of traffic to mirror.
                 enum:
                 - ingress
                 - egress
-                - both
                 type: string
-              source:
-                description: Source identifies the attachment to mirror traffic from.
+              mirrorSource:
+                description: |-
+                  MirrorSource references the Layer2NetworkConfiguration or
+                  VRFRouteConfiguration whose traffic is captured.
                 properties:
+                  apiGroup:
+                    description: |-
+                      APIGroup is the group for the resource being referenced.
+                      If APIGroup is not specified, the specified Kind must be in the core API group.
+                      For any other third-party types, APIGroup is required.
+                    type: string
                   kind:
-                    description: Kind is the type of attachment.
-                    enum:
-                    - Layer2Attachment
-                    - Inbound
-                    - Outbound
+                    description: Kind is the type of resource being referenced
                     type: string
                   name:
-                    description: Name is the name of the attachment resource.
-                    minLength: 1
+                    description: Name is the name of resource being referenced
+                    type: string
+                  namespace:
+                    description: |-
+                      Namespace is the namespace of resource being referenced
+                      Note that when a namespace is specified, a gateway.networking.k8s.io/ReferenceGrant object is required in the referent namespace to allow that namespace's owner to accept the reference. See the ReferenceGrant documentation for details.
+                      (Alpha) This field requires the CrossNamespaceVolumeDataSource feature gate to be enabled.
+                    type: string
+                required:
+                - kind
+                - name
+                type: object
+              mirrorTarget:
+                description: MirrorTarget references the MirrorTarget that describes
+                  the collector.
+                properties:
+                  apiGroup:
+                    description: |-
+                      APIGroup is the group for the resource being referenced.
+                      If APIGroup is not specified, the specified Kind must be in the core API group.
+                      For any other third-party types, APIGroup is required.
+                    type: string
+                  kind:
+                    description: Kind is the type of resource being referenced
+                    type: string
+                  name:
+                    description: Name is the name of resource being referenced
+                    type: string
+                  namespace:
+                    description: |-
+                      Namespace is the namespace of resource being referenced
+                      Note that when a namespace is specified, a gateway.networking.k8s.io/ReferenceGrant object is required in the referent namespace to allow that namespace's owner to accept the reference. See the ReferenceGrant documentation for details.
+                      (Alpha) This field requires the CrossNamespaceVolumeDataSource feature gate to be enabled.
                     type: string
                 required:
                 - kind
                 - name
                 type: object
               trafficMatch:
-                description: TrafficMatch optionally filters which traffic to mirror.
+                description: |-
+                  TrafficMatch selects which packets to mirror. An empty match captures all
+                  traffic on the source interface.
                 properties:
                   dstPort:
-                    description: DstPort filters by destination port (requires protocol
-                      to be tcp or udp).
-                    format: int32
-                    maximum: 65535
-                    minimum: 1
+                    description: DstPort is the destination port to match.
                     type: integer
                   dstPrefix:
-                    description: DstPrefix filters by destination IP prefix in CIDR
-                      notation.
+                    description: DstPrefix is the destination prefix to match.
                     type: string
                   protocol:
-                    description: Protocol filters by IP protocol.
-                    enum:
-                    - TCP
-                    - UDP
-                    - ICMP
+                    description: Protocol is the protocol to match.
                     type: string
                   srcPort:
-                    description: SrcPort filters by source port (requires protocol
-                      to be tcp or udp).
-                    format: int32
-                    maximum: 65535
-                    minimum: 1
+                    description: SrcPort is the source port to match.
                     type: integer
                   srcPrefix:
-                    description: SrcPrefix filters by source IP prefix in CIDR notation.
+                    description: SrcPrefix is the source prefix to match.
                     type: string
                 type: object
-                x-kubernetes-validations:
-                - message: srcPort/dstPort require protocol to be TCP or UDP
-                  rule: (!has(self.srcPort) && !has(self.dstPort)) || (has(self.protocol)
-                    && self.protocol != 'ICMP')
             required:
-            - collector
-            - source
+            - direction
+            - mirrorSource
+            - mirrorTarget
             type: object
           status:
-            description: TrafficMirrorStatus defines the observed state of TrafficMirror.
+            description: MirrorSelectorStatus defines the observed state of MirrorSelector.
             properties:
-              activeNodes:
-                description: ActiveNodes is the number of nodes where the mirror is
-                  active.
-                format: int32
-                type: integer
               conditions:
-                description: Conditions represent the latest available observations
-                  of the TrafficMirror's state.
+                description: |-
+                  Conditions represent the latest available observations of the selector
+                  state (e.g. Resolved, Applied).
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -199,14 +204,6 @@ spec:
                   - type
                   type: object
                 type: array
-                x-kubernetes-list-map-keys:
-                - type
-                x-kubernetes-list-type: map
-              observedGeneration:
-                description: ObservedGeneration is the most recent generation observed
-                  by the controller.
-                format: int64
-                type: integer
             type: object
         type: object
     served: true

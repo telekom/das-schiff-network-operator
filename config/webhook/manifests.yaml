@@ -10,6 +10,26 @@ webhooks:
     service:
       name: webhook-service
       namespace: system
+      path: /validate-network-t-caas-telekom-com-v1alpha1-vrfrouteconfiguration
+  failurePolicy: Fail
+  name: vvrfrouteconfiguration.kb.io
+  rules:
+  - apiGroups:
+    - network.t-caas.telekom.com
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - vrfrouteconfigurations
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
       path: /validate-network-connector-sylvaproject-org-v1alpha1-announcementpolicy
   failurePolicy: Fail
   name: vannouncementpolicy.kb.io
@@ -243,24 +263,4 @@ webhooks:
     - UPDATE
     resources:
     - vrfs
-  sideEffects: None
-- admissionReviewVersions:
-  - v1
-  clientConfig:
-    service:
-      name: webhook-service
-      namespace: system
-      path: /validate-network-t-caas-telekom-com-v1alpha1-vrfrouteconfiguration
-  failurePolicy: Fail
-  name: vvrfrouteconfiguration.kb.io
-  rules:
-  - apiGroups:
-    - network.t-caas.telekom.com
-    apiVersions:
-    - v1alpha1
-    operations:
-    - CREATE
-    - UPDATE
-    resources:
-    - vrfrouteconfigurations
   sideEffects: None

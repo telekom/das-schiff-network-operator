@@ -83,6 +83,24 @@ type VRFRouteConfigurationSpec struct {
 
 	// Select nodes to create VRF on
 	NodeSelector *metav1.LabelSelector `json:"nodeSelector,omitempty"`
+
+	// Loopbacks defines loopback interfaces for the VRF with per-node IP
+	// allocation from a subnet. The operator allocates a deterministic per-node
+	// address from each loopback's subnet (used e.g. as a mirror GRE tunnel
+	// source) and advertises it via the VRF's EVPN export filter.
+	Loopbacks []VRFLoopback `json:"loopbacks,omitempty"`
+}
+
+// VRFLoopback defines a loopback interface inside a VRF whose address is
+// allocated per-node from a subnet.
+type VRFLoopback struct {
+	// +kubebuilder:validation:Required
+	// Name is the loopback interface name (e.g. "lo.mir").
+	Name string `json:"name"`
+
+	// +kubebuilder:validation:Required
+	// Subnet is the CIDR from which a unique per-node loopback IP is allocated.
+	Subnet string `json:"subnet"`
 }
 
 // VRFRouteConfigurationStatus defines the observed state of VRFRouteConfiguration.

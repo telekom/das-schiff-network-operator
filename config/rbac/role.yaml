@@ -7,6 +7,13 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
+  - ""
+  resources:
   - nodes
   - secrets
   verbs:
@@ -45,20 +52,34 @@ rules:
   - update
   - watch
 - apiGroups:
+  - cluster.x-k8s.io
+  resources:
+  - clusters
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
   - network-connector.sylvaproject.org
   resources:
   - announcementpolicies
   - bgppeerings
+  - collectors
+  - destinations
   - inbounds
   - interfaceconfigs
   - layer2attachments
+  - networks
   - nodeattachments
   - outbounds
   - podnetworks
   - trafficmirrors
+  - vrfs
   verbs:
   - get
   - list
+  - patch
+  - update
   - watch
 - apiGroups:
   - network-connector.sylvaproject.org
@@ -83,19 +104,6 @@ rules:
 - apiGroups:
   - network-connector.sylvaproject.org
   resources:
-  - collectors
-  - destinations
-  - networks
-  - vrfs
-  verbs:
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - network-connector.sylvaproject.org
-  resources:
   - collectors/finalizers
   - destinations/finalizers
   - inbounds/finalizers
@@ -106,10 +114,24 @@ rules:
   verbs:
   - update
 - apiGroups:
+  - network-connector.sylvaproject.org
+  resources:
+  - nodenetworkstatuses
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - network.t-caas.telekom.com
   resources:
   - bgppeerings
   - layer2networkconfigurations
+  - mirrorselectors
+  - mirrortargets
   - networkconfigrevisions
   - nodenetplanconfigs
   - nodenetworkconfigs
@@ -127,6 +149,8 @@ rules:
   resources:
   - bgppeerings/finalizers
   - layer2networkconfigurations/finalizers
+  - mirrorselectors/finalizers
+  - mirrortargets/finalizers
   - networkconfigrevisions/finalizers
   - nodenetplanconfigs/finalizers
   - nodenetworkconfigs/finalizers
@@ -138,6 +162,8 @@ rules:
   resources:
   - bgppeerings/status
   - layer2networkconfigurations/status
+  - mirrorselectors/status
+  - mirrortargets/status
   - networkconfigrevisions/status
   - nodenetplanconfigs/status
   - nodenetworkconfigs/status

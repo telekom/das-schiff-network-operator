@@ -88,12 +88,32 @@ func (*CollectorBuilder) Build(ctx context.Context, data *resolver.ResolvedData)
 				fvrf = buildFabricVRF(&resolvedVRF.Spec)
 			}
 
+			bare := mirrorBareIP(addr)
+			hostAddr := mirrorHostAddress(bare)
+
 			if fvrf.Loopbacks == nil {
 				fvrf.Loopbacks = make(map[string]networkv1alpha1.Loopback)
 			}
 			fvrf.Loopbacks[loopbackName] = networkv1alpha1.Loopback{
-				IPAddresses: []string{addr},
+				IPAddresses: []string{hostAddr},
 			}
+
+			// Emit the named GRE tunnel that the MirrorACLs reference by interface
+			// name (legacy NodeNetworkConfig model). The tunnel is bound to its
+			// source loopback so an IPv6 GRE resolves the source in the right VRF.
+			if fvrf.GREs == nil {
+				fvrf.GREs = make(map[string]networkv1alpha1.GRE)
+			}
+			fvrf.GREs[collectorGREName(col)] = networkv1alpha1.GRE{
+				SourceAddress:      bare,
+				SourceInterface:    loopbackName,
+				DestinationAddress: col.Spec.Address,
+				Layer:              collectorGRELayer(col),
+				EncapsulationKey:   collectorGREKey(col),
+			}
+
+			// Advertise the per-node GRE source loopback via the VRF's EVPN export filter.
+			appendMirrorSourcePrefix(&fvrf, hostAddr)
 
 			contrib.FabricVRFs[backboneVRF] = fvrf
 		}

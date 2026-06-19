@@ -56,3 +56,6 @@ vendor/
 /platform-metallb
 /operator
 /frr-cra
+
+.gocache/
+pkg/cra-vsr/config.yaml

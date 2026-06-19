@@ -147,6 +147,11 @@ func (crr *ConfigRevisionReconciler) reconcileDebounced(ctx context.Context) err
 		}
 	}
 
+	// Update MirrorTarget/MirrorSelector status from the deployed configs.
+	if err := crr.reconcileMirrorStatus(ctx); err != nil {
+		return fmt.Errorf("error reconciling mirror status: %w", err)
+	}
+
 	// remove all but last known valid revision
 	if err := crr.revisionCleanup(ctx); err != nil {
 		return fmt.Errorf("error cleaning redundant revisions: %w", err)
@@ -346,7 +351,7 @@ func (crr *ConfigRevisionReconciler) deployNodeConfig(ctx context.Context, node 
 		return nil
 	}
 
-	newConfig, err := crr.CreateNodeNetworkConfig(node, revision)
+	newConfig, err := crr.CreateNodeNetworkConfig(ctx, node, revision)
 	if err != nil {
 		return fmt.Errorf("error preparing NodeNetworkConfig for node %s: %w", node.Name, err)
 	}
@@ -384,7 +389,7 @@ func matchSelector(node *corev1.Node, selector *metav1.LabelSelector) bool {
 	return labelSelector.Matches(labels.Set(node.ObjectMeta.Labels))
 }
 
-func (crr *ConfigRevisionReconciler) CreateNodeNetworkConfig(node *corev1.Node, revision *v1alpha1.NetworkConfigRevision) (*v1alpha1.NodeNetworkConfig, error) {
+func (crr *ConfigRevisionReconciler) CreateNodeNetworkConfig(ctx context.Context, node *corev1.Node, revision *v1alpha1.NetworkConfigRevision) (*v1alpha1.NodeNetworkConfig, error) {
 	// create new config
 	c := &v1alpha1.NodeNetworkConfig{
 		ObjectMeta: metav1.ObjectMeta{
@@ -404,6 +409,9 @@ func (crr *ConfigRevisionReconciler) CreateNodeNetworkConfig(node *corev1.Node, 
 	}
 	if err := buildNodeBgpPeers(node, revision, c); err != nil {
 		return nil, fmt.Errorf("error building node Layer2: %w", err)
+	}
+	if err := crr.buildNodeMirror(ctx, node, revision, c); err != nil {
+		return nil, fmt.Errorf("error building node mirror config: %w", err)
 	}
 
 	c.Spec.Revision = revision.Spec.Revision

@@ -117,10 +117,21 @@ func TestCollectorBuilder_BasicCollector(t *testing.T) {
 			t.Fatalf("expected loopback 'lo.mir' for %s", nodeName)
 		}
 		// The loopback IP must be the per-node allocation from
-		// status.nodeAddresses, NOT spec.address (which is the remote GRE peer).
-		expected := map[string]string{"node-1": "10.250.0.1", "node-2": "10.250.0.2"}[nodeName]
+		// status.nodeAddresses (host-prefixed), NOT spec.address (the remote GRE peer).
+		expected := map[string]string{"node-1": "10.250.0.1/32", "node-2": "10.250.0.2/32"}[nodeName]
 		if len(lb.IPAddresses) != 1 || lb.IPAddresses[0] != expected {
 			t.Errorf("node %s: expected loopback IP [%s], got %v", nodeName, expected, lb.IPAddresses)
+		}
+
+		// The collector also emits the named GRE tunnel bound to the loopback.
+		greName := collectorGREName(&data.Collectors[0])
+		gre, ok := fvrf.GREs[greName]
+		if !ok {
+			t.Fatalf("node %s: expected GRE %q, got keys %v", nodeName, greName, keys(fvrf.GREs))
+		}
+		expectedBare := map[string]string{"node-1": "10.250.0.1", "node-2": "10.250.0.2"}[nodeName]
+		if gre.SourceAddress != expectedBare || gre.DestinationAddress != "10.0.0.99" || gre.SourceInterface != "lo.mir" {
+			t.Errorf("node %s: unexpected GRE %+v", nodeName, gre)
 		}
 	}
 }
@@ -256,14 +267,11 @@ func TestMirrorBuilder_Layer2Source(t *testing.T) {
 	}
 
 	acl := l2.MirrorACLs[0]
-	if acl.DestinationAddress != "10.0.0.99" {
-		t.Errorf("expected destination address '10.0.0.99', got %q", acl.DestinationAddress)
+	if acl.MirrorDestination != collectorGREName(&data.Collectors[0]) {
+		t.Errorf("expected mirror destination %q, got %q", collectorGREName(&data.Collectors[0]), acl.MirrorDestination)
 	}
-	if acl.DestinationVrf != "mirror-vrf" {
-		t.Errorf("expected destination VRF 'mirror-vrf', got %q", acl.DestinationVrf)
-	}
-	if acl.EncapsulationType != networkv1alpha1.EncapsulationTypeGRE {
-		t.Errorf("expected encapsulation type GRE, got %q", acl.EncapsulationType)
+	if acl.Direction != networkv1alpha1.MirrorDirectionIngress {
+		t.Errorf("expected direction ingress, got %q", acl.Direction)
 	}
 }
 
@@ -350,16 +358,21 @@ func TestMirrorBuilder_InboundSource(t *testing.T) {
 		t.Fatalf("expected FabricVRF 'prod', got keys %v", keys(contrib.FabricVRFs))
 	}
 
-	if len(fvrf.MirrorACLs) != 1 {
-		t.Fatalf("expected 1 MirrorACL on FabricVRF, got %d", len(fvrf.MirrorACLs))
+	// Direction "both" expands to two ACLs (ingress + egress).
+	if len(fvrf.MirrorACLs) != 2 {
+		t.Fatalf("expected 2 MirrorACLs on FabricVRF, got %d", len(fvrf.MirrorACLs))
 	}
 
 	acl := fvrf.MirrorACLs[0]
-	if acl.DestinationAddress != "10.0.0.50" {
-		t.Errorf("expected destination address '10.0.0.50', got %q", acl.DestinationAddress)
+	if acl.MirrorDestination != collectorGREName(&data.Collectors[0]) {
+		t.Errorf("expected mirror destination %q, got %q", collectorGREName(&data.Collectors[0]), acl.MirrorDestination)
 	}
-	if acl.DestinationVrf != "mirror-vrf" {
-		t.Errorf("expected destination VRF 'mirror-vrf', got %q", acl.DestinationVrf)
+	dirs := map[networkv1alpha1.MirrorDirection]bool{
+		fvrf.MirrorACLs[0].Direction: true,
+		fvrf.MirrorACLs[1].Direction: true,
+	}
+	if !dirs[networkv1alpha1.MirrorDirectionIngress] || !dirs[networkv1alpha1.MirrorDirectionEgress] {
+		t.Errorf("expected ingress and egress ACLs, got %v", dirs)
 	}
 
 	// Verify traffic match was converted.
@@ -439,8 +452,8 @@ func TestMirrorBuilder_InboundSourceFanOut(t *testing.T) {
 		if !ok {
 			t.Fatalf("expected MirrorACL on FabricVRF %q, keys=%v", vrf, keys(contrib.FabricVRFs))
 		}
-		if len(fvrf.MirrorACLs) != 1 {
-			t.Errorf("VRF %q: expected 1 MirrorACL, got %d", vrf, len(fvrf.MirrorACLs))
+		if len(fvrf.MirrorACLs) != 2 {
+			t.Errorf("VRF %q: expected 2 MirrorACLs (both), got %d", vrf, len(fvrf.MirrorACLs))
 		}
 	}
 }
