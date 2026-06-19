@@ -146,12 +146,6 @@ func (crr *ConfigRevisionReconciler) reconcileDebounced(ctx context.Context) err
 		}
 	}
 
-	// Apply mirror-only changes to nodes already running the current revision.
-	// Mirror data is not part of the revision, so these updates are ungated.
-	if err := crr.applyMirrorUpdates(ctx, revisionToDeploy); err != nil {
-		return fmt.Errorf("error applying mirror updates: %w", err)
-	}
-
 	// Update MirrorTarget/MirrorSelector status from the deployed configs.
 	if err := crr.reconcileMirrorStatus(ctx); err != nil {
 		return fmt.Errorf("error reconciling mirror status: %w", err)

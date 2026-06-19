@@ -110,6 +110,26 @@ func mirrorSelector(name, srcKind, srcName string, dir v1alpha1.MirrorDirection)
 	}
 }
 
+// mirrorTargetRev and mirrorSelectorRev return the revision-snapshot forms used by
+// buildNodeMirror, which now resolves mirror config from the NetworkConfigRevision.
+func mirrorTargetRev() v1alpha1.MirrorTargetRevision {
+	return v1alpha1.MirrorTargetRevision{Name: "collector", MirrorTargetSpec: mirrorTarget().Spec}
+}
+
+func mirrorSelectorRev(name, srcKind, srcName string, dir v1alpha1.MirrorDirection) v1alpha1.MirrorSelectorRevision {
+	return v1alpha1.MirrorSelectorRevision{
+		Name:               name,
+		MirrorSelectorSpec: mirrorSelector(name, srcKind, srcName, dir).Spec,
+	}
+}
+
+// withMirror attaches mirror target/selector snapshots to a revision.
+func withMirror(rev *v1alpha1.NetworkConfigRevision, targets []v1alpha1.MirrorTargetRevision, selectors []v1alpha1.MirrorSelectorRevision) *v1alpha1.NetworkConfigRevision {
+	rev.Spec.MirrorTargets = targets
+	rev.Spec.MirrorSelectors = selectors
+	return rev
+}
+
 var _ = Describe("Mirror building", func() {
 	Describe("allocateSubnet", func() {
 		It("allocates the lowest free host address, skipping network and broadcast", func() {
@@ -164,12 +184,14 @@ var _ = Describe("Mirror building", func() {
 	Describe("buildNodeMirror", func() {
 		It("injects GRE, loopback, export-filter entry and MirrorACLs into the node config", func() {
 			node := makeNode("node1", true)
-			target := mirrorTarget()
-			l2Sel := mirrorSelector("sel-l2", "Layer2NetworkConfiguration", "vlan100", v1alpha1.MirrorDirectionIngress)
-			vrfSel := mirrorSelector("sel-vrf", "VRFRouteConfiguration", "ext", v1alpha1.MirrorDirectionEgress)
 
-			crr := mirrorTestReconciler(node, target, l2Sel, vrfSel)
-			revision := mirrorRevision()
+			crr := mirrorTestReconciler(node)
+			revision := withMirror(mirrorRevision(),
+				[]v1alpha1.MirrorTargetRevision{mirrorTargetRev()},
+				[]v1alpha1.MirrorSelectorRevision{
+					mirrorSelectorRev("sel-l2", "Layer2NetworkConfiguration", "vlan100", v1alpha1.MirrorDirectionIngress),
+					mirrorSelectorRev("sel-vrf", "VRFRouteConfiguration", "ext", v1alpha1.MirrorDirectionEgress),
+				})
 			c := nodeConfigWithVRFsAndL2()
 
 			Expect(crr.buildNodeMirror(context.Background(), node, revision, c)).To(Succeed())
@@ -205,14 +227,17 @@ var _ = Describe("Mirror building", func() {
 
 		It("shares a single GRE tunnel between selectors that reference the same target", func() {
 			node := makeNode("node1", true)
-			target := mirrorTarget()
-			l2Sel := mirrorSelector("sel-l2", "Layer2NetworkConfiguration", "vlan100", v1alpha1.MirrorDirectionIngress)
-			vrfSel := mirrorSelector("sel-vrf", "VRFRouteConfiguration", "ext", v1alpha1.MirrorDirectionEgress)
 
-			crr := mirrorTestReconciler(node, target, l2Sel, vrfSel)
+			crr := mirrorTestReconciler(node)
+			revision := withMirror(mirrorRevision(),
+				[]v1alpha1.MirrorTargetRevision{mirrorTargetRev()},
+				[]v1alpha1.MirrorSelectorRevision{
+					mirrorSelectorRev("sel-l2", "Layer2NetworkConfiguration", "vlan100", v1alpha1.MirrorDirectionIngress),
+					mirrorSelectorRev("sel-vrf", "VRFRouteConfiguration", "ext", v1alpha1.MirrorDirectionEgress),
+				})
 			c := nodeConfigWithVRFsAndL2()
 
-			Expect(crr.buildNodeMirror(context.Background(), node, mirrorRevision(), c)).To(Succeed())
+			Expect(crr.buildNodeMirror(context.Background(), node, revision, c)).To(Succeed())
 			Expect(c.Spec.FabricVRFs["mirror"].GREs).To(HaveLen(1))
 		})
 
@@ -226,33 +251,39 @@ var _ = Describe("Mirror building", func() {
 
 		It("skips the selector when the mirror VRF is absent on the node", func() {
 			node := makeNode("node1", true)
-			target := mirrorTarget()
-			l2Sel := mirrorSelector("sel-l2", "Layer2NetworkConfiguration", "vlan100", v1alpha1.MirrorDirectionIngress)
 
-			crr := mirrorTestReconciler(node, target, l2Sel)
+			crr := mirrorTestReconciler(node)
+			revision := withMirror(mirrorRevision(),
+				[]v1alpha1.MirrorTargetRevision{mirrorTargetRev()},
+				[]v1alpha1.MirrorSelectorRevision{
+					mirrorSelectorRev("sel-l2", "Layer2NetworkConfiguration", "vlan100", v1alpha1.MirrorDirectionIngress),
+				})
 			c := nodeConfigWithVRFsAndL2()
 			delete(c.Spec.FabricVRFs, "mirror")
 
-			Expect(crr.buildNodeMirror(context.Background(), node, mirrorRevision(), c)).To(Succeed())
+			Expect(crr.buildNodeMirror(context.Background(), node, revision, c)).To(Succeed())
 			Expect(c.Spec.Layer2s["100"].MirrorACLs).To(BeEmpty())
 		})
 
 		It("allocates IPv6 source addresses and a /128 loopback for an IPv6 collector", func() {
 			node := makeNode("node1", true)
-			target := &v1alpha1.MirrorTarget{
-				ObjectMeta: metav1.ObjectMeta{Name: "collector"},
-				Spec: v1alpha1.MirrorTargetSpec{
+			ipv6Target := v1alpha1.MirrorTargetRevision{
+				Name: "collector",
+				MirrorTargetSpec: v1alpha1.MirrorTargetSpec{
 					Type:           v1alpha1.MirrorTargetTypeL3GRE,
 					DestinationIP:  "fd00:caa5:9000::100",
 					DestinationVrf: "mirror",
 					SourceLoopback: "lo.mir",
 				},
 			}
-			sel := mirrorSelector("sel-l2", "Layer2NetworkConfiguration", "vlan100", v1alpha1.MirrorDirectionIngress)
-			revision := mirrorRevision()
+			revision := withMirror(mirrorRevision(),
+				[]v1alpha1.MirrorTargetRevision{ipv6Target},
+				[]v1alpha1.MirrorSelectorRevision{
+					mirrorSelectorRev("sel-l2", "Layer2NetworkConfiguration", "vlan100", v1alpha1.MirrorDirectionIngress),
+				})
 			revision.Spec.Vrf[0].Loopbacks = []v1alpha1.VRFLoopback{{Name: "lo.mir", Subnet: "fd00:caa5:5599::/125"}}
 
-			crr := mirrorTestReconciler(node, target, sel)
+			crr := mirrorTestReconciler(node)
 			c := nodeConfigWithVRFsAndL2()
 
 			Expect(crr.buildNodeMirror(context.Background(), node, revision, c)).To(Succeed())

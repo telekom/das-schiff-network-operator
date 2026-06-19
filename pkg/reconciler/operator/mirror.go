@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"net"
 	"sort"
@@ -14,31 +13,23 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-// buildNodeMirror resolves MirrorSelector/MirrorTarget resources and injects the
-// resulting GRE tunnels, per-node source loopbacks, EVPN export-filter entries and
-// MirrorACLs into the node's NodeNetworkConfig.
+// buildNodeMirror resolves the MirrorSelector/MirrorTarget snapshots from the
+// revision and injects the resulting GRE tunnels, per-node source loopbacks, EVPN
+// export-filter entries and MirrorACLs into the node's NodeNetworkConfig.
 //
-// Mirror data is intentionally NOT stored in the NetworkConfigRevision (proposal
-// Option B): it is resolved at NodeNetworkConfig build time. The mirror VRF and its
-// loopback definition (name + subnet) are part of the VRFRouteConfiguration and thus
-// already snapshotted in the revision; only the per-node IP, GRE interface and ACL
-// entries are injected here.
+// Mirror data is sourced from the NetworkConfigRevision (not live CRDs), so that
+// mirror changes bump the revision hash and roll out through the normal gated
+// pipeline. The mirror VRF and its loopback definition (name + subnet) live on the
+// VRFRouteConfiguration and are already snapshotted in the revision; only the
+// per-node IP, GRE interface and ACL entries are injected here.
 func (crr *ConfigRevisionReconciler) buildNodeMirror(ctx context.Context, node *corev1.Node, revision *v1alpha1.NetworkConfigRevision, c *v1alpha1.NodeNetworkConfig) error {
-	selectors := &v1alpha1.MirrorSelectorList{}
-	if err := crr.client.List(ctx, selectors); err != nil {
-		return fmt.Errorf("error listing MirrorSelectors: %w", err)
-	}
-	if len(selectors.Items) == 0 {
+	if len(revision.Spec.MirrorSelectors) == 0 {
 		return nil
 	}
 
-	targetList := &v1alpha1.MirrorTargetList{}
-	if err := crr.client.List(ctx, targetList); err != nil {
-		return fmt.Errorf("error listing MirrorTargets: %w", err)
-	}
-	targets := make(map[string]*v1alpha1.MirrorTarget, len(targetList.Items))
-	for i := range targetList.Items {
-		targets[targetList.Items[i].Name] = &targetList.Items[i]
+	targets := make(map[string]*v1alpha1.MirrorTargetRevision, len(revision.Spec.MirrorTargets))
+	for i := range revision.Spec.MirrorTargets {
+		targets[revision.Spec.MirrorTargets[i].Name] = &revision.Spec.MirrorTargets[i]
 	}
 
 	existingConfigs, err := crr.listConfigs(ctx)
@@ -56,9 +47,9 @@ func (crr *ConfigRevisionReconciler) buildNodeMirror(ctx context.Context, node *
 	// multiple selectors referencing the same target share a single tunnel.
 	createdTargets := map[string]string{}
 
-	sortSelectors(selectors.Items)
-	for i := range selectors.Items {
-		crr.applyMirrorSelector(node, revision, &selectors.Items[i], targets, alloc, createdTargets, c)
+	// Selectors are already sorted by name in the revision snapshot.
+	for i := range revision.Spec.MirrorSelectors {
+		applyMirrorSelector(node, revision, &revision.Spec.MirrorSelectors[i], targets, alloc, createdTargets, c)
 	}
 
 	return nil
@@ -67,23 +58,23 @@ func (crr *ConfigRevisionReconciler) buildNodeMirror(ctx context.Context, node *
 // applyMirrorSelector resolves a single MirrorSelector for the given node and, when
 // applicable, injects the GRE tunnel, loopback, export-filter entry and MirrorACL.
 // Selectors whose source or mirror VRF are not present on the node are skipped.
-func (crr *ConfigRevisionReconciler) applyMirrorSelector(node *corev1.Node, revision *v1alpha1.NetworkConfigRevision, sel *v1alpha1.MirrorSelector, targets map[string]*v1alpha1.MirrorTarget, alloc *loopbackAllocator, createdTargets map[string]string, c *v1alpha1.NodeNetworkConfig) {
-	target, ok := targets[sel.Spec.MirrorTarget.Name]
+func applyMirrorSelector(node *corev1.Node, revision *v1alpha1.NetworkConfigRevision, sel *v1alpha1.MirrorSelectorRevision, targets map[string]*v1alpha1.MirrorTargetRevision, alloc *loopbackAllocator, createdTargets map[string]string, c *v1alpha1.NodeNetworkConfig) {
+	target, ok := targets[sel.MirrorTarget.Name]
 	if !ok {
 		// Unresolvable target: nothing to inject. Status reporting handles this.
 		return
 	}
 
-	greName := crr.ensureMirrorTunnel(node, target, alloc, createdTargets, c)
+	greName := ensureMirrorTunnel(node, target, alloc, createdTargets, c)
 	if greName == "" {
 		// Mirror VRF or loopback not available on this node - skip.
 		return
 	}
 
 	acl := v1alpha1.MirrorACL{
-		TrafficMatch:      sel.Spec.TrafficMatch,
+		TrafficMatch:      sel.TrafficMatch,
 		MirrorDestination: greName,
-		Direction:         sel.Spec.Direction,
+		Direction:         sel.Direction,
 	}
 
 	attachMirrorACL(sel, revision, &acl, c)
@@ -93,18 +84,18 @@ func (crr *ConfigRevisionReconciler) applyMirrorSelector(node *corev1.Node, revi
 // loopback and the GRE tunnel for the given target, and that the source IP is
 // advertised via the VRF's EVPN export filter. It returns the GRE interface name,
 // or an empty string if the mirror VRF/loopback are not available on this node.
-func (*ConfigRevisionReconciler) ensureMirrorTunnel(node *corev1.Node, target *v1alpha1.MirrorTarget, alloc *loopbackAllocator, createdTargets map[string]string, c *v1alpha1.NodeNetworkConfig) string {
+func ensureMirrorTunnel(node *corev1.Node, target *v1alpha1.MirrorTargetRevision, alloc *loopbackAllocator, createdTargets map[string]string, c *v1alpha1.NodeNetworkConfig) string {
 	if name, done := createdTargets[target.Name]; done {
 		return name
 	}
 
-	fabricVrf, ok := c.Spec.FabricVRFs[target.Spec.DestinationVrf]
+	fabricVrf, ok := c.Spec.FabricVRFs[target.DestinationVrf]
 	if !ok {
 		// The mirror VRF is not configured on this node.
 		return ""
 	}
 
-	srcIP, ok := alloc.allocate(target.Spec.DestinationVrf, target.Spec.SourceLoopback, node.Name)
+	srcIP, ok := alloc.allocate(target.DestinationVrf, target.SourceLoopback, node.Name)
 	if !ok {
 		// No loopback subnet defined for this VRF/loopback, or subnet exhausted.
 		return ""
@@ -115,24 +106,24 @@ func (*ConfigRevisionReconciler) ensureMirrorTunnel(node *corev1.Node, target *v
 	if fabricVrf.Loopbacks == nil {
 		fabricVrf.Loopbacks = map[string]v1alpha1.Loopback{}
 	}
-	fabricVrf.Loopbacks[target.Spec.SourceLoopback] = v1alpha1.Loopback{
+	fabricVrf.Loopbacks[target.SourceLoopback] = v1alpha1.Loopback{
 		IPAddresses: []string{hostAddr},
 	}
 
-	greName := greInterfaceName(target.Name, target.Spec.Type)
+	greName := greInterfaceName(target.Name, target.Type)
 	if fabricVrf.GREs == nil {
 		fabricVrf.GREs = map[string]v1alpha1.GRE{}
 	}
 	fabricVrf.GREs[greName] = v1alpha1.GRE{
 		SourceAddress:      srcIP,
-		DestinationAddress: target.Spec.DestinationIP,
-		Layer:              greLayer(target.Spec.Type),
-		EncapsulationKey:   target.Spec.TunnelKey,
+		DestinationAddress: target.DestinationIP,
+		Layer:              greLayer(target.Type),
+		EncapsulationKey:   target.TunnelKey,
 	}
 
 	appendExportFilterPrefix(&fabricVrf, hostAddr)
 
-	c.Spec.FabricVRFs[target.Spec.DestinationVrf] = fabricVrf
+	c.Spec.FabricVRFs[target.DestinationVrf] = fabricVrf
 	createdTargets[target.Name] = greName
 	return greName
 }
@@ -141,10 +132,10 @@ func (*ConfigRevisionReconciler) ensureMirrorTunnel(node *corev1.Node, target *v
 // VRF) when that source is present on the node. The source is referenced by object
 // name and resolved to the NodeNetworkConfig map key (VLAN ID for Layer2, VRF name
 // for VRFRouteConfiguration) via the revision.
-func attachMirrorACL(sel *v1alpha1.MirrorSelector, revision *v1alpha1.NetworkConfigRevision, acl *v1alpha1.MirrorACL, c *v1alpha1.NodeNetworkConfig) {
-	switch sel.Spec.MirrorSource.Kind {
+func attachMirrorACL(sel *v1alpha1.MirrorSelectorRevision, revision *v1alpha1.NetworkConfigRevision, acl *v1alpha1.MirrorACL, c *v1alpha1.NodeNetworkConfig) {
+	switch sel.MirrorSource.Kind {
 	case "Layer2NetworkConfiguration":
-		key, ok := layer2KeyForSource(revision, sel.Spec.MirrorSource.Name)
+		key, ok := layer2KeyForSource(revision, sel.MirrorSource.Name)
 		if !ok {
 			return
 		}
@@ -153,7 +144,7 @@ func attachMirrorACL(sel *v1alpha1.MirrorSelector, revision *v1alpha1.NetworkCon
 			c.Spec.Layer2s[key] = l2
 		}
 	case "VRFRouteConfiguration":
-		vrfName, ok := vrfNameForSource(revision, sel.Spec.MirrorSource.Name)
+		vrfName, ok := vrfNameForSource(revision, sel.MirrorSource.Name)
 		if !ok {
 			return
 		}
@@ -184,12 +175,6 @@ func vrfNameForSource(revision *v1alpha1.NetworkConfigRevision, name string) (st
 		}
 	}
 	return "", false
-}
-
-func sortSelectors(items []v1alpha1.MirrorSelector) {
-	sort.SliceStable(items, func(i, j int) bool {
-		return items[i].Name < items[j].Name
-	})
 }
 
 func (crr *ConfigRevisionReconciler) listReadyNodeNames(ctx context.Context) ([]string, error) {
@@ -414,111 +399,4 @@ func broadcastAddr(ipNet *net.IPNet) net.IP {
 		bcast[i] = ip4[i] | ^ipNet.Mask[i]
 	}
 	return bcast
-}
-
-// applyMirrorUpdates re-resolves mirror configuration for nodes that already run
-// the current valid revision and updates their NodeNetworkConfig when the resolved
-// mirror state changed. Mirror data lives outside the NetworkConfigRevision
-// (proposal Option B), so mirror-only changes do not bump the revision and would
-// otherwise never reach already-converged nodes. Because mirroring is additive and
-// non-disruptive, these updates bypass the gated, node-by-node rollout.
-func (crr *ConfigRevisionReconciler) applyMirrorUpdates(ctx context.Context, revision *v1alpha1.NetworkConfigRevision) error {
-	if revision == nil {
-		return nil
-	}
-
-	// Fast path: without any MirrorSelectors there is nothing to reconcile.
-	selectors := &v1alpha1.MirrorSelectorList{}
-	if err := crr.client.List(ctx, selectors); err != nil {
-		return fmt.Errorf("error listing MirrorSelectors: %w", err)
-	}
-	if len(selectors.Items) == 0 {
-		return nil
-	}
-
-	nodes, err := listNodes(ctx, crr.client)
-	if err != nil {
-		return fmt.Errorf("error listing nodes for mirror updates: %w", err)
-	}
-	configs, err := crr.listConfigs(ctx)
-	if err != nil {
-		return fmt.Errorf("error listing configs for mirror updates: %w", err)
-	}
-
-	for i := range configs.Items {
-		cfg := &configs.Items[i]
-		if cfg.Spec.Revision != revision.Spec.Revision {
-			continue
-		}
-		node, ok := nodes[cfg.Name]
-		if !ok {
-			continue
-		}
-
-		desired, err := crr.CreateNodeNetworkConfig(ctx, node, revision)
-		if err != nil {
-			return fmt.Errorf("error rebuilding NodeNetworkConfig for node %s: %w", cfg.Name, err)
-		}
-
-		if mirrorFingerprint(&cfg.Spec) == mirrorFingerprint(&desired.Spec) {
-			continue
-		}
-
-		cfg.Spec = desired.Spec
-		if err := crr.client.Update(ctx, cfg); err != nil {
-			return fmt.Errorf("error updating NodeNetworkConfig for node %s: %w", cfg.Name, err)
-		}
-		crr.logger.Info("updated NodeNetworkConfig with mirror changes", "name", cfg.Name)
-	}
-
-	return nil
-}
-
-// vrfMirrorState captures the mirror-specific fields of a VRF for fingerprinting.
-type vrfMirrorState struct {
-	GREs       map[string]v1alpha1.GRE      `json:"gres,omitempty"`
-	Loopbacks  map[string]v1alpha1.Loopback `json:"loopbacks,omitempty"`
-	MirrorACLs []v1alpha1.MirrorACL         `json:"mirrorAcls,omitempty"`
-}
-
-// mirrorFingerprintData is the canonical, order-independent set of mirror-derived
-// fields used to detect mirror configuration changes without being affected by the
-// (map-iteration) ordering of unrelated fields.
-type mirrorFingerprintData struct {
-	FabricVRFs map[string]vrfMirrorState       `json:"fabricVrfs,omitempty"`
-	Layer2s    map[string][]v1alpha1.MirrorACL `json:"layer2s,omitempty"`
-}
-
-// mirrorFingerprint returns a stable hash of the mirror-derived fields of a spec.
-// Only the fields the mirror builder writes (GREs, Loopbacks and MirrorACLs on
-// fabric VRFs, and MirrorACLs on Layer2s) are considered.
-func mirrorFingerprint(spec *v1alpha1.NodeNetworkConfigSpec) string {
-	data := mirrorFingerprintData{
-		FabricVRFs: map[string]vrfMirrorState{},
-		Layer2s:    map[string][]v1alpha1.MirrorACL{},
-	}
-	for name := range spec.FabricVRFs {
-		fvrf := spec.FabricVRFs[name]
-		if len(fvrf.GREs) == 0 && len(fvrf.Loopbacks) == 0 && len(fvrf.MirrorACLs) == 0 {
-			continue
-		}
-		data.FabricVRFs[name] = vrfMirrorState{
-			GREs:       fvrf.GREs,
-			Loopbacks:  fvrf.Loopbacks,
-			MirrorACLs: fvrf.MirrorACLs,
-		}
-	}
-	for key, l2 := range spec.Layer2s {
-		if len(l2.MirrorACLs) == 0 {
-			continue
-		}
-		data.Layer2s[key] = l2.MirrorACLs
-	}
-
-	b, err := json.Marshal(data)
-	if err != nil {
-		return ""
-	}
-	sum := sha256.Sum256(b)
-	return hex.EncodeToString(sum[:])
 }

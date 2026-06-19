@@ -316,6 +316,141 @@ spec:
                   - vni
                   type: object
                 type: array
+              mirrorSelectors:
+                description: MirrorSelectors snapshots the cluster's MirrorSelector
+                  objects.
+                items:
+                  properties:
+                    direction:
+                      description: Direction is the direction of traffic to mirror.
+                      enum:
+                      - ingress
+                      - egress
+                      type: string
+                    mirrorSource:
+                      description: |-
+                        MirrorSource references the Layer2NetworkConfiguration or
+                        VRFRouteConfiguration whose traffic is captured.
+                      properties:
+                        apiGroup:
+                          description: |-
+                            APIGroup is the group for the resource being referenced.
+                            If APIGroup is not specified, the specified Kind must be in the core API group.
+                            For any other third-party types, APIGroup is required.
+                          type: string
+                        kind:
+                          description: Kind is the type of resource being referenced
+                          type: string
+                        name:
+                          description: Name is the name of resource being referenced
+                          type: string
+                        namespace:
+                          description: |-
+                            Namespace is the namespace of resource being referenced
+                            Note that when a namespace is specified, a gateway.networking.k8s.io/ReferenceGrant object is required in the referent namespace to allow that namespace's owner to accept the reference. See the ReferenceGrant documentation for details.
+                            (Alpha) This field requires the CrossNamespaceVolumeDataSource feature gate to be enabled.
+                          type: string
+                      required:
+                      - kind
+                      - name
+                      type: object
+                    mirrorTarget:
+                      description: MirrorTarget references the MirrorTarget that describes
+                        the collector.
+                      properties:
+                        apiGroup:
+                          description: |-
+                            APIGroup is the group for the resource being referenced.
+                            If APIGroup is not specified, the specified Kind must be in the core API group.
+                            For any other third-party types, APIGroup is required.
+                          type: string
+                        kind:
+                          description: Kind is the type of resource being referenced
+                          type: string
+                        name:
+                          description: Name is the name of resource being referenced
+                          type: string
+                        namespace:
+                          description: |-
+                            Namespace is the namespace of resource being referenced
+                            Note that when a namespace is specified, a gateway.networking.k8s.io/ReferenceGrant object is required in the referent namespace to allow that namespace's owner to accept the reference. See the ReferenceGrant documentation for details.
+                            (Alpha) This field requires the CrossNamespaceVolumeDataSource feature gate to be enabled.
+                          type: string
+                      required:
+                      - kind
+                      - name
+                      type: object
+                    name:
+                      type: string
+                    trafficMatch:
+                      description: |-
+                        TrafficMatch selects which packets to mirror. An empty match captures all
+                        traffic on the source interface.
+                      properties:
+                        dstPort:
+                          description: DstPort is the destination port to match.
+                          type: integer
+                        dstPrefix:
+                          description: DstPrefix is the destination prefix to match.
+                          type: string
+                        protocol:
+                          description: Protocol is the protocol to match.
+                          type: string
+                        srcPort:
+                          description: SrcPort is the source port to match.
+                          type: integer
+                        srcPrefix:
+                          description: SrcPrefix is the source prefix to match.
+                          type: string
+                      type: object
+                  required:
+                  - direction
+                  - mirrorSource
+                  - mirrorTarget
+                  type: object
+                type: array
+              mirrorTargets:
+                description: |-
+                  MirrorTargets snapshots the cluster's MirrorTarget objects so that mirror
+                  changes are reflected in the revision hash and rolled out like any other
+                  config change.
+                items:
+                  properties:
+                    destinationIP:
+                      description: DestinationIP is the remote collector IP the tunnel
+                        points to.
+                      type: string
+                    destinationVrf:
+                      description: |-
+                        DestinationVrf is the VRF in which the GRE tunnel lives. It must be a
+                        user-created VRFRouteConfiguration (with VNI + route-target).
+                      maxLength: 12
+                      type: string
+                    key:
+                      description: TunnelKey is an optional GRE encapsulation key.
+                      format: int32
+                      type: integer
+                    name:
+                      type: string
+                    sourceLoopback:
+                      description: |-
+                        SourceLoopback is the name of the loopback (defined on the destination
+                        VRF's VRFRouteConfiguration) whose per-node allocated IP is used as the
+                        GRE tunnel source address.
+                      type: string
+                    type:
+                      description: Type is the GRE encapsulation type of the tunnel.
+                      enum:
+                      - l2gre
+                      - l3gre
+                      type: string
+                  required:
+                  - destinationIP
+                  - destinationVrf
+                  - sourceLoopback
+                  - type
+                  type: object
+                type: array
               revision:
                 description: Revision is a hash of the NetworkConfigRevision object
                   that is used to identify the particular revision.

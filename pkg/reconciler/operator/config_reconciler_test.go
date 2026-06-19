@@ -8,6 +8,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -259,7 +260,7 @@ var _ = Describe("ConfigReconciler", func() {
 	})
 
 	Describe("fetchConfigData", func() {
-		It("should return all three resource types", func() {
+		It("should return all resource types including mirror snapshots", func() {
 			l2 := &v1alpha1.Layer2NetworkConfiguration{
 				ObjectMeta: metav1.ObjectMeta{Name: "l2-100"},
 				Spec:       v1alpha1.Layer2NetworkConfigurationSpec{ID: 100, VNI: 1000, MTU: 1500},
@@ -281,19 +282,67 @@ var _ = Describe("ConfigReconciler", func() {
 					Export:    []v1alpha1.VrfRouteConfigurationPrefixItem{},
 				},
 			}
+			target := &v1alpha1.MirrorTarget{
+				ObjectMeta: metav1.ObjectMeta{Name: "collector"},
+				Spec:       v1alpha1.MirrorTargetSpec{Type: v1alpha1.MirrorTargetTypeL3GRE, DestinationIP: "10.0.0.1", DestinationVrf: "tenant-a", SourceLoopback: "lo.mir"},
+			}
+			selector := &v1alpha1.MirrorSelector{
+				ObjectMeta: metav1.ObjectMeta{Name: "sel"},
+				Spec: v1alpha1.MirrorSelectorSpec{
+					MirrorTarget: corev1.TypedObjectReference{Kind: "MirrorTarget", Name: "collector"},
+					MirrorSource: corev1.TypedObjectReference{Kind: "Layer2NetworkConfiguration", Name: "l2-100"},
+					Direction:    v1alpha1.MirrorDirectionIngress,
+				},
+			}
 			fakeClient := fake.NewClientBuilder().
 				WithScheme(testScheme).
-				WithRuntimeObjects(l2, vrf, bgp).
+				WithRuntimeObjects(l2, vrf, bgp, target, selector).
 				Build()
 
 			cr := &ConfigReconciler{logger: logger, client: fakeClient}
 			r := &reconcileConfig{ConfigReconciler: cr, Logger: logger}
 
-			l2vnis, l3vnis, bgps, err := r.fetchConfigData(context.Background())
+			data, err := r.fetchConfigData(context.Background())
 			Expect(err).ToNot(HaveOccurred())
-			Expect(l2vnis).To(HaveLen(1))
-			Expect(l3vnis).To(HaveLen(1))
-			Expect(bgps).To(HaveLen(1))
+			Expect(data.layer2).To(HaveLen(1))
+			Expect(data.vrfs).To(HaveLen(1))
+			Expect(data.bgps).To(HaveLen(1))
+			Expect(data.mirrorTargets).To(HaveLen(1))
+			Expect(data.mirrorSelectors).To(HaveLen(1))
+		})
+	})
+
+	Describe("NewRevision mirror hashing", func() {
+		It("changes the revision hash when a mirror target or selector changes", func() {
+			base, err := v1alpha1.NewRevision(nil, nil, nil, nil, nil)
+			Expect(err).ToNot(HaveOccurred())
+
+			targets := []v1alpha1.MirrorTargetRevision{{
+				Name:             "collector",
+				MirrorTargetSpec: v1alpha1.MirrorTargetSpec{Type: v1alpha1.MirrorTargetTypeL2GRE, DestinationIP: "fd00:1::1", DestinationVrf: "mirror", SourceLoopback: "lo.mir6"},
+			}}
+			selectors := []v1alpha1.MirrorSelectorRevision{{
+				Name: "sel",
+				MirrorSelectorSpec: v1alpha1.MirrorSelectorSpec{
+					MirrorTarget: corev1.TypedObjectReference{Kind: "MirrorTarget", Name: "collector"},
+					MirrorSource: corev1.TypedObjectReference{Kind: "Layer2NetworkConfiguration", Name: "vlan1"},
+					Direction:    v1alpha1.MirrorDirectionIngress,
+				},
+			}}
+
+			withMir, err := v1alpha1.NewRevision(nil, nil, nil, targets, selectors)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(withMir.Spec.Revision).ToNot(Equal(base.Spec.Revision), "adding mirror config must bump the revision hash")
+
+			// A direction change on the selector must also bump the hash.
+			selectors2 := []v1alpha1.MirrorSelectorRevision{{
+				Name:               "sel",
+				MirrorSelectorSpec: selectors[0].MirrorSelectorSpec,
+			}}
+			selectors2[0].Direction = v1alpha1.MirrorDirectionEgress
+			changed, err := v1alpha1.NewRevision(nil, nil, nil, targets, selectors2)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(changed.Spec.Revision).ToNot(Equal(withMir.Spec.Revision), "changing a selector must bump the revision hash")
 		})
 	})
 
