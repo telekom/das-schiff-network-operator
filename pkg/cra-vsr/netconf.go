@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/knownhosts"
 	"nemith.io/netconf"
 	"nemith.io/netconf/rpc"
 	ncssh "nemith.io/netconf/transport/ssh"
@@ -89,7 +90,12 @@ type Netconf struct {
 	urls      []string
 }
 
-func NewNetconf(urls []string, user, pwd string, timeout time.Duration) *Netconf {
+func NewNetconf(urls []string, user, pwd, knownHostsPath string, timeout time.Duration) (*Netconf, error) {
+	hostKeyCallback, err := knownhosts.New(knownHostsPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load known hosts file %q: %w", knownHostsPath, err)
+	}
+
 	return &Netconf{
 		urls:    urls,
 		timeout: timeout,
@@ -98,13 +104,9 @@ func NewNetconf(urls []string, user, pwd string, timeout time.Duration) *Netconf
 			Auth: []ssh.AuthMethod{
 				ssh.Password(pwd),
 			},
-			// InsecureIgnoreHostKey is acceptable here because the NETCONF target is a
-			// locally managed network device reachable only within the cluster's trust
-			// boundary. Host-key verification would require pre-distributing known-hosts
-			// for each device and is not operationally feasible in this environment.
-			HostKeyCallback: ssh.InsecureIgnoreHostKey(), //nolint:gosec
+			HostKeyCallback: hostKeyCallback,
 		},
-	}
+	}, nil
 }
 
 func (nc *Netconf) Open(ctx context.Context) error {
