@@ -33,6 +33,11 @@ type GRETunnel struct {
 	Local string `json:"local"`
 	// Remote is the tunnel destination (collector) IP.
 	Remote string `json:"remote"`
+	// SourceInterface is the interface that owns the source IP. It is set as the
+	// tunnel's link device so the kernel resolves the source address in the
+	// correct VRF (l3mdev) domain; without it an IPv6 GRE whose source lives in a
+	// VRF is rejected at xmit ("Local address not yet configured").
+	SourceInterface string `json:"sourceInterface,omitempty"`
 	// Key is the optional GRE encapsulation key.
 	Key *uint32 `json:"key,omitempty"`
 	// Layer2 selects GRETAP (Ethernet) encapsulation instead of plain GRE.

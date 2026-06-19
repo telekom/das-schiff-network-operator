@@ -47,7 +47,7 @@ var _ = Describe("mirror helpers", func() {
 
 	It("builds a layer3 GRE link with key flags", func() {
 		key := uint32(1001)
-		link := greLink(&GRETunnel{Name: "gre-abc", Key: &key}, 10, nil, nil)
+		link := greLink(&GRETunnel{Name: "gre-abc", Key: &key}, 10, 0, nil, nil)
 		gre, ok := link.(*netlink.Gretun)
 		Expect(ok).To(BeTrue())
 		Expect(gre.IKey).To(Equal(uint32(1001)))
@@ -56,14 +56,24 @@ var _ = Describe("mirror helpers", func() {
 		Expect(gre.Attrs().MasterIndex).To(Equal(10))
 	})
 
+	It("binds the tunnel to the source interface (link) when provided", func() {
+		gre, ok := greLink(&GRETunnel{Name: "gre-abc"}, 10, 7, nil, nil).(*netlink.Gretun)
+		Expect(ok).To(BeTrue())
+		Expect(gre.Link).To(Equal(uint32(7)))
+
+		gtap, ok := greLink(&GRETunnel{Name: "gtap-abc", Layer2: true}, 10, 7, nil, nil).(*netlink.Gretap)
+		Expect(ok).To(BeTrue())
+		Expect(gtap.Link).To(Equal(uint32(7)))
+	})
+
 	It("selects the GRE kind from the endpoint address family", func() {
-		v4 := greLink(&GRETunnel{Name: "gre4"}, 10, net.ParseIP("1.1.1.1"), net.ParseIP("2.2.2.2"))
+		v4 := greLink(&GRETunnel{Name: "gre4"}, 10, 0, net.ParseIP("1.1.1.1"), net.ParseIP("2.2.2.2"))
 		Expect(v4.Type()).To(Equal("gre"))
 
-		v6 := greLink(&GRETunnel{Name: "gre6"}, 10, net.ParseIP("fd00::1"), net.ParseIP("fd00::2"))
+		v6 := greLink(&GRETunnel{Name: "gre6"}, 10, 0, net.ParseIP("fd00::1"), net.ParseIP("fd00::2"))
 		Expect(v6.Type()).To(Equal("ip6gre"))
 
-		v6tap := greLink(&GRETunnel{Name: "gtap6", Layer2: true}, 10, net.ParseIP("fd00::1"), net.ParseIP("fd00::2"))
+		v6tap := greLink(&GRETunnel{Name: "gtap6", Layer2: true}, 10, 0, net.ParseIP("fd00::1"), net.ParseIP("fd00::2"))
 		Expect(v6tap.Type()).To(Equal("ip6gretap"))
 	})
 
@@ -79,7 +89,7 @@ var _ = Describe("mirror helpers", func() {
 	})
 
 	It("builds a layer2 GRETAP link when requested", func() {
-		link := greLink(&GRETunnel{Name: "gtap-abc", Layer2: true}, 11, nil, nil)
+		link := greLink(&GRETunnel{Name: "gtap-abc", Layer2: true}, 11, 0, nil, nil)
 		_, ok := link.(*netlink.Gretap)
 		Expect(ok).To(BeTrue())
 	})
@@ -148,6 +158,35 @@ var _ = Describe("ReconcileGRETunnels", func() {
 		idx, err := nm.ReconcileGRETunnels([]GRETunnel{{Name: "gre-abc", VRF: "mirror", Local: "10.99.0.1", Remote: "10.250.0.100"}})
 		Expect(err).ToNot(HaveOccurred())
 		Expect(idx).To(HaveKeyWithValue("gre-abc", 31))
+	})
+
+	It("binds the tunnel to the source interface when set", func() {
+		mockctrl := gomock.NewController(GinkgoT())
+		defer mockctrl.Finish()
+		tk := mock_nl.NewMockToolkitInterface(mockctrl)
+		nm := mirrorManager(tk)
+
+		vrf := dummyLink("mirror", 10)
+		lo := dummyLink("lo.mir6", 42)
+		gre := dummyLink("gtap-abc", 33)
+
+		var added netlink.Link
+		gomock.InOrder(
+			tk.EXPECT().LinkByName("gtap-abc").Return(nil, notFound()),
+			tk.EXPECT().LinkByName("mirror").Return(vrf, nil),
+			tk.EXPECT().LinkByName("lo.mir6").Return(lo, nil),
+			tk.EXPECT().LinkAdd(gomock.Any()).DoAndReturn(func(l netlink.Link) error { added = l; return nil }),
+			tk.EXPECT().LinkByName("gtap-abc").Return(gre, nil),
+			tk.EXPECT().LinkSetUp(gre).Return(nil),
+		)
+
+		_, err := nm.ReconcileGRETunnels([]GRETunnel{
+			{Name: "gtap-abc", VRF: "mirror", Local: "fd00::1", Remote: "fd00::2", SourceInterface: "lo.mir6", Layer2: true},
+		})
+		Expect(err).ToNot(HaveOccurred())
+		gtap, ok := added.(*netlink.Gretap)
+		Expect(ok).To(BeTrue())
+		Expect(gtap.Link).To(Equal(uint32(42)))
 	})
 })
 

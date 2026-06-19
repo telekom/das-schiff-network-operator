@@ -158,7 +158,18 @@ func (n *Manager) ensureGRETunnel(t *GRETunnel) (int, error) {
 		return 0, fmt.Errorf("VRF %q not found for GRE tunnel: %w", t.VRF, err)
 	}
 
-	if err := n.toolkit.LinkAdd(greLink(t, vrfLink.Attrs().Index, localIP, remoteIP)); err != nil {
+	// Bind the tunnel to the interface that owns the source address so the kernel
+	// resolves the local address in the correct VRF (l3mdev) domain.
+	linkIndex := 0
+	if t.SourceInterface != "" {
+		srcLink, srcErr := n.toolkit.LinkByName(t.SourceInterface)
+		if srcErr != nil {
+			return 0, fmt.Errorf("source interface %q not found for GRE tunnel: %w", t.SourceInterface, srcErr)
+		}
+		linkIndex = srcLink.Attrs().Index
+	}
+
+	if err := n.toolkit.LinkAdd(greLink(t, vrfLink.Attrs().Index, linkIndex, localIP, remoteIP)); err != nil {
 		return 0, fmt.Errorf("error creating GRE tunnel %s: %w", t.Name, err)
 	}
 
@@ -175,8 +186,9 @@ func (n *Manager) ensureGRETunnel(t *GRETunnel) (int, error) {
 // greLink builds the netlink GRE/GRETAP link for a tunnel. The netlink library
 // selects the kind from the address family of the endpoints: IPv4 endpoints yield
 // "gre"/"gretap", IPv6 endpoints yield "ip6gre"/"ip6gretap" (IP6GRE). The endpoints
-// are validated to share a family by the caller.
-func greLink(t *GRETunnel, masterIndex int, local, remote net.IP) netlink.Link {
+// are validated to share a family by the caller. linkIndex, when non-zero, binds
+// the tunnel to the device owning the source address (IFLA_GRE_LINK).
+func greLink(t *GRETunnel, masterIndex, linkIndex int, local, remote net.IP) netlink.Link {
 	attrs := netlink.LinkAttrs{Name: t.Name, MasterIndex: masterIndex}
 	var iKey, oKey uint32
 	var iFlags, oFlags uint16
@@ -191,6 +203,7 @@ func greLink(t *GRETunnel, masterIndex int, local, remote net.IP) netlink.Link {
 			LinkAttrs: attrs,
 			Local:     local,
 			Remote:    remote,
+			Link:      uint32(linkIndex), //nolint:gosec // interface index is non-negative
 			IKey:      iKey,
 			OKey:      oKey,
 			IFlags:    iFlags,
@@ -201,6 +214,7 @@ func greLink(t *GRETunnel, masterIndex int, local, remote net.IP) netlink.Link {
 		LinkAttrs: attrs,
 		Local:     local,
 		Remote:    remote,
+		Link:      uint32(linkIndex), //nolint:gosec // interface index is non-negative
 		IKey:      iKey,
 		OKey:      oKey,
 		IFlags:    iFlags,

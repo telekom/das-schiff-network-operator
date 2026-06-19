@@ -109,12 +109,13 @@ func appendMirrorVRFConfig(netlinkConfig *nl.NetlinkConfiguration, vrfName strin
 	for greName := range vrf.GREs {
 		gre := vrf.GREs[greName]
 		netlinkConfig.GRETunnels = append(netlinkConfig.GRETunnels, nl.GRETunnel{
-			Name:   greName,
-			VRF:    vrfName,
-			Local:  gre.SourceAddress,
-			Remote: gre.DestinationAddress,
-			Key:    gre.EncapsulationKey,
-			Layer2: gre.Layer == v1alpha1.GRELayer2,
+			Name:            greName,
+			VRF:             vrfName,
+			Local:           gre.SourceAddress,
+			Remote:          gre.DestinationAddress,
+			SourceInterface: gre.SourceInterface,
+			Key:             gre.EncapsulationKey,
+			Layer2:          gre.Layer == v1alpha1.GRELayer2,
 		})
 	}
 
