@@ -13,7 +13,7 @@ body:
   - type: dropdown
     attributes:
       label: To which part is the documentation issue related?
-      description: The issue is either related to a documentation within the code (docstring), or external docs
+      description: The issue is either related to documentation within the code (docstrings) or external docs
       options:
         - Code comments / docstrings
         - API reference docs
