@@ -196,8 +196,24 @@ var _ = Describe("Traffic Mirroring", Label("mirror"), func() {
 
 		By("Adding MirrorACL to NNC for worker-1 via read-modify-write")
 		mirrorACL := testMirrorACL(cfg)
-		_, addErr := addMirrorACLToNNC(ctx, f, cfg.WorkerNode1, cfg.VRFM2M, mirrorACL)
+		newRev, addErr := addMirrorACLToNNC(ctx, f, cfg.WorkerNode1, cfg.VRFM2M, mirrorACL)
 		Expect(addErr).NotTo(HaveOccurred(), "mirrorAcl patch should be accepted by the API server")
+
+		By("Re-reading the NNC and verifying the MirrorACL persisted")
+		nnc := &unstructured.Unstructured{}
+		nnc.SetGroupVersionKind(nncGVK)
+		Expect(f.Client.Get(ctx, types.NamespacedName{Name: cfg.WorkerNode1}, nnc)).To(Succeed(),
+			"failed to re-read NNC after mirrorAcl update")
+
+		revision, found, err := unstructured.NestedString(nnc.Object, "spec", "revision")
+		Expect(err).NotTo(HaveOccurred(), "failed to read persisted NNC revision")
+		Expect(found).To(BeTrue(), "persisted NNC revision should be present")
+		Expect(revision).To(Equal(newRev), "persisted NNC revision should match bumped revision")
+
+		mirrorACLs, found, err := unstructured.NestedSlice(nnc.Object, "spec", "fabricVRFs", cfg.VRFM2M, "mirrorAcls")
+		Expect(err).NotTo(HaveOccurred(), "failed to read persisted mirrorAcls")
+		Expect(found).To(BeTrue(), "persisted mirrorAcls should be present")
+		Expect(mirrorACLs).To(ContainElement(mirrorACL), "persisted mirrorAcls should contain the added MirrorACL")
 	})
 
 	It("should mirror ingress traffic to a capture pod when MirrorACLs are configured", func() {
