@@ -52,9 +52,9 @@
 
 ### Test Steps
 
-1. 
-2. 
-3. 
+1.
+2.
+3.
 
 ## Screenshots (if applicable)
 
