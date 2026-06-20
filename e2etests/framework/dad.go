@@ -3,6 +3,7 @@ package framework
 import (
 	"context"
 	"fmt"
+	"net/netip"
 	"strings"
 	"time"
 )
@@ -20,6 +21,14 @@ const (
 // If the address is already stuck in DAD, the helper temporarily disables DAD
 // for the interface and re-adds the address once.
 func (f *Framework) WaitForIPv6DADComplete(ctx context.Context, namespace, podName, ipv6Addr, ifName string, timeout time.Duration) error {
+	addr, err := netip.ParseAddr(ipv6Addr)
+	if err != nil {
+		return fmt.Errorf("parse IPv6 address %q: %w", ipv6Addr, err)
+	}
+	if !addr.Is6() || addr.Is4In6() {
+		return fmt.Errorf("address %q is not IPv6", ipv6Addr)
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -33,7 +42,7 @@ func (f *Framework) WaitForIPv6DADComplete(ctx context.Context, namespace, podNa
 			return false, fmt.Errorf("ip addr show failed (stderr=%s): %w", stderr, err)
 		}
 
-		cidr, state, found := parseIPv6DADState(stdout, ipv6Addr)
+		cidr, state, found := parseIPv6DADState(stdout, addr)
 		if !found {
 			return false, nil
 		}
@@ -55,14 +64,15 @@ func (f *Framework) WaitForIPv6DADComplete(ctx context.Context, namespace, podNa
 	})
 }
 
-func parseIPv6DADState(ipAddrOutput, ipv6Addr string) (string, ipv6DADState, bool) {
+func parseIPv6DADState(ipAddrOutput string, ipv6Addr netip.Addr) (string, ipv6DADState, bool) {
 	for _, line := range strings.Split(ipAddrOutput, "\n") {
 		fields := strings.Fields(line)
 		if len(fields) < 2 || fields[0] != "inet6" {
 			continue
 		}
 		cidr := fields[1]
-		if !strings.HasPrefix(cidr, ipv6Addr+"/") {
+		prefix, err := netip.ParsePrefix(cidr)
+		if err != nil || prefix.Addr().Compare(ipv6Addr) != 0 {
 			continue
 		}
 		if strings.Contains(line, "dadfailed") {
