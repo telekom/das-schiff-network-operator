@@ -117,6 +117,8 @@ func NewNetconf(urls []string, user, pwd, knownHostsPath string, timeout time.Du
 }
 
 func validateKnownHostsEntries(knownHostsPath string, urls []string) error {
+	const knownHostsMarkerFieldCount = 3
+
 	required := map[string]struct{}{}
 	for _, rawURL := range urls {
 		url := strings.TrimSpace(rawURL)
@@ -144,7 +146,7 @@ func validateKnownHostsEntries(knownHostsPath string, urls []string) error {
 
 		hostField := fields[0]
 		if strings.HasPrefix(hostField, "@") {
-			if len(fields) < 3 {
+			if len(fields) < knownHostsMarkerFieldCount {
 				continue
 			}
 			hostField = fields[1]
