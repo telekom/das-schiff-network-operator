@@ -104,6 +104,22 @@ func TestValidateKnownHostsEntries(t *testing.T) {
 	}
 }
 
+func TestNewNetconf_NormalizesCRAURLs(t *testing.T) {
+	hostKey := newTestPublicKey(t)
+	path := filepath.Join(t.TempDir(), "known_hosts")
+	if err := os.WriteFile(path, []byte(knownhosts.Line([]string{"[169.254.33.1]:830"}, hostKey)), 0o600); err != nil {
+		t.Fatalf("write known_hosts: %v", err)
+	}
+
+	nc, err := NewNetconf([]string{" 169.254.33.1:830 ", ""}, "user", "password", path, 0)
+	if err != nil {
+		t.Fatalf("NewNetconf returned error: %v", err)
+	}
+	if len(nc.urls) != 1 || nc.urls[0] != "169.254.33.1:830" {
+		t.Fatalf("urls = %#v, want normalized CRA URL", nc.urls)
+	}
+}
+
 func newTestPublicKey(t *testing.T) ssh.PublicKey {
 	t.Helper()
 
