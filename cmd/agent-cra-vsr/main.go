@@ -177,7 +177,7 @@ func createCraManager() (*cra.Manager, error) {
 
 	knownHostsPath := os.Getenv("CRA_KNOWN_HOSTS")
 	if knownHostsPath == "" {
-		return nil, fmt.Errorf("no CRA known hosts file provided")
+		return nil, fmt.Errorf("no CRA known hosts file provided via CRA_KNOWN_HOSTS")
 	}
 
 	craManager, err := cra.NewManager(urls, user, pwd, knownHostsPath, timeout)
