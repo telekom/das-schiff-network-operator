@@ -476,7 +476,7 @@ func validateInterfaceName(intfName string) error {
 	case len(intfName) >= unix.IFNAMSIZ:
 		return fmt.Errorf("interface name %q exceeds Linux limit", intfName)
 	case strings.ContainsAny(intfName, "/\x00"):
-		return fmt.Errorf("interface name %q contains path separators", intfName)
+		return fmt.Errorf("interface name %q contains path separators or NUL bytes", intfName)
 	default:
 		return nil
 	}
