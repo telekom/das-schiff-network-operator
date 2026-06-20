@@ -17,12 +17,15 @@ limitations under the License.
 package cra
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -91,6 +94,10 @@ type Netconf struct {
 }
 
 func NewNetconf(urls []string, user, pwd, knownHostsPath string, timeout time.Duration) (*Netconf, error) {
+	if err := validateKnownHostsEntries(knownHostsPath, urls); err != nil {
+		return nil, err
+	}
+
 	hostKeyCallback, err := knownhosts.New(knownHostsPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load known hosts file %q: %w", knownHostsPath, err)
@@ -107,6 +114,65 @@ func NewNetconf(urls []string, user, pwd, knownHostsPath string, timeout time.Du
 			HostKeyCallback: hostKeyCallback,
 		},
 	}, nil
+}
+
+func validateKnownHostsEntries(knownHostsPath string, urls []string) error {
+	required := map[string]struct{}{}
+	for _, rawURL := range urls {
+		url := strings.TrimSpace(rawURL)
+		if url == "" {
+			continue
+		}
+		required[knownhosts.Normalize(url)] = struct{}{}
+	}
+	if len(required) == 0 {
+		return fmt.Errorf("no CRA URLs provided")
+	}
+
+	knownHosts, err := os.ReadFile(knownHostsPath)
+	if err != nil {
+		return fmt.Errorf("failed to read known hosts file %q: %w", knownHostsPath, err)
+	}
+
+	found := map[string]struct{}{}
+	scanner := bufio.NewScanner(bytes.NewReader(knownHosts))
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) < 2 || strings.HasPrefix(fields[0], "#") {
+			continue
+		}
+
+		hostField := fields[0]
+		if strings.HasPrefix(hostField, "@") {
+			if len(fields) < 3 {
+				continue
+			}
+			hostField = fields[1]
+		}
+
+		for _, host := range strings.Split(hostField, ",") {
+			normalized := knownhosts.Normalize(host)
+			if _, ok := required[normalized]; ok {
+				found[normalized] = struct{}{}
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("failed to scan known hosts file %q: %w", knownHostsPath, err)
+	}
+
+	missing := []string{}
+	for url := range required {
+		if _, ok := found[url]; !ok {
+			missing = append(missing, url)
+		}
+	}
+	if len(missing) > 0 {
+		sort.Strings(missing)
+		return fmt.Errorf("known hosts file %q does not contain CRA URL entries: %s", knownHostsPath, strings.Join(missing, ", "))
+	}
+
+	return nil
 }
 
 func (nc *Netconf) Open(ctx context.Context) error {
