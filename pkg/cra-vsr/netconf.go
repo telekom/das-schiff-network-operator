@@ -94,7 +94,8 @@ type Netconf struct {
 }
 
 func NewNetconf(urls []string, user, pwd, knownHostsPath string, timeout time.Duration) (*Netconf, error) {
-	if err := validateKnownHostsEntries(knownHostsPath, urls); err != nil {
+	normalizedURLs := normalizeCRAURLs(urls)
+	if err := validateKnownHostsEntries(knownHostsPath, normalizedURLs); err != nil {
 		return nil, err
 	}
 
@@ -104,7 +105,7 @@ func NewNetconf(urls []string, user, pwd, knownHostsPath string, timeout time.Du
 	}
 
 	return &Netconf{
-		urls:    urls,
+		urls:    normalizedURLs,
 		timeout: timeout,
 		sshConfig: &ssh.ClientConfig{
 			User: user,
@@ -116,15 +117,23 @@ func NewNetconf(urls []string, user, pwd, knownHostsPath string, timeout time.Du
 	}, nil
 }
 
-func validateKnownHostsEntries(knownHostsPath string, urls []string) error {
-	const knownHostsMarkerFieldCount = 3
-
-	required := map[string]struct{}{}
+func normalizeCRAURLs(urls []string) []string {
+	normalized := make([]string, 0, len(urls))
 	for _, rawURL := range urls {
 		url := strings.TrimSpace(rawURL)
 		if url == "" {
 			continue
 		}
+		normalized = append(normalized, url)
+	}
+	return normalized
+}
+
+func validateKnownHostsEntries(knownHostsPath string, urls []string) error {
+	const knownHostsMarkerFieldCount = 3
+
+	required := map[string]struct{}{}
+	for _, url := range normalizeCRAURLs(urls) {
 		required[knownhosts.Normalize(url)] = struct{}{}
 	}
 	if len(required) == 0 {
