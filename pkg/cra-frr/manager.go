@@ -68,6 +68,9 @@ func (m *Manager) postRequest(ctx context.Context, path string, body []byte) ([]
 
 		res, err := m.client.Do(req)
 		if err != nil {
+			if res != nil && res.Body != nil {
+				_ = res.Body.Close()
+			}
 			// Continue to the next URL if there is a connection issue
 			continue
 		}
