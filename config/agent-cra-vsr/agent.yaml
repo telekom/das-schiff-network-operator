@@ -91,7 +91,7 @@ spec:
           volumeMounts:
             - mountPath: /etc/cra/config/base-config.yaml
               name: base-config
-            - mountPath: /etc/cra-host
+            - mountPath: /etc/cra-host/known_hosts
               name: cra-known-hosts
               readOnly: true
             - mountPath: /opt/healthcheck/
@@ -104,8 +104,8 @@ spec:
             type: File
           name: base-config
         - hostPath:
-            path: /etc/cra
-            type: DirectoryOrCreate
+            path: /etc/cra/known_hosts
+            type: FileOrCreate
           name: cra-known-hosts
         - configMap:
             name: healthcheck-config
