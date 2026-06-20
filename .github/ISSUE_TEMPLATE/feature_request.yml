@@ -16,7 +16,7 @@ body:
     attributes:
       label: Is your feature request related to a problem?
       description: >
-        Please describe clearly and concisely what the feature is you would like.
+        Please clearly and concisely describe the feature you would like.
         The description should make your motivation clear.
       placeholder: |
         As a [role], I want to [goal], so that [benefit].
