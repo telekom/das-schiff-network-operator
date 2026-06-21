@@ -71,7 +71,6 @@ jobs:
     needs: ensure-labels
     permissions:
       contents: read
-      issues: write
       pull-requests: write
     steps:
       - name: Add size label
