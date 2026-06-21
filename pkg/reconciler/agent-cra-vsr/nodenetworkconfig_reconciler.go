@@ -18,6 +18,7 @@ package agent_cra_vsr //nolint:revive
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/go-logr/logr"
@@ -35,6 +36,8 @@ type craManager interface {
 	ApplyConfiguration(ctx context.Context, cfg *v1alpha1.NodeNetworkConfigSpec) error
 }
 
+var errNilCRAManager = errors.New("cra manager must not be nil")
+
 // CRAVSRConfigApplier implements the common.ConfigApplier interface for CRA-VSR.
 type CRAVSRConfigApplier struct {
 	craManager craManager
@@ -42,6 +45,9 @@ type CRAVSRConfigApplier struct {
 
 // ApplyConfig applies the network configuration using CRA-VSR manager.
 func (a *CRAVSRConfigApplier) ApplyConfig(ctx context.Context, cfg *v1alpha1.NodeNetworkConfig) error {
+	if a.craManager == nil {
+		return errNilCRAManager
+	}
 	if err := a.craManager.ApplyConfiguration(ctx, &cfg.Spec); err != nil {
 		return fmt.Errorf("error applying cra configuration: %w", err)
 	}
@@ -60,6 +66,10 @@ func NewNodeNetworkConfigReconciler(
 	logger logr.Logger,
 	nodeNetworkConfigPath string,
 ) (*NodeNetworkConfigReconciler, error) {
+	if manager == nil {
+		return nil, errNilCRAManager
+	}
+
 	configApplier := &CRAVSRConfigApplier{
 		craManager: manager,
 	}
