@@ -163,6 +163,6 @@ jobs:
             if [ "${{ steps.check.outputs.check_failed }}" = "true" ]; then
               echo ""
               echo "> [!WARNING]"
-              echo "> One or more GitHub API calls failed; results may be incomplete."
+              echo "> One or more version checks were skipped or failed; results may be incomplete."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
