@@ -77,7 +77,7 @@ jobs:
             local current=$2
             local name=$3
             if [ -z "$current" ]; then
-              echo "::warning::${name}: version not found in versions.env — skipping update check" >&2
+              echo "::warning::${name}: version not found in versions.env — skipping update check"
               check_failed=true
               return
             fi
