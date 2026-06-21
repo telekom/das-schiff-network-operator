@@ -25,6 +25,7 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
+	cra "github.com/telekom/das-schiff-network-operator/pkg/cra-vsr"
 	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/common"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/operator"
@@ -145,7 +146,7 @@ func TestNewNodeNetworkConfigReconciler_ConstructsCommonReconciler(t *testing.T)
 	fakeClient := fake.NewClientBuilder().WithScheme(s).Build()
 
 	reconciler, err := NewNodeNetworkConfigReconciler(
-		nil,
+		&cra.Manager{},
 		fakeClient,
 		logr.Discard(),
 		filepath.Join(t.TempDir(), "non-existent-config.yaml"),
@@ -158,6 +159,43 @@ func TestNewNodeNetworkConfigReconciler_ConstructsCommonReconciler(t *testing.T)
 	}
 	if reconciler.NodeNetworkConfigReconciler == nil {
 		t.Fatal("embedded NodeNetworkConfigReconciler is nil")
+	}
+}
+
+// TestNewNodeNetworkConfigReconciler_RejectsNilManager verifies that invalid
+// production wiring fails during startup instead of panicking during reconcile.
+func TestNewNodeNetworkConfigReconciler_RejectsNilManager(t *testing.T) {
+	s := newTestScheme(t)
+	fakeClient := fake.NewClientBuilder().WithScheme(s).Build()
+
+	reconciler, err := NewNodeNetworkConfigReconciler(
+		nil,
+		fakeClient,
+		logr.Discard(),
+		filepath.Join(t.TempDir(), "config.yaml"),
+	)
+	if err == nil {
+		t.Fatal("expected NewNodeNetworkConfigReconciler to reject nil CRA manager, got nil error")
+	}
+	if !errors.Is(err, errNilCRAManager) {
+		t.Fatalf("unexpected error from NewNodeNetworkConfigReconciler: %v", err)
+	}
+	if reconciler != nil {
+		t.Fatalf("expected nil reconciler on nil CRA manager, got %#v", reconciler)
+	}
+}
+
+// TestCRAVSRConfigApplier_ApplyConfig_RejectsNilManager verifies that direct
+// test/helper construction also fails with an error instead of a nil-pointer panic.
+func TestCRAVSRConfigApplier_ApplyConfig_RejectsNilManager(t *testing.T) {
+	applier := &CRAVSRConfigApplier{}
+
+	err := applier.ApplyConfig(context.Background(), &v1alpha1.NodeNetworkConfig{})
+	if err == nil {
+		t.Fatal("expected ApplyConfig to reject nil CRA manager, got nil error")
+	}
+	if !errors.Is(err, errNilCRAManager) {
+		t.Fatalf("unexpected error from ApplyConfig: %v", err)
 	}
 }
 
