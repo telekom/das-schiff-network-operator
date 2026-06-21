@@ -14,17 +14,19 @@ on:
 
 permissions:
   contents: read
-  issues: write
-  pull-requests: write
 
 jobs:
   ensure-labels:
     name: Ensure Labels Exist
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
     steps:
       - name: Create missing labels
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
         run: |
           ensure_label() {
             local name="$1"
@@ -53,6 +55,9 @@ jobs:
     name: Add Labels to PR
     runs-on: ubuntu-latest
     needs: ensure-labels
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - name: Add labels based on changed files
         uses: actions/labeler@634933edcd8ababfe52f92936142cc22ac488b1b # v6.0.1
@@ -64,20 +69,42 @@ jobs:
     name: Add Size Label
     runs-on: ubuntu-latest
     needs: ensure-labels
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
     steps:
       - name: Add size label
-        uses: codelytv/pr-size-labeler@4ec67706cd878fbc1c8db0a5dcd28b6bb412e85a # v1.10.3
-        with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          xs_label: 'size/XS'
-          xs_max_size: 10
-          s_label: 'size/S'
-          s_max_size: 100
-          m_label: 'size/M'
-          m_max_size: 500
-          l_label: 'size/L'
-          l_max_size: 1000
-          xl_label: 'size/XL'
-          fail_if_xl: false
-          message_if_xl: >
-            This PR is quite large. Consider breaking it into smaller PRs for easier review.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          size=$(gh pr view "$PR_NUMBER" --json additions,deletions --jq '.additions + .deletions')
+          if [ -z "$size" ]; then
+            echo "Failed to determine PR size" >&2
+            exit 1
+          fi
+
+          if [ "$size" -le 10 ]; then
+            label="size/XS"
+          elif [ "$size" -le 100 ]; then
+            label="size/S"
+          elif [ "$size" -le 500 ]; then
+            label="size/M"
+          elif [ "$size" -le 1000 ]; then
+            label="size/L"
+          else
+            label="size/XL"
+          fi
+
+          for stale_label in "size/XS" "size/S" "size/M" "size/L" "size/XL"; do
+            if [ "$stale_label" != "$label" ]; then
+              gh pr edit "$PR_NUMBER" --remove-label "$stale_label" >/dev/null 2>&1 || true
+            fi
+          done
+          gh pr edit "$PR_NUMBER" --add-label "$label"
+
+          if [ "$label" = "size/XL" ]; then
+            echo "This PR is quite large. Consider breaking it into smaller PRs for easier review." >> "$GITHUB_STEP_SUMMARY"
+          fi
