@@ -22,10 +22,15 @@ func PhaseBuildImages(repoRoot string) error {
 	testerImage := EnvOr("E2E_TESTER_IMAGE", imgBase+"/das-schiff-e2e-tester:latest")
 
 	ldflags := getLDFlags(repoRoot)
+	goVersion, err := getGoVersion(repoRoot)
+	if err != nil {
+		return err
+	}
 
 	// 1. Build cra-frr image
 	Logf("  Building das-schiff-cra-frr...")
 	if err := RunCmd("docker", "build",
+		"--build-arg", "GO_VERSION="+goVersion,
 		"--build-arg", "ldflags="+ldflags,
 		"-f", filepath.Join(repoRoot, "das-schiff-cra-frr.Dockerfile"),
 		"-t", "das-schiff-cra-frr:latest",
@@ -57,6 +62,7 @@ func PhaseBuildImages(repoRoot string) error {
 	// 3. Build operator + agent images
 	Logf("  Building operator + agent images...")
 	if err := RunCmd("docker", "build",
+		"--build-arg", "GO_VERSION="+goVersion,
 		"--build-arg", "ldflags="+ldflags,
 		"-f", filepath.Join(repoRoot, "das-schiff-network-operator.Dockerfile"),
 		"-t", imgBase+"/das-schiff-network-operator:latest",
@@ -66,6 +72,7 @@ func PhaseBuildImages(repoRoot string) error {
 	}
 
 	if err := RunCmd("docker", "build",
+		"--build-arg", "GO_VERSION="+goVersion,
 		"--build-arg", "ldflags="+ldflags,
 		"-f", filepath.Join(repoRoot, "das-schiff-nwop-agent-cra-frr.Dockerfile"),
 		"-t", imgBase+"/das-schiff-nwop-agent-cra-frr:latest",
@@ -75,6 +82,7 @@ func PhaseBuildImages(repoRoot string) error {
 	}
 
 	if err := RunCmd("docker", "build",
+		"--build-arg", "GO_VERSION="+goVersion,
 		"--build-arg", "ldflags="+ldflags,
 		"-f", filepath.Join(repoRoot, "das-schiff-nwop-agent-hbn-l2.Dockerfile"),
 		"-t", imgBase+"/das-schiff-nwop-agent-hbn-l2:latest",
@@ -118,6 +126,19 @@ func getLDFlags(repoRoot string) string {
 		return ""
 	}
 	return strings.TrimSpace(string(out))
+}
+
+func getGoVersion(repoRoot string) (string, error) {
+	data, err := os.ReadFile(filepath.Join(repoRoot, "go.mod"))
+	if err != nil {
+		return "", fmt.Errorf("reading go.mod for E2E Go version: %w", err)
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if version, ok := strings.CutPrefix(strings.TrimSpace(line), "go "); ok {
+			return version, nil
+		}
+	}
+	return "", fmt.Errorf("finding go directive in %s", filepath.Join(repoRoot, "go.mod"))
 }
 
 // Phase 1a: Create k8s node containers with proper Docker flags.
