@@ -146,7 +146,10 @@ func removeMirrorACLFromNNC(ctx context.Context, f *framework.Framework, nodeNam
 		return fmt.Errorf("bump revision: %w", err)
 	}
 
-	return f.Client.Patch(ctx, nnc, client.MergeFrom(base))
+	if err := f.Client.Patch(ctx, nnc, client.MergeFrom(base)); err != nil {
+		return fmt.Errorf("patch NNC %s VRF %s mirrorACL cleanup: %w", nodeName, vrfName, err)
+	}
+	return nil
 }
 
 func testMirrorACL(cfg *config.Config) map[string]interface{} {
