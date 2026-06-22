@@ -19,6 +19,7 @@ package cra
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"strings"
@@ -54,6 +55,16 @@ func TestValidateKnownHostsEntries(t *testing.T) {
 			name:  "marker line",
 			lines: []string{"@cert-authority " + knownhosts.Line([]string{"[169.254.33.1]:830"}, hostKey)},
 			urls:  []string{"169.254.33.1:830"},
+		},
+		{
+			name:  "hashed host",
+			lines: []string{knownHostsLineForPattern(knownhosts.HashHostname("[169.254.33.1]:830"), hostKey)},
+			urls:  []string{"169.254.33.1:830"},
+		},
+		{
+			name:  "wildcard host",
+			lines: []string{knownHostsLineForPattern("[*.example.com]:830", hostKey)},
+			urls:  []string{"cra.example.com:830"},
 		},
 		{
 			name:       "missing host",
@@ -133,4 +144,8 @@ func newTestPublicKey(t *testing.T) ssh.PublicKey {
 	}
 
 	return sshKey
+}
+
+func knownHostsLineForPattern(pattern string, key ssh.PublicKey) string {
+	return pattern + " " + key.Type() + " " + base64.StdEncoding.EncodeToString(key.Marshal())
 }
