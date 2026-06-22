@@ -76,8 +76,7 @@ lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes.
 	$(GOLANGCI_LINT) run --fix --timeout 10m
 
 .PHONY: lint-strict
-lint-strict: golangci-lint ## Run golangci-lint with strict settings (as in CI).
-	$(GOLANGCI_LINT) run --timeout 10m --issues-exit-code 1
+lint-strict: lint ## Alias for CI linting; golangci-lint already exits non-zero on issues.
 
 .PHONY: vulncheck
 vulncheck: govulncheck ## Run govulncheck to check for known vulnerabilities.
