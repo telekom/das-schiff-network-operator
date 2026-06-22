@@ -1,6 +1,17 @@
 package framework
 
-import "testing"
+import (
+	"context"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/telekom/das-schiff-network-operator/e2etests/config"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	kubefake "k8s.io/client-go/kubernetes/fake"
+	clientfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
+)
 
 func TestHasStaticIPv6MultusNetwork(t *testing.T) {
 	tests := []struct {
@@ -62,5 +73,47 @@ func TestHasStaticIPv6MultusNetwork(t *testing.T) {
 				t.Fatalf("hasStaticIPv6MultusNetwork() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestCreateTestPodDeletesStaticIPv6PodWhenReadinessFails(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := corev1.AddToScheme(scheme); err != nil {
+		t.Fatalf("add corev1 to scheme: %v", err)
+	}
+
+	kubeClient := kubefake.NewSimpleClientset()
+	f := &Framework{
+		Config: &config.Config{
+			PodReadyTimeout: time.Nanosecond,
+		},
+		KubeClient: kubeClient,
+		Client:     clientfake.NewClientBuilder().WithScheme(scheme).Build(),
+	}
+
+	err := f.CreateTestPod(
+		context.Background(),
+		"default",
+		"static-ipv6",
+		"worker-1",
+		map[string]string{
+			"k8s.v1.cni.cncf.io/networks": `[{"name":"macvlan-vlan501","ips":["fda5:25c1:193c::1/64"]}]`,
+		},
+	)
+	if err == nil {
+		t.Fatal("CreateTestPod() error = nil, want readiness failure")
+	}
+	if !strings.Contains(err.Error(), "become ready before IPv6 DAD check") {
+		t.Fatalf("CreateTestPod() error = %q, want readiness context", err)
+	}
+
+	podDeletes := 0
+	for _, action := range kubeClient.Actions() {
+		if action.GetVerb() == "delete" && action.GetResource().Resource == "pods" {
+			podDeletes++
+		}
+	}
+	if podDeletes < 2 {
+		t.Fatalf("pod delete actions = %d, want at least 2 initial+cleanup deletes", podDeletes)
 	}
 }
