@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -197,8 +198,13 @@ var _ = Describe("Traffic Mirroring", Label("mirror"), func() {
 
 		By("Adding MirrorACL to NNC for worker-1 via read-modify-write")
 		mirrorACL := testMirrorACL(cfg)
-		newRev, addErr := addMirrorACLToNNC(ctx, f, cfg.WorkerNode1, cfg.VRFM2M, mirrorACL)
-		Expect(addErr).NotTo(HaveOccurred(), "mirrorAcl patch should be accepted by the API server")
+		var newRev string
+		Eventually(func() error {
+			var err error
+			newRev, err = addMirrorACLToNNC(ctx, f, cfg.WorkerNode1, cfg.VRFM2M, mirrorACL)
+			return err
+		}).WithTimeout(2*time.Minute).WithPolling(5*time.Second).Should(Succeed(),
+			"mirrorAcl patch should be accepted once the NNC fabric VRF exists")
 
 		By("Re-reading the NNC and verifying the MirrorACL persisted")
 		nnc := &unstructured.Unstructured{}
