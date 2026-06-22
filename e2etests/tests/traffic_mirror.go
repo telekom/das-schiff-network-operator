@@ -179,6 +179,7 @@ var _ = Describe("Traffic Mirroring", Label("mirror"), func() {
 		f = framework.Global
 		Expect(f).NotTo(BeNil())
 		ctx = context.Background()
+		Expect(f.CreateNamespace(ctx, ns)).To(Succeed())
 	})
 
 	AfterEach(func() {
