@@ -82,7 +82,7 @@ func TestCreateTestPodDeletesStaticIPv6PodWhenReadinessFails(t *testing.T) {
 		t.Fatalf("add corev1 to scheme: %v", err)
 	}
 
-	kubeClient := kubefake.NewSimpleClientset()
+	kubeClient := kubefake.NewClientset()
 	f := &Framework{
 		Config: &config.Config{
 			PodReadyTimeout: time.Nanosecond,

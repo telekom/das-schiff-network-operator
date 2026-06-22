@@ -333,7 +333,7 @@ func (f *Framework) deletePodBestEffort(ctx context.Context, namespace, name str
 
 func (f *Framework) deleteCreatedTestPodAfterError(ctx context.Context, namespace, name string, cause error) error {
 	if err := f.DeletePod(ctx, namespace, name); err != nil {
-		return fmt.Errorf("%w; additionally failed to delete pod %s/%s after error: %v", cause, namespace, name, err)
+		return fmt.Errorf("%w; additionally failed to delete pod %s/%s after error: %w", cause, namespace, name, err)
 	}
 	return cause
 }
