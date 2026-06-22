@@ -177,8 +177,13 @@ func newKnownHostsValidationKey() (ssh.PublicKey, error) {
 }
 
 func knownHostsHasEntry(hostKeyCallback ssh.HostKeyCallback, address string, validationKey ssh.PublicKey) (bool, error) {
+	const (
+		validationCallbackLoopback = "127.0.0.1"
+		validationCallbackPort     = 22
+	)
+
 	callbackAddress := knownHostsCallbackAddress(address)
-	err := hostKeyCallback(callbackAddress, &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 22}, validationKey)
+	err := hostKeyCallback(callbackAddress, &net.TCPAddr{IP: net.ParseIP(validationCallbackLoopback), Port: validationCallbackPort}, validationKey)
 	if err == nil {
 		return true, nil
 	}
