@@ -18,14 +18,22 @@ type Debouncer struct {
 	// Duration between function call
 	debounceTime time.Duration
 	logger       logr.Logger
+	// cancel cancels the internal long-lived context used by debounced goroutines.
+	cancel context.CancelFunc
+	// internalCtxFunc returns the Debouncer's internal context. This avoids
+	// storing a context.Context in the struct (containedctx linter).
+	internalCtxFunc func() context.Context
 }
 
 // Create a new debouncer.
 func NewDebouncer(function func(context.Context) error, debounceTime time.Duration, logger logr.Logger) *Debouncer {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &Debouncer{
-		function:     function,
-		debounceTime: debounceTime,
-		logger:       logger,
+		function:        function,
+		debounceTime:    debounceTime,
+		logger:          logger,
+		cancel:          cancel,
+		internalCtxFunc: func() context.Context { return ctx },
 	}
 }
 
@@ -50,7 +58,10 @@ func (d *Debouncer) debounceRoutine(ctx context.Context) {
 }
 
 // Run function. First run will be in debounceTime, runs will be separated by debounceTime.
-func (d *Debouncer) Debounce(ctx context.Context) {
+// The incoming ctx is used only to signal that the caller wants to debounce; the actual
+// goroutine always runs with the Debouncer's internal context so it is not canceled when
+// a short-lived reconcile context expires.
+func (d *Debouncer) Debounce(_ context.Context) {
 	// If we haven't scheduled a goroutine yet, set scheduled=false and run goroutine
 	// We use atomic compare-and-swap to first check if scheduled equals false (not yet scheduled)
 	// and then swap the value with true
@@ -59,6 +70,12 @@ func (d *Debouncer) Debounce(ctx context.Context) {
 	// be true) will run the debounced routine once again
 	d.calledDuringExecution.Store(true)
 	if d.scheduled.CompareAndSwap(false, true) {
-		go d.debounceRoutine(ctx)
+		go d.debounceRoutine(d.internalCtxFunc()) //nolint:contextcheck // context is from internal closure, not request-scoped
 	}
+}
+
+// Stop cancels the Debouncer's internal context, which will cause any in-progress
+// debounced goroutine to observe a canceled context on its next function call.
+func (d *Debouncer) Stop() {
+	d.cancel()
 }

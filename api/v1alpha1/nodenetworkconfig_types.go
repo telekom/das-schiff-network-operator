@@ -304,7 +304,8 @@ type NodeNetworkConfigStatus struct {
 	// LastAppliedRevision stores hash of the NodeConfigRevision that was last applied to the node.
 	LastAppliedRevision string `json:"lastAppliedRevision,omitempty"`
 	// ErrorMessage contains the error message when ConfigStatus is 'invalid'.
-	// This field is cleared when the config is successfully provisioned.
+	// This field is cleared whenever ConfigStatus transitions to any non-'invalid' state
+	// (including 'provisioning' and 'provisioned'), so stale errors do not persist.
 	ErrorMessage string `json:"errorMessage,omitempty"`
 }
 

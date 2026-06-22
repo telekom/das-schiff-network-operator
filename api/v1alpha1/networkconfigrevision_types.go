@@ -76,6 +76,7 @@ type NetworkConfigRevisionStatus struct {
 //+kubebuilder:printcolumn:name="Ongoing",type="integer",JSONPath=".status.ongoing"
 //+kubebuilder:printcolumn:name="Ready",type="integer",JSONPath=".status.ready"
 //+kubebuilder:printcolumn:name="Total",type="integer",JSONPath=".status.total"
+//+kubebuilder:printcolumn:name="FailedNode",type=string,JSONPath=`.status.failedNode`,priority=1
 //+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
 // NetworkConfigRevision is the Schema for the node configuration.
