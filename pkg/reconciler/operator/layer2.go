@@ -65,6 +65,11 @@ func buildNetplanVLANs(node *corev1.Node, revision *v1alpha1.NetworkConfigRevisi
 			"link": "hbn",
 			"mtu":  l2.MTU,
 		}
+		if l2.DisableSegmentation {
+			vlan["generic-receive-offload"] = false
+			vlan["generic-segmentation-offload"] = false
+			vlan["tcp-segmentation-offload"] = false
+		}
 
 		rawVlan, err := json.Marshal(vlan)
 		if err != nil {

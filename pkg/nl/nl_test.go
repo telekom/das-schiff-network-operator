@@ -1111,13 +1111,6 @@ var _ = Describe("ReconcileL2()", func() {
 		nm := NewManager(netlinkMock, &config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
 		oldProcSysNetPath := procSysNetPath
 
-		// Mock ethtool to avoid "no such device" error
-		oldNewEthtoolFunc := newEthtoolFunc
-		newEthtoolFunc = func() (EthtoolInterface, error) {
-			return &MockEthtool{}, nil
-		}
-		defer func() { newEthtoolFunc = oldNewEthtoolFunc }()
-
 		procSysNetPath = tmpDir
 		current := &Layer2Information{
 			AnycastGateways: []string{"1.1.1.1"},
@@ -1340,7 +1333,7 @@ func createInterfaceFile(path string) {
 	Expect(err).ToNot(HaveOccurred())
 }
 
-var _ = Describe("reconcileSegmentation()", func() {
+var _ = Describe("setSegmentation()", func() {
 	var originalNewEthtoolFunc func() (EthtoolInterface, error)
 
 	BeforeEach(func() {
@@ -1351,15 +1344,45 @@ var _ = Describe("reconcileSegmentation()", func() {
 		newEthtoolFunc = originalNewEthtoolFunc
 	})
 
+	It("does nothing when current and desired disableSegmentation are equal", func() {
+		called := false
+		newEthtoolFunc = func() (EthtoolInterface, error) {
+			called = true
+			return nil, errors.New("should not be called")
+		}
+
+		vlanInterface := &netlink.Vlan{LinkAttrs: netlink.LinkAttrs{Name: "vlan100"}}
+		err := reconcileSegmentationIfNeeded(vlanInterface, false, false)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(called).To(BeFalse())
+	})
+
 	It("returns error if creating ethtool client fails", func() {
 		newEthtoolFunc = func() (EthtoolInterface, error) {
 			return nil, errors.New("failed to create ethtool client")
 		}
 
 		vlanInterface := &netlink.Vlan{LinkAttrs: netlink.LinkAttrs{Name: "vlan100"}}
-		err := reconcileSegmentation(vlanInterface, false)
+		err := setSegmentation(vlanInterface, false)
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("error creating ethtool client"))
+	})
+
+	It("returns error if reading ethtool settings fails", func() {
+		mockEth := &MockEthtool{
+			FeaturesFunc: func(_ string) (map[string]bool, error) {
+				return nil, errors.New("failed to read settings")
+			},
+		}
+		newEthtoolFunc = func() (EthtoolInterface, error) {
+			return mockEth, nil
+		}
+
+		vlanInterface := &netlink.Vlan{LinkAttrs: netlink.LinkAttrs{Name: "vlan100"}}
+		err := setSegmentation(vlanInterface, true)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("error reading ethtool settings"))
+		Expect(mockEth.Closed).To(BeTrue())
 	})
 
 	It("returns error if changing ethtool settings fails", func() {
@@ -1373,7 +1396,7 @@ var _ = Describe("reconcileSegmentation()", func() {
 		}
 
 		vlanInterface := &netlink.Vlan{LinkAttrs: netlink.LinkAttrs{Name: "vlan100"}}
-		err := reconcileSegmentation(vlanInterface, false)
+		err := setSegmentation(vlanInterface, true)
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("error changing ethtool settings"))
 		Expect(mockEth.Closed).To(BeTrue())
@@ -1383,6 +1406,13 @@ var _ = Describe("reconcileSegmentation()", func() {
 		var capturedIntf string
 		var capturedConfig map[string]bool
 		mockEth := &MockEthtool{
+			FeaturesFunc: func(_ string) (map[string]bool, error) {
+				return map[string]bool{
+					"generic-receive-offload":      true,
+					"generic-segmentation-offload": true,
+					"tcp-segmentation-offload":     true,
+				}, nil
+			},
 			ChangeFunc: func(intf string, config map[string]bool) error {
 				capturedIntf = intf
 				capturedConfig = config
@@ -1394,10 +1424,14 @@ var _ = Describe("reconcileSegmentation()", func() {
 		}
 
 		vlanInterface := &netlink.Vlan{LinkAttrs: netlink.LinkAttrs{Name: "vlan100"}}
-		err := reconcileSegmentation(vlanInterface, true)
+		err := setSegmentation(vlanInterface, true)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(capturedIntf).To(Equal("vlan100"))
-		Expect(capturedConfig).To(Equal(map[string]bool{"gro": false, "gso": false, "tso": false}))
+		Expect(capturedConfig).To(Equal(map[string]bool{
+			"generic-receive-offload":      false,
+			"generic-segmentation-offload": false,
+			"tcp-segmentation-offload":     false,
+		}))
 		Expect(mockEth.Closed).To(BeTrue())
 	})
 
@@ -1405,6 +1439,13 @@ var _ = Describe("reconcileSegmentation()", func() {
 		var capturedIntf string
 		var capturedConfig map[string]bool
 		mockEth := &MockEthtool{
+			FeaturesFunc: func(_ string) (map[string]bool, error) {
+				return map[string]bool{
+					"generic-receive-offload":      false,
+					"generic-segmentation-offload": false,
+					"tcp-segmentation-offload":     false,
+				}, nil
+			},
 			ChangeFunc: func(intf string, config map[string]bool) error {
 				capturedIntf = intf
 				capturedConfig = config
@@ -1416,10 +1457,35 @@ var _ = Describe("reconcileSegmentation()", func() {
 		}
 
 		vlanInterface := &netlink.Vlan{LinkAttrs: netlink.LinkAttrs{Name: "vlan200"}}
-		err := reconcileSegmentation(vlanInterface, false)
+		err := setSegmentation(vlanInterface, false)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(capturedIntf).To(Equal("vlan200"))
-		Expect(capturedConfig).To(Equal(map[string]bool{"gro": true, "gso": true, "tso": true}))
+		Expect(capturedConfig).To(Equal(map[string]bool{
+			"generic-receive-offload":      true,
+			"generic-segmentation-offload": true,
+			"tcp-segmentation-offload":     true,
+		}))
+		Expect(mockEth.Closed).To(BeTrue())
+	})
+
+	It("detects disabled segmentation from current ethtool settings", func() {
+		mockEth := &MockEthtool{
+			FeaturesFunc: func(_ string) (map[string]bool, error) {
+				return map[string]bool{
+					"generic-receive-offload":      false,
+					"generic-segmentation-offload": false,
+					"tcp-segmentation-offload":     false,
+				}, nil
+			},
+		}
+		newEthtoolFunc = func() (EthtoolInterface, error) {
+			return mockEth, nil
+		}
+
+		vlanInterface := &netlink.Vlan{LinkAttrs: netlink.LinkAttrs{Name: "vlan200"}}
+		disabled, err := getSegmentationDisabled(vlanInterface)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(disabled).To(BeTrue())
 		Expect(mockEth.Closed).To(BeTrue())
 	})
 })

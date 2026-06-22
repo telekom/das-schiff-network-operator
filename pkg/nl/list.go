@@ -181,6 +181,9 @@ func (*Manager) updateLink(info *Layer2Information, link netlink.Link) error {
 			return fmt.Errorf("error casting link %v as netlink.Veth", link)
 		}
 		info.vlanInterface = vlanInterface
+		if disabled, err := getSegmentationDisabled(vlanInterface); err == nil {
+			info.DisableSegmentation = disabled
+		}
 	}
 
 	return nil

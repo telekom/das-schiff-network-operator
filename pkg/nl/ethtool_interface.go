@@ -8,6 +8,7 @@ import (
 
 // EthtoolInterface defines the interface for ethtool operations.
 type EthtoolInterface interface {
+	Features(intf string) (map[string]bool, error)
 	Change(intf string, config map[string]bool) error
 	Close()
 }
@@ -22,6 +23,14 @@ func (e *ethtoolWrapper) Change(intf string, config map[string]bool) error {
 		return fmt.Errorf("ethtool change failed: %w", err)
 	}
 	return nil
+}
+
+func (e *ethtoolWrapper) Features(intf string) (map[string]bool, error) {
+	features, err := e.eth.Features(intf)
+	if err != nil {
+		return nil, fmt.Errorf("ethtool features failed: %w", err)
+	}
+	return features, nil
 }
 
 func (e *ethtoolWrapper) Close() {
