@@ -10,6 +10,7 @@ import (
 	"github.com/vishvananda/netlink"
 	vnl "github.com/vishvananda/netlink/nl"
 	"go.uber.org/mock/gomock"
+	"golang.org/x/sys/unix"
 )
 
 func mirrorManager(toolkit ToolkitInterface) *Manager {
@@ -113,7 +114,35 @@ var _ = Describe("ReconcileLoopbacks", func() {
 			tk.EXPECT().LinkByName("lo.mir").Return(lo, nil),
 			tk.EXPECT().LinkSetUp(lo).Return(nil),
 			tk.EXPECT().ParseAddr("10.99.0.1/32").Return(addr, nil),
+			tk.EXPECT().AddrList(lo, unix.AF_UNSPEC).Return(nil, nil),
 			tk.EXPECT().AddrAdd(lo, addr).Return(nil),
+		)
+
+		Expect(nm.ReconcileLoopbacks([]LoopbackConfig{
+			{Name: "lo.mir", VRF: "mirror", Addresses: []string{"10.99.0.1/32"}},
+		})).To(Succeed())
+	})
+
+	It("removes stale addresses left over from a previous subnet", func() {
+		mockctrl := gomock.NewController(GinkgoT())
+		defer mockctrl.Finish()
+		tk := mock_nl.NewMockToolkitInterface(mockctrl)
+		nm := mirrorManager(tk)
+
+		vrf := dummyLink("mirror", 10)
+		lo := dummyLink("lo.mir", 20)
+		desiredAddr, _ := netlink.ParseAddr("10.99.0.1/32")
+		staleAddr, _ := netlink.ParseAddr("10.50.0.1/32")
+		linkLocal, _ := netlink.ParseAddr("fe80::1/64")
+
+		gomock.InOrder(
+			tk.EXPECT().LinkByName("mirror").Return(vrf, nil),
+			tk.EXPECT().LinkByName("lo.mir").Return(lo, nil),
+			tk.EXPECT().LinkSetUp(lo).Return(nil),
+			tk.EXPECT().ParseAddr("10.99.0.1/32").Return(desiredAddr, nil),
+			tk.EXPECT().AddrList(lo, unix.AF_UNSPEC).Return([]netlink.Addr{*desiredAddr, *staleAddr, *linkLocal}, nil),
+			// desired already present -> no AddrAdd; stale removed; link-local kept.
+			tk.EXPECT().AddrDel(lo, staleAddr).Return(nil),
 		)
 
 		Expect(nm.ReconcileLoopbacks([]LoopbackConfig{

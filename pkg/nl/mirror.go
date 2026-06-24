@@ -8,6 +8,7 @@ import (
 
 	"github.com/vishvananda/netlink"
 	vnl "github.com/vishvananda/netlink/nl"
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -109,13 +110,49 @@ func (n *Manager) ensureLoopback(cfg *LoopbackConfig) error {
 		return fmt.Errorf("error setting up %s: %w", cfg.Name, err)
 	}
 
+	return n.reconcileLoopbackAddresses(link, cfg)
+}
+
+// reconcileLoopbackAddresses makes the loopback carry exactly the desired
+// addresses: missing ones are added and stale ones (e.g. left over after a
+// subnet change) are removed, so GRE source selection always uses a valid
+// address.
+func (n *Manager) reconcileLoopbackAddresses(link netlink.Link, cfg *LoopbackConfig) error {
+	desired := make([]*netlink.Addr, 0, len(cfg.Addresses))
 	for _, addrStr := range cfg.Addresses {
 		addr, err := n.toolkit.ParseAddr(addrStr)
 		if err != nil {
 			return fmt.Errorf("error parsing address %s: %w", addrStr, err)
 		}
-		if err := n.toolkit.AddrAdd(link, addr); err != nil && !strings.Contains(err.Error(), "exists") {
-			return fmt.Errorf("error adding address %s to %s: %w", addrStr, cfg.Name, err)
+		desired = append(desired, addr)
+	}
+
+	currentList, err := n.toolkit.AddrList(link, unix.AF_UNSPEC)
+	if err != nil {
+		return fmt.Errorf("error listing addresses on %s: %w", cfg.Name, err)
+	}
+	current := make([]*netlink.Addr, 0, len(currentList))
+	for i := range currentList {
+		// Only manage global addresses; leave kernel-managed link-local addresses
+		// (e.g. IPv6 fe80::/10) untouched.
+		if currentList[i].IP.IsLinkLocalUnicast() {
+			continue
+		}
+		current = append(current, &currentList[i])
+	}
+
+	for _, addr := range desired {
+		if !containsNetlinkAddress(current, addr) {
+			if err := n.toolkit.AddrAdd(link, addr); err != nil && !strings.Contains(err.Error(), "exists") {
+				return fmt.Errorf("error adding address %s to %s: %w", addr, cfg.Name, err)
+			}
+		}
+	}
+	for _, addr := range current {
+		if !containsNetlinkAddress(desired, addr) {
+			if err := n.toolkit.AddrDel(link, addr); err != nil {
+				return fmt.Errorf("error removing stale address %s from %s: %w", addr, cfg.Name, err)
+			}
 		}
 	}
 	return nil

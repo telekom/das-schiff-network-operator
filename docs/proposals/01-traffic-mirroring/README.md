@@ -45,9 +45,9 @@ type MirrorSelectorSpec struct {
 }
 ```
 
-### 2.2 Existing Data Path — Already Implemented
+### 2.2 Data Path — CRA-VSR Rendering
 
-The full data path from `NodeNetworkConfig` down to the CRA-VSR agent is **already implemented** by the vendor (6WIND). The `pkg/cra-vsr` package must not be modified by us.
+The data path from `NodeNetworkConfig` down to the CRA-VSR agent is provided by the `pkg/cra-vsr` package. Historically this package was treated as vendor-maintained (6WIND) and left untouched, but the GRE/GRETap, VRF loopback and `<mirror-traffic>` rendering needed for traffic mirroring **was added to `pkg/cra-vsr` in-repo as part of this change** (see `layer2.go`, `layer3.go`, `create.go`, `types.go`). The model and rendering described below therefore reflect the post-change state of the package.
 
 #### NodeNetworkConfig Model
 
@@ -79,9 +79,9 @@ type GRE struct {
 }
 ```
 
-#### CRA-VSR Agent — Already Handles All of This
+#### CRA-VSR Agent — Rendering Added In-Repo
 
-The `pkg/cra-vsr` package (vendor-maintained, **must not be modified**) already:
+The `pkg/cra-vsr` package (extended in-repo by this change):
 
 1. **Creates GRE/GRETap interfaces** inside VRFs (`layer3.go` → `setupGRE`).
 2. **Creates loopback interfaces** inside VRFs (`layer3.go` → `setupLoopback`).
@@ -100,7 +100,7 @@ The `pkg/cra-vsr` package (vendor-maintained, **must not be modified**) already:
 4. **Source IP address management** — each node needs a unique per-VRF source IP for the GRE tunnel, assigned as a loopback and advertised via EVPN export filter. The `VRFRouteConfiguration` will carry loopback definitions with a `poolRef` to a Cluster API IPAM pool; the operator creates `IPAddressClaim`s per node.
 5. **The GRE interface and loopback IP** entries are not populated in the `NodeNetworkConfig`.
 
-> **Key insight:** The entire CRA-VSR agent side is done. The only work is in the **operator** (reconciler / config-build step).
+> **Key insight:** With the CRA-VSR rendering added, the remaining work is in the **operator** (reconciler / config-build step), which wires `MirrorSelector`/`MirrorTarget` into the per-node `NodeNetworkConfig`.
 
 ## 3. Design Decisions
 
@@ -264,25 +264,31 @@ This design means:
 
 This is the central architectural question. There are two options:
 
-#### Option A — Embed in Revision (current pattern)
+#### Option A — Embed in Revision (current pattern) ✅ (implemented)
 
-Add `MirrorRevision` slices to `NetworkConfigRevisionSpec`, exactly like Layer2/VRF/BGP:
+Add mirror snapshots to `NetworkConfigRevisionSpec`, exactly like Layer2/VRF/BGP. This is what the implementation does, via `MirrorTargets` and `MirrorSelectors`:
 
 ```go
 type NetworkConfigRevisionSpec struct {
-    Layer2 []Layer2Revision `json:"layer2,omitempty"`
-    Vrf    []VRFRevision    `json:"vrf,omitempty"`
-    BGP    []BGPRevision    `json:"bgp,omitempty"`
-    Mirror []MirrorRevision `json:"mirror,omitempty"`  // NEW
+    Layer2          []Layer2Revision         `json:"layer2,omitempty"`
+    Vrf             []VRFRevision            `json:"vrf,omitempty"`
+    BGP             []BGPRevision            `json:"bgp,omitempty"`
+    MirrorTargets   []MirrorTargetRevision   `json:"mirrorTargets,omitempty"`   // NEW
+    MirrorSelectors []MirrorSelectorRevision `json:"mirrorSelectors,omitempty"` // NEW
 }
 
-type MirrorRevision struct {
-    SelectorName string             `json:"selectorName"`
-    TargetName   string             `json:"targetName"`
+type MirrorTargetRevision struct {
+    Name             string `json:"name"`
+    MirrorTargetSpec `json:",inline"`
+}
+
+type MirrorSelectorRevision struct {
+    Name               string `json:"name"`
     MirrorSelectorSpec `json:",inline"`
-    MirrorTargetSpec   `json:",inline"`
 }
 ```
+
+These snapshots are included in the revision hash computed by `NewRevision`, so any mirror change produces a new revision and rolls out through the normal gated, node-by-node pipeline.
 
 | Pro | Con |
 |---|---|
@@ -290,7 +296,7 @@ type MirrorRevision struct {
 | Atomic rollout — mirror rules roll out node-by-node together with L2/L3/BGP changes | Any mirror rule change triggers a full revision bump and node-by-node rollout, even though mirror is a low-risk, additive change |
 | Simple: agents only read `NodeNetworkConfig` | - |
 
-#### Option B — Keep Mirrors Out of Revision (recommended) ✅
+#### Option B — Keep Mirrors Out of Revision (considered, not adopted)
 
 Mirror selectors and targets are **resolved at NodeNetworkConfig build time only**, but are **not stored** in the `NetworkConfigRevisionSpec`. The revision hash is still computed from L2+VRF+BGP, meaning mirror-only changes do **not** create a new revision. Instead:
 
@@ -330,16 +336,17 @@ Mirror selectors and targets are **resolved at NodeNetworkConfig build time only
 
 #### Recommendation
 
-**Option B** is recommended, with one enhancement: the operator should still trigger a `NodeNetworkConfig` update for all affected nodes when a `MirrorSelector` or `MirrorTarget` changes. This can be done via a lightweight reconciler that watches mirror CRDs and re-builds affected node configs without bumping the revision.
+**Option A** was implemented: mirror selectors and targets are snapshotted into `NetworkConfigRevisionSpec` (`MirrorTargets` / `MirrorSelectors`) and contribute to the revision hash in `NewRevision`. Mirror changes therefore bump the revision and roll out through the normal gated, node-by-node pipeline, alongside L2/VRF/BGP changes.
 
-The rationale:
+The rationale for choosing Option A over Option B:
 
-- Mirror rules are **additive** and **non-disruptive** — adding/removing a mirror ACL does not affect forwarding of production traffic.
-- The `NetworkConfigRevision` CR already risks growing large with many L2/VRF/BGP entries. Adding every mirror rule would make it worse.
-- The revision's purpose is **gated, safe rollout of forwarding-plane changes**. Mirroring is an observability feature that does not alter the forwarding plane.
-- The mirror destination VRF itself (with VNI + RT + loopback definitions) is a standard `VRFRouteConfiguration`, so it **is** part of the revision already. The loopback spec (name + pool ref) is snapshotted; only the resolved per-node IP, GRE interface, and ACL entries are injected at build time.
+- **Single source of truth and auditability:** the revision is a full snapshot, so "what mirror config was active at revision X" is answerable directly from the revision CR.
+- **Atomic, gated rollout:** mirror config rolls out node-by-node together with the rest of the config, reusing the existing rollout/gating machinery instead of a separate, ungated update path for `NodeNetworkConfig`.
+- **Minimal moving parts:** no separate reconcile/trigger mechanism is needed for mirror CRD changes; the existing revision pipeline already reacts to them.
 
-If auditability is needed, the operator can record applied mirror state in `MirrorSelector.Status` or in `NodeNetworkConfig` annotations.
+The mirror destination VRF itself (with VNI + RT + loopback definitions) is a standard `VRFRouteConfiguration`, so it is part of the revision already. The loopback spec (name + subnet) is snapshotted; only the resolved per-node IP, GRE interface, and ACL entries are injected at `NodeNetworkConfig` build time.
+
+The main trade-off accepted is that the revision CR grows with the number of mirror selectors/targets, and that additive mirror changes still incur a full revision bump and rollout.
 
 ## 4. Implementation Plan
 

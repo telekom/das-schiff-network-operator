@@ -156,6 +156,15 @@ var _ = Describe("Mirror building", func() {
 			Expect(result["a"]).To(Equal("10.99.0.1"))
 		})
 
+		It("reallocates a stored IP that is no longer inside the (changed) subnet", func() {
+			// "a" was previously allocated from a different subnet; after the subnet
+			// changed it must not keep the out-of-subnet address.
+			existing := map[string]string{"a": "10.50.0.1"}
+			result, err := allocateSubnet("10.99.0.0/29", []string{"a"}, existing)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result["a"]).To(Equal("10.99.0.1"))
+		})
+
 		It("returns an error for an invalid CIDR", func() {
 			_, err := allocateSubnet("not-a-cidr", []string{"a"}, nil)
 			Expect(err).To(HaveOccurred())
@@ -310,6 +319,10 @@ var _ = Describe("Mirror building", func() {
 		It("reports ActiveSelectors/ActiveNodes and conditions from the deployed configs", func() {
 			target := mirrorTarget()
 			sel := mirrorSelector("sel-l2", "Layer2NetworkConfiguration", "vlan100", v1alpha1.MirrorDirectionIngress)
+			source := &v1alpha1.Layer2NetworkConfiguration{
+				ObjectMeta: metav1.ObjectMeta{Name: "vlan100"},
+				Spec:       v1alpha1.Layer2NetworkConfigurationSpec{ID: 100},
+			}
 
 			greName := greInterfaceName("collector", v1alpha1.MirrorTargetTypeL3GRE)
 			nnc := &v1alpha1.NodeNetworkConfig{
@@ -318,10 +331,15 @@ var _ = Describe("Mirror building", func() {
 					FabricVRFs: map[string]v1alpha1.FabricVRF{
 						"mirror": {VRF: v1alpha1.VRF{GREs: map[string]v1alpha1.GRE{greName: {SourceAddress: "10.99.0.1"}}}},
 					},
+					Layer2s: map[string]v1alpha1.Layer2{
+						"100": {VLAN: 100, MirrorACLs: []v1alpha1.MirrorACL{
+							{MirrorDestination: greName, Direction: v1alpha1.MirrorDirectionIngress},
+						}},
+					},
 				},
 			}
 
-			crr := mirrorTestReconciler(target, sel, nnc)
+			crr := mirrorTestReconciler(target, sel, source, nnc)
 			Expect(crr.reconcileMirrorStatus(context.Background())).To(Succeed())
 
 			gotTarget := &v1alpha1.MirrorTarget{}
@@ -334,6 +352,48 @@ var _ = Describe("Mirror building", func() {
 			Expect(crr.client.Get(context.Background(), types.NamespacedName{Name: "sel-l2"}, gotSel)).To(Succeed())
 			Expect(meta.IsStatusConditionTrue(gotSel.Status.Conditions, conditionResolved)).To(BeTrue())
 			Expect(meta.IsStatusConditionTrue(gotSel.Status.Conditions, conditionApplied)).To(BeTrue())
+		})
+
+		It("does not mark a selector Applied when only the tunnel exists but its source has no ACL", func() {
+			target := mirrorTarget()
+			// Another selector created the tunnel; this selector's source carries no ACL.
+			sel := mirrorSelector("sel-l2", "Layer2NetworkConfiguration", "vlan100", v1alpha1.MirrorDirectionIngress)
+			source := &v1alpha1.Layer2NetworkConfiguration{
+				ObjectMeta: metav1.ObjectMeta{Name: "vlan100"},
+				Spec:       v1alpha1.Layer2NetworkConfigurationSpec{ID: 100},
+			}
+
+			greName := greInterfaceName("collector", v1alpha1.MirrorTargetTypeL3GRE)
+			nnc := &v1alpha1.NodeNetworkConfig{
+				ObjectMeta: metav1.ObjectMeta{Name: "node1"},
+				Spec: v1alpha1.NodeNetworkConfigSpec{
+					FabricVRFs: map[string]v1alpha1.FabricVRF{
+						"mirror": {VRF: v1alpha1.VRF{GREs: map[string]v1alpha1.GRE{greName: {SourceAddress: "10.99.0.1"}}}},
+					},
+					Layer2s: map[string]v1alpha1.Layer2{
+						"100": {VLAN: 100},
+					},
+				},
+			}
+
+			crr := mirrorTestReconciler(target, sel, source, nnc)
+			Expect(crr.reconcileMirrorStatus(context.Background())).To(Succeed())
+
+			gotSel := &v1alpha1.MirrorSelector{}
+			Expect(crr.client.Get(context.Background(), types.NamespacedName{Name: "sel-l2"}, gotSel)).To(Succeed())
+			Expect(meta.IsStatusConditionTrue(gotSel.Status.Conditions, conditionResolved)).To(BeTrue())
+			Expect(meta.IsStatusConditionFalse(gotSel.Status.Conditions, conditionApplied)).To(BeTrue())
+		})
+
+		It("marks a selector unresolved when its source is missing", func() {
+			target := mirrorTarget()
+			sel := mirrorSelector("sel-l2", "Layer2NetworkConfiguration", "vlan100", v1alpha1.MirrorDirectionIngress)
+			crr := mirrorTestReconciler(target, sel)
+			Expect(crr.reconcileMirrorStatus(context.Background())).To(Succeed())
+
+			gotSel := &v1alpha1.MirrorSelector{}
+			Expect(crr.client.Get(context.Background(), types.NamespacedName{Name: "sel-l2"}, gotSel)).To(Succeed())
+			Expect(meta.IsStatusConditionFalse(gotSel.Status.Conditions, conditionResolved)).To(BeTrue())
 		})
 
 		It("marks a selector unresolved when its target is missing", func() {

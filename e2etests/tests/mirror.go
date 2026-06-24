@@ -152,8 +152,9 @@ spec:
 			_ = f.DeleteManifest(context.Background(), sel)
 		})
 
-		By("Waiting for NodeNetworkConfig convergence")
-		time.Sleep(15 * time.Second)
+		By("Waiting for NodeNetworkConfig convergence (MirrorSelector Applied)")
+		Expect(f.WaitForMirrorSelectorApplied(name, 2*time.Minute)).To(Succeed(),
+			"MirrorSelector should report Applied=True once the operator rolls the mirror config into a NodeNetworkConfig")
 
 		createTrafficPods(cfg)
 		verifyMirrorCapture(cfg.Macvlan02IPv4, captureFilter, label)

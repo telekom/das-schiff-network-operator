@@ -13,6 +13,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/runtime/serializer/yaml"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
@@ -239,5 +240,42 @@ func (f *Framework) WaitForDaemonSetReady(namespace, name string, timeout time.D
 		}
 		return ds.Status.DesiredNumberScheduled > 0 &&
 			ds.Status.DesiredNumberScheduled == ds.Status.NumberReady, nil
+	})
+}
+
+// WaitForMirrorSelectorApplied polls the cluster-scoped MirrorSelector until its
+// "Applied" status condition is True, which signals that the operator has rolled
+// the resulting GRE tunnel and MirrorACL into at least one node's
+// NodeNetworkConfig. This replaces fixed sleeps when waiting for mirror
+// convergence.
+func (f *Framework) WaitForMirrorSelectorApplied(name string, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	sel := &unstructured.Unstructured{}
+	sel.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "network.t-caas.telekom.com",
+		Version: "v1alpha1",
+		Kind:    "MirrorSelector",
+	})
+
+	return Poll(ctx, 3*time.Second, func() (bool, error) {
+		if err := f.Client.Get(ctx, types.NamespacedName{Name: name}, sel); err != nil {
+			return false, nil
+		}
+		conditions, found, err := unstructured.NestedSlice(sel.Object, "status", "conditions")
+		if err != nil || !found {
+			return false, nil
+		}
+		for _, c := range conditions {
+			cond, ok := c.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if cond["type"] == "Applied" && cond["status"] == string(metav1.ConditionTrue) {
+				return true, nil
+			}
+		}
+		return false, nil
 	})
 }

@@ -13,6 +13,13 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
+const (
+	// sourceKindLayer2 is the MirrorSource Kind for a Layer2NetworkConfiguration.
+	sourceKindLayer2 = "Layer2NetworkConfiguration"
+	// sourceKindVRF is the MirrorSource Kind for a VRFRouteConfiguration.
+	sourceKindVRF = "VRFRouteConfiguration"
+)
+
 // buildNodeMirror resolves the MirrorSelector/MirrorTarget snapshots from the
 // revision and injects the resulting GRE tunnels, per-node source loopbacks, EVPN
 // export-filter entries and MirrorACLs into the node's NodeNetworkConfig.
@@ -32,16 +39,10 @@ func (crr *ConfigRevisionReconciler) buildNodeMirror(ctx context.Context, node *
 		targets[revision.Spec.MirrorTargets[i].Name] = &revision.Spec.MirrorTargets[i]
 	}
 
-	existingConfigs, err := crr.listConfigs(ctx)
-	if err != nil {
-		return fmt.Errorf("error listing NodeNetworkConfigs for mirror allocation: %w", err)
-	}
-	nodeNames, err := crr.listReadyNodeNames(ctx)
+	alloc, err := crr.mirrorAllocator(ctx, revision)
 	if err != nil {
 		return err
 	}
-
-	alloc := newLoopbackAllocator(revision, existingConfigs.Items, nodeNames)
 
 	// Track GRE interfaces already created on this node (keyed by target name) so
 	// multiple selectors referencing the same target share a single tunnel.
@@ -53,6 +54,29 @@ func (crr *ConfigRevisionReconciler) buildNodeMirror(ctx context.Context, node *
 	}
 
 	return nil
+}
+
+// mirrorAllocator returns the per-node loopback allocator for the revision,
+// computing it (with the two cluster-wide List calls it needs) only once per
+// revision and caching the result. Subsequent per-node builds during the same
+// rollout reuse the cached allocator instead of re-listing.
+func (crr *ConfigRevisionReconciler) mirrorAllocator(ctx context.Context, revision *v1alpha1.NetworkConfigRevision) (*loopbackAllocator, error) {
+	if crr.mirrorAllocCache.alloc != nil && crr.mirrorAllocCache.revision == revision.Spec.Revision {
+		return crr.mirrorAllocCache.alloc, nil
+	}
+
+	existingConfigs, err := crr.listConfigs(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("error listing NodeNetworkConfigs for mirror allocation: %w", err)
+	}
+	nodeNames, err := crr.listReadyNodeNames(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	alloc := newLoopbackAllocator(revision, existingConfigs.Items, nodeNames)
+	crr.mirrorAllocCache = mirrorAllocCache{revision: revision.Spec.Revision, alloc: alloc}
+	return alloc, nil
 }
 
 // applyMirrorSelector resolves a single MirrorSelector for the given node and, when
@@ -135,7 +159,7 @@ func ensureMirrorTunnel(node *corev1.Node, target *v1alpha1.MirrorTargetRevision
 // for VRFRouteConfiguration) via the revision.
 func attachMirrorACL(sel *v1alpha1.MirrorSelectorRevision, revision *v1alpha1.NetworkConfigRevision, acl *v1alpha1.MirrorACL, c *v1alpha1.NodeNetworkConfig) {
 	switch sel.MirrorSource.Kind {
-	case "Layer2NetworkConfiguration":
+	case sourceKindLayer2:
 		key, ok := layer2KeyForSource(revision, sel.MirrorSource.Name)
 		if !ok {
 			return
@@ -144,7 +168,7 @@ func attachMirrorACL(sel *v1alpha1.MirrorSelectorRevision, revision *v1alpha1.Ne
 			l2.MirrorACLs = append(l2.MirrorACLs, *acl)
 			c.Spec.Layer2s[key] = l2
 		}
-	case "VRFRouteConfiguration":
+	case sourceKindVRF:
 		vrfName, ok := vrfNameForSource(revision, sel.MirrorSource.Name)
 		if !ok {
 			return
@@ -337,18 +361,12 @@ func allocateSubnet(cidr string, nodeNames []string, existing map[string]string)
 
 	result := make(map[string]string, len(nodeNames))
 	used := make(map[string]struct{}, len(existing))
-	for node, addr := range existing {
-		if _, ok := inScope[node]; !ok {
-			continue
-		}
-		result[node] = addr
-		used[addr] = struct{}{}
-	}
+	bcast := broadcastAddr(ipNet)
+	preserveExistingAllocations(existing, inScope, ipNet, bcast, result, used)
 
 	sorted := append([]string(nil), nodeNames...)
 	sort.Strings(sorted)
 
-	bcast := broadcastAddr(ipNet)
 	cursor := nextAddr(ipNet.IP)
 	for _, node := range sorted {
 		if _, ok := result[node]; ok {
@@ -374,6 +392,36 @@ func allocateSubnet(cidr string, nodeNames []string, existing map[string]string)
 	}
 
 	return result, nil
+}
+
+// preserveExistingAllocations copies the existing per-node allocations for
+// in-scope nodes into result/used, dropping any address that is no longer valid
+// inside the (possibly changed) CIDR so the node is reallocated a fresh
+// in-subnet address by the caller.
+func preserveExistingAllocations(existing map[string]string, inScope map[string]struct{}, ipNet *net.IPNet, bcast net.IP, result map[string]string, used map[string]struct{}) {
+	for node, addr := range existing {
+		if _, ok := inScope[node]; !ok {
+			continue
+		}
+		if !addrInSubnet(addr, ipNet, bcast) {
+			continue
+		}
+		result[node] = addr
+		used[addr] = struct{}{}
+	}
+}
+
+// addrInSubnet reports whether addr is a usable host address inside ipNet (i.e.
+// parseable, contained in the CIDR, and not the network or broadcast address).
+func addrInSubnet(addr string, ipNet *net.IPNet, bcast net.IP) bool {
+	ip := net.ParseIP(addr)
+	if ip == nil || !ipNet.Contains(ip) {
+		return false
+	}
+	if ip.Equal(ipNet.IP) {
+		return false
+	}
+	return bcast == nil || !ip.Equal(bcast)
 }
 
 // nextAddr returns the IP numerically following ip.

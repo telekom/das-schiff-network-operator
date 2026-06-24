@@ -68,6 +68,19 @@ type ConfigRevisionReconciler struct {
 	maxUpdating      int
 
 	importMode ImportMode
+
+	// mirrorAllocCache memoises the per-node loopback allocation for the current
+	// revision so that building NodeNetworkConfigs node-by-node during a rollout
+	// does not trigger cluster-wide List calls for every single node.
+	mirrorAllocCache mirrorAllocCache
+}
+
+// mirrorAllocCache caches a loopbackAllocator for a given revision hash. The
+// allocation is deterministic for a revision (mirror config is part of the
+// revision hash), so it is safe to reuse across the per-node builds of a rollout.
+type mirrorAllocCache struct {
+	revision string
+	alloc    *loopbackAllocator
 }
 
 // Reconcile starts reconciliation.
