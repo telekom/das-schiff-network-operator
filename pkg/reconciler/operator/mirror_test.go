@@ -277,6 +277,25 @@ var _ = Describe("Mirror building", func() {
 			Expect(c.Spec.Layer2s["100"].MirrorACLs).To(BeEmpty())
 		})
 
+		It("does not inject a tunnel/loopback when the selector's source is absent", func() {
+			node := makeNode("node1", true)
+
+			crr := mirrorTestReconciler(node)
+			revision := withMirror(mirrorRevision(),
+				[]v1alpha1.MirrorTargetRevision{mirrorTargetRev()},
+				[]v1alpha1.MirrorSelectorRevision{
+					mirrorSelectorRev("sel-l2", "Layer2NetworkConfiguration", "vlan100", v1alpha1.MirrorDirectionIngress),
+				})
+			c := nodeConfigWithVRFsAndL2()
+			// The mirror VRF is present, but the selector's source Layer2 is not.
+			delete(c.Spec.Layer2s, "100")
+
+			Expect(crr.buildNodeMirror(context.Background(), node, revision, c)).To(Succeed())
+			// No GRE tunnel or loopback should be injected for a source-less selector.
+			Expect(c.Spec.FabricVRFs["mirror"].GREs).To(BeEmpty())
+			Expect(c.Spec.FabricVRFs["mirror"].Loopbacks).To(BeEmpty())
+		})
+
 		It("allocates IPv6 source addresses and a /128 loopback for an IPv6 collector", func() {
 			node := makeNode("node1", true)
 			ipv6Target := v1alpha1.MirrorTargetRevision{

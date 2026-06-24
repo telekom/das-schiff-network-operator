@@ -51,6 +51,11 @@ func (crr *ConfigRevisionReconciler) reconcileMirrorStatus(ctx context.Context) 
 		targetByName[targets.Items[i].Name] = &targets.Items[i]
 	}
 	for i := range selectors.Items {
+		// Only count selectors whose MirrorTarget reference is valid (right
+		// kind/apiGroup), consistent with how updateSelectorStatuses resolves them.
+		if !validMirrorTargetRef(selectors.Items[i].Spec.MirrorTarget) {
+			continue
+		}
 		selectorCount[selectors.Items[i].Spec.MirrorTarget.Name]++
 	}
 

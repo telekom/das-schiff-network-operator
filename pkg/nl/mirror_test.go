@@ -132,7 +132,8 @@ var _ = Describe("ReconcileLoopbacks", func() {
 		nm := mirrorManager(tk)
 
 		vrf := dummyLink("mirror", 10)
-		lo := dummyLink("lo.mir", 20)
+		// Existing loopback is a dummy already enslaved to the mirror VRF (index 10).
+		lo := &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: "lo.mir", Index: 20, MasterIndex: 10}}
 		desiredAddr, _ := netlink.ParseAddr("10.99.0.1/32")
 		staleAddr, _ := netlink.ParseAddr("10.50.0.1/32")
 		linkLocal, _ := netlink.ParseAddr("fe80::1/64")
@@ -145,6 +146,35 @@ var _ = Describe("ReconcileLoopbacks", func() {
 			tk.EXPECT().AddrList(lo, unix.AF_UNSPEC).Return([]netlink.Addr{*desiredAddr, *staleAddr, *linkLocal}, nil),
 			// desired already present -> no AddrAdd; stale removed; link-local kept.
 			tk.EXPECT().AddrDel(lo, staleAddr).Return(nil),
+		)
+
+		Expect(nm.ReconcileLoopbacks([]LoopbackConfig{
+			{Name: "lo.mir", VRF: "mirror", Addresses: []string{"10.99.0.1/32"}},
+		})).To(Succeed())
+	})
+
+	It("recreates a loopback that exists in the wrong VRF", func() {
+		mockctrl := gomock.NewController(GinkgoT())
+		defer mockctrl.Finish()
+		tk := mock_nl.NewMockToolkitInterface(mockctrl)
+		nm := mirrorManager(tk)
+
+		vrf := dummyLink("mirror", 10)
+		// Existing dummy is enslaved to a different VRF (index 99) -> must be replaced.
+		stale := &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: "lo.mir", Index: 20, MasterIndex: 99}}
+		fresh := &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: "lo.mir", Index: 21, MasterIndex: 10}}
+		addr, _ := netlink.ParseAddr("10.99.0.1/32")
+
+		gomock.InOrder(
+			tk.EXPECT().LinkByName("mirror").Return(vrf, nil),
+			tk.EXPECT().LinkByName("lo.mir").Return(stale, nil),
+			tk.EXPECT().LinkDel(stale).Return(nil),
+			tk.EXPECT().LinkAdd(gomock.Any()).Return(nil),
+			tk.EXPECT().LinkByName("lo.mir").Return(fresh, nil),
+			tk.EXPECT().LinkSetUp(fresh).Return(nil),
+			tk.EXPECT().ParseAddr("10.99.0.1/32").Return(addr, nil),
+			tk.EXPECT().AddrList(fresh, unix.AF_UNSPEC).Return(nil, nil),
+			tk.EXPECT().AddrAdd(fresh, addr).Return(nil),
 		)
 
 		Expect(nm.ReconcileLoopbacks([]LoopbackConfig{
@@ -369,6 +399,35 @@ var _ = Describe("ReconcileTcMirrors", func() {
 		Expect(added).To(HaveLen(1))
 		Expect(added[0].EthType).To(Equal(ethPIPv6))
 		Expect(added[0].DestIP).ToNot(BeNil())
+	})
+
+	It("matches a bare host IP (no CIDR) as /32 or /128", func() {
+		mockctrl := gomock.NewController(GinkgoT())
+		defer mockctrl.Finish()
+		tk := mock_nl.NewMockToolkitInterface(mockctrl)
+		nm := mirrorManager(tk)
+
+		src := dummyLink("vlan.501", 5)
+		var added *netlink.Flower
+
+		tk.EXPECT().LinkByName("vlan.501").Return(src, nil)
+		tk.EXPECT().QdiscList(src).Return([]netlink.Qdisc{&netlink.Clsact{}}, nil)
+		tk.EXPECT().FilterList(src, gomock.Any()).Return(nil, nil).Times(2)
+		tk.EXPECT().FilterAdd(gomock.Any()).DoAndReturn(func(f netlink.Filter) error {
+			added = f.(*netlink.Flower)
+			return nil
+		}).Times(1)
+
+		// Bare host IP (no "/prefix") in SrcPrefix; family derivable -> IPv4 only.
+		rules := []MirrorRule{{SourceInterface: "vlan.501", Direction: "ingress", GREInterface: "gre-abc", SrcPrefix: "76.4.0.4"}}
+		Expect(nm.ReconcileTcMirrors(rules, map[string]int{"gre-abc": 30})).To(Succeed())
+
+		Expect(added).ToNot(BeNil())
+		Expect(added.EthType).To(Equal(ethPIP))
+		Expect(added.SrcIP.Equal(net.ParseIP("76.4.0.4"))).To(BeTrue())
+		ones, bits := added.SrcIPMask.Size()
+		Expect(ones).To(Equal(32))
+		Expect(bits).To(Equal(32))
 	})
 
 	It("maps direction to tc hooks per workload orientation", func() {

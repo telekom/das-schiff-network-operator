@@ -2,6 +2,7 @@
 package nl
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -31,6 +32,9 @@ const (
 	mirrorFilterPriorityBase = 0x8000
 
 	maxMirrorIfNameLen = 15
+
+	// bitsPerByte is used to convert a byte length into a CIDR prefix length.
+	bitsPerByte = 8
 
 	ethPAll  = uint16(0x0003) // ETH_P_ALL
 	ethPIP   = uint16(0x0800) // ETH_P_IP
@@ -91,8 +95,18 @@ func (n *Manager) ensureLoopback(cfg *LoopbackConfig) error {
 		return fmt.Errorf("VRF %q not found: %w", cfg.VRF, err)
 	}
 
-	link, err := n.toolkit.LinkByName(cfg.Name)
-	if err != nil {
+	link, lookupErr := n.toolkit.LinkByName(cfg.Name)
+	if lookupErr == nil && !isDesiredLoopback(link, vrfLink.Attrs().Index) {
+		// An interface with this name exists but is not a dummy enslaved to the
+		// desired VRF (e.g. it was left in a different VRF after a change, or is a
+		// different link type). Replace it so the loopback ends up in the right VRF;
+		// otherwise GRE source-address resolution could break.
+		if err := n.toolkit.LinkDel(link); err != nil {
+			return fmt.Errorf("error replacing mismatched loopback %s: %w", cfg.Name, err)
+		}
+		link, lookupErr = nil, errLoopbackRecreate
+	}
+	if lookupErr != nil {
 		dummy := &netlink.Dummy{
 			LinkAttrs: netlink.LinkAttrs{
 				Name:        cfg.Name,
@@ -113,6 +127,16 @@ func (n *Manager) ensureLoopback(cfg *LoopbackConfig) error {
 	}
 
 	return n.reconcileLoopbackAddresses(link, cfg)
+}
+
+// errLoopbackRecreate is a sentinel used internally to route a mismatched loopback
+// into the (re)creation path.
+var errLoopbackRecreate = fmt.Errorf("loopback needs recreation")
+
+// isDesiredLoopback reports whether an existing link is a dummy interface enslaved
+// to the desired VRF.
+func isDesiredLoopback(link netlink.Link, vrfIndex int) bool {
+	return link.Type() == "dummy" && link.Attrs().MasterIndex == vrfIndex
 }
 
 // reconcileLoopbackAddresses makes the loopback carry exactly the desired
@@ -145,7 +169,7 @@ func (n *Manager) reconcileLoopbackAddresses(link netlink.Link, cfg *LoopbackCon
 
 	for _, addr := range desired {
 		if !containsNetlinkAddress(current, addr) {
-			if err := n.toolkit.AddrAdd(link, addr); err != nil && !strings.Contains(err.Error(), "exists") {
+			if err := n.toolkit.AddrAdd(link, addr); err != nil && !errors.Is(err, unix.EEXIST) {
 				return fmt.Errorf("error adding address %s to %s: %w", addr, cfg.Name, err)
 			}
 		}
@@ -532,15 +556,15 @@ func (n *Manager) addMirrorFilter(link netlink.Link, parent uint32, prio uint16,
 	// Only program a prefix whose family matches this filter's ethertype; a
 	// cross-family prefix (e.g. an IPv6 dst on an IPv4 filter) cannot be encoded.
 	if prefixFamily(rule.SrcPrefix) == match.ethType {
-		if _, cidr, err := net.ParseCIDR(rule.SrcPrefix); err == nil {
-			flower.SrcIP = cidr.IP
-			flower.SrcIPMask = cidr.Mask
+		if ip, mask, ok := parseHostOrCIDR(rule.SrcPrefix); ok {
+			flower.SrcIP = ip
+			flower.SrcIPMask = mask
 		}
 	}
 	if prefixFamily(rule.DstPrefix) == match.ethType {
-		if _, cidr, err := net.ParseCIDR(rule.DstPrefix); err == nil {
-			flower.DestIP = cidr.IP
-			flower.DestIPMask = cidr.Mask
+		if ip, mask, ok := parseHostOrCIDR(rule.DstPrefix); ok {
+			flower.DestIP = ip
+			flower.DestIPMask = mask
 		}
 	}
 	// Ports are only encoded by the kernel for port-based protocols (TCP/UDP/SCTP),
@@ -674,6 +698,23 @@ func prefixFamily(prefix string) uint16 {
 		return ethPIPv6
 	}
 	return ethPIP
+}
+
+// parseHostOrCIDR parses a CIDR (e.g. "10.0.0.0/8") or a bare host IP (e.g.
+// "76.4.0.4", treated as /32 for IPv4 or /128 for IPv6) into an IP + mask. A bare
+// host would otherwise be silently dropped (CIDR-only parsing) and degrade the
+// rule to match-all on that field.
+func parseHostOrCIDR(s string) (net.IP, net.IPMask, bool) {
+	if _, cidr, err := net.ParseCIDR(s); err == nil {
+		return cidr.IP, cidr.Mask, true
+	}
+	if ip := net.ParseIP(s); ip != nil {
+		if v4 := ip.To4(); v4 != nil {
+			return v4, net.CIDRMask(net.IPv4len*bitsPerByte, net.IPv4len*bitsPerByte), true
+		}
+		return ip, net.CIDRMask(net.IPv6len*bitsPerByte, net.IPv6len*bitsPerByte), true
+	}
+	return nil, nil, false
 }
 
 // isPortProto reports whether the protocol supports L4 port matching.

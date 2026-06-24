@@ -114,6 +114,14 @@ func applyMirrorSelector(node *corev1.Node, revision *v1alpha1.NetworkConfigRevi
 		return
 	}
 
+	// Skip before injecting any tunnel/loopback when the selector's source is not
+	// present on this node — otherwise the node would get a mirror VRF loopback and
+	// GRE tunnel with no ACL attached (wasted config, and it would inflate
+	// MirrorTarget.Status.ActiveNodes).
+	if !mirrorSourcePresent(sel, revision, c) {
+		return
+	}
+
 	greName := ensureMirrorTunnel(node, target, alloc, createdTargets, c)
 	if greName == "" {
 		// Mirror VRF or loopback not available on this node - skip.
@@ -127,6 +135,31 @@ func applyMirrorSelector(node *corev1.Node, revision *v1alpha1.NetworkConfigRevi
 	}
 
 	attachMirrorACL(sel, revision, &acl, c)
+}
+
+// mirrorSourcePresent reports whether the selector's MirrorSource (a Layer2 or a
+// fabric VRF) is configured on this node and the reference is valid.
+func mirrorSourcePresent(sel *v1alpha1.MirrorSelectorRevision, revision *v1alpha1.NetworkConfigRevision, c *v1alpha1.NodeNetworkConfig) bool {
+	if !refAPIGroupOK(sel.MirrorSource) {
+		return false
+	}
+	switch sel.MirrorSource.Kind {
+	case sourceKindLayer2:
+		key, ok := layer2KeyForSource(revision, sel.MirrorSource.Name)
+		if !ok {
+			return false
+		}
+		_, present := c.Spec.Layer2s[key]
+		return present
+	case sourceKindVRF:
+		vrfName, ok := vrfNameForSource(revision, sel.MirrorSource.Name)
+		if !ok {
+			return false
+		}
+		_, present := c.Spec.FabricVRFs[vrfName]
+		return present
+	}
+	return false
 }
 
 // ensureMirrorTunnel makes sure the mirror VRF on the node carries the per-node
