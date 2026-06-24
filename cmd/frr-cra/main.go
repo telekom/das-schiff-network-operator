@@ -523,31 +523,6 @@ func waitForL3VNIs(vrfs []nl.VRFInformation) {
 	log.Printf("Warning: timed out waiting for L3VNIs in FRR (needed %d)", len(needed))
 }
 
-func reconcileMirrors(cfg *nl.NetlinkConfiguration) error {
-	// 1. Create loopback (dummy) interfaces in mirror VRFs
-	if err := nlManager.ReconcileLoopbacks(cfg.Loopbacks); err != nil {
-		return fmt.Errorf("error reconciling loopbacks: %w", err)
-	}
-
-	// 2. Create GRE tunnels for mirror rules
-	tunnelIndex, err := nlManager.ReconcileGRETunnels(cfg.Mirrors)
-	if err != nil {
-		return fmt.Errorf("error reconciling GRE tunnels: %w", err)
-	}
-
-	// 3. Set up tc mirror filters
-	if err := nlManager.ReconcileTcMirrors(cfg.Mirrors, tunnelIndex); err != nil {
-		return fmt.Errorf("error reconciling tc mirrors: %w", err)
-	}
-
-	// 4. Clean up stale GRE tunnels
-	if err := nlManager.CleanupMirrors(cfg.Mirrors); err != nil {
-		return fmt.Errorf("error cleaning up mirrors: %w", err)
-	}
-
-	return nil
-}
-
 func applyConfig(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -585,11 +560,11 @@ func applyConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Reconcile mirror loopbacks, GRE tunnels, and tc filters
-	if err := reconcileMirrors(&craConfiguration.NetlinkConfiguration); err != nil {
-		log.Print(logSanitizer.Replace(fmt.Sprintf("Failed to reconcile mirrors: %v", err)))
-		http.Error(w, fmt.Sprintf("Failed to reconcile mirrors: %v", err), http.StatusInternalServerError)
-		return
+	// Reconcile traffic mirroring (loopbacks, GRE tunnels, tc filters).
+	// Mirroring is an additive, non-disruptive observability feature, so a mirror
+	// programming error must not fail the whole node configuration.
+	if err := nlManager.ReconcileMirror(&craConfiguration.NetlinkConfiguration); err != nil {
+		log.Println("Warning: failed to reconcile mirror configuration (continuing):", err)
 	}
 
 	w.WriteHeader(http.StatusOK)

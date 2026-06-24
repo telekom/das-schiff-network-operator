@@ -69,6 +69,16 @@ var _ = BeforeSuite(func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(f.ApplyManifest(context.Background(), nwopConfigs)).To(Succeed())
 	}
+
+	// Apply the traffic-mirror base infrastructure (mirror VRF, collector VLAN
+	// and MirrorTarget) once, during suite setup, so the mirror tests only need
+	// to toggle lightweight MirrorSelectors. Creating/deleting the mirror VRF and
+	// VLAN per test would cause EVPN reconvergence churn that destabilises other
+	// tests' IPv6 connectivity.
+	By("Applying traffic-mirror base config (mirror VRF + collector VLAN + MirrorTarget)")
+	mirrorBase, err := config.ReadManifest("mirror/manifests.yaml")
+	Expect(err).NotTo(HaveOccurred())
+	Expect(f.ApplyManifest(context.Background(), mirrorBase)).To(Succeed())
 })
 
 var _ = AfterSuite(func() {

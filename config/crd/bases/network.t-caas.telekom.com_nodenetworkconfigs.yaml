@@ -674,6 +674,45 @@ spec:
                       - remoteAsn
                       type: object
                     type: array
+                  gres:
+                    additionalProperties:
+                      description: GRE represents a GRE tunnel interface configuration.
+                      properties:
+                        destinationAddress:
+                          description: DestinationAddress is the address of the GRE
+                            interface
+                          type: string
+                        encapsulationKey:
+                          description: EncapsulationKey is the encapsulation key for
+                            the GRE interface.
+                          format: int32
+                          type: integer
+                        layer:
+                          default: layer3
+                          description: Layer is the GRE encapsulation layer.
+                          enum:
+                          - layer2
+                          - layer3
+                          type: string
+                        sourceAddress:
+                          description: SourceAddress is the source address of the
+                            GRE interface.
+                          type: string
+                        sourceInterface:
+                          description: |-
+                            SourceInterface is the name of the interface that owns the source address
+                            (used as the tunnel's link-interface). The kernel validates the tunnel
+                            source against this interface, so it must be the loopback carrying
+                            SourceAddress; otherwise an IPv6 GRE refuses to originate traffic
+                            ("Local address not yet configured").
+                          type: string
+                      required:
+                      - destinationAddress
+                      - layer
+                      - sourceAddress
+                      type: object
+                    description: GREs is a map of GRE tunnel interfaces
+                    type: object
                   loopbacks:
                     additionalProperties:
                       description: Loopback represents a loopback interface.
@@ -695,28 +734,15 @@ spec:
                     items:
                       description: MirrorACL represents a mirror ACL configuration.
                       properties:
-                        destinationAddress:
-                          description: DestinationAddress is the destination address
-                            for the mirrored traffic.
-                          type: string
-                        destinationVrf:
-                          description: DestinationVrf is the destination VRF for the
-                            mirrored traffic.
-                          type: string
                         direction:
-                          default: both
-                          description: 'Direction is the mirror direction: ingress,
-                            egress, or both.'
+                          description: Direction is the direction of mirrored traffic.
                           enum:
                           - ingress
                           - egress
-                          - both
                           type: string
-                        encapsulationType:
-                          description: EncapsulationType is the encapsulation type
-                            for the mirrored traffic.
-                          enum:
-                          - gre
+                        mirrorDestination:
+                          description: MirrorDestination is the name of the interface
+                            to mirror to (in most cases a GRE interface).
                           type: string
                         trafficMatch:
                           description: TrafficMatch is the traffic match for the mirror
@@ -740,9 +766,8 @@ spec:
                               type: string
                           type: object
                       required:
-                      - destinationAddress
-                      - destinationVrf
-                      - encapsulationType
+                      - direction
+                      - mirrorDestination
                       - trafficMatch
                       type: object
                     type: array
@@ -2008,6 +2033,45 @@ spec:
                       items:
                         type: string
                       type: array
+                    gres:
+                      additionalProperties:
+                        description: GRE represents a GRE tunnel interface configuration.
+                        properties:
+                          destinationAddress:
+                            description: DestinationAddress is the address of the
+                              GRE interface
+                            type: string
+                          encapsulationKey:
+                            description: EncapsulationKey is the encapsulation key
+                              for the GRE interface.
+                            format: int32
+                            type: integer
+                          layer:
+                            default: layer3
+                            description: Layer is the GRE encapsulation layer.
+                            enum:
+                            - layer2
+                            - layer3
+                            type: string
+                          sourceAddress:
+                            description: SourceAddress is the source address of the
+                              GRE interface.
+                            type: string
+                          sourceInterface:
+                            description: |-
+                              SourceInterface is the name of the interface that owns the source address
+                              (used as the tunnel's link-interface). The kernel validates the tunnel
+                              source against this interface, so it must be the loopback carrying
+                              SourceAddress; otherwise an IPv6 GRE refuses to originate traffic
+                              ("Local address not yet configured").
+                            type: string
+                        required:
+                        - destinationAddress
+                        - layer
+                        - sourceAddress
+                        type: object
+                      description: GREs is a map of GRE tunnel interfaces
+                      type: object
                     loopbacks:
                       additionalProperties:
                         description: Loopback represents a loopback interface.
@@ -2029,28 +2093,15 @@ spec:
                       items:
                         description: MirrorACL represents a mirror ACL configuration.
                         properties:
-                          destinationAddress:
-                            description: DestinationAddress is the destination address
-                              for the mirrored traffic.
-                            type: string
-                          destinationVrf:
-                            description: DestinationVrf is the destination VRF for
-                              the mirrored traffic.
-                            type: string
                           direction:
-                            default: both
-                            description: 'Direction is the mirror direction: ingress,
-                              egress, or both.'
+                            description: Direction is the direction of mirrored traffic.
                             enum:
                             - ingress
                             - egress
-                            - both
                             type: string
-                          encapsulationType:
-                            description: EncapsulationType is the encapsulation type
-                              for the mirrored traffic.
-                            enum:
-                            - gre
+                          mirrorDestination:
+                            description: MirrorDestination is the name of the interface
+                              to mirror to (in most cases a GRE interface).
                             type: string
                           trafficMatch:
                             description: TrafficMatch is the traffic match for the
@@ -2074,9 +2125,8 @@ spec:
                                 type: string
                             type: object
                         required:
-                        - destinationAddress
-                        - destinationVrf
-                        - encapsulationType
+                        - direction
+                        - mirrorDestination
                         - trafficMatch
                         type: object
                       type: array
@@ -2588,6 +2638,10 @@ spec:
                 additionalProperties:
                   description: Layer2 represents a Layer 2 network configuration.
                   properties:
+                    disableSegmentation:
+                      description: DisableSegmentation indicates whether to disable
+                        segmentation for the Layer 2 network.
+                      type: boolean
                     irb:
                       description: IRB is the Integrated Routing and Bridging configuration.
                       properties:
@@ -2615,28 +2669,15 @@ spec:
                       items:
                         description: MirrorACL represents a mirror ACL configuration.
                         properties:
-                          destinationAddress:
-                            description: DestinationAddress is the destination address
-                              for the mirrored traffic.
-                            type: string
-                          destinationVrf:
-                            description: DestinationVrf is the destination VRF for
-                              the mirrored traffic.
-                            type: string
                           direction:
-                            default: both
-                            description: 'Direction is the mirror direction: ingress,
-                              egress, or both.'
+                            description: Direction is the direction of mirrored traffic.
                             enum:
                             - ingress
                             - egress
-                            - both
                             type: string
-                          encapsulationType:
-                            description: EncapsulationType is the encapsulation type
-                              for the mirrored traffic.
-                            enum:
-                            - gre
+                          mirrorDestination:
+                            description: MirrorDestination is the name of the interface
+                              to mirror to (in most cases a GRE interface).
                             type: string
                           trafficMatch:
                             description: TrafficMatch is the traffic match for the
@@ -2660,9 +2701,8 @@ spec:
                                 type: string
                             type: object
                         required:
-                        - destinationAddress
-                        - destinationVrf
-                        - encapsulationType
+                        - direction
+                        - mirrorDestination
                         - trafficMatch
                         type: object
                       type: array
@@ -3324,6 +3364,45 @@ spec:
                         - remoteAsn
                         type: object
                       type: array
+                    gres:
+                      additionalProperties:
+                        description: GRE represents a GRE tunnel interface configuration.
+                        properties:
+                          destinationAddress:
+                            description: DestinationAddress is the address of the
+                              GRE interface
+                            type: string
+                          encapsulationKey:
+                            description: EncapsulationKey is the encapsulation key
+                              for the GRE interface.
+                            format: int32
+                            type: integer
+                          layer:
+                            default: layer3
+                            description: Layer is the GRE encapsulation layer.
+                            enum:
+                            - layer2
+                            - layer3
+                            type: string
+                          sourceAddress:
+                            description: SourceAddress is the source address of the
+                              GRE interface.
+                            type: string
+                          sourceInterface:
+                            description: |-
+                              SourceInterface is the name of the interface that owns the source address
+                              (used as the tunnel's link-interface). The kernel validates the tunnel
+                              source against this interface, so it must be the loopback carrying
+                              SourceAddress; otherwise an IPv6 GRE refuses to originate traffic
+                              ("Local address not yet configured").
+                            type: string
+                        required:
+                        - destinationAddress
+                        - layer
+                        - sourceAddress
+                        type: object
+                      description: GREs is a map of GRE tunnel interfaces
+                      type: object
                     loopbacks:
                       additionalProperties:
                         description: Loopback represents a loopback interface.
@@ -3345,28 +3424,15 @@ spec:
                       items:
                         description: MirrorACL represents a mirror ACL configuration.
                         properties:
-                          destinationAddress:
-                            description: DestinationAddress is the destination address
-                              for the mirrored traffic.
-                            type: string
-                          destinationVrf:
-                            description: DestinationVrf is the destination VRF for
-                              the mirrored traffic.
-                            type: string
                           direction:
-                            default: both
-                            description: 'Direction is the mirror direction: ingress,
-                              egress, or both.'
+                            description: Direction is the direction of mirrored traffic.
                             enum:
                             - ingress
                             - egress
-                            - both
                             type: string
-                          encapsulationType:
-                            description: EncapsulationType is the encapsulation type
-                              for the mirrored traffic.
-                            enum:
-                            - gre
+                          mirrorDestination:
+                            description: MirrorDestination is the name of the interface
+                              to mirror to (in most cases a GRE interface).
                             type: string
                           trafficMatch:
                             description: TrafficMatch is the traffic match for the
@@ -3390,9 +3456,8 @@ spec:
                                 type: string
                             type: object
                         required:
-                        - destinationAddress
-                        - destinationVrf
-                        - encapsulationType
+                        - direction
+                        - mirrorDestination
                         - trafficMatch
                         type: object
                       type: array
@@ -3903,7 +3968,13 @@ spec:
             properties:
               configStatus:
                 description: ConfigStatus describes provisioning state of the NodeConfig.
-                  Can be either 'provisioning', 'provisioned' or 'failed'.
+                  Can be either 'provisioning', 'provisioned' or 'invalid'.
+                type: string
+              errorMessage:
+                description: |-
+                  ErrorMessage contains the error message when ConfigStatus is 'invalid'.
+                  This field is cleared whenever ConfigStatus transitions to any non-'invalid' state
+                  (including 'provisioning' and 'provisioned'), so stale errors do not persist.
                 type: string
               lastAppliedRevision:
                 description: LastAppliedRevision stores hash of the NodeConfigRevision

@@ -73,6 +73,11 @@ spec:
               createMacVLANInterface:
                 description: Create MACVLAN attach interface
                 type: boolean
+              disableSegmentation:
+                description: |-
+                  Disable segmentation offload on the VLAN, limiting the Linux packet size to the MTU.
+                  This might be required when you use AF_PACKET on the VLAN.
+                type: boolean
               id:
                 description: VLAN Id of the layer 2 network
                 type: integer

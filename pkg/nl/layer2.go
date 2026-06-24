@@ -34,17 +34,24 @@ func sanitizeIntfName(name string) (string, error) {
 	return s, nil
 }
 
+var segmentationFeatureCandidates = [][]string{
+	{"generic-receive-offload", "gro"},
+	{"generic-segmentation-offload", "gso"},
+	{"tcp-segmentation-offload", "tx-tcp-segmentation", "tso"},
+}
+
 type Layer2Information struct {
-	VlanID           int      `json:"vlanID"`
-	MTU              int      `json:"mtu"`
-	VNI              int      `json:"vni"`
-	VRF              string   `json:"vrf"`
-	AnycastMAC       *string  `json:"anycastMAC"`
-	AnycastGateways  []string `json:"anycastGateways"`
-	NeighSuppression *bool    `json:"neighSuppression"`
-	bridge           *netlink.Bridge
-	vxlan            *netlink.Vxlan
-	vlanInterface    *netlink.Vlan
+	VlanID              int      `json:"vlanID"`
+	MTU                 int      `json:"mtu"`
+	VNI                 int      `json:"vni"`
+	VRF                 string   `json:"vrf"`
+	AnycastMAC          *string  `json:"anycastMAC"`
+	AnycastGateways     []string `json:"anycastGateways"`
+	NeighSuppression    *bool    `json:"neighSuppression"`
+	DisableSegmentation bool     `json:"disableSegmentation"`
+	bridge              *netlink.Bridge
+	vxlan               *netlink.Vxlan
+	vlanInterface       *netlink.Vlan
 }
 
 type NeighborInformation struct {
@@ -202,15 +209,23 @@ func (n *Manager) setupVXLAN(info *Layer2Information, bridge *netlink.Bridge) er
 	}
 	info.vxlan = vxlan
 
-	if _, err := n.createVLAN(
+	vlanIface, err := n.createVLAN(
 		info.VlanID,
 		bridge.Attrs().Index,
-		info.MTU); err != nil {
+		info.MTU)
+	if err != nil {
 		return err
 	}
+	info.vlanInterface = vlanIface
 
 	if err := n.setUp(fmt.Sprintf("%s%d", vlanPrefix, info.VlanID)); err != nil {
 		return err
+	}
+
+	if info.DisableSegmentation {
+		if err := setSegmentation(vlanIface, info.DisableSegmentation); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -333,6 +348,10 @@ func (n *Manager) ReconcileL2(current, desired *Layer2Information) error {
 	}
 	// Add/Remove anycast gateways
 	if err := n.reconcileIPAddresses(current.bridge, currentGateways, desiredGateways); err != nil {
+		return err
+	}
+
+	if err := reconcileSegmentationIfNeeded(current.vlanInterface, current.DisableSegmentation, desired.DisableSegmentation); err != nil {
 		return err
 	}
 
@@ -493,6 +512,80 @@ func (*Manager) configureBridge(intfName string) error {
 		return fmt.Errorf("error setting ipv6 base_reachable_time_ms = %s for interface: %w", baseTimer, err)
 	}
 	return nil
+}
+
+func reconcileSegmentationIfNeeded(vlanInterface *netlink.Vlan, currentDisabled, desiredDisabled bool) error {
+	if currentDisabled == desiredDisabled {
+		return nil
+	}
+	return setSegmentation(vlanInterface, desiredDisabled)
+}
+
+func setSegmentation(vlanInterface *netlink.Vlan, disableSegmentation bool) error {
+	intfName := vlanInterface.Attrs().Name
+	eth, err := newEthtoolFunc()
+	if err != nil {
+		return fmt.Errorf("error creating ethtool client for %s: %w", intfName, err)
+	}
+	defer eth.Close()
+
+	features, err := eth.Features(intfName)
+	if err != nil {
+		return fmt.Errorf("error reading ethtool settings for %s: %w", intfName, err)
+	}
+
+	settingsMap := segmentationSettings(features, !disableSegmentation)
+	if len(settingsMap) == 0 {
+		return fmt.Errorf("no supported segmentation offload features found for %s", intfName)
+	}
+
+	if err := eth.Change(intfName, settingsMap); err != nil {
+		return fmt.Errorf("error changing ethtool settings for %s: %w", intfName, err)
+	}
+	return nil
+}
+
+// ReconcileSegmentation applies the requested segmentation-offload state to a VLAN link.
+func ReconcileSegmentation(vlanInterface *netlink.Vlan, disableSegmentation bool) error {
+	return setSegmentation(vlanInterface, disableSegmentation)
+}
+
+func getSegmentationDisabled(vlanInterface *netlink.Vlan) (bool, error) {
+	intfName := vlanInterface.Attrs().Name
+	eth, err := newEthtoolFunc()
+	if err != nil {
+		return false, fmt.Errorf("error creating ethtool client for %s: %w", intfName, err)
+	}
+	defer eth.Close()
+
+	features, err := eth.Features(intfName)
+	if err != nil {
+		return false, fmt.Errorf("error reading ethtool settings for %s: %w", intfName, err)
+	}
+
+	selected := segmentationSettings(features, true)
+	if len(selected) == 0 {
+		return false, nil
+	}
+	for name := range selected {
+		if features[name] {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+func segmentationSettings(features map[string]bool, enabled bool) map[string]bool {
+	settings := map[string]bool{}
+	for _, candidates := range segmentationFeatureCandidates {
+		for _, name := range candidates {
+			if _, ok := features[name]; ok {
+				settings[name] = enabled
+				break
+			}
+		}
+	}
+	return settings
 }
 
 func (n *Manager) ListNeighborInformation() ([]NeighborInformation, error) {

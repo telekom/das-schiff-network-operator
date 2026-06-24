@@ -17,6 +17,8 @@ limitations under the License.
 package builder
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	gonet "net"
 	"strings"
@@ -29,6 +31,41 @@ import (
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/resolver"
 )
+
+const (
+	// mirrorProtocolL2GRE is the Collector GRE encapsulation type for Layer 2 (GRE TAP).
+	mirrorProtocolL2GRE = "l2gre"
+)
+
+// mirrorGREName returns a deterministic, Linux-safe (<=15 char) GRE interface name
+// for a Collector. The same name is referenced by the MirrorACL.MirrorDestination
+// emitted by the MirrorBuilder, so both builders must derive it identically.
+func mirrorGREName(col *nc.Collector) string {
+	sum := sha256.Sum256([]byte(col.Name))
+	h := hex.EncodeToString(sum[:])[:8]
+	if col.Spec.Protocol == mirrorProtocolL2GRE {
+		return "gtap-" + h
+	}
+	return "gre-" + h
+}
+
+// mirrorGRELayer maps a Collector GRE protocol to the NodeNetworkConfig GRE layer.
+func mirrorGRELayer(protocol string) networkv1alpha1.GRELayer {
+	if protocol == mirrorProtocolL2GRE {
+		return networkv1alpha1.GRELayer2
+	}
+	return networkv1alpha1.GRELayer3
+}
+
+// mirrorGREKey converts an optional Collector GRE key (int64, full uint32 range)
+// to the NodeNetworkConfig GRE encapsulation key (*uint32).
+func mirrorGREKey(key *int64) *uint32 {
+	if key == nil {
+		return nil
+	}
+	v := uint32(*key) //nolint:gosec // validated to 0..4294967295 by the Collector CRD schema
+	return &v
+}
 
 const (
 	ipv4MaxPrefixLen = 32

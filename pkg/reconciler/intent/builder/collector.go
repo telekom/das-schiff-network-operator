@@ -95,6 +95,20 @@ func (*CollectorBuilder) Build(ctx context.Context, data *resolver.ResolvedData)
 				IPAddresses: []string{addr},
 			}
 
+			// Create the explicit GRE tunnel for this collector in the mirror VRF.
+			// The MirrorBuilder references it by name (MirrorACL.MirrorDestination);
+			// both derive the name via mirrorGREName so they stay in sync.
+			if fvrf.GREs == nil {
+				fvrf.GREs = make(map[string]networkv1alpha1.GRE)
+			}
+			fvrf.GREs[mirrorGREName(col)] = networkv1alpha1.GRE{
+				SourceAddress:      addr,
+				SourceInterface:    loopbackName,
+				DestinationAddress: col.Spec.Address,
+				Layer:              mirrorGRELayer(col.Spec.Protocol),
+				EncapsulationKey:   mirrorGREKey(col.Spec.Key),
+			}
+
 			contrib.FabricVRFs[backboneVRF] = fvrf
 		}
 	}

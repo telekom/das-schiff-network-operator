@@ -40,11 +40,27 @@ type BGPRevision struct {
 	BGPPeeringSpec `json:",inline"`
 }
 
+type MirrorTargetRevision struct {
+	Name             string `json:"name,omitempty"`
+	MirrorTargetSpec `json:",inline"`
+}
+
+type MirrorSelectorRevision struct {
+	Name               string `json:"name,omitempty"`
+	MirrorSelectorSpec `json:",inline"`
+}
+
 // NetworkConfigSpec defines the desired state of NetworkConfig.
 type NetworkConfigRevisionSpec struct {
 	Layer2 []Layer2Revision `json:"layer2,omitempty"`
 	Vrf    []VRFRevision    `json:"vrf,omitempty"`
 	BGP    []BGPRevision    `json:"bgp,omitempty"`
+	// MirrorTargets snapshots the cluster's MirrorTarget objects so that mirror
+	// changes are reflected in the revision hash and rolled out like any other
+	// config change.
+	MirrorTargets []MirrorTargetRevision `json:"mirrorTargets,omitempty"`
+	// MirrorSelectors snapshots the cluster's MirrorSelector objects.
+	MirrorSelectors []MirrorSelectorRevision `json:"mirrorSelectors,omitempty"`
 	// Revision is a hash of the NetworkConfigRevision object that is used to identify the particular revision.
 	Revision string `json:"revision"`
 }
@@ -56,10 +72,16 @@ type NetworkConfigRevisionStatus struct {
 	Ready int `json:"ready"`
 	// Ongoing informs about how many nodes are currently provisioned with a config derived from the revision.
 	Ongoing int `json:"ongoing"`
-	// Queued informs about how many nodes are currently waiting to be provisiined with a config derived from the revision.
+	// Queued informs about how many nodes are currently waiting to be provisioned with a config derived from the revision.
 	Queued int `json:"queued"`
-	// Total informs about how many nodes in total can be provisiined with a config derived from the revision.
+	// Total informs about how many nodes in total can be provisioned with a config derived from the revision.
 	Total int `json:"total"`
+	// FailedNode is the name of the node where provisioning failed, causing this revision to be invalidated.
+	FailedNode string `json:"failedNode,omitempty"`
+	// FailedMessage contains the error message from the failed provisioning attempt.
+	FailedMessage string `json:"failedMessage,omitempty"`
+	// FailedAt is when the failure occurred.
+	FailedAt *metav1.Time `json:"failedAt,omitempty"`
 }
 
 //+kubebuilder:object:root=true
@@ -70,6 +92,7 @@ type NetworkConfigRevisionStatus struct {
 //+kubebuilder:printcolumn:name="Ongoing",type="integer",JSONPath=".status.ongoing"
 //+kubebuilder:printcolumn:name="Ready",type="integer",JSONPath=".status.ready"
 //+kubebuilder:printcolumn:name="Total",type="integer",JSONPath=".status.total"
+//+kubebuilder:printcolumn:name="FailedNode",type=string,JSONPath=`.status.failedNode`,priority=1
 //+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
 // NetworkConfigRevision is the Schema for the node configuration.
@@ -90,12 +113,14 @@ type NetworkConfigRevisionList struct {
 	Items           []NetworkConfigRevision `json:"items"`
 }
 
-func NewRevision(layer2 []Layer2Revision, vrfs []VRFRevision, bgps []BGPRevision) (*NetworkConfigRevision, error) {
+func NewRevision(layer2 []Layer2Revision, vrfs []VRFRevision, bgps []BGPRevision, mirrorTargets []MirrorTargetRevision, mirrorSelectors []MirrorSelectorRevision) (*NetworkConfigRevision, error) {
 	spec := NetworkConfigRevisionSpec{
-		Layer2:   layer2,
-		Vrf:      vrfs,
-		BGP:      bgps,
-		Revision: "",
+		Layer2:          layer2,
+		Vrf:             vrfs,
+		BGP:             bgps,
+		MirrorTargets:   mirrorTargets,
+		MirrorSelectors: mirrorSelectors,
+		Revision:        "",
 	}
 	data, err := json.Marshal(spec)
 	if err != nil {

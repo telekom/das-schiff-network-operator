@@ -42,6 +42,12 @@ func (*MirrorBuilder) Name() string {
 }
 
 // Build produces per-node MirrorACL contributions from TrafficMirror resources.
+//
+// The MirrorACL references the GRE tunnel created by the CollectorBuilder
+// (by interface name via MirrorDestination), matching the NodeNetworkConfig
+// southbound shape used by the legacy (MirrorSelector/MirrorTarget) pipeline.
+// A "both"-direction TrafficMirror is expanded into one ingress and one egress
+// MirrorACL, because the southbound MirrorACL only models a single direction.
 func (b *MirrorBuilder) Build(ctx context.Context, data *resolver.ResolvedData) (map[string]*NodeContribution, error) {
 	logger := log.FromContext(ctx).WithName("mirror-builder")
 	result := make(map[string]*NodeContribution)
@@ -58,24 +64,31 @@ func (b *MirrorBuilder) Build(ctx context.Context, data *resolver.ResolvedData) 
 			continue
 		}
 
-		// Build MirrorACL.
-		mirrorACL := b.buildMirrorACL(tm, col)
-
-		// Resolve the source attachment and determine where to place the ACL.
-		var srcErr error
-		switch tm.Spec.Source.Kind {
-		case "Layer2Attachment":
-			srcErr = b.addToLayer2(tm.Spec.Source.Name, &mirrorACL, data, result)
-		case "Inbound":
-			srcErr = b.addToInboundVRF(tm.Spec.Source.Name, &mirrorACL, data, result)
-		case "Outbound":
-			srcErr = b.addToOutboundVRF(tm.Spec.Source.Name, &mirrorACL, data, result)
-		default:
+		if !validMirrorSourceKind(tm.Spec.Source.Kind) {
 			logger.Info("skipping TrafficMirror with unknown source kind",
 				"trafficmirror", tm.Name, "kind", tm.Spec.Source.Kind)
 			reportSkip(ctx, "TrafficMirror", tm.Name, "UnknownSourceKind",
 				fmt.Sprintf("unknown source kind %q", tm.Spec.Source.Kind))
 			continue
+		}
+
+		// The GRE tunnel is created by the CollectorBuilder; reference it by name.
+		greName := mirrorGREName(col)
+		var match networkv1alpha1.TrafficMatch
+		if tm.Spec.TrafficMatch != nil {
+			match = b.convertTrafficMatch(tm.Spec.TrafficMatch)
+		}
+
+		var srcErr error
+		for _, direction := range mirrorDirections(tm.Spec.Direction) {
+			acl := networkv1alpha1.MirrorACL{
+				TrafficMatch:      match,
+				MirrorDestination: greName,
+				Direction:         direction,
+			}
+			if srcErr = b.attachToSource(tm, &acl, data, result); srcErr != nil {
+				break
+			}
 		}
 		if srcErr != nil {
 			logger.Info("skipping TrafficMirror with unresolvable source",
@@ -88,6 +101,48 @@ func (b *MirrorBuilder) Build(ctx context.Context, data *resolver.ResolvedData) 
 	return result, nil
 }
 
+// validMirrorSourceKind reports whether the TrafficMirror source kind is supported.
+func validMirrorSourceKind(kind string) bool {
+	switch kind {
+	case "Layer2Attachment", "Inbound", "Outbound":
+		return true
+	default:
+		return false
+	}
+}
+
+// mirrorDirections expands a TrafficMirror direction ("ingress", "egress", "both"
+// or empty) into the concrete per-ACL directions. The southbound MirrorACL models
+// a single direction only, so "both" (the default) yields ingress and egress.
+func mirrorDirections(direction string) []networkv1alpha1.MirrorDirection {
+	switch direction {
+	case string(networkv1alpha1.MirrorDirectionIngress):
+		return []networkv1alpha1.MirrorDirection{networkv1alpha1.MirrorDirectionIngress}
+	case string(networkv1alpha1.MirrorDirectionEgress):
+		return []networkv1alpha1.MirrorDirection{networkv1alpha1.MirrorDirectionEgress}
+	default:
+		return []networkv1alpha1.MirrorDirection{
+			networkv1alpha1.MirrorDirectionIngress,
+			networkv1alpha1.MirrorDirectionEgress,
+		}
+	}
+}
+
+// attachToSource places the MirrorACL on the TrafficMirror's source (a Layer2
+// attachment, an Inbound's VRFs or an Outbound's VRFs) across all nodes.
+func (b *MirrorBuilder) attachToSource(tm *nc.TrafficMirror, acl *networkv1alpha1.MirrorACL, data *resolver.ResolvedData, result map[string]*NodeContribution) error {
+	switch tm.Spec.Source.Kind {
+	case "Layer2Attachment":
+		return b.addToLayer2(tm.Spec.Source.Name, acl, data, result)
+	case "Inbound":
+		return b.addToInboundVRF(tm.Spec.Source.Name, acl, data, result)
+	case "Outbound":
+		return b.addToOutboundVRF(tm.Spec.Source.Name, acl, data, result)
+	default:
+		return fmt.Errorf("unknown source kind %q", tm.Spec.Source.Kind)
+	}
+}
+
 // resolveCollector finds a Collector by name.
 func (*MirrorBuilder) resolveCollector(name string, data *resolver.ResolvedData) (*nc.Collector, error) {
 	for i := range data.Collectors {
@@ -96,22 +151,6 @@ func (*MirrorBuilder) resolveCollector(name string, data *resolver.ResolvedData)
 		}
 	}
 	return nil, fmt.Errorf("collector %q not found", name)
-}
-
-// buildMirrorACL creates a MirrorACL from a TrafficMirror and its resolved Collector.
-func (b *MirrorBuilder) buildMirrorACL(tm *nc.TrafficMirror, col *nc.Collector) networkv1alpha1.MirrorACL {
-	acl := networkv1alpha1.MirrorACL{
-		DestinationAddress: col.Spec.Address,
-		DestinationVrf:     col.Spec.MirrorVRF.Name,
-		EncapsulationType:  networkv1alpha1.EncapsulationTypeGRE,
-		Direction:          tm.Spec.Direction,
-	}
-
-	if tm.Spec.TrafficMatch != nil {
-		acl.TrafficMatch = b.convertTrafficMatch(tm.Spec.TrafficMatch)
-	}
-
-	return acl
 }
 
 // convertTrafficMatch converts a nc.TrafficMatch to a networkv1alpha1.TrafficMatch.

@@ -69,6 +69,22 @@ type ConfigRevisionReconciler struct {
 	maxUpdating      int
 
 	importMode ImportMode
+
+	// mirrorAllocCache memoises the per-node loopback allocation so that building
+	// NodeNetworkConfigs node-by-node during a rollout does not recompute it (and
+	// re-list all configs) for every single node.
+	mirrorAllocCache mirrorAllocCache
+}
+
+// mirrorAllocCache caches a loopbackAllocator for a given (revision, ready-node
+// set). The allocation is deterministic for those inputs, so it is safe to reuse
+// across the per-node builds of a rollout. The ready-node set is part of the key
+// because node membership does not change the revision hash, yet a newly-joined
+// node must be picked up immediately (otherwise it would silently run without its
+// mirror loopback/tunnel until an unrelated change bumped the revision).
+type mirrorAllocCache struct {
+	key   string
+	alloc *loopbackAllocator
 }
 
 // Reconcile starts reconciliation.
@@ -137,7 +153,7 @@ func (crr *ConfigRevisionReconciler) reconcileDebounced(ctx context.Context) err
 
 	// there is nothing to deploy - skip
 	if revisionToDeploy == nil {
-		crr.logger.Error(fmt.Errorf("there is no revision to deploy"), "revision deployment aboorted")
+		crr.logger.Error(fmt.Errorf("there is no revision to deploy"), "revision deployment aborted")
 		return nil
 	}
 
@@ -145,6 +161,11 @@ func (crr *ConfigRevisionReconciler) reconcileDebounced(ctx context.Context) err
 		if err := crr.deployNodeConfig(ctx, nodesToDeploy[0], revisionToDeploy); err != nil {
 			return fmt.Errorf("error deploying node configurations: %w", err)
 		}
+	}
+
+	// Update MirrorTarget/MirrorSelector status from the deployed configs.
+	if err := crr.reconcileMirrorStatus(ctx); err != nil {
+		return fmt.Errorf("error reconciling mirror status: %w", err)
 	}
 
 	// remove all but last known valid revision
@@ -167,6 +188,9 @@ func getFirstValidRevision(revisions []v1alpha1.NetworkConfigRevision) *v1alpha1
 
 type counters struct {
 	ready, ongoing, invalid int
+	failedNode              string
+	failedMessage           string
+	failedAt                metav1.Time
 }
 
 func (crr *ConfigRevisionReconciler) processConfigsForRevision(ctx context.Context, configs []v1alpha1.NodeNetworkConfig, revision *v1alpha1.NetworkConfigRevision) (*counters, error) {
@@ -174,53 +198,72 @@ func (crr *ConfigRevisionReconciler) processConfigsForRevision(ctx context.Conte
 	if err != nil {
 		return nil, fmt.Errorf("failed to remove redundant configs: %w", err)
 	}
-	ready, ongoing, invalid := crr.getRevisionCounters(configs, revision)
-	cnt := &counters{ready: ready, ongoing: ongoing, invalid: invalid}
+	cnt := crr.getRevisionCounters(configs, revision)
 
-	if invalid > 0 {
-		if err := crr.invalidateRevision(ctx, revision, "NetworkConfigRevision results in invalid config"); err != nil {
-			return cnt, fmt.Errorf("faild to invalidate revision %s: %w", revision.Name, err)
+	if cnt.invalid > 0 {
+		// Invalidate when transitioning to invalid state, or when the failed node
+		// has changed (a different node may fail on an already-invalid revision).
+		if !revision.Status.IsInvalid || revision.Status.FailedNode != cnt.failedNode {
+			if err := crr.invalidateRevision(ctx, revision, cnt.failedNode, cnt.failedMessage, cnt.failedAt); err != nil {
+				return cnt, fmt.Errorf("failed to invalidate revision %s: %w", revision.Name, err)
+			}
 		}
 	}
 
 	return cnt, nil
 }
 
-func (crr *ConfigRevisionReconciler) getRevisionCounters(configs []v1alpha1.NodeNetworkConfig, revision *v1alpha1.NetworkConfigRevision) (ready, ongoing, invalid int) {
-	ready = 0
-	ongoing = 0
-	invalid = 0
+func (crr *ConfigRevisionReconciler) getRevisionCounters(configs []v1alpha1.NodeNetworkConfig, revision *v1alpha1.NetworkConfigRevision) *counters {
+	cnt := &counters{
+		ready:   0,
+		ongoing: 0,
+		invalid: 0,
+	}
 	for i := range configs {
-		if configs[i].Spec.Revision == revision.Spec.Revision {
-			timeout := crr.configTimeout
-			switch configs[i].Status.ConfigStatus {
-			case StatusProvisioned:
-				// Update ready counter
-				ready++
-			case StatusInvalid:
-				// Increase 'invalid' counter so we know that the revision results in invalid configs
-				invalid++
-			case "":
-				// Set longer timeout if status was not yet updated
-				timeout = crr.preconfigTimeout
-				fallthrough
-			case StatusProvisioning:
-				// Update ongoing counter
-				ongoing++
-				if wasConfigTimeoutReached(&configs[i], timeout) {
-					// If timout was reached revision is invalid (but still counts as ongoing).
-					invalid++
+		cfg := &configs[i]
+		if cfg.Spec.Revision != revision.Spec.Revision {
+			continue
+		}
+
+		timeout := crr.configTimeout
+		switch cfg.Status.ConfigStatus {
+		case StatusProvisioned:
+			// Update ready counter
+			cnt.ready++
+		case StatusInvalid:
+			// Increase 'invalid' counter so we know that the revision results in invalid configs
+			cnt.invalid++
+			// Capture the failure info; choose lexicographically smallest node name for determinism.
+			if cnt.failedNode == "" || cfg.Name < cnt.failedNode {
+				cnt.failedNode = cfg.Name
+				cnt.failedMessage = cfg.Status.ErrorMessage
+				cnt.failedAt = cfg.Status.LastUpdate
+			}
+		case "":
+			// Set longer timeout if status was not yet updated
+			timeout = crr.preconfigTimeout
+			fallthrough
+		case StatusProvisioning:
+			// Update ongoing counter
+			cnt.ongoing++
+			if wasConfigTimeoutReached(cfg, timeout) {
+				// If timeout was reached revision is invalid (but still counts as ongoing).
+				cnt.invalid++
+				if cnt.failedNode == "" || cfg.Name < cnt.failedNode {
+					cnt.failedNode = cfg.Name
+					cnt.failedMessage = "provisioning timeout reached"
+					cnt.failedAt = metav1.NewTime(cfg.Status.LastUpdate.Add(timeout))
 				}
 			}
 		}
 	}
-	return ready, ongoing, invalid
+	return cnt
 }
 
 func (crr *ConfigRevisionReconciler) removeRedundantConfigs(ctx context.Context, configs []v1alpha1.NodeNetworkConfig) ([]v1alpha1.NodeNetworkConfig, error) {
 	cfg := []v1alpha1.NodeNetworkConfig{}
 	for i := range configs {
-		// Every NodeNetworkConfig obejct should have 2 owner references - for NodeConfigRevision and for the Node. If there is only one owner reference,
+		// Every NodeNetworkConfig object should have 2 owner references - for NodeConfigRevision and for the Node. If there is only one owner reference,
 		// it means that either node or revision were deleted, so the config itself can be deleted as well.
 		if len(configs[i].ObjectMeta.OwnerReferences) < numOfRefs {
 			crr.logger.Info("deleting redundant NodeNetworkConfig", "name", configs[i].Name)
@@ -234,9 +277,15 @@ func (crr *ConfigRevisionReconciler) removeRedundantConfigs(ctx context.Context,
 	return cfg, nil
 }
 
-func (crr *ConfigRevisionReconciler) invalidateRevision(ctx context.Context, revision *v1alpha1.NetworkConfigRevision, reason string) error {
-	crr.logger.Info("invalidating revision", "name", revision.Name, "reason", reason)
+func (crr *ConfigRevisionReconciler) invalidateRevision(ctx context.Context, revision *v1alpha1.NetworkConfigRevision, failedNode, failedMessage string, failedAt metav1.Time) error {
+	crr.logger.Info("invalidating revision", "name", revision.Name, "failedNode", failedNode, "failedMessage", failedMessage)
 	revision.Status.IsInvalid = true
+	revision.Status.FailedNode = failedNode
+	revision.Status.FailedMessage = failedMessage
+	if !failedAt.IsZero() {
+		revision.Status.FailedAt = &failedAt
+	}
+
 	if err := crr.client.Status().Update(ctx, revision); err != nil {
 		return fmt.Errorf("failed to update revision status %s: %w", revision.Name, err)
 	}
@@ -346,7 +395,7 @@ func (crr *ConfigRevisionReconciler) deployNodeConfig(ctx context.Context, node 
 		return nil
 	}
 
-	newConfig, err := crr.CreateNodeNetworkConfig(node, revision)
+	newConfig, err := crr.CreateNodeNetworkConfig(ctx, node, revision)
 	if err != nil {
 		return fmt.Errorf("error preparing NodeNetworkConfig for node %s: %w", node.Name, err)
 	}
@@ -384,7 +433,7 @@ func matchSelector(node *corev1.Node, selector *metav1.LabelSelector) bool {
 	return labelSelector.Matches(labels.Set(node.ObjectMeta.Labels))
 }
 
-func (crr *ConfigRevisionReconciler) CreateNodeNetworkConfig(node *corev1.Node, revision *v1alpha1.NetworkConfigRevision) (*v1alpha1.NodeNetworkConfig, error) {
+func (crr *ConfigRevisionReconciler) CreateNodeNetworkConfig(ctx context.Context, node *corev1.Node, revision *v1alpha1.NetworkConfigRevision) (*v1alpha1.NodeNetworkConfig, error) {
 	// create new config
 	c := &v1alpha1.NodeNetworkConfig{
 		ObjectMeta: metav1.ObjectMeta{
@@ -404,6 +453,9 @@ func (crr *ConfigRevisionReconciler) CreateNodeNetworkConfig(node *corev1.Node, 
 	}
 	if err := buildNodeBgpPeers(node, revision, c); err != nil {
 		return nil, fmt.Errorf("error building node Layer2: %w", err)
+	}
+	if err := crr.buildNodeMirror(ctx, node, revision, c); err != nil {
+		return nil, fmt.Errorf("error building node mirror config: %w", err)
 	}
 
 	c.Spec.Revision = revision.Spec.Revision

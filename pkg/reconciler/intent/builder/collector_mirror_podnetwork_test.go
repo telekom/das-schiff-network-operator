@@ -256,14 +256,15 @@ func TestMirrorBuilder_Layer2Source(t *testing.T) {
 	}
 
 	acl := l2.MirrorACLs[0]
-	if acl.DestinationAddress != "10.0.0.99" {
-		t.Errorf("expected destination address '10.0.0.99', got %q", acl.DestinationAddress)
+	wantGRE := mirrorGREName(&nc.Collector{
+		ObjectMeta: metav1.ObjectMeta{Name: "col-1"},
+		Spec:       nc.CollectorSpec{Protocol: "l3gre"},
+	})
+	if acl.MirrorDestination != wantGRE {
+		t.Errorf("expected mirror destination %q, got %q", wantGRE, acl.MirrorDestination)
 	}
-	if acl.DestinationVrf != "mirror-vrf" {
-		t.Errorf("expected destination VRF 'mirror-vrf', got %q", acl.DestinationVrf)
-	}
-	if acl.EncapsulationType != networkv1alpha1.EncapsulationTypeGRE {
-		t.Errorf("expected encapsulation type GRE, got %q", acl.EncapsulationType)
+	if acl.Direction != networkv1alpha1.MirrorDirectionIngress {
+		t.Errorf("expected direction ingress, got %q", acl.Direction)
 	}
 }
 
@@ -350,24 +351,32 @@ func TestMirrorBuilder_InboundSource(t *testing.T) {
 		t.Fatalf("expected FabricVRF 'prod', got keys %v", keys(contrib.FabricVRFs))
 	}
 
-	if len(fvrf.MirrorACLs) != 1 {
-		t.Fatalf("expected 1 MirrorACL on FabricVRF, got %d", len(fvrf.MirrorACLs))
+	if len(fvrf.MirrorACLs) != 2 {
+		t.Fatalf("expected 2 MirrorACLs on FabricVRF (both directions), got %d", len(fvrf.MirrorACLs))
 	}
 
-	acl := fvrf.MirrorACLs[0]
-	if acl.DestinationAddress != "10.0.0.50" {
-		t.Errorf("expected destination address '10.0.0.50', got %q", acl.DestinationAddress)
-	}
-	if acl.DestinationVrf != "mirror-vrf" {
-		t.Errorf("expected destination VRF 'mirror-vrf', got %q", acl.DestinationVrf)
-	}
+	wantGRE := mirrorGREName(&nc.Collector{
+		ObjectMeta: metav1.ObjectMeta{Name: "col-1"},
+		Spec:       nc.CollectorSpec{Protocol: "l3gre"},
+	})
+	dirs := map[networkv1alpha1.MirrorDirection]bool{}
+	for i := range fvrf.MirrorACLs {
+		acl := fvrf.MirrorACLs[i]
+		if acl.MirrorDestination != wantGRE {
+			t.Errorf("expected mirror destination %q, got %q", wantGRE, acl.MirrorDestination)
+		}
+		dirs[acl.Direction] = true
 
-	// Verify traffic match was converted.
-	if acl.TrafficMatch.Protocol == nil || *acl.TrafficMatch.Protocol != "TCP" {
-		t.Errorf("expected protocol TCP, got %v", acl.TrafficMatch.Protocol)
+		// Verify traffic match was converted.
+		if acl.TrafficMatch.Protocol == nil || *acl.TrafficMatch.Protocol != "TCP" {
+			t.Errorf("expected protocol TCP, got %v", acl.TrafficMatch.Protocol)
+		}
+		if acl.TrafficMatch.SrcPrefix == nil || *acl.TrafficMatch.SrcPrefix != "10.0.0.0/8" {
+			t.Errorf("expected src prefix '10.0.0.0/8', got %v", acl.TrafficMatch.SrcPrefix)
+		}
 	}
-	if acl.TrafficMatch.SrcPrefix == nil || *acl.TrafficMatch.SrcPrefix != "10.0.0.0/8" {
-		t.Errorf("expected src prefix '10.0.0.0/8', got %v", acl.TrafficMatch.SrcPrefix)
+	if !dirs[networkv1alpha1.MirrorDirectionIngress] || !dirs[networkv1alpha1.MirrorDirectionEgress] {
+		t.Errorf("expected both ingress and egress ACLs, got directions %v", dirs)
 	}
 }
 
@@ -439,8 +448,8 @@ func TestMirrorBuilder_InboundSourceFanOut(t *testing.T) {
 		if !ok {
 			t.Fatalf("expected MirrorACL on FabricVRF %q, keys=%v", vrf, keys(contrib.FabricVRFs))
 		}
-		if len(fvrf.MirrorACLs) != 1 {
-			t.Errorf("VRF %q: expected 1 MirrorACL, got %d", vrf, len(fvrf.MirrorACLs))
+		if len(fvrf.MirrorACLs) != 2 {
+			t.Errorf("VRF %q: expected 2 MirrorACLs (both directions), got %d", vrf, len(fvrf.MirrorACLs))
 		}
 	}
 }

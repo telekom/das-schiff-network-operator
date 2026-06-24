@@ -734,9 +734,8 @@ func TestTrafficMirrorL2ASource(t *testing.T) {
 	require.NotEmpty(t, l2.MirrorACLs, "expected MirrorACLs on Layer2")
 
 	acl := l2.MirrorACLs[0]
-	assert.Equal(t, "192.168.100.1", acl.DestinationAddress)
-	assert.Equal(t, "vrf-mir-col", acl.DestinationVrf)
-	assert.Equal(t, networkv1alpha1.EncapsulationTypeGRE, acl.EncapsulationType)
+	assert.Equal(t, networkv1alpha1.MirrorDirectionIngress, acl.Direction)
+	require.NotEmpty(t, acl.MirrorDestination, "expected MirrorDestination (GRE interface name)")
 
 	// TrafficMatch should be converted
 	require.NotNil(t, acl.TrafficMatch.Protocol)
@@ -751,6 +750,15 @@ func TestTrafficMirrorL2ASource(t *testing.T) {
 	lo, ok := mirVRF.Loopbacks["lo.mir"]
 	require.True(t, ok, "expected Loopback 'lo.mir'")
 	assert.Contains(t, lo.IPAddresses, "10.250.0.1")
+
+	// The Collector builder must also create the GRE tunnel referenced by the
+	// MirrorACL, in the mirror VRF (main's NodeNetworkConfig southbound shape).
+	gre, ok := mirVRF.GREs[acl.MirrorDestination]
+	require.True(t, ok, "expected GRE %q in mirror VRF, got keys: %v", acl.MirrorDestination, mapKeys(mirVRF.GREs))
+	assert.Equal(t, "192.168.100.1", gre.DestinationAddress)
+	assert.Equal(t, "lo.mir", gre.SourceInterface)
+	assert.Equal(t, "10.250.0.1", gre.SourceAddress)
+	assert.Equal(t, networkv1alpha1.GRELayer3, gre.Layer)
 }
 
 // --- AnnouncementPolicy Tests ---

@@ -39,6 +39,7 @@ type InfoL2 struct {
 	vrf    string
 	mac    string
 	ips    []string
+	acls   []v1alpha1.MirrorACL
 }
 
 func NewLayer2(
@@ -60,6 +61,7 @@ func (l *Layer2) setupInformations() {
 			vlanID: int(l2.VLAN),
 			mtu:    int(l2.MTU),
 			vni:    int(l2.VNI),
+			acls:   l2.MirrorACLs,
 		}
 
 		if l2.IRB != nil {
@@ -150,7 +152,17 @@ func (l *Layer2) setup() error {
 
 		br := l.setupBridge(&info, intfs)
 		l.setupVXLAN(&info, br, l.ns.Interfaces)
-		l.mgr.createVLAN(info.vlanID, info.mtu, br, l.ns.Interfaces)
+		vlan := l.mgr.createVLAN(info.vlanID, info.mtu, br, l.ns.Interfaces)
+
+		// Mirror the Layer2 access port (vlan.<id>), not the bridge master, so
+		// port-to-port (east-west) traffic between the workload side and the L2VNI
+		// overlay is captured. The port faces the workload, so the workload-
+		// perspective direction (ingress = to-workload) is inverted to the port's
+		// interface-relative direction.
+		for i := range info.acls {
+			direction := flipMirrorDirection(string(info.acls[i].Direction))
+			l.mgr.createMirrorTraffic(l.ns, vlan.Name, direction, &info.acls[i])
+		}
 	}
 
 	return nil

@@ -54,6 +54,14 @@ type ConfigReconciler struct {
 //+kubebuilder:rbac:groups=network.t-caas.telekom.com,resources=bgppeerings/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=network.t-caas.telekom.com,resources=bgppeerings/finalizers,verbs=update
 
+//+kubebuilder:rbac:groups=network.t-caas.telekom.com,resources=mirrortargets,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=network.t-caas.telekom.com,resources=mirrortargets/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=network.t-caas.telekom.com,resources=mirrortargets/finalizers,verbs=update
+
+//+kubebuilder:rbac:groups=network.t-caas.telekom.com,resources=mirrorselectors,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=network.t-caas.telekom.com,resources=mirrorselectors/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=network.t-caas.telekom.com,resources=mirrorselectors/finalizers,verbs=update
+
 //+kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch;update
 //+kubebuilder:rbac:groups=admissionregistration.k8s.io,resources=mutatingwebhookconfigurations;validatingwebhookconfigurations,verbs=get;list;watch;update
 
@@ -78,6 +86,8 @@ func (r *ConfigReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(&networkv1alpha1.Layer2NetworkConfiguration{}, h).
 		Watches(&networkv1alpha1.VRFRouteConfiguration{}, h).
 		Watches(&networkv1alpha1.BGPPeering{}, h).
+		Watches(&networkv1alpha1.MirrorTarget{}, h).
+		Watches(&networkv1alpha1.MirrorSelector{}, h).
 		Complete(r)
 	if err != nil {
 		return fmt.Errorf("error creating controller: %w", err)

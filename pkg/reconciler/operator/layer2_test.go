@@ -1,6 +1,8 @@
 package operator
 
 import (
+	"encoding/json"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -233,6 +235,44 @@ var _ = Describe("Layer2 building", func() {
 			vlans, err := buildNetplanVLANs(node, revision)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(vlans).To(HaveKey("vlan.100"))
+
+			rawVLAN := map[string]interface{}{}
+			Expect(json.Unmarshal(vlans["vlan.100"].Raw, &rawVLAN)).To(Succeed())
+			Expect(rawVLAN).To(HaveKeyWithValue("id", float64(100)))
+			Expect(rawVLAN).To(HaveKeyWithValue("link", "hbn"))
+			Expect(rawVLAN).To(HaveKeyWithValue("mtu", float64(1500)))
+			Expect(rawVLAN).NotTo(HaveKey("generic-receive-offload"))
+			Expect(rawVLAN).NotTo(HaveKey("generic-segmentation-offload"))
+			Expect(rawVLAN).NotTo(HaveKey("tcp-segmentation-offload"))
+		})
+
+		It("should disable VLAN segmentation offloads in netplan payload when requested", func() {
+			node := makeNode("node1", true)
+
+			revision := &v1alpha1.NetworkConfigRevision{
+				Spec: v1alpha1.NetworkConfigRevisionSpec{
+					Layer2: []v1alpha1.Layer2Revision{
+						{
+							Name: "l2-100",
+							Layer2NetworkConfigurationSpec: v1alpha1.Layer2NetworkConfigurationSpec{
+								ID:                  100,
+								VNI:                 1000,
+								MTU:                 1500,
+								DisableSegmentation: true,
+							},
+						},
+					},
+				},
+			}
+
+			vlans, err := buildNetplanVLANs(node, revision)
+			Expect(err).ToNot(HaveOccurred())
+
+			rawVLAN := map[string]interface{}{}
+			Expect(json.Unmarshal(vlans["vlan.100"].Raw, &rawVLAN)).To(Succeed())
+			Expect(rawVLAN).To(HaveKeyWithValue("generic-receive-offload", false))
+			Expect(rawVLAN).To(HaveKeyWithValue("generic-segmentation-offload", false))
+			Expect(rawVLAN).To(HaveKeyWithValue("tcp-segmentation-offload", false))
 		})
 
 		It("should skip layer2 entries that don't match node selector", func() {

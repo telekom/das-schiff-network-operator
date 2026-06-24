@@ -1,4 +1,4 @@
-name: Stale Issues and PRs
+name: Stale Issues
 
 on:
   schedule:
@@ -7,11 +7,11 @@ on:
 
 permissions:
   issues: write
-  pull-requests: write
+  pull-requests: read
 
 jobs:
   stale:
-    name: Mark stale issues and PRs
+    name: Mark stale issues
     runs-on: ubuntu-latest
     steps:
       - uses: actions/stale@eb5cf3af3ac0a1aa4c9c45633dd1ae542a27a899 # v10.3.0
@@ -20,20 +20,14 @@ jobs:
             This issue has been automatically marked as stale because it has not had
             recent activity. It will be closed in 14 days if no further activity occurs.
             Thank you for your contributions.
-          stale-pr-message: >
-            This pull request has been automatically marked as stale because it has not had
-            recent activity. It will be closed in 14 days if no further activity occurs.
-            Thank you for your contributions.
           close-issue-message: >
             This issue was closed because it has been stale for 14 days with no activity.
             Feel free to reopen if this is still relevant.
-          close-pr-message: >
-            This pull request was closed because it has been stale for 14 days with no activity.
-            Feel free to reopen if you'd like to continue working on this.
           days-before-stale: 60
           days-before-close: 14
+          # PR stale processing is disabled; pull requests must not be stale-closed.
+          days-before-pr-stale: -1
+          days-before-pr-close: -1
           stale-issue-label: stale
-          stale-pr-label: stale
           exempt-issue-labels: pinned,security,bug,enhancement
-          exempt-pr-labels: pinned,security
           remove-stale-when-updated: true

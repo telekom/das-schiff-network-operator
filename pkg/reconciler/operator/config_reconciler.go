@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -62,13 +63,13 @@ func (cr *ConfigReconciler) ReconcileDebounced(ctx context.Context) error {
 	defer cancel()
 
 	// Get HBRConfigs
-	l2vnis, l3vnis, bgps, err := r.fetchConfigData(timeoutCtx)
+	data, err := r.fetchConfigData(timeoutCtx)
 	if err != nil {
 		return fmt.Errorf("failed to fetch configuration details: %w", err)
 	}
 
 	// prepare new revision
-	revision, err := v1alpha1.NewRevision(l2vnis, l3vnis, bgps)
+	revision, err := v1alpha1.NewRevision(data.layer2, data.vrfs, data.bgps, data.mirrorTargets, data.mirrorSelectors)
 	if err != nil {
 		return fmt.Errorf("failed to prepare new NetworkConfigRevision: %w", err)
 	}
@@ -180,6 +181,16 @@ func lessBgp(a, b v1alpha1.BGPRevision) int {
 }
 
 //nolint:gocritic // slices.SortFunc comparator requires value params
+func lessMirrorTarget(a, b v1alpha1.MirrorTargetRevision) int {
+	return strings.Compare(a.Name, b.Name)
+}
+
+//nolint:gocritic // slices.SortFunc comparator requires value params
+func lessMirrorSelector(a, b v1alpha1.MirrorSelectorRevision) int {
+	return strings.Compare(a.Name, b.Name)
+}
+
+//nolint:gocritic // slices.SortFunc comparator requires value params
 func lessRevision(a, b v1alpha1.NetworkConfigRevision) int {
 	return b.GetCreationTimestamp().Compare(a.GetCreationTimestamp().Time) // newest first
 }
@@ -251,27 +262,95 @@ func (r *reconcileConfig) fetchBgp(ctx context.Context) ([]v1alpha1.BGPRevision,
 	return bgps, nil
 }
 
-func (r *reconcileConfig) fetchConfigData(ctx context.Context) ([]v1alpha1.Layer2Revision, []v1alpha1.VRFRevision, []v1alpha1.BGPRevision, error) {
+func (r *reconcileConfig) fetchMirrorTargets(ctx context.Context) ([]v1alpha1.MirrorTargetRevision, error) {
+	targetList := &v1alpha1.MirrorTargetList{}
+	if err := r.client.List(ctx, targetList); err != nil {
+		r.Logger.Error(err, "error getting list of MirrorTargets from Kubernetes")
+		return nil, fmt.Errorf("error getting list of MirrorTargets from Kubernetes: %w", err)
+	}
+
+	targets := make([]v1alpha1.MirrorTargetRevision, len(targetList.Items))
+	for i := range targetList.Items {
+		targets[i] = v1alpha1.MirrorTargetRevision{
+			Name:             targetList.Items[i].Name,
+			MirrorTargetSpec: targetList.Items[i].Spec,
+		}
+	}
+
+	slices.SortFunc(targets, lessMirrorTarget)
+
+	return targets, nil
+}
+
+func (r *reconcileConfig) fetchMirrorSelectors(ctx context.Context) ([]v1alpha1.MirrorSelectorRevision, error) {
+	selectorList := &v1alpha1.MirrorSelectorList{}
+	if err := r.client.List(ctx, selectorList); err != nil {
+		r.Logger.Error(err, "error getting list of MirrorSelectors from Kubernetes")
+		return nil, fmt.Errorf("error getting list of MirrorSelectors from Kubernetes: %w", err)
+	}
+
+	selectors := make([]v1alpha1.MirrorSelectorRevision, len(selectorList.Items))
+	for i := range selectorList.Items {
+		selectors[i] = v1alpha1.MirrorSelectorRevision{
+			Name:               selectorList.Items[i].Name,
+			MirrorSelectorSpec: selectorList.Items[i].Spec,
+		}
+	}
+
+	slices.SortFunc(selectors, lessMirrorSelector)
+
+	return selectors, nil
+}
+
+// revisionData is the full set of cluster config snapshots that make up a
+// NetworkConfigRevision.
+type revisionData struct {
+	layer2          []v1alpha1.Layer2Revision
+	vrfs            []v1alpha1.VRFRevision
+	bgps            []v1alpha1.BGPRevision
+	mirrorTargets   []v1alpha1.MirrorTargetRevision
+	mirrorSelectors []v1alpha1.MirrorSelectorRevision
+}
+
+func (r *reconcileConfig) fetchConfigData(ctx context.Context) (*revisionData, error) {
 	// get Layer2networkConfiguration objects
 	l2vnis, err := r.fetchLayer2(ctx)
 	if err != nil {
 		r.Logger.Error(err, "error getting list of Layer2s from Kubernetes")
-		return nil, nil, nil, fmt.Errorf("error getting list of Layer2s from Kubernetes: %w", err)
+		return nil, fmt.Errorf("error getting list of Layer2s from Kubernetes: %w", err)
 	}
 
 	// get VRFRouteConfiguration objects
 	l3vnis, err := r.fetchLayer3(ctx)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, err
 	}
 
 	// get BGPPeering objects
 	bgps, err := r.fetchBgp(ctx)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, err
 	}
 
-	return l2vnis, l3vnis, bgps, nil
+	// get MirrorTarget objects
+	mirrorTargets, err := r.fetchMirrorTargets(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// get MirrorSelector objects
+	mirrorSelectors, err := r.fetchMirrorSelectors(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return &revisionData{
+		layer2:          l2vnis,
+		vrfs:            l3vnis,
+		bgps:            bgps,
+		mirrorTargets:   mirrorTargets,
+		mirrorSelectors: mirrorSelectors,
+	}, nil
 }
 
 func listRevisions(ctx context.Context, c client.Client) (*v1alpha1.NetworkConfigRevisionList, error) {

@@ -55,6 +55,8 @@ type Layer2 struct {
 	IRB *IRB `json:"irb,omitempty"`
 	// MirrorACLs is a list of mirror ACLs.
 	MirrorACLs []MirrorACL `json:"mirrorAcls,omitempty"`
+	// DisableSegmentation indicates whether to disable segmentation for the Layer 2 network.
+	DisableSegmentation bool `json:"disableSegmentation,omitempty"`
 }
 
 // IRB represents the Integrated Routing and Bridging configuration.
@@ -85,6 +87,8 @@ type VRF struct {
 	MirrorACLs []MirrorACL `json:"mirrorAcls,omitempty"`
 	// Redistribute is a config for BGP redistribution.
 	Redistribute *Redistribute `json:"redistribute,omitempty"`
+	// GREs is a map of GRE tunnel interfaces
+	GREs map[string]GRE `json:"gres,omitempty"`
 }
 
 // Redistribute represents a BGP redistribution configuration.
@@ -272,28 +276,55 @@ type PolicyRoute struct {
 	NextHop NextHop `json:"nextHop"`
 }
 
-// EncapsulationType represents an encapsulation type.
-type EncapsulationType string
+// MirrorDirection represents the direction of mirrored traffic.
+type MirrorDirection string
 
 const (
-	EncapsulationTypeGRE EncapsulationType = "gre"
+	// MirrorDirectionIngress represents ingress mirrored traffic.
+	MirrorDirectionIngress MirrorDirection = "ingress"
+	// MirrorDirectionEgress represents egress mirrored traffic.
+	MirrorDirectionEgress MirrorDirection = "egress"
 )
 
 // MirrorACL represents a mirror ACL configuration.
 type MirrorACL struct {
 	// TrafficMatch is the traffic match for the mirror ACL.
 	TrafficMatch TrafficMatch `json:"trafficMatch"`
-	// DestinationAddress is the destination address for the mirrored traffic.
+	// MirrorDestination is the name of the interface to mirror to (in most cases a GRE interface).
+	MirrorDestination string `json:"mirrorDestination"`
+	// Direction is the direction of mirrored traffic.
+	// +kubebuilder:validation:Enum=ingress;egress
+	Direction MirrorDirection `json:"direction"`
+}
+
+// GRELayer represents the GRE encapsulation layer.
+type GRELayer string
+
+const (
+	// GRELayer2 configures GRE with Layer 2 (Ethernet) encapsulation (GRE TAP).
+	GRELayer2 GRELayer = "layer2"
+	// GRELayer3 configures GRE with Layer 3 (IP) encapsulation (standard GRE).
+	GRELayer3 GRELayer = "layer3"
+)
+
+// GRE represents a GRE tunnel interface configuration.
+type GRE struct {
+	// DestinationAddress is the address of the GRE interface
 	DestinationAddress string `json:"destinationAddress"`
-	// DestinationVrf is the destination VRF for the mirrored traffic.
-	DestinationVrf string `json:"destinationVrf"`
-	// EncapsulationType is the encapsulation type for the mirrored traffic.
-	// +kubebuilder:validation:Enum=gre
-	EncapsulationType EncapsulationType `json:"encapsulationType"`
-	// Direction is the mirror direction: ingress, egress, or both.
-	// +kubebuilder:validation:Enum=ingress;egress;both
-	// +kubebuilder:default=both
-	Direction string `json:"direction,omitempty"`
+	// SourceAddress is the source address of the GRE interface.
+	SourceAddress string `json:"sourceAddress"`
+	// SourceInterface is the name of the interface that owns the source address
+	// (used as the tunnel's link-interface). The kernel validates the tunnel
+	// source against this interface, so it must be the loopback carrying
+	// SourceAddress; otherwise an IPv6 GRE refuses to originate traffic
+	// ("Local address not yet configured").
+	SourceInterface string `json:"sourceInterface,omitempty"`
+	// Layer is the GRE encapsulation layer.
+	// +kubebuilder:validation:Enum=layer2;layer3
+	// +kubebuilder:default=layer3
+	Layer GRELayer `json:"layer"`
+	// EncapsulationKey is the encapsulation key for the GRE interface.
+	EncapsulationKey *uint32 `json:"encapsulationKey,omitempty"`
 }
 
 // NextHop represents a next hop configuration.
@@ -306,12 +337,16 @@ type NextHop struct {
 
 // NodeNetworkConfigStatus defines the observed state of NodeConfig.
 type NodeNetworkConfigStatus struct {
-	// ConfigStatus describes provisioning state of the NodeConfig. Can be either 'provisioning', 'provisioned' or 'failed'.
+	// ConfigStatus describes provisioning state of the NodeConfig. Can be either 'provisioning', 'provisioned' or 'invalid'.
 	ConfigStatus string `json:"configStatus"`
 	// LastUpdate determines when last update (change) of the ConfigStatus field took place.
 	LastUpdate metav1.Time `json:"lastUpdate"`
 	// LastAppliedRevision stores hash of the NodeConfigRevision that was last applied to the node.
 	LastAppliedRevision string `json:"lastAppliedRevision,omitempty"`
+	// ErrorMessage contains the error message when ConfigStatus is 'invalid'.
+	// This field is cleared whenever ConfigStatus transitions to any non-'invalid' state
+	// (including 'provisioning' and 'provisioned'), so stale errors do not persist.
+	ErrorMessage string `json:"errorMessage,omitempty"`
 }
 
 //+kubebuilder:object:root=true
