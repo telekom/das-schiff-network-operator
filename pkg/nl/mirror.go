@@ -333,7 +333,7 @@ func (n *Manager) setupMirrorFilters(iface string, rules []MirrorRule, tunnelInd
 			return fmt.Errorf("no GRE tunnel index for interface %s", r.GREInterface)
 		}
 		matches := buildMirrorMatches(r)
-		for _, parent := range mirrorParents(r.Direction) {
+		for _, parent := range mirrorParents(r.Direction, r.WorkloadFacing) {
 			for j := range matches {
 				prio, err := nextMirrorPriority(iface, parent, prioByParent)
 				if err != nil {
@@ -348,13 +348,23 @@ func (n *Manager) setupMirrorFilters(iface string, rules []MirrorRule, tunnelInd
 	return nil
 }
 
-// mirrorParents returns the clsact hook(s) a rule's direction maps to.
-func mirrorParents(direction string) []uint32 {
+// mirrorParents maps a workload-perspective direction to the tc clsact hook(s) on
+// the source interface. "ingress" means traffic to the workload, "egress" means
+// traffic from the workload. For a workload-facing interface (the L2 `vlan.<id>`
+// access port) the hooks are inverted: traffic to the workload leaves the bridge
+// via the port's egress hook, and traffic from the workload arrives via its ingress
+// hook. For a fabric-facing interface (the `vx.<vrf>` VXLAN port) the natural
+// mapping applies (from-fabric arrives on ingress, to-fabric leaves on egress).
+func mirrorParents(direction string, workloadFacing bool) []uint32 {
+	var toWorkloadHook, fromWorkloadHook uint32 = handleMinIngress, handleMinEgress
+	if workloadFacing {
+		toWorkloadHook, fromWorkloadHook = handleMinEgress, handleMinIngress
+	}
 	switch direction {
-	case directionIngress:
-		return []uint32{handleMinIngress}
-	case directionEgress:
-		return []uint32{handleMinEgress}
+	case directionIngress: // to the workload
+		return []uint32{toWorkloadHook}
+	case directionEgress: // from the workload
+		return []uint32{fromWorkloadHook}
 	case directionBoth:
 		return []uint32{handleMinIngress, handleMinEgress}
 	default:
@@ -616,20 +626,27 @@ func isMirrorGREName(name string) bool {
 	return strings.HasPrefix(name, greMirrorPrefix) || strings.HasPrefix(name, gretapMirrorPrefix)
 }
 
+// isMirrorSourceName reports whether a link is a possible mirror source interface:
+// the VLAN bridge port (`vlan.*`, the L2 source) or the fabric VXLAN (`vx.*`, the
+// VRF source). The legacy Layer2 bridge (`l2.*`) is included so that mirror filters
+// left on the bridge master by older versions (which attached there) are cleaned up
+// on upgrade.
 func isMirrorSourceName(name string) bool {
-	return strings.HasPrefix(name, layer2SVI) || strings.HasPrefix(name, vxlanPrefix)
+	return strings.HasPrefix(name, vlanPrefix) ||
+		strings.HasPrefix(name, vxlanPrefix) ||
+		strings.HasPrefix(name, layer2SVI)
 }
 
-// MirrorSourceL2 returns the interface name used to mirror a Layer2 VLAN's traffic
-// (the Layer2 bridge).
+// MirrorSourceL2 returns the interface name used to mirror a Layer2 VLAN's traffic.
 //
-// Note: the clsact hook lives on the bridge master device, so it observes traffic
-// the bridge exchanges with the host stack (SVI/IRB-routed and locally-terminated
-// frames). Purely port-to-port bridged (east-west) frames between two bridge ports
-// are switched in the bridge fast path and are not seen here; mirroring such flows
-// would require attaching to the individual bridge ports instead.
+// The mirror attaches to the VLAN bridge port `vlan.<id>` (the workload-facing
+// access port of the `l2.<vlan>` bridge), not the bridge master. Attaching to the
+// port captures port-to-port bridged (east-west) traffic between the workload side
+// and the L2VNI overlay (`vx.<vni>`) — which a clsact hook on the bridge master
+// would miss, as port-to-port frames are switched in the bridge fast path and
+// never traverse the master netdev.
 func MirrorSourceL2(vlan int) string {
-	return fmt.Sprintf("%s%d", layer2SVI, vlan)
+	return fmt.Sprintf("%s%d", vlanPrefix, vlan)
 }
 
 // MirrorSourceVRF returns the interface name used to mirror a fabric VRF's traffic

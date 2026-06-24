@@ -86,10 +86,10 @@ The `pkg/cra-vsr` package (extended in-repo by this change):
 1. **Creates GRE/GRETap interfaces** inside VRFs (`layer3.go` → `setupGRE`).
 2. **Creates loopback interfaces** inside VRFs (`layer3.go` → `setupLoopback`).
 3. **Programs `<mirror-traffic>` rules** from `MirrorACLs` (`create.go` → `createMirrorTraffic`):
-   - For **Layer2**: binds to the bridge interface `l2.<vlan>` (bridge name).
+   - For **Layer2**: binds to the VLAN access port `vlan.<vlan>` of the `l2.<vlan>` bridge (workload-facing, so the direction is inverted).
    - For **VRF**: binds to the VXLAN interface `vx.<vrf>` (only when VNI exists or VRF is reserved).
 4. Maps `MirrorACL.MirrorDestination` to the `<to>` target (the GRE interface name).
-5. Maps `MirrorACL.Direction` to `<direction>` (`ingress` / `egress`).
+5. Maps `MirrorACL.Direction` to `<direction>` (`ingress` = to-workload / `egress` = from-workload, inverted to the interface-relative direction on workload-facing ports).
 6. Builds traffic match filters with src/dst prefix/address, ports, and protocol.
 
 ### 2.3 What Is Missing (Operator-Side Only)
@@ -110,12 +110,12 @@ Based on the source type referenced by a `MirrorSelector`:
 
 | MirrorSource Kind | Bind Interface | Notes |
 |---|---|---|
-| `Layer2NetworkConfiguration` (VLAN *n*) | `l2.<n>` (ingress / egress) | Captures traffic to/from secondary-network pods. CRA-VSR binds to the bridge `l2.<n>`. |
+| `Layer2NetworkConfiguration` (VLAN *n*) | `vlan.<n>` (the bridge access port) | Captures traffic to/from secondary-network pods. Both the FRR and CRA-VSR paths attach to the VLAN access port `vlan.<n>` of the `l2.<n>` bridge — not the bridge master — so port-to-port (east-west) traffic between the workload side and the L2VNI overlay (`vx.<vni>`) is captured. |
 | `VRFRouteConfiguration` (VRF *v*) | `vx.<v>` if VNI present, otherwise **skip** | Captures traffic before/after VXLAN encapsulation on the fabric VRF. CRA-VSR only programs mirror-traffic rules when the VRF has a VNI or is a reserved VRF. |
 
-> **Rationale:** We want to see packets *before* encapsulation towards the fabric and *after* decapsulation from the fabric. The `vx.<vrf>` VXLAN interface is the best attach point. If the VRF has no VXLAN (e.g. a local VRF without VNI), the mirror selector is silently ignored on that node.
+> **Rationale:** We want to see packets *before* encapsulation towards the fabric and *after* decapsulation from the fabric. For an L2 source, the `vlan.<n>` access port is the right attach point: a hook on the bridge *master* only sees frames the bridge exchanges with the host stack (SVI/IRB-routed/locally-terminated), whereas port-to-port bridged frames are switched in the fast path and bypass the master. Attaching to the access port captures that east-west traffic. For a VRF source, the `vx.<vrf>` VXLAN interface is the attach point; if the VRF has no VXLAN (e.g. a local VRF without VNI), the mirror selector is silently ignored on that node.
 
-> **Known limitation (Layer2 source):** the tc clsact hook is attached to the bridge master `l2.<n>`, so it observes traffic the bridge exchanges with the host stack (SVI/IRB-routed and locally-terminated frames). Purely port-to-port bridged (east-west) traffic between two local bridge ports is switched in the bridge fast path and is **not** captured. Mirroring such flows would require attaching filters to the individual bridge ports instead of the master.
+> **Direction semantics:** `direction` is expressed from the workload's point of view — `ingress` = traffic **to** the workload, `egress` = traffic **from** the workload. On the workload-facing `vlan.<n>` access port the underlying interface hooks are inverted accordingly (to-workload = the port's egress hook, from-workload = its ingress hook); on the fabric-facing `vx.<vrf>` port the mapping is natural. This is handled by the agents so the API meaning stays consistent across sources.
 
 ### 3.2 Mirror Target VRF — User-Defined via VRFRouteConfiguration
 
@@ -680,7 +680,7 @@ spec:
   │  2. Create loopback in VRF (from Loopbacks)             │
   │  3. Create GRE/GRETap in VRF (from GREs)               │
   │  4. Program <mirror-traffic> rules (from MirrorACLs):   │
-  │     - <rule from="l2.100" direction="ingress"           │
+  │     - <rule from="vlan.100" direction="egress"          │
   │            to="gre.mir" filter="..."/>                   │
   │     - <rule from="vx.ext" direction="egress"            │
   │            to="gre.mir" filter="..."/>                   │
@@ -716,7 +716,7 @@ spec:
 | D4 | Per-node **source IP as loopback** in the mirror VRF | Each node uniquely identified; GRE source is routable via EVPN |
 | D5 | Source IP added to **EVPN export filter** (auto-appended by operator) | Collector can reach the node's GRE endpoint via the fabric |
 | D6 | **Do not modify** `pkg/cra-vsr` | Vendor-maintained; already supports MirrorACLs, GREs, loopbacks, `<mirror-traffic>` |
-| D7 | Bind L2 mirrors to `l2.<vlan>` bridge interface | CRA-VSR uses bridge name as `<from>` for Layer2 mirror-traffic rules |
+| D7 | Bind L2 mirrors to the `vlan.<id>` bridge access port | Both paths use the workload-facing access port (not the bridge master) as `<from>`/source so east-west (port-to-port) traffic is captured; the workload-perspective direction is inverted to the port's interface-relative direction |
 | D8 | Bind VRF mirrors to `vx.<vrf>` VXLAN interface (if VNI exists) | CRA-VSR uses VXLAN name as `<from>` for VRF mirror-traffic rules |
 | D9 | `MirrorACL.MirrorDestination` = GRE interface name | CRA-VSR maps this to the `<to>` field in `<mirror-traffic>` rules |
 | D10 | **Loopback `poolRef` lives on `VRFRouteConfiguration`**, not `MirrorTarget` | Loopback is a VRF interface; its IP must be in the VRF's EVPN export filter; co-locating avoids cross-cutting concerns and flows through the revision pipeline |

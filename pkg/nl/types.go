@@ -5,10 +5,18 @@ package nl
 // GRE tunnel is created separately from the GRETunnel configuration).
 type MirrorRule struct {
 	// SourceInterface is the interface to mirror traffic from
-	// (e.g. "l2.<vlan>" for a Layer2 bridge, "vx.<vrf>" for a fabric VRF).
+	// (e.g. "vlan.<id>" for a Layer2 access port, "vx.<vrf>" for a fabric VRF).
 	SourceInterface string `json:"sourceInterface"`
-	// Direction is the traffic direction to mirror: "ingress", "egress" or "both".
+	// Direction is the traffic direction to mirror, from the workload's point of
+	// view: "ingress" (traffic to the workload), "egress" (traffic from the
+	// workload) or "both".
 	Direction string `json:"direction"`
+	// WorkloadFacing indicates that SourceInterface faces the workload (the L2
+	// `vlan.<id>` access port). The tc hooks are then inverted relative to the
+	// workload direction: traffic *to* the workload leaves the bridge via the
+	// port's egress hook, and traffic *from* the workload arrives via its ingress
+	// hook. A fabric-facing source (the `vx.<vrf>` VXLAN port) leaves this false.
+	WorkloadFacing bool `json:"workloadFacing,omitempty"`
 	// GREInterface is the name of the GRE interface to mirror matching traffic to.
 	GREInterface string `json:"greInterface"`
 	// Protocol is the IP protocol to match (e.g. "tcp", "udp", "icmp"), or empty for all.

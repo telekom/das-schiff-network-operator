@@ -175,12 +175,30 @@ func (m *Manager) createVLAN(vlanID, mtu int, br *Bridge, intfs *Interfaces) *VL
 	return &intfs.VLANs[len(intfs.VLANs)-1]
 }
 
-func (*Manager) createMirrorTraffic(ns *Namespace, from string, acl *v1alpha1.MirrorACL) {
+// flipMirrorDirection swaps ingress<->egress. It translates the workload-
+// perspective direction (ingress = to-workload, egress = from-workload) into the
+// interface-relative direction of a workload-facing port (the L2 `vlan.<id>`
+// access port), whose ingress/egress are inverted relative to the workload.
+func flipMirrorDirection(direction string) string {
+	switch direction {
+	case string(v1alpha1.MirrorDirectionIngress):
+		return string(v1alpha1.MirrorDirectionEgress)
+	case string(v1alpha1.MirrorDirectionEgress):
+		return string(v1alpha1.MirrorDirectionIngress)
+	default:
+		return direction
+	}
+}
+
+// createMirrorTraffic appends a <mirror-traffic> action+filter for an ACL. The
+// direction is the interface-relative direction to program on `from` (already
+// translated from the workload-perspective MirrorACL.Direction by the caller).
+func (*Manager) createMirrorTraffic(ns *Namespace, from, direction string, acl *v1alpha1.MirrorACL) {
 	if ns.MTraffic == nil {
 		ns.MTraffic = &MirrorTraffic{}
 	}
 
-	filterKey := from + "-" + string(acl.Direction) + "-" + acl.MirrorDestination
+	filterKey := from + "-" + direction + "-" + acl.MirrorDestination
 
 	var filter *MTrafficFilter
 	for i := range ns.MTraffic.Filters {
@@ -194,7 +212,7 @@ func (*Manager) createMirrorTraffic(ns *Namespace, from string, acl *v1alpha1.Mi
 	if filter == nil {
 		ns.MTraffic.Actions = append(ns.MTraffic.Actions, MTrafficAction{
 			From:      from,
-			Direction: string(acl.Direction),
+			Direction: direction,
 			To:        acl.MirrorDestination,
 			Filter:    &filterKey,
 		})

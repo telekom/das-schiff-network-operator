@@ -61,7 +61,7 @@ func (a *CRAFRRConfigApplier) convertNodeConfigToNetlink(nodeCfg *v1alpha1.NodeN
 
 		source := nl.MirrorSourceL2(int(layer2.VLAN))
 		for j := range layer2.MirrorACLs {
-			netlinkConfig.Mirrors = append(netlinkConfig.Mirrors, convertMirrorACL(&layer2.MirrorACLs[j], source))
+			netlinkConfig.Mirrors = append(netlinkConfig.Mirrors, convertMirrorACL(&layer2.MirrorACLs[j], source, true))
 		}
 	}
 
@@ -121,13 +121,14 @@ func appendMirrorVRFConfig(netlinkConfig *nl.NetlinkConfiguration, vrfName strin
 
 	source := nl.MirrorSourceVRF(vrfName)
 	for j := range vrf.MirrorACLs {
-		netlinkConfig.Mirrors = append(netlinkConfig.Mirrors, convertMirrorACL(&vrf.MirrorACLs[j], source))
+		netlinkConfig.Mirrors = append(netlinkConfig.Mirrors, convertMirrorACL(&vrf.MirrorACLs[j], source, false))
 	}
 }
 
 // convertMirrorACL maps a NodeNetworkConfig MirrorACL to a netlink MirrorRule for
-// the given source interface.
-func convertMirrorACL(acl *v1alpha1.MirrorACL, sourceIface string) nl.MirrorRule {
+// the given source interface. workloadFacing is true for the Layer2 access port
+// (vlan.<id>), whose tc hooks are inverted relative to the workload direction.
+func convertMirrorACL(acl *v1alpha1.MirrorACL, sourceIface string, workloadFacing bool) nl.MirrorRule {
 	direction := string(acl.Direction)
 	if direction == "" {
 		direction = "both"
@@ -136,6 +137,7 @@ func convertMirrorACL(acl *v1alpha1.MirrorACL, sourceIface string) nl.MirrorRule
 		SourceInterface: sourceIface,
 		Direction:       direction,
 		GREInterface:    acl.MirrorDestination,
+		WorkloadFacing:  workloadFacing,
 	}
 	if acl.TrafficMatch.Protocol != nil {
 		rule.Protocol = *acl.TrafficMatch.Protocol

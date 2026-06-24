@@ -43,7 +43,7 @@ var _ = Describe("mirror helpers", func() {
 	})
 
 	It("builds source interface names", func() {
-		Expect(MirrorSourceL2(501)).To(Equal("l2.501"))
+		Expect(MirrorSourceL2(501)).To(Equal("vlan.501"))
 		Expect(MirrorSourceVRF("external")).To(Equal("vx.external"))
 	})
 
@@ -268,11 +268,11 @@ var _ = Describe("ReconcileTcMirrors", func() {
 		tk := mock_nl.NewMockToolkitInterface(mockctrl)
 		nm := mirrorManager(tk)
 
-		src := dummyLink("l2.501", 5)
+		src := dummyLink("vlan.501", 5)
 		var added []*netlink.Flower
 		var addedQdisc netlink.Qdisc
 
-		tk.EXPECT().LinkByName("l2.501").Return(src, nil)
+		tk.EXPECT().LinkByName("vlan.501").Return(src, nil)
 		tk.EXPECT().QdiscList(src).Return(nil, nil)
 		tk.EXPECT().QdiscAdd(gomock.Any()).DoAndReturn(func(q netlink.Qdisc) error {
 			addedQdisc = q
@@ -286,7 +286,7 @@ var _ = Describe("ReconcileTcMirrors", func() {
 			return nil
 		}).Times(2)
 
-		rules := []MirrorRule{{SourceInterface: "l2.501", Direction: "ingress", GREInterface: "gre-abc", Protocol: "tcp"}}
+		rules := []MirrorRule{{SourceInterface: "vlan.501", Direction: "ingress", GREInterface: "gre-abc", Protocol: "tcp"}}
 		Expect(nm.ReconcileTcMirrors(rules, map[string]int{"gre-abc": 30})).To(Succeed())
 
 		clsact, ok := addedQdisc.(*netlink.Clsact)
@@ -314,10 +314,10 @@ var _ = Describe("ReconcileTcMirrors", func() {
 		tk := mock_nl.NewMockToolkitInterface(mockctrl)
 		nm := mirrorManager(tk)
 
-		src := dummyLink("l2.501", 5)
+		src := dummyLink("vlan.501", 5)
 		var added []*netlink.Flower
 
-		tk.EXPECT().LinkByName("l2.501").Return(src, nil)
+		tk.EXPECT().LinkByName("vlan.501").Return(src, nil)
 		tk.EXPECT().QdiscList(src).Return([]netlink.Qdisc{&netlink.Clsact{}}, nil)
 		tk.EXPECT().FilterList(src, gomock.Any()).Return(nil, nil).Times(2)
 		// 2 families x 3 port-based protocols = 6 filters, each with the port set.
@@ -327,7 +327,7 @@ var _ = Describe("ReconcileTcMirrors", func() {
 		}).Times(6)
 
 		port := uint16(443)
-		rules := []MirrorRule{{SourceInterface: "l2.501", Direction: "ingress", GREInterface: "gre-abc", DstPort: port}}
+		rules := []MirrorRule{{SourceInterface: "vlan.501", Direction: "ingress", GREInterface: "gre-abc", DstPort: port}}
 		Expect(nm.ReconcileTcMirrors(rules, map[string]int{"gre-abc": 30})).To(Succeed())
 
 		Expect(added).To(HaveLen(6))
@@ -352,10 +352,10 @@ var _ = Describe("ReconcileTcMirrors", func() {
 		tk := mock_nl.NewMockToolkitInterface(mockctrl)
 		nm := mirrorManager(tk)
 
-		src := dummyLink("l2.501", 5)
+		src := dummyLink("vlan.501", 5)
 		var added []*netlink.Flower
 
-		tk.EXPECT().LinkByName("l2.501").Return(src, nil)
+		tk.EXPECT().LinkByName("vlan.501").Return(src, nil)
 		tk.EXPECT().QdiscList(src).Return([]netlink.Qdisc{&netlink.Clsact{}}, nil)
 		tk.EXPECT().FilterList(src, gomock.Any()).Return(nil, nil).Times(2)
 		tk.EXPECT().FilterAdd(gomock.Any()).DoAndReturn(func(f netlink.Filter) error {
@@ -363,12 +363,56 @@ var _ = Describe("ReconcileTcMirrors", func() {
 			return nil
 		}).Times(1)
 
-		rules := []MirrorRule{{SourceInterface: "l2.501", Direction: "ingress", GREInterface: "gre-abc", DstPrefix: "fd00::/64"}}
+		rules := []MirrorRule{{SourceInterface: "vlan.501", Direction: "ingress", GREInterface: "gre-abc", DstPrefix: "fd00::/64"}}
 		Expect(nm.ReconcileTcMirrors(rules, map[string]int{"gre-abc": 30})).To(Succeed())
 
 		Expect(added).To(HaveLen(1))
 		Expect(added[0].EthType).To(Equal(ethPIPv6))
 		Expect(added[0].DestIP).ToNot(BeNil())
+	})
+
+	It("maps direction to tc hooks per workload orientation", func() {
+		// ingress = to-workload, egress = from-workload.
+		// On a workload-facing L2 vlan port the hooks are inverted; on a
+		// fabric-facing VRF vxlan port they are natural.
+		cases := []struct {
+			name           string
+			iface          string
+			direction      string
+			workloadFacing bool
+			wantParent     uint32
+		}{
+			{"L2 ingress (to-workload) -> egress hook", "vlan.501", "ingress", true, handleMinEgress},
+			{"L2 egress (from-workload) -> ingress hook", "vlan.501", "egress", true, handleMinIngress},
+			{"VRF ingress (to-workload) -> ingress hook", "vx.m2m", "ingress", false, handleMinIngress},
+			{"VRF egress (from-workload) -> egress hook", "vx.m2m", "egress", false, handleMinEgress},
+		}
+		for _, tc := range cases {
+			func() {
+				mockctrl := gomock.NewController(GinkgoT())
+				defer mockctrl.Finish()
+				tk := mock_nl.NewMockToolkitInterface(mockctrl)
+				nm := mirrorManager(tk)
+
+				src := dummyLink(tc.iface, 5)
+				var added *netlink.Flower
+				tk.EXPECT().LinkByName(tc.iface).Return(src, nil)
+				tk.EXPECT().QdiscList(src).Return([]netlink.Qdisc{&netlink.Clsact{}}, nil)
+				tk.EXPECT().FilterList(src, gomock.Any()).Return(nil, nil).Times(2)
+				tk.EXPECT().FilterAdd(gomock.Any()).DoAndReturn(func(f netlink.Filter) error {
+					added = f.(*netlink.Flower)
+					return nil
+				}).Times(1)
+
+				rules := []MirrorRule{{
+					SourceInterface: tc.iface, Direction: tc.direction,
+					GREInterface: "gre-abc", Protocol: "icmp", WorkloadFacing: tc.workloadFacing,
+				}}
+				Expect(nm.ReconcileTcMirrors(rules, map[string]int{"gre-abc": 30})).To(Succeed(), tc.name)
+				Expect(added).ToNot(BeNil(), tc.name)
+				Expect(added.Parent).To(Equal(tc.wantParent), tc.name)
+			}()
+		}
 	})
 
 	It("fails when the GRE tunnel index is unknown", func() {
@@ -377,12 +421,12 @@ var _ = Describe("ReconcileTcMirrors", func() {
 		tk := mock_nl.NewMockToolkitInterface(mockctrl)
 		nm := mirrorManager(tk)
 
-		src := dummyLink("l2.501", 5)
-		tk.EXPECT().LinkByName("l2.501").Return(src, nil)
+		src := dummyLink("vlan.501", 5)
+		tk.EXPECT().LinkByName("vlan.501").Return(src, nil)
 		tk.EXPECT().QdiscList(src).Return([]netlink.Qdisc{&netlink.Clsact{}}, nil)
 		tk.EXPECT().FilterList(src, gomock.Any()).Return(nil, nil).Times(2)
 
-		rules := []MirrorRule{{SourceInterface: "l2.501", Direction: "ingress", GREInterface: "missing"}}
+		rules := []MirrorRule{{SourceInterface: "vlan.501", Direction: "ingress", GREInterface: "missing"}}
 		Expect(nm.ReconcileTcMirrors(rules, map[string]int{})).ToNot(Succeed())
 	})
 })

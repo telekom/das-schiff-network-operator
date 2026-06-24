@@ -266,7 +266,10 @@ func (l *Layer3) setupVRF(info InfoL3) error {
 		if info.vni != -1 || l.mgr.isReservedVRF(info.name) {
 			for i := range info.vrf.MirrorACLs {
 				from := (vxlanPrefix + info.name)
-				l.mgr.createMirrorTraffic(l.ns, from, &info.vrf.MirrorACLs[i])
+				// The VXLAN port faces the fabric, so the workload-perspective
+				// direction maps naturally (no inversion).
+				direction := string(info.vrf.MirrorACLs[i].Direction)
+				l.mgr.createMirrorTraffic(l.ns, from, direction, &info.vrf.MirrorACLs[i])
 			}
 		}
 	}
