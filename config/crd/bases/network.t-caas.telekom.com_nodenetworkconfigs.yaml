@@ -3950,7 +3950,13 @@ spec:
             properties:
               configStatus:
                 description: ConfigStatus describes provisioning state of the NodeConfig.
-                  Can be either 'provisioning', 'provisioned' or 'failed'.
+                  Can be either 'provisioning', 'provisioned' or 'invalid'.
+                type: string
+              errorMessage:
+                description: |-
+                  ErrorMessage contains the error message when ConfigStatus is 'invalid'.
+                  This field is cleared whenever ConfigStatus transitions to any non-'invalid' state
+                  (including 'provisioning' and 'provisioned'), so stale errors do not persist.
                 type: string
               lastAppliedRevision:
                 description: LastAppliedRevision stores hash of the NodeConfigRevision

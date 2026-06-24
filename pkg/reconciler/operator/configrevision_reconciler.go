@@ -152,7 +152,7 @@ func (crr *ConfigRevisionReconciler) reconcileDebounced(ctx context.Context) err
 
 	// there is nothing to deploy - skip
 	if revisionToDeploy == nil {
-		crr.logger.Error(fmt.Errorf("there is no revision to deploy"), "revision deployment aboorted")
+		crr.logger.Error(fmt.Errorf("there is no revision to deploy"), "revision deployment aborted")
 		return nil
 	}
 
@@ -187,6 +187,9 @@ func getFirstValidRevision(revisions []v1alpha1.NetworkConfigRevision) *v1alpha1
 
 type counters struct {
 	ready, ongoing, invalid int
+	failedNode              string
+	failedMessage           string
+	failedAt                metav1.Time
 }
 
 func (crr *ConfigRevisionReconciler) processConfigsForRevision(ctx context.Context, configs []v1alpha1.NodeNetworkConfig, revision *v1alpha1.NetworkConfigRevision) (*counters, error) {
@@ -194,53 +197,72 @@ func (crr *ConfigRevisionReconciler) processConfigsForRevision(ctx context.Conte
 	if err != nil {
 		return nil, fmt.Errorf("failed to remove redundant configs: %w", err)
 	}
-	ready, ongoing, invalid := crr.getRevisionCounters(configs, revision)
-	cnt := &counters{ready: ready, ongoing: ongoing, invalid: invalid}
+	cnt := crr.getRevisionCounters(configs, revision)
 
-	if invalid > 0 {
-		if err := crr.invalidateRevision(ctx, revision, "NetworkConfigRevision results in invalid config"); err != nil {
-			return cnt, fmt.Errorf("faild to invalidate revision %s: %w", revision.Name, err)
+	if cnt.invalid > 0 {
+		// Invalidate when transitioning to invalid state, or when the failed node
+		// has changed (a different node may fail on an already-invalid revision).
+		if !revision.Status.IsInvalid || revision.Status.FailedNode != cnt.failedNode {
+			if err := crr.invalidateRevision(ctx, revision, cnt.failedNode, cnt.failedMessage, cnt.failedAt); err != nil {
+				return cnt, fmt.Errorf("failed to invalidate revision %s: %w", revision.Name, err)
+			}
 		}
 	}
 
 	return cnt, nil
 }
 
-func (crr *ConfigRevisionReconciler) getRevisionCounters(configs []v1alpha1.NodeNetworkConfig, revision *v1alpha1.NetworkConfigRevision) (ready, ongoing, invalid int) {
-	ready = 0
-	ongoing = 0
-	invalid = 0
+func (crr *ConfigRevisionReconciler) getRevisionCounters(configs []v1alpha1.NodeNetworkConfig, revision *v1alpha1.NetworkConfigRevision) *counters {
+	cnt := &counters{
+		ready:   0,
+		ongoing: 0,
+		invalid: 0,
+	}
 	for i := range configs {
-		if configs[i].Spec.Revision == revision.Spec.Revision {
-			timeout := crr.configTimeout
-			switch configs[i].Status.ConfigStatus {
-			case StatusProvisioned:
-				// Update ready counter
-				ready++
-			case StatusInvalid:
-				// Increase 'invalid' counter so we know that the revision results in invalid configs
-				invalid++
-			case "":
-				// Set longer timeout if status was not yet updated
-				timeout = crr.preconfigTimeout
-				fallthrough
-			case StatusProvisioning:
-				// Update ongoing counter
-				ongoing++
-				if wasConfigTimeoutReached(&configs[i], timeout) {
-					// If timout was reached revision is invalid (but still counts as ongoing).
-					invalid++
+		cfg := &configs[i]
+		if cfg.Spec.Revision != revision.Spec.Revision {
+			continue
+		}
+
+		timeout := crr.configTimeout
+		switch cfg.Status.ConfigStatus {
+		case StatusProvisioned:
+			// Update ready counter
+			cnt.ready++
+		case StatusInvalid:
+			// Increase 'invalid' counter so we know that the revision results in invalid configs
+			cnt.invalid++
+			// Capture the failure info; choose lexicographically smallest node name for determinism.
+			if cnt.failedNode == "" || cfg.Name < cnt.failedNode {
+				cnt.failedNode = cfg.Name
+				cnt.failedMessage = cfg.Status.ErrorMessage
+				cnt.failedAt = cfg.Status.LastUpdate
+			}
+		case "":
+			// Set longer timeout if status was not yet updated
+			timeout = crr.preconfigTimeout
+			fallthrough
+		case StatusProvisioning:
+			// Update ongoing counter
+			cnt.ongoing++
+			if wasConfigTimeoutReached(cfg, timeout) {
+				// If timeout was reached revision is invalid (but still counts as ongoing).
+				cnt.invalid++
+				if cnt.failedNode == "" || cfg.Name < cnt.failedNode {
+					cnt.failedNode = cfg.Name
+					cnt.failedMessage = "provisioning timeout reached"
+					cnt.failedAt = metav1.NewTime(cfg.Status.LastUpdate.Add(timeout))
 				}
 			}
 		}
 	}
-	return ready, ongoing, invalid
+	return cnt
 }
 
 func (crr *ConfigRevisionReconciler) removeRedundantConfigs(ctx context.Context, configs []v1alpha1.NodeNetworkConfig) ([]v1alpha1.NodeNetworkConfig, error) {
 	cfg := []v1alpha1.NodeNetworkConfig{}
 	for i := range configs {
-		// Every NodeNetworkConfig obejct should have 2 owner references - for NodeConfigRevision and for the Node. If there is only one owner reference,
+		// Every NodeNetworkConfig object should have 2 owner references - for NodeConfigRevision and for the Node. If there is only one owner reference,
 		// it means that either node or revision were deleted, so the config itself can be deleted as well.
 		if len(configs[i].ObjectMeta.OwnerReferences) < numOfRefs {
 			crr.logger.Info("deleting redundant NodeNetworkConfig", "name", configs[i].Name)
@@ -254,9 +276,15 @@ func (crr *ConfigRevisionReconciler) removeRedundantConfigs(ctx context.Context,
 	return cfg, nil
 }
 
-func (crr *ConfigRevisionReconciler) invalidateRevision(ctx context.Context, revision *v1alpha1.NetworkConfigRevision, reason string) error {
-	crr.logger.Info("invalidating revision", "name", revision.Name, "reason", reason)
+func (crr *ConfigRevisionReconciler) invalidateRevision(ctx context.Context, revision *v1alpha1.NetworkConfigRevision, failedNode, failedMessage string, failedAt metav1.Time) error {
+	crr.logger.Info("invalidating revision", "name", revision.Name, "failedNode", failedNode, "failedMessage", failedMessage)
 	revision.Status.IsInvalid = true
+	revision.Status.FailedNode = failedNode
+	revision.Status.FailedMessage = failedMessage
+	if !failedAt.IsZero() {
+		revision.Status.FailedAt = &failedAt
+	}
+
 	if err := crr.client.Status().Update(ctx, revision); err != nil {
 		return fmt.Errorf("failed to update revision status %s: %w", revision.Name, err)
 	}

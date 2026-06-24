@@ -66,10 +66,10 @@ var _ = Describe("ConfigRevisionReconciler helpers", func() {
 				makeNodeConfig("node1", "rev001", StatusProvisioned, time.Now().Add(-time.Minute)),
 				makeNodeConfig("node2", "rev001", StatusProvisioned, time.Now().Add(-time.Minute)),
 			}
-			ready, ongoing, invalid := crr.getRevisionCounters(configs, &revision)
-			Expect(ready).To(Equal(2))
-			Expect(ongoing).To(Equal(0))
-			Expect(invalid).To(Equal(0))
+			cnt := crr.getRevisionCounters(configs, &revision)
+			Expect(cnt.ready).To(Equal(2))
+			Expect(cnt.ongoing).To(Equal(0))
+			Expect(cnt.invalid).To(Equal(0))
 		})
 
 		It("should count provisioning nodes correctly", func() {
@@ -77,10 +77,10 @@ var _ = Describe("ConfigRevisionReconciler helpers", func() {
 			configs := []v1alpha1.NodeNetworkConfig{
 				makeNodeConfig("node1", "rev001", StatusProvisioning, time.Now()),
 			}
-			ready, ongoing, invalid := crr.getRevisionCounters(configs, &revision)
-			Expect(ready).To(Equal(0))
-			Expect(ongoing).To(Equal(1))
-			Expect(invalid).To(Equal(0))
+			cnt := crr.getRevisionCounters(configs, &revision)
+			Expect(cnt.ready).To(Equal(0))
+			Expect(cnt.ongoing).To(Equal(1))
+			Expect(cnt.invalid).To(Equal(0))
 		})
 
 		It("should count invalid nodes correctly", func() {
@@ -88,10 +88,10 @@ var _ = Describe("ConfigRevisionReconciler helpers", func() {
 			configs := []v1alpha1.NodeNetworkConfig{
 				makeNodeConfig("node1", "rev001", StatusInvalid, time.Now().Add(-time.Minute)),
 			}
-			ready, ongoing, invalid := crr.getRevisionCounters(configs, &revision)
-			Expect(ready).To(Equal(0))
-			Expect(ongoing).To(Equal(0))
-			Expect(invalid).To(Equal(1))
+			cnt := crr.getRevisionCounters(configs, &revision)
+			Expect(cnt.ready).To(Equal(0))
+			Expect(cnt.ongoing).To(Equal(0))
+			Expect(cnt.invalid).To(Equal(1))
 		})
 
 		It("should count nodes with empty status as ongoing (pre-config)", func() {
@@ -99,10 +99,10 @@ var _ = Describe("ConfigRevisionReconciler helpers", func() {
 			configs := []v1alpha1.NodeNetworkConfig{
 				makeNodeConfig("node1", "rev001", "", time.Now()),
 			}
-			ready, ongoing, invalid := crr.getRevisionCounters(configs, &revision)
-			Expect(ready).To(Equal(0))
-			Expect(ongoing).To(Equal(1))
-			Expect(invalid).To(Equal(0))
+			cnt := crr.getRevisionCounters(configs, &revision)
+			Expect(cnt.ready).To(Equal(0))
+			Expect(cnt.ongoing).To(Equal(1))
+			Expect(cnt.invalid).To(Equal(0))
 		})
 
 		It("should count timed-out provisioning config as invalid (still ongoing)", func() {
@@ -111,10 +111,10 @@ var _ = Describe("ConfigRevisionReconciler helpers", func() {
 			configs := []v1alpha1.NodeNetworkConfig{
 				makeNodeConfig("node1", "rev001", StatusProvisioning, time.Now().Add(-time.Minute)),
 			}
-			ready, ongoing, invalid := crr.getRevisionCounters(configs, &revision)
-			Expect(ongoing).To(Equal(1)) // still counted as ongoing
-			Expect(invalid).To(Equal(1)) // also counted as invalid because timeout reached
-			Expect(ready).To(Equal(0))
+			cnt := crr.getRevisionCounters(configs, &revision)
+			Expect(cnt.ongoing).To(Equal(1)) // still counted as ongoing
+			Expect(cnt.invalid).To(Equal(1)) // also counted as invalid because timeout reached
+			Expect(cnt.ready).To(Equal(0))
 		})
 
 		It("should not count configs for other revisions", func() {
@@ -122,10 +122,10 @@ var _ = Describe("ConfigRevisionReconciler helpers", func() {
 			configs := []v1alpha1.NodeNetworkConfig{
 				makeNodeConfig("node1", "rev002", StatusProvisioned, time.Now().Add(-time.Minute)),
 			}
-			ready, ongoing, invalid := crr.getRevisionCounters(configs, &revision)
-			Expect(ready).To(Equal(0))
-			Expect(ongoing).To(Equal(0))
-			Expect(invalid).To(Equal(0))
+			cnt := crr.getRevisionCounters(configs, &revision)
+			Expect(cnt.ready).To(Equal(0))
+			Expect(cnt.ongoing).To(Equal(0))
+			Expect(cnt.invalid).To(Equal(0))
 		})
 	})
 
@@ -363,9 +363,13 @@ var _ = Describe("ConfigRevisionReconciler helpers", func() {
 				client: fakeClient,
 			}
 
-			err := crr.invalidateRevision(context.Background(), &revision, "test reason")
+			failedAt := metav1.NewTime(time.Now().Truncate(time.Second))
+			err := crr.invalidateRevision(context.Background(), &revision, "node1", "test reason", failedAt)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(revision.Status.IsInvalid).To(BeTrue())
+			Expect(revision.Status.FailedNode).To(Equal("node1"))
+			Expect(revision.Status.FailedMessage).To(Equal("test reason"))
+			Expect(revision.Status.FailedAt).To(Equal(&failedAt))
 		})
 	})
 

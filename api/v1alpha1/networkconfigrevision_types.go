@@ -72,10 +72,16 @@ type NetworkConfigRevisionStatus struct {
 	Ready int `json:"ready"`
 	// Ongoing informs about how many nodes are currently provisioned with a config derived from the revision.
 	Ongoing int `json:"ongoing"`
-	// Queued informs about how many nodes are currently waiting to be provisiined with a config derived from the revision.
+	// Queued informs about how many nodes are currently waiting to be provisioned with a config derived from the revision.
 	Queued int `json:"queued"`
-	// Total informs about how many nodes in total can be provisiined with a config derived from the revision.
+	// Total informs about how many nodes in total can be provisioned with a config derived from the revision.
 	Total int `json:"total"`
+	// FailedNode is the name of the node where provisioning failed, causing this revision to be invalidated.
+	FailedNode string `json:"failedNode,omitempty"`
+	// FailedMessage contains the error message from the failed provisioning attempt.
+	FailedMessage string `json:"failedMessage,omitempty"`
+	// FailedAt is when the failure occurred.
+	FailedAt *metav1.Time `json:"failedAt,omitempty"`
 }
 
 //+kubebuilder:object:root=true
@@ -86,6 +92,7 @@ type NetworkConfigRevisionStatus struct {
 //+kubebuilder:printcolumn:name="Ongoing",type="integer",JSONPath=".status.ongoing"
 //+kubebuilder:printcolumn:name="Ready",type="integer",JSONPath=".status.ready"
 //+kubebuilder:printcolumn:name="Total",type="integer",JSONPath=".status.total"
+//+kubebuilder:printcolumn:name="FailedNode",type=string,JSONPath=`.status.failedNode`,priority=1
 //+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
 // NetworkConfigRevision is the Schema for the node configuration.
