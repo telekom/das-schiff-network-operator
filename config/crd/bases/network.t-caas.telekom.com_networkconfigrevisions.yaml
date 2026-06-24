@@ -316,6 +316,153 @@ spec:
                   - vni
                   type: object
                 type: array
+              mirrorSelectors:
+                description: MirrorSelectors snapshots the cluster's MirrorSelector
+                  objects.
+                items:
+                  properties:
+                    direction:
+                      description: Direction is the direction of traffic to mirror.
+                      enum:
+                      - ingress
+                      - egress
+                      type: string
+                    mirrorSource:
+                      description: |-
+                        MirrorSource references the Layer2NetworkConfiguration or
+                        VRFRouteConfiguration whose traffic is captured.
+                      properties:
+                        apiGroup:
+                          description: |-
+                            APIGroup is the group for the resource being referenced.
+                            If APIGroup is not specified, the specified Kind must be in the core API group.
+                            For any other third-party types, APIGroup is required.
+                          type: string
+                        kind:
+                          description: Kind is the type of resource being referenced
+                          type: string
+                        name:
+                          description: Name is the name of resource being referenced
+                          type: string
+                        namespace:
+                          description: |-
+                            Namespace is the namespace of resource being referenced
+                            Note that when a namespace is specified, a gateway.networking.k8s.io/ReferenceGrant object is required in the referent namespace to allow that namespace's owner to accept the reference. See the ReferenceGrant documentation for details.
+                            (Alpha) This field requires the CrossNamespaceVolumeDataSource feature gate to be enabled.
+                          type: string
+                      required:
+                      - kind
+                      - name
+                      type: object
+                      x-kubernetes-validations:
+                      - message: mirrorSource must reference a Layer2NetworkConfiguration
+                          or VRFRouteConfiguration in apiGroup network.t-caas.telekom.com
+                        rule: (self.kind == 'Layer2NetworkConfiguration' || self.kind
+                          == 'VRFRouteConfiguration') && (!has(self.apiGroup) || self.apiGroup
+                          == 'network.t-caas.telekom.com')
+                    mirrorTarget:
+                      description: MirrorTarget references the MirrorTarget that describes
+                        the collector.
+                      properties:
+                        apiGroup:
+                          description: |-
+                            APIGroup is the group for the resource being referenced.
+                            If APIGroup is not specified, the specified Kind must be in the core API group.
+                            For any other third-party types, APIGroup is required.
+                          type: string
+                        kind:
+                          description: Kind is the type of resource being referenced
+                          type: string
+                        name:
+                          description: Name is the name of resource being referenced
+                          type: string
+                        namespace:
+                          description: |-
+                            Namespace is the namespace of resource being referenced
+                            Note that when a namespace is specified, a gateway.networking.k8s.io/ReferenceGrant object is required in the referent namespace to allow that namespace's owner to accept the reference. See the ReferenceGrant documentation for details.
+                            (Alpha) This field requires the CrossNamespaceVolumeDataSource feature gate to be enabled.
+                          type: string
+                      required:
+                      - kind
+                      - name
+                      type: object
+                      x-kubernetes-validations:
+                      - message: mirrorTarget must reference a MirrorTarget in apiGroup
+                          network.t-caas.telekom.com
+                        rule: self.kind == 'MirrorTarget' && (!has(self.apiGroup)
+                          || self.apiGroup == 'network.t-caas.telekom.com')
+                    name:
+                      type: string
+                    trafficMatch:
+                      description: |-
+                        TrafficMatch selects which packets to mirror. An empty match captures all
+                        traffic on the source interface.
+                      properties:
+                        dstPort:
+                          description: DstPort is the destination port to match.
+                          type: integer
+                        dstPrefix:
+                          description: DstPrefix is the destination prefix to match.
+                          type: string
+                        protocol:
+                          description: Protocol is the protocol to match.
+                          type: string
+                        srcPort:
+                          description: SrcPort is the source port to match.
+                          type: integer
+                        srcPrefix:
+                          description: SrcPrefix is the source prefix to match.
+                          type: string
+                      type: object
+                  required:
+                  - direction
+                  - mirrorSource
+                  - mirrorTarget
+                  type: object
+                type: array
+              mirrorTargets:
+                description: |-
+                  MirrorTargets snapshots the cluster's MirrorTarget objects so that mirror
+                  changes are reflected in the revision hash and rolled out like any other
+                  config change.
+                items:
+                  properties:
+                    destinationIP:
+                      description: DestinationIP is the remote collector IP the tunnel
+                        points to.
+                      pattern: ^((([0-9]{1,3}\.){3}[0-9]{1,3})|(([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}))$
+                      type: string
+                    destinationVrf:
+                      description: |-
+                        DestinationVrf is the VRF in which the GRE tunnel lives. It must be a
+                        user-created VRFRouteConfiguration (with VNI + route-target).
+                      maxLength: 12
+                      type: string
+                    key:
+                      description: TunnelKey is an optional GRE encapsulation key.
+                      format: int32
+                      type: integer
+                    name:
+                      type: string
+                    sourceLoopback:
+                      description: |-
+                        SourceLoopback is the name of the loopback (defined on the destination
+                        VRF's VRFRouteConfiguration) whose per-node allocated IP is used as the
+                        GRE tunnel source address.
+                      type: string
+                    type:
+                      description: Type is the GRE encapsulation type of the tunnel.
+                      enum:
+                      - l2gre
+                      - l3gre
+                      type: string
+                  required:
+                  - destinationIP
+                  - destinationVrf
+                  - sourceLoopback
+                  - type
+                  type: object
+                type: array
               revision:
                 description: Revision is a hash of the NetworkConfigRevision object
                   that is used to identify the particular revision.
@@ -397,6 +544,33 @@ spec:
                         - cidr
                         type: object
                       maxItems: 4294967295
+                      type: array
+                    loopbacks:
+                      description: |-
+                        Loopbacks defines loopback interfaces for the VRF with per-node IP
+                        allocation from a subnet. The operator allocates a deterministic per-node
+                        address from each loopback's subnet (used e.g. as a mirror GRE tunnel
+                        source) and advertises it via the VRF's EVPN export filter.
+                      items:
+                        description: |-
+                          VRFLoopback defines a loopback interface inside a VRF whose address is
+                          allocated per-node from a subnet.
+                        properties:
+                          name:
+                            description: |-
+                              Name is the loopback interface name (e.g. "lo.mir"). It must fit within the
+                              Linux interface name length limit (15 characters).
+                            maxLength: 15
+                            type: string
+                          subnet:
+                            description: Subnet is the CIDR from which a unique per-node
+                              loopback IP is allocated.
+                            pattern: ^((([0-9]{1,3}\.){3}[0-9]{1,3})|(([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}))/[0-9]{1,3}$
+                            type: string
+                        required:
+                        - name
+                        - subnet
+                        type: object
                       type: array
                     name:
                       type: string

@@ -99,3 +99,27 @@ func (f *Framework) CurlFromCluster2Pod(ctx context.Context, namespace, podName,
 	}
 	return "", fmt.Errorf("unexpected wget response: %s", stderr)
 }
+
+// EnsureIPv6NoDad disables IPv6 Duplicate Address Detection on the given pod
+// interface and re-adds the address. In containerlab/Kind environments CRA bridge
+// agents may answer DAD probes, leaving the address in "dadfailed" state.
+func (f *Framework) EnsureIPv6NoDad(ctx context.Context, namespace, podName, ipv6Addr, iface string) error {
+	//nolint:dogsled // best-effort sysctl, outputs unused
+	_, _, _ = f.ExecInPod(ctx, namespace, podName, "", []string{
+		"sysctl", "-w", fmt.Sprintf("net.ipv6.conf.%s.accept_dad=0", iface),
+	})
+
+	//nolint:dogsled // best-effort addr del, outputs unused
+	_, _, _ = f.ExecInPod(ctx, namespace, podName, "", []string{
+		"ip", "addr", "del", ipv6Addr + "/64", "dev", iface,
+	})
+
+	_, stderr, err := f.ExecInPod(ctx, namespace, podName, "", []string{
+		"ip", "addr", "add", ipv6Addr + "/64", "dev", iface,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to re-add IPv6 address: %s: %w", stderr, err)
+	}
+
+	return nil
+}

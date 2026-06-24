@@ -85,6 +85,8 @@ type VRF struct {
 	MirrorACLs []MirrorACL `json:"mirrorAcls,omitempty"`
 	// Redistribute is a config for BGP redistribution.
 	Redistribute *Redistribute `json:"redistribute,omitempty"`
+	// GREs is a map of GRE tunnel interfaces
+	GREs map[string]GRE `json:"gres,omitempty"`
 }
 
 // Redistribute represents a BGP redistribution configuration.
@@ -267,24 +269,55 @@ type PolicyRoute struct {
 	NextHop NextHop `json:"nextHop"`
 }
 
-// EncapsulationType represents an encapsulation type.
-type EncapsulationType string
+// MirrorDirection represents the direction of mirrored traffic.
+type MirrorDirection string
 
 const (
-	EncapsulationTypeGRE EncapsulationType = "gre"
+	// MirrorDirectionIngress represents ingress mirrored traffic.
+	MirrorDirectionIngress MirrorDirection = "ingress"
+	// MirrorDirectionEgress represents egress mirrored traffic.
+	MirrorDirectionEgress MirrorDirection = "egress"
 )
 
 // MirrorACL represents a mirror ACL configuration.
 type MirrorACL struct {
 	// TrafficMatch is the traffic match for the mirror ACL.
 	TrafficMatch TrafficMatch `json:"trafficMatch"`
-	// DestinationAddress is the destination address for the mirrored traffic.
+	// MirrorDestination is the name of the interface to mirror to (in most cases a GRE interface).
+	MirrorDestination string `json:"mirrorDestination"`
+	// Direction is the direction of mirrored traffic.
+	// +kubebuilder:validation:Enum=ingress;egress
+	Direction MirrorDirection `json:"direction"`
+}
+
+// GRELayer represents the GRE encapsulation layer.
+type GRELayer string
+
+const (
+	// GRELayer2 configures GRE with Layer 2 (Ethernet) encapsulation (GRE TAP).
+	GRELayer2 GRELayer = "layer2"
+	// GRELayer3 configures GRE with Layer 3 (IP) encapsulation (standard GRE).
+	GRELayer3 GRELayer = "layer3"
+)
+
+// GRE represents a GRE tunnel interface configuration.
+type GRE struct {
+	// DestinationAddress is the address of the GRE interface
 	DestinationAddress string `json:"destinationAddress"`
-	// DestinationVrf is the destination VRF for the mirrored traffic.
-	DestinationVrf string `json:"destinationVrf"`
-	// EncapsulationType is the encapsulation type for the mirrored traffic.
-	// +kubebuilder:validation:Enum=gre
-	EncapsulationType EncapsulationType `json:"encapsulationType"`
+	// SourceAddress is the source address of the GRE interface.
+	SourceAddress string `json:"sourceAddress"`
+	// SourceInterface is the name of the interface that owns the source address
+	// (used as the tunnel's link-interface). The kernel validates the tunnel
+	// source against this interface, so it must be the loopback carrying
+	// SourceAddress; otherwise an IPv6 GRE refuses to originate traffic
+	// ("Local address not yet configured").
+	SourceInterface string `json:"sourceInterface,omitempty"`
+	// Layer is the GRE encapsulation layer.
+	// +kubebuilder:validation:Enum=layer2;layer3
+	// +kubebuilder:default=layer3
+	Layer GRELayer `json:"layer"`
+	// EncapsulationKey is the encapsulation key for the GRE interface.
+	EncapsulationKey *uint32 `json:"encapsulationKey,omitempty"`
 }
 
 // NextHop represents a next hop configuration.

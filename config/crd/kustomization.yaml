@@ -8,6 +8,8 @@ resources:
 - bases/network.t-caas.telekom.com_nodenetplanconfigs.yaml
 - bases/network.t-caas.telekom.com_nodenetworkconfigs.yaml
 - bases/network.t-caas.telekom.com_networkconfigrevisions.yaml
+- bases/network.t-caas.telekom.com_mirrortargets.yaml
+- bases/network.t-caas.telekom.com_mirrorselectors.yaml
 #+kubebuilder:scaffold:crdkustomizeresource
 
 # [WEBHOOK] To enable webhook, uncomment all the sections with [WEBHOOK] prefix.

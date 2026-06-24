@@ -1,0 +1,78 @@
+# Mirror infrastructure: a dedicated mirror VRF with a per-node loopback subnet,
+# the collector L2 network (VLAN 590) and the MirrorTarget describing the GRE
+# collector. MirrorSelectors are applied per test case.
+#
+# The mirror VRF is a standard VRFRouteConfiguration. Its `loopbacks` field
+# declares a subnet from which the operator allocates a unique per-node GRE
+# source IP and advertises it via the EVPN export filter.
+apiVersion: network.t-caas.telekom.com/v1alpha1
+kind: VRFRouteConfiguration
+metadata:
+  name: mirror-test-vrf
+spec:
+  vrf: mirror
+  vni: 2002099
+  routeTarget: "65188:2099"
+  seq: 20
+  loopbacks:
+  - name: lo.mir
+    subnet: 10.250.91.0/29
+  - name: lo.mir6
+    subnet: "fd94:685b:30cf:591::/125"
+  export:
+  # collector network (VLAN 590)
+  - cidr: 10.250.90.0/24
+    le: 32
+    action: permit
+  - cidr: "fd94:685b:30cf:590::/64"
+    le: 128
+    action: permit
+  # per-node GRE source loopbacks (operator also auto-appends the exact /32 & /128)
+  - cidr: 10.250.91.0/24
+    le: 32
+    action: permit
+  - cidr: "fd94:685b:30cf:591::/64"
+    le: 128
+    action: permit
+  import: []
+---
+# Collector L2 network in the mirror VRF. The collector pod attaches here.
+apiVersion: network.t-caas.telekom.com/v1alpha1
+kind: Layer2NetworkConfiguration
+metadata:
+  name: vlan590
+spec:
+  anycastGateways:
+  - 10.250.90.1/24
+  - fd94:685b:30cf:590::1/64
+  anycastMac: 1a:ee:cf:2f:a7:b0
+  id: 590
+  mtu: 1500
+  vni: 4000090
+  vrf: mirror
+---
+# IPv4 GRE collector. The GRE tunnel lives in the mirror VRF and uses the lo.mir
+# loopback's per-node IPv4 address as its source.
+apiVersion: network.t-caas.telekom.com/v1alpha1
+kind: MirrorTarget
+metadata:
+  name: collector-prod
+spec:
+  type: l3gre
+  destinationIP: 10.250.90.100
+  key: 1001
+  destinationVrf: mirror
+  sourceLoopback: lo.mir
+---
+# IPv6 collector (IP6GRE). Uses the lo.mir6 loopback's per-node IPv6 /128 as the
+# GRE source; the selected traffic may be IPv4 or IPv6 and is carried over IPv6.
+apiVersion: network.t-caas.telekom.com/v1alpha1
+kind: MirrorTarget
+metadata:
+  name: collector-prod-v6
+spec:
+  type: l3gre
+  destinationIP: "fd94:685b:30cf:590::100"
+  key: 1006
+  destinationVrf: mirror
+  sourceLoopback: lo.mir6

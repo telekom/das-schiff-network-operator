@@ -47,3 +47,5 @@ e2e/setup/e2e/
 *.conf.sav
 
 vendor/
+.gocache/
+pkg/cra-vsr/config.yaml

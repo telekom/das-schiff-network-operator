@@ -68,6 +68,22 @@ type ConfigRevisionReconciler struct {
 	maxUpdating      int
 
 	importMode ImportMode
+
+	// mirrorAllocCache memoises the per-node loopback allocation so that building
+	// NodeNetworkConfigs node-by-node during a rollout does not recompute it (and
+	// re-list all configs) for every single node.
+	mirrorAllocCache mirrorAllocCache
+}
+
+// mirrorAllocCache caches a loopbackAllocator for a given (revision, ready-node
+// set). The allocation is deterministic for those inputs, so it is safe to reuse
+// across the per-node builds of a rollout. The ready-node set is part of the key
+// because node membership does not change the revision hash, yet a newly-joined
+// node must be picked up immediately (otherwise it would silently run without its
+// mirror loopback/tunnel until an unrelated change bumped the revision).
+type mirrorAllocCache struct {
+	key   string
+	alloc *loopbackAllocator
 }
 
 // Reconcile starts reconciliation.
@@ -144,6 +160,11 @@ func (crr *ConfigRevisionReconciler) reconcileDebounced(ctx context.Context) err
 		if err := crr.deployNodeConfig(ctx, nodesToDeploy[0], revisionToDeploy); err != nil {
 			return fmt.Errorf("error deploying node configurations: %w", err)
 		}
+	}
+
+	// Update MirrorTarget/MirrorSelector status from the deployed configs.
+	if err := crr.reconcileMirrorStatus(ctx); err != nil {
+		return fmt.Errorf("error reconciling mirror status: %w", err)
 	}
 
 	// remove all but last known valid revision
@@ -345,7 +366,7 @@ func (crr *ConfigRevisionReconciler) deployNodeConfig(ctx context.Context, node 
 		return nil
 	}
 
-	newConfig, err := crr.CreateNodeNetworkConfig(node, revision)
+	newConfig, err := crr.CreateNodeNetworkConfig(ctx, node, revision)
 	if err != nil {
 		return fmt.Errorf("error preparing NodeNetworkConfig for node %s: %w", node.Name, err)
 	}
@@ -383,7 +404,7 @@ func matchSelector(node *corev1.Node, selector *metav1.LabelSelector) bool {
 	return labelSelector.Matches(labels.Set(node.ObjectMeta.Labels))
 }
 
-func (crr *ConfigRevisionReconciler) CreateNodeNetworkConfig(node *corev1.Node, revision *v1alpha1.NetworkConfigRevision) (*v1alpha1.NodeNetworkConfig, error) {
+func (crr *ConfigRevisionReconciler) CreateNodeNetworkConfig(ctx context.Context, node *corev1.Node, revision *v1alpha1.NetworkConfigRevision) (*v1alpha1.NodeNetworkConfig, error) {
 	// create new config
 	c := &v1alpha1.NodeNetworkConfig{
 		ObjectMeta: metav1.ObjectMeta{
@@ -403,6 +424,9 @@ func (crr *ConfigRevisionReconciler) CreateNodeNetworkConfig(node *corev1.Node, 
 	}
 	if err := buildNodeBgpPeers(node, revision, c); err != nil {
 		return nil, fmt.Errorf("error building node Layer2: %w", err)
+	}
+	if err := crr.buildNodeMirror(ctx, node, revision, c); err != nil {
+		return nil, fmt.Errorf("error building node mirror config: %w", err)
 	}
 
 	c.Spec.Revision = revision.Spec.Revision

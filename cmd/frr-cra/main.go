@@ -59,7 +59,7 @@ var (
 // to prevent log injection attacks (CodeQL: Log entries created from user input).
 var logSanitizer = strings.NewReplacer("\n", "", "\r", "")
 
-func deleteLayer2(cfg nl.NetlinkConfiguration) error {
+func deleteLayer2(cfg *nl.NetlinkConfiguration) error {
 	existing, err := nlManager.ListL2()
 	if err != nil {
 		return fmt.Errorf("error listing L2: %w", err)
@@ -94,7 +94,7 @@ func deleteLayer2(cfg nl.NetlinkConfiguration) error {
 	return nil
 }
 
-func createLayer2(cfg nl.NetlinkConfiguration) error {
+func createLayer2(cfg *nl.NetlinkConfiguration) error {
 	existing, err := nlManager.ListL2()
 	if err != nil {
 		return fmt.Errorf("error listing L2: %w", err)
@@ -123,7 +123,7 @@ func createLayer2(cfg nl.NetlinkConfiguration) error {
 	return nil
 }
 
-func reconcileNeighborSync(cfg nl.NetlinkConfiguration) {
+func reconcileNeighborSync(cfg *nl.NetlinkConfiguration) {
 	if neighborSyncer == nil {
 		return
 	}
@@ -360,7 +360,7 @@ func protoNumber(proto string) int {
 	}
 }
 
-func getVRFsToDelete(cfg nl.NetlinkConfiguration) ([]nl.VRFInformation, error) {
+func getVRFsToDelete(cfg *nl.NetlinkConfiguration) ([]nl.VRFInformation, error) {
 	existing, err := nlManager.ListL3()
 	if err != nil {
 		return nil, fmt.Errorf("error listing L3 VRF information: %w", err)
@@ -388,7 +388,7 @@ func getVRFsToDelete(cfg nl.NetlinkConfiguration) ([]nl.VRFInformation, error) {
 	return toDelete, nil
 }
 
-func createVRFs(cfg nl.NetlinkConfiguration) error {
+func createVRFs(cfg *nl.NetlinkConfiguration) error {
 	existing, err := nlManager.ListL3()
 	if err != nil {
 		return fmt.Errorf("error listing L3 VRF information: %w", err)
@@ -417,7 +417,7 @@ func createVRFs(cfg nl.NetlinkConfiguration) error {
 	return nil
 }
 
-func reconcileLayer3(cfg nl.NetlinkConfiguration) error {
+func reconcileLayer3(cfg *nl.NetlinkConfiguration) error {
 	vrfsToDelete, err := getVRFsToDelete(cfg)
 	if err != nil {
 		return fmt.Errorf("error getting VRFs to delete: %w", err)
@@ -507,7 +507,7 @@ func applyConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Delete Layer2
-	err = deleteLayer2(craConfiguration.NetlinkConfiguration)
+	err = deleteLayer2(&craConfiguration.NetlinkConfiguration)
 	if err != nil {
 		log.Println("Failed to reconcile Layer2", err)
 		http.Error(w, fmt.Sprintf("Failed to reconcile Layer2: %v", err), http.StatusInternalServerError)
@@ -515,7 +515,7 @@ func applyConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Reconcile Layer3
-	err = reconcileLayer3(craConfiguration.NetlinkConfiguration)
+	err = reconcileLayer3(&craConfiguration.NetlinkConfiguration)
 	if err != nil {
 		log.Println("Failed to reconcile Layer3", err)
 		http.Error(w, fmt.Sprintf("Failed to reconcile Layer3: %v", err), http.StatusInternalServerError)
@@ -523,7 +523,7 @@ func applyConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Recreate Layer2
-	err = createLayer2(craConfiguration.NetlinkConfiguration)
+	err = createLayer2(&craConfiguration.NetlinkConfiguration)
 	if err != nil {
 		log.Println("Failed to reconcile Layer2", err)
 		http.Error(w, fmt.Sprintf("Failed to reconcile Layer2: %v", err), http.StatusInternalServerError)
@@ -531,13 +531,20 @@ func applyConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Reconcile neighbor sync for ARP/NDP refresh
-	reconcileNeighborSync(craConfiguration.NetlinkConfiguration)
+	reconcileNeighborSync(&craConfiguration.NetlinkConfiguration)
 
 	// Reconcile SBR policy routes as ip rules
 	if err := reconcilePolicyRoutes(craConfiguration.PolicyRoutes); err != nil {
 		log.Println("Failed to reconcile policy routes", err)
 		http.Error(w, fmt.Sprintf("Failed to reconcile policy routes: %v", err), http.StatusInternalServerError)
 		return
+	}
+
+	// Reconcile traffic mirroring (loopbacks, GRE tunnels, tc filters).
+	// Mirroring is an additive, non-disruptive observability feature, so a mirror
+	// programming error must not fail the whole node configuration.
+	if err := nlManager.ReconcileMirror(&craConfiguration.NetlinkConfiguration); err != nil {
+		log.Println("Warning: failed to reconcile mirror configuration (continuing):", err)
 	}
 
 	w.WriteHeader(http.StatusOK)
