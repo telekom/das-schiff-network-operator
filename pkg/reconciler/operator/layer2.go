@@ -61,9 +61,10 @@ func buildNetplanVLANs(node *corev1.Node, revision *v1alpha1.NetworkConfigRevisi
 		}
 
 		vlan := map[string]interface{}{
-			"id":   l2.ID,
-			"link": "hbn",
-			"mtu":  l2.MTU,
+			"id":       l2.ID,
+			"link":     "hbn",
+			"mtu":      l2.MTU,
+			"critical": true,
 		}
 		if l2.DisableSegmentation {
 			vlan["generic-receive-offload"] = false
