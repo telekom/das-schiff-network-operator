@@ -1,24 +1,33 @@
 # Proposal 01 — Traffic Mirroring
 
-- **Status:** Draft
-- **Date:** 2026-02-07
+- **Status:** Implemented
+- **Date:** 2026-02-07 (proposal); implemented in the `api/mirror-extensions` work
 - **Authors:** das-schiff network-operator team
+
+> **Note:** This document started as a pre-implementation proposal. It has been
+> updated to describe the design **as implemented**. Two notable deviations from
+> the original draft: (1) per-node source IPs are allocated **deterministically
+> from a subnet** declared on the `VRFRouteConfiguration` loopback — there is no
+> Cluster API IPAM dependency; and (2) the GRE/GRETap/loopback/`<mirror-traffic>`
+> rendering was added **in-repo** to `pkg/cra-vsr` (and the equivalent netlink
+> rendering to the CRA-FRR path), rather than relying on a pre-existing vendor
+> implementation.
 
 ## 1. Summary
 
 This proposal describes how to implement end-to-end traffic mirroring in the das-schiff network operator.
 The goal is to allow users to declaratively mirror selected traffic flows from Layer 2 (secondary network) or VRF (fabric) interfaces towards a remote GRE-encapsulated collector, while keeping the operator's revision-based, node-by-node rollout model intact.
 
-## 2. Current State
+## 2. Starting Point
 
 ### 2.1 Existing CRDs
 
-The API types are already scaffolded but **not wired up**:
+At the start of this work the API types were scaffolded but **not wired up**:
 
-| Resource | Scope | File | Status |
+| Resource | Scope | File | Starting status |
 |---|---|---|---|
-| `MirrorTarget` | Cluster | `api/v1alpha1/mirrortarget_types.go` | Types + CRD exist, **not reconciled** |
-| `MirrorSelector` | Cluster | `api/v1alpha1/mirrorselector_types.go` | Types + CRD exist, **not reconciled** |
+| `MirrorTarget` | Cluster | `api/v1alpha1/mirrortarget_types.go` | Types + CRD existed, **not reconciled** |
+| `MirrorSelector` | Cluster | `api/v1alpha1/mirrorselector_types.go` | Types + CRD existed, **not reconciled** |
 
 **MirrorTarget** describes *where* mirrored traffic is sent:
 
@@ -32,7 +41,7 @@ type MirrorTargetSpec struct {
 }
 ```
 
-`SourceLoopback` explicitly selects which loopback interface (and therefore which IPAM pool / allocated IP) within `DestinationVrf` is used as the GRE tunnel source address. This avoids ambiguity when a VRF has multiple loopbacks — without it, the operator would have to guess (e.g. pick the first, or the one with the lowest IP), which is fragile and non-deterministic.
+`SourceLoopback` explicitly selects which loopback interface (and therefore which per-node allocated IP) within `DestinationVrf` is used as the GRE tunnel source address. This avoids ambiguity when a VRF has multiple loopbacks — without it, the operator would have to guess (e.g. pick the first, or the one with the lowest IP), which is fragile and non-deterministic.
 
 **MirrorSelector** describes *what* traffic to capture and in which direction:
 
@@ -92,15 +101,17 @@ The `pkg/cra-vsr` package (extended in-repo by this change):
 5. Maps `MirrorACL.Direction` to `<direction>` (`ingress` = to-workload / `egress` = from-workload, inverted to the interface-relative direction on workload-facing ports).
 6. Builds traffic match filters with src/dst prefix/address, ports, and protocol.
 
-### 2.3 What Is Missing (Operator-Side Only)
+### 2.3 What Was Missing (Operator-Side) — Now Implemented
 
-1. **Config controller** (`controllers/operator/config_controller.go`) does not watch `MirrorSelector` / `MirrorTarget`.
-2. **NetworkConfigRevision** does not carry any mirror data — it only stores `Layer2Revision`, `VRFRevision`, and `BGPRevision`.
-3. **Config-build step** (`pkg/reconciler/operator/`) never populates `MirrorACLs` on the per-node `NodeNetworkConfig`.
-4. **Source IP address management** — each node needs a unique per-VRF source IP for the GRE tunnel, assigned as a loopback and advertised via EVPN export filter. The `VRFRouteConfiguration` will carry loopback definitions with a `poolRef` to a Cluster API IPAM pool; the operator creates `IPAddressClaim`s per node.
-5. **The GRE interface and loopback IP** entries are not populated in the `NodeNetworkConfig`.
+At the start, the operator side was unwired. The following were added:
 
-> **Key insight:** With the CRA-VSR rendering added, the remaining work is in the **operator** (reconciler / config-build step), which wires `MirrorSelector`/`MirrorTarget` into the per-node `NodeNetworkConfig`.
+1. **Config controller** (`controllers/operator/config_controller.go`) now watches `MirrorSelector` / `MirrorTarget`.
+2. **NetworkConfigRevision** now carries mirror data (`MirrorTargets`, `MirrorSelectors`) and includes it in the revision hash.
+3. **Config-build step** (`pkg/reconciler/operator/`) now populates `MirrorACLs` on the per-node `NodeNetworkConfig`.
+4. **Source IP address management** — each node gets a unique per-VRF source IP for the GRE tunnel, assigned as a loopback and advertised via the EVPN export filter. The `VRFRouteConfiguration` carries loopback definitions with a `subnet`; the operator allocates a deterministic per-node IP from that subnet at build time (no external IPAM).
+5. **GRE interface and loopback IP** entries are populated in the `NodeNetworkConfig`, and the CRA-VSR / CRA-FRR agents render them.
+
+> **Key insight:** mirroring reuses the existing revision → `NodeNetworkConfig` → agent pipeline end-to-end; the operator resolves `MirrorSelector`/`MirrorTarget` into per-node config, and both agents render the resulting GRE/loopback/mirror-traffic.
 
 ## 3. Design Decisions
 
@@ -129,14 +140,14 @@ The GRE tunnel used to transport mirrored traffic **MUST live in a dedicated fab
 
 The VRF needs:
 - A **VNI** and **route-target** (so it participates in EVPN and the collector is reachable).
-- **Loopbacks with a `poolRef`** — the `VRFRouteConfiguration` owns the loopback definitions, including the reference to a Cluster API IPAM pool from which per-node IPs are allocated (see §3.3).
+- **Loopbacks with a `subnet`** — the `VRFRouteConfiguration` owns the loopback definitions, including the CIDR from which the operator allocates a deterministic per-node IP (see §3.3).
 - An **EVPN export filter** that permits the per-node source IPs (loopback addresses — the operator auto-appends these at build time).
 
-#### Why the loopback pool reference belongs to the VRF, not MirrorTarget
+#### Why the loopback subnet belongs to the VRF, not MirrorTarget
 
-The previous design had `PoolRef` on the `MirrorTarget`. But the loopback is an **interface inside the VRF** and its IP must appear in the VRF's **EVPN export filter**. Having the MirrorTarget "own" the loopback creates a cross-cutting concern: the target would dictate VRF-level infrastructure that the VRF itself should control.
+An earlier draft put the source-IP pool on the `MirrorTarget`. But the loopback is an **interface inside the VRF** and its IP must appear in the VRF's **EVPN export filter**. Having the MirrorTarget "own" the loopback creates a cross-cutting concern: the target would dictate VRF-level infrastructure that the VRF itself should control.
 
-By placing the loopback (with its pool reference) on the `VRFRouteConfiguration`:
+By placing the loopback (with its subnet) on the `VRFRouteConfiguration`:
 
 - The loopback flows through the **normal revision pipeline** as part of the VRF config.
 - The EVPN export filter enrichment is co-located with the VRF that owns it.
@@ -159,11 +170,11 @@ Without this explicit reference, the operator would need a heuristic to pick a l
 
   VRFRouteConfiguration "mirror"
   └── loopbacks:
-      ├── lo.mir   → poolRef: InClusterIPPool/mirror-source-ips  ← used by collector-prod
-      └── lo.bgp   → poolRef: InClusterIPPool/bgp-peering-ips    ← used by something else
+      ├── lo.mir   → subnet: 10.99.0.0/24    ← per-node IP allocated here, used by collector-prod
+      └── lo.bgp   → subnet: 10.99.1.0/24    ← used by something else
 ```
 
-### 3.3 Per-Node Source IP Address Management via Cluster API IPAM
+### 3.3 Per-Node Source IP Address Management — Deterministic Subnet Allocation
 
 Each node needs a **unique source IP** for the GRE tunnel endpoint. This is required because:
 
@@ -171,83 +182,60 @@ Each node needs a **unique source IP** for the GRE tunnel endpoint. This is requ
 - GRE tunnels with overlapping source IPs would collide at the collector.
 - The source IP must be reachable from the collector via the mirror VRF's EVPN fabric.
 
-#### Cluster API IPAM Integration
+#### Deterministic allocation from the loopback subnet
 
-We use the **Cluster API IPAM contract** (`ipam.cluster.x-k8s.io`) for source IP allocation. This is a well-established Kubernetes-native IPAM interface with multiple provider implementations:
+The per-node IP is allocated **deterministically from the CIDR declared on the VRF loopback** — there is no external IPAM dependency. The operator's `loopbackAllocator` computes a stable `node → IP` map for each `<vrf>/<loopback>` subnet:
 
-- **[In-Cluster Provider](https://github.com/kubernetes-sigs/cluster-api-ipam-provider-in-cluster)** — lightweight, CRD-based, no external dependencies. Good for dev/test.
-- **[Infoblox Provider](https://github.com/telekom/cluster-api-ipam-provider-infoblox)** — integrates with Infoblox NIOS for enterprise IPAM. Likely production choice.
+- Nodes are sorted by name; each gets the lowest free host address in the subnet.
+- The IPv4 network and broadcast addresses are skipped.
+- **Existing allocations are preserved** — a node keeps the IP already present in its `NodeNetworkConfig`, so re-reconcile is stable. An address that no longer falls inside the (possibly changed) subnet is dropped and the node is re-allocated a valid one.
+- Addresses still held by out-of-scope (e.g. temporarily NotReady) nodes are **reserved**, so they are never handed to a different node (no duplicate source IPs).
+- The allocation is computed once per `(revision, ready-node set)` and reused across the per-node builds of a rollout.
 
-The contract works as follows:
+Because the loopback subnet is part of the `VRFRouteConfiguration` (and thus the revision), and the result is written into each `NodeNetworkConfig`, the allocation flows through the normal gated pipeline with no extra control-plane components.
 
-1. The user creates an **IP Pool** (provider-specific CRD, e.g. `InClusterIPPool` or `InfobloxIPPool`).
-2. The operator creates an **`IPAddressClaim`** per node, referencing the pool.
-3. The IPAM provider fulfils the claim by creating an **`IPAddress`** resource with the allocated address.
-4. The operator reads the `IPAddress` and uses it as the loopback/GRE source IP.
+#### Subnet on the VRF Loopback
 
-```yaml
-# Provider-specific pool (InClusterIPPool example)
-apiVersion: ipam.cluster.x-k8s.io/v1beta1
-kind: InClusterIPPool
-metadata:
-  name: mirror-source-ips
-spec:
-  addresses:
-  - 10.99.0.1-10.99.0.254
-  prefix: 32
----
-# Infoblox example
-apiVersion: ipam.cluster.x-k8s.io/v1beta1
-kind: InfobloxIPPool
-metadata:
-  name: mirror-source-ips
-spec:
-  networkView: "default"
-  subnet: "10.99.0.0/24"
-```
-
-#### Pool Reference on the VRF Loopback
-
-The `VRFRouteConfiguration` is extended with a `loopbacks` field that carries both the loopback name and a `poolRef` to a Cluster API IPAM pool:
+The `VRFRouteConfiguration` carries a `loopbacks` field with the loopback name and the subnet to allocate from:
 
 ```go
 type VRFRouteConfigurationSpec struct {
     // ... existing fields (VRF, VNI, RouteTarget, Import, Export, etc.) ...
 
-    // Loopbacks defines loopback interfaces for the VRF with optional per-node IP allocation.
+    // Loopbacks defines loopback interfaces for the VRF with per-node IP allocation.
     Loopbacks []VRFLoopback `json:"loopbacks,omitempty"`
 }
 
 type VRFLoopback struct {
-    // Name is the loopback interface name (e.g. "lo.mir").
+    // Name is the loopback interface name (e.g. "lo.mir"), max 15 chars.
     Name string `json:"name"`
-    // PoolRef references a Cluster API IPAM pool (e.g. InClusterIPPool, InfobloxIPPool).
-    // The operator creates an IPAddressClaim per node and uses the allocated IP.
-    PoolRef corev1.TypedObjectReference `json:"poolRef"`
+    // Subnet is the CIDR from which a unique per-node loopback IP is allocated.
+    Subnet string `json:"subnet"`
 }
 ```
 
 This design means:
 - The loopback is **part of the VRF definition** and flows through the normal revision pipeline.
-- The EVPN export filter is enriched per-node by the operator with `permit <allocated-ip>/32`.
-- The `MirrorTarget` stays focused on tunnel properties — it does **not** own the loopback or pool.
+- The EVPN export filter is enriched per-node by the operator with `permit <allocated-ip>/32` (or `/128`).
+- The `MirrorTarget` stays focused on tunnel properties — it does **not** own the loopback or its subnet.
+
+> **Subnet sizing:** every node reserves an address from the subnet (whether or not it currently participates in mirroring), so the subnet must be large enough for the whole cluster plus the network/broadcast addresses.
 
 #### Allocation Flow
 
-1. **Revision pipeline** includes the mirror VRF (it's a standard `VRFRouteConfiguration`).
-2. During `NodeNetworkConfig` build, for each VRF loopback with a `poolRef`:
-   - Create or look up an `IPAddressClaim` named `<vrf>-<loopback>-<node>` with owner ref to the `NodeNetworkConfig`.
-   - Wait for the IPAM provider to fulfil it → read the `IPAddress.Spec.Address`.
-   - Populate `FabricVRFs["<vrf>"].Loopbacks["<name>"]` with the allocated IP.
+1. **Revision pipeline** includes the mirror VRF (it's a standard `VRFRouteConfiguration`, with its loopback subnet snapshotted).
+2. During `NodeNetworkConfig` build, for each referenced VRF loopback:
+   - Compute the deterministic per-node IP from the subnet (preserving any existing allocation).
+   - Populate `FabricVRFs["<vrf>"].Loopbacks["<name>"]` with `<ip>/32` (or `/128`).
    - Auto-append `permit <ip>/32` to the VRF's `EVPNExportFilter`.
-3. GRE tunnel interfaces (created by `MirrorTarget` resolution) use the loopback IP as `SourceAddress`.
+3. GRE tunnel interfaces (created by `MirrorTarget` resolution) use the loopback IP as `SourceAddress` and bind to the loopback as their source interface.
 
 ```
   Mirror VRF (e.g. "mirror")
   ┌──────────────────────────────────────────────────┐
-  │  Loopback lo.mir: 10.99.0.<node>/32              │ ← from IPAddressClaim
-  │  GRE      gre.mir: src=10.99.0.<node>            │
-  │                    dst=10.250.0.100 (collector)   │
+  │  Loopback lo.mir: 10.99.0.<node>/32              │ ← deterministic from subnet
+  │  GRE      gre.<hash>: src=10.99.0.<node>          │
+  │                       dst=10.250.0.100 (collector)│
   │  EVPN export filter: permit 10.99.0.<node>/32    │ ← auto-appended
   │  VNI: <configured>                               │
   │  RT:  <configured>                               │
@@ -256,11 +244,11 @@ This design means:
 
 #### Lifecycle
 
-- **Node added:** Operator creates `IPAddressClaim` → IPAM allocates → IP used in `NodeNetworkConfig`.
-- **Node removed:** `IPAddressClaim` is garbage-collected (owner ref to `NodeNetworkConfig`) → IPAM releases the IP.
-- **Stable across reconcile:** Claims are deterministically named, so re-reconcile finds the existing claim + address.
+- **Node added:** the next build includes the new ready node in the allocation; it gets the lowest free address.
+- **Node removed:** once its `NodeNetworkConfig` is garbage-collected, its address frees up for reuse.
+- **Stable across reconcile:** allocation is deterministic and preserves existing per-node IPs.
 
-> **Note:** The loopback model is already supported — `VRF.Loopbacks` exists in the `NodeNetworkConfig` API and CRA-VSR's `layer3.go` → `setupLoopback` renders them as `<loopback>` interfaces inside the VRF. The GRE model is also already supported — `VRF.GREs` exists and CRA-VSR's `layer3.go` → `setupGRE` renders them as `<gre>` or `<gretap>` interfaces.
+> **Note:** The loopback model is supported end-to-end — `VRF.Loopbacks` exists in the `NodeNetworkConfig` API; CRA-VSR's `layer3.go` → `setupLoopback` renders them as `<loopback>` interfaces and the CRA-FRR path (`pkg/nl`) creates dummy loopbacks inside the VRF. The GRE model is likewise supported — `VRF.GREs` is rendered as `<gre>`/`<gretap>` by CRA-VSR and as netlink GRE/GRETAP (incl. IP6GRE) by CRA-FRR.
 
 ### 3.4 Should Mirror Data Live in the NetworkConfigRevision?
 
@@ -352,7 +340,7 @@ The main trade-off accepted is that the revision CR grows with the number of mir
 
 ## 4. Implementation Plan
 
-> **Scope:** All implementation is in the **operator** only (`controllers/operator/`, `pkg/reconciler/operator/`). The `pkg/cra-vsr` package is vendor-maintained and already handles everything on the agent side.
+> **Scope:** The operator side (`controllers/operator/`, `pkg/reconciler/operator/`) resolves the CRDs into per-node config. Both agent rendering paths were extended in-repo: `pkg/cra-vsr` (6WIND vSR XML) and `pkg/nl` + `pkg/reconciler/agent-cra-frr` (Linux netlink/tc for CRA-FRR).
 
 ### Phase 1 — Operator-Side Wiring
 
@@ -362,7 +350,7 @@ The main trade-off accepted is that the revision CR grows with the number of mir
    Watches(&networkv1alpha1.MirrorTarget{}, h).
    ```
 
-2. **Add `fetchMirrorData`** in `config_reconciler.go` to list all `MirrorSelector` and `MirrorTarget` objects and resolve references. Mirror data is **not** added to the revision — only used at `NodeNetworkConfig` build time.
+2. **Add `fetchMirrorTargets`/`fetchMirrorSelectors`** in `config_reconciler.go` to list all `MirrorTarget` and `MirrorSelector` objects; their sorted snapshots are added to the `NetworkConfigRevision` (and hashed) and resolved at `NodeNetworkConfig` build time.
 
 ### Phase 2 — NodeNetworkConfig Build: Mirror ACL + GRE + Loopback + Export Filter
 
@@ -371,21 +359,19 @@ In `configrevision_reconciler.go` → `CreateNodeNetworkConfig`, after building 
 For each `MirrorSelector`:
 
 1. **Resolve references:**
-   - Look up the referenced `MirrorTarget` → get collector IP, GRE key, type (l2gre/l3gre), and source IP pool.
+   - Look up the referenced `MirrorTarget` → get collector IP, GRE key, type (l2gre/l3gre), destination VRF and source loopback.
    - Look up the referenced `MirrorSource` → get the `Layer2NetworkConfiguration` or `VRFRouteConfiguration` (including its `NodeSelector`).
 
 2. **Check node eligibility:** Only add mirror config to nodes matched by the source's `NodeSelector`.
 
 3. **Ensure the mirror destination VRF and loopback exist:**
    - The mirror destination VRF is identified by `MirrorTarget.Spec.DestinationVrf` (e.g. `"mirror"`).
-   - It must be a **user-created `VRFRouteConfiguration`** (with VNI + RT) and already present in `FabricVRFs` on the node. If not → set error status.
-   - The loopback named by `MirrorTarget.Spec.SourceLoopback` (e.g. `"lo.mir"`) must exist in the VRF's `loopbacks` list with a valid `poolRef`. If not → set error status.
+   - It must be a **user-created `VRFRouteConfiguration`** (with VNI + RT) and already present in `FabricVRFs` on the node. If not → skip on this node (status reflects it).
+   - The loopback named by `MirrorTarget.Spec.SourceLoopback` (e.g. `"lo.mir"`) must be defined in the VRF's `loopbacks` list with a `subnet`. If not → skip.
 
-4. **Resolve the source loopback IP via CAPI IPAM:**
+4. **Allocate the source loopback IP from the subnet:**
    - Look up the `VRFLoopback` named by `MirrorTarget.Spec.SourceLoopback` on the mirror VRF's `VRFRouteConfiguration`.
-   - Create or find the `IPAddressClaim` named `<vrf>-<loopback>-<node>` (Cluster API IPAM contract) using the loopback's `poolRef`.
-   - Read the fulfilled `IPAddress.Spec.Address` from the IPAM provider.
-   - If the claim is not yet fulfilled, the `NodeNetworkConfig` build is retried (requeue).
+   - Compute the deterministic per-node IP from its `subnet` via `loopbackAllocator` (preserving any existing allocation; reserving out-of-scope nodes' addresses).
 
 5. **Inject loopback into the mirror VRF:**
    ```go
@@ -396,9 +382,10 @@ For each `MirrorSelector`:
 
 6. **Inject GRE tunnel interface into the mirror VRF:**
    ```go
-   greName := "gre.mir"  // or "gretap.mir" for l2gre
+   greName := greInterfaceName(target.Name, target.Spec.Type) // "gre-<hash>" (l3gre) or "gtap-<hash>" (l2gre), <=15 chars
    fabricVrf.GREs[greName] = v1alpha1.GRE{
-       SourceAddress:      "<allocated-ip>",  // from IPAddress of the sourceLoopback
+       SourceAddress:      "<allocated-ip>",       // the sourceLoopback's per-node IP
+       SourceInterface:    target.Spec.SourceLoopback, // bind tunnel to the loopback (l3mdev/IP6GRE)
        DestinationAddress: target.Spec.DestinationIP,
        Layer:              "layer3",  // or "layer2" for l2gre
        EncapsulationKey:   target.Spec.TunnelKey,
@@ -425,22 +412,25 @@ For each `MirrorSelector`:
    ```go
    MirrorACL{
        TrafficMatch:      selector.Spec.TrafficMatch,
-       MirrorDestination: greName,   // e.g. "gre.mir" — the GRE interface name
+       MirrorDestination: greName,   // the GRE interface name (gre-<hash>/gtap-<hash>)
        Direction:         selector.Spec.Direction,
    }
    ```
 
-### Phase 3 — Cluster API IPAM Integration
+### Phase 3 — Per-Node Source IP Allocation
 
-1. **Add `ipam.cluster.x-k8s.io/v1beta1` to the scheme** and RBAC for `IPAddressClaim` / `IPAddress` resources.
-2. **Watch `IPAddress`** — when an IPAM provider fulfils a claim, the operator must re-reconcile the affected `NodeNetworkConfig`.
-3. **Claim lifecycle:**
-   - Create: `IPAddressClaim` with deterministic name `<vrf>-<loopback>-<node>`, owner ref to `NodeNetworkConfig`, pool ref from `VRFLoopback.PoolRef`.
-   - Read: Fulfilled claim → `Status.Address` → read `IPAddress.Spec.Address`.
-   - Delete: Garbage-collected when the `NodeNetworkConfig` is deleted (owner ref).
-4. **Provider deployment** is out of scope of this operator but must be documented:
-   - Dev/test: deploy `cluster-api-ipam-provider-in-cluster` + create `InClusterIPPool`.
-   - Production: deploy Infoblox IPAM provider + create `InfobloxIPPool`.
+No external IPAM is used. During `NodeNetworkConfig` build the operator's
+`loopbackAllocator` computes a deterministic `node → IP` map per `<vrf>/<loopback>`
+subnet:
+
+1. Sort nodes by name; assign the lowest free host address, skipping the IPv4
+   network and broadcast addresses.
+2. Preserve existing per-node allocations; drop and re-allocate any address that
+   no longer falls inside the (possibly changed) subnet.
+3. Reserve addresses still held by out-of-scope (e.g. NotReady) nodes so they are
+   never duplicated.
+4. The map is computed once per `(revision, ready-node set)` and reused for the
+   per-node builds of a rollout.
 
 ### Phase 4 — Status Reporting
 
@@ -453,36 +443,9 @@ For each `MirrorSelector`:
 
 ## 5. CRD Examples
 
-### Prerequisites — IP Pool (Cluster API IPAM)
+### Mirror Destination VRF (user-created, with loopback subnet)
 
-Deploy a Cluster API IPAM provider and create a pool. **In-Cluster** example for dev/test:
-
-```yaml
-apiVersion: ipam.cluster.x-k8s.io/v1beta1
-kind: InClusterIPPool
-metadata:
-  name: mirror-source-ips
-spec:
-  addresses:
-  - 10.99.0.1-10.99.0.254
-  prefix: 32
-```
-
-**Infoblox** example for production:
-
-```yaml
-apiVersion: ipam.cluster.x-k8s.io/v1beta1
-kind: InfobloxIPPool
-metadata:
-  name: mirror-source-ips
-spec:
-  networkView: "default"
-  subnet: "10.99.0.0/24"
-```
-
-### Mirror Destination VRF (user-created, with loopback pool ref)
-
-The mirror VRF is a standard `VRFRouteConfiguration`. The `loopbacks` field references the IPAM pool:
+The mirror VRF is a standard `VRFRouteConfiguration`. The `loopbacks` field declares the subnet the operator allocates per-node source IPs from (no IPAM provider required):
 
 ```yaml
 apiVersion: network.t-caas.telekom.com/v1alpha1
@@ -502,10 +465,7 @@ spec:
   # with the allocated source IPs (permit <src-ip>/32)
   loopbacks:
   - name: lo.mir
-    poolRef:
-      apiGroup: ipam.cluster.x-k8s.io
-      kind: InClusterIPPool       # or InfobloxIPPool
-      name: mirror-source-ips
+    subnet: 10.99.0.0/24   # per-node source IPs allocated deterministically from here
 ```
 
 ### MirrorTarget — GRE collector
@@ -523,7 +483,7 @@ spec:
   sourceLoopback: lo.mir     # loopback within the VRF → determines GRE source IP
 ```
 
-> **CRD change required:** Add `destinationVrf` and `sourceLoopback` fields to `MirrorTargetSpec`; remove `poolRef`.
+> **API note:** `MirrorTargetSpec` carries `destinationVrf` and `sourceLoopback` (and no IP pool reference); the source-IP subnet lives on the `VRFRouteConfiguration` loopback.
 
 ### MirrorSelector — Mirror L2 ingress traffic
 
@@ -591,7 +551,7 @@ spec:
         "lo.mir":
           ipAddresses: ["10.99.0.1/32"]
       gres:
-        "gre.mir":
+        "gre-1a2b3c4d":
           sourceAddress: "10.99.0.1"
           destinationAddress: "10.250.0.100"
           layer: layer3
@@ -601,7 +561,7 @@ spec:
       mirrorAcls:
       - trafficMatch:
           dstPrefix: "0.0.0.0/0"
-        mirrorDestination: "gre.mir"
+        mirrorDestination: "gre-1a2b3c4d"
         direction: egress
   layer2s:
     "100":
@@ -613,7 +573,7 @@ spec:
           srcPrefix: "10.100.0.0/16"
           protocol: "tcp"
           dstPort: 443
-        mirrorDestination: "gre.mir"
+        mirrorDestination: "gre-1a2b3c4d"
         direction: ingress
 ```
 
@@ -629,82 +589,71 @@ spec:
            │  references
            ▼
   ┌────────────────────┐    ┌───────────────────────────────────────┐
-  │  MirrorSource:     │    │  VRFRouteConfiguration "mirror"      │
-  │  L2NetConfig or    │    │  (loopbacks:                         │
-  │  VRFRouteConfig    │    │    - name: lo.mir                    │
-  └────────────────────┘    │      poolRef: → InClusterIPPool /   │
-                            │                 InfobloxIPPool)      │
-                            └──────────────────┬────────────────────┘
-                                               │ poolRef
-                                               ▼
-                            ┌───────────────────────────────────────┐
-                            │  CAPI IPAM Pool                       │
-                            │  (InClusterIPPool / InfobloxIPPool)   │
+  │  MirrorSource:     │    │  VRFRouteConfiguration "mirror"       │
+  │  L2NetConfig or    │    │  (loopbacks:                          │
+  │  VRFRouteConfig    │    │    - name: lo.mir                     │
+  └────────────────────┘    │      subnet: 10.99.0.0/24)            │
                             └───────────────────────────────────────┘
 
   Operator reconcile loop (pkg/reconciler/operator):
   ┌──────────────────────────────────────────────────────────────────┐
   │                                                                  │
-  │  1. List MirrorSelectors + MirrorTargets                        │
-  │  2. Resolve MirrorTarget → get collector IP, key, type, VRF,    │
-  │     and sourceLoopback                                          │
-  │  3. Resolve MirrorSource → get L2 VLAN or VRF name             │
-  │  4. Match nodes via source's nodeSelector                       │
-  │  5. For VRF loopbacks with poolRef:                             │
-  │     a) Create/find IPAddressClaim per node (CAPI IPAM)          │
-  │     b) Read fulfilled IPAddress → get allocated IP              │
-  │  6. Into mirror VRF on NodeNetworkConfig:                       │
-  │     a) Add Loopback with allocated IP                           │
-  │     b) Add GRE tunnel interface (src=loopback, dst=collector)   │
+  │  1. Snapshot MirrorTargets + MirrorSelectors into the revision   │
+  │  2. Resolve MirrorTarget → get collector IP, key, type, VRF,     │
+  │     and sourceLoopback                                           │
+  │  3. Resolve MirrorSource → get L2 VLAN or VRF name               │
+  │  4. Match nodes via source's nodeSelector                        │
+  │  5. Allocate per-node loopback IP deterministically from the     │
+  │     loopback subnet (loopbackAllocator)                          │
+  │  6. Into mirror VRF on NodeNetworkConfig:                        │
+  │     a) Add Loopback with allocated IP                            │
+  │     b) Add GRE tunnel interface (src=loopback, dst=collector)    │
   │     c) Auto-append source IP to EVPN export filter              │
-  │  7. Build MirrorACL entries (mirrorDestination = GRE intf name) │
-  │  8. Attach MirrorACLs to source L2 / VRF                       │
+  │  7. Build MirrorACL entries (mirrorDestination = GRE intf name)  │
+  │  8. Attach MirrorACLs to source L2 / VRF                         │
   │                                                                  │
   └────────────────────┬─────────────────────────────────────────────┘
                        │
                        ▼
   ┌────────────────────────────────────────────────────────┐
-  │      NodeNetworkConfig (per node)                      │
-  │  .FabricVRFs["mirror"].Loopbacks["lo.mir"]  = src IP   │
-  │  .FabricVRFs["mirror"].GREs["gre.mir"]      = tunnel   │
-  │  .FabricVRFs["mirror"].EVPNExportFilter     += src IP  │
-  │  .Layer2s["100"].MirrorACLs                 += ACL     │
-  │  .FabricVRFs["ext"].MirrorACLs              += ACL     │
+  │      NodeNetworkConfig (per node)                       │
+  │  .FabricVRFs["mirror"].Loopbacks["lo.mir"]   = src IP   │
+  │  .FabricVRFs["mirror"].GREs["gre-1a2b3c4d"]  = tunnel   │
+  │  .FabricVRFs["mirror"].EVPNExportFilter     += src IP   │
+  │  .Layer2s["100"].MirrorACLs                 += ACL      │
+  │  .FabricVRFs["ext"].MirrorACLs              += ACL      │
   └────────────────────┬───────────────────────────────────┘
                        │
                        ▼
   ┌──────────────────────────────────────────────────────────┐
-  │  CRA-VSR Agent (per node, vendor-maintained, no changes) │
-  │  Already handles:                                        │
-  │  1. Create VRF + VXLAN (from FabricVRFs)                │
-  │  2. Create loopback in VRF (from Loopbacks)             │
-  │  3. Create GRE/GRETap in VRF (from GREs)               │
-  │  4. Program <mirror-traffic> rules (from MirrorACLs):   │
-  │     - <rule from="vlan.100" direction="egress"          │
-  │            to="gre.mir" filter="..."/>                   │
-  │     - <rule from="vx.ext" direction="egress"            │
-  │            to="gre.mir" filter="..."/>                   │
-  │  5. Build traffic match filters per filter rule          │
+  │  Agent (per node) — CRA-VSR (XML) or CRA-FRR (netlink)   │
+  │  Both render, from the NodeNetworkConfig:                │
+  │  1. VRF + VXLAN (from FabricVRFs)                        │
+  │  2. Loopback in VRF (from Loopbacks)                     │
+  │  3. GRE/GRETap in VRF (from GREs)                        │
+  │  4. Mirror rules (from MirrorACLs), bound to the L2      │
+  │     access port vlan.<id> or the VRF's vx.<vrf>:         │
+  │     - from="vlan.100" direction (interface-relative)     │
+  │            to="gre-1a2b3c4d"                             │
+  │     - from="vx.ext"   direction (interface-relative)     │
+  │            to="gre-1a2b3c4d"                             │
+  │  5. Traffic match filters per rule                       │
   └──────────────────────────────────────────────────────────┘
 ```
 
-## 7. Open Questions
+## 7. Open Questions / Future Work
 
-1. **IPAM provider deployment:** The operator depends on a Cluster API IPAM provider being deployed. This must be documented as a prerequisite. For production the Infoblox provider is the likely choice; for dev/test the in-cluster provider suffices. Should the operator verify the provider is running and surface errors if claims remain unfulfilled?
+1. **Subnet sizing & exhaustion:** every node reserves an address from the loopback subnet. Should the operator surface a clear status/condition when the subnet is too small for the cluster (allocation fails for some nodes)?
 
-2. **`IPAddressClaim` requeue strategy:** If the IPAM provider has not yet fulfilled a claim when `NodeNetworkConfig` is being built, the operator must requeue. What is the appropriate backoff? Should there be a timeout after which the `MirrorSelector` status is set to `Error`?
+2. **Rate limiting / sampling:** Should `MirrorSelector` support a `sampleRate` field (e.g. 1:1000) to reduce volume? This can be added later.
 
-3. **Rate limiting / sampling:** Should `MirrorSelector` support a `sampleRate` field (e.g. 1:1000) to reduce volume? This can be added later.
+3. **Multiple targets per selector:** Currently each selector points to exactly one target. Multi-target (e.g. primary + backup collector) can be a future extension.
 
-4. **Multiple targets per selector:** Currently each selector points to exactly one target. Multi-target (e.g. primary + backup collector) can be a future extension.
+4. **EVPN export filter merging:** The per-node source IP is appended to the mirror VRF's EVPN export filter alongside whatever the user configured in the `VRFRouteConfiguration`. The operator merges these without overwriting user-defined filter items (idempotently).
 
-5. **EVPN export filter merging:** The per-node source IP must be appended to the mirror VRF's EVPN export filter alongside whatever the user configured in the `VRFRouteConfiguration`. The operator must merge these carefully without overwriting user-defined filter items.
+5. **L2 east-west completeness:** mirroring attaches to the `vlan.<id>` access port, so same-node/same-VLAN pod-to-pod traffic that is switched inside the macvlan driver (macvlan bridge mode, same parent) is not seen. Is that in scope?
 
-6. **CRA-FRR support:** This proposal focuses on the CRA-VSR path. The `cra-frr` agent would need equivalent mirror programming — this can be a follow-up.
-
-7. **GRE interface naming:** With multiple `MirrorTarget`s, each needs a unique GRE interface name inside the same VRF. Naming scheme: `gre.<target-hash>` (or `gretap.<target-hash>` for l2gre), staying within the 15-char Linux interface name limit.
-
-8. **Loopback as a general VRF feature:** The `loopbacks` field with `poolRef` on `VRFRouteConfiguration` is useful beyond mirroring (e.g. BGP peering loopbacks). Should it be designed as a generic feature from the start?
+6. **vSR mirror-traffic direction semantics:** the L2 direction inversion assumes the 6WIND `<mirror-traffic>` `direction` is interface-relative (same rx/tx convention as Linux tc). Worth validating against actual vSR capture behavior.
 
 ## 8. Decision Record
 
@@ -720,6 +669,6 @@ spec:
 | D8 | Bind VRF mirrors to `vx.<vrf>` VXLAN interface (if VNI exists) | CRA-VSR uses VXLAN name as `<from>` for VRF mirror-traffic rules |
 | D9 | `MirrorACL.MirrorDestination` = GRE interface name | CRA-VSR maps this to the `<to>` field in `<mirror-traffic>` rules |
 | D10 | **Loopback subnet lives on `VRFRouteConfiguration`** (`VRFLoopback.Subnet`), not `MirrorTarget` | Loopback is a VRF interface; its IP must be in the VRF's EVPN export filter; co-locating avoids cross-cutting concerns and flows through the revision pipeline |
-| D11 | **Remove `PoolRef` from `MirrorTargetSpec`**; add `destinationVrf` + `sourceLoopback` | MirrorTarget specifies tunnel properties + which VRF and loopback to bind the GRE source to; IP allocation is the VRF's responsibility |
+| D11 | `MirrorTargetSpec` carries `destinationVrf` + `sourceLoopback` (no IP-pool reference) | MirrorTarget specifies tunnel properties + which VRF and loopback to bind the GRE source to; IP allocation is the VRF's responsibility |
 | D13 | **`MirrorTarget.SourceLoopback` explicitly selects the loopback** within the VRF | Avoids ambiguity when a VRF has multiple loopbacks; without it the operator would need a non-deterministic heuristic to pick a source IP |
 | D12 | Allocate the per-node source IP **deterministically from the loopback `Subnet`** (operator-side `loopbackAllocator`), preserving existing per-node allocations | No external IPAM dependency; stable, deterministic per-node addresses computed at build time and snapshotted into the revision |
