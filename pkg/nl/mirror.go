@@ -47,7 +47,8 @@ const (
 
 // ReconcileMirror programs the full mirror data path described by the
 // NetlinkConfiguration: per-VRF loopbacks, GRE tunnels and tc mirror filters.
-// Stale mirror resources that are no longer desired are removed.
+// Stale mirror resources that are no longer desired — GRE tunnels, per-VRF
+// loopbacks and tc mirror filters — are removed by CleanupMirrors.
 func (n *Manager) ReconcileMirror(cfg *NetlinkConfiguration) error {
 	if err := n.ReconcileLoopbacks(cfg.Loopbacks); err != nil {
 		return fmt.Errorf("error reconciling loopbacks: %w", err)
@@ -318,7 +319,7 @@ func (n *Manager) setupMirrorFilters(iface string, rules []MirrorRule, tunnelInd
 	if err := n.ensureClsactQdisc(link); err != nil {
 		return err
 	}
-	if err := n.clearMirrorFilters(link); err != nil {
+	if err := n.clearMirrorFilters(link, false); err != nil {
 		return err
 	}
 
@@ -481,11 +482,19 @@ func (n *Manager) ensureClsactQdisc(link netlink.Link) error {
 // clearMirrorFilters removes only the mirror filters (those in the dedicated
 // mirror priority range) from the link's clsact hooks, leaving the node's
 // forwarding/BPF filters — which occupy the low priorities — untouched.
-func (n *Manager) clearMirrorFilters(link netlink.Link) error {
+//
+// tolerateListErr controls how a FilterList failure is handled: callers that have
+// just ensured the clsact qdisc (the setup path) pass false so a list failure is
+// surfaced instead of silently leaving stale filters behind; cleanup callers pass
+// true because the interface may legitimately have no clsact qdisc to list.
+func (n *Manager) clearMirrorFilters(link netlink.Link, tolerateListErr bool) error {
 	for _, parent := range []uint32{handleMinIngress, handleMinEgress} {
 		filters, err := n.toolkit.FilterList(link, parent)
 		if err != nil {
-			continue
+			if tolerateListErr {
+				continue
+			}
+			return fmt.Errorf("error listing filters on %s (parent %#x): %w", link.Attrs().Name, parent, err)
 		}
 		for _, f := range filters {
 			if int(f.Attrs().Priority) < mirrorFilterPriorityBase {
@@ -596,7 +605,7 @@ func (n *Manager) CleanupMirrors(tunnels []GRETunnel, loopbacks []LoopbackConfig
 			}
 		case isMirrorSourceName(name):
 			if _, ok := desiredSources[name]; !ok {
-				if err := n.clearMirrorFilters(link); err != nil {
+				if err := n.clearMirrorFilters(link, true); err != nil {
 					return err
 				}
 			}

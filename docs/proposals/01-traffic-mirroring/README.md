@@ -710,16 +710,16 @@ spec:
 
 | # | Decision | Rationale |
 |---|---|---|
-| D1 | Keep mirror data **out of** `NetworkConfigRevision` | Avoids CR bloat; mirror is additive/non-disruptive |
-| D2 | Resolve mirror rules at `NodeNetworkConfig` build time | Agents stay simple — they only read the fully-resolved per-node config |
+| D1 | Embed mirror snapshots (`MirrorTargets`/`MirrorSelectors`) **in** `NetworkConfigRevision` and include them in the revision hash | Mirror changes bump the revision and roll out through the normal gated, node-by-node pipeline; gives a full per-revision snapshot for auditability (implemented — "Option A") |
+| D2 | Resolve mirror selectors/targets into per-node `MirrorACLs`/GRE/loopback at `NodeNetworkConfig` build time | Agents stay simple — they only read the fully-resolved per-node config |
 | D3 | Mirror VRF is a **user-created `VRFRouteConfiguration`** (fabric VRF with VNI + RT) | Consistent with existing VRF lifecycle; enables EVPN reachability to collector |
 | D4 | Per-node **source IP as loopback** in the mirror VRF | Each node uniquely identified; GRE source is routable via EVPN |
 | D5 | Source IP added to **EVPN export filter** (auto-appended by operator) | Collector can reach the node's GRE endpoint via the fabric |
-| D6 | **Do not modify** `pkg/cra-vsr` | Vendor-maintained; already supports MirrorACLs, GREs, loopbacks, `<mirror-traffic>` |
+| D6 | Add GRE/GRETap, loopback and `<mirror-traffic>` rendering to `pkg/cra-vsr` (and the equivalent netlink rendering to the FRR path) **in-repo** as part of this change | Earlier the package was treated as vendor-maintained and untouched, but the mirroring data path required extending it; the rendering now lives in-repo alongside the rest of the config generation |
 | D7 | Bind L2 mirrors to the `vlan.<id>` bridge access port | Both paths use the workload-facing access port (not the bridge master) as `<from>`/source so east-west (port-to-port) traffic is captured; the workload-perspective direction is inverted to the port's interface-relative direction |
 | D8 | Bind VRF mirrors to `vx.<vrf>` VXLAN interface (if VNI exists) | CRA-VSR uses VXLAN name as `<from>` for VRF mirror-traffic rules |
 | D9 | `MirrorACL.MirrorDestination` = GRE interface name | CRA-VSR maps this to the `<to>` field in `<mirror-traffic>` rules |
-| D10 | **Loopback `poolRef` lives on `VRFRouteConfiguration`**, not `MirrorTarget` | Loopback is a VRF interface; its IP must be in the VRF's EVPN export filter; co-locating avoids cross-cutting concerns and flows through the revision pipeline |
+| D10 | **Loopback subnet lives on `VRFRouteConfiguration`** (`VRFLoopback.Subnet`), not `MirrorTarget` | Loopback is a VRF interface; its IP must be in the VRF's EVPN export filter; co-locating avoids cross-cutting concerns and flows through the revision pipeline |
 | D11 | **Remove `PoolRef` from `MirrorTargetSpec`**; add `destinationVrf` + `sourceLoopback` | MirrorTarget specifies tunnel properties + which VRF and loopback to bind the GRE source to; IP allocation is the VRF's responsibility |
 | D13 | **`MirrorTarget.SourceLoopback` explicitly selects the loopback** within the VRF | Avoids ambiguity when a VRF has multiple loopbacks; without it the operator would need a non-deterministic heuristic to pick a source IP |
-| D12 | Use **Cluster API IPAM** (`ipam.cluster.x-k8s.io`) for source IP allocation | Industry-standard contract; supports in-cluster (dev) and Infoblox (prod) providers; stable per-node allocation with claim/address lifecycle |
+| D12 | Allocate the per-node source IP **deterministically from the loopback `Subnet`** (operator-side `loopbackAllocator`), preserving existing per-node allocations | No external IPAM dependency; stable, deterministic per-node addresses computed at build time and snapshotted into the revision |
