@@ -2,6 +2,7 @@ package operator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
@@ -9,6 +10,8 @@ import (
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/util/retry"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
@@ -58,37 +61,51 @@ func (crr *ConfigRevisionReconciler) reconcileMirrorStatus(ctx context.Context) 
 }
 
 func (crr *ConfigRevisionReconciler) updateTargetStatuses(ctx context.Context, targets []v1alpha1.MirrorTarget, selectorCount map[string]int, configs []v1alpha1.NodeNetworkConfig) error {
+	var errs []error
 	for i := range targets {
-		t := &targets[i]
-		activeNodes := countTargetNodes(t, configs)
+		name := targets[i].Name
+		activeNodes := countTargetNodes(&targets[i], configs)
+		activeSelectors := selectorCount[name]
 
-		newStatus := t.Status.DeepCopy()
-		newStatus.ActiveSelectors = selectorCount[t.Name]
-		newStatus.ActiveNodes = activeNodes
-
-		ready := metav1.Condition{Type: conditionReady, ObservedGeneration: t.Generation, Status: metav1.ConditionTrue, Reason: "Configured", Message: "GRE tunnel configured on at least one node"}
-		if activeNodes == 0 {
-			ready.Status = metav1.ConditionFalse
-			ready.Reason = "NotConfigured"
-			ready.Message = "GRE tunnel is not configured on any node"
-		}
-		meta.SetStatusCondition(&newStatus.Conditions, ready)
-
-		if equality.Semantic.DeepEqual(&t.Status, newStatus) {
-			continue
-		}
-		t.Status = *newStatus
-		if err := crr.client.Status().Update(ctx, t); err != nil {
-			return fmt.Errorf("error updating MirrorTarget %s status: %w", t.Name, err)
+		err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			cur := &v1alpha1.MirrorTarget{}
+			if err := crr.client.Get(ctx, client.ObjectKey{Name: name}, cur); err != nil {
+				return fmt.Errorf("error getting MirrorTarget %s: %w", name, err)
+			}
+			newStatus := cur.Status.DeepCopy()
+			newStatus.ActiveSelectors = activeSelectors
+			newStatus.ActiveNodes = activeNodes
+			meta.SetStatusCondition(&newStatus.Conditions, targetReadyCondition(cur.Generation, activeNodes))
+			if equality.Semantic.DeepEqual(&cur.Status, newStatus) {
+				return nil
+			}
+			cur.Status = *newStatus
+			return crr.client.Status().Update(ctx, cur)
+		})
+		if err != nil {
+			errs = append(errs, fmt.Errorf("error updating MirrorTarget %s status: %w", name, err))
 		}
 	}
-	return nil
+	return errors.Join(errs...)
+}
+
+func targetReadyCondition(generation int64, activeNodes int) metav1.Condition {
+	cond := metav1.Condition{Type: conditionReady, ObservedGeneration: generation, Status: metav1.ConditionTrue, Reason: "Configured", Message: "GRE tunnel configured on at least one node"}
+	if activeNodes == 0 {
+		cond.Status = metav1.ConditionFalse
+		cond.Reason = "NotConfigured"
+		cond.Message = "GRE tunnel is not configured on any node"
+	}
+	return cond
 }
 
 func (crr *ConfigRevisionReconciler) updateSelectorStatuses(ctx context.Context, selectors []v1alpha1.MirrorSelector, targetByName map[string]*v1alpha1.MirrorTarget, resolver *mirrorSourceResolver, configs []v1alpha1.NodeNetworkConfig) error {
+	var errs []error
 	for i := range selectors {
 		s := &selectors[i]
+		name := s.Name
 		target, targetFound := targetByName[s.Spec.MirrorTarget.Name]
+		targetFound = targetFound && validMirrorTargetRef(s.Spec.MirrorTarget)
 		sourceKey, sourceFound := resolver.resolve(s.Spec.MirrorSource)
 		resolved := targetFound && sourceFound
 
@@ -98,19 +115,25 @@ func (crr *ConfigRevisionReconciler) updateSelectorStatuses(ctx context.Context,
 		// (possibly created by another selector) is not enough.
 		applied := resolved && countSelectorNodes(s, target, sourceKey, configs) > 0
 
-		newStatus := s.Status.DeepCopy()
-		meta.SetStatusCondition(&newStatus.Conditions, resolvedCondition(s.Generation, targetFound, sourceFound))
-		meta.SetStatusCondition(&newStatus.Conditions, appliedCondition(s.Generation, applied))
-
-		if equality.Semantic.DeepEqual(&s.Status, newStatus) {
-			continue
-		}
-		s.Status = *newStatus
-		if err := crr.client.Status().Update(ctx, s); err != nil {
-			return fmt.Errorf("error updating MirrorSelector %s status: %w", s.Name, err)
+		err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			cur := &v1alpha1.MirrorSelector{}
+			if err := crr.client.Get(ctx, client.ObjectKey{Name: name}, cur); err != nil {
+				return fmt.Errorf("error getting MirrorSelector %s: %w", name, err)
+			}
+			newStatus := cur.Status.DeepCopy()
+			meta.SetStatusCondition(&newStatus.Conditions, resolvedCondition(cur.Generation, targetFound, sourceFound))
+			meta.SetStatusCondition(&newStatus.Conditions, appliedCondition(cur.Generation, applied))
+			if equality.Semantic.DeepEqual(&cur.Status, newStatus) {
+				return nil
+			}
+			cur.Status = *newStatus
+			return crr.client.Status().Update(ctx, cur)
+		})
+		if err != nil {
+			errs = append(errs, fmt.Errorf("error updating MirrorSelector %s status: %w", name, err))
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 func resolvedCondition(generation int64, targetFound, sourceFound bool) metav1.Condition {
@@ -231,8 +254,12 @@ func (crr *ConfigRevisionReconciler) buildMirrorSourceResolver(ctx context.Conte
 }
 
 // resolve returns the NodeNetworkConfig map key for the selector's source and
-// whether the source reference points at an existing object.
+// whether the source reference points at an existing object in the right
+// kind/apiGroup.
 func (r *mirrorSourceResolver) resolve(src corev1.TypedObjectReference) (key string, found bool) {
+	if !refAPIGroupOK(src) {
+		return "", false
+	}
 	switch src.Kind {
 	case sourceKindLayer2:
 		key, found = r.layer2Keys[src.Name]

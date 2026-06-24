@@ -18,7 +18,24 @@ const (
 	sourceKindLayer2 = "Layer2NetworkConfiguration"
 	// sourceKindVRF is the MirrorSource Kind for a VRFRouteConfiguration.
 	sourceKindVRF = "VRFRouteConfiguration"
+	// targetKind is the Kind a MirrorTarget reference must use.
+	targetKind = "MirrorTarget"
+	// mirrorAPIGroup is the apiGroup mirror references must point at (empty is
+	// also accepted as "this group").
+	mirrorAPIGroup = "network.t-caas.telekom.com"
 )
+
+// refAPIGroupOK reports whether a reference's apiGroup is empty (defaulted) or the
+// operator's own group; references into foreign groups are rejected.
+func refAPIGroupOK(ref corev1.TypedObjectReference) bool {
+	return ref.APIGroup == nil || *ref.APIGroup == "" || *ref.APIGroup == mirrorAPIGroup
+}
+
+// validMirrorTargetRef reports whether a MirrorTarget reference has the right kind
+// and apiGroup.
+func validMirrorTargetRef(ref corev1.TypedObjectReference) bool {
+	return ref.Kind == targetKind && refAPIGroupOK(ref)
+}
 
 // buildNodeMirror resolves the MirrorSelector/MirrorTarget snapshots from the
 // revision and injects the resulting GRE tunnels, per-node source loopbacks, EVPN
@@ -56,12 +73,20 @@ func (crr *ConfigRevisionReconciler) buildNodeMirror(ctx context.Context, node *
 	return nil
 }
 
-// mirrorAllocator returns the per-node loopback allocator for the revision,
-// computing it (with the two cluster-wide List calls it needs) only once per
-// revision and caching the result. Subsequent per-node builds during the same
-// rollout reuse the cached allocator instead of re-listing.
+// mirrorAllocator returns the per-node loopback allocator for the revision and
+// the current ready-node set, recomputing it (and re-listing configs) only when
+// either changes. Keying on the ready-node set ensures a node that joins during a
+// revision's lifetime is allocated its loopback immediately instead of being
+// silently skipped until the next revision bump.
 func (crr *ConfigRevisionReconciler) mirrorAllocator(ctx context.Context, revision *v1alpha1.NetworkConfigRevision) (*loopbackAllocator, error) {
-	if crr.mirrorAllocCache.alloc != nil && crr.mirrorAllocCache.revision == revision.Spec.Revision {
+	nodeNames, err := crr.listReadyNodeNames(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// nodeNames is sorted by listReadyNodeNames, so this key is stable.
+	key := revision.Spec.Revision + "|" + strings.Join(nodeNames, ",")
+	if crr.mirrorAllocCache.alloc != nil && crr.mirrorAllocCache.key == key {
 		return crr.mirrorAllocCache.alloc, nil
 	}
 
@@ -69,13 +94,9 @@ func (crr *ConfigRevisionReconciler) mirrorAllocator(ctx context.Context, revisi
 	if err != nil {
 		return nil, fmt.Errorf("error listing NodeNetworkConfigs for mirror allocation: %w", err)
 	}
-	nodeNames, err := crr.listReadyNodeNames(ctx)
-	if err != nil {
-		return nil, err
-	}
 
 	alloc := newLoopbackAllocator(revision, existingConfigs.Items, nodeNames)
-	crr.mirrorAllocCache = mirrorAllocCache{revision: revision.Spec.Revision, alloc: alloc}
+	crr.mirrorAllocCache = mirrorAllocCache{key: key, alloc: alloc}
 	return alloc, nil
 }
 
@@ -83,6 +104,10 @@ func (crr *ConfigRevisionReconciler) mirrorAllocator(ctx context.Context, revisi
 // applicable, injects the GRE tunnel, loopback, export-filter entry and MirrorACL.
 // Selectors whose source or mirror VRF are not present on the node are skipped.
 func applyMirrorSelector(node *corev1.Node, revision *v1alpha1.NetworkConfigRevision, sel *v1alpha1.MirrorSelectorRevision, targets map[string]*v1alpha1.MirrorTargetRevision, alloc *loopbackAllocator, createdTargets map[string]string, c *v1alpha1.NodeNetworkConfig) {
+	if !validMirrorTargetRef(sel.MirrorTarget) {
+		// Reference into a foreign kind/apiGroup: ignore. Status reporting handles this.
+		return
+	}
 	target, ok := targets[sel.MirrorTarget.Name]
 	if !ok {
 		// Unresolvable target: nothing to inject. Status reporting handles this.
@@ -158,6 +183,10 @@ func ensureMirrorTunnel(node *corev1.Node, target *v1alpha1.MirrorTargetRevision
 // name and resolved to the NodeNetworkConfig map key (VLAN ID for Layer2, VRF name
 // for VRFRouteConfiguration) via the revision.
 func attachMirrorACL(sel *v1alpha1.MirrorSelectorRevision, revision *v1alpha1.NetworkConfigRevision, acl *v1alpha1.MirrorACL, c *v1alpha1.NodeNetworkConfig) {
+	if !refAPIGroupOK(sel.MirrorSource) {
+		// Reference into a foreign apiGroup: ignore.
+		return
+	}
 	switch sel.MirrorSource.Kind {
 	case sourceKindLayer2:
 		key, ok := layer2KeyForSource(revision, sel.MirrorSource.Name)
@@ -219,8 +248,12 @@ func (crr *ConfigRevisionReconciler) listReadyNodeNames(ctx context.Context) ([]
 // VRF's EVPN export filter, without overwriting any user-defined items.
 func appendExportFilterPrefix(fabricVrf *v1alpha1.FabricVRF, hostAddr string) {
 	if fabricVrf.EVPNExportFilter == nil {
+		// A fabric VRF built by the operator always carries an export filter (see
+		// createFabricVRF), so this branch is only a defensive fallback. Default to
+		// Accept rather than Reject so we never silently suppress a VRF's other EVPN
+		// advertisements just because a mirror source IP had to be permitted.
 		fabricVrf.EVPNExportFilter = &v1alpha1.Filter{
-			DefaultAction: v1alpha1.Action{Type: v1alpha1.Reject},
+			DefaultAction: v1alpha1.Action{Type: v1alpha1.Accept},
 		}
 	}
 	for i := range fabricVrf.EVPNExportFilter.Items {
@@ -394,20 +427,22 @@ func allocateSubnet(cidr string, nodeNames []string, existing map[string]string)
 	return result, nil
 }
 
-// preserveExistingAllocations copies the existing per-node allocations for
-// in-scope nodes into result/used, dropping any address that is no longer valid
-// inside the (possibly changed) CIDR so the node is reallocated a fresh
-// in-subnet address by the caller.
+// preserveExistingAllocations records the existing per-node allocations. Every
+// still-configured in-subnet address is reserved in `used` so it is never handed
+// to a different node — even for nodes that are currently out of scope (e.g.
+// temporarily NotReady), whose NodeNetworkConfig still carries the address and
+// would otherwise collide with a freshly-allocated one. Addresses are only
+// re-emitted in `result` for in-scope nodes; out-of-subnet addresses (e.g. after
+// a subnet change) are dropped so the node is reallocated a valid address.
 func preserveExistingAllocations(existing map[string]string, inScope map[string]struct{}, ipNet *net.IPNet, bcast net.IP, result map[string]string, used map[string]struct{}) {
 	for node, addr := range existing {
-		if _, ok := inScope[node]; !ok {
-			continue
-		}
 		if !addrInSubnet(addr, ipNet, bcast) {
 			continue
 		}
-		result[node] = addr
 		used[addr] = struct{}{}
+		if _, ok := inScope[node]; ok {
+			result[node] = addr
+		}
 	}
 }
 

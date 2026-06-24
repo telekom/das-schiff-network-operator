@@ -354,6 +354,12 @@ spec:
                       - kind
                       - name
                       type: object
+                      x-kubernetes-validations:
+                      - message: mirrorSource must reference a Layer2NetworkConfiguration
+                          or VRFRouteConfiguration in apiGroup network.t-caas.telekom.com
+                        rule: (self.kind == 'Layer2NetworkConfiguration' || self.kind
+                          == 'VRFRouteConfiguration') && (!has(self.apiGroup) || self.apiGroup
+                          == 'network.t-caas.telekom.com')
                     mirrorTarget:
                       description: MirrorTarget references the MirrorTarget that describes
                         the collector.
@@ -380,6 +386,11 @@ spec:
                       - kind
                       - name
                       type: object
+                      x-kubernetes-validations:
+                      - message: mirrorTarget must reference a MirrorTarget in apiGroup
+                          network.t-caas.telekom.com
+                        rule: self.kind == 'MirrorTarget' && (!has(self.apiGroup)
+                          || self.apiGroup == 'network.t-caas.telekom.com')
                     name:
                       type: string
                     trafficMatch:
@@ -419,6 +430,7 @@ spec:
                     destinationIP:
                       description: DestinationIP is the remote collector IP the tunnel
                         points to.
+                      pattern: ^((([0-9]{1,3}\.){3}[0-9]{1,3})|(([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}))$
                       type: string
                     destinationVrf:
                       description: |-
@@ -545,12 +557,15 @@ spec:
                           allocated per-node from a subnet.
                         properties:
                           name:
-                            description: Name is the loopback interface name (e.g.
-                              "lo.mir").
+                            description: |-
+                              Name is the loopback interface name (e.g. "lo.mir"). It must fit within the
+                              Linux interface name length limit (15 characters).
+                            maxLength: 15
                             type: string
                           subnet:
                             description: Subnet is the CIDR from which a unique per-node
                               loopback IP is allocated.
+                            pattern: ^((([0-9]{1,3}\.){3}[0-9]{1,3})|(([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}))/[0-9]{1,3}$
                             type: string
                         required:
                         - name

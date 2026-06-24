@@ -95,10 +95,13 @@ type VRFRouteConfigurationSpec struct {
 // allocated per-node from a subnet.
 type VRFLoopback struct {
 	// +kubebuilder:validation:Required
-	// Name is the loopback interface name (e.g. "lo.mir").
+	// +kubebuilder:validation:MaxLength=15
+	// Name is the loopback interface name (e.g. "lo.mir"). It must fit within the
+	// Linux interface name length limit (15 characters).
 	Name string `json:"name"`
 
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Pattern=`^((([0-9]{1,3}\.){3}[0-9]{1,3})|(([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}))/[0-9]{1,3}$`
 	// Subnet is the CIDR from which a unique per-node loopback IP is allocated.
 	Subnet string `json:"subnet"`
 }

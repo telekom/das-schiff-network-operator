@@ -31,10 +31,12 @@ type MirrorSelectorSpec struct {
 	TrafficMatch TrafficMatch `json:"trafficMatch,omitempty"`
 
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:XValidation:rule="self.kind == 'MirrorTarget' && (!has(self.apiGroup) || self.apiGroup == 'network.t-caas.telekom.com')",message="mirrorTarget must reference a MirrorTarget in apiGroup network.t-caas.telekom.com"
 	// MirrorTarget references the MirrorTarget that describes the collector.
 	MirrorTarget corev1.TypedObjectReference `json:"mirrorTarget"`
 
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:XValidation:rule="(self.kind == 'Layer2NetworkConfiguration' || self.kind == 'VRFRouteConfiguration') && (!has(self.apiGroup) || self.apiGroup == 'network.t-caas.telekom.com')",message="mirrorSource must reference a Layer2NetworkConfiguration or VRFRouteConfiguration in apiGroup network.t-caas.telekom.com"
 	// MirrorSource references the Layer2NetworkConfiguration or
 	// VRFRouteConfiguration whose traffic is captured.
 	MirrorSource corev1.TypedObjectReference `json:"mirrorSource"`

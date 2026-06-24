@@ -41,6 +41,7 @@ const (
 	protoTCP    = 6
 	protoUDP    = 17
 	protoICMP   = 1
+	protoSCTP   = 132
 	protoICMPv6 = 58
 )
 
@@ -61,7 +62,7 @@ func (n *Manager) ReconcileMirror(cfg *NetlinkConfiguration) error {
 		return fmt.Errorf("error reconciling tc mirrors: %w", err)
 	}
 
-	if err := n.CleanupMirrors(cfg.GRETunnels, cfg.Mirrors); err != nil {
+	if err := n.CleanupMirrors(cfg.GRETunnels, cfg.Loopbacks, cfg.Mirrors); err != nil {
 		return fmt.Errorf("error cleaning up mirrors: %w", err)
 	}
 
@@ -177,10 +178,6 @@ func (n *Manager) ensureGRETunnel(t *GRETunnel) (int, error) {
 		return 0, fmt.Errorf("GRE tunnel name %q exceeds max length %d", t.Name, maxMirrorIfNameLen)
 	}
 
-	if link, err := n.toolkit.LinkByName(t.Name); err == nil {
-		return link.Attrs().Index, nil
-	}
-
 	localIP := net.ParseIP(t.Local)
 	remoteIP := net.ParseIP(t.Remote)
 	if localIP == nil || remoteIP == nil {
@@ -206,7 +203,22 @@ func (n *Manager) ensureGRETunnel(t *GRETunnel) (int, error) {
 		linkIndex = srcLink.Attrs().Index
 	}
 
-	if err := n.toolkit.LinkAdd(greLink(t, vrfLink.Attrs().Index, linkIndex, localIP, remoteIP)); err != nil {
+	desired := greLink(t, vrfLink.Attrs().Index, linkIndex, localIP, remoteIP)
+
+	// If a tunnel with this name already exists, keep it only when it still matches
+	// the desired endpoints/key/VRF. The interface name is derived from the
+	// MirrorTarget name (not its mutable fields), so an edit to the collector IP or
+	// tunnel key would otherwise leave a stale tunnel pointing at the old collector.
+	if existing, lookupErr := n.toolkit.LinkByName(t.Name); lookupErr == nil {
+		if greTunnelUpToDate(existing, desired) {
+			return existing.Attrs().Index, nil
+		}
+		if err := n.toolkit.LinkDel(existing); err != nil {
+			return 0, fmt.Errorf("error replacing outdated GRE tunnel %s: %w", t.Name, err)
+		}
+	}
+
+	if err := n.toolkit.LinkAdd(desired); err != nil {
 		return 0, fmt.Errorf("error creating GRE tunnel %s: %w", t.Name, err)
 	}
 
@@ -218,6 +230,28 @@ func (n *Manager) ensureGRETunnel(t *GRETunnel) (int, error) {
 		return 0, fmt.Errorf("error setting up GRE tunnel %s: %w", t.Name, err)
 	}
 	return link.Attrs().Index, nil
+}
+
+// greTunnelUpToDate reports whether an existing GRE link still matches the desired
+// tunnel's family/encapsulation, endpoints, key and VRF. The source link binding
+// (IFLA_GRE_LINK) is intentionally not compared: the kernel does not report it
+// back, so comparing it would force needless tunnel recreation on every reconcile.
+func greTunnelUpToDate(existing, desired netlink.Link) bool {
+	if existing.Attrs().MasterIndex != desired.Attrs().MasterIndex {
+		return false
+	}
+	switch d := desired.(type) {
+	case *netlink.Gretun:
+		e, ok := existing.(*netlink.Gretun)
+		return ok && e.Local.Equal(d.Local) && e.Remote.Equal(d.Remote) &&
+			e.IKey == d.IKey && e.OKey == d.OKey
+	case *netlink.Gretap:
+		e, ok := existing.(*netlink.Gretap)
+		return ok && e.Local.Equal(d.Local) && e.Remote.Equal(d.Remote) &&
+			e.IKey == d.IKey && e.OKey == d.OKey
+	default:
+		return false
+	}
 }
 
 // greLink builds the netlink GRE/GRETAP link for a tunnel. The netlink library
@@ -288,28 +322,120 @@ func (n *Manager) setupMirrorFilters(iface string, rules []MirrorRule, tunnelInd
 		return err
 	}
 
+	// Priorities are scoped per clsact hook (ingress/egress), so track a separate
+	// counter per parent. A single MirrorRule can expand into several flower
+	// filters (one per IP family / L4 protocol), each needing a unique priority.
+	prioByParent := map[uint32]int{handleMinIngress: 0, handleMinEgress: 0}
 	for i := range rules {
 		r := &rules[i]
 		greIdx, ok := tunnelIndex[r.GREInterface]
 		if !ok {
 			return fmt.Errorf("no GRE tunnel index for interface %s", r.GREInterface)
 		}
-		if mirrorFilterPriorityBase+i > int(^uint16(0)) {
-			return fmt.Errorf("too many mirror rules on %s: priority overflow at index %d", iface, i)
-		}
-		prio := uint16(mirrorFilterPriorityBase + i) //nolint:gosec // bounds-checked above
-		if r.Direction == string(directionIngress) || r.Direction == directionBoth {
-			if err := n.addMirrorFilter(link, handleMinIngress, prio, r, greIdx); err != nil {
-				return fmt.Errorf("error adding ingress filter: %w", err)
-			}
-		}
-		if r.Direction == string(directionEgress) || r.Direction == directionBoth {
-			if err := n.addMirrorFilter(link, handleMinEgress, prio, r, greIdx); err != nil {
-				return fmt.Errorf("error adding egress filter: %w", err)
+		matches := buildMirrorMatches(r)
+		for _, parent := range mirrorParents(r.Direction) {
+			for j := range matches {
+				prio, err := nextMirrorPriority(iface, parent, prioByParent)
+				if err != nil {
+					return err
+				}
+				if err := n.addMirrorFilter(link, parent, prio, r, &matches[j], greIdx); err != nil {
+					return fmt.Errorf("error adding mirror filter: %w", err)
+				}
 			}
 		}
 	}
 	return nil
+}
+
+// mirrorParents returns the clsact hook(s) a rule's direction maps to.
+func mirrorParents(direction string) []uint32 {
+	switch direction {
+	case directionIngress:
+		return []uint32{handleMinIngress}
+	case directionEgress:
+		return []uint32{handleMinEgress}
+	case directionBoth:
+		return []uint32{handleMinIngress, handleMinEgress}
+	default:
+		return nil
+	}
+}
+
+// nextMirrorPriority returns the next free tc filter priority for the given hook,
+// staying within the dedicated mirror priority range, and bumps the counter.
+func nextMirrorPriority(iface string, parent uint32, prioByParent map[uint32]int) (uint16, error) {
+	p := mirrorFilterPriorityBase + prioByParent[parent]
+	if p > int(^uint16(0)) {
+		return 0, fmt.Errorf("too many mirror filters on %s (parent %#x): priority overflow", iface, parent)
+	}
+	prioByParent[parent]++
+	return uint16(p), nil //nolint:gosec // bounds-checked above
+}
+
+// mirrorMatch is one concrete (IP family, L4 protocol) combination a MirrorRule
+// expands into. A nil proto means "no L4 protocol match" (match the whole family).
+type mirrorMatch struct {
+	ethType uint16
+	proto   *vnl.IPProto
+}
+
+// buildMirrorMatches expands a MirrorRule into the concrete flower matches to
+// program. The IP family is derived from the protocol (icmp→v4, icmpv6→v6) or the
+// prefixes; when it cannot be determined, both families are emitted. When ports
+// are matched without an explicit protocol, one match per port-based protocol
+// (TCP/UDP/SCTP) is emitted so the port match is actually honored instead of
+// silently degrading to match-all.
+func buildMirrorMatches(rule *MirrorRule) []mirrorMatch {
+	families := mirrorFamilies(rule)
+	protos := mirrorProtos(rule)
+	matches := make([]mirrorMatch, 0, len(families)*len(protos))
+	for _, fam := range families {
+		for _, proto := range protos {
+			matches = append(matches, mirrorMatch{ethType: fam, proto: proto})
+		}
+	}
+	return matches
+}
+
+// mirrorFamilies returns the IP families (as ethertypes) a rule applies to.
+func mirrorFamilies(rule *MirrorRule) []uint16 {
+	switch strings.ToLower(rule.Protocol) {
+	case "icmp":
+		return []uint16{ethPIP}
+	case "icmpv6":
+		return []uint16{ethPIPv6}
+	}
+	hasV4 := prefixFamily(rule.SrcPrefix) == ethPIP || prefixFamily(rule.DstPrefix) == ethPIP
+	hasV6 := prefixFamily(rule.SrcPrefix) == ethPIPv6 || prefixFamily(rule.DstPrefix) == ethPIPv6
+	switch {
+	case hasV6 && !hasV4:
+		return []uint16{ethPIPv6}
+	case hasV4 && !hasV6:
+		return []uint16{ethPIP}
+	default:
+		// No (or mixed) prefix family information: program both families so an
+		// IPv6 flow is never silently missed.
+		return []uint16{ethPIP, ethPIPv6}
+	}
+}
+
+// mirrorProtos returns the L4 protocols a rule matches. An explicit protocol is
+// used as-is; ports without a protocol expand to TCP/UDP/SCTP; otherwise no L4
+// match is applied.
+func mirrorProtos(rule *MirrorRule) []*vnl.IPProto {
+	if rule.Protocol != "" {
+		if proto := ipProtoNumber(rule.Protocol); proto != nil {
+			return []*vnl.IPProto{proto}
+		}
+		// Unknown protocol string: fall back to no L4 match rather than dropping
+		// the rule entirely.
+		return []*vnl.IPProto{nil}
+	}
+	if rule.SrcPort > 0 || rule.DstPort > 0 {
+		return []*vnl.IPProto{ipProtoPtr(protoTCP), ipProtoPtr(protoUDP), ipProtoPtr(protoSCTP)}
+	}
+	return []*vnl.IPProto{nil}
 }
 
 const (
@@ -363,7 +489,7 @@ func (n *Manager) clearMirrorFilters(link netlink.Link) error {
 	return nil
 }
 
-func (n *Manager) addMirrorFilter(link netlink.Link, parent uint32, prio uint16, rule *MirrorRule, greIfIndex int) error {
+func (n *Manager) addMirrorFilter(link netlink.Link, parent uint32, prio uint16, rule *MirrorRule, match *mirrorMatch, greIfIndex int) error {
 	flower := &netlink.Flower{
 		FilterAttrs: netlink.FilterAttrs{
 			LinkIndex: link.Attrs().Index,
@@ -371,6 +497,7 @@ func (n *Manager) addMirrorFilter(link netlink.Link, parent uint32, prio uint16,
 			Priority:  prio,
 			Protocol:  ethPAll,
 		},
+		EthType: match.ethType,
 		Actions: []netlink.Action{
 			&netlink.MirredAction{
 				ActionAttrs:  netlink.ActionAttrs{Action: netlink.TC_ACT_PIPE},
@@ -380,34 +507,31 @@ func (n *Manager) addMirrorFilter(link netlink.Link, parent uint32, prio uint16,
 		},
 	}
 
-	if rule.Protocol != "" {
-		if proto := ipProtoNumber(rule.Protocol); proto != nil {
-			flower.IPProto = proto
-		}
+	if match.proto != nil {
+		flower.IPProto = match.proto
 	}
-	if rule.SrcPrefix != "" {
+	// Only program a prefix whose family matches this filter's ethertype; a
+	// cross-family prefix (e.g. an IPv6 dst on an IPv4 filter) cannot be encoded.
+	if prefixFamily(rule.SrcPrefix) == match.ethType {
 		if _, cidr, err := net.ParseCIDR(rule.SrcPrefix); err == nil {
 			flower.SrcIP = cidr.IP
 			flower.SrcIPMask = cidr.Mask
 		}
 	}
-	if rule.DstPrefix != "" {
+	if prefixFamily(rule.DstPrefix) == match.ethType {
 		if _, cidr, err := net.ParseCIDR(rule.DstPrefix); err == nil {
 			flower.DestIP = cidr.IP
 			flower.DestIPMask = cidr.Mask
 		}
 	}
-	if rule.SrcPort > 0 {
-		flower.SrcPort = rule.SrcPort
-	}
-	if rule.DstPort > 0 {
-		flower.DestPort = rule.DstPort
-	}
-	if flower.IPProto != nil || flower.SrcIP != nil || flower.DestIP != nil {
-		if isIPv6(rule.SrcPrefix, rule.DstPrefix) {
-			flower.EthType = ethPIPv6
-		} else {
-			flower.EthType = ethPIP
+	// Ports are only encoded by the kernel for port-based protocols (TCP/UDP/SCTP),
+	// which is exactly when match.proto is one of those.
+	if isPortProto(match.proto) {
+		if rule.SrcPort > 0 {
+			flower.SrcPort = rule.SrcPort
+		}
+		if rule.DstPort > 0 {
+			flower.DestPort = rule.DstPort
 		}
 	}
 
@@ -417,13 +541,15 @@ func (n *Manager) addMirrorFilter(link netlink.Link, parent uint32, prio uint16,
 	return nil
 }
 
-// CleanupMirrors removes stale GRE tunnels and stale mirror filters that are no
-// longer in the desired state. GRE tunnels are identified by the mirror naming
-// prefixes. Only mirror filters (in the dedicated mirror priority range) are
-// removed from mirror-shaped source interfaces (l2.*, vx.*) that are no longer
-// referenced by any rule; the shared clsact qdisc and the node's forwarding/BPF
-// filters are never touched.
-func (n *Manager) CleanupMirrors(tunnels []GRETunnel, rules []MirrorRule) error {
+// CleanupMirrors removes stale GRE tunnels, stale per-VRF loopbacks and stale
+// mirror filters that are no longer in the desired state. GRE tunnels are
+// identified by the mirror naming prefixes; loopbacks are identified as dummy
+// interfaces enslaved to a VRF (the only VRF-enslaved dummies in this data path
+// are mirror loopbacks). Only mirror filters (in the dedicated mirror priority
+// range) are removed from mirror-shaped source interfaces (l2.*, vx.*) that are
+// no longer referenced by any rule; the shared clsact qdisc and the node's
+// forwarding/BPF filters are never touched.
+func (n *Manager) CleanupMirrors(tunnels []GRETunnel, loopbacks []LoopbackConfig, rules []MirrorRule) error {
 	links, err := n.toolkit.LinkList()
 	if err != nil {
 		return fmt.Errorf("error listing links: %w", err)
@@ -433,30 +559,57 @@ func (n *Manager) CleanupMirrors(tunnels []GRETunnel, rules []MirrorRule) error 
 	for i := range tunnels {
 		desiredGRE[tunnels[i].Name] = struct{}{}
 	}
+	desiredLoopbacks := make(map[string]struct{}, len(loopbacks))
+	for i := range loopbacks {
+		desiredLoopbacks[loopbacks[i].Name] = struct{}{}
+	}
 	desiredSources := make(map[string]struct{}, len(rules))
 	for i := range rules {
 		desiredSources[rules[i].SourceInterface] = struct{}{}
 	}
 
+	vrfIndices := make(map[int]struct{})
+	for _, link := range links {
+		if link.Type() == "vrf" {
+			vrfIndices[link.Attrs().Index] = struct{}{}
+		}
+	}
+
 	for _, link := range links {
 		name := link.Attrs().Name
-		if isMirrorGREName(name) {
+		switch {
+		case isMirrorGREName(name):
 			if _, ok := desiredGRE[name]; !ok {
 				if err := n.toolkit.LinkDel(link); err != nil {
 					return fmt.Errorf("error deleting stale GRE %s: %w", name, err)
 				}
 			}
-			continue
-		}
-		if isMirrorSourceName(name) {
+		case isMirrorSourceName(name):
 			if _, ok := desiredSources[name]; !ok {
 				if err := n.clearMirrorFilters(link); err != nil {
 					return err
 				}
 			}
+		case isMirrorLoopback(link, vrfIndices):
+			if _, ok := desiredLoopbacks[name]; !ok {
+				if err := n.toolkit.LinkDel(link); err != nil {
+					return fmt.Errorf("error deleting stale loopback %s: %w", name, err)
+				}
+			}
 		}
 	}
 	return nil
+}
+
+// isMirrorLoopback reports whether a link is a mirror loopback: a dummy interface
+// enslaved to one of the VRFs. In this data path the only VRF-enslaved dummies are
+// the per-node mirror source loopbacks created by ensureLoopback.
+func isMirrorLoopback(link netlink.Link, vrfIndices map[int]struct{}) bool {
+	if link.Type() != "dummy" {
+		return false
+	}
+	_, ok := vrfIndices[link.Attrs().MasterIndex]
+	return ok
 }
 
 func isMirrorGREName(name string) bool {
@@ -469,6 +622,12 @@ func isMirrorSourceName(name string) bool {
 
 // MirrorSourceL2 returns the interface name used to mirror a Layer2 VLAN's traffic
 // (the Layer2 bridge).
+//
+// Note: the clsact hook lives on the bridge master device, so it observes traffic
+// the bridge exchanges with the host stack (SVI/IRB-routed and locally-terminated
+// frames). Purely port-to-port bridged (east-west) frames between two bridge ports
+// are switched in the bridge fast path and are not seen here; mirroring such flows
+// would require attaching to the individual bridge ports instead.
 func MirrorSourceL2(vlan int) string {
 	return fmt.Sprintf("%s%d", layer2SVI, vlan)
 }
@@ -479,13 +638,33 @@ func MirrorSourceVRF(vrf string) string {
 	return vxlanPrefix + vrf
 }
 
-func isIPv6(prefixes ...string) bool {
-	for _, p := range prefixes {
-		if p != "" && strings.Contains(p, ":") {
-			return true
-		}
+// prefixFamily returns the ethertype (ethPIP / ethPIPv6) of a CIDR/IP string, or
+// 0 when it is empty or unparseable.
+func prefixFamily(prefix string) uint16 {
+	if prefix == "" {
+		return 0
 	}
-	return false
+	if strings.Contains(prefix, ":") {
+		return ethPIPv6
+	}
+	return ethPIP
+}
+
+// isPortProto reports whether the protocol supports L4 port matching.
+func isPortProto(proto *vnl.IPProto) bool {
+	if proto == nil {
+		return false
+	}
+	switch *proto {
+	case protoTCP, protoUDP, protoSCTP:
+		return true
+	default:
+		return false
+	}
+}
+
+func ipProtoPtr(p vnl.IPProto) *vnl.IPProto {
+	return &p
 }
 
 func ipProtoNumber(proto string) *vnl.IPProto {
@@ -495,6 +674,8 @@ func ipProtoNumber(proto string) *vnl.IPProto {
 		p = protoTCP
 	case "udp":
 		p = protoUDP
+	case "sctp":
+		p = protoSCTP
 	case "icmp":
 		p = protoICMP
 	case "icmpv6":

@@ -148,12 +148,14 @@ var _ = Describe("Mirror building", func() {
 			Expect(result["b"]).To(Equal("10.99.0.1"))
 		})
 
-		It("drops allocations for out-of-scope nodes", func() {
+		It("does not re-emit out-of-scope nodes but reserves their addresses", func() {
+			// "gone" is out of scope (e.g. NotReady) but its NodeNetworkConfig still
+			// carries 10.99.0.1, so that address must not be handed to another node.
 			existing := map[string]string{"gone": "10.99.0.1"}
 			result, err := allocateSubnet("10.99.0.0/29", []string{"a"}, existing)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(result).ToNot(HaveKey("gone"))
-			Expect(result["a"]).To(Equal("10.99.0.1"))
+			Expect(result["a"]).To(Equal("10.99.0.2"), "must skip the address reserved by the still-configured out-of-scope node")
 		})
 
 		It("reallocates a stored IP that is no longer inside the (changed) subnet", func() {

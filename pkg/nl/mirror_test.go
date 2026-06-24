@@ -36,9 +36,10 @@ var _ = Describe("mirror helpers", func() {
 		Expect(ipProtoNumber("frobnicate")).To(BeNil())
 	})
 
-	It("detects IPv6 prefixes", func() {
-		Expect(isIPv6("10.0.0.0/8", "")).To(BeFalse())
-		Expect(isIPv6("", "fd00::/64")).To(BeTrue())
+	It("detects the IP family of a prefix", func() {
+		Expect(prefixFamily("10.0.0.0/8")).To(Equal(ethPIP))
+		Expect(prefixFamily("fd00::/64")).To(Equal(ethPIPv6))
+		Expect(prefixFamily("")).To(Equal(uint16(0)))
 	})
 
 	It("builds source interface names", func() {
@@ -84,7 +85,8 @@ var _ = Describe("mirror helpers", func() {
 		tk := mock_nl.NewMockToolkitInterface(mockctrl)
 		nm := mirrorManager(tk)
 
-		tk.EXPECT().LinkByName("gre-mixed").Return(nil, notFound())
+		// The family mismatch is caught while parsing the endpoints, before any
+		// netlink lookups, so no toolkit calls are expected.
 		_, err := nm.ensureGRETunnel(&GRETunnel{Name: "gre-mixed", VRF: "mirror", Local: "fd00::1", Remote: "2.2.2.2"})
 		Expect(err).To(MatchError(ContainSubstring("same address family")))
 	})
@@ -162,8 +164,8 @@ var _ = Describe("ReconcileGRETunnels", func() {
 		gre := dummyLink("gre-abc", 30)
 
 		gomock.InOrder(
-			tk.EXPECT().LinkByName("gre-abc").Return(nil, notFound()),
 			tk.EXPECT().LinkByName("mirror").Return(vrf, nil),
+			tk.EXPECT().LinkByName("gre-abc").Return(nil, notFound()),
 			tk.EXPECT().LinkAdd(gomock.Any()).Return(nil),
 			tk.EXPECT().LinkByName("gre-abc").Return(gre, nil),
 			tk.EXPECT().LinkSetUp(gre).Return(nil),
@@ -176,17 +178,57 @@ var _ = Describe("ReconcileGRETunnels", func() {
 		Expect(idx).To(HaveKeyWithValue("gre-abc", 30))
 	})
 
-	It("reuses an existing GRE tunnel", func() {
+	It("reuses an existing GRE tunnel that still matches the desired spec", func() {
 		mockctrl := gomock.NewController(GinkgoT())
 		defer mockctrl.Finish()
 		tk := mock_nl.NewMockToolkitInterface(mockctrl)
 		nm := mirrorManager(tk)
 
-		tk.EXPECT().LinkByName("gre-abc").Return(dummyLink("gre-abc", 31), nil)
+		vrf := dummyLink("mirror", 10)
+		existing := &netlink.Gretun{
+			LinkAttrs: netlink.LinkAttrs{Name: "gre-abc", Index: 31, MasterIndex: 10},
+			Local:     net.ParseIP("10.99.0.1"),
+			Remote:    net.ParseIP("10.250.0.100"),
+		}
+
+		gomock.InOrder(
+			tk.EXPECT().LinkByName("mirror").Return(vrf, nil),
+			tk.EXPECT().LinkByName("gre-abc").Return(existing, nil),
+		)
 
 		idx, err := nm.ReconcileGRETunnels([]GRETunnel{{Name: "gre-abc", VRF: "mirror", Local: "10.99.0.1", Remote: "10.250.0.100"}})
 		Expect(err).ToNot(HaveOccurred())
 		Expect(idx).To(HaveKeyWithValue("gre-abc", 31))
+	})
+
+	It("recreates the tunnel when the collector IP changed", func() {
+		mockctrl := gomock.NewController(GinkgoT())
+		defer mockctrl.Finish()
+		tk := mock_nl.NewMockToolkitInterface(mockctrl)
+		nm := mirrorManager(tk)
+
+		vrf := dummyLink("mirror", 10)
+		stale := &netlink.Gretun{
+			LinkAttrs: netlink.LinkAttrs{Name: "gre-abc", Index: 31, MasterIndex: 10},
+			Local:     net.ParseIP("10.99.0.1"),
+			Remote:    net.ParseIP("10.250.0.100"), // old collector
+		}
+		recreated := dummyLink("gre-abc", 32)
+
+		gomock.InOrder(
+			tk.EXPECT().LinkByName("mirror").Return(vrf, nil),
+			tk.EXPECT().LinkByName("gre-abc").Return(stale, nil),
+			tk.EXPECT().LinkDel(stale).Return(nil),
+			tk.EXPECT().LinkAdd(gomock.Any()).Return(nil),
+			tk.EXPECT().LinkByName("gre-abc").Return(recreated, nil),
+			tk.EXPECT().LinkSetUp(recreated).Return(nil),
+		)
+
+		idx, err := nm.ReconcileGRETunnels([]GRETunnel{
+			{Name: "gre-abc", VRF: "mirror", Local: "10.99.0.1", Remote: "10.250.0.200"}, // new collector
+		})
+		Expect(err).ToNot(HaveOccurred())
+		Expect(idx).To(HaveKeyWithValue("gre-abc", 32))
 	})
 
 	It("binds the tunnel to the source interface when set", func() {
@@ -201,9 +243,9 @@ var _ = Describe("ReconcileGRETunnels", func() {
 
 		var added netlink.Link
 		gomock.InOrder(
-			tk.EXPECT().LinkByName("gtap-abc").Return(nil, notFound()),
 			tk.EXPECT().LinkByName("mirror").Return(vrf, nil),
 			tk.EXPECT().LinkByName("lo.mir6").Return(lo, nil),
+			tk.EXPECT().LinkByName("gtap-abc").Return(nil, notFound()),
 			tk.EXPECT().LinkAdd(gomock.Any()).DoAndReturn(func(l netlink.Link) error { added = l; return nil }),
 			tk.EXPECT().LinkByName("gtap-abc").Return(gre, nil),
 			tk.EXPECT().LinkSetUp(gre).Return(nil),
@@ -227,7 +269,7 @@ var _ = Describe("ReconcileTcMirrors", func() {
 		nm := mirrorManager(tk)
 
 		src := dummyLink("l2.501", 5)
-		var added *netlink.Flower
+		var added []*netlink.Flower
 		var addedQdisc netlink.Qdisc
 
 		tk.EXPECT().LinkByName("l2.501").Return(src, nil)
@@ -237,10 +279,12 @@ var _ = Describe("ReconcileTcMirrors", func() {
 			return nil
 		})
 		tk.EXPECT().FilterList(src, gomock.Any()).Return(nil, nil).Times(2)
+		// A "tcp" rule with no prefix has no derivable family, so a filter is
+		// emitted per family (IPv4 + IPv6).
 		tk.EXPECT().FilterAdd(gomock.Any()).DoAndReturn(func(f netlink.Filter) error {
-			added = f.(*netlink.Flower)
+			added = append(added, f.(*netlink.Flower))
 			return nil
-		})
+		}).Times(2)
 
 		rules := []MirrorRule{{SourceInterface: "l2.501", Direction: "ingress", GREInterface: "gre-abc", Protocol: "tcp"}}
 		Expect(nm.ReconcileTcMirrors(rules, map[string]int{"gre-abc": 30})).To(Succeed())
@@ -250,10 +294,81 @@ var _ = Describe("ReconcileTcMirrors", func() {
 		Expect(clsact.Attrs().Handle).To(Equal(netlink.MakeHandle(clsactHandleMajor, 0)))
 		Expect(clsact.Attrs().Parent).To(Equal(uint32(netlink.HANDLE_CLSACT)))
 
-		Expect(added).ToNot(BeNil())
-		Expect(added.Actions).To(HaveLen(1))
-		mirred := added.Actions[0].(*netlink.MirredAction)
-		Expect(mirred.Ifindex).To(Equal(30))
+		Expect(added).To(HaveLen(2))
+		ethTypes := []uint16{added[0].EthType, added[1].EthType}
+		Expect(ethTypes).To(ConsistOf(ethPIP, ethPIPv6))
+		for _, f := range added {
+			Expect(f.IPProto).ToNot(BeNil())
+			Expect(*f.IPProto).To(Equal(vnl.IPProto(protoTCP)))
+			Expect(f.Actions).To(HaveLen(1))
+			Expect(f.Actions[0].(*netlink.MirredAction).Ifindex).To(Equal(30))
+			// Distinct priorities within the same (ingress) hook.
+			Expect(int(f.Priority)).To(BeNumerically(">=", mirrorFilterPriorityBase))
+		}
+		Expect(added[0].Priority).ToNot(Equal(added[1].Priority))
+	})
+
+	It("emits TCP/UDP/SCTP filters for both families when only a port is matched", func() {
+		mockctrl := gomock.NewController(GinkgoT())
+		defer mockctrl.Finish()
+		tk := mock_nl.NewMockToolkitInterface(mockctrl)
+		nm := mirrorManager(tk)
+
+		src := dummyLink("l2.501", 5)
+		var added []*netlink.Flower
+
+		tk.EXPECT().LinkByName("l2.501").Return(src, nil)
+		tk.EXPECT().QdiscList(src).Return([]netlink.Qdisc{&netlink.Clsact{}}, nil)
+		tk.EXPECT().FilterList(src, gomock.Any()).Return(nil, nil).Times(2)
+		// 2 families x 3 port-based protocols = 6 filters, each with the port set.
+		tk.EXPECT().FilterAdd(gomock.Any()).DoAndReturn(func(f netlink.Filter) error {
+			added = append(added, f.(*netlink.Flower))
+			return nil
+		}).Times(6)
+
+		port := uint16(443)
+		rules := []MirrorRule{{SourceInterface: "l2.501", Direction: "ingress", GREInterface: "gre-abc", DstPort: port}}
+		Expect(nm.ReconcileTcMirrors(rules, map[string]int{"gre-abc": 30})).To(Succeed())
+
+		Expect(added).To(HaveLen(6))
+		protos := map[vnl.IPProto]int{}
+		prios := map[uint16]struct{}{}
+		for _, f := range added {
+			Expect(f.IPProto).ToNot(BeNil())
+			protos[*f.IPProto]++
+			Expect(f.DestPort).To(Equal(port))
+			prios[f.Priority] = struct{}{}
+		}
+		Expect(protos).To(HaveKeyWithValue(vnl.IPProto(protoTCP), 2))
+		Expect(protos).To(HaveKeyWithValue(vnl.IPProto(protoUDP), 2))
+		Expect(protos).To(HaveKeyWithValue(vnl.IPProto(protoSCTP), 2))
+		// All 6 share the ingress hook, so all priorities must be unique.
+		Expect(prios).To(HaveLen(6))
+	})
+
+	It("emits a single family-specific filter when the prefix family is known", func() {
+		mockctrl := gomock.NewController(GinkgoT())
+		defer mockctrl.Finish()
+		tk := mock_nl.NewMockToolkitInterface(mockctrl)
+		nm := mirrorManager(tk)
+
+		src := dummyLink("l2.501", 5)
+		var added []*netlink.Flower
+
+		tk.EXPECT().LinkByName("l2.501").Return(src, nil)
+		tk.EXPECT().QdiscList(src).Return([]netlink.Qdisc{&netlink.Clsact{}}, nil)
+		tk.EXPECT().FilterList(src, gomock.Any()).Return(nil, nil).Times(2)
+		tk.EXPECT().FilterAdd(gomock.Any()).DoAndReturn(func(f netlink.Filter) error {
+			added = append(added, f.(*netlink.Flower))
+			return nil
+		}).Times(1)
+
+		rules := []MirrorRule{{SourceInterface: "l2.501", Direction: "ingress", GREInterface: "gre-abc", DstPrefix: "fd00::/64"}}
+		Expect(nm.ReconcileTcMirrors(rules, map[string]int{"gre-abc": 30})).To(Succeed())
+
+		Expect(added).To(HaveLen(1))
+		Expect(added[0].EthType).To(Equal(ethPIPv6))
+		Expect(added[0].DestIP).ToNot(BeNil())
 	})
 
 	It("fails when the GRE tunnel index is unknown", func() {
@@ -286,7 +401,26 @@ var _ = Describe("CleanupMirrors", func() {
 		tk.EXPECT().LinkList().Return([]netlink.Link{stale, keep, other}, nil)
 		tk.EXPECT().LinkDel(stale).Return(nil)
 
-		Expect(nm.CleanupMirrors([]GRETunnel{{Name: "gre-keep"}}, nil)).To(Succeed())
+		Expect(nm.CleanupMirrors([]GRETunnel{{Name: "gre-keep"}}, nil, nil)).To(Succeed())
+	})
+
+	It("deletes stale VRF-enslaved loopback dummies not in the desired set", func() {
+		mockctrl := gomock.NewController(GinkgoT())
+		defer mockctrl.Finish()
+		tk := mock_nl.NewMockToolkitInterface(mockctrl)
+		nm := mirrorManager(tk)
+
+		vrf := &netlink.Vrf{LinkAttrs: netlink.LinkAttrs{Name: "mirror", Index: 10}}
+		keepLo := &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: "lo.keep", Index: 20, MasterIndex: 10}}
+		staleLo := &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: "lo.stale", Index: 21, MasterIndex: 10}}
+		rootDummy := &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: "lo.root", Index: 22}} // not VRF-enslaved
+
+		tk.EXPECT().LinkList().Return([]netlink.Link{vrf, keepLo, staleLo, rootDummy}, nil)
+		// Only the stale VRF-enslaved loopback is removed; the root-namespace dummy
+		// and the desired loopback are left untouched.
+		tk.EXPECT().LinkDel(staleLo).Return(nil)
+
+		Expect(nm.CleanupMirrors(nil, []LoopbackConfig{{Name: "lo.keep", VRF: "mirror"}}, nil)).To(Succeed())
 	})
 
 	It("clears only mirror-priority filters from a source no longer mirrored", func() {
@@ -305,6 +439,6 @@ var _ = Describe("CleanupMirrors", func() {
 		// forwarding filter at priority 1 is left untouched.
 		tk.EXPECT().FilterDel(mirrorFilter).Return(nil).Times(2)
 
-		Expect(nm.CleanupMirrors(nil, nil)).To(Succeed())
+		Expect(nm.CleanupMirrors(nil, nil, nil)).To(Succeed())
 	})
 })

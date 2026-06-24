@@ -41,6 +41,7 @@ type MirrorTargetSpec struct {
 	Type MirrorTargetType `json:"type"`
 
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Pattern=`^((([0-9]{1,3}\.){3}[0-9]{1,3})|(([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}))$`
 	// DestinationIP is the remote collector IP the tunnel points to.
 	DestinationIP string `json:"destinationIP"`
 

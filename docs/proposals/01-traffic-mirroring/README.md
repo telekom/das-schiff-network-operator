@@ -115,6 +115,8 @@ Based on the source type referenced by a `MirrorSelector`:
 
 > **Rationale:** We want to see packets *before* encapsulation towards the fabric and *after* decapsulation from the fabric. The `vx.<vrf>` VXLAN interface is the best attach point. If the VRF has no VXLAN (e.g. a local VRF without VNI), the mirror selector is silently ignored on that node.
 
+> **Known limitation (Layer2 source):** the tc clsact hook is attached to the bridge master `l2.<n>`, so it observes traffic the bridge exchanges with the host stack (SVI/IRB-routed and locally-terminated frames). Purely port-to-port bridged (east-west) traffic between two local bridge ports is switched in the bridge fast path and is **not** captured. Mirroring such flows would require attaching filters to the individual bridge ports instead of the master.
+
 ### 3.2 Mirror Target VRF — User-Defined via VRFRouteConfiguration
 
 The GRE tunnel used to transport mirrored traffic **MUST live in a dedicated fabric VRF** (a "tap" / "mirror" VRF) that is separate from production VRFs. This avoids:
