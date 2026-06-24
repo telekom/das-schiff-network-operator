@@ -10,6 +10,7 @@ import (
 	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
 	"github.com/telekom/das-schiff-network-operator/pkg/network/netplan"
+	"github.com/telekom/das-schiff-network-operator/pkg/nl"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 	"gopkg.in/yaml.v2"
@@ -40,9 +41,20 @@ type addresses struct {
 }
 
 type netplanVlan struct {
-	addresses `json:",inline"`
-	ID        int `json:"id"`
-	Mtu       int `json:"mtu"`
+	addresses                  `json:",inline" yaml:",inline"`
+	ID                         int   `json:"id" yaml:"id"`
+	Mtu                        int   `json:"mtu" yaml:"mtu"`
+	GenericReceiveOffload      *bool `json:"generic-receive-offload" yaml:"generic-receive-offload"`
+	GenericSegmentationOffload *bool `json:"generic-segmentation-offload" yaml:"generic-segmentation-offload"`
+	TCPSegmentationOffload     *bool `json:"tcp-segmentation-offload" yaml:"tcp-segmentation-offload"`
+}
+
+func (v *netplanVlan) disableSegmentation() bool {
+	return isFalse(v.GenericReceiveOffload) || isFalse(v.GenericSegmentationOffload) || isFalse(v.TCPSegmentationOffload)
+}
+
+func isFalse(value *bool) bool {
+	return value != nil && !*value
 }
 
 type NodeNetplanConfigReconciler struct {
@@ -110,6 +122,11 @@ func createVLAN(masterInterface netlink.Link, vlanConfig *netplanVlan, name stri
 	}
 	if err := netlink.LinkSetUp(&link); err != nil {
 		return fmt.Errorf("error setting up vlan %s: %w", name, err)
+	}
+	if vlanConfig.disableSegmentation() {
+		if err := nl.ReconcileSegmentation(&link, true); err != nil {
+			return fmt.Errorf("error disabling segmentation offload for vlan %s: %w", name, err)
+		}
 	}
 	if err := reconcileAddresses(&link, vlan); err != nil {
 		return fmt.Errorf("error reconciling addresses for vlan %s: %w", name, err)
@@ -274,15 +291,37 @@ func reconcileExisting(prefix, interfaceType string, devices map[string]netplan.
 							return fmt.Errorf("error deleting vlan %s from bridge %s: %w", existingInterface.Attrs().Name, (*bridge).Attrs().Name, err)
 						}
 					}
-				} else {
-					if err := reconcileExistingAddresses(existingInterface, devices[name]); err != nil {
-						return fmt.Errorf("error reconciling existing addresses for %s: %w", existingInterface.Attrs().Name, err)
-					}
+				} else if err := reconcileExistingInterface(existingInterface, interfaceType, devices[name]); err != nil {
+					return fmt.Errorf("error reconciling existing %s: %w", existingInterface.Attrs().Name, err)
 				}
 			}
 		}
 	}
 
+	return nil
+}
+
+func reconcileExistingInterface(existingInterface netlink.Link, interfaceType string, device netplan.Device) error {
+	if err := reconcileExistingAddresses(existingInterface, device); err != nil {
+		return err
+	}
+	if interfaceType != vlanInterfaceType {
+		return nil
+	}
+	vlanConfig, err := parseVlan(device)
+	if err != nil {
+		return err
+	}
+	if !vlanConfig.disableSegmentation() {
+		return nil
+	}
+	vlanInterface, ok := existingInterface.(*netlink.Vlan)
+	if !ok {
+		return fmt.Errorf("expected vlan link, got %s", existingInterface.Type())
+	}
+	if err := nl.ReconcileSegmentation(vlanInterface, true); err != nil {
+		return fmt.Errorf("error disabling segmentation offload: %w", err)
+	}
 	return nil
 }
 

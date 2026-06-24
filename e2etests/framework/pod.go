@@ -3,7 +3,9 @@ package framework
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/netip"
 	"os/exec"
 	"strings"
 	"time"
@@ -14,6 +16,11 @@ import (
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/remotecommand"
+)
+
+const (
+	testPodCreateAttempts  = 3
+	testPodDADCheckTimeout = 30 * time.Second
 )
 
 // PodOption applies optional configuration to a test pod spec.
@@ -49,16 +56,9 @@ func WithNetAdmin() PodOption {
 
 // CreateTestPod creates a simple test pod with network tools.
 // If a pod with the same name already exists, it is deleted first.
+// Static IPv6 Multus pods are retried when CNI-time DAD suppression loses
+// the race and the assigned address enters dadfailed state.
 func (f *Framework) CreateTestPod(ctx context.Context, namespace, name, nodeName string, annotations map[string]string, opts ...PodOption) error {
-	// Clean up any leftover pod from a previous run.
-	_ = f.KubeClient.CoreV1().Pods(namespace).Delete(ctx, name, metav1.DeleteOptions{})
-	// Wait until it's actually gone (up to 60s).
-	waitCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
-	defer cancel()
-	_ = Poll(waitCtx, 2*time.Second, func() (bool, error) {
-		_, err := f.KubeClient.CoreV1().Pods(namespace).Get(waitCtx, name, metav1.GetOptions{})
-		return apierrors.IsNotFound(err), nil
-	})
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        name,
@@ -91,7 +91,45 @@ func (f *Framework) CreateTestPod(ctx context.Context, namespace, name, nodeName
 	for _, opt := range opts {
 		opt(&pod.Spec)
 	}
-	return f.Client.Create(ctx, pod)
+
+	attempts := 1
+	if hasStaticIPv6MultusNetwork(annotations) {
+		attempts = testPodCreateAttempts
+	}
+
+	deletePod := f.deletePodBestEffort
+	if attempts > 1 {
+		deletePod = f.DeletePod
+	}
+
+	for attempt := 1; attempt <= attempts; attempt++ {
+		if err := deletePod(ctx, namespace, name); err != nil {
+			return err
+		}
+		if err := f.Client.Create(ctx, pod.DeepCopy()); err != nil {
+			return err
+		}
+		if attempts == 1 {
+			return nil
+		}
+
+		if err := f.WaitForPodReady(ctx, namespace, name, f.Config.PodReadyTimeout); err != nil {
+			return fmt.Errorf("wait for pod %s/%s to become ready before IPv6 DAD check: %w", namespace, name, err)
+		}
+
+		dadFailed, err := f.podHasIPv6DADFailure(ctx, namespace, name, testPodDADCheckTimeout)
+		if err != nil {
+			return fmt.Errorf("check IPv6 DAD state for pod %s/%s: %w", namespace, name, err)
+		}
+		if !dadFailed {
+			return nil
+		}
+		if err := f.DeletePod(ctx, namespace, name); err != nil {
+			return fmt.Errorf("delete pod %s/%s after IPv6 DAD failure: %w", namespace, name, err)
+		}
+	}
+
+	return fmt.Errorf("pod %s/%s IPv6 address entered dadfailed state after %d create attempts", namespace, name, attempts)
 }
 
 // CreateBirdPod creates a Bird BGP speaker pod with init container for loopback IPs.
@@ -174,17 +212,80 @@ func (f *Framework) WaitForPodReady(ctx context.Context, namespace, name string,
 		if err != nil {
 			return false, nil
 		}
-		if pod.Status.Phase != corev1.PodRunning {
+		return podIsReady(pod), nil
+	})
+}
+
+func (f *Framework) podHasIPv6DADFailure(ctx context.Context, namespace, name string, timeout time.Duration) (bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	dadFailed := false
+	err := Poll(ctx, 2*time.Second, func() (bool, error) {
+		pod, err := f.KubeClient.CoreV1().Pods(namespace).Get(ctx, name, metav1.GetOptions{})
+		if err != nil || !podIsReady(pod) {
 			return false, nil
 		}
-		for i := range pod.Status.ContainerStatuses {
-			cs := &pod.Status.ContainerStatuses[i]
-			if !cs.Ready {
-				return false, nil
-			}
+
+		stdout, stderr, err := f.ExecInPod(ctx, namespace, name, "", []string{"ip", "-6", "addr", "show"})
+		if err != nil {
+			return false, fmt.Errorf("inspect IPv6 addresses in pod %s/%s failed (stderr=%s): %w", namespace, name, stderr, err)
+		}
+		if strings.Contains(stdout, "dadfailed") {
+			dadFailed = true
+			return true, nil
+		}
+		if strings.Contains(stdout, " tentative") {
+			return false, nil
 		}
 		return true, nil
 	})
+	return dadFailed, err
+}
+
+func podIsReady(pod *corev1.Pod) bool {
+	if pod.Status.Phase != corev1.PodRunning {
+		return false
+	}
+	for i := range pod.Status.ContainerStatuses {
+		if !pod.Status.ContainerStatuses[i].Ready {
+			return false
+		}
+	}
+	return true
+}
+
+func hasStaticIPv6MultusNetwork(annotations map[string]string) bool {
+	networks := annotations["k8s.v1.cni.cncf.io/networks"]
+	if networks == "" {
+		return false
+	}
+
+	var selections []struct {
+		IPs []string `json:"ips"`
+	}
+	if err := json.Unmarshal([]byte(networks), &selections); err != nil {
+		return false
+	}
+
+	for _, selection := range selections {
+		for _, ip := range selection.IPs {
+			if isIPv6AddressOrPrefix(ip) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func isIPv6AddressOrPrefix(value string) bool {
+	if prefix, err := netip.ParsePrefix(value); err == nil {
+		return prefix.Addr().Is6()
+	}
+	if addr, err := netip.ParseAddr(value); err == nil {
+		return addr.Is6()
+	}
+	return false
 }
 
 // DeletePod force-deletes a pod and waits for it to be fully removed.
@@ -207,6 +308,17 @@ func (f *Framework) DeletePod(ctx context.Context, namespace, name string) error
 		_, gerr := f.KubeClient.CoreV1().Pods(namespace).Get(waitCtx, name, metav1.GetOptions{})
 		return apierrors.IsNotFound(gerr), nil
 	})
+}
+
+func (f *Framework) deletePodBestEffort(ctx context.Context, namespace, name string) error {
+	_ = f.KubeClient.CoreV1().Pods(namespace).Delete(ctx, name, metav1.DeleteOptions{})
+	waitCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+	_ = Poll(waitCtx, 2*time.Second, func() (bool, error) {
+		_, err := f.KubeClient.CoreV1().Pods(namespace).Get(waitCtx, name, metav1.GetOptions{})
+		return apierrors.IsNotFound(err), nil
+	})
+	return nil
 }
 
 // ExecInPod executes a command in a running pod and returns stdout, stderr.
