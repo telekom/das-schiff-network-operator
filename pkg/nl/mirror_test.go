@@ -526,6 +526,27 @@ var _ = Describe("CleanupMirrors", func() {
 		Expect(nm.CleanupMirrors(nil, []LoopbackConfig{{Name: "lo.keep", VRF: "mirror"}}, nil)).To(Succeed())
 	})
 
+	It("never deletes dummies in VRFs that carry no mirror config", func() {
+		mockctrl := gomock.NewController(GinkgoT())
+		defer mockctrl.Finish()
+		tk := mock_nl.NewMockToolkitInterface(mockctrl)
+		nm := mirrorManager(tk)
+
+		mirrorVrf := &netlink.Vrf{LinkAttrs: netlink.LinkAttrs{Name: "mirror", Index: 10}}
+		clusterVrf := &netlink.Vrf{LinkAttrs: netlink.LinkAttrs{Name: "cluster", Index: 11}}
+		mgmtVrf := &netlink.Vrf{LinkAttrs: netlink.LinkAttrs{Name: "mgmt", Index: 12}}
+		// Legitimate non-mirror loopbacks enslaved to other VRFs must NOT be touched.
+		clusterLo := &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: "lo.cluster", Index: 20, MasterIndex: 11}}
+		mgmtLo := &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: "lo.mgmt", Index: 21, MasterIndex: 12}}
+		keepLo := &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: "lo.mir", Index: 22, MasterIndex: 10}}
+
+		tk.EXPECT().LinkList().Return([]netlink.Link{mirrorVrf, clusterVrf, mgmtVrf, clusterLo, mgmtLo, keepLo}, nil)
+		// No LinkDel expected at all: the mirror VRF's only loopback is desired, and
+		// the cluster/mgmt loopbacks are out of scope.
+
+		Expect(nm.CleanupMirrors(nil, []LoopbackConfig{{Name: "lo.mir", VRF: "mirror"}}, nil)).To(Succeed())
+	})
+
 	It("clears only mirror-priority filters from a source no longer mirrored", func() {
 		mockctrl := gomock.NewController(GinkgoT())
 		defer mockctrl.Finish()

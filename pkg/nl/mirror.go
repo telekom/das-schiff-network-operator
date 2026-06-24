@@ -610,48 +610,75 @@ func (n *Manager) CleanupMirrors(tunnels []GRETunnel, loopbacks []LoopbackConfig
 	for i := range rules {
 		desiredSources[rules[i].SourceInterface] = struct{}{}
 	}
+	mirrorVRFIndices := mirrorVRFIndexSet(links, tunnels, loopbacks)
 
-	vrfIndices := make(map[int]struct{})
 	for _, link := range links {
-		if link.Type() == "vrf" {
-			vrfIndices[link.Attrs().Index] = struct{}{}
+		if err := n.cleanupMirrorLink(link, desiredGRE, desiredSources, desiredLoopbacks, mirrorVRFIndices); err != nil {
+			return err
 		}
 	}
+	return nil
+}
 
-	for _, link := range links {
-		name := link.Attrs().Name
-		switch {
-		case isMirrorGREName(name):
-			if _, ok := desiredGRE[name]; !ok {
-				if err := n.toolkit.LinkDel(link); err != nil {
-					return fmt.Errorf("error deleting stale GRE %s: %w", name, err)
-				}
+// cleanupMirrorLink removes a single link's stale mirror state: stale GRE tunnels
+// and stale (mirror-VRF-scoped) loopbacks are deleted; mirror filters are cleared
+// from source interfaces no longer referenced by any rule.
+func (n *Manager) cleanupMirrorLink(link netlink.Link, desiredGRE, desiredSources, desiredLoopbacks map[string]struct{}, mirrorVRFIndices map[int]struct{}) error {
+	name := link.Attrs().Name
+	switch {
+	case isMirrorGREName(name):
+		if _, ok := desiredGRE[name]; !ok {
+			if err := n.toolkit.LinkDel(link); err != nil {
+				return fmt.Errorf("error deleting stale GRE %s: %w", name, err)
 			}
-		case isMirrorSourceName(name):
-			if _, ok := desiredSources[name]; !ok {
-				if err := n.clearMirrorFilters(link, true); err != nil {
-					return err
-				}
-			}
-		case isMirrorLoopback(link, vrfIndices):
-			if _, ok := desiredLoopbacks[name]; !ok {
-				if err := n.toolkit.LinkDel(link); err != nil {
-					return fmt.Errorf("error deleting stale loopback %s: %w", name, err)
-				}
+		}
+	case isMirrorSourceName(name):
+		if _, ok := desiredSources[name]; !ok {
+			return n.clearMirrorFilters(link, true)
+		}
+	case isMirrorLoopback(link, mirrorVRFIndices):
+		if _, ok := desiredLoopbacks[name]; !ok {
+			if err := n.toolkit.LinkDel(link); err != nil {
+				return fmt.Errorf("error deleting stale loopback %s: %w", name, err)
 			}
 		}
 	}
 	return nil
 }
 
-// isMirrorLoopback reports whether a link is a mirror loopback: a dummy interface
-// enslaved to one of the VRFs. In this data path the only VRF-enslaved dummies are
-// the per-node mirror source loopbacks created by ensureLoopback.
-func isMirrorLoopback(link netlink.Link, vrfIndices map[int]struct{}) bool {
+// mirrorVRFIndexSet returns the ifindexes of VRFs that currently carry mirror
+// config (a desired GRE tunnel or loopback). Only dummies enslaved to these are
+// candidates for loopback GC, so a dummy in an unrelated VRF (management, cluster,
+// fabric, ...) is never deleted — important because CleanupMirrors runs every
+// reconcile and LinkDel is destructive.
+func mirrorVRFIndexSet(links []netlink.Link, tunnels []GRETunnel, loopbacks []LoopbackConfig) map[int]struct{} {
+	mirrorVRFNames := make(map[string]struct{}, len(tunnels)+len(loopbacks))
+	for i := range tunnels {
+		mirrorVRFNames[tunnels[i].VRF] = struct{}{}
+	}
+	for i := range loopbacks {
+		mirrorVRFNames[loopbacks[i].VRF] = struct{}{}
+	}
+	indices := make(map[int]struct{})
+	for _, link := range links {
+		if link.Type() != "vrf" {
+			continue
+		}
+		if _, ok := mirrorVRFNames[link.Attrs().Name]; ok {
+			indices[link.Attrs().Index] = struct{}{}
+		}
+	}
+	return indices
+}
+
+// isMirrorLoopback reports whether a link is a stale mirror loopback candidate: a
+// dummy interface enslaved to a VRF that currently carries mirror config. Scoping
+// to mirror VRFs ensures dummies in unrelated VRFs are never deleted.
+func isMirrorLoopback(link netlink.Link, mirrorVRFIndices map[int]struct{}) bool {
 	if link.Type() != "dummy" {
 		return false
 	}
-	_, ok := vrfIndices[link.Attrs().MasterIndex]
+	_, ok := mirrorVRFIndices[link.Attrs().MasterIndex]
 	return ok
 }
 
