@@ -14,7 +14,7 @@ import (
 	"github.com/telekom/das-schiff-network-operator/e2etests/framework"
 )
 
-func determineIPv6Prefix(ctx context.Context, f *framework.Framework, namespace, podName, iface string) (string, error) {
+func determineIPv6PrefixLength(ctx context.Context, f *framework.Framework, namespace, podName, iface string) (string, error) {
 	stdout, stderr, err := f.ExecInPod(ctx, namespace, podName, "", []string{
 		"ip", "-6", "-o", "addr", "show", "dev", iface, "scope", "global",
 	})
@@ -127,7 +127,7 @@ var _ = Describe("VIP Failover", Label("failover"), func() {
 		Expect(f.EnsureIPv6NoDad(ctx, ns, "failover-dst", cfg.FailoverPod02IPv6, "net1")).To(Succeed())
 
 		By("Determining global IPv6 prefix for failover VIP")
-		vipV6Prefix, err := determineIPv6Prefix(ctx, f, ns, "failover-dst", "net1")
+		vipV6Prefix, err := determineIPv6PrefixLength(ctx, f, ns, "failover-dst", "net1")
 		Expect(err).NotTo(HaveOccurred())
 		vipV6WithPrefix := vipV6 + "/" + vipV6Prefix
 
