@@ -73,7 +73,8 @@ test: manifests generate fmt vet envtest ## Run tests.
 		echo "no non-e2e Go packages found for integration test run" >&2; \
 		exit 1; \
 	fi; \
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" go test -tags=integration $$TEST_PACKAGES -coverprofile cover.out
+	KUBEBUILDER_ASSETS="$$( $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path )"; \
+	KUBEBUILDER_ASSETS="$$KUBEBUILDER_ASSETS" go test -tags=integration $$TEST_PACKAGES -coverprofile cover.out
 
 ##@ Build
 
