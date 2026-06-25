@@ -63,7 +63,7 @@ vet: ## Run go vet against code.
 
 .PHONY: test
 test: manifests generate fmt vet envtest ## Run tests.
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" go test $(shell go list ./... 2>/dev/null | grep -v -e '/e2etests$$' -e /e2etests/tests -e /e2etests/config -e /e2e/ || true) -coverprofile cover.out
+	KUBEBUILDER_ASSETS="$$( $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path )" go test $$(go list ./... 2>/dev/null | grep -v -e '/e2etests$$' -e /e2etests/tests -e /e2etests/config -e /e2e/ || true) -coverprofile cover.out
 
 ##@ Linting
 
