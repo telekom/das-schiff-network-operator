@@ -152,7 +152,7 @@ SPDX-License-Identifier = "GPL-2.0-only"
 [[annotations]]
 path = ["LICENSE"]
 precedence = "override"
-SPDX-FileCopyrightText = "2020 Deutsche Telekom AG"
+SPDX-FileCopyrightText = "2004 Apache Software Foundation"
 SPDX-License-Identifier = "Apache-2.0"
 
 # BPF bundled license text (verbatim GPL-2.0 copy)
