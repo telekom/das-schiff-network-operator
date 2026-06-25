@@ -78,7 +78,12 @@ func (noopNetlinkOps) LinkSetNoMaster(_ netlink.Link) error                     
 func (noopNetlinkOps) LinkGetProtinfo(_ netlink.Link) (netlink.Protinfo, error) {
 	return netlink.Protinfo{}, nil
 }
-func (noopNetlinkOps) LinkSetMaster(_, _ netlink.Link) error { return nil }
+func (noopNetlinkOps) LinkSetMaster(_, _ netlink.Link) error             { return nil }
+func (noopNetlinkOps) QdiscList(_ netlink.Link) ([]netlink.Qdisc, error) { return nil, nil }
+func (noopNetlinkOps) QdiscAdd(_ netlink.Qdisc) error                    { return nil }
+func (noopNetlinkOps) FilterList(_ netlink.Link, _ uint32) ([]netlink.Filter, error) {
+	return nil, nil
+}
 
 func newTestNeighborSync(nlOps nl.ToolkitInterface) *NeighborSync {
 	return &NeighborSync{
