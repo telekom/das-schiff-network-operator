@@ -201,7 +201,7 @@ func getGoVersion(repoRoot string) (string, error) {
 	}
 	for _, line := range strings.Split(string(data), "\n") {
 		fields := strings.Fields(line)
-		if len(fields) == 2 && fields[0] == "go" {
+		if len(fields) >= 2 && fields[0] == "go" {
 			return fields[1], nil
 		}
 	}
