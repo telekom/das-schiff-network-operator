@@ -79,6 +79,12 @@ func TestValidateKnownHostsEntries(t *testing.T) {
 			wantErrSub: "does not contain CRA URL entries: [169.254.33.1]:830",
 		},
 		{
+			name:       "missing port",
+			lines:      []string{knownhosts.Line([]string{"169.254.33.1"}, hostKey)},
+			urls:       []string{"169.254.33.1"},
+			wantErrSub: `CRA URL "169.254.33.1" must be in host:port form`,
+		},
+		{
 			name:       "empty file",
 			urls:       []string{"169.254.33.1:830"},
 			wantErrSub: "does not contain CRA URL entries: [169.254.33.1]:830",
