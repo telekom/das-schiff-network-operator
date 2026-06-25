@@ -157,9 +157,8 @@ func testMirrorACL(cfg *config.Config) map[string]interface{} {
 		"trafficMatch": map[string]interface{}{
 			"srcPrefix": cfg.Macvlan01IPv4 + "/32",
 		},
-		"destinationAddress": cfg.Macvlan02IPv4,
-		"destinationVrf":     cfg.VRFM2M,
-		"encapsulationType":  "gre",
+		"mirrorDestination": "gre-mirror-test",
+		"direction":         "ingress",
 	}
 }
 
