@@ -10,7 +10,7 @@ body:
     attributes:
       value: |
         Thank you for reporting a bug! Before submitting, please:
-        - Check the [documentation](https://github.com/telekom/das-schiff-network-operator/tree/main/docs)
+        - Check the [documentation](https://github.com/telekom/das-schiff-network-operator/tree/HEAD/docs)
         - Search [existing issues](https://github.com/telekom/das-schiff-network-operator/issues) for similar reports
         - For security issues, email opensource@telekom.de instead of using this form
 
