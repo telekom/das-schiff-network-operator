@@ -19,7 +19,7 @@ SHELL = /usr/bin/env bash -o pipefail
 .SHELLFLAGS = -ec
 
 LDFLAGS := $(shell hack/version.sh)
-GO_VERSION := $(if $(GO_VERSION),$(GO_VERSION),$(shell awk '/^go / {print $$2; exit}' go.mod))
+GO_VERSION ?= $(shell awk '/^go / {print $$2; exit}' go.mod)
 
 .PHONY: all
 all: build

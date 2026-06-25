@@ -1,6 +1,6 @@
 # Test runner image for das-schiff-network-operator e2e tests.
 # Includes ginkgo CLI, kubectl, Go, and network diagnostic tools.
-ARG GO_VERSION=1.25
+ARG GO_VERSION=1.25.0
 FROM golang:${GO_VERSION} AS builder
 
 # Install ginkgo CLI
