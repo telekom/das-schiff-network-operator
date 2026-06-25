@@ -66,6 +66,7 @@ func (noopNetlinkOps) AddrDel(_ netlink.Link, _ *netlink.Addr) error          { 
 func (noopNetlinkOps) LinkSetLearning(_ netlink.Link, _ bool) error           { return nil }
 func (noopNetlinkOps) LinkSetHairpin(_ netlink.Link, _ bool) error            { return nil }
 func (noopNetlinkOps) FilterAdd(_ netlink.Filter) error                       { return nil }
+func (noopNetlinkOps) FilterDel(_ netlink.Filter) error                       { return nil }
 func (noopNetlinkOps) ExecuteNetlinkRequest(_ *netlinkNl.NetlinkRequest, _ int, _ uint16) ([][]byte, error) {
 	return nil, nil
 }
