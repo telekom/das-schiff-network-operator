@@ -148,6 +148,10 @@ func validateKnownHostsEntries(knownHostsPath string, urls []string) error {
 
 	missing := []string{}
 	for _, url := range normalizedURLs {
+		if _, _, err := net.SplitHostPort(url); err != nil {
+			return fmt.Errorf("CRA URL %q must be in host:port form: %w", url, err)
+		}
+
 		hasEntry, err := knownHostsHasEntry(hostKeyCallback, url, validationKey)
 		if err != nil {
 			return fmt.Errorf("validate known hosts entry for CRA URL %q in file %q: %w", url, knownHostsPath, err)
