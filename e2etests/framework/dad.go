@@ -18,8 +18,8 @@ const (
 
 // WaitForIPv6DADComplete waits until the given IPv6 address on the specified
 // interface inside a pod is no longer in "tentative" or "dadfailed" state.
-// If the address is observed as tentative or dadfailed, the helper temporarily
-// disables DAD for the interface and re-adds the address once.
+// If DAD has failed, the helper temporarily disables DAD for the interface and
+// re-adds the address once.
 func (f *Framework) WaitForIPv6DADComplete(ctx context.Context, namespace, podName, ipv6Addr, ifName string, timeout time.Duration) error {
 	addr, err := netip.ParseAddr(ipv6Addr)
 	if err != nil {
@@ -49,7 +49,9 @@ func (f *Framework) WaitForIPv6DADComplete(ctx context.Context, namespace, podNa
 		switch state {
 		case ipv6DADReady:
 			return true, nil
-		case ipv6DADTentative, ipv6DADFailed:
+		case ipv6DADTentative:
+			return false, nil
+		case ipv6DADFailed:
 			if repaired {
 				return false, fmt.Errorf("IPv6 DAD did not clear for %s on %s", ipv6Addr, ifName)
 			}
