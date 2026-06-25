@@ -212,9 +212,9 @@ e2e-down: ## Tear down the E2E lab.
 	cd e2e/setup && go run ./cmd down
 
 .PHONY: e2e-test
-e2e-test: ## Run legacy E2E tests (excludes intent/mirror/sync tests).
+e2e-test: ## Run legacy E2E tests (includes legacy traffic mirror; excludes intent/sync tests).
 	docker exec clab-nwop-tester bash -c \
-	  'cd /repo && KUBECONFIG=/repo/e2etests/.kubeconfig go test -v -count=1 -timeout=30m ./e2etests -ginkgo.label-filter="!intent && !intent-exclusive && !mirror && !sync"'
+	  'cd /repo && KUBECONFIG=/repo/e2etests/.kubeconfig go test -v -count=1 -timeout=30m ./e2etests -ginkgo.label-filter="!intent && !intent-exclusive && !sync"'
 
 .PHONY: e2e-test-intent
 e2e-test-intent: ## Run E2E tests with intent reconciler enabled (replaces legacy pipeline).
@@ -225,11 +225,6 @@ e2e-test-intent: ## Run E2E tests with intent reconciler enabled (replaces legac
 e2e-test-sync: ## Run E2E sync controller tests.
 	docker exec clab-nwop-tester bash -c \
 	  'cd /repo && KUBECONFIG=/repo/e2etests/.kubeconfig E2E_INTENT_MODE=true go test -v -count=1 -timeout=30m ./e2etests -ginkgo.label-filter="sync"'
-
-.PHONY: e2e-test-mirror
-e2e-test-mirror: ## Run E2E traffic mirror tests.
-	docker exec clab-nwop-tester bash -c \
-	  'cd /repo && KUBECONFIG=/repo/e2etests/.kubeconfig go test -v -count=1 -timeout=30m ./e2etests -ginkgo.label-filter="mirror"'
 
 ##@ Build Dependencies
 

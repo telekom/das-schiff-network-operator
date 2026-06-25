@@ -203,16 +203,12 @@ jobs:
         id: legacy
         run: make e2e-test
 
-      - name: Run E2E tests (mirror)
-        # Must run before the intent step: the intent step patches the operator
-        # to --enable-intent-reconciler (disabling the legacy ConfigReconciler)
-        # and deletes legacy configs, which the MirrorSelector pipeline needs.
-        if: ${{ !cancelled() && steps.legacy.conclusion != 'skipped' }}
-        id: mirror
-        run: make e2e-test-mirror
-
       - name: Run E2E tests (intent)
-        if: ${{ !cancelled() && steps.mirror.conclusion != 'skipped' }}
+        # Must run after the legacy step: this step patches the operator to
+        # --enable-intent-reconciler (disabling the legacy ConfigReconciler)
+        # and deletes legacy configs, which the legacy pipeline (incl. the
+        # MirrorSelector mirror specs in the legacy step) needs.
+        if: ${{ !cancelled() && steps.legacy.conclusion != 'skipped' }}
         id: intent
         run: make e2e-test-intent
 
