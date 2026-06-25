@@ -31,6 +31,13 @@ import (
 // MirrorBuilder transforms TrafficMirror intent CRDs into MirrorACL entries.
 type MirrorBuilder struct{}
 
+// TrafficMirror source kinds.
+const (
+	mirrorSourceLayer2Attachment = "Layer2Attachment"
+	mirrorSourceInbound          = "Inbound"
+	mirrorSourceOutbound         = "Outbound"
+)
+
 // NewMirrorBuilder creates a new MirrorBuilder.
 func NewMirrorBuilder() *MirrorBuilder {
 	return &MirrorBuilder{}
@@ -104,7 +111,7 @@ func (b *MirrorBuilder) Build(ctx context.Context, data *resolver.ResolvedData) 
 // validMirrorSourceKind reports whether the TrafficMirror source kind is supported.
 func validMirrorSourceKind(kind string) bool {
 	switch kind {
-	case "Layer2Attachment", "Inbound", "Outbound":
+	case mirrorSourceLayer2Attachment, mirrorSourceInbound, mirrorSourceOutbound:
 		return true
 	default:
 		return false
@@ -132,11 +139,11 @@ func mirrorDirections(direction string) []networkv1alpha1.MirrorDirection {
 // attachment, an Inbound's VRFs or an Outbound's VRFs) across all nodes.
 func (b *MirrorBuilder) attachToSource(tm *nc.TrafficMirror, acl *networkv1alpha1.MirrorACL, data *resolver.ResolvedData, result map[string]*NodeContribution) error {
 	switch tm.Spec.Source.Kind {
-	case "Layer2Attachment":
+	case mirrorSourceLayer2Attachment:
 		return b.addToLayer2(tm.Spec.Source.Name, acl, data, result)
-	case "Inbound":
+	case mirrorSourceInbound:
 		return b.addToInboundVRF(tm.Spec.Source.Name, acl, data, result)
-	case "Outbound":
+	case mirrorSourceOutbound:
 		return b.addToOutboundVRF(tm.Spec.Source.Name, acl, data, result)
 	default:
 		return fmt.Errorf("unknown source kind %q", tm.Spec.Source.Kind)
