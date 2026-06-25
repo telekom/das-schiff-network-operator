@@ -502,7 +502,7 @@ func (reconciler *NodeNetplanConfigReconciler) Reconcile(ctx context.Context) er
 }
 
 func setEUIAutogeneration(intfName string, generateEUI bool) error {
-	if err := validateInterfaceName(intfName); err != nil {
+	if err := nl.ValidateInterfaceName(intfName); err != nil {
 		return err
 	}
 	fileName := filepath.Join(procSysNetIPv6ConfPath, intfName, "addr_gen_mode")
@@ -524,19 +524,6 @@ func setEUIAutogeneration(intfName string, generateEUI bool) error {
 		return fmt.Errorf("error closing file: %w", err)
 	}
 	return nil
-}
-
-func validateInterfaceName(intfName string) error {
-	switch {
-	case intfName == "", intfName == ".", intfName == "..":
-		return fmt.Errorf("invalid interface name %q", intfName)
-	case len(intfName) >= unix.IFNAMSIZ:
-		return fmt.Errorf("interface name %q exceeds Linux limit", intfName)
-	case strings.ContainsAny(intfName, "/\x00"):
-		return fmt.Errorf("interface name %q contains path separators or NUL bytes", intfName)
-	default:
-		return nil
-	}
 }
 
 func parseVlan(device netplan.Device) (*netplanVlan, error) {
