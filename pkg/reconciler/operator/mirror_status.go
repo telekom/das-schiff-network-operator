@@ -5,13 +5,14 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 )
 
 const (
