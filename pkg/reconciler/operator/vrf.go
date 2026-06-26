@@ -153,7 +153,10 @@ func processExports(vrf *v1alpha1.VRFRevision, fabricVrf *v1alpha1.FabricVRF) {
 
 		vrfImportItem := filterItem.DeepCopy()
 		comms := vrf.Communities
+		// Fall back to the deprecated single Community field for backward compatibility.
+		//nolint:staticcheck // SA1019: intentional read of deprecated field for backward compatibility
 		if len(comms) == 0 && vrf.Community != nil {
+			//nolint:staticcheck // SA1019: intentional read of deprecated field for backward compatibility
 			comms = []string{*vrf.Community}
 		}
 		if len(comms) > 0 {

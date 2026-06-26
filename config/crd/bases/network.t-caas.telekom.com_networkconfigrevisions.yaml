@@ -494,7 +494,9 @@ spec:
                     community:
                       description: |-
                         Community for export, if omitted no community will be set.
-                        Deprecated: use Communities instead. Mutually exclusive with Communities.
+                        Mutually exclusive with Communities.
+
+                        Deprecated: use Communities instead.
                       type: string
                     export:
                       description: Routes exported from the cluster VRF into the specified

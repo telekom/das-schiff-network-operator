@@ -79,7 +79,9 @@ type VRFRouteConfigurationSpec struct {
 	Seq int `json:"seq"`
 
 	// Community for export, if omitted no community will be set.
-	// Deprecated: use Communities instead. Mutually exclusive with Communities.
+	// Mutually exclusive with Communities.
+	//
+	// Deprecated: use Communities instead.
 	Community *string `json:"community,omitempty"`
 
 	// Communities for export, if omitted no community will be set.
