@@ -1,7 +1,7 @@
 # Custom kind node image for das-schiff-network-operator e2e tests.
 # Extends kindest/node with CRA host-side tooling and the CRA-FRR machine
 # image baked in at build time.
-ARG KIND_NODE_VERSION=v1.32.2
+ARG KIND_NODE_VERSION=v1.35.1
 FROM kindest/node:${KIND_NODE_VERSION}
 
 # ── Host-side CRA dependencies ──
@@ -15,7 +15,8 @@ RUN apt-get update && \
       iproute2 \
       bridge-utils \
       bpftool \
-      tcpdump && \
+      tcpdump \
+      netplan.io && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 

@@ -1,0 +1,514 @@
+package framework
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"time"
+
+	appsv1 "k8s.io/api/apps/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+)
+
+const (
+	operatorNamespace  = "kube-system"
+	operatorDeployment = "network-operator-operator"
+	intentRBACName     = "network-operator-intent"
+	intentAPIGroup     = "network-connector.sylvaproject.org"
+	nncGVR             = "nodenetworkconfigs"
+	nncGroup           = "network.t-caas.telekom.com"
+	nncVersion         = "v1alpha1"
+)
+
+// EnableIntentReconciler patches the operator deployment to enable the intent
+// reconciler and creates the necessary RBAC for intent CRDs. It then waits
+// for the operator to restart and the webhook to be serving.
+func (f *Framework) EnableIntentReconciler(ctx context.Context) error {
+	// 1. Create RBAC for intent CRD API group.
+	if err := f.ensureIntentRBAC(ctx); err != nil {
+		return fmt.Errorf("create intent RBAC: %w", err)
+	}
+
+	// 2. Delete legacy VRFRouteConfigurations so intent reconciler starts clean.
+	if err := f.deleteLegacyConfigs(ctx); err != nil {
+		return fmt.Errorf("delete legacy configs: %w", err)
+	}
+
+	// 3. Patch operator deployment to add --enable-intent-reconciler arg.
+	if err := f.patchOperatorForIntent(ctx); err != nil {
+		return fmt.Errorf("patch operator deployment: %w", err)
+	}
+
+	// 4. Wait for operator pod to restart with new args.
+	if err := f.waitForOperatorReady(ctx, 120*time.Second); err != nil {
+		return fmt.Errorf("wait for operator restart: %w", err)
+	}
+
+	// 5. Wait for webhook to be serving (cert generation takes a moment).
+	if err := f.waitForWebhookReady(ctx, 120*time.Second); err != nil {
+		return fmt.Errorf("wait for webhook ready: %w", err)
+	}
+
+	return nil
+}
+
+// ensureIntentRBAC creates the ClusterRole + ClusterRoleBinding for intent CRDs.
+func (f *Framework) ensureIntentRBAC(ctx context.Context) error {
+	cr := &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{Name: intentRBACName},
+		Rules: []rbacv1.PolicyRule{
+			{
+				APIGroups: []string{intentAPIGroup},
+				Resources: []string{"*"},
+				Verbs:     []string{"get", "list", "watch", "create", "update", "patch", "delete"},
+			},
+			{
+				APIGroups: []string{intentAPIGroup},
+				Resources: []string{"*/status"},
+				Verbs:     []string{"get", "update", "patch"},
+			},
+		},
+	}
+
+	if err := f.Client.Create(ctx, cr); err != nil && !apierrors.IsAlreadyExists(err) {
+		return err
+	}
+
+	crb := &rbacv1.ClusterRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: intentRBACName},
+		RoleRef: rbacv1.RoleRef{
+			APIGroup: "rbac.authorization.k8s.io",
+			Kind:     "ClusterRole",
+			Name:     intentRBACName,
+		},
+		Subjects: []rbacv1.Subject{
+			{
+				Kind:      "ServiceAccount",
+				Name:      "network-operator-controller-manager",
+				Namespace: operatorNamespace,
+			},
+		},
+	}
+
+	if err := f.Client.Create(ctx, crb); err != nil && !apierrors.IsAlreadyExists(err) {
+		return err
+	}
+
+	return nil
+}
+
+// deleteLegacyConfigs removes VRFRouteConfigurations and Layer2NetworkConfigurations.
+func (f *Framework) deleteLegacyConfigs(ctx context.Context) error {
+	legacyKinds := []struct {
+		kind     string
+		listKind string
+	}{
+		{kind: "VRFRouteConfiguration", listKind: "VRFRouteConfigurationList"},
+		{kind: "Layer2NetworkConfiguration", listKind: "Layer2NetworkConfigurationList"},
+	}
+	for _, lk := range legacyKinds {
+		list := &unstructured.UnstructuredList{}
+		list.SetGroupVersionKind(schema.GroupVersionKind{
+			Group:   "network.t-caas.telekom.com",
+			Version: "v1alpha1",
+			Kind:    lk.listKind,
+		})
+		if err := f.Client.List(ctx, list); err != nil {
+			// CRD might not be installed, skip.
+			continue
+		}
+		for i := range list.Items {
+			if err := f.Client.Delete(ctx, &list.Items[i]); err != nil && !apierrors.IsNotFound(err) {
+				return fmt.Errorf("delete %s/%s: %w", lk.kind, list.Items[i].GetName(), err)
+			}
+		}
+	}
+	return nil
+}
+
+// patchOperatorForIntent adds --enable-intent-reconciler to the operator container args.
+func (f *Framework) patchOperatorForIntent(ctx context.Context) error {
+	deploy := &appsv1.Deployment{}
+	if err := f.Client.Get(ctx, types.NamespacedName{
+		Name:      operatorDeployment,
+		Namespace: operatorNamespace,
+	}, deploy); err != nil {
+		return err
+	}
+
+	// Check if already patched.
+	for _, arg := range deploy.Spec.Template.Spec.Containers[0].Args {
+		if arg == "--enable-intent-reconciler" {
+			return nil // already enabled
+		}
+	}
+
+	// Use JSON patch to append the args.
+	patch := []map[string]interface{}{
+		{
+			"op":    "add",
+			"path":  "/spec/template/spec/containers/0/args/-",
+			"value": "--enable-intent-reconciler",
+		},
+		{
+			// Watch all namespaces so the intent reconciler sees Outbound CRDs
+			// created in test namespaces (not just the default namespace).
+			"op":    "add",
+			"path":  "/spec/template/spec/containers/0/args/-",
+			"value": "--intent-namespace=",
+		},
+	}
+	patchBytes, err := json.Marshal(patch)
+	if err != nil {
+		return err
+	}
+
+	return f.Client.Patch(ctx, deploy, client.RawPatch(types.JSONPatchType, patchBytes))
+}
+
+// waitForOperatorReady waits for the operator deployment to be available after restart.
+func (f *Framework) waitForOperatorReady(ctx context.Context, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	// Wait briefly for the rollout to start.
+	time.Sleep(5 * time.Second)
+
+	return Poll(ctx, 5*time.Second, func() (bool, error) {
+		deploy, err := f.KubeClient.AppsV1().Deployments(operatorNamespace).Get(ctx, operatorDeployment, metav1.GetOptions{})
+		if err != nil {
+			return false, nil
+		}
+		// Check rollout complete: updatedReplicas == replicas && availableReplicas == replicas.
+		return deploy.Status.UpdatedReplicas == *deploy.Spec.Replicas &&
+			deploy.Status.AvailableReplicas == *deploy.Spec.Replicas &&
+			deploy.Status.UnavailableReplicas == 0, nil
+	})
+}
+
+// waitForWebhookReady waits for the operator webhook to actually serve requests.
+// Checking the endpoint alone isn't enough — the TLS cert may not be injected yet.
+func (f *Framework) waitForWebhookReady(ctx context.Context, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	// Dry-run a VRF create to verify the webhook is responding.
+	vrfProbe := &unstructured.Unstructured{}
+	vrfProbe.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   intentAPIGroup,
+		Version: "v1alpha1",
+		Kind:    "VRF",
+	})
+	vrfProbe.SetName("webhook-probe")
+	vrfProbe.SetNamespace("default")
+	unstructured.SetNestedField(vrfProbe.Object, "probe", "spec", "vrf") //nolint:errcheck
+
+	return Poll(ctx, 3*time.Second, func() (bool, error) {
+		err := f.Client.Create(ctx, vrfProbe, client.DryRunAll)
+		if err == nil {
+			return true, nil
+		}
+		// Any API-level error (4xx) means the webhook IS responding.
+		// Only connection-level errors (reset, refused, timeout) mean it's not ready.
+		if apierrors.IsInvalid(err) || apierrors.IsForbidden(err) ||
+			apierrors.IsAlreadyExists(err) || apierrors.IsBadRequest(err) ||
+			apierrors.IsConflict(err) {
+			return true, nil
+		}
+		// Check for webhook-specific validation errors (status reason).
+		var statusErr *apierrors.StatusError
+		if ok := errors.As(err, &statusErr); ok {
+			code := statusErr.Status().Code
+			// Any HTTP response from the API server means webhook is reachable.
+			if code >= 400 && code < 500 {
+				return true, nil
+			}
+		}
+		return false, nil
+	})
+}
+
+// WaitForIntentNNCs waits for the intent reconciler to produce NodeNetworkConfig
+// resources with the intent-managed label for all worker nodes.
+func (f *Framework) WaitForIntentNNCs(ctx context.Context, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	return Poll(ctx, 5*time.Second, func() (bool, error) {
+		nodes, err := f.KubeClient.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+		if err != nil {
+			return false, nil
+		}
+
+		for i := range nodes.Items {
+			node := &nodes.Items[i]
+			nnc := &unstructured.Unstructured{}
+			nnc.SetGroupVersionKind(schema.GroupVersionKind{
+				Group:   nncGroup,
+				Version: nncVersion,
+				Kind:    "NodeNetworkConfig",
+			})
+			if err := f.Client.Get(ctx, types.NamespacedName{Name: node.Name}, nnc); err != nil {
+				return false, nil
+			}
+			labels := nnc.GetLabels()
+			if labels == nil || labels["network-connector.sylvaproject.org/managed-by"] != "intent" {
+				return false, nil
+			}
+		}
+		return true, nil
+	})
+}
+
+// IsIntentMode returns true if the framework is configured for intent mode.
+func (f *Framework) IsIntentMode() bool {
+	return f.Config.IntentMode
+}
+
+// GetNNC fetches a NodeNetworkConfig by node name and returns it as unstructured.
+func (f *Framework) GetNNC(ctx context.Context, nodeName string) (*unstructured.Unstructured, error) {
+	nnc := &unstructured.Unstructured{}
+	nnc.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   nncGroup,
+		Version: nncVersion,
+		Kind:    "NodeNetworkConfig",
+	})
+	if err := f.Client.Get(ctx, types.NamespacedName{Name: nodeName}, nnc); err != nil {
+		return nil, err
+	}
+	return nnc, nil
+}
+
+// NNCHasFabricVRF checks if a NNC has a fabricVRF entry with the given name.
+func NNCHasFabricVRF(nnc *unstructured.Unstructured, vrfName string) bool {
+	fabricVRFs, found, err := unstructured.NestedMap(nnc.Object, "spec", "fabricVRFs", vrfName)
+	return err == nil && found && fabricVRFs != nil
+}
+
+// NNCHasLayer2 checks if a NNC has a layer2 entry with the given key.
+func NNCHasLayer2(nnc *unstructured.Unstructured, l2Key string) bool {
+	l2, found, err := unstructured.NestedMap(nnc.Object, "spec", "layer2s", l2Key)
+	return err == nil && found && l2 != nil
+}
+
+// WaitForNNCVRFs waits until the NNC for the given node contains all specified fabricVRFs.
+func (f *Framework) WaitForNNCVRFs(ctx context.Context, nodeName string, vrfNames []string, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	return Poll(ctx, 5*time.Second, func() (bool, error) {
+		nnc, err := f.GetNNC(ctx, nodeName)
+		if err != nil {
+			return false, nil
+		}
+		for _, name := range vrfNames {
+			if !NNCHasFabricVRF(nnc, name) {
+				return false, nil
+			}
+		}
+		return true, nil
+	})
+}
+
+// NNCFabricVRFHasVRFImport checks if a FabricVRF has a VRFImport from the given source VRF.
+func NNCFabricVRFHasVRFImport(nnc *unstructured.Unstructured, vrfName, fromVRF string) bool {
+	imports, found, err := unstructured.NestedSlice(nnc.Object, "spec", "fabricVRFs", vrfName, "vrfImports")
+	if err != nil || !found {
+		return false
+	}
+	for _, imp := range imports {
+		if m, ok := imp.(map[string]interface{}); ok {
+			if m["fromVrf"] == fromVRF {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// NNCRevision returns the revision string from a NNC spec.
+func NNCRevision(nnc *unstructured.Unstructured) string {
+	rev, _, _ := unstructured.NestedString(nnc.Object, "spec", "revision")
+	return rev
+}
+
+// NNCIsProvisioned checks if a NNC has configStatus "provisioned".
+func NNCIsProvisioned(nnc *unstructured.Unstructured) bool {
+	status, _, _ := unstructured.NestedString(nnc.Object, "status", "configStatus")
+	return status == "provisioned"
+}
+
+// NNCHasNoStaticRoutes checks that a FabricVRF has no static routes (they should use vrfImport instead).
+func NNCHasNoStaticRoutes(nnc *unstructured.Unstructured, vrfName string) bool {
+	routes, found, err := unstructured.NestedSlice(nnc.Object, "spec", "fabricVRFs", vrfName, "staticRoutes")
+	if err != nil || !found {
+		return true // no staticRoutes field at all
+	}
+	return len(routes) == 0
+}
+
+// NNCFabricVRFHasAggregateRoute checks that a FabricVRF has an aggregate static route
+// matching the given prefix (the Network CIDR covering prefix for EVPN export).
+func NNCFabricVRFHasAggregateRoute(nnc *unstructured.Unstructured, vrfName, prefix string) bool {
+	routes, found, err := unstructured.NestedSlice(nnc.Object, "spec", "fabricVRFs", vrfName, "staticRoutes")
+	if err != nil || !found {
+		return false
+	}
+	for _, r := range routes {
+		route, ok := r.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if p, ok := route["prefix"].(string); ok && p == prefix {
+			return true
+		}
+	}
+	return false
+}
+
+// NNCHasLocalVRF checks if a NNC has a localVRF entry with the given name.
+func NNCHasLocalVRF(nnc *unstructured.Unstructured, vrfName string) bool {
+	vrf, found, err := unstructured.NestedMap(nnc.Object, "spec", "localVRFs", vrfName)
+	return err == nil && found && vrf != nil
+}
+
+// NNCLocalVRFNames returns all localVRF names from the NNC spec.
+func NNCLocalVRFNames(nnc *unstructured.Unstructured) []string {
+	vrfs, found, err := unstructured.NestedMap(nnc.Object, "spec", "localVRFs")
+	if err != nil || !found {
+		return nil
+	}
+	names := make([]string, 0, len(vrfs))
+	for k := range vrfs {
+		names = append(names, k)
+	}
+	return names
+}
+
+// NNCLocalVRFStaticRouteTarget checks if a localVRF has a static route for the given
+// prefix pointing to the expected target VRF via nextHop.vrf.
+func NNCLocalVRFStaticRouteTarget(nnc *unstructured.Unstructured, localVRFName, prefix, targetVRF string) bool {
+	routes, found, err := unstructured.NestedSlice(nnc.Object, "spec", "localVRFs", localVRFName, "staticRoutes")
+	if err != nil || !found {
+		return false
+	}
+	for _, r := range routes {
+		m, ok := r.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if m["prefix"] != prefix {
+			continue
+		}
+		nh, ok := m["nextHop"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if nh["vrf"] == targetVRF {
+			return true
+		}
+	}
+	return false
+}
+
+// NNCClusterVRFHasPolicyRoute checks if the clusterVRF has a policy route with
+// the given source prefix pointing to the given target VRF.
+func NNCClusterVRFHasPolicyRoute(nnc *unstructured.Unstructured, srcPrefix, targetVRF string) bool {
+	routes, found, err := unstructured.NestedSlice(nnc.Object, "spec", "clusterVRF", "policyRoutes")
+	if err != nil || !found {
+		return false
+	}
+	for _, r := range routes {
+		m, ok := r.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		tm, ok := m["trafficMatch"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		nh, ok := m["nextHop"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if tm["srcPrefix"] == srcPrefix && nh["vrf"] == targetVRF {
+			return true
+		}
+	}
+	return false
+}
+
+// NNCClusterVRFPolicyRouteDstPrefix returns the dstPrefix from a policy route matching
+// the given srcPrefix (nil if no dstPrefix or not found).
+func NNCClusterVRFPolicyRouteDstPrefix(nnc *unstructured.Unstructured, srcPrefix string) *string {
+	routes, found, err := unstructured.NestedSlice(nnc.Object, "spec", "clusterVRF", "policyRoutes")
+	if err != nil || !found {
+		return nil
+	}
+	for _, r := range routes {
+		m, ok := r.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		tm, ok := m["trafficMatch"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if tm["srcPrefix"] != srcPrefix {
+			continue
+		}
+		dst, ok := tm["dstPrefix"].(string)
+		if ok {
+			return &dst
+		}
+		return nil
+	}
+	return nil
+}
+
+// NNCFabricVRFImportHasPrefix checks that a VRFImport filter contains a specific prefix.
+func NNCFabricVRFImportHasPrefix(nnc *unstructured.Unstructured, vrfName, fromVRF, prefix string) bool {
+	imports, found, err := unstructured.NestedSlice(nnc.Object, "spec", "fabricVRFs", vrfName, "vrfImports")
+	if err != nil || !found {
+		return false
+	}
+	for _, imp := range imports {
+		m, ok := imp.(map[string]interface{})
+		if !ok || m["fromVrf"] != fromVRF {
+			continue
+		}
+		filter, ok := m["filter"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		items, ok := filter["items"].([]interface{})
+		if !ok {
+			continue
+		}
+		for _, item := range items {
+			im, ok := item.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			matcher, ok := im["matcher"].(map[string]interface{})
+			if !ok {
+				continue
+			}
+			pfx, ok := matcher["prefix"].(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if pfx["prefix"] == prefix {
+				return true
+			}
+		}
+	}
+	return false
+}

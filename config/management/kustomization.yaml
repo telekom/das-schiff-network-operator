@@ -1,0 +1,22 @@
+# Management-cluster bundle: only the network-sync controller plus the intent
+# CRDs that users author on the management cluster. The operator and per-node
+# agents are NOT deployed here -- they only run on workload clusters where the
+# host network actually needs to be configured.
+namespace: kube-system
+namePrefix: network-operator-
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  # The full CRD set is installed; only the network-connector.sylvaproject.org
+  # group is actively used here. The network.t-caas.telekom.com CRDs (NNC,
+  # NetworkConfigRevision, etc.) are node-local outputs produced on workload
+  # clusters and remain unused on management -- installing them is harmless and
+  # avoids duplicating the CRD list in two kustomizations.
+  - ../crd
+  - ../network-sync
+
+labels:
+  - includeSelectors: true
+    pairs:
+      app.kubernetes.io/name: network-operator

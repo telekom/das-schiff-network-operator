@@ -8,11 +8,12 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/sirupsen/logrus"
+	"sigs.k8s.io/yaml"
+
 	"github.com/telekom/das-schiff-network-operator/pkg/helpers/diff"
 	"github.com/telekom/das-schiff-network-operator/pkg/helpers/maps"
 	"github.com/telekom/das-schiff-network-operator/pkg/helpers/merge"
 	"github.com/telekom/das-schiff-network-operator/pkg/network/net"
-	"sigs.k8s.io/yaml"
 )
 
 type RawDevice []byte

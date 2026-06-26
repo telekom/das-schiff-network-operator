@@ -30,7 +30,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags "${ldflags}" -a -o frr-cra main.g
 
 FROM docker.io/library/ubuntu:25.10
 
-ENV FRRVER="frr-stable"
+ENV FRRVER="frr-10.6"
 ARG DEBIAN_FRONTEND=noninteractive
 
 # Install: dependencies, clean: apt cache, remove dir: cache, man, doc, change mod time of cache dir.

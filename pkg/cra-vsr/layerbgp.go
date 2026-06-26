@@ -57,7 +57,7 @@ func (LayerBGP) hash(s string) string {
 	return hashHex[:8]
 }
 
-func (l *LayerBGP) getBGPPeerName(peer v1alpha1.BGPPeer) string {
+func (l *LayerBGP) getBGPPeerName(peer *v1alpha1.BGPPeer) string {
 	if peer.Address != nil {
 		return l.hash(*peer.Address)
 	}
@@ -361,7 +361,7 @@ func (l *LayerBGP) setupVRFImport(vrf *VRF, i int, conf v1alpha1.VRFImport) {
 	}
 }
 
-func (l *LayerBGP) setupNeighbor(bgp *BGP, conf v1alpha1.BGPPeer) {
+func (l *LayerBGP) setupNeighbor(bgp *BGP, conf *v1alpha1.BGPPeer) {
 	name := l.getBGPPeerName(conf)
 
 	var neigh *BGPNeighbor
@@ -648,8 +648,8 @@ func (l *LayerBGP) setupLocalVRF(name string, conf *v1alpha1.VRF) error {
 	for i, imprt := range conf.VRFImports {
 		l.setupVRFImport(vrf, i, imprt)
 	}
-	for _, peer := range conf.BGPPeers {
-		l.setupNeighbor(bgp, peer)
+	for i := range conf.BGPPeers {
+		l.setupNeighbor(bgp, &conf.BGPPeers[i])
 	}
 
 	return nil
@@ -732,8 +732,8 @@ func (l *LayerBGP) setupFabricVRF(name string, conf *v1alpha1.FabricVRF) error {
 	for i, imprt := range conf.VRFImports {
 		l.setupVRFImport(vrf, i, imprt)
 	}
-	for _, peer := range conf.BGPPeers {
-		l.setupNeighbor(bgp, peer)
+	for i := range conf.BGPPeers {
+		l.setupNeighbor(bgp, &conf.BGPPeers[i])
 	}
 
 	return nil
@@ -851,8 +851,8 @@ func (l *LayerBGP) setupClusterVRF() error {
 		for i, imprt := range conf.VRFImports {
 			l.setupVRFImport(vrf, i, imprt)
 		}
-		for _, peer := range conf.BGPPeers {
-			l.setupNeighbor(bgp, peer)
+		for i := range conf.BGPPeers {
+			l.setupNeighbor(bgp, &conf.BGPPeers[i])
 		}
 		for i, pr := range conf.PolicyRoutes {
 			if err := l.setupPolicyRoute((i + 1), pr); err != nil {

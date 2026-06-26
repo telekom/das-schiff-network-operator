@@ -14,11 +14,12 @@ import (
 	"sync"
 
 	"github.com/go-logr/logr"
-	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+
+	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
 )
 
 const (

@@ -17,8 +17,9 @@ limitations under the License.
 package v1alpha1
 
 import (
-	"github.com/telekom/das-schiff-network-operator/pkg/network/netplan"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/telekom/das-schiff-network-operator/pkg/network/netplan"
 )
 
 type NodeNetplanConfigSpec struct {

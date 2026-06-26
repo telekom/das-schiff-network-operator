@@ -1,24 +1,47 @@
-# BGPPeering CR for BGPaaS test
-apiVersion: network.t-caas.telekom.com/v1alpha1
+# BGPPeering CR for BGPaaS test (intent API).
+# Configures FRR to accept dynamic BGP peers from the VLAN 501 subnet.
+# Requires a matching L2A and Inbound for the peering VLAN.
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Layer2Attachment
+metadata:
+  name: l2a-bgpaas
+  namespace: default
+spec:
+  networkRef: "net-vlan501"
+  destinations:
+    matchLabels:
+      type: gateway
+---
+# Inbound with addresses the workload advertises via BGP.
+# These become the import filter on the BGP peer (only these prefixes accepted)
+# and the EVPN export entries (so the fabric distributes them).
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Inbound
+metadata:
+  name: ib-bgpaas
+  namespace: default
+spec:
+  networkRef: "net-vlan501"
+  destinations:
+    matchLabels:
+      type: gateway
+  addresses:
+    ipv4:
+      - "10.250.3.0/24"
+    ipv6:
+      - "fd75:2d70:f7f7::/64"
+  advertisement:
+    type: bgp
+---
+apiVersion: network-connector.sylvaproject.org/v1alpha1
 kind: BGPPeering
 metadata:
   name: bgpaas-test
+  namespace: default
 spec:
-  peeringVlan:
-    name: vlan1
-  remoteASN: 65511
-  enableBFD: false
-  import:
-    - cidr: "10.250.3.0/24"
-      action: permit
-      seq: 10
-    - cidr: "fd75:2d70:f7f7::/64"
-      action: permit
-      seq: 20
-  export:
-    - cidr: "10.250.0.0/16"
-      action: permit
-      seq: 10
-    - cidr: "fd94:685b:30cf::/48"
-      action: permit
-      seq: 20
+  mode: listenRange
+  ref:
+    attachmentRef: "l2a-bgpaas"
+    inboundRefs:
+      - "ib-bgpaas"
+  workloadAS: 65511

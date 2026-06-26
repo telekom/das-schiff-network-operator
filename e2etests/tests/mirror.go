@@ -8,9 +8,10 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
+
 	"github.com/telekom/das-schiff-network-operator/e2etests/config"
 	"github.com/telekom/das-schiff-network-operator/e2etests/framework"
-	corev1 "k8s.io/api/core/v1"
 )
 
 // TC-MIRROR: Traffic Mirror E2E tests.

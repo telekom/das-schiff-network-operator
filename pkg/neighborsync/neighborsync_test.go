@@ -10,9 +10,10 @@ import (
 	"github.com/cilium/ebpf/ringbuf"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
-	mock_nl "github.com/telekom/das-schiff-network-operator/pkg/nl/mock"
 	"github.com/vishvananda/netlink"
 	"go.uber.org/mock/gomock"
+
+	mock_nl "github.com/telekom/das-schiff-network-operator/pkg/nl/mock"
 )
 
 var (

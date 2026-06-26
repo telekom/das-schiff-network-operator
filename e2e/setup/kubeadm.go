@@ -9,17 +9,18 @@ import (
 const kubeadmToken = "abcdef.0123456789abcdef"
 
 // kubeadmInitConfig generates the multi-document kubeadm config for the control-plane,
-// modelled after kind's internal config generation (v1beta3).
+// modelled after kind's internal config generation (v1beta4).
 func kubeadmInitConfig(cluster *Cluster) string {
 	cp := cluster.ControlPlane()
+	k8sVersion := EnvOr("KIND_NODE_VERSION", "v1.35.1")
 
 	// IPv6-primary dual-stack: IPv6 first, then IPv4
 	nodeAddress := cp.IPv6 + "," + cp.IPv4
 	advertiseAddress := cp.IPv6
 
-	return fmt.Sprintf(`apiVersion: kubeadm.k8s.io/v1beta3
+	return fmt.Sprintf(`apiVersion: kubeadm.k8s.io/v1beta4
 kind: ClusterConfiguration
-kubernetesVersion: v1.32.2
+kubernetesVersion: %s
 clusterName: "%s"
 controlPlaneEndpoint: "%s:6443"
 apiServer:
@@ -32,15 +33,17 @@ apiServer:
     - "%s"
 controllerManager:
   extraArgs:
-    bind-address: "::"
+    - name: bind-address
+      value: "::"
 scheduler:
   extraArgs:
-    bind-address: "::1"
+    - name: bind-address
+      value: "::1"
 networking:
   podSubnet: "%s"
   serviceSubnet: "%s"
 ---
-apiVersion: kubeadm.k8s.io/v1beta3
+apiVersion: kubeadm.k8s.io/v1beta4
 kind: InitConfiguration
 bootstrapTokens:
   - token: "%s"
@@ -50,7 +53,8 @@ localAPIEndpoint:
 nodeRegistration:
   criSocket: "unix:///run/containerd/containerd.sock"
   kubeletExtraArgs:
-    node-ip: "%s"
+    - name: node-ip
+      value: "%s"
 skipPhases:
   - addon/kube-proxy
 ---
@@ -75,6 +79,7 @@ iptables:
 conntrack:
   maxPerCore: 0
 `,
+		k8sVersion,
 		cluster.Name,
 		cluster.VIP,
 		cluster.VIP,
@@ -92,12 +97,13 @@ conntrack:
 func kubeadmJoinConfig(cluster *Cluster, node *Node) string {
 	nodeAddress := node.IPv6 + "," + node.IPv4
 
-	return fmt.Sprintf(`apiVersion: kubeadm.k8s.io/v1beta3
+	return fmt.Sprintf(`apiVersion: kubeadm.k8s.io/v1beta4
 kind: JoinConfiguration
 nodeRegistration:
   criSocket: "unix:///run/containerd/containerd.sock"
   kubeletExtraArgs:
-    node-ip: "%s"
+    - name: node-ip
+      value: "%s"
 discovery:
   bootstrapToken:
     apiServerEndpoint: "%s:6443"

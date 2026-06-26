@@ -19,10 +19,11 @@ package shared
 import (
 	"os"
 
-	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
+
+	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
 )
 
 // BuildNamePredicates returns a predicate.Funcs that filters events to only those

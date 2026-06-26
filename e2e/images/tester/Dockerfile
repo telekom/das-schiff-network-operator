@@ -16,7 +16,7 @@ RUN apt-get update && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # kubectl
-RUN curl -fsSL "https://dl.k8s.io/release/v1.32.2/bin/linux/amd64/kubectl" \
+RUN curl -fsSL "https://dl.k8s.io/release/v1.35.1/bin/linux/amd64/kubectl" \
       -o /usr/local/bin/kubectl && chmod +x /usr/local/bin/kubectl
 
 # ginkgo + go (for running tests)
