@@ -314,6 +314,36 @@ var _ = Describe("VRF building", func() {
 			Expect(fabricVrf.VRFImports[0].Filter.Items[0].Action.ModifyRoute).ToNot(BeNil())
 			Expect(fabricVrf.VRFImports[0].Filter.Items[0].Action.ModifyRoute.AddCommunities).To(ContainElement("65000:1"))
 		})
+
+		It("should add all communities to VRF import when communities list is set", func() {
+			fabricVrf := v1alpha1.FabricVRF{
+				VRF: v1alpha1.VRF{
+					VRFImports: []v1alpha1.VRFImport{
+						{
+							FromVRF: "cluster",
+							Filter: v1alpha1.Filter{
+								DefaultAction: v1alpha1.Action{Type: v1alpha1.Reject},
+							},
+						},
+					},
+				},
+				EVPNExportFilter: &v1alpha1.Filter{
+					DefaultAction: v1alpha1.Action{Type: v1alpha1.Reject},
+				},
+			}
+			vrf := &v1alpha1.VRFRevision{
+				VRFRouteConfigurationSpec: v1alpha1.VRFRouteConfigurationSpec{
+					Communities: []string{"65000:1", "65000:2"},
+					Export: []v1alpha1.VrfRouteConfigurationPrefixItem{
+						{CIDR: "10.0.0.0/8", Seq: 10, Action: "permit"},
+					},
+				},
+			}
+
+			processExports(vrf, &fabricVrf)
+			Expect(fabricVrf.VRFImports[0].Filter.Items[0].Action.ModifyRoute).ToNot(BeNil())
+			Expect(fabricVrf.VRFImports[0].Filter.Items[0].Action.ModifyRoute.AddCommunities).To(ConsistOf("65000:1", "65000:2"))
+		})
 	})
 
 	Describe("processImports", func() {

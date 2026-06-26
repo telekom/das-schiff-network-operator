@@ -80,6 +80,9 @@ func (*VRFRouteConfiguration) ValidateDelete(_ context.Context, r *VRFRouteConfi
 }
 
 func (r *VRFRouteConfiguration) validateItems() error {
+	if r.Spec.Community != nil && len(r.Spec.Communities) > 0 {
+		return fmt.Errorf("only one of 'community' (deprecated) or 'communities' may be set")
+	}
 	err := validateItemList(r.Spec.Export)
 	if err != nil {
 		return err

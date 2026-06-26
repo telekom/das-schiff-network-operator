@@ -24,6 +24,52 @@ func intPtr(i int) *int {
 	return &i
 }
 
+func strPtr(s string) *string {
+	return &s
+}
+
+func TestValidateItems(t *testing.T) {
+	tests := []struct {
+		name    string
+		spec    VRFRouteConfigurationSpec
+		wantErr bool
+	}{
+		{
+			name:    "neither community nor communities set",
+			spec:    VRFRouteConfigurationSpec{},
+			wantErr: false,
+		},
+		{
+			name:    "only deprecated community set",
+			spec:    VRFRouteConfigurationSpec{Community: strPtr("65000:1")},
+			wantErr: false,
+		},
+		{
+			name:    "only communities set",
+			spec:    VRFRouteConfigurationSpec{Communities: []string{"65000:1", "65000:2"}},
+			wantErr: false,
+		},
+		{
+			name: "both community and communities set is rejected",
+			spec: VRFRouteConfigurationSpec{
+				Community:   strPtr("65000:1"),
+				Communities: []string{"65000:2"},
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := &VRFRouteConfiguration{Spec: tt.spec}
+			err := r.validateItems()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateItems() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestFindDuplicates(t *testing.T) {
 	tests := []struct {
 		name     string

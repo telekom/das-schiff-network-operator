@@ -152,10 +152,14 @@ func processExports(vrf *v1alpha1.VRFRevision, fabricVrf *v1alpha1.FabricVRF) {
 		fabricVrf.EVPNExportFilter.Items = append(fabricVrf.EVPNExportFilter.Items, filterItem)
 
 		vrfImportItem := filterItem.DeepCopy()
-		if vrf.Community != nil {
+		comms := vrf.Communities
+		if len(comms) == 0 && vrf.Community != nil {
+			comms = []string{*vrf.Community}
+		}
+		if len(comms) > 0 {
 			additive := true
 			vrfImportItem.Action.ModifyRoute = &v1alpha1.ModifyRouteAction{
-				AddCommunities:      []string{*vrf.Community},
+				AddCommunities:      comms,
 				AdditiveCommunities: &additive,
 			}
 		}

@@ -484,9 +484,17 @@ spec:
                       items:
                         type: string
                       type: array
+                    communities:
+                      description: |-
+                        Communities for export, if omitted no community will be set.
+                        Use this instead of the deprecated Community field. Mutually exclusive with Community.
+                      items:
+                        type: string
+                      type: array
                     community:
-                      description: Community for export, if omitted no community will
-                        be set
+                      description: |-
+                        Community for export, if omitted no community will be set.
+                        Deprecated: use Communities instead. Mutually exclusive with Communities.
                       type: string
                     export:
                       description: Routes exported from the cluster VRF into the specified

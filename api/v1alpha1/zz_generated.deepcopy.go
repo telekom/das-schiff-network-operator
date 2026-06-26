@@ -1643,6 +1643,11 @@ func (in *VRFRouteConfigurationSpec) DeepCopyInto(out *VRFRouteConfigurationSpec
 		*out = new(string)
 		**out = **in
 	}
+	if in.Communities != nil {
+		in, out := &in.Communities, &out.Communities
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	if in.NodeSelector != nil {
 		in, out := &in.NodeSelector, &out.NodeSelector
 		*out = new(v1.LabelSelector)
