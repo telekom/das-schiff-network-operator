@@ -73,7 +73,7 @@ topology:
       exec:
         - ip addr add fddf:64ff:9b00:1::1/127 dev eth1
         - ip addr add fddf:64ff:9b00:2::1/127 dev eth2
-        - "ip -6 route add default src fda5:25c1:193e::1 nexthop via fddf:64ff:9b00:1:: dev eth1 weight 1 nexthop via fddf:64ff:9b00:2:: dev eth2 weight 1"
+        - "bash -c 'for i in $(seq 1 30); do ip -6 route replace default src fda5:25c1:193e::1 nexthop via fddf:64ff:9b00:1:: dev eth1 weight 1 nexthop via fddf:64ff:9b00:2:: dev eth2 weight 1 && exit 0; sleep 1; done; ip -6 addr show; exit 1'"
 
     # ── Test runner ──
     tester:
