@@ -62,7 +62,7 @@ func phaseBuildAllImages(repoRoot string) error {
 	ldflags := getLDFlags(repoRoot)
 	goVersion, err := getGoVersion(repoRoot)
 	if err != nil {
-		return err
+		return fmt.Errorf("derive Go version from go.mod: %w", err)
 	}
 
 	// 1. Build cra-frr image
