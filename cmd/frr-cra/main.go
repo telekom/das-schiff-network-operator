@@ -452,9 +452,9 @@ func reconcileLayer3(cfg *nl.NetlinkConfiguration) ([]nl.VRFInformation, error) 
 	}
 
 	for i := range vrfsToDelete {
-		errors := nlManager.CleanupL3(vrfsToDelete[i].Name)
-		if len(errors) > 0 {
-			return nil, fmt.Errorf("error cleaning up L3 (VRF: %s): %v", vrfsToDelete[i].Name, errors)
+		cleanupErrs := nlManager.CleanupL3(vrfsToDelete[i].Name)
+		if len(cleanupErrs) > 0 {
+			return nil, fmt.Errorf("error cleaning up L3 (VRF: %s): %v", vrfsToDelete[i].Name, cleanupErrs)
 		}
 	}
 
