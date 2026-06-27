@@ -11,12 +11,13 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/telekom/das-schiff-network-operator/pkg/nl"
-	mock_nl "github.com/telekom/das-schiff-network-operator/pkg/nl/mock"
 	"github.com/vishvananda/netlink"
 	netlinkNl "github.com/vishvananda/netlink/nl"
 	"go.uber.org/mock/gomock"
 	"golang.org/x/sys/unix"
+
+	"github.com/telekom/das-schiff-network-operator/pkg/nl"
+	mock_nl "github.com/telekom/das-schiff-network-operator/pkg/nl/mock"
 )
 
 var (
@@ -34,9 +35,6 @@ func TestNeighborSync(t *testing.T) {
 var _ = BeforeSuite(func() {
 	mockNlOps = mock_nl.NewMockToolkitInterface(mockCtrl)
 })
-
-func noopSendNeighborRequest(_ int, _ net.HardwareAddr, _ netip.Addr) {}
-func noopSendGratuitous(_ int, _ netip.Addr, _ net.HardwareAddr)      {}
 
 // noopNetlinkOps is a no-op implementation of nl.ToolkitInterface for tests that do not
 // exercise any netlink operations (e.g. timer/map logic tests).
