@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/netip"
 	"os/exec"
@@ -333,7 +334,7 @@ func (f *Framework) deletePodBestEffort(ctx context.Context, namespace, name str
 
 func (f *Framework) deleteCreatedTestPodAfterError(ctx context.Context, namespace, name string, cause error) error {
 	if err := f.DeletePod(ctx, namespace, name); err != nil {
-		return fmt.Errorf("%w; additionally failed to delete pod %s/%s after error: %w", cause, namespace, name, err)
+		return errors.Join(cause, fmt.Errorf("delete pod %s/%s after error: %w", namespace, name, err))
 	}
 	return cause
 }
