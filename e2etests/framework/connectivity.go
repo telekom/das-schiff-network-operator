@@ -194,8 +194,11 @@ func parseCanonicalIPv6(s string) (netip.Addr, error) {
 	if err != nil {
 		return netip.Addr{}, err
 	}
-	if !addr.Is6() || addr.Is4In6() {
+	if !addr.Is6() {
 		return netip.Addr{}, fmt.Errorf("%q is not an IPv6 address", s)
+	}
+	if addr.Is4In6() {
+		return netip.Addr{}, fmt.Errorf("%q is an IPv4-mapped IPv6 address, not a pure IPv6 address", s)
 	}
 	return addr, nil
 }
