@@ -503,7 +503,7 @@ func (reconciler *NodeNetplanConfigReconciler) Reconcile(ctx context.Context) er
 
 func setEUIAutogeneration(intfName string, generateEUI bool) error {
 	if err := nl.ValidateInterfaceName(intfName); err != nil {
-		return err
+		return fmt.Errorf("validate interface name %q: %w", intfName, err)
 	}
 	fileName := filepath.Join(procSysNetIPv6ConfPath, intfName, "addr_gen_mode")
 	file, err := os.OpenFile(fileName, os.O_WRONLY, 0)
