@@ -29,6 +29,17 @@ updates:
     prefix: ":seedling:"
   labels:
     - "ok-to-test"
+  ignore:
+    - dependency-name: "k8s.io/*"
+      # The code still imports Kubernetes APIs removed in newer minor lines.
+      update-types:
+        - "version-update:semver-major"
+        - "version-update:semver-minor"
+    - dependency-name: "sigs.k8s.io/controller-runtime"
+      # Keep controller-runtime on the Kubernetes minor line used by the repo.
+      update-types:
+        - "version-update:semver-major"
+        - "version-update:semver-minor"
   groups:
     kubernetes-major:
       patterns:
