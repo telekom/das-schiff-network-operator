@@ -206,6 +206,10 @@ func (f *Framework) CreateBirdPod(ctx context.Context, namespace, name, nodeName
 			},
 		},
 	}
+	if err := f.DeletePod(ctx, namespace, name); err != nil {
+		return fmt.Errorf("delete existing bird pod %s/%s: %w", namespace, name, err)
+	}
+
 	return f.createPodWithStaticIPv6Retry(ctx, namespace, name, annotations, func() *corev1.Pod {
 		return pod.DeepCopy()
 	})
