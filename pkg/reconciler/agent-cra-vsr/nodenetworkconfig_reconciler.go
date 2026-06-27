@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 
 	"github.com/go-logr/logr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -45,13 +46,26 @@ type CRAVSRConfigApplier struct {
 
 // ApplyConfig applies the network configuration using CRA-VSR manager.
 func (a *CRAVSRConfigApplier) ApplyConfig(ctx context.Context, cfg *v1alpha1.NodeNetworkConfig) error {
-	if a.craManager == nil {
+	if isNilCRAManager(a.craManager) {
 		return errNilCRAManager
 	}
 	if err := a.craManager.ApplyConfiguration(ctx, &cfg.Spec); err != nil {
 		return fmt.Errorf("error applying cra configuration: %w", err)
 	}
 	return nil
+}
+
+func isNilCRAManager(manager craManager) bool {
+	if manager == nil {
+		return true
+	}
+	value := reflect.ValueOf(manager)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
 }
 
 // NodeNetworkConfigReconciler wraps the common reconciler with CRA-VSR specific logic.

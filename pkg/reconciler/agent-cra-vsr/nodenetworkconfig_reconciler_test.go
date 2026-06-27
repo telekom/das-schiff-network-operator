@@ -200,6 +200,21 @@ func TestCRAVSRConfigApplier_ApplyConfig_RejectsNilManager(t *testing.T) {
 	}
 }
 
+// TestCRAVSRConfigApplier_ApplyConfig_RejectsTypedNilManager verifies that a
+// typed nil stored in the craManager interface is rejected before dispatch.
+func TestCRAVSRConfigApplier_ApplyConfig_RejectsTypedNilManager(t *testing.T) {
+	var manager *stubCRAManager
+	applier := &CRAVSRConfigApplier{craManager: manager}
+
+	err := applier.ApplyConfig(context.Background(), &v1alpha1.NodeNetworkConfig{})
+	if err == nil {
+		t.Fatal("expected ApplyConfig to reject typed nil CRA manager, got nil error")
+	}
+	if !errors.Is(err, errNilCRAManager) {
+		t.Fatalf("unexpected error from ApplyConfig: %v", err)
+	}
+}
+
 // TestCRAVSRConfigApplier_ApplyConfig_PropagatesError verifies that
 // CRAVSRConfigApplier.ApplyConfig returns an error when the underlying manager fails.
 func TestCRAVSRConfigApplier_ApplyConfig_PropagatesError(t *testing.T) {
