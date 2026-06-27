@@ -81,6 +81,7 @@ func (noopNetlinkOps) LinkGetProtinfo(_ netlink.Link) (netlink.Protinfo, error) 
 func (noopNetlinkOps) LinkSetMaster(_, _ netlink.Link) error             { return nil }
 func (noopNetlinkOps) QdiscList(_ netlink.Link) ([]netlink.Qdisc, error) { return nil, nil }
 func (noopNetlinkOps) QdiscAdd(_ netlink.Qdisc) error                    { return nil }
+func (noopNetlinkOps) QdiscDel(_ netlink.Qdisc) error                    { return nil }
 func (noopNetlinkOps) FilterList(_ netlink.Link, _ uint32) ([]netlink.Filter, error) {
 	return nil, nil
 }
