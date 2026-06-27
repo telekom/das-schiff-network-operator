@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
-	"crypto/rand"
 	"encoding/xml"
 	"errors"
 	"fmt"
@@ -96,6 +95,7 @@ type Netconf struct {
 
 func NewNetconf(urls []string, user, pwd, knownHostsPath string, timeout time.Duration) (*Netconf, error) {
 	normalizedURLs := normalizeCRAURLs(urls)
+	knownHostsPath = strings.TrimSpace(knownHostsPath)
 	if err := validateKnownHostsEntries(knownHostsPath, normalizedURLs); err != nil {
 		return nil, err
 	}
@@ -131,6 +131,11 @@ func normalizeCRAURLs(urls []string) []string {
 }
 
 func validateKnownHostsEntries(knownHostsPath string, urls []string) error {
+	knownHostsPath = strings.TrimSpace(knownHostsPath)
+	if knownHostsPath == "" {
+		return fmt.Errorf("known hosts file path is required")
+	}
+
 	normalizedURLs := normalizeCRAURLs(urls)
 	if len(normalizedURLs) == 0 {
 		return fmt.Errorf("no CRA URLs provided")
@@ -169,9 +174,9 @@ func validateKnownHostsEntries(knownHostsPath string, urls []string) error {
 }
 
 func newKnownHostsValidationKey() (ssh.PublicKey, error) {
-	publicKey, _, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		return nil, fmt.Errorf("generate validation SSH key: %w", err)
+	publicKey := make(ed25519.PublicKey, ed25519.PublicKeySize)
+	for i := range publicKey {
+		publicKey[i] = byte(i + 1)
 	}
 	sshKey, err := ssh.NewPublicKey(publicKey)
 	if err != nil {
