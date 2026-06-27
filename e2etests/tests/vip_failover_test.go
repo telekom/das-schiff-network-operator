@@ -22,3 +22,11 @@ func TestGlobalIPv6PrefixLenFromAddrOutputNoGlobalAddress(t *testing.T) {
 		t.Fatalf("globalIPv6PrefixLenFromAddrOutput() = %q, want error", got)
 	}
 }
+
+func TestGlobalIPv6PrefixLenFromAddrOutputRequiresGlobalScope(t *testing.T) {
+	output := `2: net1    inet6 2001:db8::1/64 scope host`
+
+	if got, err := globalIPv6PrefixLenFromAddrOutput(output); err == nil {
+		t.Fatalf("globalIPv6PrefixLenFromAddrOutput() = %q, want error", got)
+	}
+}

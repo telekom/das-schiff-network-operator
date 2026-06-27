@@ -20,21 +20,10 @@ import (
 	mock_nl "github.com/telekom/das-schiff-network-operator/pkg/nl/mock"
 )
 
-var (
-	mockCtrl  *gomock.Controller
-	mockNlOps *mock_nl.MockToolkitInterface
-)
-
 func TestNeighborSync(t *testing.T) {
 	RegisterFailHandler(Fail)
-	mockCtrl = gomock.NewController(t)
-	defer mockCtrl.Finish()
 	RunSpecs(t, "NeighborSync Suite")
 }
-
-var _ = BeforeSuite(func() {
-	mockNlOps = mock_nl.NewMockToolkitInterface(mockCtrl)
-})
 
 // noopNetlinkOps is a no-op implementation of nl.ToolkitInterface for tests that do not
 // exercise any netlink operations (e.g. timer/map logic tests).

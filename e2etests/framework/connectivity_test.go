@@ -1,6 +1,7 @@
 package framework
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -8,9 +9,10 @@ func TestParseCanonicalIPv6(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name    string
-		input   string
-		wantErr bool
+		name            string
+		input           string
+		wantErr         bool
+		wantErrContains string
 	}{
 		{
 			name:    "valid compressed IPv6",
@@ -33,9 +35,10 @@ func TestParseCanonicalIPv6(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:    "IPv4-mapped IPv6 is rejected",
-			input:   "::ffff:192.0.2.1",
-			wantErr: true,
+			name:            "IPv4-mapped IPv6 is rejected",
+			input:           "::ffff:192.0.2.1",
+			wantErr:         true,
+			wantErrContains: "IPv4-mapped IPv6",
 		},
 		{
 			name:    "plain IPv4 is rejected",
@@ -67,6 +70,9 @@ func TestParseCanonicalIPv6(t *testing.T) {
 			if tc.wantErr {
 				if err == nil {
 					t.Errorf("parseCanonicalIPv6(%q) = %v, want error", tc.input, addr)
+				}
+				if tc.wantErrContains != "" && !strings.Contains(err.Error(), tc.wantErrContains) {
+					t.Errorf("parseCanonicalIPv6(%q) error = %q, want substring %q", tc.input, err, tc.wantErrContains)
 				}
 				return
 			}
