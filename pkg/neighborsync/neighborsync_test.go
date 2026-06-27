@@ -6,11 +6,9 @@ import (
 	"errors"
 	"net"
 	"net/netip"
-	"sync"
 	"testing"
 	"time"
 
-	"github.com/cilium/ebpf/ringbuf"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
