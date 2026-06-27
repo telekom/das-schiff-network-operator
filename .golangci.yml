@@ -308,16 +308,6 @@ linters:
         linters:
           - revive
         text: 'redundant-test-main-exit:'
-      # Exclude new noctx patterns for existing code (v2 detects more patterns)
-      - linters:
-          - noctx
-        text: 'net/http.NewRequest must not be called'
-      - linters:
-          - noctx
-        text: 'net.Dial must not be called'
-      - linters:
-          - noctx
-        text: 'os/exec.Command must not be called'
       # Exclude prealloc for existing code
       - linters:
           - prealloc
