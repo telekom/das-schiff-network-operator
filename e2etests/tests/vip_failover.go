@@ -33,6 +33,9 @@ func determineIPv6PrefixLength(ctx context.Context, f *framework.Framework, name
 func globalIPv6PrefixLenFromAddrOutput(output string) (string, error) {
 	for _, line := range strings.Split(output, "\n") {
 		fields := strings.Fields(line)
+		if !hasGlobalScope(fields) {
+			continue
+		}
 		for i, field := range fields {
 			if field != "inet6" || i+1 >= len(fields) {
 				continue
@@ -53,6 +56,15 @@ func globalIPv6PrefixLenFromAddrOutput(output string) (string, error) {
 	}
 
 	return "", fmt.Errorf("no global IPv6 prefix found")
+}
+
+func hasGlobalScope(fields []string) bool {
+	for i, field := range fields {
+		if field == "scope" && i+1 < len(fields) {
+			return fields[i+1] == "global"
+		}
+	}
+	return false
 }
 
 // TC-11: VIP Failover with Gratuitous ARP/NA.
