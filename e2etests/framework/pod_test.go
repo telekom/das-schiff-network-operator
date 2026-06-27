@@ -7,8 +7,11 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	kubefake "k8s.io/client-go/kubernetes/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	clientfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/telekom/das-schiff-network-operator/e2etests/config"
@@ -89,7 +92,10 @@ func TestCreateTestPodDeletesStaticIPv6PodWhenReadinessFails(t *testing.T) {
 			PodReadyTimeout: time.Nanosecond,
 		},
 		KubeClient: kubeClient,
-		Client:     clientfake.NewClientBuilder().WithScheme(scheme).Build(),
+		Client: &mirroringCreateClient{
+			Client:     clientfake.NewClientBuilder().WithScheme(scheme).Build(),
+			kubeClient: kubeClient,
+		},
 	}
 
 	err := f.CreateTestPod(
@@ -108,13 +114,44 @@ func TestCreateTestPodDeletesStaticIPv6PodWhenReadinessFails(t *testing.T) {
 		t.Fatalf("CreateTestPod() error = %q, want readiness context", err)
 	}
 
+	podCreates := 0
 	podDeletes := 0
 	for _, action := range kubeClient.Actions() {
-		if action.GetVerb() == "delete" && action.GetResource().Resource == "pods" {
+		if action.GetResource().Resource != "pods" {
+			continue
+		}
+		switch action.GetVerb() {
+		case "create":
+			podCreates++
+		case "delete":
 			podDeletes++
 		}
+	}
+	if podCreates != 1 {
+		t.Fatalf("pod create actions = %d, want 1", podCreates)
 	}
 	if podDeletes < 2 {
 		t.Fatalf("pod delete actions = %d, want at least 2 initial+cleanup deletes", podDeletes)
 	}
+	if _, err := kubeClient.CoreV1().Pods("default").Get(context.Background(), "static-ipv6", metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+		t.Fatalf("pod still exists after cleanup: %v", err)
+	}
+}
+
+type mirroringCreateClient struct {
+	client.Client
+	kubeClient *kubefake.Clientset
+}
+
+func (c *mirroringCreateClient) Create(ctx context.Context, obj client.Object, opts ...client.CreateOption) error {
+	if err := c.Client.Create(ctx, obj, opts...); err != nil {
+		return err
+	}
+
+	pod, ok := obj.(*corev1.Pod)
+	if !ok {
+		return nil
+	}
+	_, err := c.kubeClient.CoreV1().Pods(pod.Namespace).Create(ctx, pod.DeepCopy(), metav1.CreateOptions{})
+	return err
 }
