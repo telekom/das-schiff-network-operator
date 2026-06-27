@@ -130,6 +130,7 @@ func phaseBuildAllImages(repoRoot string) error {
 	}
 
 	if err := RunCmd("docker", "build",
+		"--build-arg", "GO_VERSION="+goVersion,
 		"--build-arg", "ldflags="+ldflags,
 		"-f", filepath.Join(repoRoot, "das-schiff-platform-coil.Dockerfile"),
 		"-t", imgBase+"/das-schiff-platform-coil:latest",
@@ -139,6 +140,7 @@ func phaseBuildAllImages(repoRoot string) error {
 	}
 
 	if err := RunCmd("docker", "build",
+		"--build-arg", "GO_VERSION="+goVersion,
 		"--build-arg", "ldflags="+ldflags,
 		"-f", filepath.Join(repoRoot, "das-schiff-platform-metallb.Dockerfile"),
 		"-t", imgBase+"/das-schiff-platform-metallb:latest",
@@ -148,6 +150,7 @@ func phaseBuildAllImages(repoRoot string) error {
 	}
 
 	if err := RunCmd("docker", "build",
+		"--build-arg", "GO_VERSION="+goVersion,
 		"--build-arg", "ldflags="+ldflags,
 		"-f", filepath.Join(repoRoot, "das-schiff-network-sync.Dockerfile"),
 		"-t", imgBase+"/das-schiff-network-sync:latest",
