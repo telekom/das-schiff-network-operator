@@ -24,17 +24,18 @@ import (
 	"testing"
 
 	"github.com/go-logr/logr"
-	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
-	cra "github.com/telekom/das-schiff-network-operator/pkg/cra-vsr"
-	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
-	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/common"
-	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/operator"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
+	cra "github.com/telekom/das-schiff-network-operator/pkg/cra-vsr"
+	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
+	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/common"
+	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/operator"
 )
 
 var _ common.ConfigApplier = &CRAVSRConfigApplier{}
