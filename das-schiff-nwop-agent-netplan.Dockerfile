@@ -20,12 +20,13 @@ COPY pkg/ pkg/
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-$(go env GOARCH)} \
     go build -trimpath -ldflags="-s -w ${ldflags}" -o agent main.go
 
-FROM gcr.io/distroless/static-debian12
+FROM docker.io/library/alpine:3.21
 
 LABEL org.opencontainers.image.title="das-schiff-nwop-agent-netplan" \
       org.opencontainers.image.source="https://github.com/telekom/das-schiff-network-operator" \
       org.opencontainers.image.vendor="Deutsche Telekom AG" \
-      org.opencontainers.image.licenses="Apache-2.0"
+      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.base.name="docker.io/library/alpine:3.21"
 
 WORKDIR /
 COPY --from=builder /workspace/agent .
