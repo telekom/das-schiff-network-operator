@@ -526,7 +526,9 @@ var _ = Describe("EnsureNeighborSuppression()", func() {
 		// LinkByIndex fails before state is mutated — maps must remain empty.
 		nlMock.EXPECT().LinkByIndex(10).Return(nil, errors.New("no such device"))
 
-		_ = n.EnsureNeighborSuppression(5, 10)
+		err := n.EnsureNeighborSuppression(5, 10)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("failed to get link by index"))
 
 		_, bridgeStored := n.sendGratuitousNeighbor.Load(5)
 		_, vethStored := n.receiveNeighbors.Load(10)
@@ -561,7 +563,9 @@ var _ = Describe("EnsureNeighborSuppression()", func() {
 		fakeLink := &netlink.Dummy{}
 		nlMock.EXPECT().LinkByIndex(10).Return(fakeLink, nil)
 
-		_ = n.EnsureNeighborSuppression(5, 10)
+		err := n.EnsureNeighborSuppression(5, 10)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("failed to attach BPF program"))
 
 		_, bridgeStored := n.sendGratuitousNeighbor.Load(5)
 		_, vethStored := n.receiveNeighbors.Load(10)
@@ -624,7 +628,9 @@ var _ = Describe("DisableNeighborSuppression()", func() {
 		// consistent with the kernel (BPF is still attached).
 		nlMock.EXPECT().LinkByIndex(10).Return(nil, errors.New("no such device"))
 
-		_ = n.DisableNeighborSuppression(5, 10)
+		err := n.DisableNeighborSuppression(5, 10)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("failed to get link by index"))
 
 		_, bridgeStored := n.sendGratuitousNeighbor.Load(5)
 		_, vethStored := n.receiveNeighbors.Load(10)
