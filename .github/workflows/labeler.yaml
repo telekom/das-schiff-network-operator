@@ -33,7 +33,7 @@ jobs:
             local color="$2"
             local description="$3"
             if ! gh label view "$name" >/dev/null 2>&1; then
-              gh label create "$name" --color "$color" --description "$description"
+              gh label create "$name" --color "$color" --description "$description" || gh label view "$name" >/dev/null
             fi
           }
 
