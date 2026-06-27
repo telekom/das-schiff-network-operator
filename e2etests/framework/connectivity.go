@@ -159,9 +159,7 @@ func (f *Framework) WaitForIPv6DADComplete(ctx context.Context, namespace, podNa
 		}
 
 		for _, line := range strings.Split(stdout, "\n") {
-			if strings.Contains(line, "tentative") {
-				continue
-			}
+			matchesTarget := false
 			for _, field := range strings.Fields(line) {
 				addrPart := field
 				if slash := strings.IndexByte(addrPart, '/'); slash >= 0 {
@@ -172,9 +170,20 @@ func (f *Framework) WaitForIPv6DADComplete(ctx context.Context, namespace, podNa
 					continue
 				}
 				if lineAddr == canonical {
-					return true, nil
+					matchesTarget = true
+					break
 				}
 			}
+			if !matchesTarget {
+				continue
+			}
+			if strings.Contains(line, "dadfailed") {
+				return false, fmt.Errorf("IPv6 DAD failed for %s on %s: %s", ipv6Addr, iface, strings.TrimSpace(line))
+			}
+			if strings.Contains(line, "tentative") {
+				continue
+			}
+			return true, nil
 		}
 		return false, nil
 	})
