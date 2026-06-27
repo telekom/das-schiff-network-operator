@@ -5,7 +5,7 @@ FROM --platform=$BUILDPLATFORM docker.io/library/golang:${GO_VERSION}-alpine AS 
 
 ARG TARGETOS
 ARG TARGETARCH
-ARG ldflags=""
+ARG ldflags=
 
 WORKDIR /workspace
 COPY go.mod go.mod
