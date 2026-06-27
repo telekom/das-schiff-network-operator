@@ -106,3 +106,45 @@ func TestParseCanonicalIPv6_CanonicalEquality(t *testing.T) {
 		t.Errorf("canonical forms differ: %v != %v", a, b)
 	}
 }
+
+func TestFindIPv6AddressWithPrefix(t *testing.T) {
+	t.Parallel()
+
+	output := `2: net1    inet6 fe80::20c:29ff:fe7c:1/64 scope link
+2: net1    inet6 fd94:685b:30cf:501::10/80 scope global tentative
+2: net1    inet6 2001:db8::1/96 scope global`
+
+	got, err := findIPv6AddressWithPrefix(output, "fd94:685b:30cf:501::10")
+	if err != nil {
+		t.Fatalf("findIPv6AddressWithPrefix returned error: %v", err)
+	}
+	if got != "fd94:685b:30cf:501::10/80" {
+		t.Errorf("findIPv6AddressWithPrefix returned %q, want %q", got, "fd94:685b:30cf:501::10/80")
+	}
+}
+
+func TestFindIPv6AddressWithPrefix_CanonicalMatch(t *testing.T) {
+	t.Parallel()
+
+	output := `2: net1    inet6 fd94:685b:30cf:501::10/112 scope global`
+
+	got, err := findIPv6AddressWithPrefix(output, "fd94:685b:30cf:0501:0000:0000:0000:0010")
+	if err != nil {
+		t.Fatalf("findIPv6AddressWithPrefix returned error: %v", err)
+	}
+	if got != "fd94:685b:30cf:501::10/112" {
+		t.Errorf("findIPv6AddressWithPrefix returned %q, want %q", got, "fd94:685b:30cf:501::10/112")
+	}
+}
+
+func TestFindIPv6AddressWithPrefix_NotFound(t *testing.T) {
+	t.Parallel()
+
+	_, err := findIPv6AddressWithPrefix(`2: net1 inet6 2001:db8::1/64 scope global`, "fd94:685b:30cf:501::10")
+	if err == nil {
+		t.Fatal("findIPv6AddressWithPrefix returned nil error, want not found error")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("findIPv6AddressWithPrefix error = %q, want substring %q", err, "not found")
+	}
+}
