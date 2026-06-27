@@ -137,6 +137,16 @@ func TestNewNetconf_NormalizesCRAURLs(t *testing.T) {
 	}
 }
 
+func TestNewNetconf_RejectsMissingKnownHostsPath(t *testing.T) {
+	_, err := NewNetconf([]string{"169.254.33.1:830"}, "user", "password", " ", 0)
+	if err == nil {
+		t.Fatal("NewNetconf returned nil error, want missing known hosts path error")
+	}
+	if !strings.Contains(err.Error(), "known hosts file path is required") {
+		t.Fatalf("NewNetconf error = %q, want known hosts path context", err)
+	}
+}
+
 func newTestPublicKey(t *testing.T) ssh.PublicKey {
 	t.Helper()
 
