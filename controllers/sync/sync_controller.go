@@ -1414,7 +1414,7 @@ func (r *Controller) enqueueForBGPSecret(ctx context.Context, obj client.Object)
 	); err != nil {
 		r.Log.Error(err, "Listing BGPPeerings for auth Secret failed",
 			"namespace", obj.GetNamespace(), "secret", obj.GetName())
-		return nil
+		return syncNamespaceRequest(obj.GetNamespace())
 	}
 	for i := range bpList.Items {
 		bp := &bpList.Items[i]
@@ -1423,14 +1423,18 @@ func (r *Controller) enqueueForBGPSecret(ctx context.Context, obj client.Object)
 			bp.Spec.AuthSecretRef.Name != obj.GetName() {
 			continue
 		}
-		return []reconcile.Request{{
-			NamespacedName: types.NamespacedName{
-				Namespace: obj.GetNamespace(),
-				Name:      syncRequestName,
-			},
-		}}
+		return syncNamespaceRequest(obj.GetNamespace())
 	}
 	return nil
+}
+
+func syncNamespaceRequest(namespace string) []reconcile.Request {
+	return []reconcile.Request{{
+		NamespacedName: types.NamespacedName{
+			Namespace: namespace,
+			Name:      syncRequestName,
+		},
+	}}
 }
 
 func indexBGPAuthSecretRef(obj client.Object) []string {
