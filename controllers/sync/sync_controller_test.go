@@ -430,9 +430,10 @@ func TestSyncDeletion(t *testing.T) {
 
 	remoteVRF := &nc.VRF{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      testVRFName,
-			Namespace: testRemoteNamespace,
-			Labels:    map[string]string{labelManagedBy: labelManagedByValue},
+			Name:        testVRFName,
+			Namespace:   testRemoteNamespace,
+			Labels:      map[string]string{labelManagedBy: labelManagedByValue},
+			Annotations: map[string]string{annotationSourceNS: testClusterNamespace},
 		},
 		Spec: nc.VRFSpec{VRF: testVRFValue, VNI: ptrInt32(2002026), RouteTarget: ptrString("65188:2026")},
 	}
@@ -816,6 +817,50 @@ func TestSyncDeleteLeavesUnmanagedHelmObjectUntouched(t *testing.T) {
 	}
 	if got.Labels[labelManagedBy] == labelManagedByValue {
 		t.Errorf("Expected sync ownership label not to be added to unmanaged object, got %v", got.Labels)
+	}
+}
+
+func TestSyncDeleteKeepsRemoteObjectFromOtherSourceNamespace(t *testing.T) {
+	now := metav1.Now()
+	vrf := &nc.VRF{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              testVRFName,
+			Namespace:         testClusterNamespace,
+			DeletionTimestamp: &now,
+			Finalizers:        []string{finalizerName},
+		},
+		Spec: nc.VRFSpec{VRF: testVRFValue, VNI: ptrInt32(2002026), RouteTarget: ptrString("65188:2026")},
+	}
+
+	remoteFromOtherSource := &nc.VRF{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      testVRFName,
+			Namespace: testRemoteNamespace,
+			Labels: map[string]string{
+				labelManagedBy: labelManagedByValue,
+			},
+			Annotations: map[string]string{
+				annotationSourceNS: testOrphanedClusterNamespace,
+			},
+		},
+		Spec: nc.VRFSpec{VRF: testForeignVRFValue, VNI: ptrInt32(1), RouteTarget: ptrString("1:1")},
+	}
+
+	sc, remoteClient := newFakeSyncController([]client.Object{vrf}, []client.Object{remoteFromOtherSource})
+	ctx := context.Background()
+
+	if _, err := sc.Reconcile(ctx, ctrl.Request{
+		NamespacedName: types.NamespacedName{Namespace: testClusterNamespace, Name: syncRequestName},
+	}); err != nil {
+		t.Fatalf("Reconcile failed: %v", err)
+	}
+
+	got := &nc.VRF{}
+	if err := remoteClient.Get(ctx, types.NamespacedName{Namespace: testRemoteNamespace, Name: testVRFName}, got); err != nil {
+		t.Fatalf("Expected remote VRF from other source namespace to survive source deletion: %v", err)
+	}
+	if got.Annotations[annotationSourceNS] != testOrphanedClusterNamespace {
+		t.Errorf("Expected other source namespace annotation to be preserved, got %v", got.Annotations)
 	}
 }
 

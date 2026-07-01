@@ -440,6 +440,9 @@ func (r *Controller) deleteRemote(ctx context.Context, remoteClient client.Clien
 	if remote.GetLabels()[labelManagedBy] != labelManagedByValue {
 		return nil
 	}
+	if remote.GetAnnotations()[annotationSourceNS] != src.GetNamespace() {
+		return nil
+	}
 
 	if err := remoteClient.Delete(ctx, remote); err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("deleting remote object %s/%s: %w", remote.GetNamespace(), remote.GetName(), err)
