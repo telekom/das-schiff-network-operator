@@ -454,7 +454,8 @@ func (r *Controller) deleteRemote(ctx context.Context, remoteClient client.Clien
 	if remote.GetLabels()[labelManagedBy] != labelManagedByValue {
 		return nil
 	}
-	if remote.GetAnnotations()[annotationSourceNS] != src.GetNamespace() {
+	remoteSourceNamespace, hasSourceNamespace := remote.GetAnnotations()[annotationSourceNS]
+	if hasSourceNamespace && remoteSourceNamespace != src.GetNamespace() {
 		return nil
 	}
 
