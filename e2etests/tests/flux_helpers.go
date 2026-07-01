@@ -199,16 +199,16 @@ func getFluxFixtureChart() ([]byte, string, error) {
 		fluxFixtureIndexYAML = fmt.Sprintf(`apiVersion: v1
 entries:
   %s:
-  - apiVersion: v2
-    appVersion: "%s"
-    created: "2026-07-01T00:00:00Z"
-    description: Network sync Flux ownership e2e fixture
-    digest: "%x"
-    name: %s
-    type: application
-    urls:
-    - %s
-    version: "%s"
+    - apiVersion: v2
+      appVersion: "%s"
+      created: "2026-07-01T00:00:00Z"
+      description: Network sync Flux ownership e2e fixture
+      digest: "%x"
+      name: %s
+      type: application
+      urls:
+        - %s
+      version: "%s"
 generated: "2026-07-01T00:00:00Z"
 `, fluxFixtureChartName, fluxFixtureChartVersion, sum, fluxFixtureChartName, fluxFixtureChartArchive, fluxFixtureChartVersion)
 	})
@@ -369,7 +369,10 @@ func waitForFluxHelmReleaseReconcile(ctx context.Context, c client.Client, name,
 	return framework.Poll(waitCtx, 5*time.Second, func() (bool, error) {
 		obj := fluxHelmReleaseObject(name)
 		if err := c.Get(waitCtx, client.ObjectKey{Namespace: fluxSystemNamespace, Name: name}, obj); err != nil {
-			return false, nil
+			if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
+				return false, nil
+			}
+			return false, err
 		}
 		lastHandled, found, err := unstructured.NestedString(obj.Object, "status", "lastHandledReconcileAt")
 		if err != nil {
