@@ -58,6 +58,7 @@ const (
 	testOwnershipHelmReleaseName = "meta.helm.sh/release-name"
 	testOwnershipHelmReleaseNS   = "meta.helm.sh/release-namespace"
 	testBGPPasswordKey           = "password"
+	testBGPExtraKey              = "extra"
 )
 
 var testOwnershipLabelKeys = []string{
@@ -139,6 +140,9 @@ func TestSyncCreatesRemoteObject(t *testing.T) {
 	}
 	if remoteVRF.Annotations[annotationSourceNS] != testClusterNamespace {
 		t.Errorf("Expected source-namespace annotation, got %v", remoteVRF.Annotations)
+	}
+	if remoteVRF.Annotations[annotationSSAAdopted] != annotationSSAAdoptedValue {
+		t.Errorf("Expected SSA adoption marker, got %v", remoteVRF.Annotations)
 	}
 }
 
@@ -326,6 +330,9 @@ func TestSyncPreservesRemoteOwnershipMetadata(t *testing.T) {
 	if got.Annotations[testIntentAnnotation] != testSANIntentValue {
 		t.Errorf("Expected desired non-ownership annotation to be applied, got %v", got.Annotations)
 	}
+	if got.Annotations[annotationSSAAdopted] != annotationSSAAdoptedValue {
+		t.Errorf("Expected legacy object to be marked as SSA adopted, got %v", got.Annotations)
+	}
 	if got.Labels[labelManagedBy] != labelManagedByValue {
 		t.Errorf("Expected sync ownership label to be retained, got %v", got.Labels)
 	}
@@ -334,6 +341,73 @@ func TestSyncPreservesRemoteOwnershipMetadata(t *testing.T) {
 	}
 	if _, ok := got.Annotations[testStaleMetadataKey]; ok {
 		t.Errorf("Expected non-ownership remote annotation drift to be removed, got %v", got.Annotations)
+	}
+	if got.Spec.VNI == nil || *got.Spec.VNI != 2002026 {
+		t.Errorf("Expected spec drift to still be corrected, got %v", got.Spec.VNI)
+	}
+}
+
+func TestSyncPreservesWorkloadLocalMetadataAfterSSAAdoption(t *testing.T) {
+	vrf := &nc.VRF{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      testVRFName,
+			Namespace: testClusterNamespace,
+			Labels: map[string]string{
+				testScopeLabel: testStorageScopeValue,
+			},
+			Annotations: map[string]string{
+				testIntentAnnotation: testSANIntentValue,
+			},
+		},
+		Spec: nc.VRFSpec{
+			VRF:         testVRFValue,
+			VNI:         ptrInt32(2002026),
+			RouteTarget: ptrString("65188:2026"),
+		},
+	}
+	remoteVRF := &nc.VRF{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      testVRFName,
+			Namespace: testRemoteNamespace,
+			Labels: map[string]string{
+				labelManagedBy:       labelManagedByValue,
+				testStaleMetadataKey: testStaleMetadataValue,
+			},
+			Annotations: map[string]string{
+				annotationSourceNS:   testClusterNamespace,
+				annotationSSAAdopted: annotationSSAAdoptedValue,
+				testStaleMetadataKey: testStaleMetadataValue,
+				testIntentAnnotation: "workload-local",
+			},
+		},
+		Spec: nc.VRFSpec{
+			VRF:         testVRFValue,
+			VNI:         ptrInt32(9999),
+			RouteTarget: ptrString("65188:2026"),
+		},
+	}
+
+	sc, remoteClient := newFakeSyncController([]client.Object{vrf}, []client.Object{remoteVRF})
+	ctx := context.Background()
+
+	if _, err := sc.Reconcile(ctx, ctrl.Request{
+		NamespacedName: types.NamespacedName{Namespace: testClusterNamespace, Name: syncRequestName},
+	}); err != nil {
+		t.Fatalf("Reconcile failed: %v", err)
+	}
+
+	got := &nc.VRF{}
+	if err := remoteClient.Get(ctx, types.NamespacedName{Namespace: testRemoteNamespace, Name: testVRFName}, got); err != nil {
+		t.Fatalf("Get remote VRF: %v", err)
+	}
+	if got.Labels[testStaleMetadataKey] != testStaleMetadataValue {
+		t.Errorf("Expected SSA to preserve workload-local label, got %v", got.Labels)
+	}
+	if got.Annotations[testStaleMetadataKey] != testStaleMetadataValue {
+		t.Errorf("Expected SSA to preserve workload-local annotation, got %v", got.Annotations)
+	}
+	if got.Annotations[testIntentAnnotation] != testSANIntentValue {
+		t.Errorf("Expected desired annotation to be reconciled, got %v", got.Annotations)
 	}
 	if got.Spec.VNI == nil || *got.Spec.VNI != 2002026 {
 		t.Errorf("Expected spec drift to still be corrected, got %v", got.Spec.VNI)
@@ -412,6 +486,9 @@ func TestSyncPreservesRemoteOwnershipMetadataEvenWhenItMatchesSource(t *testing.
 	}
 	if got.Annotations[annotationSourceNS] != testClusterNamespace {
 		t.Errorf("Expected source namespace annotation to remain, got %v", got.Annotations)
+	}
+	if got.Annotations[annotationSSAAdopted] != annotationSSAAdoptedValue {
+		t.Errorf("Expected SSA adoption marker, got %v", got.Annotations)
 	}
 	if got.Spec.VNI == nil || *got.Spec.VNI != 2002026 {
 		t.Errorf("Expected spec drift to still be corrected, got %v", got.Spec.VNI)
@@ -1119,6 +1196,9 @@ func TestSyncBGPSecretsMirrorsReferencedSecret(t *testing.T) {
 	if got.Annotations[annotationSourceNS] != testClusterNamespace {
 		t.Errorf("Expected source-namespace annotation, got %v", got.Annotations)
 	}
+	if got.Annotations[annotationSSAAdopted] != annotationSSAAdoptedValue {
+		t.Errorf("Expected SSA adoption marker, got %v", got.Annotations)
+	}
 }
 
 func TestSyncBGPSecretsPreservesRemoteOwnershipMetadataOnUpdate(t *testing.T) {
@@ -1154,7 +1234,10 @@ func TestSyncBGPSecretsPreservesRemoteOwnershipMetadataOnUpdate(t *testing.T) {
 			},
 		},
 		Type: corev1.SecretTypeOpaque,
-		Data: map[string][]byte{testBGPPasswordKey: []byte("old-secret")},
+		Data: map[string][]byte{
+			testBGPPasswordKey: []byte("old-secret"),
+			testBGPExtraKey:    []byte("stale"),
+		},
 	}
 
 	sc, remoteClient := newFakeSyncController([]client.Object{bp, src}, []client.Object{remoteSecret})
@@ -1174,6 +1257,9 @@ func TestSyncBGPSecretsPreservesRemoteOwnershipMetadataOnUpdate(t *testing.T) {
 	}
 	if string(got.Data[testBGPPasswordKey]) != "new-secret" {
 		t.Errorf("Expected password to be updated, got %q", string(got.Data[testBGPPasswordKey]))
+	}
+	if _, ok := got.Data[testBGPExtraKey]; ok {
+		t.Errorf("Expected legacy Secret adoption to remove stale data key, got %v", got.Data)
 	}
 	if got.Labels[testOwnershipManagedByLabel] != testHelmManager {
 		t.Errorf("Expected remote Helm managed-by label to be preserved, got %v", got.Labels)
@@ -1195,6 +1281,65 @@ func TestSyncBGPSecretsPreservesRemoteOwnershipMetadataOnUpdate(t *testing.T) {
 	}
 	if _, ok := got.Annotations[testStaleMetadataKey]; ok {
 		t.Errorf("Expected stale non-ownership annotation drift to be removed, got %v", got.Annotations)
+	}
+	if got.Annotations[annotationSSAAdopted] != annotationSSAAdoptedValue {
+		t.Errorf("Expected legacy Secret to be marked as SSA adopted, got %v", got.Annotations)
+	}
+}
+
+func TestSyncBGPSecretsPreservesWorkloadLocalDataAfterSSAAdoption(t *testing.T) {
+	bp := &nc.BGPPeering{
+		ObjectMeta: metav1.ObjectMeta{Name: "lp", Namespace: testClusterNamespace},
+		Spec: nc.BGPPeeringSpec{
+			Mode:          nc.BGPPeeringModeLoopbackPeer,
+			Ref:           nc.BGPPeeringRef{InboundRefs: []string{"x"}},
+			AuthSecretRef: &corev1.LocalObjectReference{Name: testBGPAuthSecretName},
+		},
+	}
+	src := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: testBGPAuthSecretName, Namespace: testClusterNamespace},
+		Type:       corev1.SecretTypeOpaque,
+		Data:       map[string][]byte{testBGPPasswordKey: []byte("new-secret")},
+	}
+	remoteSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      testBGPAuthSecretName,
+			Namespace: testRemoteNamespace,
+			Labels: map[string]string{
+				labelManagedBy: labelManagedByValue,
+			},
+			Annotations: map[string]string{
+				annotationSourceNS:   testClusterNamespace,
+				annotationSSAAdopted: annotationSSAAdoptedValue,
+			},
+		},
+		Type: corev1.SecretTypeOpaque,
+		Data: map[string][]byte{
+			testBGPPasswordKey: []byte("old-secret"),
+			testBGPExtraKey:    []byte("workload-local"),
+		},
+	}
+
+	sc, remoteClient := newFakeSyncController([]client.Object{bp, src}, []client.Object{remoteSecret})
+	ctx := context.Background()
+
+	if _, err := sc.Reconcile(ctx, ctrl.Request{
+		NamespacedName: types.NamespacedName{Namespace: testClusterNamespace, Name: syncRequestName},
+	}); err != nil {
+		t.Fatalf("Reconcile failed: %v", err)
+	}
+
+	got := &corev1.Secret{}
+	if err := remoteClient.Get(ctx, types.NamespacedName{
+		Namespace: testRemoteNamespace, Name: testBGPAuthSecretName,
+	}, got); err != nil {
+		t.Fatalf("Remote Secret not found: %v", err)
+	}
+	if string(got.Data[testBGPPasswordKey]) != "new-secret" {
+		t.Errorf("Expected password to be updated, got %q", string(got.Data[testBGPPasswordKey]))
+	}
+	if string(got.Data[testBGPExtraKey]) != "workload-local" {
+		t.Errorf("Expected SSA to preserve workload-local data key, got %v", got.Data)
 	}
 }
 
