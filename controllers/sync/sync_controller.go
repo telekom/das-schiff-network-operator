@@ -618,6 +618,10 @@ func (r *Controller) syncBGPSecrets(ctx context.Context, log logr.Logger, remote
 			if apierrors.IsNotFound(err) {
 				log.Info("BGPPeering authSecretRef target Secret missing; skipping",
 					"namespace", namespace, "name", name)
+				missingSrc := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace}}
+				if err := r.deleteRemote(ctx, remoteClient, missingSrc); err != nil {
+					return fmt.Errorf("deleting remote BGP auth Secret %s/%s after source Secret disappeared: %w", namespace, name, err)
+				}
 				continue
 			}
 			return fmt.Errorf("getting BGP auth Secret %s/%s: %w", namespace, name, err)
@@ -717,6 +721,35 @@ func indexBGPAuthSecretRef(obj client.Object) []string {
 	return []string{bp.Spec.AuthSecretRef.Name}
 }
 
+func bgpAuthSecretPredicate() predicate.Predicate {
+	return predicate.Funcs{
+		CreateFunc: func(e event.CreateEvent) bool {
+			return e.Object != nil
+		},
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			return bgpAuthSecretContentChanged(e.ObjectOld, e.ObjectNew)
+		},
+		DeleteFunc: func(e event.DeleteEvent) bool {
+			return e.Object != nil
+		},
+		GenericFunc: func(e event.GenericEvent) bool {
+			return e.Object != nil
+		},
+	}
+}
+
+func bgpAuthSecretContentChanged(oldObj, newObj client.Object) bool {
+	if oldObj == nil || newObj == nil {
+		return false
+	}
+	oldSecret, oldOK := oldObj.(*corev1.Secret)
+	newSecret, newOK := newObj.(*corev1.Secret)
+	if !oldOK || !newOK {
+		return true
+	}
+	return oldSecret.Type != newSecret.Type || !reflect.DeepEqual(oldSecret.Data, newSecret.Data)
+}
+
 // SetupWithManager registers watches for all intent CRD types.
 func (r *Controller) SetupWithManager(mgr ctrl.Manager) error {
 	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &nc.BGPPeering{}, bgpAuthSecretRefField, indexBGPAuthSecretRef); err != nil {
@@ -736,20 +769,6 @@ func (r *Controller) SetupWithManager(mgr ctrl.Manager) error {
 	)
 
 	secretToSyncNamespace := handler.EnqueueRequestsFromMapFunc(r.enqueueForBGPSecret)
-	secretPredicate := predicate.Funcs{
-		CreateFunc: func(e event.CreateEvent) bool {
-			return e.Object != nil
-		},
-		UpdateFunc: func(e event.UpdateEvent) bool {
-			return e.ObjectNew != nil
-		},
-		DeleteFunc: func(e event.DeleteEvent) bool {
-			return e.Object != nil
-		},
-		GenericFunc: func(e event.GenericEvent) bool {
-			return e.Object != nil
-		},
-	}
 
 	builder := ctrl.NewControllerManagedBy(mgr).
 		Named("sync-controller")
@@ -757,7 +776,7 @@ func (r *Controller) SetupWithManager(mgr ctrl.Manager) error {
 	for _, obj := range intentCRDTypes() {
 		builder = builder.Watches(obj, enqueueNS)
 	}
-	builder = builder.Watches(&corev1.Secret{}, secretToSyncNamespace, ctrlbuilder.WithPredicates(secretPredicate))
+	builder = builder.Watches(&corev1.Secret{}, secretToSyncNamespace, ctrlbuilder.WithPredicates(bgpAuthSecretPredicate()))
 
 	if err := builder.Complete(r); err != nil {
 		return fmt.Errorf("setting up sync controller: %w", err)
