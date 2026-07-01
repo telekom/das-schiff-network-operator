@@ -16,6 +16,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
@@ -173,6 +174,9 @@ func TestSyncUpdatesRemoteObject(t *testing.T) {
 			Labels: map[string]string{
 				labelManagedBy: labelManagedByValue,
 			},
+			Annotations: map[string]string{
+				annotationSourceNS: testClusterNamespace,
+			},
 		},
 		Spec: nc.VRFSpec{
 			VRF:         testVRFValue,
@@ -289,6 +293,7 @@ func TestSyncPreservesRemoteOwnershipMetadata(t *testing.T) {
 				testStaleMetadataKey:        testStaleMetadataValue,
 			},
 			Annotations: map[string]string{
+				annotationSourceNS:           testClusterNamespace,
 				testOwnershipHelmReleaseName: testRemoteReleaseName,
 				testOwnershipHelmReleaseNS:   testRemoteReleaseNamespace,
 				testStaleMetadataKey:         testStaleMetadataValue,
@@ -1467,6 +1472,38 @@ func TestEnqueueForBGPSecretUsesAuthSecretRefIndex(t *testing.T) {
 	}
 }
 
+func TestBGPAuthSecretPredicateIgnoresMetadataOnlyUpdates(t *testing.T) {
+	pred := bgpAuthSecretPredicate()
+
+	oldSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        testBGPAuthSecretName,
+			Namespace:   testClusterNamespace,
+			Annotations: map[string]string{"old": "value"},
+		},
+		Type: corev1.SecretTypeOpaque,
+		Data: map[string][]byte{testBGPPasswordKey: []byte("old-password")},
+	}
+	metadataOnlySecret := oldSecret.DeepCopy()
+	metadataOnlySecret.Annotations = map[string]string{"new": "value"}
+
+	if pred.Update(event.UpdateEvent{ObjectOld: oldSecret, ObjectNew: metadataOnlySecret}) {
+		t.Fatal("Expected metadata-only Secret update to be ignored")
+	}
+
+	dataChangedSecret := oldSecret.DeepCopy()
+	dataChangedSecret.Data[testBGPPasswordKey] = []byte("new-password")
+	if !pred.Update(event.UpdateEvent{ObjectOld: oldSecret, ObjectNew: dataChangedSecret}) {
+		t.Fatal("Expected Secret data update to trigger reconcile")
+	}
+
+	typeChangedSecret := oldSecret.DeepCopy()
+	typeChangedSecret.Type = corev1.SecretTypeBasicAuth
+	if !pred.Update(event.UpdateEvent{ObjectOld: oldSecret, ObjectNew: typeChangedSecret}) {
+		t.Fatal("Expected Secret type update to trigger reconcile")
+	}
+}
+
 func copyStringMap(in map[string]string) map[string]string {
 	out := make(map[string]string, len(in))
 	for k, v := range in {
@@ -1675,6 +1712,48 @@ func TestSyncBGPSecretsPreservesWorkloadLocalDataAfterSSAAdoption(t *testing.T) 
 	}
 	if string(got.Data[testBGPExtraKey]) != "workload-local" {
 		t.Errorf("Expected SSA to preserve workload-local data key, got %v", got.Data)
+	}
+}
+
+func TestSyncBGPSecretsDeletesRemoteSecretWhenSourceSecretDisappears(t *testing.T) {
+	bp := &nc.BGPPeering{
+		ObjectMeta: metav1.ObjectMeta{Name: "lp", Namespace: testClusterNamespace},
+		Spec: nc.BGPPeeringSpec{
+			Mode:          nc.BGPPeeringModeLoopbackPeer,
+			Ref:           nc.BGPPeeringRef{InboundRefs: []string{"x"}},
+			AuthSecretRef: &corev1.LocalObjectReference{Name: testBGPAuthSecretName},
+		},
+	}
+	remoteSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      testBGPAuthSecretName,
+			Namespace: testRemoteNamespace,
+			Labels: map[string]string{
+				labelManagedBy: labelManagedByValue,
+			},
+			Annotations: map[string]string{
+				annotationSourceNS: testClusterNamespace,
+			},
+		},
+		Type: corev1.SecretTypeOpaque,
+		Data: map[string][]byte{testBGPPasswordKey: []byte("old-secret")},
+	}
+
+	sc, remoteClient := newFakeSyncController([]client.Object{bp}, []client.Object{remoteSecret})
+	ctx := context.Background()
+
+	if _, err := sc.Reconcile(ctx, ctrl.Request{
+		NamespacedName: types.NamespacedName{Namespace: testClusterNamespace, Name: syncRequestName},
+	}); err != nil {
+		t.Fatalf("Reconcile failed: %v", err)
+	}
+
+	got := &corev1.Secret{}
+	err := remoteClient.Get(ctx, types.NamespacedName{
+		Namespace: testRemoteNamespace, Name: testBGPAuthSecretName,
+	}, got)
+	if err == nil {
+		t.Fatalf("Expected remote Secret to be deleted after source Secret disappeared")
 	}
 }
 
