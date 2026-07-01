@@ -9,6 +9,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -330,7 +331,7 @@ func getCluster2Object(ctx context.Context, f *framework.Framework, resource, na
 func getObject(ctx context.Context, c client.Client, resource, namespace, name string) *unstructured.Unstructured {
 	obj, err := fetchObject(ctx, c, resource, namespace, name)
 	if err != nil {
-		if !apierrors.IsNotFound(err) {
+		if !apierrors.IsNotFound(err) && !meta.IsNoMatchError(err) {
 			GinkgoWriter.Printf("getting %s %s/%s failed: %v\n", resourceToKind(resource), namespace, name, err)
 		}
 		return nil
@@ -353,7 +354,7 @@ func fetchObject(ctx context.Context, c client.Client, resource, namespace, name
 
 func deleteObject(ctx context.Context, c client.Client, resource, namespace, name string) error {
 	obj, err := fetchObject(ctx, c, resource, namespace, name)
-	if apierrors.IsNotFound(err) {
+	if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
 		return nil
 	}
 	if err != nil {

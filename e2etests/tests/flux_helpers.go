@@ -78,6 +78,14 @@ func workloadFluxCluster(f *framework.Framework) fluxCluster {
 }
 
 func ensureFluxInstalled(ctx context.Context, cluster fluxCluster) error {
+	ready, err := fluxControllersReady(ctx, cluster.kubeClient)
+	if err != nil {
+		return fmt.Errorf("checking existing Flux install on %s cluster: %w", cluster.name, err)
+	}
+	if ready {
+		return nil
+	}
+
 	manifest, err := getFluxInstallManifest(ctx)
 	if err != nil {
 		return err
@@ -91,6 +99,24 @@ func ensureFluxInstalled(ctx context.Context, cluster fluxCluster) error {
 		}
 	}
 	return nil
+}
+
+func fluxControllersReady(ctx context.Context, kube kubernetes.Interface) (bool, error) {
+	for _, name := range []string{"source-controller", "helm-controller"} {
+		deploy, err := kube.AppsV1().Deployments(fluxSystemNamespace).Get(ctx, name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		if deploy.Spec.Replicas == nil ||
+			deploy.Status.AvailableReplicas != *deploy.Spec.Replicas ||
+			deploy.Status.UpdatedReplicas != *deploy.Spec.Replicas {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 func getFluxInstallManifest(_ context.Context) ([]byte, error) {
