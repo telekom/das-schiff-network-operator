@@ -2,6 +2,7 @@ package tests
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -151,21 +152,35 @@ spec:
 			vrfName         = "vrf-sync-flux-helm-ownership"
 			sourceRelease   = "network-sync-source"
 			workloadRelease = "network-sync-workload"
+
+			workloadInitialRevision = "workload-2002040"
+			sourceFirstRevision     = "source-2002041"
+			workloadReapplyRevision = "workload-2002041"
+			sourceSecondRevision    = "source-2002042"
 		)
 
 		AfterEach(func() {
 			ctx = context.Background()
+			var cleanupErrs []error
+			recordCleanup := func(action string, err error) {
+				if err == nil {
+					return
+				}
+				GinkgoWriter.Printf("cleanup %s failed: %v\n", action, err)
+				cleanupErrs = append(cleanupErrs, fmt.Errorf("%s: %w", action, err))
+			}
 
 			By("Cleaning up Flux HelmReleases")
-			Expect(deleteFluxHelmRelease(ctx, f.Client, sourceRelease)).To(Succeed())
-			Expect(deleteFluxHelmRelease(ctx, f.Cluster2Client(), workloadRelease)).To(Succeed())
+			recordCleanup("source HelmRelease", deleteFluxHelmRelease(ctx, f.Client, sourceRelease))
+			recordCleanup("workload HelmRelease", deleteFluxHelmRelease(ctx, f.Cluster2Client(), workloadRelease))
 
-			Expect(deleteObject(ctx, f.Client, "vrfs", syncNamespace, vrfName)).To(Succeed())
-			Expect(deleteCluster2Object(ctx, f, "vrfs", vrfName)).To(Succeed())
+			recordCleanup("source VRF", deleteObject(ctx, f.Client, "vrfs", syncNamespace, vrfName))
+			recordCleanup("workload VRF", deleteCluster2Object(ctx, f, "vrfs", vrfName))
 
 			By("Cleaning up Flux chart repositories")
-			Expect(cleanupFluxChartRepository(ctx, managementFluxCluster(f))).To(Succeed())
-			Expect(cleanupFluxChartRepository(ctx, workloadFluxCluster(f))).To(Succeed())
+			recordCleanup("management Flux chart repository", cleanupFluxChartRepository(ctx, managementFluxCluster(f)))
+			recordCleanup("workload Flux chart repository", cleanupFluxChartRepository(ctx, workloadFluxCluster(f)))
+			Expect(errors.Join(cleanupErrs...)).To(Succeed())
 		})
 
 		It("should preserve actual Flux Helm workload ownership metadata while syncing Flux-managed source changes", Label("ownership", "helm", "flux"), func() {
@@ -178,7 +193,7 @@ spec:
 			Expect(ensureFluxChartRepository(ctx, workloadFluxCluster(f))).To(Succeed())
 
 			By("Creating the workload VRF through a real Flux HelmRelease")
-			Expect(f.ApplyManifestToCluster2(ctx, []byte(fluxHelmReleaseYAML(workloadRelease, remoteNS, vrfName, 2002040, true)))).To(Succeed())
+			Expect(f.ApplyManifestToCluster2(ctx, []byte(fluxHelmReleaseYAML(workloadRelease, remoteNS, vrfName, 2002040, true, workloadInitialRevision)))).To(Succeed())
 
 			Eventually(func() error {
 				vrf := getCluster2Object(ctx, f, "vrfs", vrfName)
@@ -188,11 +203,14 @@ spec:
 				if err := expectSyncedVRF(vrf, 2002040); err != nil {
 					return err
 				}
-				return expectHelmFluxOwnership(vrf, workloadRelease, remoteNS)
+				if err := expectHelmFluxOwnership(vrf, workloadRelease, remoteNS); err != nil {
+					return err
+				}
+				return expectFluxFixtureRevision(vrf, workloadInitialRevision)
 			}, syncTimeout, syncInterval).Should(Succeed())
 
 			By("Creating the source VRF through a real Flux HelmRelease")
-			Expect(f.ApplyManifest(ctx, []byte(fluxHelmReleaseYAML(sourceRelease, syncNamespace, vrfName, 2002041, false)))).To(Succeed())
+			Expect(f.ApplyManifest(ctx, []byte(fluxHelmReleaseYAML(sourceRelease, syncNamespace, vrfName, 2002041, false, sourceFirstRevision)))).To(Succeed())
 
 			By("Waiting for Flux to create the source VRF with Helm ownership metadata")
 			Eventually(func() error {
@@ -203,7 +221,10 @@ spec:
 				if err := expectVRFVNI(vrf, 2002041); err != nil {
 					return err
 				}
-				return expectHelmFluxOwnership(vrf, sourceRelease, syncNamespace)
+				if err := expectHelmFluxOwnership(vrf, sourceRelease, syncNamespace); err != nil {
+					return err
+				}
+				return expectFluxFixtureRevision(vrf, sourceFirstRevision)
 			}, syncTimeout, syncInterval).Should(Succeed())
 
 			By("Verifying network-sync updates the Flux-owned workload object without stealing ownership")
@@ -215,15 +236,19 @@ spec:
 				if err := expectSyncedVRF(vrf, 2002041); err != nil {
 					return err
 				}
-				return expectHelmFluxOwnership(vrf, workloadRelease, remoteNS)
+				if err := expectHelmFluxOwnership(vrf, workloadRelease, remoteNS); err != nil {
+					return err
+				}
+				return expectFluxFixtureRevision(vrf, sourceFirstRevision)
 			}, syncTimeout, syncInterval).Should(Succeed())
 
-			By("Forcing workload Flux to reconcile after network-sync mutates the workload VRF")
+			By("Updating workload Flux to render the network-sync-mutated VRF after network-sync has touched it")
+			Expect(f.ApplyManifestToCluster2(ctx, []byte(fluxHelmReleaseYAML(workloadRelease, remoteNS, vrfName, 2002041, true, workloadReapplyRevision)))).To(Succeed())
 			requestedAt, err := requestFluxHelmReleaseReconcile(ctx, f.Cluster2Client(), workloadRelease)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(waitForFluxHelmReleaseReconcile(ctx, f.Cluster2Client(), workloadRelease, requestedAt)).To(Succeed())
 
-			By("Checking the workload VRF remains converged after the workload Flux reconcile")
+			By("Checking the workload VRF reflects a real workload Flux apply after network-sync mutation")
 			Eventually(func() error {
 				vrf := getCluster2Object(ctx, f, "vrfs", vrfName)
 				if vrf == nil {
@@ -232,7 +257,10 @@ spec:
 				if err := expectSyncedVRF(vrf, 2002041); err != nil {
 					return err
 				}
-				return expectHelmFluxOwnership(vrf, workloadRelease, remoteNS)
+				if err := expectHelmFluxOwnership(vrf, workloadRelease, remoteNS); err != nil {
+					return err
+				}
+				return expectFluxFixtureRevision(vrf, workloadReapplyRevision)
 			}, syncTimeout, syncInterval).Should(Succeed())
 			Consistently(func() error {
 				vrf := getCluster2Object(ctx, f, "vrfs", vrfName)
@@ -242,11 +270,14 @@ spec:
 				if err := expectSyncedVRF(vrf, 2002041); err != nil {
 					return err
 				}
-				return expectHelmFluxOwnership(vrf, workloadRelease, remoteNS)
+				if err := expectHelmFluxOwnership(vrf, workloadRelease, remoteNS); err != nil {
+					return err
+				}
+				return expectFluxFixtureRevision(vrf, workloadReapplyRevision)
 			}, 30*time.Second, syncInterval).Should(Succeed())
 
 			By("Updating the source HelmRelease values through Flux")
-			Expect(f.ApplyManifest(ctx, []byte(fluxHelmReleaseYAML(sourceRelease, syncNamespace, vrfName, 2002042, false)))).To(Succeed())
+			Expect(f.ApplyManifest(ctx, []byte(fluxHelmReleaseYAML(sourceRelease, syncNamespace, vrfName, 2002042, false, sourceSecondRevision)))).To(Succeed())
 
 			By("Waiting for Flux to update the source VRF")
 			Eventually(func() error {
@@ -257,7 +288,10 @@ spec:
 				if err := expectVRFVNI(vrf, 2002042); err != nil {
 					return err
 				}
-				return expectHelmFluxOwnership(vrf, sourceRelease, syncNamespace)
+				if err := expectHelmFluxOwnership(vrf, sourceRelease, syncNamespace); err != nil {
+					return err
+				}
+				return expectFluxFixtureRevision(vrf, sourceSecondRevision)
 			}, syncTimeout, syncInterval).Should(Succeed())
 
 			By("Checking workload Flux ownership survives the Flux-managed source update")
@@ -269,7 +303,10 @@ spec:
 				if err := expectSyncedVRF(vrf, 2002042); err != nil {
 					return err
 				}
-				return expectHelmFluxOwnership(vrf, workloadRelease, remoteNS)
+				if err := expectHelmFluxOwnership(vrf, workloadRelease, remoteNS); err != nil {
+					return err
+				}
+				return expectFluxFixtureRevision(vrf, sourceSecondRevision)
 			}, syncTimeout, syncInterval).Should(Succeed())
 		})
 	})
@@ -291,28 +328,36 @@ func getCluster2Object(ctx context.Context, f *framework.Framework, resource, na
 }
 
 func getObject(ctx context.Context, c client.Client, resource, namespace, name string) *unstructured.Unstructured {
+	obj, err := fetchObject(ctx, c, resource, namespace, name)
+	if err != nil {
+		if !apierrors.IsNotFound(err) {
+			GinkgoWriter.Printf("getting %s %s/%s failed: %v\n", resourceToKind(resource), namespace, name, err)
+		}
+		return nil
+	}
+	return obj
+}
+
+func fetchObject(ctx context.Context, c client.Client, resource, namespace, name string) (*unstructured.Unstructured, error) {
 	obj := &unstructured.Unstructured{}
 	obj.SetGroupVersionKind(schema.GroupVersionKind{
 		Group:   "network-connector.sylvaproject.org",
 		Version: "v1alpha1",
 		Kind:    resourceToKind(resource),
 	})
-	err := c.Get(ctx, framework.ObjectKey(namespace, name), obj)
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			return nil
-		}
-		ExpectWithOffset(1, err).NotTo(HaveOccurred(),
-			"getting %s %s/%s", resourceToKind(resource), namespace, name)
-		return nil
+	if err := c.Get(ctx, framework.ObjectKey(namespace, name), obj); err != nil {
+		return nil, err
 	}
-	return obj
+	return obj, nil
 }
 
 func deleteObject(ctx context.Context, c client.Client, resource, namespace, name string) error {
-	obj := getObject(ctx, c, resource, namespace, name)
-	if obj == nil {
+	obj, err := fetchObject(ctx, c, resource, namespace, name)
+	if apierrors.IsNotFound(err) {
 		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("getting %s %s/%s before delete: %w", resourceToKind(resource), namespace, name, err)
 	}
 	if err := client.IgnoreNotFound(c.Delete(ctx, obj)); err != nil {
 		return err
@@ -357,6 +402,14 @@ func expectVRFVNI(vrf *unstructured.Unstructured, expectedVNI int64) error {
 	}
 	if vni != expectedVNI {
 		return fmt.Errorf("expected spec.vni %d, got %d", expectedVNI, vni)
+	}
+	return nil
+}
+
+func expectFluxFixtureRevision(obj *unstructured.Unstructured, expected string) error {
+	annotations := obj.GetAnnotations()
+	if annotations["networking.telekom.com/fixture-revision"] != expected {
+		return fmt.Errorf("expected Flux fixture revision %q, got annotations %v", expected, annotations)
 	}
 	return nil
 }
