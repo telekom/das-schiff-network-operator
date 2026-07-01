@@ -1059,15 +1059,22 @@ func (r *Controller) prepareApplyObject(obj client.Object) error {
 
 // overlayBody copies the source-of-truth payload from src onto dst without
 // touching dst's server-managed metadata (resourceVersion, UID, foreign labels,
-// etc.). For CRDs that means the Spec field; for Secrets it means Data/StringData
-// (Type is immutable after creation and is only set when unset).
+// etc.). For CRDs that means the Spec field; for Secrets it overlays Data so
+// workload-local keys survive SSA adoption.
 func overlayBody(dst, src client.Object) error {
 	if dstSecret, ok := dst.(*corev1.Secret); ok {
 		srcSecret, ok := src.(*corev1.Secret)
 		if !ok {
 			return fmt.Errorf("type mismatch overlaying %T onto *corev1.Secret", src)
 		}
-		dstSecret.Data = srcSecret.Data
+		data := make(map[string][]byte, len(dstSecret.Data)+len(srcSecret.Data))
+		for k, v := range dstSecret.Data {
+			data[k] = append([]byte(nil), v...)
+		}
+		for k, v := range srcSecret.Data {
+			data[k] = append([]byte(nil), v...)
+		}
+		dstSecret.Data = data
 		dstSecret.StringData = srcSecret.StringData
 		if dstSecret.Type == "" {
 			dstSecret.Type = srcSecret.Type
