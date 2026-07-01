@@ -7,6 +7,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -298,6 +299,11 @@ func getObject(ctx context.Context, c client.Client, resource, namespace, name s
 	})
 	err := c.Get(ctx, framework.ObjectKey(namespace, name), obj)
 	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		ExpectWithOffset(1, err).NotTo(HaveOccurred(),
+			"getting %s %s/%s", resourceToKind(resource), namespace, name)
 		return nil
 	}
 	return obj
