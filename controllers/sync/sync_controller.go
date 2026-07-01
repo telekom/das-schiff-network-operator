@@ -16,13 +16,14 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/events"
-	"sigs.k8s.io/cluster-api/util/patch"
 	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlbuilder "sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -35,11 +36,14 @@ import (
 )
 
 const (
-	finalizerName       = "network-sync.telekom.com/cleanup"
-	labelManagedBy      = "network-sync.telekom.com/managed-by"
-	labelManagedByValue = "network-sync"
-	annotationSourceNS  = "network-sync.telekom.com/source-namespace"
-	syncRequestName     = "sync"
+	finalizerName             = "network-sync.telekom.com/cleanup"
+	labelManagedBy            = "network-sync.telekom.com/managed-by"
+	labelManagedByValue       = "network-sync"
+	annotationSourceNS        = "network-sync.telekom.com/source-namespace"
+	annotationSSAAdopted      = "network-sync.telekom.com/ssa-adopted"
+	annotationSSAAdoptedValue = "true"
+	remoteFieldManager        = "network-sync"
+	syncRequestName           = "sync"
 
 	// annotationSourceGeneration records the management object's
 	// metadata.generation that the remote object's spec was built from. Status
@@ -327,8 +331,9 @@ func (r *Controller) drainFinalizersForLostRemote(ctx context.Context, log logr.
 			log.Info("Remote cluster gone; releasing finalizer without remote delete",
 				"kind", obj.GetObjectKind().GroupVersionKind().Kind,
 				"name", obj.GetName())
-			controllerutil.RemoveFinalizer(obj, finalizerName)
-			if err := r.Client.Update(ctx, obj); err != nil {
+			if err := r.patchFinalizer(ctx, obj, func() {
+				controllerutil.RemoveFinalizer(obj, finalizerName)
+			}); err != nil {
 				return fmt.Errorf("removing finalizer from %s/%s during drain: %w",
 					obj.GetObjectKind().GroupVersionKind().Kind, obj.GetName(), err)
 			}
@@ -351,8 +356,9 @@ func (r *Controller) syncObject(ctx context.Context, log logr.Logger, remoteClie
 			if err := r.deleteRemote(ctx, remoteClient, obj); err != nil {
 				return fmt.Errorf("deleting remote %s/%s: %w", kind, name, err)
 			}
-			controllerutil.RemoveFinalizer(obj, finalizerName)
-			if err := r.Client.Update(ctx, obj); err != nil {
+			if err := r.patchFinalizer(ctx, obj, func() {
+				controllerutil.RemoveFinalizer(obj, finalizerName)
+			}); err != nil {
 				return fmt.Errorf("removing finalizer from %s/%s: %w", kind, name, err)
 			}
 		}
@@ -361,8 +367,9 @@ func (r *Controller) syncObject(ctx context.Context, log logr.Logger, remoteClie
 
 	// Ensure our finalizer is present.
 	if !controllerutil.ContainsFinalizer(obj, finalizerName) {
-		controllerutil.AddFinalizer(obj, finalizerName)
-		if err := r.Client.Update(ctx, obj); err != nil {
+		if err := r.patchFinalizer(ctx, obj, func() {
+			controllerutil.AddFinalizer(obj, finalizerName)
+		}); err != nil {
 			return fmt.Errorf("adding finalizer to %s/%s: %w", kind, name, err)
 		}
 	}
@@ -374,6 +381,18 @@ func (r *Controller) syncObject(ctx context.Context, log logr.Logger, remoteClie
 	}
 	log.V(1).Info("Syncing to remote", "kind", kind, "name", name)
 	return r.applyRemote(ctx, remoteClient, remote)
+}
+
+func (r *Controller) patchFinalizer(ctx context.Context, obj client.Object, mutate func()) error {
+	before, ok := obj.DeepCopyObject().(client.Object)
+	if !ok {
+		return fmt.Errorf("DeepCopyObject did not return client.Object for %s/%s", obj.GetNamespace(), obj.GetName())
+	}
+	mutate()
+	if err := r.Client.Patch(ctx, obj, client.MergeFrom(before)); err != nil {
+		return fmt.Errorf("patching finalizer on %s/%s: %w", obj.GetNamespace(), obj.GetName(), err)
+	}
+	return nil
 }
 
 // syncObjectStatusBack reads the workload copy of a single intent object and
@@ -695,6 +714,7 @@ func (r *Controller) buildRemoteObject(src client.Object, sourceNamespace string
 	dst.SetCreationTimestamp(metav1.Time{})
 	dst.SetDeletionTimestamp(nil)
 	dst.SetDeletionGracePeriodSeconds(nil)
+	dst.SetGeneration(0)
 	dst.SetGenerateName("")
 	dst.SetSelfLink("")
 	dst.SetManagedFields(nil)
@@ -719,6 +739,7 @@ func (r *Controller) buildRemoteObject(src client.Object, sourceNamespace string
 	// Record the management generation this spec was built from so status
 	// sync-back can tell whether the workload has caught up to the current intent.
 	annotations[annotationSourceGeneration] = strconv.FormatInt(src.GetGeneration(), 10)
+	annotations[annotationSSAAdopted] = annotationSSAAdoptedValue
 	// Remove system annotations.
 	delete(annotations, lastAppliedConfigurationAnn)
 	dst.SetAnnotations(annotations)
@@ -728,8 +749,21 @@ func (r *Controller) buildRemoteObject(src client.Object, sourceNamespace string
 
 	// IPAM promotion: copy status.addresses → spec.addresses for Inbound/Outbound.
 	r.promoteIPAMAddresses(dst, ipamAddrs)
+	clearObjectStatus(dst)
 
 	return dst
+}
+
+func clearObjectStatus(obj client.Object) {
+	v := reflect.ValueOf(obj)
+	if v.Kind() != reflect.Pointer || v.IsNil() {
+		return
+	}
+	status := v.Elem().FieldByName("Status")
+	if !status.IsValid() || !status.CanSet() {
+		return
+	}
+	status.Set(reflect.Zero(status.Type()))
 }
 
 // reconcileIPAM runs IPAM allocation for count-mode Inbound/Outbound in the given namespace.
@@ -858,18 +892,8 @@ func toHostCIDR(addr string) string {
 	return addr + "/128"
 }
 
-// applyRemote creates the object on the remote cluster if it does not yet exist,
-// otherwise it patches only the fields this controller owns (the spec/data plus
-// its own managed metadata) using the Cluster API patch helper.
-//
-// The patch helper snapshots the freshly fetched object, we then mutate that same
-// object in place, and Patch emits a minimal before→after merge patch. This is
-// what ends the label war with Flux: any label or annotation a GitOps controller
-// set on the remote object is part of the fetched "before" state, is never
-// touched, and therefore never appears in the emitted patch. The previous full
-// client.Update replaced the entire object and clobbered every label the sync
-// operator did not itself set, so Flux and the sync operator flapped forever.
-func (*Controller) applyRemote(ctx context.Context, remoteClient client.Client, desired client.Object) error {
+// applyRemote applies the network-sync-owned fields on the remote cluster.
+func (r *Controller) applyRemote(ctx context.Context, remoteClient client.Client, desired client.Object) error {
 	desiredSourceNamespace := desired.GetAnnotations()[annotationSourceNS]
 	if desiredSourceNamespace == "" {
 		return fmt.Errorf("desired remote object %s/%s is missing %s annotation",
@@ -886,17 +910,13 @@ func (*Controller) applyRemote(ctx context.Context, remoteClient client.Client, 
 	}, existing)
 
 	if apierrors.IsNotFound(err) {
-		if err := remoteClient.Create(ctx, desired); err != nil {
-			return fmt.Errorf("creating remote object %s/%s: %w", desired.GetNamespace(), desired.GetName(), err)
-		}
-		return nil
+		return r.applyRemoteDesired(ctx, remoteClient, desired)
 	}
 	if err != nil {
 		return fmt.Errorf("getting remote object: %w", err)
 	}
 
-	// Verify we own this object before mutating it.
-	if existing.GetLabels()[labelManagedBy] != labelManagedByValue {
+	if labels := existing.GetLabels(); labels[labelManagedBy] != labelManagedByValue {
 		return fmt.Errorf("remote object %s/%s exists but not managed by us", desired.GetNamespace(), desired.GetName())
 	}
 	existingSourceNamespace, hasSourceNamespace := existing.GetAnnotations()[annotationSourceNS]
@@ -908,20 +928,113 @@ func (*Controller) applyRemote(ctx context.Context, remoteClient client.Client, 
 			desired.GetNamespace(), desired.GetName(), existingSourceNamespace, desiredSourceNamespace)
 	}
 
-	// Snapshot the fetched object, then mutate it in place so the patch helper
-	// only diffs the fields we actually change.
-	helper, err := patch.NewHelper(existing, remoteClient)
-	if err != nil {
-		return fmt.Errorf("creating patch helper for %s/%s: %w", desired.GetNamespace(), desired.GetName(), err)
+	if needsLegacySSAAdoption(existing) {
+		if err := r.adoptLegacyRemoteObject(ctx, remoteClient, existing, desired); err != nil {
+			return err
+		}
 	}
+
+	return r.applyRemoteDesired(ctx, remoteClient, desired)
+}
+
+func needsLegacySSAAdoption(existing client.Object) bool {
+	return existing.GetAnnotations()[annotationSSAAdopted] != annotationSSAAdoptedValue
+}
+
+func (r *Controller) adoptLegacyRemoteObject(ctx context.Context, remoteClient client.Client, existing, desired client.Object) error {
 	if err := overlayBody(existing, desired); err != nil {
-		return fmt.Errorf("overlaying desired state onto %s/%s: %w", desired.GetNamespace(), desired.GetName(), err)
+		return fmt.Errorf("overlaying desired state onto %s/%s for SSA adoption: %w",
+			desired.GetNamespace(), desired.GetName(), err)
 	}
 	reconcileManagedMetadata(existing, desired)
-
-	if err := helper.Patch(ctx, existing); err != nil {
-		return fmt.Errorf("patching remote object %s/%s: %w", desired.GetNamespace(), desired.GetName(), err)
+	existing.SetManagedFields(nil)
+	if err := remoteClient.Update(ctx, existing); err != nil {
+		return fmt.Errorf("adopting legacy remote object %s/%s before server-side apply: %w",
+			desired.GetNamespace(), desired.GetName(), err)
 	}
+	return nil
+}
+
+func (r *Controller) applyRemoteDesired(ctx context.Context, remoteClient client.Client, desired client.Object) error {
+	unstructuredDesired, err := r.buildApplyObject(desired)
+	if err != nil {
+		return err
+	}
+	if err := remoteClient.Apply(ctx, client.ApplyConfigurationFromUnstructured(unstructuredDesired),
+		client.FieldOwner(remoteFieldManager), client.ForceOwnership); err != nil {
+		return fmt.Errorf("server-side applying remote object %s/%s: %w", desired.GetNamespace(), desired.GetName(), err)
+	}
+	return nil
+}
+
+func (r *Controller) buildApplyObject(desired client.Object) (*unstructured.Unstructured, error) {
+	if err := r.prepareApplyObject(desired); err != nil {
+		return nil, err
+	}
+	objMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(desired)
+	if err != nil {
+		return nil, fmt.Errorf("converting %s/%s to unstructured apply configuration: %w",
+			desired.GetNamespace(), desired.GetName(), err)
+	}
+
+	gvk := desired.GetObjectKind().GroupVersionKind()
+	metadata := map[string]interface{}{
+		"name":      desired.GetName(),
+		"namespace": desired.GetNamespace(),
+	}
+	if labels := desired.GetLabels(); len(labels) > 0 {
+		metadata["labels"] = stringMapToUnstructured(labels)
+	}
+	if annotations := desired.GetAnnotations(); len(annotations) > 0 {
+		metadata["annotations"] = stringMapToUnstructured(annotations)
+	}
+
+	applyMap := map[string]interface{}{
+		"apiVersion": gvk.GroupVersion().String(),
+		"kind":       gvk.Kind,
+		"metadata":   metadata,
+	}
+	if spec, ok := objMap["spec"]; ok {
+		applyMap["spec"] = spec
+	} else if _, isSecret := desired.(*corev1.Secret); !isSecret {
+		applyMap["spec"] = map[string]interface{}{}
+	}
+	if _, ok := desired.(*corev1.Secret); ok {
+		if typ, ok := objMap["type"]; ok {
+			applyMap["type"] = typ
+		}
+		if data, ok := objMap["data"]; ok {
+			applyMap["data"] = data
+		} else {
+			applyMap["data"] = map[string]interface{}{}
+		}
+	}
+
+	unstructuredDesired := &unstructured.Unstructured{Object: applyMap}
+	unstructuredDesired.SetGroupVersionKind(gvk)
+	return unstructuredDesired, nil
+}
+
+func stringMapToUnstructured(in map[string]string) map[string]interface{} {
+	out := make(map[string]interface{}, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+func (r *Controller) prepareApplyObject(obj client.Object) error {
+	if !obj.GetObjectKind().GroupVersionKind().Empty() {
+		return nil
+	}
+	if r.Scheme == nil {
+		return fmt.Errorf("cannot infer GVK for %T without a scheme", obj)
+	}
+	gvk, err := apiutil.GVKForObject(obj, r.Scheme)
+	if err != nil {
+		return fmt.Errorf("inferring GVK for %T: %w", obj, err)
+	}
+	obj.GetObjectKind().SetGroupVersionKind(gvk)
 	return nil
 }
 
@@ -1176,7 +1289,7 @@ func (r *Controller) syncBGPSecrets(ctx context.Context, log logr.Logger, remote
 		return fmt.Errorf("listing BGPPeerings for secret sync: %w", err)
 	}
 
-	desired := map[string]struct{}{}
+	referenced := map[string]struct{}{}
 	for i := range bpList.Items {
 		bp := &bpList.Items[i]
 		if !bp.GetDeletionTimestamp().IsZero() {
@@ -1185,10 +1298,11 @@ func (r *Controller) syncBGPSecrets(ctx context.Context, log logr.Logger, remote
 		if bp.Spec.AuthSecretRef == nil || bp.Spec.AuthSecretRef.Name == "" {
 			continue
 		}
-		desired[bp.Spec.AuthSecretRef.Name] = struct{}{}
+		referenced[bp.Spec.AuthSecretRef.Name] = struct{}{}
 	}
 
-	for name := range desired {
+	applied := map[string]struct{}{}
+	for name := range referenced {
 		src := &corev1.Secret{}
 		if err := r.Client.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, src); err != nil {
 			if apierrors.IsNotFound(err) {
@@ -1202,6 +1316,7 @@ func (r *Controller) syncBGPSecrets(ctx context.Context, log logr.Logger, remote
 		if err := r.applyRemote(ctx, remoteClient, remote); err != nil {
 			return fmt.Errorf("syncing BGP auth Secret %s/%s: %w", namespace, name, err)
 		}
+		applied[name] = struct{}{}
 	}
 
 	// Sweep orphaned remote Secrets we previously synced.
@@ -1218,7 +1333,7 @@ func (r *Controller) syncBGPSecrets(ctx context.Context, log logr.Logger, remote
 		if s.Annotations[annotationSourceNS] != namespace {
 			continue
 		}
-		if _, keep := desired[s.Name]; keep {
+		if _, keep := applied[s.Name]; keep {
 			continue
 		}
 		log.Info("Sweeping orphan synced Secret on workload cluster",
@@ -1242,7 +1357,8 @@ func (r *Controller) buildRemoteSecret(src *corev1.Secret, sourceNamespace strin
 				labelManagedBy: labelManagedByValue,
 			},
 			Annotations: map[string]string{
-				annotationSourceNS: sourceNamespace,
+				annotationSourceNS:   sourceNamespace,
+				annotationSSAAdopted: annotationSSAAdoptedValue,
 			},
 		},
 		Type: src.Type,
@@ -1259,6 +1375,28 @@ func (r *Controller) buildRemoteSecret(src *corev1.Secret, sourceNamespace strin
 	return dst
 }
 
+func (r *Controller) enqueueForBGPSecret(ctx context.Context, obj client.Object) []reconcile.Request {
+	bpList := &nc.BGPPeeringList{}
+	if err := r.Client.List(ctx, bpList, client.InNamespace(obj.GetNamespace())); err != nil {
+		return nil
+	}
+	for i := range bpList.Items {
+		bp := &bpList.Items[i]
+		if !bp.GetDeletionTimestamp().IsZero() ||
+			bp.Spec.AuthSecretRef == nil ||
+			bp.Spec.AuthSecretRef.Name != obj.GetName() {
+			continue
+		}
+		return []reconcile.Request{{
+			NamespacedName: types.NamespacedName{
+				Namespace: obj.GetNamespace(),
+				Name:      syncRequestName,
+			},
+		}}
+	}
+	return nil
+}
+
 // SetupWithManager registers watches for all intent CRD types.
 func (r *Controller) SetupWithManager(mgr ctrl.Manager) error {
 	// Map any intent CRD change → reconcile for its namespace.
@@ -1273,12 +1411,29 @@ func (r *Controller) SetupWithManager(mgr ctrl.Manager) error {
 		},
 	)
 
+	secretToSyncNamespace := handler.EnqueueRequestsFromMapFunc(r.enqueueForBGPSecret)
+	secretPredicate := predicate.Funcs{
+		CreateFunc: func(e event.CreateEvent) bool {
+			return e.Object != nil
+		},
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			return e.ObjectNew != nil
+		},
+		DeleteFunc: func(e event.DeleteEvent) bool {
+			return e.Object != nil
+		},
+		GenericFunc: func(e event.GenericEvent) bool {
+			return e.Object != nil
+		},
+	}
+
 	builder := ctrl.NewControllerManagedBy(mgr).
 		Named("sync-controller")
 
 	for _, obj := range intentCRDTypes() {
 		builder = builder.Watches(obj, enqueueNS, ctrlbuilder.WithPredicates(syncCRDPredicate()))
 	}
+	builder = builder.Watches(&corev1.Secret{}, secretToSyncNamespace, ctrlbuilder.WithPredicates(secretPredicate))
 
 	if err := builder.Complete(r); err != nil {
 		return fmt.Errorf("setting up sync controller: %w", err)
