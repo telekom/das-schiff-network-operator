@@ -28,6 +28,11 @@ if [[ ${#INTERFACES[@]} -eq 0 ]]; then
 fi
 
 if [[ "$FLAVOUR" == "frr" ]]; then
+    NSPAWN_EPHEMERAL="--ephemeral"
+    if [[ -f /etc/cra/no-ephemeral ]]; then
+        NSPAWN_EPHEMERAL=""
+    fi
+
     # Build interface arguments for systemd-nspawn
     IFACE_ARGS=""
     for iface in "${INTERFACES[@]}"; do
@@ -50,7 +55,7 @@ ExecStartPre=mkdir -p /etc/cra/certs
 ExecStartPre=mkdir -p /etc/cra/netplan
 ExecStartPre=mkdir -p /etc/cra/systemd-network
 ExecStartPre=cp -f /etc/cra/base-config.yaml /etc/cra/certs/base-config.yaml
-ExecStart=systemd-nspawn --quiet --ephemeral --bind=/etc/cra/certs:/etc/cra --bind=/etc/cra/frr.conf:/etc/frr/frr.conf --bind-ro=/etc/cra/netplan:/etc/netplan --bind-ro=/etc/cra/systemd-network:/etc/systemd/network --oci-bundle /var/lib/machines/cra-frr -M cra-frr --network-veth-extra=hbn$IFACE_ARGS --private-network --capability=CAP_BPF,CAP_SYS_RAWIO,CAP_DAC_OVERRIDE,CAP_SYS_ADMIN,CAP_NET_RAW --system-call-filter=bpf
+ExecStart=systemd-nspawn --quiet $NSPAWN_EPHEMERAL --bind=/etc/cra/certs:/etc/cra --bind=/etc/cra/frr.conf:/etc/frr/frr.conf --bind-ro=/etc/cra/netplan:/etc/netplan --bind-ro=/etc/cra/systemd-network:/etc/systemd/network --oci-bundle /var/lib/machines/cra-frr -M cra-frr --network-veth-extra=hbn$IFACE_ARGS --private-network --capability=CAP_BPF,CAP_SYS_RAWIO,CAP_DAC_OVERRIDE,CAP_SYS_ADMIN,CAP_NET_RAW --system-call-filter=bpf
 KillMode=mixed
 Type=notify
 RestartForceExitStatus=133
