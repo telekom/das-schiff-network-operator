@@ -52,9 +52,8 @@ type fluxCluster struct {
 }
 
 var (
-	fluxInstallOnce     sync.Once
+	fluxInstallMu       sync.Mutex
 	fluxInstallManifest []byte
-	fluxInstallErr      error
 
 	fluxFixtureChartOnce  sync.Once
 	fluxFixtureChartBytes []byte
@@ -97,27 +96,31 @@ func ensureFluxInstalled(ctx context.Context, cluster fluxCluster) error {
 }
 
 func getFluxInstallManifest(ctx context.Context) ([]byte, error) {
-	fluxInstallOnce.Do(func() {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, fluxInstallURL, http.NoBody)
-		if err != nil {
-			fluxInstallErr = err
-			return
-		}
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			fluxInstallErr = err
-			return
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			fluxInstallErr = fmt.Errorf("downloading Flux install manifest: %s", resp.Status)
-			return
-		}
-		fluxInstallManifest, fluxInstallErr = io.ReadAll(resp.Body)
-	})
-	if fluxInstallErr != nil {
-		return nil, fluxInstallErr
+	fluxInstallMu.Lock()
+	defer fluxInstallMu.Unlock()
+
+	if len(fluxInstallManifest) > 0 {
+		return fluxInstallManifest, nil
 	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fluxInstallURL, http.NoBody)
+	if err != nil {
+		return nil, err
+	}
+	httpClient := &http.Client{Timeout: 2 * time.Minute}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("downloading Flux install manifest: %s", resp.Status)
+	}
+	fluxInstallManifest, err = io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading Flux install manifest: %w", err)
+	}
+
 	return fluxInstallManifest, nil
 }
 
@@ -520,7 +523,10 @@ func waitForDeploymentReady(ctx context.Context, kube kubernetes.Interface, name
 	return framework.Poll(waitCtx, 5*time.Second, func() (bool, error) {
 		deploy, err := kube.AppsV1().Deployments(namespace).Get(waitCtx, name, metav1.GetOptions{})
 		if err != nil {
-			return false, nil
+			if apierrors.IsNotFound(err) {
+				return false, nil
+			}
+			return false, err
 		}
 		if deploy.Spec.Replicas == nil {
 			return false, nil
