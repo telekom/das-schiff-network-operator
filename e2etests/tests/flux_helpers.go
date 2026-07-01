@@ -111,6 +111,7 @@ func fluxControllersReady(ctx context.Context, kube kubernetes.Interface) (bool,
 			return false, err
 		}
 		if deploy.Spec.Replicas == nil ||
+			*deploy.Spec.Replicas == 0 ||
 			deploy.Status.AvailableReplicas != *deploy.Spec.Replicas ||
 			deploy.Status.UpdatedReplicas != *deploy.Spec.Replicas {
 			return false, nil
@@ -537,7 +538,7 @@ func waitForDeploymentReady(ctx context.Context, kube kubernetes.Interface, name
 			}
 			return false, err
 		}
-		if deploy.Spec.Replicas == nil {
+		if deploy.Spec.Replicas == nil || *deploy.Spec.Replicas == 0 {
 			return false, nil
 		}
 		return deploy.Status.AvailableReplicas == *deploy.Spec.Replicas &&
