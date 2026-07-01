@@ -473,6 +473,42 @@ func TestSyncDeletion(t *testing.T) {
 	// err != nil (not found) is the expected case — object was GC'd.
 }
 
+func TestSyncDeletionRemovesLegacyManagedRemoteObject(t *testing.T) {
+	now := metav1.Now()
+	vrf := &nc.VRF{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              testVRFName,
+			Namespace:         testClusterNamespace,
+			DeletionTimestamp: &now,
+			Finalizers:        []string{finalizerName},
+		},
+		Spec: nc.VRFSpec{VRF: testVRFValue, VNI: ptrInt32(2002026), RouteTarget: ptrString("65188:2026")},
+	}
+
+	remoteVRF := &nc.VRF{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      testVRFName,
+			Namespace: testRemoteNamespace,
+			Labels:    map[string]string{labelManagedBy: labelManagedByValue},
+		},
+		Spec: nc.VRFSpec{VRF: testVRFValue, VNI: ptrInt32(2002026), RouteTarget: ptrString("65188:2026")},
+	}
+
+	sc, remoteClient := newFakeSyncController([]client.Object{vrf}, []client.Object{remoteVRF})
+	ctx := context.Background()
+
+	if _, err := sc.Reconcile(ctx, ctrl.Request{
+		NamespacedName: types.NamespacedName{Namespace: testClusterNamespace, Name: syncRequestName},
+	}); err != nil {
+		t.Fatalf("Reconcile failed: %v", err)
+	}
+
+	err := remoteClient.Get(ctx, types.NamespacedName{Namespace: testRemoteNamespace, Name: testVRFName}, &nc.VRF{})
+	if err == nil {
+		t.Error("Expected legacy managed remote VRF to be deleted, but it still exists")
+	}
+}
+
 func TestSyncSweepsOrphanedRemoteIntentObject(t *testing.T) {
 	remoteVRF := &nc.VRF{
 		ObjectMeta: metav1.ObjectMeta{
