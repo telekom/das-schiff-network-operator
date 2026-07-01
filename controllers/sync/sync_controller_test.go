@@ -62,6 +62,7 @@ const (
 	testOwnershipHelmReleaseNS   = "meta.helm.sh/release-namespace"
 	testBGPPasswordKey           = "password"
 	testBGPExtraKey              = "extra"
+	testCAPIClusterFinalizer     = "cluster.x-k8s.io"
 )
 
 var testOwnershipLabelKeys = []string{
@@ -921,7 +922,7 @@ func TestRemoteClusterExistsIgnoresDeletingClusters(t *testing.T) {
 	cluster.SetName("workload")
 	cluster.SetNamespace(testPendingClusterNamespace)
 	cluster.SetDeletionTimestamp(&now)
-	cluster.SetFinalizers([]string{"cluster.x-k8s.io"})
+	cluster.SetFinalizers([]string{testCAPIClusterFinalizer})
 
 	s := testScheme()
 	mgmtClient := fake.NewClientBuilder().WithScheme(s).WithObjects(cluster).Build()
@@ -933,6 +934,33 @@ func TestRemoteClusterExistsIgnoresDeletingClusters(t *testing.T) {
 	}
 	if exists {
 		t.Fatal("Expected deleting CAPI Cluster not to count as an active remote cluster")
+	}
+}
+
+func TestRemoteClusterExistsFindsActiveClusterAfterDeletingCluster(t *testing.T) {
+	now := metav1.Now()
+	deletingCluster := &unstructured.Unstructured{}
+	deletingCluster.SetGroupVersionKind(capiClusterGVK)
+	deletingCluster.SetName("deleting-workload")
+	deletingCluster.SetNamespace(testPendingClusterNamespace)
+	deletingCluster.SetDeletionTimestamp(&now)
+	deletingCluster.SetFinalizers([]string{testCAPIClusterFinalizer})
+
+	activeCluster := &unstructured.Unstructured{}
+	activeCluster.SetGroupVersionKind(capiClusterGVK)
+	activeCluster.SetName("active-workload")
+	activeCluster.SetNamespace(testPendingClusterNamespace)
+
+	s := testScheme()
+	mgmtClient := fake.NewClientBuilder().WithScheme(s).WithObjects(deletingCluster, activeCluster).Build()
+	sc := &Controller{Client: mgmtClient}
+
+	exists, err := sc.remoteClusterExists(context.Background(), testPendingClusterNamespace)
+	if err != nil {
+		t.Fatalf("remoteClusterExists returned error: %v", err)
+	}
+	if !exists {
+		t.Fatal("Expected active CAPI Cluster to keep the remote cluster present")
 	}
 }
 
