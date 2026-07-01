@@ -27,6 +27,19 @@ import (
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 )
 
+const (
+	intentTestManagedByLabel         = "app.kubernetes.io/managed-by"
+	intentTestFluxHelmNameLabel      = "helm.toolkit.fluxcd.io/name"
+	intentTestFluxHelmNamespaceLabel = "helm.toolkit.fluxcd.io/namespace"
+	intentTestHelmManager            = "Helm"
+	intentTestScopeLabel             = "networking.telekom.com/scope"
+	intentTestSourceNamespace        = "t-caas-controllers"
+	intentTestOldRelease             = "old-release"
+	intentTestNewRelease             = "new-release"
+	intentTestNetworkingRelease      = "networking"
+	intentTestSANScope               = "san"
+)
+
 func makeVRF(name string, gen int64, labels, annotations map[string]string) *nc.VRF {
 	return &nc.VRF{
 		ObjectMeta: metav1.ObjectMeta{
@@ -71,6 +84,102 @@ func TestIntentCRDPredicate_AnnotationChangeAccepted(t *testing.T) {
 	updated := makeVRF("v1", 5, nil, map[string]string{"k": "v2"})
 	if !p.Update(event.UpdateEvent{ObjectOld: old, ObjectNew: updated}) {
 		t.Fatalf("expected annotation change to be accepted")
+	}
+}
+
+func TestIntentCRDPredicate_HelmOwnershipAnnotationIgnored(t *testing.T) {
+	p := intentCRDPredicate()
+	old := makeVRF("v1", 5, map[string]string{intentTestManagedByLabel: intentTestHelmManager}, nil)
+	updated := makeVRF("v1", 5,
+		map[string]string{
+			intentTestManagedByLabel: intentTestHelmManager,
+		},
+		map[string]string{
+			helmReleaseNameAnnotation:      intentTestNetworkingRelease,
+			helmReleaseNamespaceAnnotation: intentTestSourceNamespace,
+		},
+	)
+	if p.Update(event.UpdateEvent{ObjectOld: old, ObjectNew: updated}) {
+		t.Fatalf("expected Helm ownership annotation-only update to be filtered out")
+	}
+}
+
+func TestIntentCRDPredicate_HelmOwnershipAnnotationChangeIgnored(t *testing.T) {
+	p := intentCRDPredicate()
+	old := makeVRF("v1", 5,
+		map[string]string{intentTestScopeLabel: intentTestSANScope},
+		map[string]string{
+			helmReleaseNameAnnotation:      intentTestOldRelease,
+			helmReleaseNamespaceAnnotation: "old-namespace",
+		},
+	)
+	updated := makeVRF("v1", 5,
+		map[string]string{intentTestScopeLabel: intentTestSANScope},
+		map[string]string{
+			helmReleaseNameAnnotation:      intentTestNewRelease,
+			helmReleaseNamespaceAnnotation: "new-namespace",
+		},
+	)
+	if p.Update(event.UpdateEvent{ObjectOld: old, ObjectNew: updated}) {
+		t.Fatalf("expected Helm ownership annotation value changes to be filtered out")
+	}
+}
+
+func TestIntentCRDPredicate_HelmOwnershipAnnotationRemovalIgnored(t *testing.T) {
+	p := intentCRDPredicate()
+	old := makeVRF("v1", 5,
+		map[string]string{intentTestScopeLabel: intentTestSANScope},
+		map[string]string{
+			helmReleaseNameAnnotation:      intentTestNetworkingRelease,
+			helmReleaseNamespaceAnnotation: intentTestSourceNamespace,
+		},
+	)
+	updated := makeVRF("v1", 5, map[string]string{intentTestScopeLabel: intentTestSANScope}, nil)
+	if p.Update(event.UpdateEvent{ObjectOld: old, ObjectNew: updated}) {
+		t.Fatalf("expected Helm ownership annotation removal to be filtered out")
+	}
+}
+
+func TestIntentCRDPredicate_HelmFluxOwnershipLabelChangeAccepted(t *testing.T) {
+	p := intentCRDPredicate()
+	old := makeVRF("v1", 5, nil, nil)
+	updated := makeVRF("v1", 5,
+		map[string]string{
+			intentTestManagedByLabel:         intentTestHelmManager,
+			intentTestFluxHelmNameLabel:      intentTestNetworkingRelease,
+			intentTestFluxHelmNamespaceLabel: intentTestSourceNamespace,
+		},
+		nil,
+	)
+	if !p.Update(event.UpdateEvent{ObjectOld: old, ObjectNew: updated}) {
+		t.Fatalf("expected Helm/Flux ownership label change to be accepted because selectors may use those labels")
+	}
+}
+
+func TestIntentCRDPredicate_SelectorLabelChangeWithHelmFluxMetadataAccepted(t *testing.T) {
+	p := intentCRDPredicate()
+	old := makeVRF("v1", 5,
+		map[string]string{
+			intentTestScopeLabel: intentTestSANScope,
+		},
+		map[string]string{
+			helmReleaseNameAnnotation: intentTestOldRelease,
+		},
+	)
+	updated := makeVRF("v1", 5,
+		map[string]string{
+			intentTestScopeLabel:             "storage",
+			intentTestManagedByLabel:         intentTestHelmManager,
+			intentTestFluxHelmNameLabel:      intentTestNetworkingRelease,
+			intentTestFluxHelmNamespaceLabel: intentTestSourceNamespace,
+		},
+		map[string]string{
+			helmReleaseNameAnnotation:      intentTestNewRelease,
+			helmReleaseNamespaceAnnotation: intentTestSourceNamespace,
+		},
+	)
+	if !p.Update(event.UpdateEvent{ObjectOld: old, ObjectNew: updated}) {
+		t.Fatalf("expected non-ownership selector label change to be accepted")
 	}
 }
 
