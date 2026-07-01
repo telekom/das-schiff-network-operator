@@ -229,6 +229,7 @@ vrf: ownmeta
 vni: 2002040
 routeTarget: "65188:2040"
 syncManaged: false
+revision: initial
 `,
 		"templates/vrf.yaml": `apiVersion: network-connector.sylvaproject.org/v1alpha1
 kind: VRF
@@ -241,6 +242,7 @@ metadata:
 {{ end }}
   annotations:
     networking.telekom.com/source: flux-helm
+    networking.telekom.com/fixture-revision: {{ .Values.revision | quote }}
 spec:
   vrf: {{ .Values.vrf | quote }}
   vni: {{ .Values.vni }}
@@ -283,7 +285,8 @@ spec:
 	return buf.Bytes(), nil
 }
 
-func fluxHelmReleaseYAML(releaseName, targetNamespace, vrfName string, vni int, syncManaged bool) string {
+//nolint:unparam // Keeping vrfName explicit makes the fixture call sites readable.
+func fluxHelmReleaseYAML(releaseName, targetNamespace, vrfName string, vni int, syncManaged bool, revision string) string {
 	routeTarget := fmt.Sprintf("65188:%d", vni-2000000)
 	return fmt.Sprintf(`apiVersion: source.toolkit.fluxcd.io/v1
 kind: HelmRepository
@@ -326,10 +329,11 @@ spec:
     vni: %d
     routeTarget: %q
     syncManaged: %t
+    revision: %q
 `, fluxFixtureRepoName, fluxSystemNamespace, fluxFixtureServerName, fluxSystemNamespace,
 		releaseName, fluxSystemNamespace, releaseName, targetNamespace,
 		fluxFixtureChartName, fluxFixtureChartVersion, fluxFixtureRepoName, fluxSystemNamespace,
-		vrfName, vni, routeTarget, syncManaged)
+		vrfName, vni, routeTarget, syncManaged, revision)
 }
 
 func requestFluxHelmReleaseReconcile(ctx context.Context, c client.Client, name string) (string, error) {
