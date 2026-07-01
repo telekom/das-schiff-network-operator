@@ -7,6 +7,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
@@ -149,7 +150,9 @@ spec:
 
 		AfterEach(func() {
 			ctx = context.Background()
-			defer deleteCluster2Object(ctx, f, "vrfs", vrfName)
+			defer func() {
+				Expect(deleteCluster2Object(ctx, f, "vrfs", vrfName)).To(Succeed())
+			}()
 
 			By("Cleaning up simulated Helm-owned sync VRF from mgmt cluster")
 			Expect(f.DeleteManifestInNamespace(ctx, []byte(helmOwnedSourceVRFUpdatedYAML), syncNamespace)).To(Succeed())
@@ -260,12 +263,15 @@ func objectExistsOnCluster2(ctx context.Context, f *framework.Framework, resourc
 	return obj != nil
 }
 
-func deleteCluster2Object(ctx context.Context, f *framework.Framework, resource, name string) {
+func deleteCluster2Object(ctx context.Context, f *framework.Framework, resource, name string) error {
 	obj := getCluster2Object(ctx, f, resource, name)
 	if obj == nil {
-		return
+		return nil
 	}
-	_ = f.Cluster2Client().Delete(ctx, obj)
+	if err := f.Cluster2Client().Delete(ctx, obj); err != nil && !apierrors.IsNotFound(err) {
+		return err
+	}
+	return nil
 }
 
 // getCluster2Object fetches a network-connector CRD from cluster-2's default namespace.
