@@ -396,6 +396,20 @@ func TestBuildApplyObjectOmitsStatusAndObjectMetadataNoise(t *testing.T) {
 			t.Fatalf("Apply payload metadata must not contain %q: %v", key, metadata)
 		}
 	}
+	labels, ok := metadata["labels"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("Apply payload labels have unexpected type: %T", metadata["labels"])
+	}
+	if labels[labelManagedBy] != labelManagedByValue {
+		t.Fatalf("Apply payload labels missing sync ownership: %v", labels)
+	}
+	annotations, ok := metadata["annotations"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("Apply payload annotations have unexpected type: %T", metadata["annotations"])
+	}
+	if annotations[annotationSourceNS] != testClusterNamespace {
+		t.Fatalf("Apply payload annotations missing source namespace: %v", annotations)
+	}
 	if _, ok := applyObj.Object["spec"]; !ok {
 		t.Fatalf("Apply payload should contain desired spec: %v", applyObj.Object)
 	}

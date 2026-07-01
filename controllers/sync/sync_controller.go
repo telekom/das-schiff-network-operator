@@ -456,10 +456,10 @@ func (r *Controller) buildApplyObject(desired client.Object) (*unstructured.Unst
 		"namespace": desired.GetNamespace(),
 	}
 	if labels := desired.GetLabels(); len(labels) > 0 {
-		metadata["labels"] = labels
+		metadata["labels"] = stringMapToUnstructured(labels)
 	}
 	if annotations := desired.GetAnnotations(); len(annotations) > 0 {
-		metadata["annotations"] = annotations
+		metadata["annotations"] = stringMapToUnstructured(annotations)
 	}
 
 	applyMap := map[string]interface{}{
@@ -484,6 +484,14 @@ func (r *Controller) buildApplyObject(desired client.Object) (*unstructured.Unst
 	unstructuredDesired := &unstructured.Unstructured{Object: applyMap}
 	unstructuredDesired.SetGroupVersionKind(gvk)
 	return unstructuredDesired, nil
+}
+
+func stringMapToUnstructured(in map[string]string) map[string]interface{} {
+	out := make(map[string]interface{}, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }
 
 func (r *Controller) prepareApplyObject(obj client.Object) error {
