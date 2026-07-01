@@ -39,6 +39,7 @@ const (
 	labelManagedBy      = "network-sync.telekom.com/managed-by"
 	labelManagedByValue = "network-sync"
 	annotationSourceNS  = "network-sync.telekom.com/source-namespace"
+	syncRequestName     = "sync"
 
 	// annotationSourceGeneration records the management object's
 	// metadata.generation that the remote object's spec was built from. Status
@@ -58,6 +59,13 @@ const (
 	// existing objects instead of accreting stale keys forever.
 	annotationManagedLabels      = "network-sync.telekom.com/managed-labels"
 	annotationManagedAnnotations = "network-sync.telekom.com/managed-annotations"
+
+	ownershipManagedByLabel          = "app.kubernetes.io/managed-by"
+	ownershipFluxHelmNameLabel       = "helm.toolkit.fluxcd.io/name"
+	ownershipFluxHelmNamespaceLabel  = "helm.toolkit.fluxcd.io/namespace"
+	ownershipHelmReleaseNameAnn      = "meta.helm.sh/release-name"
+	ownershipHelmReleaseNamespaceAnn = "meta.helm.sh/release-namespace"
+	lastAppliedConfigurationAnn      = "kubectl.kubernetes.io/last-applied-configuration"
 )
 
 // gitOpsKeyPrefixes are label/annotation key prefixes owned by GitOps tooling
@@ -72,6 +80,17 @@ var gitOpsKeyPrefixes = []string{
 }
 
 const syncRequeueInterval = 10 * time.Second
+
+var ownershipLabelKeys = map[string]struct{}{
+	ownershipManagedByLabel:         {},
+	ownershipFluxHelmNameLabel:      {},
+	ownershipFluxHelmNamespaceLabel: {},
+}
+
+var ownershipAnnotationKeys = map[string]struct{}{
+	ownershipHelmReleaseNameAnn:      {},
+	ownershipHelmReleaseNamespaceAnn: {},
+}
 
 // errMultipleWorkloadClusters is returned by Reconcile (and surfaced on the
 // intent resources as a condition + event) when a namespace resolves to more
@@ -251,6 +270,7 @@ func (r *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 			return ctrl.Result{}, fmt.Errorf("listing %T: %w", list, err)
 		}
 		items := extractItems(list)
+		desiredNames := desiredObjectNames(items)
 		for i := range items {
 			if err := r.syncObject(ctx, log, remoteClient, items[i], ipamAddrs); err != nil {
 				return ctrl.Result{}, err
@@ -263,6 +283,11 @@ func (r *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 				if err := r.syncObjectStatusBack(ctx, log, remoteClient, items[i]); err != nil {
 					return ctrl.Result{}, err
 				}
+			}
+		}
+		for _, remoteClient := range remoteClients {
+			if err := r.sweepRemoteOrphans(ctx, log, remoteClient, list, desiredNames, req.Namespace); err != nil {
+				return ctrl.Result{}, err
 			}
 		}
 	}
@@ -676,21 +701,26 @@ func (r *Controller) buildRemoteObject(src client.Object, sourceNamespace string
 	dst.SetFinalizers(nil)      // Remote objects don't need our finalizer
 	dst.SetOwnerReferences(nil) // No cross-cluster owner refs
 
-	// Set sync labels/annotations. Strip GitOps (Flux) keys first so that the
-	// management cluster's kustomization inventory metadata is not carried over
-	// to the workload cluster; otherwise a Flux running there would claim our
-	// synced objects and the two controllers would fight over them.
-	labels := stripGitOpsKeys(dst.GetLabels())
+	// Set sync labels/annotations. Strip GitOps inventory and source-side
+	// Helm/Flux ownership metadata first so the workload copy is not adopted by
+	// the management cluster's tooling.
+	labels := stripMetadataKeys(stripGitOpsKeys(dst.GetLabels()), ownershipLabelKeys)
+	if labels == nil {
+		labels = make(map[string]string)
+	}
 	labels[labelManagedBy] = labelManagedByValue
 	dst.SetLabels(labels)
 
-	annotations := stripGitOpsKeys(dst.GetAnnotations())
+	annotations := stripMetadataKeys(stripGitOpsKeys(dst.GetAnnotations()), ownershipAnnotationKeys)
+	if annotations == nil {
+		annotations = make(map[string]string)
+	}
 	annotations[annotationSourceNS] = sourceNamespace
 	// Record the management generation this spec was built from so status
 	// sync-back can tell whether the workload has caught up to the current intent.
 	annotations[annotationSourceGeneration] = strconv.FormatInt(src.GetGeneration(), 10)
 	// Remove system annotations.
-	delete(annotations, "kubectl.kubernetes.io/last-applied-configuration")
+	delete(annotations, lastAppliedConfigurationAnn)
 	dst.SetAnnotations(annotations)
 
 	// Record the keys we own so the next sync can prune the ones we drop.
@@ -933,15 +963,16 @@ func reconcileManagedMetadata(dst, src client.Object) {
 	prevLabelKeys := parseKeyList(dst.GetAnnotations()[annotationManagedLabels])
 	prevAnnotationKeys := parseKeyList(dst.GetAnnotations()[annotationManagedAnnotations])
 
-	dst.SetLabels(mergeAndPrune(dst.GetLabels(), src.GetLabels(), prevLabelKeys))
-	dst.SetAnnotations(mergeAndPrune(dst.GetAnnotations(), src.GetAnnotations(), prevAnnotationKeys))
+	dst.SetLabels(mergeAndPrune(dst.GetLabels(), src.GetLabels(), prevLabelKeys, ownershipLabelKeys))
+	dst.SetAnnotations(mergeAndPrune(dst.GetAnnotations(), src.GetAnnotations(), prevAnnotationKeys, ownershipAnnotationKeys))
 }
 
 // mergeAndPrune overlays the keys we manage now (desired) onto existing, removes
 // keys we managed on the previous sync (prevManaged) that are no longer desired,
-// and drops any GitOps/Flux-owned key. Foreign keys we never managed and that are
-// not GitOps-owned are left untouched.
-func mergeAndPrune(existing, desired map[string]string, prevManaged []string) map[string]string {
+// and drops any GitOps/Flux-owned key except remote-side ownership keys that
+// belong to the workload cluster's manager. Foreign keys we never managed and
+// that are not GitOps-owned are left untouched.
+func mergeAndPrune(existing, desired map[string]string, prevManaged []string, preserveKeys map[string]struct{}) map[string]string {
 	out := make(map[string]string, len(existing)+len(desired))
 	for k, v := range existing {
 		out[k] = v
@@ -949,6 +980,9 @@ func mergeAndPrune(existing, desired map[string]string, prevManaged []string) ma
 	// Drop keys we used to own but no longer set.
 	for _, k := range prevManaged {
 		if _, stillManaged := desired[k]; !stillManaged {
+			if _, preserve := preserveKeys[k]; preserve {
+				continue
+			}
 			delete(out, k)
 		}
 	}
@@ -959,6 +993,9 @@ func mergeAndPrune(existing, desired map[string]string, prevManaged []string) ma
 	// not part of any Flux inventory.
 	for k := range out {
 		if hasAnyPrefix(k, gitOpsKeyPrefixes) {
+			if _, preserve := preserveKeys[k]; preserve {
+				continue
+			}
 			delete(out, k)
 		}
 	}
@@ -1029,6 +1066,24 @@ func hasAnyPrefix(s string, prefixes []string) bool {
 	return false
 }
 
+func stripMetadataKeys(metadata map[string]string, keys map[string]struct{}) map[string]string {
+	if len(metadata) == 0 {
+		return nil
+	}
+
+	filtered := make(map[string]string, len(metadata))
+	for key, value := range metadata {
+		if _, ok := keys[key]; ok {
+			continue
+		}
+		filtered[key] = value
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
+	return filtered
+}
+
 // deleteRemote removes the object from the remote cluster.
 func (r *Controller) deleteRemote(ctx context.Context, remoteClient client.Client, src client.Object) error {
 	remote, ok := src.DeepCopyObject().(client.Object)
@@ -1039,12 +1094,57 @@ func (r *Controller) deleteRemote(ctx context.Context, remoteClient client.Clien
 	remote.SetResourceVersion("")
 	remote.SetUID("")
 
-	err := remoteClient.Delete(ctx, remote)
+	err := remoteClient.Get(ctx, types.NamespacedName{
+		Namespace: remote.GetNamespace(),
+		Name:      remote.GetName(),
+	}, remote)
 	if apierrors.IsNotFound(err) {
 		return nil // Already gone.
 	}
 	if err != nil {
+		return fmt.Errorf("getting remote object %s/%s before delete: %w", remote.GetNamespace(), remote.GetName(), err)
+	}
+
+	if remote.GetLabels()[labelManagedBy] != labelManagedByValue {
+		return nil
+	}
+
+	if err := remoteClient.Delete(ctx, remote); err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("deleting remote object %s/%s: %w", remote.GetNamespace(), remote.GetName(), err)
+	}
+	return nil
+}
+
+func (r *Controller) sweepRemoteOrphans(ctx context.Context, log logr.Logger, remoteClient client.Client,
+	sourceList client.ObjectList, desiredNames map[string]struct{}, sourceNamespace string,
+) error {
+	remoteList, err := newObjectListLike(sourceList)
+	if err != nil {
+		return err
+	}
+	if err := remoteClient.List(ctx, remoteList,
+		client.InNamespace(r.remoteNamespace()),
+		client.MatchingLabels{labelManagedBy: labelManagedByValue},
+	); err != nil {
+		return fmt.Errorf("listing remote %T for orphan sweep: %w", remoteList, err)
+	}
+
+	items := extractItems(remoteList)
+	for i := range items {
+		obj := items[i]
+		if obj.GetAnnotations()[annotationSourceNS] != sourceNamespace {
+			continue
+		}
+		if _, keep := desiredNames[obj.GetName()]; keep {
+			continue
+		}
+		log.Info("Sweeping orphan synced intent object on workload cluster",
+			"kind", obj.GetObjectKind().GroupVersionKind().Kind,
+			"namespace", obj.GetNamespace(),
+			"name", obj.GetName())
+		if err := remoteClient.Delete(ctx, obj); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("deleting orphan remote %s/%s: %w", obj.GetNamespace(), obj.GetName(), err)
+		}
 	}
 	return nil
 }
@@ -1149,7 +1249,7 @@ func (r *Controller) SetupWithManager(mgr ctrl.Manager) error {
 			return []reconcile.Request{{
 				NamespacedName: types.NamespacedName{
 					Namespace: obj.GetNamespace(),
-					Name:      "sync", // Synthetic key; we reconcile the whole namespace.
+					Name:      syncRequestName, // Synthetic key; we reconcile the whole namespace.
 				},
 			}}
 		},
@@ -1227,4 +1327,27 @@ func extractItems(list client.ObjectList) []client.Object {
 	}
 
 	return out
+}
+
+func desiredObjectNames(items []client.Object) map[string]struct{} {
+	names := make(map[string]struct{}, len(items))
+	for i := range items {
+		if !items[i].GetDeletionTimestamp().IsZero() {
+			continue
+		}
+		names[items[i].GetName()] = struct{}{}
+	}
+	return names
+}
+
+func newObjectListLike(list client.ObjectList) (client.ObjectList, error) {
+	t := reflect.TypeOf(list)
+	if t == nil || t.Kind() != reflect.Pointer {
+		return nil, fmt.Errorf("expected pointer ObjectList, got %T", list)
+	}
+	copyList, ok := reflect.New(t.Elem()).Interface().(client.ObjectList)
+	if !ok {
+		return nil, fmt.Errorf("new %s is not a client.ObjectList", t.Elem())
+	}
+	return copyList, nil
 }
