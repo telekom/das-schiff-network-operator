@@ -121,12 +121,17 @@ func (r *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 	remoteClients := r.Remotes.GetByNamespace(req.Namespace)
 	if len(remoteClients) == 0 {
-		// No remote client — either the workload cluster's CAPI Cluster has been
-		// deleted (or never reached Ready). Drain our finalizer from any intent
-		// CRs that are mid-deletion; otherwise they would block forever waiting
-		// for a remote cluster that no longer exists.
-		if err := r.drainFinalizersForLostRemote(ctx, log, req.Namespace); err != nil {
+		clusterExists, err := r.remoteClusterExists(ctx, req.Namespace)
+		if err != nil {
 			return ctrl.Result{}, err
+		}
+		if !clusterExists {
+			// The workload cluster's CAPI Cluster is gone. Drain finalizers from
+			// intent CRs that are mid-deletion; otherwise they would block forever
+			// waiting for a workload cluster that no longer exists.
+			if err := r.drainFinalizersForLostRemote(ctx, log, req.Namespace); err != nil {
+				return ctrl.Result{}, err
+			}
 		}
 		// ClusterController hasn't set up a client (yet) — wait and retry.
 		return ctrl.Result{RequeueAfter: syncRequeueInterval}, nil
@@ -172,6 +177,17 @@ func (r *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	}
 
 	return ctrl.Result{}, nil
+}
+
+func (r *Controller) remoteClusterExists(ctx context.Context, namespace string) (bool, error) {
+	clusterList := &unstructured.UnstructuredList{}
+	gvk := capiClusterGVK
+	gvk.Kind = "ClusterList"
+	clusterList.SetGroupVersionKind(gvk)
+	if err := r.Client.List(ctx, clusterList, client.InNamespace(namespace)); err != nil {
+		return false, fmt.Errorf("listing CAPI Clusters in namespace %s: %w", namespace, err)
+	}
+	return len(clusterList.Items) > 0, nil
 }
 
 // drainFinalizersForLostRemote walks every intent CRD type in the namespace and
@@ -411,57 +427,65 @@ func (r *Controller) applyRemote(ctx context.Context, remoteClient client.Client
 			desired.GetNamespace(), desired.GetName(), existingSourceNamespace, desiredSourceNamespace)
 	}
 
-	if needsLegacySSAAdoption(existing) {
-		if err := r.adoptLegacyRemoteObject(ctx, remoteClient, existing, desired); err != nil {
-			return err
-		}
-	}
-
 	return r.applyRemoteDesired(ctx, remoteClient, desired)
 }
 
-func needsLegacySSAAdoption(existing client.Object) bool {
-	return existing.GetAnnotations()[annotationSSAAdopted] != annotationSSAAdoptedValue
-}
-
-func (r *Controller) adoptLegacyRemoteObject(ctx context.Context, remoteClient client.Client, existing, desired client.Object) error {
-	legacyDesired, ok := desired.DeepCopyObject().(client.Object)
-	if !ok {
-		return fmt.Errorf("DeepCopyObject did not return client.Object for %s/%s", desired.GetNamespace(), desired.GetName())
-	}
-	if err := r.prepareApplyObject(legacyDesired); err != nil {
-		return err
-	}
-	preserveOwnershipMetadata(existing, legacyDesired)
-	legacyDesired.SetResourceVersion(existing.GetResourceVersion())
-	legacyDesired.SetUID(existing.GetUID())
-	legacyDesired.SetManagedFields(nil)
-	if err := remoteClient.Update(ctx, legacyDesired); err != nil {
-		return fmt.Errorf("adopting legacy remote object %s/%s before server-side apply: %w",
-			desired.GetNamespace(), desired.GetName(), err)
-	}
-	return nil
-}
-
 func (r *Controller) applyRemoteDesired(ctx context.Context, remoteClient client.Client, desired client.Object) error {
-	if err := r.prepareApplyObject(desired); err != nil {
+	unstructuredDesired, err := r.buildApplyObject(desired)
+	if err != nil {
 		return err
 	}
-	desired.SetResourceVersion("")
-	desired.SetUID("")
-	desired.SetManagedFields(nil)
-	objMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(desired)
-	if err != nil {
-		return fmt.Errorf("converting %s/%s to unstructured apply configuration: %w",
-			desired.GetNamespace(), desired.GetName(), err)
-	}
-	unstructuredDesired := &unstructured.Unstructured{Object: objMap}
-	unstructuredDesired.SetGroupVersionKind(desired.GetObjectKind().GroupVersionKind())
 	if err := remoteClient.Apply(ctx, client.ApplyConfigurationFromUnstructured(unstructuredDesired),
 		client.FieldOwner(remoteFieldManager), client.ForceOwnership); err != nil {
 		return fmt.Errorf("server-side applying remote object %s/%s: %w", desired.GetNamespace(), desired.GetName(), err)
 	}
 	return nil
+}
+
+func (r *Controller) buildApplyObject(desired client.Object) (*unstructured.Unstructured, error) {
+	if err := r.prepareApplyObject(desired); err != nil {
+		return nil, err
+	}
+	objMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(desired)
+	if err != nil {
+		return nil, fmt.Errorf("converting %s/%s to unstructured apply configuration: %w",
+			desired.GetNamespace(), desired.GetName(), err)
+	}
+
+	gvk := desired.GetObjectKind().GroupVersionKind()
+	metadata := map[string]interface{}{
+		"name":      desired.GetName(),
+		"namespace": desired.GetNamespace(),
+	}
+	if labels := desired.GetLabels(); len(labels) > 0 {
+		metadata["labels"] = labels
+	}
+	if annotations := desired.GetAnnotations(); len(annotations) > 0 {
+		metadata["annotations"] = annotations
+	}
+
+	applyMap := map[string]interface{}{
+		"apiVersion": gvk.GroupVersion().String(),
+		"kind":       gvk.Kind,
+		"metadata":   metadata,
+	}
+	if spec, ok := objMap["spec"]; ok {
+		applyMap["spec"] = spec
+	}
+	if _, ok := desired.(*corev1.Secret); ok {
+		if typ, ok := objMap["type"]; ok {
+			applyMap["type"] = typ
+		}
+		if data, ok := objMap["data"]; ok {
+			applyMap["data"] = data
+		} else {
+			applyMap["data"] = map[string]interface{}{}
+		}
+	}
+
+	unstructuredDesired := &unstructured.Unstructured{Object: applyMap}
+	unstructuredDesired.SetGroupVersionKind(gvk)
+	return unstructuredDesired, nil
 }
 
 func (r *Controller) prepareApplyObject(obj client.Object) error {
@@ -495,30 +519,6 @@ func stripMetadataKeys(metadata map[string]string, keys map[string]struct{}) map
 		return nil
 	}
 	return filtered
-}
-
-func preserveOwnershipMetadata(existing, desired client.Object) {
-	desired.SetLabels(preserveMetadataKeys(existing.GetLabels(), desired.GetLabels(), ownershipLabelKeys))
-	desired.SetAnnotations(preserveMetadataKeys(existing.GetAnnotations(), desired.GetAnnotations(), ownershipAnnotationKeys))
-}
-
-func preserveMetadataKeys(existing, desired map[string]string, keys map[string]struct{}) map[string]string {
-	if len(existing) == 0 {
-		return desired
-	}
-
-	preserved := desired
-	for key := range keys {
-		value, ok := existing[key]
-		if !ok {
-			continue
-		}
-		if preserved == nil {
-			preserved = make(map[string]string)
-		}
-		preserved[key] = value
-	}
-	return preserved
 }
 
 // deleteRemote removes the object from the remote cluster.
