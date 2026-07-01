@@ -226,7 +226,11 @@ func (*Framework) applySingleObject(ctx context.Context, c client.Client, yamlDa
 		if err := c.Get(ctx, key, existing); err == nil {
 			obj.SetResourceVersion(existing.GetResourceVersion())
 			obj.SetUID(existing.GetUID())
-			obj.SetFinalizers(existing.GetFinalizers())
+			if _, finalizersSet, err := unstructured.NestedStringSlice(obj.Object, "metadata", "finalizers"); err != nil {
+				return fmt.Errorf("decode finalizers for %s/%s: %w", obj.GetKind(), obj.GetName(), err)
+			} else if !finalizersSet {
+				obj.SetFinalizers(existing.GetFinalizers())
+			}
 			err = c.Update(ctx, obj)
 			if apierrors.IsConflict(err) || isWebhookTransient(err) {
 				time.Sleep(time.Duration(attempt+1) * 500 * time.Millisecond)
