@@ -6,9 +6,8 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
+	_ "embed"
 	"fmt"
-	"io"
-	"net/http"
 	"slices"
 	"sync"
 	"time"
@@ -30,7 +29,6 @@ import (
 
 const (
 	fluxVersion         = "v2.9.0"
-	fluxInstallURL      = "https://github.com/fluxcd/flux2/releases/download/" + fluxVersion + "/install.yaml"
 	fluxSystemNamespace = "flux-system"
 
 	fluxFixtureChartName    = "network-sync-fixture"
@@ -51,10 +49,10 @@ type fluxCluster struct {
 	apply      func(context.Context, []byte) error
 }
 
-var (
-	fluxInstallMu       sync.Mutex
-	fluxInstallManifest []byte
+//go:embed testdata/flux/install-v2.9.0.yaml
+var fluxInstallManifest []byte
 
+var (
 	fluxFixtureChartOnce  sync.Once
 	fluxFixtureChartBytes []byte
 	fluxFixtureIndexYAML  string
@@ -95,32 +93,10 @@ func ensureFluxInstalled(ctx context.Context, cluster fluxCluster) error {
 	return nil
 }
 
-func getFluxInstallManifest(ctx context.Context) ([]byte, error) {
-	fluxInstallMu.Lock()
-	defer fluxInstallMu.Unlock()
-
-	if len(fluxInstallManifest) > 0 {
-		return fluxInstallManifest, nil
+func getFluxInstallManifest(_ context.Context) ([]byte, error) {
+	if len(fluxInstallManifest) == 0 {
+		return nil, fmt.Errorf("embedded Flux %s install manifest is empty", fluxVersion)
 	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fluxInstallURL, http.NoBody)
-	if err != nil {
-		return nil, err
-	}
-	httpClient := &http.Client{Timeout: 2 * time.Minute}
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("downloading Flux install manifest: %s", resp.Status)
-	}
-	fluxInstallManifest, err = io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("reading Flux install manifest: %w", err)
-	}
-
 	return fluxInstallManifest, nil
 }
 
