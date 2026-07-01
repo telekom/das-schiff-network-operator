@@ -770,6 +770,51 @@ func TestSyncRefusesManagedObjectFromOtherSourceNamespace(t *testing.T) {
 	}
 }
 
+func TestSyncRefusesManagedObjectWithEmptySourceNamespace(t *testing.T) {
+	vrf := &nc.VRF{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      testVRFName,
+			Namespace: testClusterNamespace,
+		},
+		Spec: nc.VRFSpec{VRF: testVRFValue, VNI: ptrInt32(2002026), RouteTarget: ptrString("65188:2026")},
+	}
+
+	remoteWithEmptySource := &nc.VRF{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      testVRFName,
+			Namespace: testRemoteNamespace,
+			Labels: map[string]string{
+				labelManagedBy: labelManagedByValue,
+			},
+			Annotations: map[string]string{
+				annotationSourceNS: "",
+			},
+		},
+		Spec: nc.VRFSpec{VRF: testForeignVRFValue, VNI: ptrInt32(1), RouteTarget: ptrString("1:1")},
+	}
+
+	sc, remoteClient := newFakeSyncController([]client.Object{vrf}, []client.Object{remoteWithEmptySource})
+	ctx := context.Background()
+
+	_, err := sc.Reconcile(ctx, ctrl.Request{
+		NamespacedName: types.NamespacedName{Namespace: testClusterNamespace, Name: syncRequestName},
+	})
+	if err == nil {
+		t.Fatal("Expected error when remote object has an explicit empty source namespace")
+	}
+
+	got := &nc.VRF{}
+	if err := remoteClient.Get(ctx, types.NamespacedName{Namespace: testRemoteNamespace, Name: testVRFName}, got); err != nil {
+		t.Fatalf("Get remote VRF: %v", err)
+	}
+	if got.Spec.VRF != testForeignVRFValue {
+		t.Errorf("Expected empty-source object to be left unchanged, got spec %v", got.Spec)
+	}
+	if got.Annotations[annotationSourceNS] != "" {
+		t.Errorf("Expected empty source namespace annotation to be preserved, got %v", got.Annotations)
+	}
+}
+
 func TestSyncRefusesHelmManagedObjectWithoutSyncOwnership(t *testing.T) {
 	vrf := &nc.VRF{
 		ObjectMeta: metav1.ObjectMeta{
