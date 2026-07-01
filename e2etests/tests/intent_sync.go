@@ -7,9 +7,9 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/telekom/das-schiff-network-operator/e2etests/framework"
 )
@@ -146,31 +146,39 @@ spec:
 	})
 
 	Context("Flux Helm ownership metadata", func() {
-		const vrfName = "vrf-sync-helm-flux-ownership"
+		const (
+			vrfName         = "vrf-sync-flux-helm-ownership"
+			sourceRelease   = "network-sync-source"
+			workloadRelease = "network-sync-workload"
+		)
 
 		AfterEach(func() {
 			ctx = context.Background()
-			defer func() {
-				Expect(deleteCluster2Object(ctx, f, "vrfs", vrfName)).To(Succeed())
-			}()
 
-			By("Cleaning up simulated Helm-owned sync VRF from mgmt cluster")
-			Expect(f.DeleteManifestInNamespace(ctx, []byte(helmOwnedSourceVRFUpdatedYAML), syncNamespace)).To(Succeed())
+			By("Cleaning up Flux HelmReleases")
+			Expect(deleteFluxHelmRelease(ctx, f.Client, sourceRelease)).To(Succeed())
+			Expect(deleteFluxHelmRelease(ctx, f.Cluster2Client(), workloadRelease)).To(Succeed())
 
-			By("Waiting for simulated Helm-owned sync VRF to be removed from cluster-2")
-			Eventually(func() bool {
-				return !objectExistsOnCluster2(ctx, f, "vrfs", vrfName)
-			}, syncTimeout, syncInterval).Should(BeTrue())
+			Expect(deleteObject(ctx, f.Client, "vrfs", syncNamespace, vrfName)).To(Succeed())
+			Expect(deleteCluster2Object(ctx, f, "vrfs", vrfName)).To(Succeed())
+
+			By("Cleaning up Flux chart repositories")
+			Expect(cleanupFluxChartRepository(ctx, managementFluxCluster(f))).To(Succeed())
+			Expect(cleanupFluxChartRepository(ctx, workloadFluxCluster(f))).To(Succeed())
 		})
 
-		It("should preserve simulated Flux Helm workload ownership metadata while syncing source changes", Label("ownership", "helm", "flux"), func() {
-			// The e2e lab does not install Flux Helm controllers. This simulates
-			// the metadata those controllers apply, then forces network-sync
-			// through its update path to catch ownership fights.
-			By("Applying a source VRF with Helm/Flux ownership metadata in the sync namespace")
-			Expect(f.ApplyManifestInNamespace(ctx, []byte(helmOwnedSourceVRFInitialYAML), syncNamespace)).To(Succeed())
+		It("should preserve actual Flux Helm workload ownership metadata while syncing Flux-managed source changes", Label("ownership", "helm", "flux"), func() {
+			By("Installing Flux controllers on the management and workload clusters")
+			Expect(ensureFluxInstalled(ctx, managementFluxCluster(f))).To(Succeed())
+			Expect(ensureFluxInstalled(ctx, workloadFluxCluster(f))).To(Succeed())
 
-			By("Waiting for network-sync to create the workload VRF without copying source Helm ownership")
+			By("Serving the Helm fixture chart inside both clusters")
+			Expect(ensureFluxChartRepository(ctx, managementFluxCluster(f))).To(Succeed())
+			Expect(ensureFluxChartRepository(ctx, workloadFluxCluster(f))).To(Succeed())
+
+			By("Creating the workload VRF through a real Flux HelmRelease")
+			Expect(f.ApplyManifestToCluster2(ctx, []byte(fluxHelmReleaseYAML(workloadRelease, remoteNS, vrfName, 2002040, true)))).To(Succeed())
+
 			Eventually(func() error {
 				vrf := getCluster2Object(ctx, f, "vrfs", vrfName)
 				if vrf == nil {
@@ -179,23 +187,25 @@ spec:
 				if err := expectSyncedVRF(vrf, 2002040); err != nil {
 					return err
 				}
-				return expectNoHelmFluxOwnership(vrf)
+				return expectHelmFluxOwnership(vrf, workloadRelease, remoteNS)
 			}, syncTimeout, syncInterval).Should(Succeed())
 
-			By("Simulating Flux Helm ownership on the workload-cluster object")
+			By("Creating the source VRF through a real Flux HelmRelease")
+			Expect(f.ApplyManifest(ctx, []byte(fluxHelmReleaseYAML(sourceRelease, syncNamespace, vrfName, 2002041, false)))).To(Succeed())
+
+			By("Waiting for Flux to create the source VRF with Helm ownership metadata")
 			Eventually(func() error {
-				vrf := getCluster2Object(ctx, f, "vrfs", vrfName)
+				vrf := getObject(ctx, f.Client, "vrfs", syncNamespace, vrfName)
 				if vrf == nil {
-					return fmt.Errorf("workload VRF %q does not exist", vrfName)
+					return fmt.Errorf("source VRF %q does not exist", vrfName)
 				}
-				setHelmFluxOwnership(vrf, "workload-networking", "workload-flux-system")
-				return f.Cluster2Client().Update(ctx, vrf)
+				if err := expectVRFVNI(vrf, 2002041); err != nil {
+					return err
+				}
+				return expectHelmFluxOwnership(vrf, sourceRelease, syncNamespace)
 			}, syncTimeout, syncInterval).Should(Succeed())
 
-			By("Updating the source VRF spec to force a network-sync reconciliation")
-			Expect(f.ApplyManifestInNamespace(ctx, []byte(helmOwnedSourceVRFUpdatedYAML), syncNamespace)).To(Succeed())
-
-			By("Verifying sync updates spec drift while preserving workload Helm ownership")
+			By("Verifying network-sync updates the Flux-owned workload object without stealing ownership")
 			Eventually(func() error {
 				vrf := getCluster2Object(ctx, f, "vrfs", vrfName)
 				if vrf == nil {
@@ -204,13 +214,15 @@ spec:
 				if err := expectSyncedVRF(vrf, 2002041); err != nil {
 					return err
 				}
-				return expectHelmFluxOwnership(vrf, "workload-networking", "workload-flux-system")
+				return expectHelmFluxOwnership(vrf, workloadRelease, remoteNS)
 			}, syncTimeout, syncInterval).Should(Succeed())
 
-			By("Triggering another source reconciliation with the same spec")
-			Expect(f.ApplyManifestInNamespace(ctx, []byte(helmOwnedSourceVRFUpdatedYAML), syncNamespace)).To(Succeed())
+			By("Forcing workload Flux to reconcile after network-sync mutates the workload VRF")
+			requestedAt, err := requestFluxHelmReleaseReconcile(ctx, f.Cluster2Client(), workloadRelease)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(waitForFluxHelmReleaseReconcile(ctx, f.Cluster2Client(), workloadRelease, requestedAt)).To(Succeed())
 
-			By("Checking ownership metadata survives the subsequent sync")
+			By("Checking the workload VRF remains converged after the workload Flux reconcile")
 			Eventually(func() error {
 				vrf := getCluster2Object(ctx, f, "vrfs", vrfName)
 				if vrf == nil {
@@ -219,43 +231,48 @@ spec:
 				if err := expectSyncedVRF(vrf, 2002041); err != nil {
 					return err
 				}
-				return expectHelmFluxOwnership(vrf, "workload-networking", "workload-flux-system")
+				return expectHelmFluxOwnership(vrf, workloadRelease, remoteNS)
+			}, syncTimeout, syncInterval).Should(Succeed())
+			Consistently(func() error {
+				vrf := getCluster2Object(ctx, f, "vrfs", vrfName)
+				if vrf == nil {
+					return fmt.Errorf("workload VRF %q does not exist", vrfName)
+				}
+				if err := expectSyncedVRF(vrf, 2002041); err != nil {
+					return err
+				}
+				return expectHelmFluxOwnership(vrf, workloadRelease, remoteNS)
+			}, 30*time.Second, syncInterval).Should(Succeed())
+
+			By("Updating the source HelmRelease values through Flux")
+			Expect(f.ApplyManifest(ctx, []byte(fluxHelmReleaseYAML(sourceRelease, syncNamespace, vrfName, 2002042, false)))).To(Succeed())
+
+			By("Waiting for Flux to update the source VRF")
+			Eventually(func() error {
+				vrf := getObject(ctx, f.Client, "vrfs", syncNamespace, vrfName)
+				if vrf == nil {
+					return fmt.Errorf("source VRF %q does not exist", vrfName)
+				}
+				if err := expectVRFVNI(vrf, 2002042); err != nil {
+					return err
+				}
+				return expectHelmFluxOwnership(vrf, sourceRelease, syncNamespace)
+			}, syncTimeout, syncInterval).Should(Succeed())
+
+			By("Checking workload Flux ownership survives the Flux-managed source update")
+			Eventually(func() error {
+				vrf := getCluster2Object(ctx, f, "vrfs", vrfName)
+				if vrf == nil {
+					return fmt.Errorf("workload VRF %q does not exist", vrfName)
+				}
+				if err := expectSyncedVRF(vrf, 2002042); err != nil {
+					return err
+				}
+				return expectHelmFluxOwnership(vrf, workloadRelease, remoteNS)
 			}, syncTimeout, syncInterval).Should(Succeed())
 		})
 	})
 })
-
-const helmOwnedSourceVRFInitialYAML = `apiVersion: network-connector.sylvaproject.org/v1alpha1
-kind: VRF
-metadata:
-  name: vrf-sync-helm-flux-ownership
-  labels:
-    app.kubernetes.io/managed-by: Helm
-    helm.toolkit.fluxcd.io/name: source-networking
-    helm.toolkit.fluxcd.io/namespace: source-flux-system
-  annotations:
-    meta.helm.sh/release-name: source-networking
-    meta.helm.sh/release-namespace: source-flux-system
-spec:
-  vrf: "ownmeta"
-  vni: 2002040
-  routeTarget: "65188:2040"`
-
-const helmOwnedSourceVRFUpdatedYAML = `apiVersion: network-connector.sylvaproject.org/v1alpha1
-kind: VRF
-metadata:
-  name: vrf-sync-helm-flux-ownership
-  labels:
-    app.kubernetes.io/managed-by: Helm
-    helm.toolkit.fluxcd.io/name: source-networking
-    helm.toolkit.fluxcd.io/namespace: source-flux-system
-  annotations:
-    meta.helm.sh/release-name: source-networking
-    meta.helm.sh/release-namespace: source-flux-system
-spec:
-  vrf: "ownmeta"
-  vni: 2002041
-  routeTarget: "65188:2041"`
 
 // objectExistsOnCluster2 checks if a network-connector CRD exists on cluster-2.
 func objectExistsOnCluster2(ctx context.Context, f *framework.Framework, resource, name string) bool {
@@ -264,29 +281,37 @@ func objectExistsOnCluster2(ctx context.Context, f *framework.Framework, resourc
 }
 
 func deleteCluster2Object(ctx context.Context, f *framework.Framework, resource, name string) error {
-	obj := getCluster2Object(ctx, f, resource, name)
-	if obj == nil {
-		return nil
-	}
-	if err := f.Cluster2Client().Delete(ctx, obj); err != nil && !apierrors.IsNotFound(err) {
-		return err
-	}
-	return nil
+	return deleteObject(ctx, f.Cluster2Client(), resource, remoteNS, name)
 }
 
 // getCluster2Object fetches a network-connector CRD from cluster-2's default namespace.
 func getCluster2Object(ctx context.Context, f *framework.Framework, resource, name string) *unstructured.Unstructured {
+	return getObject(ctx, f.Cluster2Client(), resource, remoteNS, name)
+}
+
+func getObject(ctx context.Context, c client.Client, resource, namespace, name string) *unstructured.Unstructured {
 	obj := &unstructured.Unstructured{}
 	obj.SetGroupVersionKind(schema.GroupVersionKind{
 		Group:   "network-connector.sylvaproject.org",
 		Version: "v1alpha1",
 		Kind:    resourceToKind(resource),
 	})
-	err := f.Cluster2Client().Get(ctx, framework.ObjectKey(remoteNS, name), obj)
+	err := c.Get(ctx, framework.ObjectKey(namespace, name), obj)
 	if err != nil {
 		return nil
 	}
 	return obj
+}
+
+func deleteObject(ctx context.Context, c client.Client, resource, namespace, name string) error {
+	obj := getObject(ctx, c, resource, namespace, name)
+	if obj == nil {
+		return nil
+	}
+	if err := client.IgnoreNotFound(c.Delete(ctx, obj)); err != nil {
+		return err
+	}
+	return waitForObjectDeleted(ctx, c, obj, syncTimeout)
 }
 
 func resourceToKind(resource string) string {
@@ -313,6 +338,10 @@ func expectSyncedVRF(vrf *unstructured.Unstructured, expectedVNI int64) error {
 	if labels[syncManagedByLabel] != syncManagedByValue {
 		return fmt.Errorf("expected sync label %s=%s, got %v", syncManagedByLabel, syncManagedByValue, labels)
 	}
+	return expectVRFVNI(vrf, expectedVNI)
+}
+
+func expectVRFVNI(vrf *unstructured.Unstructured, expectedVNI int64) error {
 	vni, found, err := unstructured.NestedInt64(vrf.Object, "spec", "vni")
 	if err != nil {
 		return fmt.Errorf("read spec.vni: %w", err)
@@ -326,51 +355,18 @@ func expectSyncedVRF(vrf *unstructured.Unstructured, expectedVNI int64) error {
 	return nil
 }
 
-func setHelmFluxOwnership(obj *unstructured.Unstructured, releaseName, releaseNamespace string) {
-	labels := obj.GetLabels()
-	if labels == nil {
-		labels = map[string]string{}
-	}
-	labels[helmManagedByLabel] = "Helm"
-	labels[fluxHelmNameLabel] = releaseName
-	labels[fluxHelmNamespaceLabel] = releaseNamespace
-	obj.SetLabels(labels)
-
-	annotations := obj.GetAnnotations()
-	if annotations == nil {
-		annotations = map[string]string{}
-	}
-	annotations[helmReleaseNameAnnotation] = releaseName
-	annotations[helmReleaseNamespaceAnn] = releaseNamespace
-	obj.SetAnnotations(annotations)
-}
-
-func expectHelmFluxOwnership(obj *unstructured.Unstructured, releaseName, releaseNamespace string) error {
+func expectHelmFluxOwnership(obj *unstructured.Unstructured, releaseName, targetNamespace string) error {
 	labels := obj.GetLabels()
 	if labels[helmManagedByLabel] != "Helm" ||
 		labels[fluxHelmNameLabel] != releaseName ||
-		labels[fluxHelmNamespaceLabel] != releaseNamespace {
-		return fmt.Errorf("expected workload Helm/Flux labels for %s/%s, got %v", releaseNamespace, releaseName, labels)
+		labels[fluxHelmNamespaceLabel] != fluxSystemNamespace {
+		return fmt.Errorf("expected Helm/Flux labels for %s/%s, got %v", fluxSystemNamespace, releaseName, labels)
 	}
 
 	annotations := obj.GetAnnotations()
 	if annotations[helmReleaseNameAnnotation] != releaseName ||
-		annotations[helmReleaseNamespaceAnn] != releaseNamespace {
-		return fmt.Errorf("expected workload Helm annotations for %s/%s, got %v", releaseNamespace, releaseName, annotations)
-	}
-	return nil
-}
-
-func expectNoHelmFluxOwnership(obj *unstructured.Unstructured) error {
-	for _, key := range []string{helmManagedByLabel, fluxHelmNameLabel, fluxHelmNamespaceLabel} {
-		if value, ok := obj.GetLabels()[key]; ok {
-			return fmt.Errorf("expected ownership label %q to be absent, got %q", key, value)
-		}
-	}
-	for _, key := range []string{helmReleaseNameAnnotation, helmReleaseNamespaceAnn} {
-		if value, ok := obj.GetAnnotations()[key]; ok {
-			return fmt.Errorf("expected ownership annotation %q to be absent, got %q", key, value)
-		}
+		annotations[helmReleaseNamespaceAnn] != targetNamespace {
+		return fmt.Errorf("expected Helm annotations for %s in target namespace %s, got %v", releaseName, targetNamespace, annotations)
 	}
 	return nil
 }
