@@ -320,7 +320,12 @@ func (r *Controller) remoteClusterExists(ctx context.Context, namespace string) 
 	if err := r.Client.List(ctx, clusterList, client.InNamespace(namespace)); err != nil {
 		return false, fmt.Errorf("listing CAPI Clusters in namespace %s: %w", namespace, err)
 	}
-	return len(clusterList.Items) > 0, nil
+	for i := range clusterList.Items {
+		if clusterList.Items[i].GetDeletionTimestamp().IsZero() {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // drainFinalizersForLostRemote walks every intent CRD type in the namespace and
