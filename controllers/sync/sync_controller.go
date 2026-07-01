@@ -28,9 +28,28 @@ const (
 	labelManagedBy      = "network-sync.telekom.com/managed-by"
 	labelManagedByValue = "network-sync"
 	annotationSourceNS  = "network-sync.telekom.com/source-namespace"
+	syncRequestName     = "sync"
+
+	ownershipManagedByLabel          = "app.kubernetes.io/managed-by"
+	ownershipFluxHelmNameLabel       = "helm.toolkit.fluxcd.io/name"
+	ownershipFluxHelmNamespaceLabel  = "helm.toolkit.fluxcd.io/namespace"
+	ownershipHelmReleaseNameAnn      = "meta.helm.sh/release-name"
+	ownershipHelmReleaseNamespaceAnn = "meta.helm.sh/release-namespace"
+	lastAppliedConfigurationAnn      = "kubectl.kubernetes.io/last-applied-configuration"
 )
 
 const syncRequeueInterval = 10 * time.Second
+
+var ownershipLabelKeys = map[string]struct{}{
+	ownershipManagedByLabel:         {},
+	ownershipFluxHelmNameLabel:      {},
+	ownershipFluxHelmNamespaceLabel: {},
+}
+
+var ownershipAnnotationKeys = map[string]struct{}{
+	ownershipHelmReleaseNameAnn:      {},
+	ownershipHelmReleaseNamespaceAnn: {},
+}
 
 // Controller watches intent CRDs on the management cluster and syncs them
 // to workload clusters via the RemoteClientManager.
@@ -119,11 +138,17 @@ func (r *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 			return ctrl.Result{}, fmt.Errorf("listing %T: %w", list, err)
 		}
 		items := extractItems(list)
+		desiredNames := desiredObjectNames(items)
 		for i := range items {
 			for _, remoteClient := range remoteClients {
 				if err := r.syncObject(ctx, log, remoteClient, items[i]); err != nil {
 					return ctrl.Result{}, err
 				}
+			}
+		}
+		for _, remoteClient := range remoteClients {
+			if err := r.sweepRemoteOrphans(ctx, log, remoteClient, list, desiredNames, req.Namespace); err != nil {
+				return ctrl.Result{}, err
 			}
 		}
 	}
@@ -232,21 +257,23 @@ func (r *Controller) buildRemoteObject(src client.Object, sourceNamespace string
 	dst.SetFinalizers(nil)      // Remote objects don't need our finalizer
 	dst.SetOwnerReferences(nil) // No cross-cluster owner refs
 
-	// Set sync labels/annotations.
-	labels := dst.GetLabels()
+	// Set sync labels/annotations. Helm/Flux ownership metadata belongs to
+	// the manager that applies the object on each cluster; do not copy the
+	// management-side ownership into the workload cluster.
+	labels := stripMetadataKeys(dst.GetLabels(), ownershipLabelKeys)
 	if labels == nil {
 		labels = make(map[string]string)
 	}
 	labels[labelManagedBy] = labelManagedByValue
 	dst.SetLabels(labels)
 
-	annotations := dst.GetAnnotations()
+	annotations := stripMetadataKeys(dst.GetAnnotations(), ownershipAnnotationKeys)
 	if annotations == nil {
 		annotations = make(map[string]string)
 	}
 	annotations[annotationSourceNS] = sourceNamespace
 	// Remove system annotations.
-	delete(annotations, "kubectl.kubernetes.io/last-applied-configuration")
+	delete(annotations, lastAppliedConfigurationAnn)
 	dst.SetAnnotations(annotations)
 
 	// IPAM promotion: copy status.addresses → spec.addresses for Inbound/Outbound.
@@ -311,6 +338,12 @@ func (*Controller) promoteIPAMAddresses(obj client.Object) {
 
 // applyRemote creates or updates the object on the remote cluster.
 func (*Controller) applyRemote(ctx context.Context, remoteClient client.Client, desired client.Object) error {
+	desiredSourceNamespace := desired.GetAnnotations()[annotationSourceNS]
+	if desiredSourceNamespace == "" {
+		return fmt.Errorf("desired remote object %s/%s is missing %s annotation",
+			desired.GetNamespace(), desired.GetName(), annotationSourceNS)
+	}
+
 	existing, ok := desired.DeepCopyObject().(client.Object)
 	if !ok {
 		return fmt.Errorf("DeepCopyObject did not return client.Object for %s/%s", desired.GetNamespace(), desired.GetName())
@@ -335,6 +368,16 @@ func (*Controller) applyRemote(ctx context.Context, remoteClient client.Client, 
 	if labels[labelManagedBy] != labelManagedByValue {
 		return fmt.Errorf("remote object %s/%s exists but not managed by us", desired.GetNamespace(), desired.GetName())
 	}
+	existingSourceNamespace, hasSourceNamespace := existing.GetAnnotations()[annotationSourceNS]
+	// Older network-sync managed objects did not have annotationSourceNS yet.
+	// Adopt only that absent legacy value; reject explicit empty or mismatched
+	// values because they break the source namespace ownership boundary.
+	if hasSourceNamespace && existingSourceNamespace != desiredSourceNamespace {
+		return fmt.Errorf("remote object %s/%s belongs to source namespace %q, not %q",
+			desired.GetNamespace(), desired.GetName(), existingSourceNamespace, desiredSourceNamespace)
+	}
+
+	preserveOwnershipMetadata(existing, desired)
 
 	// Preserve remote resourceVersion for update.
 	desired.SetResourceVersion(existing.GetResourceVersion())
@@ -343,6 +386,48 @@ func (*Controller) applyRemote(ctx context.Context, remoteClient client.Client, 
 		return fmt.Errorf("updating remote object %s/%s: %w", desired.GetNamespace(), desired.GetName(), err)
 	}
 	return nil
+}
+
+func stripMetadataKeys(metadata map[string]string, keys map[string]struct{}) map[string]string {
+	if len(metadata) == 0 {
+		return nil
+	}
+
+	filtered := make(map[string]string, len(metadata))
+	for key, value := range metadata {
+		if _, ok := keys[key]; ok {
+			continue
+		}
+		filtered[key] = value
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
+	return filtered
+}
+
+func preserveOwnershipMetadata(existing, desired client.Object) {
+	desired.SetLabels(preserveMetadataKeys(existing.GetLabels(), desired.GetLabels(), ownershipLabelKeys))
+	desired.SetAnnotations(preserveMetadataKeys(existing.GetAnnotations(), desired.GetAnnotations(), ownershipAnnotationKeys))
+}
+
+func preserveMetadataKeys(existing, desired map[string]string, keys map[string]struct{}) map[string]string {
+	if len(existing) == 0 {
+		return desired
+	}
+
+	preserved := desired
+	for key := range keys {
+		value, ok := existing[key]
+		if !ok {
+			continue
+		}
+		if preserved == nil {
+			preserved = make(map[string]string)
+		}
+		preserved[key] = value
+	}
+	return preserved
 }
 
 // deleteRemote removes the object from the remote cluster.
@@ -355,12 +440,61 @@ func (r *Controller) deleteRemote(ctx context.Context, remoteClient client.Clien
 	remote.SetResourceVersion("")
 	remote.SetUID("")
 
-	err := remoteClient.Delete(ctx, remote)
+	err := remoteClient.Get(ctx, types.NamespacedName{
+		Namespace: remote.GetNamespace(),
+		Name:      remote.GetName(),
+	}, remote)
 	if apierrors.IsNotFound(err) {
 		return nil // Already gone.
 	}
 	if err != nil {
+		return fmt.Errorf("getting remote object %s/%s before delete: %w", remote.GetNamespace(), remote.GetName(), err)
+	}
+
+	if remote.GetLabels()[labelManagedBy] != labelManagedByValue {
+		return nil
+	}
+	remoteSourceNamespace, hasSourceNamespace := remote.GetAnnotations()[annotationSourceNS]
+	if hasSourceNamespace && remoteSourceNamespace != src.GetNamespace() {
+		return nil
+	}
+
+	if err := remoteClient.Delete(ctx, remote); err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("deleting remote object %s/%s: %w", remote.GetNamespace(), remote.GetName(), err)
+	}
+	return nil
+}
+
+func (r *Controller) sweepRemoteOrphans(ctx context.Context, log logr.Logger, remoteClient client.Client,
+	sourceList client.ObjectList, desiredNames map[string]struct{}, sourceNamespace string,
+) error {
+	remoteList, err := newObjectListLike(sourceList)
+	if err != nil {
+		return err
+	}
+	if err := remoteClient.List(ctx, remoteList,
+		client.InNamespace(r.remoteNamespace()),
+		client.MatchingLabels{labelManagedBy: labelManagedByValue},
+	); err != nil {
+		return fmt.Errorf("listing remote %T for orphan sweep: %w", remoteList, err)
+	}
+
+	items := extractItems(remoteList)
+	for i := range items {
+		obj := items[i]
+		if obj.GetAnnotations()[annotationSourceNS] != sourceNamespace {
+			continue
+		}
+		if _, keep := desiredNames[obj.GetName()]; keep {
+			continue
+		}
+		log.Info("Sweeping orphan synced intent object on workload cluster",
+			"kind", obj.GetObjectKind().GroupVersionKind().Kind,
+			"namespace", obj.GetNamespace(),
+			"name", obj.GetName())
+		if err := remoteClient.Delete(ctx, obj); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("deleting orphan remote %s/%s: %w", obj.GetNamespace(), obj.GetName(), err)
+		}
 	}
 	return nil
 }
@@ -462,7 +596,7 @@ func (r *Controller) SetupWithManager(mgr ctrl.Manager) error {
 			return []reconcile.Request{{
 				NamespacedName: types.NamespacedName{
 					Namespace: obj.GetNamespace(),
-					Name:      "sync", // Synthetic key; we reconcile the whole namespace.
+					Name:      syncRequestName, // Synthetic key; we reconcile the whole namespace.
 				},
 			}}
 		},
@@ -501,7 +635,7 @@ func extractItems(list client.ObjectList) []client.Object {
 	}
 
 	out := make([]client.Object, items.Len())
-	for i := range items.Len() {
+	for i := 0; i < items.Len(); i++ {
 		obj, ok := items.Index(i).Addr().Interface().(client.Object)
 		if !ok {
 			return nil
@@ -510,4 +644,41 @@ func extractItems(list client.ObjectList) []client.Object {
 	}
 
 	return out
+}
+
+func desiredObjectNames(items []client.Object) map[string]struct{} {
+	names := make(map[string]struct{}, len(items))
+	for i := range items {
+		if !items[i].GetDeletionTimestamp().IsZero() {
+			continue
+		}
+		names[items[i].GetName()] = struct{}{}
+	}
+	return names
+}
+
+func newObjectListLike(list client.ObjectList) (client.ObjectList, error) {
+	elem, ok := pointerElementType(reflect.TypeOf(list))
+	if !ok {
+		return nil, fmt.Errorf("expected pointer ObjectList, got %T", list)
+	}
+	copyList, ok := reflect.New(elem).Interface().(client.ObjectList)
+	if !ok {
+		return nil, fmt.Errorf("new %s is not a client.ObjectList", elem)
+	}
+	return copyList, nil
+}
+
+func pointerElementType(t reflect.Type) (elem reflect.Type, ok bool) {
+	if t == nil {
+		return nil, false
+	}
+	defer func() {
+		if recover() != nil {
+			elem = nil
+			ok = false
+		}
+	}()
+	elem = t.Elem()
+	return elem, reflect.PointerTo(elem) == t
 }
