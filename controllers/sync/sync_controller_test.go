@@ -80,6 +80,7 @@ func newFakeSyncController(mgmtObjs, remoteObjs []client.Object) (*Controller, c
 	mgmtClient := fake.NewClientBuilder().
 		WithScheme(s).
 		WithObjects(mgmtObjs...).
+		WithIndex(&nc.BGPPeering{}, bgpAuthSecretRefField, indexBGPAuthSecretRef).
 		WithStatusSubresource(&nc.Inbound{}, &nc.Outbound{}).
 		Build()
 
@@ -1325,6 +1326,43 @@ func TestSyncDoesNotPropagateFluxLabels(t *testing.T) {
 	}
 	if got.Labels[labelManagedBy] != labelManagedByValue {
 		t.Errorf("managed-by label missing, got %v", got.Labels)
+	}
+}
+
+func TestEnqueueForBGPSecretUsesAuthSecretRefIndex(t *testing.T) {
+	matching := &nc.BGPPeering{
+		ObjectMeta: metav1.ObjectMeta{Name: "matching", Namespace: testClusterNamespace},
+		Spec: nc.BGPPeeringSpec{
+			Mode:          nc.BGPPeeringModeLoopbackPeer,
+			Ref:           nc.BGPPeeringRef{InboundRefs: []string{"x"}},
+			AuthSecretRef: &corev1.LocalObjectReference{Name: testBGPAuthSecretName},
+		},
+	}
+	otherSecret := &nc.BGPPeering{
+		ObjectMeta: metav1.ObjectMeta{Name: "other-secret", Namespace: testClusterNamespace},
+		Spec: nc.BGPPeeringSpec{
+			Mode:          nc.BGPPeeringModeLoopbackPeer,
+			Ref:           nc.BGPPeeringRef{InboundRefs: []string{"x"}},
+			AuthSecretRef: &corev1.LocalObjectReference{Name: "different-auth"},
+		},
+	}
+
+	sc, _ := newFakeSyncController([]client.Object{matching, otherSecret}, nil)
+	requests := sc.enqueueForBGPSecret(context.Background(), &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: testBGPAuthSecretName, Namespace: testClusterNamespace},
+	})
+	if len(requests) != 1 {
+		t.Fatalf("Expected one reconcile request for matching Secret, got %d", len(requests))
+	}
+	if requests[0].NamespacedName != (types.NamespacedName{Namespace: testClusterNamespace, Name: syncRequestName}) {
+		t.Fatalf("Unexpected reconcile request: %v", requests[0].NamespacedName)
+	}
+
+	requests = sc.enqueueForBGPSecret(context.Background(), &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "unreferenced", Namespace: testClusterNamespace},
+	})
+	if len(requests) != 0 {
+		t.Fatalf("Expected no reconcile requests for unreferenced Secret, got %v", requests)
 	}
 }
 

@@ -44,6 +44,7 @@ const (
 	annotationSSAAdoptedValue = "true"
 	remoteFieldManager        = "network-sync"
 	syncRequestName           = "sync"
+	bgpAuthSecretRefField     = "spec.authSecretRef.name" // #nosec G101 -- field index name, not a credential value.
 
 	// annotationSourceGeneration records the management object's
 	// metadata.generation that the remote object's spec was built from. Status
@@ -1377,7 +1378,12 @@ func (r *Controller) buildRemoteSecret(src *corev1.Secret, sourceNamespace strin
 
 func (r *Controller) enqueueForBGPSecret(ctx context.Context, obj client.Object) []reconcile.Request {
 	bpList := &nc.BGPPeeringList{}
-	if err := r.Client.List(ctx, bpList, client.InNamespace(obj.GetNamespace())); err != nil {
+	if err := r.Client.List(ctx, bpList,
+		client.InNamespace(obj.GetNamespace()),
+		client.MatchingFields{bgpAuthSecretRefField: obj.GetName()},
+	); err != nil {
+		r.Log.Error(err, "Listing BGPPeerings for auth Secret failed",
+			"namespace", obj.GetNamespace(), "secret", obj.GetName())
 		return nil
 	}
 	for i := range bpList.Items {
@@ -1397,8 +1403,20 @@ func (r *Controller) enqueueForBGPSecret(ctx context.Context, obj client.Object)
 	return nil
 }
 
+func indexBGPAuthSecretRef(obj client.Object) []string {
+	bp, ok := obj.(*nc.BGPPeering)
+	if !ok || bp.Spec.AuthSecretRef == nil || bp.Spec.AuthSecretRef.Name == "" {
+		return nil
+	}
+	return []string{bp.Spec.AuthSecretRef.Name}
+}
+
 // SetupWithManager registers watches for all intent CRD types.
 func (r *Controller) SetupWithManager(mgr ctrl.Manager) error {
+	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &nc.BGPPeering{}, bgpAuthSecretRefField, indexBGPAuthSecretRef); err != nil {
+		return fmt.Errorf("indexing BGPPeerings by auth Secret: %w", err)
+	}
+
 	// Map any intent CRD change → reconcile for its namespace.
 	enqueueNS := handler.EnqueueRequestsFromMapFunc(
 		func(_ context.Context, obj client.Object) []reconcile.Request {
