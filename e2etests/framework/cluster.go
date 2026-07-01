@@ -245,7 +245,7 @@ func (*Framework) applySingleObject(ctx context.Context, c client.Client, yamlDa
 			return fmt.Errorf("get %s/%s: %w", obj.GetKind(), obj.GetName(), err)
 		}
 		err = c.Create(ctx, obj)
-		if isWebhookTransient(err) {
+		if meta.IsNoMatchError(err) || isWebhookTransient(err) {
 			time.Sleep(time.Duration(attempt+1) * 500 * time.Millisecond)
 			continue
 		}
