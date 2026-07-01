@@ -338,6 +338,12 @@ func (*Controller) promoteIPAMAddresses(obj client.Object) {
 
 // applyRemote creates or updates the object on the remote cluster.
 func (*Controller) applyRemote(ctx context.Context, remoteClient client.Client, desired client.Object) error {
+	desiredSourceNamespace := desired.GetAnnotations()[annotationSourceNS]
+	if desiredSourceNamespace == "" {
+		return fmt.Errorf("desired remote object %s/%s is missing %s annotation",
+			desired.GetNamespace(), desired.GetName(), annotationSourceNS)
+	}
+
 	existing, ok := desired.DeepCopyObject().(client.Object)
 	if !ok {
 		return fmt.Errorf("DeepCopyObject did not return client.Object for %s/%s", desired.GetNamespace(), desired.GetName())
@@ -361,6 +367,11 @@ func (*Controller) applyRemote(ctx context.Context, remoteClient client.Client, 
 	labels := existing.GetLabels()
 	if labels[labelManagedBy] != labelManagedByValue {
 		return fmt.Errorf("remote object %s/%s exists but not managed by us", desired.GetNamespace(), desired.GetName())
+	}
+	if existingSourceNamespace := existing.GetAnnotations()[annotationSourceNS]; existingSourceNamespace != "" &&
+		existingSourceNamespace != desiredSourceNamespace {
+		return fmt.Errorf("remote object %s/%s belongs to source namespace %q, not %q",
+			desired.GetNamespace(), desired.GetName(), existingSourceNamespace, desiredSourceNamespace)
 	}
 
 	preserveOwnershipMetadata(existing, desired)

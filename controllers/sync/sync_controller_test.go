@@ -189,6 +189,9 @@ func TestSyncUpdatesRemoteObject(t *testing.T) {
 	if remoteVRF.Spec.VNI == nil || *remoteVRF.Spec.VNI != 2002026 {
 		t.Errorf("Expected VNI 2002026, got %v (drift not corrected)", remoteVRF.Spec.VNI)
 	}
+	if remoteVRF.Annotations[annotationSourceNS] != testClusterNamespace {
+		t.Errorf("Expected source-namespace annotation, got %v", remoteVRF.Annotations)
+	}
 }
 
 func TestSyncDoesNotCopySourceOwnershipMetadata(t *testing.T) {
@@ -719,6 +722,51 @@ func TestSyncRefusesUnmanagedObject(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("Expected error when remote object is not managed by us")
+	}
+}
+
+func TestSyncRefusesManagedObjectFromOtherSourceNamespace(t *testing.T) {
+	vrf := &nc.VRF{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      testVRFName,
+			Namespace: testClusterNamespace,
+		},
+		Spec: nc.VRFSpec{VRF: testVRFValue, VNI: ptrInt32(2002026), RouteTarget: ptrString("65188:2026")},
+	}
+
+	remoteFromOtherSource := &nc.VRF{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      testVRFName,
+			Namespace: testRemoteNamespace,
+			Labels: map[string]string{
+				labelManagedBy: labelManagedByValue,
+			},
+			Annotations: map[string]string{
+				annotationSourceNS: testOrphanedClusterNamespace,
+			},
+		},
+		Spec: nc.VRFSpec{VRF: testForeignVRFValue, VNI: ptrInt32(1), RouteTarget: ptrString("1:1")},
+	}
+
+	sc, remoteClient := newFakeSyncController([]client.Object{vrf}, []client.Object{remoteFromOtherSource})
+	ctx := context.Background()
+
+	_, err := sc.Reconcile(ctx, ctrl.Request{
+		NamespacedName: types.NamespacedName{Namespace: testClusterNamespace, Name: syncRequestName},
+	})
+	if err == nil {
+		t.Fatal("Expected error when remote object is managed by another source namespace")
+	}
+
+	got := &nc.VRF{}
+	if err := remoteClient.Get(ctx, types.NamespacedName{Namespace: testRemoteNamespace, Name: testVRFName}, got); err != nil {
+		t.Fatalf("Get remote VRF: %v", err)
+	}
+	if got.Spec.VRF != testForeignVRFValue {
+		t.Errorf("Expected other-source object to be left unchanged, got spec %v", got.Spec)
+	}
+	if got.Annotations[annotationSourceNS] != testOrphanedClusterNamespace {
+		t.Errorf("Expected other source namespace annotation to be preserved, got %v", got.Annotations)
 	}
 }
 
