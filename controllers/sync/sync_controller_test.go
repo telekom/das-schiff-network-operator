@@ -8,6 +8,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -47,6 +48,7 @@ const (
 	testRemoteClientNamespace    = "ns1"
 	testRemoteClientName         = "c1"
 	testBGPAuthSecretName        = "bgp-auth" // #nosec G101 -- test Secret object name, not a credential value.
+	testInboundName              = "ib-test"
 	testScopeLabel               = "networking.telekom.com/scope"
 	testStorageScopeValue        = "storage"
 	testIntentAnnotation         = "networking.telekom.com/intent"
@@ -340,13 +342,59 @@ func TestSyncPreservesRemoteOwnershipMetadata(t *testing.T) {
 		t.Errorf("Expected sync ownership label to be retained, got %v", got.Labels)
 	}
 	if got.Labels[testStaleMetadataKey] != testStaleMetadataValue {
-		t.Errorf("Expected foreign non-ownership remote label to be preserved, got %v", got.Labels)
+		t.Errorf("Expected unknown remote label to be preserved during SSA adoption, got %v", got.Labels)
 	}
 	if got.Annotations[testStaleMetadataKey] != testStaleMetadataValue {
-		t.Errorf("Expected foreign non-ownership remote annotation to be preserved, got %v", got.Annotations)
+		t.Errorf("Expected unknown remote annotation to be preserved during SSA adoption, got %v", got.Annotations)
 	}
 	if got.Spec.VNI == nil || *got.Spec.VNI != 2002026 {
 		t.Errorf("Expected spec drift to still be corrected, got %v", got.Spec.VNI)
+	}
+}
+
+func TestBuildApplyObjectOmitsStatusAndObjectMetadataNoise(t *testing.T) {
+	inbound := &nc.Inbound{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            testInboundName,
+			Namespace:       testClusterNamespace,
+			ResourceVersion: "123",
+			UID:             types.UID("abc"),
+			Generation:      7,
+			ManagedFields: []metav1.ManagedFieldsEntry{{
+				Manager: "other-controller",
+			}},
+		},
+		Spec: nc.InboundSpec{
+			NetworkRef:    testNetworkName,
+			Count:         ptrInt32(1),
+			Advertisement: nc.AdvertisementConfig{Type: "bgp"},
+		},
+		Status: nc.InboundStatus{
+			Addresses: &nc.AddressAllocation{IPv4: []string{"10.250.0.9"}},
+		},
+	}
+
+	sc, _ := newFakeSyncController(nil, nil)
+	remote := sc.buildRemoteObject(inbound, testClusterNamespace, nil)
+	applyObj, err := sc.buildApplyObject(remote)
+	if err != nil {
+		t.Fatalf("buildApplyObject failed: %v", err)
+	}
+
+	if _, ok := applyObj.Object["status"]; ok {
+		t.Fatalf("Apply payload must not contain status: %v", applyObj.Object["status"])
+	}
+	metadata, ok := applyObj.Object["metadata"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("Apply payload metadata has unexpected type: %T", applyObj.Object["metadata"])
+	}
+	for _, key := range []string{"resourceVersion", "uid", "generation", "managedFields", "creationTimestamp"} {
+		if _, ok := metadata[key]; ok {
+			t.Fatalf("Apply payload metadata must not contain %q: %v", key, metadata)
+		}
+	}
+	if _, ok := applyObj.Object["spec"]; !ok {
+		t.Fatalf("Apply payload should contain desired spec: %v", applyObj.Object)
 	}
 }
 
@@ -664,7 +712,7 @@ func TestSyncIPAMPromotion(t *testing.T) {
 	count := int32(2)
 	inbound := &nc.Inbound{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "ib-test",
+			Name:      testInboundName,
 			Namespace: testClusterNamespace,
 		},
 		Spec: nc.InboundSpec{
@@ -691,7 +739,7 @@ func TestSyncIPAMPromotion(t *testing.T) {
 	}
 
 	remoteInbound := &nc.Inbound{}
-	if err := remoteClient.Get(ctx, types.NamespacedName{Namespace: testRemoteNamespace, Name: "ib-test"}, remoteInbound); err != nil {
+	if err := remoteClient.Get(ctx, types.NamespacedName{Namespace: testRemoteNamespace, Name: testInboundName}, remoteInbound); err != nil {
 		t.Fatalf("Remote Inbound not found: %v", err)
 	}
 
@@ -855,6 +903,59 @@ func TestSyncDrainsFinalizerWhenRemoteGone(t *testing.T) {
 		if len(got.Finalizers) != 0 {
 			t.Errorf("Expected finalizer to be drained, still present: %v", got.Finalizers)
 		}
+	}
+}
+
+func TestSyncKeepsFinalizerWhenClusterExistsButRemoteClientMissing(t *testing.T) {
+	now := metav1.Now()
+	vrf := &nc.VRF{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "vrf-waiting",
+			Namespace:         testPendingClusterNamespace,
+			Finalizers:        []string{finalizerName},
+			DeletionTimestamp: &now,
+		},
+		Spec: nc.VRFSpec{VRF: "waiting", VNI: ptrInt32(2002097), RouteTarget: ptrString("65188:97")},
+	}
+	cluster := &unstructured.Unstructured{}
+	cluster.SetGroupVersionKind(capiClusterGVK)
+	cluster.SetName("workload")
+	cluster.SetNamespace(testPendingClusterNamespace)
+
+	s := testScheme()
+	mgmtClient := fake.NewClientBuilder().WithScheme(s).WithObjects(vrf, cluster).Build()
+	remotes := NewRemoteClientManager(s, RemoteClientConfig{})
+
+	sc := &Controller{
+		Client:  mgmtClient,
+		Scheme:  s,
+		Log:     zap.New(zap.UseDevMode(true)),
+		Remotes: remotes,
+	}
+
+	result, err := sc.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Namespace: testPendingClusterNamespace, Name: syncRequestName},
+	})
+	if err != nil {
+		t.Fatalf("Reconcile returned error: %v", err)
+	}
+	if result.RequeueAfter == 0 {
+		t.Error("Expected requeue while Cluster exists but remote client is missing")
+	}
+
+	got := &nc.VRF{}
+	if err := mgmtClient.Get(context.Background(), types.NamespacedName{Namespace: testPendingClusterNamespace, Name: "vrf-waiting"}, got); err != nil {
+		t.Fatalf("VRF should still exist while remote client is missing: %v", err)
+	}
+	foundFinalizer := false
+	for _, f := range got.Finalizers {
+		if f == finalizerName {
+			foundFinalizer = true
+			break
+		}
+	}
+	if !foundFinalizer {
+		t.Errorf("Expected finalizer to remain while Cluster exists but remote client is missing, got %v", got.Finalizers)
 	}
 }
 
@@ -1492,8 +1593,8 @@ func TestSyncBGPSecretsPreservesRemoteOwnershipMetadataOnUpdate(t *testing.T) {
 	if string(got.Data[testBGPPasswordKey]) != "new-secret" {
 		t.Errorf("Expected password to be updated, got %q", string(got.Data[testBGPPasswordKey]))
 	}
-	if _, ok := got.Data[testBGPExtraKey]; ok {
-		t.Errorf("Expected legacy Secret adoption to remove stale data key, got %v", got.Data)
+	if string(got.Data[testBGPExtraKey]) != "stale" {
+		t.Errorf("Expected legacy Secret adoption to preserve unknown data key, got %v", got.Data)
 	}
 	if got.Labels[testOwnershipManagedByLabel] != testHelmManager {
 		t.Errorf("Expected remote Helm managed-by label to be preserved, got %v", got.Labels)
@@ -1511,10 +1612,10 @@ func TestSyncBGPSecretsPreservesRemoteOwnershipMetadataOnUpdate(t *testing.T) {
 		t.Errorf("Expected remote Helm release namespace annotation to be preserved, got %v", got.Annotations)
 	}
 	if got.Labels[testStaleMetadataKey] != testStaleMetadataValue {
-		t.Errorf("Expected foreign non-ownership label to be preserved, got %v", got.Labels)
+		t.Errorf("Expected unknown remote label to be preserved during SSA adoption, got %v", got.Labels)
 	}
 	if got.Annotations[testStaleMetadataKey] != testStaleMetadataValue {
-		t.Errorf("Expected foreign non-ownership annotation to be preserved, got %v", got.Annotations)
+		t.Errorf("Expected unknown remote annotation to be preserved during SSA adoption, got %v", got.Annotations)
 	}
 	if got.Annotations[annotationSSAAdopted] != annotationSSAAdoptedValue {
 		t.Errorf("Expected legacy Secret to be marked as SSA adopted, got %v", got.Annotations)

@@ -223,12 +223,17 @@ func (r *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 	remoteClients := r.Remotes.GetByNamespace(req.Namespace)
 	if len(remoteClients) == 0 {
-		// No remote client — either the workload cluster's CAPI Cluster has been
-		// deleted (or never reached Ready). Drain our finalizer from any intent
-		// CRs that are mid-deletion; otherwise they would block forever waiting
-		// for a remote cluster that no longer exists.
-		if err := r.drainFinalizersForLostRemote(ctx, log, req.Namespace); err != nil {
+		clusterExists, err := r.remoteClusterExists(ctx, req.Namespace)
+		if err != nil {
 			return ctrl.Result{}, err
+		}
+		if !clusterExists {
+			// The workload cluster's CAPI Cluster is gone. Drain finalizers from
+			// intent CRs that are mid-deletion; otherwise they would block forever
+			// waiting for a workload cluster that no longer exists.
+			if err := r.drainFinalizersForLostRemote(ctx, log, req.Namespace); err != nil {
+				return ctrl.Result{}, err
+			}
 		}
 		// ClusterController hasn't set up a client (yet) — wait and retry.
 		return ctrl.Result{RequeueAfter: syncRequeueInterval}, nil
@@ -307,6 +312,17 @@ func (r *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	// Requeue so workload status changes are pulled back periodically; the
 	// controller does not watch the workload clusters.
 	return ctrl.Result{RequeueAfter: statusPollInterval}, nil
+}
+
+func (r *Controller) remoteClusterExists(ctx context.Context, namespace string) (bool, error) {
+	clusterList := &unstructured.UnstructuredList{}
+	gvk := capiClusterGVK
+	gvk.Kind = "ClusterList"
+	clusterList.SetGroupVersionKind(gvk)
+	if err := r.Client.List(ctx, clusterList, client.InNamespace(namespace)); err != nil {
+		return false, fmt.Errorf("listing CAPI Clusters in namespace %s: %w", namespace, err)
+	}
+	return len(clusterList.Items) > 0, nil
 }
 
 // drainFinalizersForLostRemote walks every intent CRD type in the namespace and
@@ -1041,15 +1057,22 @@ func (r *Controller) prepareApplyObject(obj client.Object) error {
 
 // overlayBody copies the source-of-truth payload from src onto dst without
 // touching dst's server-managed metadata (resourceVersion, UID, foreign labels,
-// etc.). For CRDs that means the Spec field; for Secrets it means Data/StringData
-// (Type is immutable after creation and is only set when unset).
+// etc.). For CRDs that means the Spec field; for Secrets it overlays Data so
+// workload-local keys survive SSA adoption.
 func overlayBody(dst, src client.Object) error {
 	if dstSecret, ok := dst.(*corev1.Secret); ok {
 		srcSecret, ok := src.(*corev1.Secret)
 		if !ok {
 			return fmt.Errorf("type mismatch overlaying %T onto *corev1.Secret", src)
 		}
-		dstSecret.Data = srcSecret.Data
+		data := make(map[string][]byte, len(dstSecret.Data)+len(srcSecret.Data))
+		for k, v := range dstSecret.Data {
+			data[k] = append([]byte(nil), v...)
+		}
+		for k, v := range srcSecret.Data {
+			data[k] = append([]byte(nil), v...)
+		}
+		dstSecret.Data = data
 		dstSecret.StringData = srcSecret.StringData
 		if dstSecret.Type == "" {
 			dstSecret.Type = srcSecret.Type
