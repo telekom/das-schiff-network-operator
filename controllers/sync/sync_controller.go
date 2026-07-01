@@ -1321,7 +1321,7 @@ func extractItems(list client.ObjectList) []client.Object {
 	}
 
 	out := make([]client.Object, items.Len())
-	for i := range items.Len() {
+	for i := 0; i < items.Len(); i++ {
 		obj, ok := items.Index(i).Addr().Interface().(client.Object)
 		if !ok {
 			return nil
