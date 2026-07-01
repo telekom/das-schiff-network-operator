@@ -415,6 +415,29 @@ func TestBuildApplyObjectOmitsStatusAndObjectMetadataNoise(t *testing.T) {
 	}
 }
 
+func TestBuildApplyObjectIncludesEmptySpecForNonSecretObjects(t *testing.T) {
+	desired := &unstructured.Unstructured{}
+	desired.SetGroupVersionKind(capiClusterGVK)
+	desired.SetName("empty-spec")
+	desired.SetNamespace(testClusterNamespace)
+	desired.SetLabels(map[string]string{labelManagedBy: labelManagedByValue})
+	desired.SetAnnotations(map[string]string{annotationSourceNS: testClusterNamespace})
+
+	sc, _ := newFakeSyncController(nil, nil)
+	applyObj, err := sc.buildApplyObject(desired)
+	if err != nil {
+		t.Fatalf("buildApplyObject failed: %v", err)
+	}
+
+	spec, ok := applyObj.Object["spec"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("Apply payload should contain empty spec map, got %T: %v", applyObj.Object["spec"], applyObj.Object["spec"])
+	}
+	if len(spec) != 0 {
+		t.Fatalf("Expected empty spec map, got %v", spec)
+	}
+}
+
 func TestSyncPreservesWorkloadLocalMetadataAfterSSAAdoption(t *testing.T) {
 	vrf := &nc.VRF{
 		ObjectMeta: metav1.ObjectMeta{
@@ -888,6 +911,28 @@ func TestSyncKeepsFinalizerWhenClusterExistsButRemoteClientMissing(t *testing.T)
 	}
 	if !foundFinalizer {
 		t.Errorf("Expected finalizer to remain while Cluster exists but remote client is missing, got %v", got.Finalizers)
+	}
+}
+
+func TestRemoteClusterExistsIgnoresDeletingClusters(t *testing.T) {
+	now := metav1.Now()
+	cluster := &unstructured.Unstructured{}
+	cluster.SetGroupVersionKind(capiClusterGVK)
+	cluster.SetName("workload")
+	cluster.SetNamespace(testPendingClusterNamespace)
+	cluster.SetDeletionTimestamp(&now)
+	cluster.SetFinalizers([]string{"cluster.x-k8s.io"})
+
+	s := testScheme()
+	mgmtClient := fake.NewClientBuilder().WithScheme(s).WithObjects(cluster).Build()
+	sc := &Controller{Client: mgmtClient}
+
+	exists, err := sc.remoteClusterExists(context.Background(), testPendingClusterNamespace)
+	if err != nil {
+		t.Fatalf("remoteClusterExists returned error: %v", err)
+	}
+	if exists {
+		t.Fatal("Expected deleting CAPI Cluster not to count as an active remote cluster")
 	}
 }
 
