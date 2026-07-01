@@ -1355,13 +1355,27 @@ func desiredObjectNames(items []client.Object) map[string]struct{} {
 }
 
 func newObjectListLike(list client.ObjectList) (client.ObjectList, error) {
-	t := reflect.TypeOf(list)
-	if t == nil || t.Kind() != reflect.Pointer {
+	elem, ok := pointerElementType(reflect.TypeOf(list))
+	if !ok {
 		return nil, fmt.Errorf("expected pointer ObjectList, got %T", list)
 	}
-	copyList, ok := reflect.New(t.Elem()).Interface().(client.ObjectList)
+	copyList, ok := reflect.New(elem).Interface().(client.ObjectList)
 	if !ok {
-		return nil, fmt.Errorf("new %s is not a client.ObjectList", t.Elem())
+		return nil, fmt.Errorf("new %s is not a client.ObjectList", elem)
 	}
 	return copyList, nil
+}
+
+func pointerElementType(t reflect.Type) (elem reflect.Type, ok bool) {
+	if t == nil {
+		return nil, false
+	}
+	defer func() {
+		if recover() != nil {
+			elem = nil
+			ok = false
+		}
+	}()
+	elem = t.Elem()
+	return elem, reflect.PointerTo(elem) == t
 }

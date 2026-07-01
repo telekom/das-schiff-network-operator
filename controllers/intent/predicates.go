@@ -47,7 +47,7 @@ func intentCRDPredicate() predicate.Predicate {
 			if e.ObjectOld.GetGeneration() != e.ObjectNew.GetGeneration() {
 				return true
 			}
-			if !reflect.DeepEqual(e.ObjectOld.GetLabels(), e.ObjectNew.GetLabels()) {
+			if !metadataEqualIgnoringKeys(e.ObjectOld.GetLabels(), e.ObjectNew.GetLabels(), nil) {
 				return true
 			}
 			return !metadataEqualIgnoringKeys(e.ObjectOld.GetAnnotations(), e.ObjectNew.GetAnnotations(), ownershipAnnotationKeys)
