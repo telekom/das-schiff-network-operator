@@ -180,17 +180,27 @@ func (r *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 }
 
 func (r *Controller) remoteClusterExists(ctx context.Context, namespace string) (bool, error) {
-	clusterList := &unstructured.UnstructuredList{}
-	clusterList.SetGroupVersionKind(capiClusterGVK)
-	if err := r.Client.List(ctx, clusterList, client.InNamespace(namespace)); err != nil {
-		return false, fmt.Errorf("listing CAPI Clusters in namespace %s: %w", namespace, err)
-	}
-	for i := range clusterList.Items {
-		if clusterList.Items[i].GetDeletionTimestamp().IsZero() {
-			return true, nil
+	continueToken := ""
+	for {
+		clusterList := &unstructured.UnstructuredList{}
+		clusterList.SetGroupVersionKind(capiClusterGVK)
+		opts := []client.ListOption{client.InNamespace(namespace), client.Limit(1)}
+		if continueToken != "" {
+			opts = append(opts, client.Continue(continueToken))
+		}
+		if err := r.Client.List(ctx, clusterList, opts...); err != nil {
+			return false, fmt.Errorf("listing CAPI Clusters in namespace %s: %w", namespace, err)
+		}
+		for i := range clusterList.Items {
+			if clusterList.Items[i].GetDeletionTimestamp().IsZero() {
+				return true, nil
+			}
+		}
+		continueToken = clusterList.GetContinue()
+		if continueToken == "" {
+			return false, nil
 		}
 	}
-	return false, nil
 }
 
 // drainFinalizersForLostRemote walks every intent CRD type in the namespace and
