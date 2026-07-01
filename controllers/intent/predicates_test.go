@@ -60,6 +60,15 @@ func TestIntentCRDPredicate_StatusOnlyUpdateIgnored(t *testing.T) {
 	}
 }
 
+func TestIntentCRDPredicate_EmptyLabelsMatchNilLabels(t *testing.T) {
+	p := intentCRDPredicate()
+	old := makeVRF("v1", 5, nil, nil)
+	updated := makeVRF("v1", 5, map[string]string{}, nil)
+	if p.Update(event.UpdateEvent{ObjectOld: old, ObjectNew: updated}) {
+		t.Fatalf("expected nil and empty label maps to be treated as equal")
+	}
+}
+
 func TestIntentCRDPredicate_GenerationBumpAccepted(t *testing.T) {
 	p := intentCRDPredicate()
 	old := makeVRF("v1", 5, nil, nil)
