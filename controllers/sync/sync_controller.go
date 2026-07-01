@@ -899,8 +899,11 @@ func (*Controller) applyRemote(ctx context.Context, remoteClient client.Client, 
 	if existing.GetLabels()[labelManagedBy] != labelManagedByValue {
 		return fmt.Errorf("remote object %s/%s exists but not managed by us", desired.GetNamespace(), desired.GetName())
 	}
-	if existingSourceNamespace := existing.GetAnnotations()[annotationSourceNS]; existingSourceNamespace != "" &&
-		existingSourceNamespace != desiredSourceNamespace {
+	existingSourceNamespace, hasSourceNamespace := existing.GetAnnotations()[annotationSourceNS]
+	// Older network-sync managed objects did not have annotationSourceNS yet.
+	// Adopt only that absent legacy value; reject explicit empty or mismatched
+	// values because they break the source namespace ownership boundary.
+	if hasSourceNamespace && existingSourceNamespace != desiredSourceNamespace {
 		return fmt.Errorf("remote object %s/%s belongs to source namespace %q, not %q",
 			desired.GetNamespace(), desired.GetName(), existingSourceNamespace, desiredSourceNamespace)
 	}
