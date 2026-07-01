@@ -11,6 +11,7 @@ import (
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -225,7 +226,6 @@ func (*Framework) applySingleObject(ctx context.Context, c client.Client, yamlDa
 		existing := obj.DeepCopy()
 		if err := c.Get(ctx, key, existing); err == nil {
 			obj.SetResourceVersion(existing.GetResourceVersion())
-			obj.SetUID(existing.GetUID())
 			if _, finalizersSet, err := unstructured.NestedStringSlice(obj.Object, "metadata", "finalizers"); err != nil {
 				return fmt.Errorf("decode finalizers for %s/%s: %w", obj.GetKind(), obj.GetName(), err)
 			} else if !finalizersSet {
@@ -238,7 +238,7 @@ func (*Framework) applySingleObject(ctx context.Context, c client.Client, yamlDa
 			}
 			return err
 		} else if !apierrors.IsNotFound(err) {
-			if isWebhookTransient(err) {
+			if meta.IsNoMatchError(err) || isWebhookTransient(err) {
 				time.Sleep(time.Duration(attempt+1) * 500 * time.Millisecond)
 				continue
 			}
