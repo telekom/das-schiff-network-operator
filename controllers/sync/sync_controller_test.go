@@ -1276,6 +1276,25 @@ func TestEnqueueForBGPSecretUsesAuthSecretRefIndex(t *testing.T) {
 	}
 }
 
+func TestEnqueueForBGPSecretFallsBackToNamespaceRequestOnListError(t *testing.T) {
+	s := testScheme()
+	sc := &Controller{
+		Client: fake.NewClientBuilder().WithScheme(s).Build(),
+		Scheme: s,
+		Log:    zap.New(zap.UseDevMode(true)),
+	}
+
+	requests := sc.enqueueForBGPSecret(context.Background(), &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: testBGPAuthSecretName, Namespace: testClusterNamespace},
+	})
+	if len(requests) != 1 {
+		t.Fatalf("Expected one fallback reconcile request, got %d", len(requests))
+	}
+	if requests[0].NamespacedName != (types.NamespacedName{Namespace: testClusterNamespace, Name: syncRequestName}) {
+		t.Fatalf("Unexpected fallback reconcile request: %v", requests[0].NamespacedName)
+	}
+}
+
 func TestBGPAuthSecretPredicateIgnoresMetadataOnlyUpdates(t *testing.T) {
 	pred := bgpAuthSecretPredicate()
 
