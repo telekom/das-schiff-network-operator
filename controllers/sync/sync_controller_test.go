@@ -444,6 +444,105 @@ func TestSyncMultipleCRDTypes(t *testing.T) {
 func ptrInt32(v int32) *int32    { return &v }
 func ptrString(v string) *string { return &v }
 
+// TestSyncPreservesForeignLabelsOnRemote is the core regression test for the
+// label war with Flux. A remote object we manage also carries a label set by a
+// GitOps controller on the workload cluster. Syncing must correct spec drift and
+// keep our managed-by label, while leaving the foreign label completely intact —
+// the patch helper only diffs the fields we changed, so it must never be sent.
+func TestSyncPreservesForeignLabelsOnRemote(t *testing.T) {
+	const fluxLabel = "kustomize.toolkit.fluxcd.io/name"
+
+	vrf := &nc.VRF{
+		ObjectMeta: metav1.ObjectMeta{Name: "vrf-m2m", Namespace: "test-cluster"},
+		Spec:       nc.VRFSpec{VRF: "m2m", VNI: ptrInt32(2002026), RouteTarget: ptrString("65188:2026")},
+	}
+
+	// Remote object is ours (managed-by label) but a workload-cluster Flux has
+	// also stamped its own inventory label on it, and the spec has drifted.
+	remote := &nc.VRF{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "vrf-m2m",
+			Namespace: testRemoteNamespace,
+			Labels: map[string]string{
+				labelManagedBy: labelManagedByValue,
+				fluxLabel:      "workload-apps",
+			},
+		},
+		Spec: nc.VRFSpec{VRF: "m2m", VNI: ptrInt32(9999), RouteTarget: ptrString("65188:2026")},
+	}
+
+	sc, remoteClient := newFakeSyncController([]client.Object{vrf}, []client.Object{remote})
+	ctx := context.Background()
+
+	if _, err := sc.Reconcile(ctx, ctrl.Request{
+		NamespacedName: types.NamespacedName{Namespace: "test-cluster", Name: "sync"},
+	}); err != nil {
+		t.Fatalf("Reconcile failed: %v", err)
+	}
+
+	got := &nc.VRF{}
+	if err := remoteClient.Get(ctx, types.NamespacedName{Namespace: testRemoteNamespace, Name: "vrf-m2m"}, got); err != nil {
+		t.Fatalf("Get remote VRF: %v", err)
+	}
+
+	// Spec drift corrected.
+	if got.Spec.VNI == nil || *got.Spec.VNI != 2002026 {
+		t.Errorf("Expected VNI 2002026 (drift corrected), got %v", got.Spec.VNI)
+	}
+	// Our managed-by label still present.
+	if got.Labels[labelManagedBy] != labelManagedByValue {
+		t.Errorf("managed-by label lost, got %v", got.Labels)
+	}
+	// The foreign Flux label must survive untouched — this is the whole point.
+	if got.Labels[fluxLabel] != "workload-apps" {
+		t.Errorf("foreign Flux label clobbered: got %v", got.Labels)
+	}
+}
+
+// TestSyncDoesNotPropagateFluxLabels verifies that GitOps inventory labels present
+// on the management-cluster source object are stripped and never land on the
+// remote copy, so a workload-cluster Flux does not adopt/prune our synced objects.
+func TestSyncDoesNotPropagateFluxLabels(t *testing.T) {
+	vrf := &nc.VRF{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "vrf-m2m",
+			Namespace: "test-cluster",
+			Labels: map[string]string{
+				"kustomize.toolkit.fluxcd.io/name":      "mgmt-intents",
+				"kustomize.toolkit.fluxcd.io/namespace": "flux-system",
+				"app.kubernetes.io/part-of":             "network", // legitimate, must propagate
+			},
+		},
+		Spec: nc.VRFSpec{VRF: "m2m", VNI: ptrInt32(2002026), RouteTarget: ptrString("65188:2026")},
+	}
+
+	sc, remoteClient := newFakeSyncController([]client.Object{vrf}, nil)
+	ctx := context.Background()
+
+	if _, err := sc.Reconcile(ctx, ctrl.Request{
+		NamespacedName: types.NamespacedName{Namespace: "test-cluster", Name: "sync"},
+	}); err != nil {
+		t.Fatalf("Reconcile failed: %v", err)
+	}
+
+	got := &nc.VRF{}
+	if err := remoteClient.Get(ctx, types.NamespacedName{Namespace: testRemoteNamespace, Name: "vrf-m2m"}, got); err != nil {
+		t.Fatalf("Get remote VRF: %v", err)
+	}
+
+	for k := range got.Labels {
+		if k == "kustomize.toolkit.fluxcd.io/name" || k == "kustomize.toolkit.fluxcd.io/namespace" {
+			t.Errorf("Flux inventory label %q was propagated to remote: %v", k, got.Labels)
+		}
+	}
+	if got.Labels["app.kubernetes.io/part-of"] != "network" {
+		t.Errorf("legitimate source label was not propagated, got %v", got.Labels)
+	}
+	if got.Labels[labelManagedBy] != labelManagedByValue {
+		t.Errorf("managed-by label missing, got %v", got.Labels)
+	}
+}
+
 // TestSyncBGPSecretsMirrorsReferencedSecret verifies that a Secret referenced
 // by a BGPPeering.spec.authSecretRef is copied into the remote namespace,
 // stamped with our managed-by label, and contains the same Data.
