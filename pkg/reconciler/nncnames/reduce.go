@@ -71,6 +71,12 @@ func reduceKeys[T any](m map[string]T) (map[string]T, error) {
 	origin := make(map[string]string, len(m))
 	for k, v := range m {
 		nk := vrfname.Reduce(k)
+		// Reduce is best-effort: an incompressible name can still exceed the
+		// limit. Fail early here so the reconciler surfaces it, rather than
+		// emitting a NodeNetworkConfig the datapath will reject (IFNAMSIZ).
+		if len(nk) > vrfname.MaxLen {
+			return nil, fmt.Errorf("VRF name %q cannot be reduced to fit the %d-character interface-name limit (best effort %q)", k, vrfname.MaxLen, nk)
+		}
 		if prev, dup := origin[nk]; dup {
 			return nil, fmt.Errorf("VRF names %q and %q both reduce to %q", prev, k, nk)
 		}

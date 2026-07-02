@@ -117,6 +117,25 @@ func TestReduce_CollisionIsError(t *testing.T) {
 	}
 }
 
+func TestReduce_IrreducibleKeyIsError(t *testing.T) {
+	// A long incompressible name (no removable vowels, no underscores) cannot be
+	// reduced to fit and must be reported rather than silently passed through.
+	irreducible := "wwwwwwwwxxxxxxxx" // 16, no vowels/underscores
+	if vrfname.CanReduce(irreducible) {
+		t.Skipf("test name unexpectedly reducible: %q", vrfname.Reduce(irreducible))
+	}
+	spec := &v1alpha1.NodeNetworkConfigSpec{
+		FabricVRFs: map[string]v1alpha1.FabricVRF{irreducible: {VNI: 1}},
+	}
+	err := Reduce(spec)
+	if err == nil {
+		t.Fatal("expected error for irreducible VRF key, got nil")
+	}
+	if !strings.Contains(err.Error(), "cannot be reduced") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
 func keysFabric(m map[string]v1alpha1.FabricVRF) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {
