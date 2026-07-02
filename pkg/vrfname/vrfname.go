@@ -25,6 +25,7 @@ package vrfname
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"strings"
 )
 
 // MaxLen is the maximum length of a reduced VRF name. It equals the usable
@@ -32,15 +33,22 @@ import (
 const MaxLen = 15
 
 // sbrPrefix prefixes the name of an SBR (source-based routing) intermediate
-// VRF. The name is always derived from a hash so that it is a fixed, short
-// length regardless of the (possibly long) source key.
+// VRF.
 const sbrPrefix = "s-"
 
-// SBRName returns the name of the SBR intermediate VRF for the given key. The
-// key is hashed so the result is always sbrPrefix + 8 hex chars = 10 bytes,
-// which fits within MaxLen for any input. It is deterministic: the same key
-// always yields the same name.
+// SBRName returns the name of the SBR intermediate VRF for the given key.
+//
+// For a single-VRF key that still fits within MaxLen it keeps the readable
+// "s-<key>" form. Otherwise (a key that would overflow MaxLen, or a multi-VRF
+// combo key which contains "+") it falls back to a hash: "s-<8 hex chars>" = 10
+// bytes, which always fits. It is deterministic: the same key always yields the
+// same name.
 func SBRName(key string) string {
+	if !strings.Contains(key, "+") {
+		if candidate := sbrPrefix + key; len(candidate) <= MaxLen {
+			return candidate
+		}
+	}
 	sum := sha256.Sum256([]byte(key))
 	return sbrPrefix + hex.EncodeToString(sum[:])[:8]
 }

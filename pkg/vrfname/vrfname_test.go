@@ -2,6 +2,29 @@ package vrfname
 
 import "testing"
 
+func TestSBRName(t *testing.T) {
+	// Short single-VRF keys stay readable.
+	if got := SBRName("blue"); got != "s-blue" {
+		t.Errorf("SBRName(short) = %q, want s-blue", got)
+	}
+	// A key whose "s-" form would exceed MaxLen is hashed down to fit.
+	long := SBRName("thirteen_chars_x") // "s-thirteen_chars_x" > 15
+	if len(long) > MaxLen {
+		t.Errorf("SBRName(long) = %q exceeds MaxLen", long)
+	}
+	if long[:2] != "s-" {
+		t.Errorf("SBRName(long) = %q must keep the s- prefix", long)
+	}
+	// Multi-VRF combo keys (containing '+') are always hashed, never readable.
+	combo := SBRName("blue+green")
+	if len(combo) > MaxLen || combo == "s-blue+green" {
+		t.Errorf("SBRName(combo) = %q should be a hashed name", combo)
+	}
+	if SBRName("blue+green") != combo {
+		t.Error("SBRName not deterministic")
+	}
+}
+
 func TestReduce_ShortNamesUnchanged(t *testing.T) {
 	// Anything already within MaxLen must pass through untouched.
 	cases := []string{

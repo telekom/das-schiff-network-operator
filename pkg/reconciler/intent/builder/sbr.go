@@ -223,10 +223,10 @@ func destinationSetKey(sel *metav1.LabelSelector, data *resolver.ResolvedData) s
 	return strings.Join(names, "+")
 }
 
-// intermediateVRFName returns the LocalVRF name for a group. The name is always
-// derived from a hash of the group key ("s-<8-char-hash>") so it is a fixed,
-// short length that fits within the Linux interface-name limit regardless of
-// how long the source VRF name(s) are.
+// intermediateVRFName returns the LocalVRF name for a group. Short single-VRF
+// keys keep the readable "s-<vrf>" form; keys that would overflow the interface
+// name limit and multi-VRF combo keys fall back to "s-<hash>". See
+// vrfname.SBRName.
 func intermediateVRFName(group *sbrGroup) string {
 	return vrfname.SBRName(group.key)
 }
