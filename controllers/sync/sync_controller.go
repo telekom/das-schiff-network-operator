@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -12,6 +13,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/cluster-api/util/patch"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -29,6 +31,17 @@ const (
 	labelManagedByValue = "network-sync"
 	annotationSourceNS  = "network-sync.telekom.com/source-namespace"
 )
+
+// gitOpsKeyPrefixes are label/annotation key prefixes owned by GitOps tooling
+// (Flux). They are stripped when building the remote object so the management
+// cluster's kustomization inventory metadata is never propagated to workload
+// clusters, where a local Flux would otherwise treat our synced objects as part
+// of its own inventory and continually fight us (or prune them).
+var gitOpsKeyPrefixes = []string{
+	"kustomize.toolkit.fluxcd.io/",
+	"helm.toolkit.fluxcd.io/",
+	"reconcile.fluxcd.io/",
+}
 
 const syncRequeueInterval = 10 * time.Second
 
@@ -232,18 +245,15 @@ func (r *Controller) buildRemoteObject(src client.Object, sourceNamespace string
 	dst.SetFinalizers(nil)      // Remote objects don't need our finalizer
 	dst.SetOwnerReferences(nil) // No cross-cluster owner refs
 
-	// Set sync labels/annotations.
-	labels := dst.GetLabels()
-	if labels == nil {
-		labels = make(map[string]string)
-	}
+	// Set sync labels/annotations. Strip GitOps (Flux) keys first so that the
+	// management cluster's kustomization inventory metadata is not carried over
+	// to the workload cluster; otherwise a Flux running there would claim our
+	// synced objects and the two controllers would fight over them.
+	labels := stripGitOpsKeys(dst.GetLabels())
 	labels[labelManagedBy] = labelManagedByValue
 	dst.SetLabels(labels)
 
-	annotations := dst.GetAnnotations()
-	if annotations == nil {
-		annotations = make(map[string]string)
-	}
+	annotations := stripGitOpsKeys(dst.GetAnnotations())
 	annotations[annotationSourceNS] = sourceNamespace
 	// Remove system annotations.
 	delete(annotations, "kubectl.kubernetes.io/last-applied-configuration")
@@ -309,7 +319,17 @@ func (*Controller) promoteIPAMAddresses(obj client.Object) {
 	}
 }
 
-// applyRemote creates or updates the object on the remote cluster.
+// applyRemote creates the object on the remote cluster if it does not yet exist,
+// otherwise it patches only the fields this controller owns (the spec/data plus
+// its own managed metadata) using the Cluster API patch helper.
+//
+// The patch helper snapshots the freshly fetched object, we then mutate that same
+// object in place, and Patch emits a minimal before→after merge patch. This is
+// what ends the label war with Flux: any label or annotation a GitOps controller
+// set on the remote object is part of the fetched "before" state, is never
+// touched, and therefore never appears in the emitted patch. The previous full
+// client.Update replaced the entire object and clobbered every label the sync
+// operator did not itself set, so Flux and the sync operator flapped forever.
 func (*Controller) applyRemote(ctx context.Context, remoteClient client.Client, desired client.Object) error {
 	existing, ok := desired.DeepCopyObject().(client.Object)
 	if !ok {
@@ -330,19 +350,102 @@ func (*Controller) applyRemote(ctx context.Context, remoteClient client.Client, 
 		return fmt.Errorf("getting remote object: %w", err)
 	}
 
-	// Verify we own this object.
-	labels := existing.GetLabels()
-	if labels[labelManagedBy] != labelManagedByValue {
+	// Verify we own this object before mutating it.
+	if existing.GetLabels()[labelManagedBy] != labelManagedByValue {
 		return fmt.Errorf("remote object %s/%s exists but not managed by us", desired.GetNamespace(), desired.GetName())
 	}
 
-	// Preserve remote resourceVersion for update.
-	desired.SetResourceVersion(existing.GetResourceVersion())
-	desired.SetUID(existing.GetUID())
-	if err := remoteClient.Update(ctx, desired); err != nil {
-		return fmt.Errorf("updating remote object %s/%s: %w", desired.GetNamespace(), desired.GetName(), err)
+	// Snapshot the fetched object, then mutate it in place so the patch helper
+	// only diffs the fields we actually change.
+	helper, err := patch.NewHelper(existing, remoteClient)
+	if err != nil {
+		return fmt.Errorf("creating patch helper for %s/%s: %w", desired.GetNamespace(), desired.GetName(), err)
+	}
+	if err := overlayBody(existing, desired); err != nil {
+		return fmt.Errorf("overlaying desired state onto %s/%s: %w", desired.GetNamespace(), desired.GetName(), err)
+	}
+	mergeManagedMetadata(existing, desired)
+
+	if err := helper.Patch(ctx, existing); err != nil {
+		return fmt.Errorf("patching remote object %s/%s: %w", desired.GetNamespace(), desired.GetName(), err)
 	}
 	return nil
+}
+
+// overlayBody copies the source-of-truth payload from src onto dst without
+// touching dst's server-managed metadata (resourceVersion, UID, foreign labels,
+// etc.). For CRDs that means the Spec field; for Secrets it means Data/StringData
+// (Type is immutable after creation and is only set when unset).
+func overlayBody(dst, src client.Object) error {
+	if dstSecret, ok := dst.(*corev1.Secret); ok {
+		srcSecret, ok := src.(*corev1.Secret)
+		if !ok {
+			return fmt.Errorf("type mismatch overlaying %T onto *corev1.Secret", src)
+		}
+		dstSecret.Data = srcSecret.Data
+		dstSecret.StringData = srcSecret.StringData
+		if dstSecret.Type == "" {
+			dstSecret.Type = srcSecret.Type
+		}
+		return nil
+	}
+
+	dstSpec := reflect.ValueOf(dst).Elem().FieldByName("Spec")
+	srcSpec := reflect.ValueOf(src).Elem().FieldByName("Spec")
+	if !dstSpec.IsValid() || !srcSpec.IsValid() {
+		return fmt.Errorf("object %T has no Spec field to overlay", dst)
+	}
+	if !dstSpec.CanSet() {
+		return fmt.Errorf("spec field on %T is not settable", dst)
+	}
+	dstSpec.Set(srcSpec)
+	return nil
+}
+
+// mergeManagedMetadata merges the labels and annotations this controller manages
+// (carried on src) into dst without removing keys owned by other actors. This
+// additive-only merge is the second half of the truce with Flux: we assert our
+// own managed-by label and source-namespace annotation, propagate legitimate
+// source labels, and leave every foreign key already on the remote untouched.
+func mergeManagedMetadata(dst, src client.Object) {
+	labels := dst.GetLabels()
+	if labels == nil {
+		labels = make(map[string]string)
+	}
+	for k, v := range src.GetLabels() {
+		labels[k] = v
+	}
+	dst.SetLabels(labels)
+
+	annotations := dst.GetAnnotations()
+	if annotations == nil {
+		annotations = make(map[string]string)
+	}
+	for k, v := range src.GetAnnotations() {
+		annotations[k] = v
+	}
+	dst.SetAnnotations(annotations)
+}
+
+// stripGitOpsKeys returns a copy of in with all GitOps-owned keys removed.
+func stripGitOpsKeys(in map[string]string) map[string]string {
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		if hasAnyPrefix(k, gitOpsKeyPrefixes) {
+			continue
+		}
+		out[k] = v
+	}
+	return out
+}
+
+func hasAnyPrefix(s string, prefixes []string) bool {
+	for _, p := range prefixes {
+		if strings.HasPrefix(s, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // deleteRemote removes the object from the remote cluster.
