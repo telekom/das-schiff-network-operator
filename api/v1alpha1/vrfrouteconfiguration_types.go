@@ -49,10 +49,8 @@ type VrfRouteConfigurationPrefixItem struct {
 // VRFRouteConfigurationSpec defines the desired state of VRFRouteConfiguration.
 type VRFRouteConfigurationSpec struct {
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:MaxLength=63
-	// VRF this configuration refers to. May be a readable name; the controller
-	// reduces it to a datapath-safe form (<=15 chars) and the webhook rejects
-	// names that cannot be reduced to fit.
+	// +kubebuilder:validation:MaxLength=12
+	// VRF this configuration refers to
 	VRF string `json:"vrf,omitempty"`
 
 	RouteTarget *string `json:"routeTarget,omitempty"`

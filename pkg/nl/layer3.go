@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"net"
 	"sort"
+	"strings"
+
+	"github.com/vishvananda/netlink"
 )
 
 const (
@@ -97,19 +100,54 @@ func (n *Manager) CleanupL3(info VRFInformation) []error {
 	}
 
 	errors := []error{}
-	// Bridge/VXLAN are named by VNI; only fabric VRFs (VNI != 0) have them.
-	if info.VNI != 0 {
-		if err := n.deleteLink(l3VXLANName(info.VNI)); err != nil {
-			errors = append(errors, err)
-		}
-		if err := n.deleteLink(l3BridgeName(info.VNI)); err != nil {
-			errors = append(errors, err)
+	// Delete every bridge/VXLAN enslaved to this VRF by walking the link list
+	// rather than reconstructing names. This removes the current VNI-named
+	// interfaces (br.<vni>/vx.<vni>) and also any legacy name-based interfaces
+	// (br.<vrf>/vx.<vrf>) left behind by an older agent, which would otherwise
+	// be orphaned when the VRF device is deleted.
+	if info.vrfID != 0 {
+		links, err := n.toolkit.LinkList()
+		if err != nil {
+			errors = append(errors, fmt.Errorf("error listing links: %w", err))
+		} else {
+			errors = append(errors, n.deleteL3Children(info.vrfID, links)...)
 		}
 	}
 	if err := n.deleteLink(info.Name); err != nil {
 		errors = append(errors, err)
 	}
 	return errors
+}
+
+// deleteL3Children deletes the L3VNI bridge(s) enslaved to the given VRF device
+// and the VXLAN(s) enslaved to those bridges, regardless of their naming scheme.
+func (n *Manager) deleteL3Children(vrfID int, links []netlink.Link) []error {
+	errs := []error{}
+	bridges := map[int]string{}
+	for _, link := range links {
+		if link.Type() == linkTypeBridge &&
+			strings.HasPrefix(link.Attrs().Name, bridgePrefix) &&
+			link.Attrs().MasterIndex == vrfID {
+			bridges[link.Attrs().Index] = link.Attrs().Name
+		}
+	}
+	// Delete VXLANs enslaved to those bridges first, then the bridges.
+	for _, link := range links {
+		if link.Type() != linkTypeVXLAN || !strings.HasPrefix(link.Attrs().Name, vxlanPrefix) {
+			continue
+		}
+		if _, ok := bridges[link.Attrs().MasterIndex]; ok {
+			if err := n.deleteLink(link.Attrs().Name); err != nil {
+				errs = append(errs, err)
+			}
+		}
+	}
+	for _, name := range bridges {
+		if err := n.deleteLink(name); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errs
 }
 
 func (n *Manager) findFreeTableID() (int, error) {

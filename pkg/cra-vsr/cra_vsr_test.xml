@@ -886,7 +886,7 @@
       </interface>
     </l3vrf>
     <l3vrf>
-      <name>s-e179a85e</name>
+      <name>s-m2m</name>
       <table-id>52</table-id>
       <routing xmlns="urn:6wind:vrouter/routing" nc:operation="replace">
         <static></static>
@@ -906,7 +906,7 @@
                 <import>
                   <l3vrf>cluster</l3vrf>
                   <l3vrf>m2m</l3vrf>
-                  <route-map>rm_s-e179a85e_import</route-map>
+                  <route-map>rm_s-m2m_import</route-map>
                 </import>
               </l3vrf>
             </ipv4-unicast>
@@ -921,7 +921,7 @@
                 <import>
                   <l3vrf>cluster</l3vrf>
                   <l3vrf>m2m</l3vrf>
-                  <route-map>rm_s-e179a85e_import</route-map>
+                  <route-map>rm_s-m2m_import</route-map>
                 </import>
               </l3vrf>
             </ipv6-unicast>
@@ -1463,14 +1463,14 @@
       </seq>
     </route-map>
     <route-map>
-      <name>rm_s-e179a85e_import</name>
+      <name>rm_s-m2m_import</name>
       <seq>
         <num>10</num>
         <policy>permit</policy>
         <match>
           <source-l3vrf>m2m</source-l3vrf>
         </match>
-        <call>rm_s-e179a85e_import_m2m</call>
+        <call>rm_s-m2m_import_m2m</call>
       </seq>
       <seq>
         <num>11</num>
@@ -1478,18 +1478,18 @@
         <match>
           <source-l3vrf>cluster</source-l3vrf>
         </match>
-        <call>rm_s-e179a85e_import_cluster</call>
+        <call>rm_s-m2m_import_cluster</call>
       </seq>
     </route-map>
     <route-map>
-      <name>rm_s-e179a85e_import_cluster</name>
+      <name>rm_s-m2m_import_cluster</name>
       <seq>
         <num>10</num>
         <policy>permit</policy>
       </seq>
     </route-map>
     <route-map>
-      <name>rm_s-e179a85e_import_m2m</name>
+      <name>rm_s-m2m_import_m2m</name>
       <seq>
         <num>10</num>
         <policy>permit</policy>

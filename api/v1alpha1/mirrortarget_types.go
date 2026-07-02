@@ -49,10 +49,9 @@ type MirrorTargetSpec struct {
 	TunnelKey *uint32 `json:"key,omitempty"`
 
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:MaxLength=12
 	// DestinationVrf is the VRF in which the GRE tunnel lives. It must be a
-	// user-created VRFRouteConfiguration (with VNI + route-target). It may be a
-	// readable name; the controller reduces it to a datapath-safe form.
+	// user-created VRFRouteConfiguration (with VNI + route-target).
 	DestinationVrf string `json:"destinationVrf"`
 
 	// +kubebuilder:validation:Required

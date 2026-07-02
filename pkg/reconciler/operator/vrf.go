@@ -7,7 +7,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
-	"github.com/telekom/das-schiff-network-operator/pkg/vrfname"
 )
 
 func (crr *ConfigRevisionReconciler) buildNodeVrf(node *corev1.Node, revision *v1alpha1.NetworkConfigRevision, c *v1alpha1.NodeNetworkConfig) error {
@@ -247,7 +246,7 @@ func dropStaticRouteImports(redistribute *v1alpha1.Redistribute, vrf *v1alpha1.V
 
 func updateLocalVRFs(localVrfs map[string]v1alpha1.VRF, clusterVrf *v1alpha1.VRF, vrf *v1alpha1.VRFRevision) {
 	if len(vrf.SBRPrefixes) > 0 {
-		sbrIntermediateName := vrfname.SBRName(vrf.VRF)
+		sbrIntermediateName := fmt.Sprintf("s-%s", vrf.VRF)
 		localVrfs[sbrIntermediateName] = v1alpha1.VRF{
 			VRFImports: []v1alpha1.VRFImport{
 				{

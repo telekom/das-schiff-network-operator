@@ -301,13 +301,23 @@ var _ = Describe("GetVRFInterfaceIdxByName()", func() {
 })
 
 var _ = Describe("CleanupL3()", func() {
+	// A VRF (index 10) with an enslaved bridge br.100 (index 11) and a vxlan
+	// vx.100 (master 11). Cleanup deletes the vxlan, the bridge and the VRF
+	// device: three LinkDel calls.
+	cleanupLinks := func() []netlink.Link {
+		return []netlink.Link{
+			&netlink.Bridge{LinkAttrs: netlink.LinkAttrs{Name: bridgePrefix + "100", Index: 11, MasterIndex: 10}},
+			&netlink.Vxlan{LinkAttrs: netlink.LinkAttrs{Name: vxlanPrefix + "100", Index: 12, MasterIndex: 11}},
+		}
+	}
 	It("returns non empty error slice if any errors occurred", func() {
 		mockctrl := gomock.NewController(GinkgoT())
 		defer mockctrl.Finish()
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
 		nm := NewManager(netlinkMock, &config.BaseConfig{})
+		netlinkMock.EXPECT().LinkList().Return(cleanupLinks(), nil)
 		netlinkMock.EXPECT().LinkDel(gomock.Any()).Return(errors.New("error deleting link")).Times(3)
-		err := nm.CleanupL3(VRFInformation{Name: "name", VNI: 100})
+		err := nm.CleanupL3(VRFInformation{Name: "name", vrfID: 10, VNI: 100})
 		Expect(err).ToNot(BeEmpty())
 	})
 	It("returns empty error slice if no errors occurred", func() {
@@ -315,8 +325,9 @@ var _ = Describe("CleanupL3()", func() {
 		defer mockctrl.Finish()
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
 		nm := NewManager(netlinkMock, &config.BaseConfig{})
+		netlinkMock.EXPECT().LinkList().Return(cleanupLinks(), nil)
 		netlinkMock.EXPECT().LinkDel(gomock.Any()).Return(nil).Times(3)
-		err := nm.CleanupL3(VRFInformation{Name: "name", VNI: 100})
+		err := nm.CleanupL3(VRFInformation{Name: "name", vrfID: 10, VNI: 100})
 		Expect(err).To(BeEmpty())
 	})
 	It("ignores EINVAL and ENODEV errors (link already gone)", func() {
@@ -324,8 +335,9 @@ var _ = Describe("CleanupL3()", func() {
 		defer mockctrl.Finish()
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
 		nm := NewManager(netlinkMock, &config.BaseConfig{})
+		netlinkMock.EXPECT().LinkList().Return(cleanupLinks(), nil)
 		netlinkMock.EXPECT().LinkDel(gomock.Any()).Return(unix.EINVAL).Times(3)
-		err := nm.CleanupL3(VRFInformation{Name: "name", VNI: 100})
+		err := nm.CleanupL3(VRFInformation{Name: "name", vrfID: 10, VNI: 100})
 		Expect(err).To(BeEmpty())
 	})
 })

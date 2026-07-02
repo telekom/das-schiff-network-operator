@@ -117,10 +117,10 @@ func (n *Manager) ListL3() ([]VRFInformation, error) {
 // VXLAN (vx.*) is enslaved to that bridge; the VNI is read back from the VXLAN.
 // This is master-index based (not name based) because bridge/VXLAN interfaces
 // are named by VNI, which is exactly what we are trying to discover.
-func (n *Manager) updateL3Indices(info *VRFInformation, links []netlink.Link) {
+func (*Manager) updateL3Indices(info *VRFInformation, links []netlink.Link) {
 	var bridge netlink.Link
 	for _, link := range links {
-		if link.Type() == "bridge" &&
+		if link.Type() == linkTypeBridge &&
 			strings.HasPrefix(link.Attrs().Name, bridgePrefix) &&
 			link.Attrs().MasterIndex == info.vrfID {
 			bridge = link
@@ -134,7 +134,7 @@ func (n *Manager) updateL3Indices(info *VRFInformation, links []netlink.Link) {
 	}
 
 	for _, link := range links {
-		if link.Type() == "vxlan" &&
+		if link.Type() == linkTypeVXLAN &&
 			strings.HasPrefix(link.Attrs().Name, vxlanPrefix) &&
 			link.Attrs().MasterIndex == bridge.Attrs().Index {
 			if vxlan, ok := link.(*netlink.Vxlan); ok {
@@ -184,7 +184,7 @@ func (n *Manager) updateL2Indices(info *Layer2Information, links []netlink.Link)
 
 func (*Manager) updateLink(info *Layer2Information, link netlink.Link) error {
 	// If subinterface is VXLAN
-	if link.Type() == "vxlan" && strings.HasPrefix(link.Attrs().Name, vxlanPrefix) {
+	if link.Type() == linkTypeVXLAN && strings.HasPrefix(link.Attrs().Name, vxlanPrefix) {
 		vxlan, ok := link.(*netlink.Vxlan)
 		if !ok {
 			return fmt.Errorf("error casting link %v as netlink.Vxlan", link)
@@ -217,7 +217,7 @@ func (n *Manager) ListL2() ([]Layer2Information, error) {
 	}
 
 	for _, link := range links {
-		if !(link.Type() == "bridge" && strings.HasPrefix(link.Attrs().Name, layer2SVI)) {
+		if !(link.Type() == linkTypeBridge && strings.HasPrefix(link.Attrs().Name, layer2SVI)) {
 			continue
 		}
 		info := Layer2Information{}
