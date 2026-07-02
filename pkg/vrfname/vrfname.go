@@ -36,13 +36,18 @@ const MaxLen = 15
 // VRF.
 const sbrPrefix = "s-"
 
+// sbrHashLen is the number of hex characters used for the hashed SBR name. It
+// is the largest value that still fits within MaxLen after the prefix, which
+// maximises collision resistance (sbrHashLen*4 bits) for free.
+const sbrHashLen = MaxLen - len(sbrPrefix)
+
 // SBRName returns the name of the SBR intermediate VRF for the given key.
 //
 // For a single-VRF key that still fits within MaxLen it keeps the readable
 // "s-<key>" form. Otherwise (a key that would overflow MaxLen, or a multi-VRF
-// combo key which contains "+") it falls back to a hash: "s-<8 hex chars>" = 10
-// bytes, which always fits. It is deterministic: the same key always yields the
-// same name.
+// combo key which contains "+") it falls back to a hash: "s-<hash>", sized to
+// fill MaxLen exactly. It is deterministic: the same key always yields the same
+// name.
 func SBRName(key string) string {
 	if !strings.Contains(key, "+") {
 		if candidate := sbrPrefix + key; len(candidate) <= MaxLen {
@@ -50,7 +55,7 @@ func SBRName(key string) string {
 		}
 	}
 	sum := sha256.Sum256([]byte(key))
-	return sbrPrefix + hex.EncodeToString(sum[:])[:8]
+	return sbrPrefix + hex.EncodeToString(sum[:])[:sbrHashLen]
 }
 
 // Reduce shortens name to at most MaxLen bytes using the cascade described in

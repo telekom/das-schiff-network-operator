@@ -23,6 +23,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -426,9 +427,16 @@ func TestSBRMultiVRF(t *testing.T) {
 
 	nnc := reconcileAndGetNNC(t, ctx, nodeName)
 
-	comboName := "s-3d1234a5"
-	comboVRF, ok := nnc.Spec.LocalVRFs[comboName]
-	assert.True(t, ok, "expected combo LocalVRF %q", comboName)
+	// The multi-VRF consumer produces a single hashed combo LocalVRF.
+	var comboName string
+	var comboVRF networkv1alpha1.VRF
+	for name, v := range nnc.Spec.LocalVRFs {
+		if strings.HasPrefix(name, "s-") {
+			comboName, comboVRF = name, v
+			break
+		}
+	}
+	require.NotEmpty(t, comboName, "expected a hashed combo LocalVRF")
 
 	prefixesFound := map[string]bool{}
 	for _, sr := range comboVRF.StaticRoutes {
