@@ -40,6 +40,7 @@ import (
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/builder"
+	"github.com/telekom/das-schiff-network-operator/pkg/vrfname"
 )
 
 var (
@@ -382,8 +383,8 @@ func TestSBRSingleVRF(t *testing.T) {
 
 	nnc := reconcileAndGetNNC(t, ctx, nodeName)
 
-	_, ok := nnc.Spec.LocalVRFs["s-sbrm"]
-	assert.True(t, ok, "expected LocalVRF 's-sbrm' (SBR intermediate VRF, keyed by backbone VRF name)")
+	_, ok := nnc.Spec.LocalVRFs[vrfname.SBRName("sbrm")]
+	assert.True(t, ok, "expected SBR intermediate LocalVRF (hashed from backbone VRF name)")
 
 	// ClusterVRF should have PolicyRoutes for SBR
 	require.NotNil(t, nnc.Spec.ClusterVRF, "expected ClusterVRF to be set for SBR")

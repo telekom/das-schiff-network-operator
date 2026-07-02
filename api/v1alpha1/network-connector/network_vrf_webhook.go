@@ -26,6 +26,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
+
+	"github.com/telekom/das-schiff-network-operator/pkg/vrfname"
 )
 
 var (
@@ -128,6 +130,9 @@ func (*VRF) ValidateDelete(_ context.Context, r *VRF) (admission.Warnings, error
 func (r *VRF) validateVRF() error {
 	if r.Spec.VRF == "" {
 		return fmt.Errorf("spec.vrf must not be empty")
+	}
+	if !vrfname.CanReduce(r.Spec.VRF) {
+		return fmt.Errorf("spec.vrf %q cannot be reduced to fit the %d-character interface-name limit", r.Spec.VRF, vrfname.MaxLen)
 	}
 	if r.Spec.VNI != nil && *r.Spec.VNI <= 0 {
 		return fmt.Errorf("vni must be > 0, got %d", *r.Spec.VNI)

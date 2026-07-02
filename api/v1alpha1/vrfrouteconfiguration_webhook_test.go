@@ -17,11 +17,28 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"context"
 	"testing"
 )
 
 func intPtr(i int) *int {
 	return &i
+}
+
+func TestVRFRouteConfigurationValidateCreate_ReducibleVRF(t *testing.T) {
+	// A readable name longer than 15 chars that still reduces to fit is accepted.
+	r := &VRFRouteConfiguration{Spec: VRFRouteConfigurationSpec{VRF: "payment_gateway_worker"}}
+	if _, err := r.ValidateCreate(context.Background(), r); err != nil {
+		t.Fatalf("expected reducible VRF name to be accepted, got %v", err)
+	}
+}
+
+func TestVRFRouteConfigurationValidateCreate_IrreducibleVRF(t *testing.T) {
+	// A long incompressible name (no removable vowels / underscores) is rejected.
+	r := &VRFRouteConfiguration{Spec: VRFRouteConfigurationSpec{VRF: "wwwwwwwwxxxxxxxx"}}
+	if _, err := r.ValidateCreate(context.Background(), r); err == nil {
+		t.Fatal("expected error for irreducible VRF name, got nil")
+	}
 }
 
 func TestFindDuplicates(t *testing.T) {

@@ -24,6 +24,7 @@ import (
 	"github.com/telekom/das-schiff-network-operator/pkg/config"
 	"github.com/telekom/das-schiff-network-operator/pkg/debounce"
 	"github.com/telekom/das-schiff-network-operator/pkg/network/netplan"
+	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/nncnames"
 )
 
 const (
@@ -456,6 +457,12 @@ func (crr *ConfigRevisionReconciler) CreateNodeNetworkConfig(ctx context.Context
 	}
 	if err := crr.buildNodeMirror(ctx, node, revision, c); err != nil {
 		return nil, fmt.Errorf("error building node mirror config: %w", err)
+	}
+
+	// Reduce all VRF names (map keys and cross-references) to their
+	// datapath-safe form before the config is persisted and hashed.
+	if err := nncnames.Reduce(&c.Spec); err != nil {
+		return nil, fmt.Errorf("error reducing VRF names: %w", err)
 	}
 
 	c.Spec.Revision = revision.Spec.Revision

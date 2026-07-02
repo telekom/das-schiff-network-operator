@@ -121,7 +121,7 @@ func appendMirrorVRFConfig(netlinkConfig *nl.NetlinkConfiguration, vrfName strin
 		})
 	}
 
-	source := nl.MirrorSourceVRF(vrfName)
+	source := nl.MirrorSourceVRF(vrf.VNI)
 	for j := range vrf.MirrorACLs {
 		netlinkConfig.Mirrors = append(netlinkConfig.Mirrors, convertMirrorACL(&vrf.MirrorACLs[j], source, false))
 	}

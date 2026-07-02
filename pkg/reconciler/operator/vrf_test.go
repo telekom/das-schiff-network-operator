@@ -10,6 +10,7 @@ import (
 
 	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/pkg/config"
+	"github.com/telekom/das-schiff-network-operator/pkg/vrfname"
 )
 
 const (
@@ -147,7 +148,7 @@ var _ = Describe("VRF building", func() {
 			c := &v1alpha1.NodeNetworkConfig{}
 			err := crr.buildNodeVrf(node, revision, c)
 			Expect(err).ToNot(HaveOccurred())
-			Expect(c.Spec.LocalVRFs).To(HaveKey("s-tenant-a"))
+			Expect(c.Spec.LocalVRFs).To(HaveKey(vrfname.SBRName("tenant-a")))
 			Expect(c.Spec.ClusterVRF.PolicyRoutes).To(HaveLen(1))
 		})
 
@@ -352,8 +353,8 @@ var _ = Describe("VRF building", func() {
 
 			updateLocalVRFs(localVRFs, clusterVRF, vrf)
 
-			Expect(localVRFs).To(HaveKey("s-tenant-a"))
-			sbrVRF := localVRFs["s-tenant-a"]
+			Expect(localVRFs).To(HaveKey(vrfname.SBRName("tenant-a")))
+			sbrVRF := localVRFs[vrfname.SBRName("tenant-a")]
 			Expect(sbrVRF.VRFImports).To(HaveLen(2))
 			Expect(clusterVRF.PolicyRoutes).To(HaveLen(2))
 			Expect(*clusterVRF.PolicyRoutes[0].TrafficMatch.SrcPrefix).To(Equal(sbrPrefix1))

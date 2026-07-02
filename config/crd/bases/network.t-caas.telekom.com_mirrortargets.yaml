@@ -65,8 +65,9 @@ spec:
               destinationVrf:
                 description: |-
                   DestinationVrf is the VRF in which the GRE tunnel lives. It must be a
-                  user-created VRFRouteConfiguration (with VNI + route-target).
-                maxLength: 12
+                  user-created VRFRouteConfiguration (with VNI + route-target). It may be a
+                  readable name; the controller reduces it to a datapath-safe form.
+                maxLength: 63
                 type: string
               key:
                 description: TunnelKey is an optional GRE encapsulation key.

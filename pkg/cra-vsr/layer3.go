@@ -25,7 +25,10 @@ import (
 )
 
 const (
-	maxVRFnameLen = 12
+	// maxVRFnameLen is the maximum length of a VRF name. Bridge/VXLAN interfaces
+	// are named by VNI (not by VRF name), so the VRF device name itself is the
+	// only remaining constraint: the Linux interface-name limit (IFNAMSIZ-1).
+	maxVRFnameLen = 15
 )
 
 type Layer3 struct {
@@ -240,18 +243,18 @@ func (l *Layer3) setupLoopback(vrf *VRF, name string, conf v1alpha1.Loopback) {
 
 func (l *Layer3) setupVRF(info InfoL3) error {
 	if len(info.name) > maxVRFnameLen {
-		return fmt.Errorf("VRF name too long (max 12): %s", info.name)
+		return fmt.Errorf("VRF name too long (max %d): %s", maxVRFnameLen, info.name)
 	}
 
 	vrf := l.mgr.createVRF(info.name, info.tid, l.ns)
 
 	if info.vni != -1 {
 		br := l.mgr.createBridge(
-			(bridgePrefix + info.name), "", vrf.Interfaces,
+			l3BridgeName(info.name, info.vni), "", vrf.Interfaces,
 			info.mtu, true, false)
 
 		l.mgr.createVXLAN(
-			(vxlanPrefix + info.name), br, l.ns.Interfaces,
+			l3VXLANName(info.name, info.vni), br, l.ns.Interfaces,
 			info.vni, info.mtu, true, false)
 	}
 
@@ -265,7 +268,7 @@ func (l *Layer3) setupVRF(info InfoL3) error {
 
 		if info.vni != -1 || l.mgr.isReservedVRF(info.name) {
 			for i := range info.vrf.MirrorACLs {
-				from := (vxlanPrefix + info.name)
+				from := l3VXLANName(info.name, info.vni)
 				// The VXLAN port faces the fabric, so the workload-perspective
 				// direction maps naturally (no inversion).
 				direction := string(info.vrf.MirrorACLs[i].Direction)
@@ -275,6 +278,26 @@ func (l *Layer3) setupVRF(info InfoL3) error {
 	}
 
 	return nil
+}
+
+// l3BridgeName returns the bridge interface name for an L3VNI VRF. Fabric VRFs
+// (vni != -1) are named by VNI so the VRF name itself is not constrained by the
+// Linux interface-name length limit. Reserved VRFs (vni == -1, cluster/mgmt)
+// keep their externally-provisioned name-based interface.
+func l3BridgeName(name string, vni int) string {
+	if vni == -1 {
+		return bridgePrefix + name
+	}
+	return fmt.Sprintf("%s%d", bridgePrefix, vni)
+}
+
+// l3VXLANName returns the VXLAN interface name for an L3VNI VRF. See
+// l3BridgeName for the naming rationale.
+func l3VXLANName(name string, vni int) string {
+	if vni == -1 {
+		return vxlanPrefix + name
+	}
+	return fmt.Sprintf("%s%d", vxlanPrefix, vni)
 }
 
 func (l *Layer3) setup() error {

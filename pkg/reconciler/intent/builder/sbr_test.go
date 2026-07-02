@@ -29,6 +29,7 @@ import (
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/resolver"
+	"github.com/telekom/das-schiff-network-operator/pkg/vrfname"
 )
 
 func ptrString(s string) *string { return &s }
@@ -87,8 +88,8 @@ func TestSBRBuilder_BasicOutbound(t *testing.T) {
 	contrib := result["worker-1"]
 
 	// Should have intermediate LocalVRF s-internet (keyed by backbone VRF name).
-	require.Contains(t, contrib.LocalVRFs, "s-internet")
-	localVRF := contrib.LocalVRFs["s-internet"]
+	require.Contains(t, contrib.LocalVRFs, vrfname.SBRName("internet"))
+	localVRF := contrib.LocalVRFs[vrfname.SBRName("internet")]
 
 	// Cluster VRF import for internal reachability.
 	require.Len(t, localVRF.VRFImports, 1)
@@ -107,7 +108,7 @@ func TestSBRBuilder_BasicOutbound(t *testing.T) {
 	pr := contrib.ClusterVRF.PolicyRoutes[0]
 	assert.Equal(t, "198.51.100.10/32", *pr.TrafficMatch.SrcPrefix)
 	assert.Nil(t, pr.TrafficMatch.DstPrefix, "single-VRF should use source-only matching")
-	assert.Equal(t, "s-internet", *pr.NextHop.Vrf)
+	assert.Equal(t, vrfname.SBRName("internet"), *pr.NextHop.Vrf)
 }
 
 func TestSBRBuilder_InboundWithStatusAddresses(t *testing.T) {
@@ -318,7 +319,7 @@ func TestSBRBuilder_MultiConsumerMerge(t *testing.T) {
 
 	// Only ONE intermediate VRF (same destination VRF).
 	require.Len(t, contrib.LocalVRFs, 1)
-	require.Contains(t, contrib.LocalVRFs, "s-internet")
+	require.Contains(t, contrib.LocalVRFs, vrfname.SBRName("internet"))
 
 	// TWO PolicyRoutes (one per source prefix, merged from both consumers).
 	require.Len(t, contrib.ClusterVRF.PolicyRoutes, 2)

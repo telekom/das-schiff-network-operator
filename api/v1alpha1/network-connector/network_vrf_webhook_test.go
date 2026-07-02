@@ -214,6 +214,22 @@ func TestVRFValidateCreate_EmptyVRFName(t *testing.T) {
 	}
 }
 
+func TestVRFValidateCreate_ReducibleLongName(t *testing.T) {
+	// A readable name longer than 15 chars that still reduces to fit is accepted.
+	v := &VRF{Spec: VRFSpec{VRF: "payment_gateway_worker"}}
+	if _, err := v.ValidateCreate(context.Background(), v); err != nil {
+		t.Fatalf("expected reducible long name to be accepted, got %v", err)
+	}
+}
+
+func TestVRFValidateCreate_IrreducibleName(t *testing.T) {
+	// A long incompressible name (no removable vowels / underscores) is rejected.
+	v := &VRF{Spec: VRFSpec{VRF: "wwwwwwwwxxxxxxxx"}}
+	if _, err := v.ValidateCreate(context.Background(), v); err == nil {
+		t.Fatal("expected error for irreducible VRF name, got nil")
+	}
+}
+
 func TestVRFValidateCreate_VNIZero(t *testing.T) {
 	v := &VRF{Spec: VRFSpec{VRF: "prod", VNI: int32Ptr(0)}}
 	if _, err := v.ValidateCreate(context.Background(), v); err == nil {

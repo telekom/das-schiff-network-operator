@@ -23,9 +23,12 @@ import (
 // VRFSpec defines the desired state of VRF.
 // +kubebuilder:validation:XValidation:rule="self.vrf == oldSelf.vrf",message="vrf is immutable"
 type VRFSpec struct {
-	// VRF is the name of the VRF in the backbone.
+	// VRF is the name of the VRF in the backbone. It may be a readable name; the
+	// controller reduces it to a datapath-safe form (<=15 chars). The webhook
+	// rejects names that cannot be reduced to fit. The generous upper bound here
+	// is only a sanity limit.
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:MaxLength=12
+	// +kubebuilder:validation:MaxLength=63
 	VRF string `json:"vrf"`
 
 	// VNI is the VXLAN Network Identifier. When omitted, the controller resolves it from operator config.

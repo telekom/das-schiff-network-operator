@@ -214,8 +214,11 @@ spec:
               vni:
                 type: integer
               vrf:
-                description: VRF this configuration refers to
-                maxLength: 12
+                description: |-
+                  VRF this configuration refers to. May be a readable name; the controller
+                  reduces it to a datapath-safe form (<=15 chars) and the webhook rejects
+                  names that cannot be reduced to fit.
+                maxLength: 63
                 type: string
             required:
             - export
