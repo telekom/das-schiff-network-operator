@@ -1,3 +1,10 @@
+# Intent BGP listenRange test.
+# The BIRD pod (bird-pod.yaml) peers with CRA-FRR on VLAN 501 (m2m VRF) as
+# AS 65100 and announces 10.250.3.1/32 and fd75:2d70:f7f7::1/128.
+# The listen-range CIDR comes from the L2A's Network (net-vlan501); the
+# import allow-list + EVPN export come from the BGPPeering's networkRefs
+# (net-bgp-clients), which must contain the prefixes BIRD announces.
+# No Inbound is involved — listenRange no longer allocates MetalLB pools.
 apiVersion: network-connector.sylvaproject.org/v1alpha1
 kind: Layer2Attachment
 metadata:
@@ -9,21 +16,17 @@ spec:
     matchLabels:
       type: gateway
 ---
+# Network whose CIDRs L2 clients on VLAN 501 are permitted to announce.
 apiVersion: network-connector.sylvaproject.org/v1alpha1
-kind: Inbound
+kind: Network
 metadata:
-  name: ib-bgp
+  name: net-bgp-clients
   namespace: default
 spec:
-  networkRef: "net-vlan501"
-  destinations:
-    matchLabels:
-      type: gateway
-  addresses:
-    ipv4:
-      - "10.250.0.50/32"
-  advertisement:
-    type: bgp
+  ipv4:
+    cidr: "10.250.3.0/24"
+  ipv6:
+    cidr: "fd75:2d70:f7f7::/64"
 ---
 apiVersion: network-connector.sylvaproject.org/v1alpha1
 kind: BGPPeering
@@ -34,6 +37,6 @@ spec:
   mode: listenRange
   ref:
     attachmentRef: "l2a-bgp"
-    inboundRefs:
-      - "ib-bgp"
+    networkRefs:
+      - "net-bgp-clients"
   workloadAS: 65100

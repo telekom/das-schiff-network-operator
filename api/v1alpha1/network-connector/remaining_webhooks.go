@@ -77,17 +77,26 @@ func (r *BGPPeering) validateBGPPeering() error {
 	if r.Spec.Mode != BGPPeeringModeListenRange && r.Spec.Mode != BGPPeeringModeLoopbackPeer {
 		return fmt.Errorf("spec.mode must be %q or %q, got %q", BGPPeeringModeListenRange, BGPPeeringModeLoopbackPeer, r.Spec.Mode)
 	}
-	if len(r.Spec.Ref.InboundRefs) == 0 {
-		return fmt.Errorf("spec.ref.inboundRefs must not be empty")
-	}
 	if r.Spec.Mode == BGPPeeringModeListenRange {
 		if r.Spec.Ref.AttachmentRef == nil || *r.Spec.Ref.AttachmentRef == "" {
 			return fmt.Errorf("spec.ref.attachmentRef is required for listenRange mode")
 		}
+		if len(r.Spec.Ref.NetworkRefs) == 0 {
+			return fmt.Errorf("spec.ref.networkRefs must not be empty for listenRange mode")
+		}
+		if len(r.Spec.Ref.InboundRefs) != 0 {
+			return fmt.Errorf("spec.ref.inboundRefs must not be set for listenRange mode")
+		}
 	}
 	if r.Spec.Mode == BGPPeeringModeLoopbackPeer {
+		if len(r.Spec.Ref.InboundRefs) == 0 {
+			return fmt.Errorf("spec.ref.inboundRefs must not be empty for loopbackPeer mode")
+		}
 		if r.Spec.Ref.AttachmentRef != nil {
 			return fmt.Errorf("spec.ref.attachmentRef must not be set for loopbackPeer mode")
+		}
+		if len(r.Spec.Ref.NetworkRefs) != 0 {
+			return fmt.Errorf("spec.ref.networkRefs must not be set for loopbackPeer mode")
 		}
 	}
 	return nil

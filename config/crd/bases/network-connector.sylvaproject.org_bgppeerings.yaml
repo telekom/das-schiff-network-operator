@@ -140,20 +140,30 @@ spec:
                   attachmentRef:
                     description: |-
                       AttachmentRef references a Layer2Attachment by name.
-                      Required for listenRange mode — identifies the L2 segment for the BGP listen-range.
-                      Must not be set for loopbackPeer mode.
+                      Required for listenRange mode — identifies the L2 segment the BGP
+                      listen-range is opened on (the listen-range CIDR comes from the L2A's
+                      Network). Must not be set for loopbackPeer mode.
                     type: string
                   inboundRefs:
                     description: |-
-                      InboundRefs references Inbound resources whose IP pools are accepted/advertised.
-                      Required for both modes: listenRange uses them as prefix filters,
-                      loopbackPeer advertises VIPs from these pools.
+                      InboundRefs references Inbound resources whose IP pools the tenant
+                      advertises (BGPaaS). Required for loopbackPeer mode; must not be set
+                      for listenRange mode.
                     items:
                       type: string
                     minItems: 1
                     type: array
-                required:
-                - inboundRefs
+                  networkRefs:
+                    description: |-
+                      NetworkRefs references Network resources by name. For listenRange mode
+                      their CIDRs form the import allow-list: L2 clients may only announce
+                      prefixes contained within these Networks (matched with le 32 / le 128),
+                      and those prefixes are re-exported into the EVPN fabric.
+                      Required for listenRange mode; must not be set for loopbackPeer mode.
+                    items:
+                      type: string
+                    minItems: 1
+                    type: array
                 type: object
               workloadAS:
                 description: |-
@@ -173,6 +183,14 @@ spec:
                 for loopbackPeer mode
               rule: 'self.mode == ''listenRange'' ? has(self.ref.attachmentRef) :
                 !has(self.ref.attachmentRef)'
+            - message: networkRefs is required for listenRange mode and forbidden
+                for loopbackPeer mode
+              rule: 'self.mode == ''listenRange'' ? (has(self.ref.networkRefs) &&
+                size(self.ref.networkRefs) > 0) : !has(self.ref.networkRefs)'
+            - message: inboundRefs is required for loopbackPeer mode and forbidden
+                for listenRange mode
+              rule: 'self.mode == ''loopbackPeer'' ? (has(self.ref.inboundRefs) &&
+                size(self.ref.inboundRefs) > 0) : !has(self.ref.inboundRefs)'
           status:
             description: BGPPeeringStatus defines the observed state of BGPPeering.
             properties:

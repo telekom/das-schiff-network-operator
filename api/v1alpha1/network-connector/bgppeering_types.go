@@ -37,25 +37,41 @@ const (
 )
 
 // BGPPeeringRef identifies the resources this peering session relates to.
-// inboundRefs is always required (both modes need IP pools).
-// attachmentRef is required for listenRange mode only.
+// The reference kind is mode-specific and mutually exclusive:
+//   - listenRange requires attachmentRef (the L2 segment to listen on) and
+//     networkRefs (the Networks whose prefixes L2 clients may announce);
+//     inboundRefs must not be set.
+//   - loopbackPeer requires inboundRefs (the allocated VIP pools the tenant
+//     advertises); attachmentRef and networkRefs must not be set.
 type BGPPeeringRef struct {
 	// AttachmentRef references a Layer2Attachment by name.
-	// Required for listenRange mode — identifies the L2 segment for the BGP listen-range.
-	// Must not be set for loopbackPeer mode.
+	// Required for listenRange mode — identifies the L2 segment the BGP
+	// listen-range is opened on (the listen-range CIDR comes from the L2A's
+	// Network). Must not be set for loopbackPeer mode.
 	// +optional
 	AttachmentRef *string `json:"attachmentRef,omitempty"`
 
-	// InboundRefs references Inbound resources whose IP pools are accepted/advertised.
-	// Required for both modes: listenRange uses them as prefix filters,
-	// loopbackPeer advertises VIPs from these pools.
-	// +kubebuilder:validation:Required
+	// NetworkRefs references Network resources by name. For listenRange mode
+	// their CIDRs form the import allow-list: L2 clients may only announce
+	// prefixes contained within these Networks (matched with le 32 / le 128),
+	// and those prefixes are re-exported into the EVPN fabric.
+	// Required for listenRange mode; must not be set for loopbackPeer mode.
+	// +optional
 	// +kubebuilder:validation:MinItems=1
-	InboundRefs []string `json:"inboundRefs"`
+	NetworkRefs []string `json:"networkRefs,omitempty"`
+
+	// InboundRefs references Inbound resources whose IP pools the tenant
+	// advertises (BGPaaS). Required for loopbackPeer mode; must not be set
+	// for listenRange mode.
+	// +optional
+	// +kubebuilder:validation:MinItems=1
+	InboundRefs []string `json:"inboundRefs,omitempty"`
 }
 
 // BGPPeeringSpec defines the desired state of BGPPeering.
 // +kubebuilder:validation:XValidation:rule="self.mode == 'listenRange' ? has(self.ref.attachmentRef) : !has(self.ref.attachmentRef)",message="attachmentRef is required for listenRange mode and forbidden for loopbackPeer mode"
+// +kubebuilder:validation:XValidation:rule="self.mode == 'listenRange' ? (has(self.ref.networkRefs) && size(self.ref.networkRefs) > 0) : !has(self.ref.networkRefs)",message="networkRefs is required for listenRange mode and forbidden for loopbackPeer mode"
+// +kubebuilder:validation:XValidation:rule="self.mode == 'loopbackPeer' ? (has(self.ref.inboundRefs) && size(self.ref.inboundRefs) > 0) : !has(self.ref.inboundRefs)",message="inboundRefs is required for loopbackPeer mode and forbidden for listenRange mode"
 type BGPPeeringSpec struct {
 	// Mode selects the peering type: listenRange (L2 attachment BGP) or loopbackPeer (BGPaaS).
 	// Immutable after creation.

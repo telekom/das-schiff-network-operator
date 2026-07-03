@@ -10,7 +10,7 @@ import (
 	"github.com/telekom/das-schiff-network-operator/e2etests/framework"
 )
 
-// Intent-based BGP Peering test using BGPPeering, Layer2Attachment, and Inbound CRDs.
+// Intent-based BGP Peering test using BGPPeering, Layer2Attachment, and Network CRDs.
 // Validates that intent CRDs can be applied alongside legacy config without conflict.
 // Full pipeline validation is in Tier 1 envtest (pkg/reconciler/intent/reconciler_test.go).
 var _ = Describe("Intent BGP Peering", Label("intent", "bgp"), func() {
@@ -39,7 +39,7 @@ var _ = Describe("Intent BGP Peering", Label("intent", "bgp"), func() {
 	It("should accept BGPPeering intent CRDs without breaking existing connectivity", func() {
 		cfg := f.Config
 
-		By("Applying intent BGP manifests (L2A + Inbound + BGPPeering)")
+		By("Applying intent BGP manifests (L2A + Network + BGPPeering)")
 		manifest, err := readTestdata("intent/bgp/manifests.yaml")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(f.ApplyManifest(ctx, manifest)).To(Succeed())

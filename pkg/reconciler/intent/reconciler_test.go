@@ -606,16 +606,16 @@ func TestBGPPeeringListenRange(t *testing.T) {
 	createObj(t, ctx, makeNetwork("net-bgp-lr", 560, 4600001, "10.250.60.0/24", "fd96::1/64"))
 	createObj(t, ctx, makeDestination("dest-bgp-lr", "vrf-bgp-lr", map[string]string{"type": "bgp-lr"}, []string{"10.102.0.0/16"}))
 	createObj(t, ctx, makeL2A("l2a-bgp-lr", "net-bgp-lr", destSelector("bgp-lr"), nil))
-	createObj(t, ctx, makeInbound("ib-bgp-lr", "net-bgp-lr", destSelector("bgp-lr"), []string{"10.250.60.10/32"}))
 
-	// BGPPeering in listenRange mode referencing the L2A
+	// BGPPeering in listenRange mode referencing the L2A (for the listen-range
+	// CIDR + VRFs) and a Network (the client-announce allow-list). No Inbound.
 	bgpPeering := &nc.BGPPeering{
 		ObjectMeta: metav1.ObjectMeta{Name: "bgpp-listen", Namespace: testNamespace},
 		Spec: nc.BGPPeeringSpec{
 			Mode: nc.BGPPeeringModeListenRange,
 			Ref: nc.BGPPeeringRef{
 				AttachmentRef: ptr("l2a-bgp-lr"),
-				InboundRefs:   []string{"ib-bgp-lr"},
+				NetworkRefs:   []string{"net-bgp-lr"},
 			},
 			WorkloadAS: ptr(int64(65100)),
 		},

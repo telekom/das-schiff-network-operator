@@ -1,6 +1,6 @@
 # BGPPeering CR for BGPaaS test (intent API).
 # Configures FRR to accept dynamic BGP peers from the VLAN 501 subnet.
-# Requires a matching L2A and Inbound for the peering VLAN.
+# Requires a matching L2A for the peering VLAN and a Network for the allow-list.
 apiVersion: network-connector.sylvaproject.org/v1alpha1
 kind: Layer2Attachment
 metadata:
@@ -12,26 +12,21 @@ spec:
     matchLabels:
       type: gateway
 ---
-# Inbound with addresses the workload advertises via BGP.
-# These become the import filter on the BGP peer (only these prefixes accepted)
-# and the EVPN export entries (so the fabric distributes them).
+# Network whose CIDRs the workload is allowed to advertise via BGP.
+# These become the import filter on the BGP peer (only prefixes within these
+# CIDRs are accepted, matched le 32/128) and the EVPN export entries (so the
+# fabric distributes them). BIRD announces 10.250.3.1/32 and
+# fd75:2d70:f7f7::1/128, both contained here.
 apiVersion: network-connector.sylvaproject.org/v1alpha1
-kind: Inbound
+kind: Network
 metadata:
-  name: ib-bgpaas
+  name: net-bgpaas-clients
   namespace: default
 spec:
-  networkRef: "net-vlan501"
-  destinations:
-    matchLabels:
-      type: gateway
-  addresses:
-    ipv4:
-      - "10.250.3.0/24"
-    ipv6:
-      - "fd75:2d70:f7f7::/64"
-  advertisement:
-    type: bgp
+  ipv4:
+    cidr: "10.250.3.0/24"
+  ipv6:
+    cidr: "fd75:2d70:f7f7::/64"
 ---
 apiVersion: network-connector.sylvaproject.org/v1alpha1
 kind: BGPPeering
@@ -42,6 +37,6 @@ spec:
   mode: listenRange
   ref:
     attachmentRef: "l2a-bgpaas"
-    inboundRefs:
-      - "ib-bgpaas"
+    networkRefs:
+      - "net-bgpaas-clients"
   workloadAS: 65511
