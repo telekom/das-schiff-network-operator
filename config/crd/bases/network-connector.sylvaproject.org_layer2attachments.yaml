@@ -20,7 +20,7 @@ spec:
     - jsonPath: .spec.networkRef
       name: NetworkRef
       type: string
-    - jsonPath: .spec.interfaceName
+    - jsonPath: .status.interfaceName
       name: InterfaceName
       type: string
     - jsonPath: .spec.mtu
@@ -307,6 +307,13 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              interfaceName:
+                description: |-
+                  InterfaceName is the interface name the agent creates for this attachment:
+                  the spec.interfaceName override when set, otherwise the default
+                  "vlan.<vlan>" derived from the referenced Network's VLAN. Empty when no
+                  override is set and the Network (or its VLAN) cannot be resolved.
+                type: string
               nodeAddresses:
                 additionalProperties:
                   description: AddressAllocation holds allocated IP addresses in status.

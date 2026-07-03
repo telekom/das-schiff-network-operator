@@ -271,10 +271,13 @@ func (u *Updater) updateLayer2AttachmentConditions(ctx context.Context, fetched 
 		}
 		readyStatus, readyReason, readyMsg = applyBuildIssue(issues, "Layer2Attachment", l2a.Name, readyStatus, readyReason, readyMsg)
 
+		effIfName := effectiveInterfaceName(l2a, resolved)
+
 		if err := u.statusUpdateWithRetry(ctx, l2a, func(obj client.Object) {
 			la := obj.(*nc.Layer2Attachment)
 			setCondition(&la.Status.Conditions, nc.ConditionTypeResolved, resolvedStatus, resolvedReason, resolvedMsg, la.Generation)
 			setCondition(&la.Status.Conditions, nc.ConditionTypeReady, readyStatus, readyReason, readyMsg, la.Generation)
+			la.Status.InterfaceName = effIfName
 			la.Status.ObservedGeneration = la.Generation
 		}); err != nil {
 			return fmt.Errorf("updating Layer2Attachment %q status: %w", l2a.Name, err)
@@ -402,6 +405,23 @@ func checkNetworkRef(networkRef string, resolved *resolver.ResolvedData) (condSt
 		return metav1.ConditionFalse, "NetworkNotFound", fmt.Sprintf("referenced Network %q not found", networkRef)
 	}
 	return metav1.ConditionTrue, reasonAllResolved, msgAllResolved
+}
+
+// effectiveInterfaceName returns the interface name the agent will create for
+// the attachment: the explicit spec.interfaceName override when set, otherwise
+// the default "vlan.<vlan>" derived from the referenced Network's VLAN. It
+// returns "" when no override is set and the Network (or its VLAN) cannot be
+// resolved. This mirrors the naming logic in intent.buildNetplanState so the
+// status reflects exactly what lands on the node.
+func effectiveInterfaceName(l2a *nc.Layer2Attachment, resolved *resolver.ResolvedData) string {
+	if l2a.Spec.InterfaceName != nil && *l2a.Spec.InterfaceName != "" {
+		return *l2a.Spec.InterfaceName
+	}
+	net, ok := resolved.Networks[l2a.Spec.NetworkRef]
+	if !ok || net.Spec.VLAN == nil {
+		return ""
+	}
+	return fmt.Sprintf("vlan.%d", *net.Spec.VLAN)
 }
 
 // setCondition is a helper to set a condition with observedGeneration.
