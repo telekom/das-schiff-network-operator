@@ -18,9 +18,10 @@ package builder
 
 import (
 	"context"
+	"encoding/binary"
+	"errors"
 	"fmt"
-	gonet "net"
-	"strings"
+	"net/netip"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -74,8 +75,11 @@ func (b *L2ABuilder) Build(ctx context.Context, data *resolver.ResolvedData) (ma
 		}
 
 		if err := b.applyL2AToNodes(l2a, net, vrfName, vrfSpec, data, result, ifOwner); err != nil {
+			// Never abort the reconcile for one bad L2A: skip it and surface the
+			// failure as a Ready=False condition (with a specific reason) so it
+			// is visible in the resource status, not only the controller log.
 			logger.Info("skipping Layer2Attachment", "l2a", l2a.Name, "error", err.Error())
-			reportSkip(ctx, "Layer2Attachment", l2a.Name, "BuildFailed", err.Error())
+			reportSkip(ctx, "Layer2Attachment", l2a.Name, skipReason(err), err.Error())
 			continue
 		}
 	}
@@ -225,12 +229,40 @@ func (b *L2ABuilder) buildLayer2(l2a *nc.Layer2Attachment, net *resolver.Resolve
 	if vrfName != "" && (l2a.Spec.DisableAnycast == nil || !*l2a.Spec.DisableAnycast) {
 		irb, err := b.buildIRB(l2a, net, vrfName)
 		if err != nil {
-			return nil, err
+			// A Network CIDR with no usable gateway (e.g. a /32 or /128) is a
+			// configuration error, not a reason to abort the reconcile. Tag it
+			// with a specific reason so the L2A's Ready condition is actionable.
+			return nil, &skipReasonError{reason: reasonInvalidIRBGateway, err: err}
 		}
 		layer2.IRB = irb
 	}
 
 	return layer2, nil
+}
+
+// reasonInvalidIRBGateway is the Ready-condition reason used when an L2A's
+// referenced Network CIDR yields no usable anycast gateway (e.g. /32, /128).
+const reasonInvalidIRBGateway = "InvalidIRBGateway"
+
+// skipReasonError wraps a build error with a specific condition reason to
+// report. Builders return it so a skipped resource surfaces an actionable
+// Ready=False reason instead of the generic "BuildFailed".
+type skipReasonError struct {
+	reason string
+	err    error
+}
+
+func (e *skipReasonError) Error() string { return e.err.Error() }
+func (e *skipReasonError) Unwrap() error { return e.err }
+
+// skipReason returns the condition reason to report for a build error,
+// defaulting to "BuildFailed" when the error carries no specific reason.
+func skipReason(err error) string {
+	var s *skipReasonError
+	if errors.As(err, &s) {
+		return s.reason
+	}
+	return "BuildFailed"
 }
 
 // buildIRB constructs the IRB config for an L2A with VRF plumbing.
@@ -239,14 +271,24 @@ func (*L2ABuilder) buildIRB(_ *nc.Layer2Attachment, net *resolver.ResolvedNetwor
 		VRF: vrfName,
 	}
 
-	// Collect anycast gateway IPs from the Network CIDR.
-	// The gateway address is typically the first usable IP in the subnet.
+	// Collect anycast gateway IPs from the Network CIDR. The Network resource
+	// carries the network address (host bits zero); the anycast gateway is the
+	// first usable host (network address + 1), preserving the prefix length.
+	// See gatewayCIDR for point-to-point (/31, /127) and single-host handling.
 	var ipAddresses []string
 	if net.Spec.IPv4 != nil {
-		ipAddresses = append(ipAddresses, net.Spec.IPv4.CIDR)
+		gw, err := gatewayCIDR(net.Spec.IPv4.CIDR)
+		if err != nil {
+			return nil, fmt.Errorf("network %q IPv4 CIDR: %w", net.Name, err)
+		}
+		ipAddresses = append(ipAddresses, gw)
 	}
 	if net.Spec.IPv6 != nil {
-		ipAddresses = append(ipAddresses, net.Spec.IPv6.CIDR)
+		gw, err := gatewayCIDR(net.Spec.IPv6.CIDR)
+		if err != nil {
+			return nil, fmt.Errorf("network %q IPv6 CIDR: %w", net.Name, err)
+		}
+		ipAddresses = append(ipAddresses, gw)
 	}
 
 	if len(ipAddresses) == 0 {
@@ -354,19 +396,96 @@ func buildNetplanNodeIP(l2a *nc.Layer2Attachment, nw *resolver.ResolvedNetwork, 
 	return result
 }
 
-// parseCIDRParts extracts the host IP and prefix length string from a CIDR
-// like "10.0.1.1/24" → ("10.0.1.1", "24").
+// gatewayCIDR returns the anycast gateway CIDR for a Network CIDR: the first
+// usable host (network address + 1) with the original prefix length preserved,
+// e.g. "198.51.100.224/27" → "198.51.100.225/27" and "2001:db8::/64"
+// → "2001:db8::1/64".
+//
+// NOTE: Network resources are expected to carry the *network address* (host
+// bits zero) — not an authored host address like "10.0.1.1/24". The
+// vnetwork.kb.io webhook enforces this, so we can treat the CIDR's base as the
+// network address and derive the gateway as network+1.
+func gatewayCIDR(cidr string) (string, error) {
+	gw, bits, err := gatewayAddr(cidr)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%s/%d", gw.String(), bits), nil
+}
+
+// parseCIDRParts extracts the anycast gateway host IP (network address + 1) and
+// the prefix length string from a Network CIDR, e.g. "198.51.100.224/27" →
+// ("198.51.100.225", "27"). The gateway is returned without a prefix because
+// callers use it as a bare default gateway. On any error (unparseable CIDR or a
+// prefix with no usable host, e.g. /32) it returns empty strings so the caller
+// skips gateway rendering.
 func parseCIDRParts(cidr string) (gatewayIP, prefixLen string) {
-	ip, ipNet, err := gonet.ParseCIDR(cidr)
+	gw, bits, err := gatewayAddr(cidr)
 	if err != nil {
 		return "", ""
 	}
-	ones, _ := ipNet.Mask.Size()
+	return gw.String(), fmt.Sprintf("%d", bits)
+}
 
-	// The Network CIDR host part is the gateway (e.g., "10.0.1.1/24" → gw "10.0.1.1").
-	gwIP := ip.String()
-	if strings.Contains(cidr, ":") && ip.To4() == nil {
-		gwIP = ip.String()
+// gatewayAddr derives the anycast gateway for a Network CIDR, returning the
+// gateway address and the original prefix length.
+//
+// Network resources carry the network address (host bits zero; enforced by the
+// vnetwork.kb.io webhook), so the gateway is the first usable host: network
+// address + 1. Two edge cases are handled:
+//
+//   - Point-to-point prefixes (/31 for IPv4, /127 for IPv6, RFC 3021) have no
+//     dedicated network/broadcast address; both addresses are usable hosts, so
+//     the network address itself is used as the gateway.
+//   - Single-host prefixes (/32, /128) — and any case where network+1 would
+//     fall outside the prefix or land on the IPv4 broadcast address — have no
+//     usable gateway and return an error rather than emitting an invalid CIDR.
+func gatewayAddr(cidr string) (netip.Addr, int, error) {
+	prefix, err := netip.ParsePrefix(cidr)
+	if err != nil {
+		return netip.Addr{}, 0, fmt.Errorf("invalid CIDR %q: %w", cidr, err)
 	}
-	return gwIP, fmt.Sprintf("%d", ones)
+	// Mask defensively so a stray host bit never skews the derived gateway.
+	prefix = prefix.Masked()
+	network := prefix.Addr()
+	bits := prefix.Bits()
+	maxBits := network.BitLen() // 32 for IPv4, 128 for IPv6
+
+	// Point-to-point (/31, /127): use the network address itself.
+	if bits == maxBits-1 {
+		return network, bits, nil
+	}
+
+	gw := network.Next()
+	if !gw.IsValid() || !prefix.Contains(gw) {
+		return netip.Addr{}, 0, fmt.Errorf(
+			"cannot derive gateway for CIDR %q: no usable host address in prefix", cidr)
+	}
+	// Reject the IPv4 broadcast (all-ones host) address. For prefixes wider
+	// than /31 network+1 is never the broadcast, but guard explicitly so the
+	// invariant is enforced rather than assumed.
+	if bcast, ok := broadcastAddr(prefix); ok && gw == bcast {
+		return netip.Addr{}, 0, fmt.Errorf(
+			"cannot derive gateway for CIDR %q: only the broadcast address is available", cidr)
+	}
+	return gw, bits, nil
+}
+
+// broadcastAddr returns the IPv4 broadcast (last) address of a prefix. The
+// second return value is false for IPv6 (no broadcast concept) and for prefixes
+// without host bits.
+func broadcastAddr(prefix netip.Prefix) (netip.Addr, bool) {
+	addr := prefix.Masked().Addr()
+	if !addr.Is4() {
+		return netip.Addr{}, false
+	}
+	hostBits := ipv4MaxPrefixLen - prefix.Bits()
+	if hostBits == 0 {
+		return netip.Addr{}, false
+	}
+	b := addr.As4()
+	v := binary.BigEndian.Uint32(b[:])
+	v |= (uint32(1) << hostBits) - 1 // set the host bits to all-ones
+	binary.BigEndian.PutUint32(b[:], v)
+	return netip.AddrFrom4(b), true
 }

@@ -253,7 +253,7 @@ func TestL2APipeline(t *testing.T) {
 
 	createNode(t, ctx, nodeName, nil)
 	createObj(t, ctx, makeVRF("vrf-l2a", "m2m", 2002026, "65188:2026"))
-	createObj(t, ctx, makeNetwork("net-l2a-501", 501, 4000002, "10.250.0.0/24", "fd94::1/64"))
+	createObj(t, ctx, makeNetwork("net-l2a-501", 501, 4000002, "10.250.0.0/24", "fd94::/64"))
 	createObj(t, ctx, makeDestination("dest-l2a-gw", "vrf-l2a", map[string]string{"type": "gateway"}, []string{"10.102.0.0/16"}))
 	createObj(t, ctx, makeL2A("l2a-pipeline", "net-l2a-501", destSelector("gateway"), nil))
 
@@ -488,11 +488,12 @@ func TestLifecycleUpdate(t *testing.T) {
 
 	assert.NotEqual(t, rev1, nnc2.Spec.Revision, "expected revision to change after Network update")
 
-	// Verify updated CIDR in IRB
+	// Verify updated CIDR in IRB — the IRB carries the gateway (network+1),
+	// so the anycast gateway for 10.250.11.0/24 is 10.250.11.1/24.
 	l2, ok := nnc2.Spec.Layer2s["510"]
 	require.True(t, ok, "expected Layer2 '510' after update")
 	require.NotNil(t, l2.IRB, "expected IRB after update")
-	assert.Contains(t, l2.IRB.IPAddresses, "10.250.11.0/24")
+	assert.Contains(t, l2.IRB.IPAddresses, "10.250.11.1/24")
 }
 
 func TestLifecycleDelete(t *testing.T) {
@@ -612,7 +613,7 @@ func TestBGPPeeringListenRange(t *testing.T) {
 
 	createNode(t, ctx, nodeName, nil)
 	createObj(t, ctx, makeVRF("vrf-bgp-lr", "bgplr", 2002090, "65188:2090"))
-	createObj(t, ctx, makeNetwork("net-bgp-lr", 560, 4600001, "10.250.60.0/24", "fd96::1/64"))
+	createObj(t, ctx, makeNetwork("net-bgp-lr", 560, 4600001, "10.250.60.0/24", "fd96::/64"))
 	createObj(t, ctx, makeDestination("dest-bgp-lr", "vrf-bgp-lr", map[string]string{"type": "bgp-lr"}, []string{"10.102.0.0/16"}))
 	createObj(t, ctx, makeL2A("l2a-bgp-lr", "net-bgp-lr", destSelector("bgp-lr"), nil))
 
