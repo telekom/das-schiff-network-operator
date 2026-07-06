@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 	"time"
 
@@ -30,6 +31,17 @@ const (
 	labelManagedBy      = "network-sync.telekom.com/managed-by"
 	labelManagedByValue = "network-sync"
 	annotationSourceNS  = "network-sync.telekom.com/source-namespace"
+
+	// annotationManagedLabels and annotationManagedAnnotations record the label
+	// and annotation keys this controller propagated on the last sync. They let a
+	// subsequent sync prune the keys we stop setting — source keys that were
+	// removed upstream, or Flux/GitOps keys we used to copy before we learned to
+	// strip them — without ever touching foreign keys owned by other actors on
+	// the remote object. This is the same "last-applied" ownership trick kubectl
+	// and server-side apply use, and it is what lets an additive merge converge
+	// existing objects instead of accreting stale keys forever.
+	annotationManagedLabels      = "network-sync.telekom.com/managed-labels"
+	annotationManagedAnnotations = "network-sync.telekom.com/managed-annotations"
 )
 
 // gitOpsKeyPrefixes are label/annotation key prefixes owned by GitOps tooling
@@ -259,6 +271,9 @@ func (r *Controller) buildRemoteObject(src client.Object, sourceNamespace string
 	delete(annotations, "kubectl.kubernetes.io/last-applied-configuration")
 	dst.SetAnnotations(annotations)
 
+	// Record the keys we own so the next sync can prune the ones we drop.
+	recordManagedKeys(dst)
+
 	// IPAM promotion: copy status.addresses → spec.addresses for Inbound/Outbound.
 	r.promoteIPAMAddresses(dst)
 
@@ -364,7 +379,7 @@ func (*Controller) applyRemote(ctx context.Context, remoteClient client.Client, 
 	if err := overlayBody(existing, desired); err != nil {
 		return fmt.Errorf("overlaying desired state onto %s/%s: %w", desired.GetNamespace(), desired.GetName(), err)
 	}
-	mergeManagedMetadata(existing, desired)
+	reconcileManagedMetadata(existing, desired)
 
 	if err := helper.Patch(ctx, existing); err != nil {
 		return fmt.Errorf("patching remote object %s/%s: %w", desired.GetNamespace(), desired.GetName(), err)
@@ -402,29 +417,88 @@ func overlayBody(dst, src client.Object) error {
 	return nil
 }
 
-// mergeManagedMetadata merges the labels and annotations this controller manages
-// (carried on src) into dst without removing keys owned by other actors. This
-// additive-only merge is the second half of the truce with Flux: we assert our
-// own managed-by label and source-namespace annotation, propagate legitimate
-// source labels, and leave every foreign key already on the remote untouched.
-func mergeManagedMetadata(dst, src client.Object) {
-	labels := dst.GetLabels()
-	if labels == nil {
-		labels = make(map[string]string)
-	}
-	for k, v := range src.GetLabels() {
-		labels[k] = v
-	}
-	dst.SetLabels(labels)
+// reconcileManagedMetadata merges the labels and annotations this controller
+// manages (carried on src) into dst and prunes the keys we managed on a previous
+// sync but no longer set. It is the second half of the truce with Flux: foreign
+// keys — anything we never propagated ourselves — are always preserved, so a
+// workload-cluster GitOps controller keeps ownership of its own labels. But keys
+// that WE put there and have since dropped are removed, so existing objects
+// actually converge:
+//
+//   - a source label/annotation that was deleted upstream disappears from the
+//     remote instead of lingering forever, and
+//   - a Flux/GitOps key we propagated before this controller learned to strip
+//     them is cleaned up the moment it leaves our managed set.
+//
+// The set of keys we own is read back from the tracking annotations that
+// recordManagedKeys stamped on the previous sync (present on dst) and rewritten
+// from the freshly built desired object (src).
+func reconcileManagedMetadata(dst, src client.Object) {
+	prevLabelKeys := parseKeyList(dst.GetAnnotations()[annotationManagedLabels])
+	prevAnnotationKeys := parseKeyList(dst.GetAnnotations()[annotationManagedAnnotations])
 
-	annotations := dst.GetAnnotations()
+	dst.SetLabels(mergeAndPrune(dst.GetLabels(), src.GetLabels(), prevLabelKeys))
+	dst.SetAnnotations(mergeAndPrune(dst.GetAnnotations(), src.GetAnnotations(), prevAnnotationKeys))
+}
+
+// mergeAndPrune overlays the keys we manage now (desired) onto existing and
+// removes keys we managed on the previous sync (prevManaged) that are no longer
+// desired. Keys we never managed are left untouched.
+func mergeAndPrune(existing, desired map[string]string, prevManaged []string) map[string]string {
+	out := make(map[string]string, len(existing)+len(desired))
+	for k, v := range existing {
+		out[k] = v
+	}
+	// Drop keys we used to own but no longer set.
+	for _, k := range prevManaged {
+		if _, stillManaged := desired[k]; !stillManaged {
+			delete(out, k)
+		}
+	}
+	// Assert the keys we own now.
+	for k, v := range desired {
+		out[k] = v
+	}
+	return out
+}
+
+// recordManagedKeys stamps the tracking annotations that list the label and
+// annotation keys this controller owns on obj. The tracking annotations are
+// never counted as part of the managed set (we always rewrite them), so they are
+// dropped before the keys are enumerated and re-added afterwards.
+func recordManagedKeys(obj client.Object) {
+	annotations := obj.GetAnnotations()
 	if annotations == nil {
 		annotations = make(map[string]string)
 	}
-	for k, v := range src.GetAnnotations() {
-		annotations[k] = v
+	delete(annotations, annotationManagedLabels)
+	delete(annotations, annotationManagedAnnotations)
+
+	labelKeys := strings.Join(sortedKeys(obj.GetLabels()), ",")
+	annotationKeys := strings.Join(sortedKeys(annotations), ",")
+
+	annotations[annotationManagedLabels] = labelKeys
+	annotations[annotationManagedAnnotations] = annotationKeys
+	obj.SetAnnotations(annotations)
+}
+
+// sortedKeys returns the keys of m in deterministic order so the tracking
+// annotations are stable across syncs and never generate spurious patches.
+func sortedKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
 	}
-	dst.SetAnnotations(annotations)
+	sort.Strings(keys)
+	return keys
+}
+
+// parseKeyList splits a comma-separated tracking annotation value back into keys.
+func parseKeyList(s string) []string {
+	if s == "" {
+		return nil
+	}
+	return strings.Split(s, ",")
 }
 
 // stripGitOpsKeys returns a copy of in with all GitOps-owned keys removed.
@@ -554,6 +628,9 @@ func (r *Controller) buildRemoteSecret(src *corev1.Secret, sourceNamespace strin
 		copy(b, v)
 		dst.Data[k] = b
 	}
+	// Record the keys we own so a later sync can prune the ones we drop, keeping
+	// synced Secrets on the same convergence path as the intent CRDs.
+	recordManagedKeys(dst)
 	return dst
 }
 
