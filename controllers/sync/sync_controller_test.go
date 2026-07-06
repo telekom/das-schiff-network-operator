@@ -2,6 +2,7 @@ package sync
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -444,6 +445,115 @@ func TestSyncMultipleCRDTypes(t *testing.T) {
 func ptrInt32(v int32) *int32    { return &v }
 func ptrString(v string) *string { return &v }
 
+// TestSyncPreservesForeignLabelsOnRemote verifies that non-GitOps labels set by
+// another controller on the workload cluster are preserved, while a Flux/GitOps
+// inventory label is stripped even when it was already present on the remote.
+// The patch helper only diffs the fields we change, so the foreign label is
+// never sent; the Flux label is actively removed because our synced objects are
+// not part of any Flux inventory (if a live Flux truly owns it, it reapplies).
+func TestSyncPreservesForeignLabelsOnRemote(t *testing.T) {
+	const (
+		fluxLabel    = "kustomize.toolkit.fluxcd.io/name" // must be stripped
+		foreignLabel = "example.com/owned-by"             // must be preserved
+	)
+
+	vrf := &nc.VRF{
+		ObjectMeta: metav1.ObjectMeta{Name: "vrf-m2m", Namespace: "test-cluster"},
+		Spec:       nc.VRFSpec{VRF: "m2m", VNI: ptrInt32(2002026), RouteTarget: ptrString("65188:2026")},
+	}
+
+	// Remote object is ours (managed-by label) but a workload-cluster Flux has
+	// also stamped its own inventory label on it, another controller stamped a
+	// non-GitOps label, and the spec has drifted.
+	remote := &nc.VRF{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "vrf-m2m",
+			Namespace: testRemoteNamespace,
+			Labels: map[string]string{
+				labelManagedBy: labelManagedByValue,
+				fluxLabel:      "workload-apps",
+				foreignLabel:   "some-operator",
+			},
+		},
+		Spec: nc.VRFSpec{VRF: "m2m", VNI: ptrInt32(9999), RouteTarget: ptrString("65188:2026")},
+	}
+
+	sc, remoteClient := newFakeSyncController([]client.Object{vrf}, []client.Object{remote})
+	ctx := context.Background()
+
+	if _, err := sc.Reconcile(ctx, ctrl.Request{
+		NamespacedName: types.NamespacedName{Namespace: "test-cluster", Name: "sync"},
+	}); err != nil {
+		t.Fatalf("Reconcile failed: %v", err)
+	}
+
+	got := &nc.VRF{}
+	if err := remoteClient.Get(ctx, types.NamespacedName{Namespace: testRemoteNamespace, Name: "vrf-m2m"}, got); err != nil {
+		t.Fatalf("Get remote VRF: %v", err)
+	}
+
+	// Spec drift corrected.
+	if got.Spec.VNI == nil || *got.Spec.VNI != 2002026 {
+		t.Errorf("Expected VNI 2002026 (drift corrected), got %v", got.Spec.VNI)
+	}
+	// Our managed-by label still present.
+	if got.Labels[labelManagedBy] != labelManagedByValue {
+		t.Errorf("managed-by label lost, got %v", got.Labels)
+	}
+	// The foreign non-GitOps label must survive untouched.
+	if got.Labels[foreignLabel] != "some-operator" {
+		t.Errorf("foreign non-GitOps label clobbered: got %v", got.Labels)
+	}
+	// The Flux inventory label must be stripped from the remote object.
+	if _, ok := got.Labels[fluxLabel]; ok {
+		t.Errorf("Flux inventory label was not stripped from remote: %v", got.Labels)
+	}
+}
+
+// TestSyncDoesNotPropagateFluxLabels verifies that GitOps inventory labels present
+// on the management-cluster source object are stripped and never land on the
+// remote copy, so a workload-cluster Flux does not adopt/prune our synced objects.
+func TestSyncDoesNotPropagateFluxLabels(t *testing.T) {
+	vrf := &nc.VRF{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "vrf-m2m",
+			Namespace: "test-cluster",
+			Labels: map[string]string{
+				"kustomize.toolkit.fluxcd.io/name":      "mgmt-intents",
+				"kustomize.toolkit.fluxcd.io/namespace": "flux-system",
+				"app.kubernetes.io/part-of":             "network", // legitimate, must propagate
+			},
+		},
+		Spec: nc.VRFSpec{VRF: "m2m", VNI: ptrInt32(2002026), RouteTarget: ptrString("65188:2026")},
+	}
+
+	sc, remoteClient := newFakeSyncController([]client.Object{vrf}, nil)
+	ctx := context.Background()
+
+	if _, err := sc.Reconcile(ctx, ctrl.Request{
+		NamespacedName: types.NamespacedName{Namespace: "test-cluster", Name: "sync"},
+	}); err != nil {
+		t.Fatalf("Reconcile failed: %v", err)
+	}
+
+	got := &nc.VRF{}
+	if err := remoteClient.Get(ctx, types.NamespacedName{Namespace: testRemoteNamespace, Name: "vrf-m2m"}, got); err != nil {
+		t.Fatalf("Get remote VRF: %v", err)
+	}
+
+	for k := range got.Labels {
+		if k == "kustomize.toolkit.fluxcd.io/name" || k == "kustomize.toolkit.fluxcd.io/namespace" {
+			t.Errorf("Flux inventory label %q was propagated to remote: %v", k, got.Labels)
+		}
+	}
+	if got.Labels["app.kubernetes.io/part-of"] != "network" {
+		t.Errorf("legitimate source label was not propagated, got %v", got.Labels)
+	}
+	if got.Labels[labelManagedBy] != labelManagedByValue {
+		t.Errorf("managed-by label missing, got %v", got.Labels)
+	}
+}
+
 // TestSyncBGPSecretsMirrorsReferencedSecret verifies that a Secret referenced
 // by a BGPPeering.spec.authSecretRef is copied into the remote namespace,
 // stamped with our managed-by label, and contains the same Data.
@@ -524,3 +634,171 @@ func TestSyncBGPSecretsSweepsOrphan(t *testing.T) {
 
 // Ensure corev1 import is used (for scheme registration).
 var _ = &corev1.Secret{}
+
+// TestSyncPrunesRemovedSourceLabel is the convergence counterpart to the
+// foreign-label test. A label we propagated on an earlier sync (recorded in the
+// managed-labels tracking annotation) but that has since been removed from the
+// source must be pruned from the remote object, while a foreign label we never
+// managed is left untouched.
+func TestSyncPrunesRemovedSourceLabel(t *testing.T) {
+	const (
+		foreignLabel = "example.com/owned-by"      // foreign, non-GitOps: must survive
+		droppedLabel = "team"                      // we propagated this before, now gone
+		keptLabel    = "app.kubernetes.io/part-of" // still on the source
+	)
+
+	// Source no longer carries droppedLabel.
+	vrf := &nc.VRF{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "vrf-m2m",
+			Namespace: "test-cluster",
+			Labels:    map[string]string{keptLabel: "network"},
+		},
+		Spec: nc.VRFSpec{VRF: "m2m", VNI: ptrInt32(2002026), RouteTarget: ptrString("65188:2026")},
+	}
+
+	// Remote reflects a previous sync: we managed part-of, managed-by and team,
+	// and another controller independently stamped its own non-GitOps label.
+	remote := &nc.VRF{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "vrf-m2m",
+			Namespace: testRemoteNamespace,
+			Labels: map[string]string{
+				labelManagedBy: labelManagedByValue,
+				keptLabel:      "network",
+				droppedLabel:   "net", // stale: we set it last time, source dropped it
+				foreignLabel:   "some-operator",
+			},
+			Annotations: map[string]string{
+				annotationSourceNS: "test-cluster",
+				annotationManagedLabels: strings.Join([]string{
+					keptLabel, labelManagedBy, droppedLabel,
+				}, ","),
+				annotationManagedAnnotations: annotationSourceNS,
+			},
+		},
+		Spec: nc.VRFSpec{VRF: "m2m", VNI: ptrInt32(2002026), RouteTarget: ptrString("65188:2026")},
+	}
+
+	sc, remoteClient := newFakeSyncController([]client.Object{vrf}, []client.Object{remote})
+	ctx := context.Background()
+
+	if _, err := sc.Reconcile(ctx, ctrl.Request{
+		NamespacedName: types.NamespacedName{Namespace: "test-cluster", Name: "sync"},
+	}); err != nil {
+		t.Fatalf("Reconcile failed: %v", err)
+	}
+
+	got := &nc.VRF{}
+	if err := remoteClient.Get(ctx, types.NamespacedName{Namespace: testRemoteNamespace, Name: "vrf-m2m"}, got); err != nil {
+		t.Fatalf("Get remote VRF: %v", err)
+	}
+
+	// The label we used to manage but dropped upstream must be gone.
+	if _, ok := got.Labels[droppedLabel]; ok {
+		t.Errorf("stale managed label %q was not pruned: %v", droppedLabel, got.Labels)
+	}
+	// The foreign non-GitOps label we never managed must survive.
+	if got.Labels[foreignLabel] != "some-operator" {
+		t.Errorf("foreign label %q was clobbered: %v", foreignLabel, got.Labels)
+	}
+	// The still-desired source label and our managed-by label must remain.
+	if got.Labels[keptLabel] != "network" {
+		t.Errorf("desired label %q missing: %v", keptLabel, got.Labels)
+	}
+	if got.Labels[labelManagedBy] != labelManagedByValue {
+		t.Errorf("managed-by label missing: %v", got.Labels)
+	}
+}
+
+// TestSyncPrunesPreviouslyPropagatedFluxLabel covers the exact regression Max
+// flagged: a Flux/GitOps label the sync controller itself propagated before it
+// learned to strip them (so it is in our managed set) must be cleaned up on the
+// next sync, because the freshly built desired object no longer carries it.
+func TestSyncPrunesPreviouslyPropagatedFluxLabel(t *testing.T) {
+	const propagatedFluxLabel = "kustomize.toolkit.fluxcd.io/namespace"
+
+	vrf := &nc.VRF{
+		ObjectMeta: metav1.ObjectMeta{Name: "vrf-m2m", Namespace: "test-cluster"},
+		Spec:       nc.VRFSpec{VRF: "m2m", VNI: ptrInt32(2002026), RouteTarget: ptrString("65188:2026")},
+	}
+
+	// Remote still carries a Flux label we propagated before, AND has it recorded
+	// in our managed-labels tracking annotation — so we own it and must remove it.
+	remote := &nc.VRF{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "vrf-m2m",
+			Namespace: testRemoteNamespace,
+			Labels: map[string]string{
+				labelManagedBy:      labelManagedByValue,
+				propagatedFluxLabel: "flux-system",
+			},
+			Annotations: map[string]string{
+				annotationSourceNS:           "test-cluster",
+				annotationManagedLabels:      labelManagedBy + "," + propagatedFluxLabel,
+				annotationManagedAnnotations: annotationSourceNS,
+			},
+		},
+		Spec: nc.VRFSpec{VRF: "m2m", VNI: ptrInt32(2002026), RouteTarget: ptrString("65188:2026")},
+	}
+
+	sc, remoteClient := newFakeSyncController([]client.Object{vrf}, []client.Object{remote})
+	ctx := context.Background()
+
+	if _, err := sc.Reconcile(ctx, ctrl.Request{
+		NamespacedName: types.NamespacedName{Namespace: "test-cluster", Name: "sync"},
+	}); err != nil {
+		t.Fatalf("Reconcile failed: %v", err)
+	}
+
+	got := &nc.VRF{}
+	if err := remoteClient.Get(ctx, types.NamespacedName{Namespace: testRemoteNamespace, Name: "vrf-m2m"}, got); err != nil {
+		t.Fatalf("Get remote VRF: %v", err)
+	}
+
+	if _, ok := got.Labels[propagatedFluxLabel]; ok {
+		t.Errorf("previously-propagated Flux label %q was not pruned: %v", propagatedFluxLabel, got.Labels)
+	}
+	if got.Labels[labelManagedBy] != labelManagedByValue {
+		t.Errorf("managed-by label missing: %v", got.Labels)
+	}
+}
+
+// TestSyncRecordsManagedKeysOnCreate verifies that a freshly created remote
+// object carries the tracking annotations enumerating the label and annotation
+// keys we own, so the very next sync has the ownership information it needs to
+// prune keys we later drop.
+func TestSyncRecordsManagedKeysOnCreate(t *testing.T) {
+	vrf := &nc.VRF{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "vrf-m2m",
+			Namespace: "test-cluster",
+			Labels:    map[string]string{"app.kubernetes.io/part-of": "network"},
+		},
+		Spec: nc.VRFSpec{VRF: "m2m", VNI: ptrInt32(2002026), RouteTarget: ptrString("65188:2026")},
+	}
+
+	sc, remoteClient := newFakeSyncController([]client.Object{vrf}, nil)
+	ctx := context.Background()
+
+	if _, err := sc.Reconcile(ctx, ctrl.Request{
+		NamespacedName: types.NamespacedName{Namespace: "test-cluster", Name: "sync"},
+	}); err != nil {
+		t.Fatalf("Reconcile failed: %v", err)
+	}
+
+	got := &nc.VRF{}
+	if err := remoteClient.Get(ctx, types.NamespacedName{Namespace: testRemoteNamespace, Name: "vrf-m2m"}, got); err != nil {
+		t.Fatalf("Get remote VRF: %v", err)
+	}
+
+	wantLabelKeys := "app.kubernetes.io/part-of," + labelManagedBy
+	if got.Annotations[annotationManagedLabels] != wantLabelKeys {
+		t.Errorf("managed-labels tracking annotation = %q, want %q",
+			got.Annotations[annotationManagedLabels], wantLabelKeys)
+	}
+	if got.Annotations[annotationManagedAnnotations] != annotationSourceNS {
+		t.Errorf("managed-annotations tracking annotation = %q, want %q",
+			got.Annotations[annotationManagedAnnotations], annotationSourceNS)
+	}
+}

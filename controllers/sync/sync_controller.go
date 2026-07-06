@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -12,6 +14,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/cluster-api/util/patch"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -28,7 +31,29 @@ const (
 	labelManagedBy      = "network-sync.telekom.com/managed-by"
 	labelManagedByValue = "network-sync"
 	annotationSourceNS  = "network-sync.telekom.com/source-namespace"
+
+	// annotationManagedLabels and annotationManagedAnnotations record the label
+	// and annotation keys this controller propagated on the last sync. They let a
+	// subsequent sync prune the keys we stop setting — source keys that were
+	// removed upstream, or Flux/GitOps keys we used to copy before we learned to
+	// strip them — without ever touching foreign keys owned by other actors on
+	// the remote object. This is the same "last-applied" ownership trick kubectl
+	// and server-side apply use, and it is what lets an additive merge converge
+	// existing objects instead of accreting stale keys forever.
+	annotationManagedLabels      = "network-sync.telekom.com/managed-labels"
+	annotationManagedAnnotations = "network-sync.telekom.com/managed-annotations"
 )
+
+// gitOpsKeyPrefixes are label/annotation key prefixes owned by GitOps tooling
+// (Flux). They are stripped when building the remote object so the management
+// cluster's kustomization inventory metadata is never propagated to workload
+// clusters, where a local Flux would otherwise treat our synced objects as part
+// of its own inventory and continually fight us (or prune them).
+var gitOpsKeyPrefixes = []string{
+	"kustomize.toolkit.fluxcd.io/",
+	"helm.toolkit.fluxcd.io/",
+	"reconcile.fluxcd.io/",
+}
 
 const syncRequeueInterval = 10 * time.Second
 
@@ -232,22 +257,22 @@ func (r *Controller) buildRemoteObject(src client.Object, sourceNamespace string
 	dst.SetFinalizers(nil)      // Remote objects don't need our finalizer
 	dst.SetOwnerReferences(nil) // No cross-cluster owner refs
 
-	// Set sync labels/annotations.
-	labels := dst.GetLabels()
-	if labels == nil {
-		labels = make(map[string]string)
-	}
+	// Set sync labels/annotations. Strip GitOps (Flux) keys first so that the
+	// management cluster's kustomization inventory metadata is not carried over
+	// to the workload cluster; otherwise a Flux running there would claim our
+	// synced objects and the two controllers would fight over them.
+	labels := stripGitOpsKeys(dst.GetLabels())
 	labels[labelManagedBy] = labelManagedByValue
 	dst.SetLabels(labels)
 
-	annotations := dst.GetAnnotations()
-	if annotations == nil {
-		annotations = make(map[string]string)
-	}
+	annotations := stripGitOpsKeys(dst.GetAnnotations())
 	annotations[annotationSourceNS] = sourceNamespace
 	// Remove system annotations.
 	delete(annotations, "kubectl.kubernetes.io/last-applied-configuration")
 	dst.SetAnnotations(annotations)
+
+	// Record the keys we own so the next sync can prune the ones we drop.
+	recordManagedKeys(dst)
 
 	// IPAM promotion: copy status.addresses → spec.addresses for Inbound/Outbound.
 	r.promoteIPAMAddresses(dst)
@@ -309,7 +334,17 @@ func (*Controller) promoteIPAMAddresses(obj client.Object) {
 	}
 }
 
-// applyRemote creates or updates the object on the remote cluster.
+// applyRemote creates the object on the remote cluster if it does not yet exist,
+// otherwise it patches only the fields this controller owns (the spec/data plus
+// its own managed metadata) using the Cluster API patch helper.
+//
+// The patch helper snapshots the freshly fetched object, we then mutate that same
+// object in place, and Patch emits a minimal before→after merge patch. This is
+// what ends the label war with Flux: any label or annotation a GitOps controller
+// set on the remote object is part of the fetched "before" state, is never
+// touched, and therefore never appears in the emitted patch. The previous full
+// client.Update replaced the entire object and clobbered every label the sync
+// operator did not itself set, so Flux and the sync operator flapped forever.
 func (*Controller) applyRemote(ctx context.Context, remoteClient client.Client, desired client.Object) error {
 	existing, ok := desired.DeepCopyObject().(client.Object)
 	if !ok {
@@ -330,19 +365,174 @@ func (*Controller) applyRemote(ctx context.Context, remoteClient client.Client, 
 		return fmt.Errorf("getting remote object: %w", err)
 	}
 
-	// Verify we own this object.
-	labels := existing.GetLabels()
-	if labels[labelManagedBy] != labelManagedByValue {
+	// Verify we own this object before mutating it.
+	if existing.GetLabels()[labelManagedBy] != labelManagedByValue {
 		return fmt.Errorf("remote object %s/%s exists but not managed by us", desired.GetNamespace(), desired.GetName())
 	}
 
-	// Preserve remote resourceVersion for update.
-	desired.SetResourceVersion(existing.GetResourceVersion())
-	desired.SetUID(existing.GetUID())
-	if err := remoteClient.Update(ctx, desired); err != nil {
-		return fmt.Errorf("updating remote object %s/%s: %w", desired.GetNamespace(), desired.GetName(), err)
+	// Snapshot the fetched object, then mutate it in place so the patch helper
+	// only diffs the fields we actually change.
+	helper, err := patch.NewHelper(existing, remoteClient)
+	if err != nil {
+		return fmt.Errorf("creating patch helper for %s/%s: %w", desired.GetNamespace(), desired.GetName(), err)
+	}
+	if err := overlayBody(existing, desired); err != nil {
+		return fmt.Errorf("overlaying desired state onto %s/%s: %w", desired.GetNamespace(), desired.GetName(), err)
+	}
+	reconcileManagedMetadata(existing, desired)
+
+	if err := helper.Patch(ctx, existing); err != nil {
+		return fmt.Errorf("patching remote object %s/%s: %w", desired.GetNamespace(), desired.GetName(), err)
 	}
 	return nil
+}
+
+// overlayBody copies the source-of-truth payload from src onto dst without
+// touching dst's server-managed metadata (resourceVersion, UID, foreign labels,
+// etc.). For CRDs that means the Spec field; for Secrets it means Data/StringData
+// (Type is immutable after creation and is only set when unset).
+func overlayBody(dst, src client.Object) error {
+	if dstSecret, ok := dst.(*corev1.Secret); ok {
+		srcSecret, ok := src.(*corev1.Secret)
+		if !ok {
+			return fmt.Errorf("type mismatch overlaying %T onto *corev1.Secret", src)
+		}
+		dstSecret.Data = srcSecret.Data
+		dstSecret.StringData = srcSecret.StringData
+		if dstSecret.Type == "" {
+			dstSecret.Type = srcSecret.Type
+		}
+		return nil
+	}
+
+	dstSpec := reflect.ValueOf(dst).Elem().FieldByName("Spec")
+	srcSpec := reflect.ValueOf(src).Elem().FieldByName("Spec")
+	if !dstSpec.IsValid() || !srcSpec.IsValid() {
+		return fmt.Errorf("object %T has no Spec field to overlay", dst)
+	}
+	if !dstSpec.CanSet() {
+		return fmt.Errorf("spec field on %T is not settable", dst)
+	}
+	dstSpec.Set(srcSpec)
+	return nil
+}
+
+// reconcileManagedMetadata merges the labels and annotations this controller
+// manages (carried on src) into dst, prunes the keys we managed on a previous
+// sync but no longer set, and strips GitOps/Flux-owned keys outright. Foreign
+// keys we never propagated ourselves are otherwise preserved. Together this ends
+// the label war and converges existing objects:
+//
+//   - a source label/annotation that was deleted upstream disappears from the
+//     remote instead of lingering forever;
+//   - a Flux/GitOps key is removed whether we propagated it before (old
+//     full-Update code) or a controller stamped it on the workload cluster — our
+//     synced objects are not part of any Flux inventory, so those keys never
+//     belong on them. If a live Flux genuinely owns the object it will simply
+//     reapply, but the patch helper only emits the keys we actually change, so
+//     unrelated foreign metadata is still never touched.
+//
+// The set of keys we own is read back from the tracking annotations that
+// recordManagedKeys stamped on the previous sync (present on dst) and rewritten
+// from the freshly built desired object (src).
+func reconcileManagedMetadata(dst, src client.Object) {
+	prevLabelKeys := parseKeyList(dst.GetAnnotations()[annotationManagedLabels])
+	prevAnnotationKeys := parseKeyList(dst.GetAnnotations()[annotationManagedAnnotations])
+
+	dst.SetLabels(mergeAndPrune(dst.GetLabels(), src.GetLabels(), prevLabelKeys))
+	dst.SetAnnotations(mergeAndPrune(dst.GetAnnotations(), src.GetAnnotations(), prevAnnotationKeys))
+}
+
+// mergeAndPrune overlays the keys we manage now (desired) onto existing, removes
+// keys we managed on the previous sync (prevManaged) that are no longer desired,
+// and drops any GitOps/Flux-owned key. Foreign keys we never managed and that are
+// not GitOps-owned are left untouched.
+func mergeAndPrune(existing, desired map[string]string, prevManaged []string) map[string]string {
+	out := make(map[string]string, len(existing)+len(desired))
+	for k, v := range existing {
+		out[k] = v
+	}
+	// Drop keys we used to own but no longer set.
+	for _, k := range prevManaged {
+		if _, stillManaged := desired[k]; !stillManaged {
+			delete(out, k)
+		}
+	}
+	// Drop GitOps-owned keys outright. buildRemoteObject never propagates them,
+	// so any present here were copied by the old full-Update code or stamped by a
+	// controller on the workload cluster; neither belongs on an object the sync
+	// operator owns. A live Flux would just reapply, but these synced objects are
+	// not part of any Flux inventory.
+	for k := range out {
+		if hasAnyPrefix(k, gitOpsKeyPrefixes) {
+			delete(out, k)
+		}
+	}
+	// Assert the keys we own now.
+	for k, v := range desired {
+		out[k] = v
+	}
+	return out
+}
+
+// recordManagedKeys stamps the tracking annotations that list the label and
+// annotation keys this controller owns on obj. The tracking annotations are
+// never counted as part of the managed set (we always rewrite them), so they are
+// dropped before the keys are enumerated and re-added afterwards.
+func recordManagedKeys(obj client.Object) {
+	annotations := obj.GetAnnotations()
+	if annotations == nil {
+		annotations = make(map[string]string)
+	}
+	delete(annotations, annotationManagedLabels)
+	delete(annotations, annotationManagedAnnotations)
+
+	labelKeys := strings.Join(sortedKeys(obj.GetLabels()), ",")
+	annotationKeys := strings.Join(sortedKeys(annotations), ",")
+
+	annotations[annotationManagedLabels] = labelKeys
+	annotations[annotationManagedAnnotations] = annotationKeys
+	obj.SetAnnotations(annotations)
+}
+
+// sortedKeys returns the keys of m in deterministic order so the tracking
+// annotations are stable across syncs and never generate spurious patches.
+func sortedKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// parseKeyList splits a comma-separated tracking annotation value back into keys.
+func parseKeyList(s string) []string {
+	if s == "" {
+		return nil
+	}
+	return strings.Split(s, ",")
+}
+
+// stripGitOpsKeys returns a copy of in with all GitOps-owned keys removed.
+func stripGitOpsKeys(in map[string]string) map[string]string {
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		if hasAnyPrefix(k, gitOpsKeyPrefixes) {
+			continue
+		}
+		out[k] = v
+	}
+	return out
+}
+
+func hasAnyPrefix(s string, prefixes []string) bool {
+	for _, p := range prefixes {
+		if strings.HasPrefix(s, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // deleteRemote removes the object from the remote cluster.
@@ -451,6 +641,9 @@ func (r *Controller) buildRemoteSecret(src *corev1.Secret, sourceNamespace strin
 		copy(b, v)
 		dst.Data[k] = b
 	}
+	// Record the keys we own so a later sync can prune the ones we drop, keeping
+	// synced Secrets on the same convergence path as the intent CRDs.
+	recordManagedKeys(dst)
 	return dst
 }
 
