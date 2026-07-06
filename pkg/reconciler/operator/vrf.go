@@ -149,16 +149,28 @@ func processExports(vrf *v1alpha1.VRFRevision, fabricVrf *v1alpha1.FabricVRF) {
 		if export.Action == permitRoute {
 			filterItem.Action.Type = v1alpha1.Accept
 		}
-		fabricVrf.EVPNExportFilter.Items = append(fabricVrf.EVPNExportFilter.Items, filterItem)
 
-		vrfImportItem := filterItem.DeepCopy()
-		if vrf.Community != nil {
+		comms := vrf.Communities
+		// Fall back to the deprecated single Community field for backward compatibility.
+		//nolint:staticcheck // SA1019: intentional read of deprecated field for backward compatibility
+		if len(comms) == 0 && vrf.Community != nil {
+			//nolint:staticcheck // SA1019: intentional read of deprecated field for backward compatibility
+			comms = []string{*vrf.Community}
+		}
+		if len(comms) > 0 {
 			additive := true
-			vrfImportItem.Action.ModifyRoute = &v1alpha1.ModifyRouteAction{
-				AddCommunities:      []string{*vrf.Community},
+			// Set the communities both on the EVPN export filter (the l2vpn evpn
+			// advertise route-map) and on the fabric VRF import, mirroring stable/0.2
+			// where the single rm_<vrf>_export route-map carried `set community` and
+			// was attached to both the EVPN advertisement and the VRF import path.
+			filterItem.Action.ModifyRoute = &v1alpha1.ModifyRouteAction{
+				AddCommunities:      comms,
 				AdditiveCommunities: &additive,
 			}
 		}
+		fabricVrf.EVPNExportFilter.Items = append(fabricVrf.EVPNExportFilter.Items, filterItem)
+
+		vrfImportItem := filterItem.DeepCopy()
 		vrfImport := fabricVrf.VRFImports[0]
 		vrfImport.Filter.Items = append(vrfImport.Filter.Items, *vrfImportItem)
 		fabricVrf.VRFImports[0] = vrfImport

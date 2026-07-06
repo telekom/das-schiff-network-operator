@@ -78,8 +78,15 @@ type VRFRouteConfigurationSpec struct {
 	// Sequence of the generated route-map, maximum of 65534 because we sometimes have to set an explicit default-deny
 	Seq int `json:"seq"`
 
-	// Community for export, if omitted no community will be set
+	// Community for export, if omitted no community will be set.
+	// Mutually exclusive with Communities.
+	//
+	// Deprecated: use Communities instead.
 	Community *string `json:"community,omitempty"`
+
+	// Communities for export, if omitted no community will be set.
+	// Use this instead of the deprecated Community field. Mutually exclusive with Community.
+	Communities []string `json:"communities,omitempty"`
 
 	// Select nodes to create VRF on
 	NodeSelector *metav1.LabelSelector `json:"nodeSelector,omitempty"`
