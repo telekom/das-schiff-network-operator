@@ -190,7 +190,7 @@ func (r *Reconciler) ReconcileDebounced(ctx context.Context) error {
 	// the builders surface as Ready=False on the specific offending resource.
 	issuesMap := make(map[string]status.ResourceIssue)
 	for _, issue := range report.Issues() {
-		issuesMap[status.IssueKey(issue.Kind, issue.Name)] = status.ResourceIssue{
+		issuesMap[status.IssueKey(issue.Kind, issue.Namespace, issue.Name)] = status.ResourceIssue{
 			Reason:  issue.Reason,
 			Message: issue.Message,
 		}

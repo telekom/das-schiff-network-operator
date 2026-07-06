@@ -79,7 +79,7 @@ func (b *L2ABuilder) Build(ctx context.Context, data *resolver.ResolvedData) (ma
 			// failure as a Ready=False condition (with a specific reason) so it
 			// is visible in the resource status, not only the controller log.
 			logger.Info("skipping Layer2Attachment", "l2a", l2a.Name, "error", err.Error())
-			reportSkip(ctx, "Layer2Attachment", l2a.Name, skipReason(err), err.Error())
+			reportSkip(ctx, "Layer2Attachment", l2a.Namespace, l2a.Name, skipReason(err), err.Error())
 			continue
 		}
 	}

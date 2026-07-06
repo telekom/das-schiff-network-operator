@@ -29,7 +29,7 @@ func TestBuildReport_CapturesSkippedResource(t *testing.T) {
 	data := baseInboundData()
 	data.Inbounds = []nc.Inbound{
 		{
-			ObjectMeta: metav1.ObjectMeta{Name: "bad-inbound"},
+			ObjectMeta: metav1.ObjectMeta{Name: "bad-inbound", Namespace: "tenant-a"},
 			Spec: nc.InboundSpec{
 				NetworkRef:   "nonexistent",
 				Destinations: &metav1.LabelSelector{MatchLabels: map[string]string{"type": "gw"}},
@@ -50,7 +50,7 @@ func TestBuildReport_CapturesSkippedResource(t *testing.T) {
 		t.Fatalf("expected 1 build issue, got %d: %+v", len(issues), issues)
 	}
 	got := issues[0]
-	if got.Kind != "Inbound" || got.Name != "bad-inbound" || got.Reason != "NetworkNotFound" {
+	if got.Kind != "Inbound" || got.Namespace != "tenant-a" || got.Name != "bad-inbound" || got.Reason != "NetworkNotFound" {
 		t.Errorf("unexpected issue: %+v", got)
 	}
 	if got.Message == "" {
@@ -85,5 +85,5 @@ func TestBuildReport_NoIssuesWhenHealthy(t *testing.T) {
 
 func TestReportSkip_NoopWithoutReport(_ *testing.T) {
 	// Must not panic when ctx carries no report (e.g. unit tests calling Build directly).
-	reportSkip(context.Background(), "Inbound", "x", "Reason", "message")
+	reportSkip(context.Background(), "Inbound", "ns", "x", "Reason", "message")
 }

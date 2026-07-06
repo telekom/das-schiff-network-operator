@@ -45,19 +45,22 @@ type ResourceIssue struct {
 	Message string
 }
 
-// IssueKey builds the map key used to look up a ResourceIssue by kind and name.
-func IssueKey(kind, name string) string {
-	return kind + "/" + name
+// IssueKey builds the map key used to look up a ResourceIssue by kind,
+// namespace and name. Namespace is part of the key because intent CRDs are
+// namespaced and the reconciler may run cluster-wide, so name alone is not
+// unique across namespaces.
+func IssueKey(kind, namespace, name string) string {
+	return kind + "/" + namespace + "/" + name
 }
 
 // applyBuildIssue forces Ready=False (with the issue's reason/message) when the
 // resource has a recorded build issue; otherwise the inputs are returned
 // unchanged. The Resolved condition is left untouched — references may have
 // resolved fine while the build still failed for another reason.
-func applyBuildIssue(issues map[string]ResourceIssue, kind, name string,
+func applyBuildIssue(issues map[string]ResourceIssue, kind, namespace, name string,
 	status metav1.ConditionStatus, reason, message string,
 ) (readyStatus metav1.ConditionStatus, readyReason, readyMessage string) {
-	if issue, ok := issues[IssueKey(kind, name)]; ok {
+	if issue, ok := issues[IssueKey(kind, namespace, name)]; ok {
 		return metav1.ConditionFalse, issue.Reason, issue.Message
 	}
 	return status, reason, message
@@ -109,7 +112,7 @@ func (u *Updater) statusUpdateWithRetry(ctx context.Context, obj client.Object, 
 }
 
 // UpdateConditions sets Ready/Resolved conditions on intent CRDs. The issues
-// map (keyed by IssueKey(kind, name)) carries per-resource build failures so
+// map (keyed by IssueKey(kind, namespace, name)) carries per-resource build failures so
 // resources skipped during the build phase surface Ready=False.
 func (u *Updater) UpdateConditions(ctx context.Context, fetched *resolver.FetchedResources, resolved *resolver.ResolvedData, issues map[string]ResourceIssue) error {
 	if err := u.updateVRFConditions(ctx, fetched); err != nil {
@@ -222,7 +225,7 @@ func (u *Updater) updateInboundConditions(ctx context.Context, fetched *resolver
 		if resolvedStatus != metav1.ConditionTrue {
 			readyMsg = resolvedMsg
 		}
-		readyStatus, readyReason, readyMsg = applyBuildIssue(issues, "Inbound", inb.Name, readyStatus, readyReason, readyMsg)
+		readyStatus, readyReason, readyMsg = applyBuildIssue(issues, "Inbound", inb.Namespace, inb.Name, readyStatus, readyReason, readyMsg)
 
 		if err := u.statusUpdateWithRetry(ctx, inb, func(obj client.Object) {
 			in := obj.(*nc.Inbound)
@@ -247,7 +250,7 @@ func (u *Updater) updateOutboundConditions(ctx context.Context, fetched *resolve
 		if resolvedStatus != metav1.ConditionTrue {
 			readyMsg = resolvedMsg
 		}
-		readyStatus, readyReason, readyMsg = applyBuildIssue(issues, "Outbound", outb.Name, readyStatus, readyReason, readyMsg)
+		readyStatus, readyReason, readyMsg = applyBuildIssue(issues, "Outbound", outb.Namespace, outb.Name, readyStatus, readyReason, readyMsg)
 
 		if err := u.statusUpdateWithRetry(ctx, outb, func(obj client.Object) {
 			o := obj.(*nc.Outbound)
@@ -272,7 +275,7 @@ func (u *Updater) updateLayer2AttachmentConditions(ctx context.Context, fetched 
 		if resolvedStatus != metav1.ConditionTrue {
 			readyMsg = resolvedMsg
 		}
-		readyStatus, readyReason, readyMsg = applyBuildIssue(issues, "Layer2Attachment", l2a.Name, readyStatus, readyReason, readyMsg)
+		readyStatus, readyReason, readyMsg = applyBuildIssue(issues, "Layer2Attachment", l2a.Namespace, l2a.Name, readyStatus, readyReason, readyMsg)
 
 		effIfName := effectiveInterfaceName(l2a, resolved)
 
@@ -300,7 +303,7 @@ func (u *Updater) updatePodNetworkConditions(ctx context.Context, fetched *resol
 		if resolvedStatus != metav1.ConditionTrue {
 			readyMsg = resolvedMsg
 		}
-		readyStatus, readyReason, readyMsg = applyBuildIssue(issues, "PodNetwork", pn.Name, readyStatus, readyReason, readyMsg)
+		readyStatus, readyReason, readyMsg = applyBuildIssue(issues, "PodNetwork", pn.Namespace, pn.Name, readyStatus, readyReason, readyMsg)
 
 		if err := u.statusUpdateWithRetry(ctx, pn, func(obj client.Object) {
 			p := obj.(*nc.PodNetwork)
@@ -317,7 +320,7 @@ func (u *Updater) updatePodNetworkConditions(ctx context.Context, fetched *resol
 func (u *Updater) updateCollectorConditions(ctx context.Context, fetched *resolver.FetchedResources, issues map[string]ResourceIssue) error {
 	for i := range fetched.Collectors {
 		col := &fetched.Collectors[i]
-		readyStatus, readyReason, readyMsg := applyBuildIssue(issues, "Collector", col.Name,
+		readyStatus, readyReason, readyMsg := applyBuildIssue(issues, "Collector", col.Namespace, col.Name,
 			metav1.ConditionTrue, "Ready", "Collector is ready")
 		if err := u.statusUpdateWithRetry(ctx, col, func(obj client.Object) {
 			c := obj.(*nc.Collector)
@@ -355,7 +358,7 @@ func (u *Updater) updateTrafficMirrorConditions(ctx context.Context, fetched *re
 		if resolvedStatus != metav1.ConditionTrue {
 			readyMsg = resolvedMsg
 		}
-		readyStatus, readyReason, readyMsg = applyBuildIssue(issues, "TrafficMirror", tm.Name, readyStatus, readyReason, readyMsg)
+		readyStatus, readyReason, readyMsg = applyBuildIssue(issues, "TrafficMirror", tm.Namespace, tm.Name, readyStatus, readyReason, readyMsg)
 
 		if err := u.statusUpdateWithRetry(ctx, tm, func(obj client.Object) {
 			t := obj.(*nc.TrafficMirror)
@@ -388,7 +391,7 @@ func (u *Updater) updateNodeAttachmentConditions(ctx context.Context, fetched *r
 		if resolvedStatus != metav1.ConditionTrue {
 			readyMsg = resolvedMsg
 		}
-		readyStatus, readyReason, readyMsg = applyBuildIssue(issues, "NodeAttachment", na.Name, readyStatus, readyReason, readyMsg)
+		readyStatus, readyReason, readyMsg = applyBuildIssue(issues, "NodeAttachment", na.Namespace, na.Name, readyStatus, readyReason, readyMsg)
 
 		if err := u.statusUpdateWithRetry(ctx, na, func(obj client.Object) {
 			n := obj.(*nc.NodeAttachment)
@@ -413,7 +416,7 @@ func (u *Updater) updateBGPPeeringConditions(ctx context.Context, fetched *resol
 		if resolvedStatus != metav1.ConditionTrue {
 			readyMsg = resolvedMsg
 		}
-		readyStatus, readyReason, readyMsg = applyBuildIssue(issues, "BGPPeering", bp.Name, readyStatus, readyReason, readyMsg)
+		readyStatus, readyReason, readyMsg = applyBuildIssue(issues, "BGPPeering", bp.Namespace, bp.Name, readyStatus, readyReason, readyMsg)
 
 		if err := u.statusUpdateWithRetry(ctx, bp, func(obj client.Object) {
 			b := obj.(*nc.BGPPeering)
@@ -428,9 +431,11 @@ func (u *Updater) updateBGPPeeringConditions(ctx context.Context, fetched *resol
 	return nil
 }
 
-// checkBGPPeeringRefs validates that the references declared in a BGPPeering
-// spec resolve to existing intent resources. The checks are mode-specific and
-// mirror the requirements enforced by the BGPPeering builder:
+// checkBGPPeeringRefs validates, for status reporting, that the references
+// declared in a BGPPeering spec point at intent resources that actually exist.
+// This drives the Resolved condition and is independent of the builder, which
+// silently skips unresolved networkRefs and does not consume inboundRefs at
+// all. The required references are mode-specific:
 //   - listenRange requires attachmentRef (an existing Layer2Attachment) and
 //     at least one networkRef (each an existing Network).
 //   - loopbackPeer requires at least one inboundRef (each an existing Inbound).

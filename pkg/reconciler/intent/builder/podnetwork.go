@@ -55,7 +55,7 @@ func (b *PodNetworkBuilder) Build(ctx context.Context, data *resolver.ResolvedDa
 		if !ok {
 			logger.Info("skipping PodNetwork with unknown Network reference",
 				"podnetwork", pn.Name, "networkRef", pn.Spec.NetworkRef)
-			reportSkip(ctx, "PodNetwork", pn.Name, "NetworkNotFound",
+			reportSkip(ctx, "PodNetwork", pn.Namespace, pn.Name, "NetworkNotFound",
 				fmt.Sprintf("referenced Network %q not found", pn.Spec.NetworkRef))
 			continue
 		}
@@ -65,7 +65,7 @@ func (b *PodNetworkBuilder) Build(ctx context.Context, data *resolver.ResolvedDa
 		if err != nil {
 			logger.Info("skipping PodNetwork with unresolvable destinations",
 				"podnetwork", pn.Name, "error", err.Error())
-			reportSkip(ctx, "PodNetwork", pn.Name, "DestinationResolutionFailed", err.Error())
+			reportSkip(ctx, "PodNetwork", pn.Namespace, pn.Name, "DestinationResolutionFailed", err.Error())
 			continue
 		}
 
@@ -78,7 +78,7 @@ func (b *PodNetworkBuilder) Build(ctx context.Context, data *resolver.ResolvedDa
 		if err != nil {
 			logger.Info("skipping PodNetwork with ambiguous announcement policy",
 				"podnetwork", pn.Name, "error", err.Error())
-			reportSkip(ctx, "PodNetwork", pn.Name, "AmbiguousAnnouncementPolicy", err.Error())
+			reportSkip(ctx, "PodNetwork", pn.Namespace, pn.Name, "AmbiguousAnnouncementPolicy", err.Error())
 			continue
 		}
 
