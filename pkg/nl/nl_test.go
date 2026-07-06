@@ -99,13 +99,12 @@ var _ = Describe("ListL3()", func() {
 		Expect(err).ToNot(HaveOccurred())
 		Expect(result).To(BeEmpty())
 	})
-	It("returns no error error if cannot get bridge, vxlan and vrf links by name", func() {
+	It("returns no error if the VRF has no bridge/vxlan children", func() {
 		mockctrl := gomock.NewController(GinkgoT())
 		defer mockctrl.Finish()
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
 		nm := NewManager(netlinkMock, &config.BaseConfig{})
 		netlinkMock.EXPECT().LinkList().Return([]netlink.Link{&netlink.Vrf{LinkAttrs: netlink.LinkAttrs{Name: dummyIntf}}}, nil)
-		netlinkMock.EXPECT().LinkByName(gomock.Any()).Return(nil, errors.New("link not found")).Times(2)
 
 		_, err := nm.ListL3()
 		Expect(err).ToNot(HaveOccurred())
@@ -115,11 +114,17 @@ var _ = Describe("ListL3()", func() {
 		defer mockctrl.Finish()
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
 		nm := NewManager(netlinkMock, &config.BaseConfig{})
-		netlinkMock.EXPECT().LinkList().Return([]netlink.Link{&netlink.Vrf{LinkAttrs: netlink.LinkAttrs{Name: dummyIntf}}}, nil)
-		netlinkMock.EXPECT().LinkByName(bridgePrefix+dummyIntf).Return(&netlink.Bridge{}, nil)
-		netlinkMock.EXPECT().LinkByName(vxlanPrefix+dummyIntf).Return(&netlink.Vxlan{}, nil)
-		_, err := nm.ListL3()
+		// VRF (index 10) <- bridge br.100 (index 11) <- vxlan vx.100 (VNI 100).
+		netlinkMock.EXPECT().LinkList().Return([]netlink.Link{
+			&netlink.Vrf{LinkAttrs: netlink.LinkAttrs{Name: dummyIntf, Index: 10}},
+			&netlink.Bridge{LinkAttrs: netlink.LinkAttrs{Name: bridgePrefix + "100", Index: 11, MasterIndex: 10}},
+			&netlink.Vxlan{LinkAttrs: netlink.LinkAttrs{Name: vxlanPrefix + "100", Index: 12, MasterIndex: 11}, VxlanId: 100},
+		}, nil)
+		result, err := nm.ListL3()
 		Expect(err).ToNot(HaveOccurred())
+		Expect(result).To(HaveLen(1))
+		Expect(result[0].VNI).To(Equal(100))
+		Expect(result[0].MarkForDelete).To(BeFalse())
 	})
 })
 
@@ -290,21 +295,29 @@ var _ = Describe("GetVRFInterfaceIdxByName()", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
 		nm := NewManager(netlinkMock, &config.BaseConfig{})
 		netlinkMock.EXPECT().LinkList().Return([]netlink.Link{&netlink.Vrf{LinkAttrs: netlink.LinkAttrs{Name: dummyIntf}}}, nil)
-		netlinkMock.EXPECT().LinkByName(bridgePrefix+dummyIntf).Return(&netlink.Bridge{}, nil)
-		netlinkMock.EXPECT().LinkByName(vxlanPrefix+dummyIntf).Return(&netlink.Vxlan{}, nil)
 		_, err := nm.GetVRFInterfaceIdxByName(dummyIntf)
 		Expect(err).ToNot(HaveOccurred())
 	})
 })
 
 var _ = Describe("CleanupL3()", func() {
+	// A VRF (index 10) with an enslaved bridge br.100 (index 11) and a vxlan
+	// vx.100 (master 11). Cleanup deletes the vxlan, the bridge and the VRF
+	// device: three LinkDel calls.
+	cleanupLinks := func() []netlink.Link {
+		return []netlink.Link{
+			&netlink.Bridge{LinkAttrs: netlink.LinkAttrs{Name: bridgePrefix + "100", Index: 11, MasterIndex: 10}},
+			&netlink.Vxlan{LinkAttrs: netlink.LinkAttrs{Name: vxlanPrefix + "100", Index: 12, MasterIndex: 11}},
+		}
+	}
 	It("returns non empty error slice if any errors occurred", func() {
 		mockctrl := gomock.NewController(GinkgoT())
 		defer mockctrl.Finish()
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
 		nm := NewManager(netlinkMock, &config.BaseConfig{})
+		netlinkMock.EXPECT().LinkList().Return(cleanupLinks(), nil)
 		netlinkMock.EXPECT().LinkDel(gomock.Any()).Return(errors.New("error deleting link")).Times(3)
-		err := nm.CleanupL3("name")
+		err := nm.CleanupL3(VRFInformation{Name: "name", vrfID: 10, VNI: 100})
 		Expect(err).ToNot(BeEmpty())
 	})
 	It("returns empty error slice if no errors occurred", func() {
@@ -312,8 +325,9 @@ var _ = Describe("CleanupL3()", func() {
 		defer mockctrl.Finish()
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
 		nm := NewManager(netlinkMock, &config.BaseConfig{})
+		netlinkMock.EXPECT().LinkList().Return(cleanupLinks(), nil)
 		netlinkMock.EXPECT().LinkDel(gomock.Any()).Return(nil).Times(3)
-		err := nm.CleanupL3("name")
+		err := nm.CleanupL3(VRFInformation{Name: "name", vrfID: 10, VNI: 100})
 		Expect(err).To(BeEmpty())
 	})
 	It("ignores EINVAL and ENODEV errors (link already gone)", func() {
@@ -321,8 +335,9 @@ var _ = Describe("CleanupL3()", func() {
 		defer mockctrl.Finish()
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
 		nm := NewManager(netlinkMock, &config.BaseConfig{})
+		netlinkMock.EXPECT().LinkList().Return(cleanupLinks(), nil)
 		netlinkMock.EXPECT().LinkDel(gomock.Any()).Return(unix.EINVAL).Times(3)
-		err := nm.CleanupL3("name")
+		err := nm.CleanupL3(VRFInformation{Name: "name", vrfID: 10, VNI: 100})
 		Expect(err).To(BeEmpty())
 	})
 })
@@ -388,8 +403,6 @@ var _ = Describe("findFreeTableID()", func() {
 		links := []netlink.Link{}
 		for i := vrfTableStart; i <= vrfTableEnd+1; i++ {
 			links = append(links, &netlink.Vrf{Table: uint32(i), LinkAttrs: netlink.LinkAttrs{Name: dummyIntf + strconv.Itoa(i)}})
-			netlinkMock.EXPECT().LinkByName(gomock.Any()).Return(&netlink.Bridge{}, nil)
-			netlinkMock.EXPECT().LinkByName(gomock.Any()).Return(&netlink.Vxlan{}, nil)
 		}
 		nm := NewManager(netlinkMock, &config.BaseConfig{})
 		netlinkMock.EXPECT().LinkList().Return(links, nil)
@@ -404,8 +417,6 @@ var _ = Describe("findFreeTableID()", func() {
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
 		nm := NewManager(netlinkMock, &config.BaseConfig{})
 		netlinkMock.EXPECT().LinkList().Return([]netlink.Link{&netlink.Vrf{LinkAttrs: netlink.LinkAttrs{Name: dummyIntf}}}, nil)
-		netlinkMock.EXPECT().LinkByName(gomock.Any()).Return(&netlink.Bridge{}, nil)
-		netlinkMock.EXPECT().LinkByName(gomock.Any()).Return(&netlink.Vxlan{}, nil)
 		v, err := nm.findFreeTableID()
 		Expect(v).To(Equal(vrfTableStart))
 		Expect(err).ToNot(HaveOccurred())
@@ -1189,13 +1200,13 @@ var _ = Describe("ReconcileL2()", func() {
 })
 
 var _ = Describe("CreateL3()", func() {
-	It("returns error if VRF name is longer than 12 characters", func() {
+	It("returns error if VRF name is longer than 15 characters", func() {
 		mockctrl := gomock.NewController(GinkgoT())
 		defer mockctrl.Finish()
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
 		nm := NewManager(netlinkMock, &config.BaseConfig{VTEPLoopbackIP: "127.0.0.1"})
 		vrfInfo := VRFInformation{
-			Name: "reallyLongTestNameOver12Chars",
+			Name: "reallyLongTestNameOver15Chars",
 		}
 		err := nm.CreateL3(vrfInfo)
 		Expect(err).To(HaveOccurred())
@@ -1224,8 +1235,6 @@ var _ = Describe("CreateL3()", func() {
 		}
 
 		netlinkMock.EXPECT().LinkList().Return([]netlink.Link{&netlink.Vrf{LinkAttrs: netlink.LinkAttrs{Name: dummyIntf}}}, nil)
-		netlinkMock.EXPECT().LinkByName(gomock.Any()).Return(&netlink.Bridge{}, nil)
-		netlinkMock.EXPECT().LinkByName(gomock.Any()).Return(&netlink.Vxlan{}, nil)
 		netlinkMock.EXPECT().LinkAdd(gomock.Any()).Return(errors.New("failed to add link"))
 
 		err := nm.CreateL3(vrfInfo)
@@ -1241,8 +1250,6 @@ var _ = Describe("CreateL3()", func() {
 		}
 
 		netlinkMock.EXPECT().LinkList().Return([]netlink.Link{&netlink.Vrf{LinkAttrs: netlink.LinkAttrs{Name: dummyIntf}}}, nil)
-		netlinkMock.EXPECT().LinkByName(gomock.Any()).Return(&netlink.Bridge{}, nil)
-		netlinkMock.EXPECT().LinkByName(gomock.Any()).Return(&netlink.Vxlan{}, nil)
 		netlinkMock.EXPECT().LinkAdd(gomock.Any()).Return(nil)
 
 		err := nm.CreateL3(vrfInfo)
@@ -1262,8 +1269,6 @@ var _ = Describe("CreateL3()", func() {
 		vrfName := dummyIntf
 
 		netlinkMock.EXPECT().LinkList().Return([]netlink.Link{&netlink.Vrf{LinkAttrs: netlink.LinkAttrs{Name: dummyIntf}}}, nil)
-		netlinkMock.EXPECT().LinkByName(gomock.Any()).Return(&netlink.Bridge{}, nil)
-		netlinkMock.EXPECT().LinkByName(gomock.Any()).Return(&netlink.Vxlan{}, nil)
 		netlinkMock.EXPECT().LinkAdd(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetUp(gomock.Any()).Return(errors.New("failed to set link up"))
 
@@ -1288,8 +1293,6 @@ var _ = Describe("CreateL3()", func() {
 		vrfName := dummyIntf
 
 		netlinkMock.EXPECT().LinkList().Return([]netlink.Link{&netlink.Vrf{LinkAttrs: netlink.LinkAttrs{Name: dummyIntf}}}, nil)
-		netlinkMock.EXPECT().LinkByName(gomock.Any()).Return(&netlink.Bridge{}, nil)
-		netlinkMock.EXPECT().LinkByName(gomock.Any()).Return(&netlink.Vxlan{}, nil)
 		netlinkMock.EXPECT().LinkByName(underlayInterfaceName).Return(&netlink.Dummy{}, nil)
 		netlinkMock.EXPECT().LinkAdd(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetUp(gomock.Any()).Return(nil)
@@ -1316,8 +1319,6 @@ var _ = Describe("CreateL3()", func() {
 		vrfName := dummyIntf
 
 		netlinkMock.EXPECT().LinkList().Return([]netlink.Link{&netlink.Vrf{LinkAttrs: netlink.LinkAttrs{Name: dummyIntf}}}, nil)
-		netlinkMock.EXPECT().LinkByName(gomock.Any()).Return(&netlink.Bridge{}, nil)
-		netlinkMock.EXPECT().LinkByName(gomock.Any()).Return(&netlink.Vxlan{}, nil)
 		netlinkMock.EXPECT().LinkByName(underlayInterfaceName).Return(&netlink.Dummy{}, nil)
 		netlinkMock.EXPECT().LinkAdd(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetUp(gomock.Any()).Return(nil)

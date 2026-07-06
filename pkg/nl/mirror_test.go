@@ -45,7 +45,7 @@ var _ = Describe("mirror helpers", func() {
 
 	It("builds source interface names", func() {
 		Expect(MirrorSourceL2(501)).To(Equal("vlan.501"))
-		Expect(MirrorSourceVRF("external")).To(Equal("vx.external"))
+		Expect(MirrorSourceVRF(uint32(2000123))).To(Equal("vx.2000123"))
 	})
 
 	It("builds a layer3 GRE link with key flags", func() {

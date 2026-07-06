@@ -18,8 +18,6 @@ package builder
 
 import (
 	"context"
-	"crypto/sha256"
-	"fmt"
 	"sort"
 	"strings"
 
@@ -29,12 +27,13 @@ import (
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/resolver"
+	"github.com/telekom/das-schiff-network-operator/pkg/vrfname"
 )
 
 // SBRBuilder auto-detects cross-VRF routing needs and produces intermediate
 // LocalVRFs with static routes + ClusterVRF PolicyRoutes for source-based routing.
 //
-// Single-VRF consumers get a LocalVRF named "s-<vrf>" with source-only policy routes.
+// Single-VRF consumers get a LocalVRF named "s-<hash>" with source-only policy routes.
 // Multi-VRF consumers get a single combo LocalVRF named "s-<hash>" that contains
 // static routes for all destination prefixes, each pointing to the correct FabricVRF.
 // This avoids policy-route ordering issues: ClusterVRF uses src-only policy routes
@@ -150,7 +149,7 @@ func (b *SBRBuilder) Build(_ context.Context, data *resolver.ResolvedData) (map[
 // addConsumerToGroups resolves a consumer's destination selector and adds its
 // source prefixes to the appropriate sbrGroup.
 //
-// Single-VRF consumers get a dedicated group keyed by VRF name → "s-<vrf>".
+// Single-VRF consumers get a dedicated group keyed by VRF name → "s-<hash>".
 // Multi-VRF consumers get a combo group keyed by sorted destination names → "s-<hash>".
 // Two consumers selecting the same destinations share the same combo group.
 func (*SBRBuilder) addConsumerToGroups(
@@ -169,7 +168,7 @@ func (*SBRBuilder) addConsumerToGroups(
 	}
 
 	if len(grouped) == 1 {
-		// Single VRF — use the VRF name as key for a simple "s-<vrf>" intermediate.
+		// Single VRF — use the VRF name as key for a simple "s-<hash>" intermediate.
 		for vrfName, dests := range grouped {
 			group, ok := groups[vrfName]
 			if !ok {
@@ -224,15 +223,12 @@ func destinationSetKey(sel *metav1.LabelSelector, data *resolver.ResolvedData) s
 	return strings.Join(names, "+")
 }
 
-// intermediateVRFName returns the LocalVRF name for a group.
-// Single-VRF: "s-<vrf>" (backward compatible, human-readable).
-// Multi-VRF:  "s-<8-char-hash>" (deterministic, compact).
+// intermediateVRFName returns the LocalVRF name for a group. Short single-VRF
+// keys keep the readable "s-<vrf>" form; keys that would overflow the interface
+// name limit and multi-VRF combo keys fall back to "s-<hash>". See
+// vrfname.SBRName.
 func intermediateVRFName(group *sbrGroup) string {
-	if !strings.Contains(group.key, "+") {
-		return fmt.Sprintf("s-%s", group.key)
-	}
-	h := sha256.Sum256([]byte(group.key))
-	return fmt.Sprintf("s-%x", h[:4]) // 8 hex chars
+	return vrfname.SBRName(group.key)
 }
 
 // buildComboVRF creates the intermediate LocalVRF for a group.

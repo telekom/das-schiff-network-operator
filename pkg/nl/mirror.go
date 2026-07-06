@@ -710,9 +710,9 @@ func MirrorSourceL2(vlan int) string {
 }
 
 // MirrorSourceVRF returns the interface name used to mirror a fabric VRF's traffic
-// (the VXLAN interface).
-func MirrorSourceVRF(vrf string) string {
-	return vxlanPrefix + vrf
+// (the VXLAN interface). The VXLAN is named by VNI.
+func MirrorSourceVRF(vni uint32) string {
+	return fmt.Sprintf("%s%d", vxlanPrefix, vni)
 }
 
 // prefixFamily returns the ethertype (ethPIP / ethPIPv6) of a CIDR/IP string, or

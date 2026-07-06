@@ -16,6 +16,11 @@ const (
 	vlanPrefix     = "vlan."
 	loopbackPrefix = "lo."
 
+	// linkTypeBridge is the netlink link type string for a bridge interface.
+	linkTypeBridge = "bridge"
+	// linkTypeVXLAN is the netlink link type string for a VXLAN interface.
+	linkTypeVXLAN = "vxlan"
+
 	underlayInterfaceName = "dum.underlay"
 
 	vxlanPort  = 4789

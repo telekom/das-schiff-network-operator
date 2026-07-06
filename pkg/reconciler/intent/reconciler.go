@@ -42,6 +42,7 @@ import (
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/legacy"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/resolver"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/status"
+	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/nncnames"
 )
 
 const (
@@ -215,6 +216,13 @@ func (r *Reconciler) applyNodeConfigs(
 		result, err := assembler.Assemble(contributions[node.Name])
 		if err != nil {
 			r.logger.Error(err, "assembly failed", "node", node.Name)
+			continue
+		}
+
+		// Reduce all VRF names (map keys and cross-references) to their
+		// datapath-safe form before hashing and applying the config.
+		if err := nncnames.Reduce(result.Spec); err != nil {
+			r.logger.Error(err, "VRF name reduction failed", "node", node.Name)
 			continue
 		}
 
