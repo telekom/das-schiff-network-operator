@@ -3,6 +3,7 @@ package sync
 import (
 	"context"
 	"fmt"
+	"net"
 	"reflect"
 	"sort"
 	"strings"
@@ -317,21 +318,59 @@ func (r *Controller) reconcileIPAM(ctx context.Context, namespace string) error 
 
 // promoteIPAMAddresses copies status.addresses into spec.addresses for Inbound/Outbound
 // so the workload operator sees pre-allocated IPs from mgmt-cluster IPAM.
+//
+// IPAM stores allocated addresses as bare host IPs (e.g. "10.100.148.1"), but
+// spec.addresses is a CIDR-typed field: the vinbound/voutbound webhooks validate
+// each entry with net.ParseCIDR. A bare IP therefore gets rejected on the remote
+// cluster. Inbound/Outbound addresses are advertised as individual routed hosts,
+// so each allocated IP is promoted to its /32 (IPv4) or /128 (IPv6) host CIDR.
 func (*Controller) promoteIPAMAddresses(obj client.Object) {
 	switch v := obj.(type) {
 	case *nc.Inbound:
 		if v.Spec.Addresses == nil && v.Status.Addresses != nil &&
 			(len(v.Status.Addresses.IPv4) > 0 || len(v.Status.Addresses.IPv6) > 0) {
-			v.Spec.Addresses = v.Status.Addresses.DeepCopy()
+			v.Spec.Addresses = hostCIDRAllocation(v.Status.Addresses)
 			v.Spec.Count = nil // Switch from count → manual mode
 		}
 	case *nc.Outbound:
 		if v.Spec.Addresses == nil && v.Status.Addresses != nil &&
 			(len(v.Status.Addresses.IPv4) > 0 || len(v.Status.Addresses.IPv6) > 0) {
-			v.Spec.Addresses = v.Status.Addresses.DeepCopy()
+			v.Spec.Addresses = hostCIDRAllocation(v.Status.Addresses)
 			v.Spec.Count = nil
 		}
 	}
+}
+
+// hostCIDRAllocation returns a copy of src with every bare host IP normalised to
+// its host CIDR (/32 for IPv4, /128 for IPv6). Entries that already carry a
+// prefix length are left untouched so explicit subnets survive round-trips.
+func hostCIDRAllocation(src *nc.AddressAllocation) *nc.AddressAllocation {
+	out := &nc.AddressAllocation{}
+	for _, addr := range src.IPv4 {
+		out.IPv4 = append(out.IPv4, toHostCIDR(addr))
+	}
+	for _, addr := range src.IPv6 {
+		out.IPv6 = append(out.IPv6, toHostCIDR(addr))
+	}
+	return out
+}
+
+// toHostCIDR normalises a single address to a host CIDR. A value that already
+// contains a prefix length is returned unchanged; a bare IP gets /32 (IPv4) or
+// /128 (IPv6). A value that parses as neither is returned as-is so the webhook
+// surfaces the original malformed input rather than a mangled one.
+func toHostCIDR(addr string) string {
+	if strings.Contains(addr, "/") {
+		return addr
+	}
+	ip := net.ParseIP(addr)
+	if ip == nil {
+		return addr
+	}
+	if ip.To4() != nil {
+		return addr + "/32"
+	}
+	return addr + "/128"
 }
 
 // applyRemote creates the object on the remote cluster if it does not yet exist,

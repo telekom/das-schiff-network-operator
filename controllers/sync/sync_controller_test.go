@@ -2,6 +2,7 @@ package sync
 
 import (
 	"context"
+	"net"
 	"strings"
 	"testing"
 
@@ -245,6 +246,66 @@ func TestSyncIPAMPromotion(t *testing.T) {
 	}
 	if remoteInbound.Spec.Count != nil {
 		t.Error("Remote Inbound spec.count should be nil after IPAM promotion")
+	}
+
+	// IPAM stores bare host IPs in status; spec.addresses is a CIDR-typed field
+	// validated by the vinbound webhook (net.ParseCIDR). The promoted addresses
+	// must be valid CIDRs or the remote create is rejected. This is the exact
+	// production failure: "invalid IPv4 CIDR \"10.100.148.1\"".
+	for _, addr := range remoteInbound.Spec.Addresses.IPv4 {
+		if _, _, err := net.ParseCIDR(addr); err != nil {
+			t.Errorf("promoted IPv4 address %q is not a valid CIDR: %v", addr, err)
+		}
+	}
+	for _, addr := range remoteInbound.Spec.Addresses.IPv6 {
+		if _, _, err := net.ParseCIDR(addr); err != nil {
+			t.Errorf("promoted IPv6 address %q is not a valid CIDR: %v", addr, err)
+		}
+	}
+
+	// The promoted remote object must also pass the real admission webhook that
+	// rejected it in production.
+	if _, err := (&nc.Inbound{}).ValidateCreate(ctx, remoteInbound); err != nil {
+		t.Errorf("promoted remote Inbound rejected by vinbound webhook: %v", err)
+	}
+}
+
+// TestPromoteIPAMAddressesFormatsHostCIDR reproduces the production bug directly:
+// a bare host IP allocated by IPAM (e.g. "10.100.148.1") must be promoted into
+// spec.addresses as a host CIDR (/32 for IPv4, /128 for IPv6) so the vinbound
+// webhook accepts it. Entries that already carry a prefix must be left intact.
+func TestPromoteIPAMAddressesFormatsHostCIDR(t *testing.T) {
+	inbound := &nc.Inbound{
+		Spec: nc.InboundSpec{NetworkRef: "net"},
+		Status: nc.InboundStatus{
+			Addresses: &nc.AddressAllocation{
+				IPv4: []string{"10.100.148.1", "10.100.148.0/24"},
+				IPv6: []string{"fd00::1"},
+			},
+		},
+	}
+
+	(&Controller{}).promoteIPAMAddresses(inbound)
+
+	if inbound.Spec.Addresses == nil {
+		t.Fatal("spec.addresses should be populated from status")
+	}
+	wantV4 := []string{"10.100.148.1/32", "10.100.148.0/24"}
+	if len(inbound.Spec.Addresses.IPv4) != len(wantV4) {
+		t.Fatalf("expected %d IPv4 entries, got %v", len(wantV4), inbound.Spec.Addresses.IPv4)
+	}
+	for i, want := range wantV4 {
+		if inbound.Spec.Addresses.IPv4[i] != want {
+			t.Errorf("IPv4[%d] = %q, want %q", i, inbound.Spec.Addresses.IPv4[i], want)
+		}
+	}
+	if len(inbound.Spec.Addresses.IPv6) != 1 || inbound.Spec.Addresses.IPv6[0] != "fd00::1/128" {
+		t.Errorf("IPv6 = %v, want [fd00::1/128]", inbound.Spec.Addresses.IPv6)
+	}
+
+	// The whole point: the promoted spec now passes admission validation.
+	if _, err := (&nc.Inbound{}).ValidateCreate(context.Background(), inbound); err != nil {
+		t.Errorf("promoted Inbound rejected by vinbound webhook: %v", err)
 	}
 }
 
