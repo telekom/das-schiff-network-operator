@@ -34,7 +34,7 @@ func TestBGPPeeringValidateCreate_ListenRange_Valid(t *testing.T) {
 		Mode: BGPPeeringModeListenRange,
 		Ref: BGPPeeringRef{
 			AttachmentRef: strPtr("l2a-1"),
-			InboundRefs:   []string{"ib-1"},
+			NetworkRefs:   []string{"net-1"},
 		},
 	}}
 	if _, err := r.ValidateCreate(context.Background(), r); err != nil {
@@ -54,28 +54,52 @@ func TestBGPPeeringValidateCreate_LoopbackPeer_Valid(t *testing.T) {
 	}
 }
 
-func TestBGPPeeringValidateCreate_EmptyInboundRefs(t *testing.T) {
+func TestBGPPeeringValidateCreate_ListenRange_MissingNetworkRefs(t *testing.T) {
 	r := &BGPPeering{Spec: BGPPeeringSpec{
 		Mode: BGPPeeringModeListenRange,
 		Ref: BGPPeeringRef{
 			AttachmentRef: strPtr("l2a-1"),
-			InboundRefs:   []string{},
 		},
 	}}
 	if _, err := r.ValidateCreate(context.Background(), r); err == nil {
-		t.Fatal("expected error for empty inboundRefs, got nil")
+		t.Fatal("expected error for listenRange without networkRefs, got nil")
 	}
 }
 
-func TestBGPPeeringValidateCreate_NilInboundRefs(t *testing.T) {
+func TestBGPPeeringValidateCreate_ListenRange_WithInboundRefs(t *testing.T) {
 	r := &BGPPeering{Spec: BGPPeeringSpec{
 		Mode: BGPPeeringModeListenRange,
 		Ref: BGPPeeringRef{
 			AttachmentRef: strPtr("l2a-1"),
+			NetworkRefs:   []string{"net-1"},
+			InboundRefs:   []string{"ib-1"},
 		},
 	}}
 	if _, err := r.ValidateCreate(context.Background(), r); err == nil {
-		t.Fatal("expected error for nil inboundRefs, got nil")
+		t.Fatal("expected error for listenRange with inboundRefs, got nil")
+	}
+}
+
+func TestBGPPeeringValidateCreate_LoopbackPeer_EmptyInboundRefs(t *testing.T) {
+	r := &BGPPeering{Spec: BGPPeeringSpec{
+		Mode: BGPPeeringModeLoopbackPeer,
+		Ref:  BGPPeeringRef{InboundRefs: []string{}},
+	}}
+	if _, err := r.ValidateCreate(context.Background(), r); err == nil {
+		t.Fatal("expected error for loopbackPeer with empty inboundRefs, got nil")
+	}
+}
+
+func TestBGPPeeringValidateCreate_LoopbackPeer_WithNetworkRefs(t *testing.T) {
+	r := &BGPPeering{Spec: BGPPeeringSpec{
+		Mode: BGPPeeringModeLoopbackPeer,
+		Ref: BGPPeeringRef{
+			InboundRefs: []string{"ib-1"},
+			NetworkRefs: []string{"net-1"},
+		},
+	}}
+	if _, err := r.ValidateCreate(context.Background(), r); err == nil {
+		t.Fatal("expected error for loopbackPeer with networkRefs, got nil")
 	}
 }
 
@@ -83,7 +107,7 @@ func TestBGPPeeringValidateCreate_ListenRange_MissingAttachmentRef(t *testing.T)
 	r := &BGPPeering{Spec: BGPPeeringSpec{
 		Mode: BGPPeeringModeListenRange,
 		Ref: BGPPeeringRef{
-			InboundRefs: []string{"ib-1"},
+			NetworkRefs: []string{"net-1"},
 		},
 	}}
 	if _, err := r.ValidateCreate(context.Background(), r); err == nil {
@@ -121,7 +145,7 @@ func TestBGPPeeringValidateUpdate_ModeImmutable(t *testing.T) {
 		Mode: BGPPeeringModeListenRange,
 		Ref: BGPPeeringRef{
 			AttachmentRef: strPtr("l2a-1"),
-			InboundRefs:   []string{"ib-1"},
+			NetworkRefs:   []string{"net-1"},
 		},
 	}}
 	r := &BGPPeering{Spec: BGPPeeringSpec{

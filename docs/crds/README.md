@@ -16,7 +16,7 @@ across management and workload clusters.
 | **Inbound** | `ib` | Allocate IPs for MetalLB pools (ingress LBs) |
 | **Outbound** | `ob` | Allocate IPs for SNAT / Coil egress |
 | **PodNetwork** | `pnet` | Additional pod-level networks from a Network |
-| **BGPPeering** | `bgpp` | BGP session — listenRange (L2) or loopbackPeer (BGPaaS); always references Inbound pools |
+| **BGPPeering** | `bgpp` | BGP session — listenRange (references Networks as the client-announce allow-list) or loopbackPeer/BGPaaS (references Inbound pools) |
 | **Collector** | `col` | GRE collector endpoint + mirror VRF binding |
 | **TrafficMirror** | `tmir` | Mirror traffic from an attachment to a Collector |
 | **InterfaceConfig** | `ifc` | Node-level interface provisioning (bonds, NICs) |
@@ -71,7 +71,7 @@ graph TD
     end
 
     subgraph "BGP"
-        BGPPeering["<b>BGPPeering</b><br/>mode, inboundRefs, attachmentRef, timers, BFD"]
+        BGPPeering["<b>BGPPeering</b><br/>mode, networkRefs, inboundRefs, attachmentRef, timers, BFD"]
     end
 
     subgraph "Traffic Mirroring"
@@ -104,7 +104,8 @@ graph TD
     PodNetwork -- "destinations (selector)" --> Destination
 
     BGPPeering -- "attachmentRef (listenRange)" --> L2A
-    BGPPeering -- "inboundRefs (both modes)" --> Inbound
+    BGPPeering -- "networkRefs (listenRange)" --> Network
+    BGPPeering -- "inboundRefs (loopbackPeer)" --> Inbound
 
     TrafficMirror -- "collector" --> Collector
     TrafficMirror -- "source" --> L2A

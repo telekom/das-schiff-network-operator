@@ -104,13 +104,15 @@ func (b *BGPPeeringBuilder) buildListenRange(bp *nc.BGPPeering, data *resolver.R
 		return fmt.Errorf("Layer2Attachment %q has no VRF for IRB", l2a.Name)
 	}
 
-	// Resolve inboundRefs to get the addresses the workload advertises.
-	inboundIPv4, inboundIPv6 := b.resolveInboundAddresses(bp, data)
+	// Resolve networkRefs to get the CIDRs L2 clients may announce. These
+	// form the import allow-list and the EVPN export set. The listen-range
+	// CIDR itself comes from the L2A's Network (net), not from here.
+	allowIPv4, allowIPv6 := b.resolveNetworkCIDRs(bp, data)
 
-	// Build BGPPeer with ListenRange, import filter from Inbound addresses,
-	// and EVPN export items for those same addresses.
-	peers := b.buildListenRangePeers(bp, net, inboundIPv4, inboundIPv6, data)
-	evpnExportItems := b.inboundEVPNExportItems(inboundIPv4, inboundIPv6)
+	// Build BGPPeer with ListenRange, import filter from networkRefs CIDRs,
+	// and EVPN export items for those same CIDRs.
+	peers := b.buildListenRangePeers(bp, net, allowIPv4, allowIPv6, data)
+	evpnExportItems := b.evpnExportItems(allowIPv4, allowIPv6)
 
 	// Sorted iteration for deterministic output.
 	vrfNames := make([]string, 0, len(vrfs))
@@ -184,17 +186,18 @@ func (*BGPPeeringBuilder) resolveL2AVRFs(l2a *nc.Layer2Attachment, data *resolve
 	return resolveSelectorVRFs(l2a.Spec.Destinations, data)
 }
 
-// buildListenRangePeers creates BGPPeer entries with ListenRange from Network CIDRs.
-// Import filter is scoped to the Inbound addresses (what the workload may advertise).
+// buildListenRangePeers creates BGPPeer entries with ListenRange from the L2A
+// Network CIDR. The import filter is scoped to the allow-list prefixes
+// (networkRefs CIDRs — what the L2 clients may announce, matched le 32/128).
 // Export filter is permit-all (workload sees all VRF routes).
-func (b *BGPPeeringBuilder) buildListenRangePeers(bp *nc.BGPPeering, net *resolver.ResolvedNetwork, inboundIPv4, inboundIPv6 []string, data *resolver.ResolvedData) []networkv1alpha1.BGPPeer {
+func (b *BGPPeeringBuilder) buildListenRangePeers(bp *nc.BGPPeering, net *resolver.ResolvedNetwork, allowIPv4, allowIPv6 []string, data *resolver.ResolvedData) []networkv1alpha1.BGPPeer {
 	var peers []networkv1alpha1.BGPPeer
 
 	if net.Spec.IPv4 != nil {
 		peer := b.buildBasePeer(bp, data)
 		cidr := net.Spec.IPv4.CIDR
 		peer.ListenRange = &cidr
-		peer.IPv4 = b.buildPeerAF(bp, inboundIPv4, true)
+		peer.IPv4 = b.buildPeerAF(bp, allowIPv4, true)
 		peers = append(peers, peer)
 	}
 
@@ -202,46 +205,36 @@ func (b *BGPPeeringBuilder) buildListenRangePeers(bp *nc.BGPPeering, net *resolv
 		peer := b.buildBasePeer(bp, data)
 		cidr := net.Spec.IPv6.CIDR
 		peer.ListenRange = &cidr
-		peer.IPv6 = b.buildPeerAF(bp, inboundIPv6, false)
+		peer.IPv6 = b.buildPeerAF(bp, allowIPv6, false)
 		peers = append(peers, peer)
 	}
 
 	return peers
 }
 
-// resolveInboundAddresses collects IPv4 and IPv6 addresses from the Inbound CRDs
-// referenced by the BGPPeering's inboundRefs.
-func (*BGPPeeringBuilder) resolveInboundAddresses(bp *nc.BGPPeering, data *resolver.ResolvedData) (ipv4, ipv6 []string) {
-	if bp.Spec.Ref.InboundRefs == nil {
-		return nil, nil
-	}
-
-	refSet := make(map[string]struct{}, len(bp.Spec.Ref.InboundRefs))
-	for _, ref := range bp.Spec.Ref.InboundRefs {
-		refSet[ref] = struct{}{}
-	}
-
-	for i := range data.Inbounds {
-		ib := &data.Inbounds[i]
-		if _, ok := refSet[ib.Name]; !ok {
+// resolveNetworkCIDRs collects the IPv4 and IPv6 CIDRs from the Network CRDs
+// referenced by the BGPPeering's networkRefs. These CIDRs form the listenRange
+// import allow-list (L2 clients may announce prefixes within them) and the
+// EVPN export set.
+func (*BGPPeeringBuilder) resolveNetworkCIDRs(bp *nc.BGPPeering, data *resolver.ResolvedData) (ipv4, ipv6 []string) {
+	for _, ref := range bp.Spec.Ref.NetworkRefs {
+		net, ok := data.Networks[ref]
+		if !ok {
 			continue
 		}
-		addrs := ib.Spec.Addresses
-		if addrs == nil {
-			addrs = ib.Status.Addresses
+		if net.Spec.IPv4 != nil && net.Spec.IPv4.CIDR != "" {
+			ipv4 = append(ipv4, net.Spec.IPv4.CIDR)
 		}
-		if addrs == nil {
-			continue
+		if net.Spec.IPv6 != nil && net.Spec.IPv6.CIDR != "" {
+			ipv6 = append(ipv6, net.Spec.IPv6.CIDR)
 		}
-		ipv4 = append(ipv4, addrs.IPv4...)
-		ipv6 = append(ipv6, addrs.IPv6...)
 	}
-
 	return ipv4, ipv6
 }
 
-// buildPeerAF builds an AddressFamily with an import filter from Inbound addresses
-// and a permit-all export filter. isIPv4 controls the le value (32 vs 128).
+// buildPeerAF builds an AddressFamily with an import filter from the allow-list
+// prefixes (networkRefs CIDRs) and a permit-all export filter. isIPv4 controls
+// the le value (32 vs 128), so a CIDR accepts any more-specific prefix within it.
 func (*BGPPeeringBuilder) buildPeerAF(bp *nc.BGPPeering, prefixes []string, isIPv4 bool) *networkv1alpha1.AddressFamily {
 	le := 128
 	if isIPv4 {
@@ -274,9 +267,9 @@ func (*BGPPeeringBuilder) buildPeerAF(bp *nc.BGPPeering, prefixes []string, isIP
 	return af
 }
 
-// inboundEVPNExportItems builds EVPN export filter items from Inbound addresses
-// so those prefixes are distributed across the fabric.
-func (*BGPPeeringBuilder) inboundEVPNExportItems(ipv4, ipv6 []string) []networkv1alpha1.FilterItem {
+// evpnExportItems builds EVPN export filter items from the allow-list prefixes
+// (networkRefs CIDRs) so those prefixes are distributed across the fabric.
+func (*BGPPeeringBuilder) evpnExportItems(ipv4, ipv6 []string) []networkv1alpha1.FilterItem {
 	items := make([]networkv1alpha1.FilterItem, 0, len(ipv4)+len(ipv6))
 	for _, pfx := range ipv4 {
 		le := 32

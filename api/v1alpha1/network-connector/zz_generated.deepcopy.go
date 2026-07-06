@@ -314,6 +314,11 @@ func (in *BGPPeeringRef) DeepCopyInto(out *BGPPeeringRef) {
 		*out = new(string)
 		**out = **in
 	}
+	if in.NetworkRefs != nil {
+		in, out := &in.NetworkRefs, &out.NetworkRefs
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	if in.InboundRefs != nil {
 		in, out := &in.InboundRefs, &out.InboundRefs
 		*out = make([]string, len(*in))

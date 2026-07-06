@@ -519,11 +519,16 @@ spec:
 
 Configures a BGP session in one of two modes:
 
-- **`listenRange`** — L2 attachment–based BGP peering (requires `attachmentRef`)
-- **`loopbackPeer`** — BGPaaS with auto-generated ULA IPv6 addresses (forbids `attachmentRef`)
+- **`listenRange`** — L2 attachment–based BGP peering. Requires `attachmentRef`
+  (the L2 segment to open the listen-range on; the listen-range CIDR comes from
+  the L2A's Network) and `networkRefs` (the Networks whose CIDRs L2 clients may
+  announce). Forbids `inboundRefs`. No Inbound/MetalLB pool is involved.
+- **`loopbackPeer`** — BGPaaS with auto-generated ULA IPv6 addresses. Requires
+  `inboundRefs` (the allocated VIP pools the tenant advertises). Forbids
+  `attachmentRef` and `networkRefs`.
 
-Both modes always reference one or more Inbound resources for IP pool
-advertisement.
+The reference kind is mode-specific and mutually exclusive — listenRange
+operates on Networks, loopbackPeer on Inbounds.
 
 #### Spec
 
@@ -532,7 +537,8 @@ advertisement.
 | `mode` | string | ✅ | 🔒 | `listenRange` or `loopbackPeer`. |
 | `ref` | BGPPeeringRef | ✅ | | Reference configuration. |
 | `ref.attachmentRef` | \*string | | | Layer2Attachment name. **Required** for `listenRange`, **forbidden** for `loopbackPeer`. |
-| `ref.inboundRefs` | []string | ✅ | | Inbound names (MinItems=1). |
+| `ref.networkRefs` | []string | | | Network names (MinItems=1). Their CIDRs form the listenRange import allow-list (matched le 32/128) and EVPN export set. **Required** for `listenRange`, **forbidden** for `loopbackPeer`. |
+| `ref.inboundRefs` | []string | | | Inbound names (MinItems=1). **Required** for `loopbackPeer`, **forbidden** for `listenRange`. |
 | `advertiseTransferNetwork` | \*bool | | | Advertise the transfer network prefix. |
 | `holdTime` | \*Duration | | | BGP hold timer. |
 | `keepaliveTime` | \*Duration | | | BGP keepalive timer. |
@@ -560,7 +566,10 @@ advertisement.
 - `mode` is immutable (CEL: `self.mode == oldSelf.mode`).
 - `attachmentRef` is **required** when `mode == listenRange` and **forbidden**
   when `mode == loopbackPeer` (CEL).
-- `ref.inboundRefs` must contain at least 1 item.
+- `networkRefs` is **required** (MinItems=1) when `mode == listenRange` and
+  **forbidden** when `mode == loopbackPeer` (CEL).
+- `inboundRefs` is **required** (MinItems=1) when `mode == loopbackPeer` and
+  **forbidden** when `mode == listenRange` (CEL).
 - `workloadAS` range: 1–4 294 967 295.
 - `bfdProfile.minInterval` range: 50–60 000 ms.
 
@@ -582,8 +591,8 @@ spec:
   mode: listenRange
   ref:
     attachmentRef: prod-l2
-    inboundRefs:
-      - prod-ingress
+    networkRefs:
+      - prod-clients
   holdTime: 90s
   keepaliveTime: 30s
   maximumPrefixes: 1000

@@ -69,6 +69,13 @@ func TestBGPPeeringBuilder_ListenRange(t *testing.T) { //nolint:funlen // table-
 					IPv6: &nc.IPNetwork{CIDR: "fd00:100::/64"},
 				},
 			},
+			"allowed-net": {
+				Name: "allowed-net",
+				Spec: nc.NetworkSpec{
+					IPv4: &nc.IPNetwork{CIDR: "10.200.0.0/24"},
+					IPv6: &nc.IPNetwork{CIDR: "fd00:200::/64"},
+				},
+			},
 		},
 		VRFs: map[string]*resolver.ResolvedVRF{
 			"prod-vrf": {
@@ -107,7 +114,7 @@ func TestBGPPeeringBuilder_ListenRange(t *testing.T) { //nolint:funlen // table-
 					Mode: nc.BGPPeeringModeListenRange,
 					Ref: nc.BGPPeeringRef{
 						AttachmentRef: ptr("transfer-l2a"),
-						InboundRefs:   []string{"my-inbound"},
+						NetworkRefs:   []string{"allowed-net"},
 					},
 					WorkloadAS: ptr(int64(65100)),
 				},
@@ -149,11 +156,15 @@ func TestBGPPeeringBuilder_ListenRange(t *testing.T) { //nolint:funlen // table-
 		t.Errorf("expected RemoteASN 65100, got %d", p4.RemoteASN)
 	}
 	if p4.IPv4 == nil {
-		t.Error("expected IPv4 address family on IPv4 peer")
+		t.Fatal("expected IPv4 address family on IPv4 peer")
 	}
 	if p4.IPv6 != nil {
 		t.Error("expected nil IPv6 address family on IPv4 peer")
 	}
+
+	// The import allow-list must come from the BGPPeering's networkRefs
+	// (allowed-net IPv4 CIDR), matched le 32 — NOT from the listen-range Network.
+	assertImportAllows(t, p4.IPv4, "10.200.0.0/24", 32)
 
 	// Check IPv6 peer.
 	p6 := fvrf.BGPPeers[1]
@@ -164,10 +175,44 @@ func TestBGPPeeringBuilder_ListenRange(t *testing.T) { //nolint:funlen // table-
 		t.Errorf("expected RemoteASN 65100, got %d", p6.RemoteASN)
 	}
 	if p6.IPv6 == nil {
-		t.Error("expected IPv6 address family on IPv6 peer")
+		t.Fatal("expected IPv6 address family on IPv6 peer")
 	}
 	if p6.IPv4 != nil {
 		t.Error("expected nil IPv4 address family on IPv6 peer")
+	}
+	assertImportAllows(t, p6.IPv6, "fd00:200::/64", 128)
+
+	// networkRefs CIDRs are also added to the VRF's EVPN export filter.
+	if fvrf.EVPNExportFilter == nil {
+		t.Fatal("expected EVPNExportFilter to be set from networkRefs")
+	}
+	if len(fvrf.EVPNExportFilter.Items) != 2 {
+		t.Fatalf("expected 2 EVPN export items (IPv4 + IPv6), got %d", len(fvrf.EVPNExportFilter.Items))
+	}
+}
+
+// assertImportAllows checks that af has a reject-default import filter with a
+// single accept item for the given prefix and le bound.
+func assertImportAllows(t *testing.T, af *networkv1alpha1.AddressFamily, prefix string, le int) {
+	t.Helper()
+	if af.ImportFilter == nil {
+		t.Fatal("expected import filter")
+	}
+	if af.ImportFilter.DefaultAction.Type != networkv1alpha1.Reject {
+		t.Errorf("expected reject-default import filter, got %v", af.ImportFilter.DefaultAction.Type)
+	}
+	if len(af.ImportFilter.Items) != 1 {
+		t.Fatalf("expected 1 import allow item, got %d", len(af.ImportFilter.Items))
+	}
+	item := af.ImportFilter.Items[0]
+	if item.Action.Type != networkv1alpha1.Accept {
+		t.Errorf("expected accept action, got %v", item.Action.Type)
+	}
+	if item.Matcher.Prefix == nil || item.Matcher.Prefix.Prefix != prefix {
+		t.Errorf("expected import allow prefix %q, got %v", prefix, item.Matcher.Prefix)
+	}
+	if item.Matcher.Prefix != nil && (item.Matcher.Prefix.Le == nil || *item.Matcher.Prefix.Le != le) {
+		t.Errorf("expected le %d, got %v", le, item.Matcher.Prefix.Le)
 	}
 }
 
@@ -220,7 +265,7 @@ func TestBGPPeeringBuilder_ListenRangeFanOut(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{Name: "lp"},
 				Spec: nc.BGPPeeringSpec{
 					Mode:       nc.BGPPeeringModeListenRange,
-					Ref:        nc.BGPPeeringRef{AttachmentRef: ptr("transfer-l2a")},
+					Ref:        nc.BGPPeeringRef{AttachmentRef: ptr("transfer-l2a"), NetworkRefs: []string{"transfer-net"}},
 					WorkloadAS: ptr(int64(65100)),
 				},
 			},
@@ -424,7 +469,7 @@ func TestBGPPeeringBuilder_MissingAttachmentRef(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{Name: "missing-ref"},
 				Spec: nc.BGPPeeringSpec{
 					Mode: nc.BGPPeeringModeListenRange,
-					Ref:  nc.BGPPeeringRef{InboundRefs: []string{"x"}},
+					Ref:  nc.BGPPeeringRef{NetworkRefs: []string{"x"}},
 					// AttachmentRef intentionally omitted.
 				},
 			},
