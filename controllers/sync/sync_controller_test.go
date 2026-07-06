@@ -445,13 +445,17 @@ func TestSyncMultipleCRDTypes(t *testing.T) {
 func ptrInt32(v int32) *int32    { return &v }
 func ptrString(v string) *string { return &v }
 
-// TestSyncPreservesForeignLabelsOnRemote is the core regression test for the
-// label war with Flux. A remote object we manage also carries a label set by a
-// GitOps controller on the workload cluster. Syncing must correct spec drift and
-// keep our managed-by label, while leaving the foreign label completely intact —
-// the patch helper only diffs the fields we changed, so it must never be sent.
+// TestSyncPreservesForeignLabelsOnRemote verifies that non-GitOps labels set by
+// another controller on the workload cluster are preserved, while a Flux/GitOps
+// inventory label is stripped even when it was already present on the remote.
+// The patch helper only diffs the fields we change, so the foreign label is
+// never sent; the Flux label is actively removed because our synced objects are
+// not part of any Flux inventory (if a live Flux truly owns it, it reapplies).
 func TestSyncPreservesForeignLabelsOnRemote(t *testing.T) {
-	const fluxLabel = "kustomize.toolkit.fluxcd.io/name"
+	const (
+		fluxLabel    = "kustomize.toolkit.fluxcd.io/name" // must be stripped
+		foreignLabel = "example.com/owned-by"             // must be preserved
+	)
 
 	vrf := &nc.VRF{
 		ObjectMeta: metav1.ObjectMeta{Name: "vrf-m2m", Namespace: "test-cluster"},
@@ -459,7 +463,8 @@ func TestSyncPreservesForeignLabelsOnRemote(t *testing.T) {
 	}
 
 	// Remote object is ours (managed-by label) but a workload-cluster Flux has
-	// also stamped its own inventory label on it, and the spec has drifted.
+	// also stamped its own inventory label on it, another controller stamped a
+	// non-GitOps label, and the spec has drifted.
 	remote := &nc.VRF{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "vrf-m2m",
@@ -467,6 +472,7 @@ func TestSyncPreservesForeignLabelsOnRemote(t *testing.T) {
 			Labels: map[string]string{
 				labelManagedBy: labelManagedByValue,
 				fluxLabel:      "workload-apps",
+				foreignLabel:   "some-operator",
 			},
 		},
 		Spec: nc.VRFSpec{VRF: "m2m", VNI: ptrInt32(9999), RouteTarget: ptrString("65188:2026")},
@@ -494,9 +500,13 @@ func TestSyncPreservesForeignLabelsOnRemote(t *testing.T) {
 	if got.Labels[labelManagedBy] != labelManagedByValue {
 		t.Errorf("managed-by label lost, got %v", got.Labels)
 	}
-	// The foreign Flux label must survive untouched — this is the whole point.
-	if got.Labels[fluxLabel] != "workload-apps" {
-		t.Errorf("foreign Flux label clobbered: got %v", got.Labels)
+	// The foreign non-GitOps label must survive untouched.
+	if got.Labels[foreignLabel] != "some-operator" {
+		t.Errorf("foreign non-GitOps label clobbered: got %v", got.Labels)
+	}
+	// The Flux inventory label must be stripped from the remote object.
+	if _, ok := got.Labels[fluxLabel]; ok {
+		t.Errorf("Flux inventory label was not stripped from remote: %v", got.Labels)
 	}
 }
 
@@ -632,9 +642,9 @@ var _ = &corev1.Secret{}
 // managed is left untouched.
 func TestSyncPrunesRemovedSourceLabel(t *testing.T) {
 	const (
-		foreignLabel = "kustomize.toolkit.fluxcd.io/name" // owned by workload Flux
-		droppedLabel = "team"                             // we propagated this before, now gone
-		keptLabel    = "app.kubernetes.io/part-of"        // still on the source
+		foreignLabel = "example.com/owned-by"      // foreign, non-GitOps: must survive
+		droppedLabel = "team"                      // we propagated this before, now gone
+		keptLabel    = "app.kubernetes.io/part-of" // still on the source
 	)
 
 	// Source no longer carries droppedLabel.
@@ -648,7 +658,7 @@ func TestSyncPrunesRemovedSourceLabel(t *testing.T) {
 	}
 
 	// Remote reflects a previous sync: we managed part-of, managed-by and team,
-	// and a workload Flux independently stamped its own inventory label.
+	// and another controller independently stamped its own non-GitOps label.
 	remote := &nc.VRF{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "vrf-m2m",
@@ -657,7 +667,7 @@ func TestSyncPrunesRemovedSourceLabel(t *testing.T) {
 				labelManagedBy: labelManagedByValue,
 				keptLabel:      "network",
 				droppedLabel:   "net", // stale: we set it last time, source dropped it
-				foreignLabel:   "workload-apps",
+				foreignLabel:   "some-operator",
 			},
 			Annotations: map[string]string{
 				annotationSourceNS: "test-cluster",
@@ -688,8 +698,8 @@ func TestSyncPrunesRemovedSourceLabel(t *testing.T) {
 	if _, ok := got.Labels[droppedLabel]; ok {
 		t.Errorf("stale managed label %q was not pruned: %v", droppedLabel, got.Labels)
 	}
-	// The foreign label we never managed must survive.
-	if got.Labels[foreignLabel] != "workload-apps" {
+	// The foreign non-GitOps label we never managed must survive.
+	if got.Labels[foreignLabel] != "some-operator" {
 		t.Errorf("foreign label %q was clobbered: %v", foreignLabel, got.Labels)
 	}
 	// The still-desired source label and our managed-by label must remain.
@@ -724,10 +734,8 @@ func TestSyncPrunesPreviouslyPropagatedFluxLabel(t *testing.T) {
 				propagatedFluxLabel: "flux-system",
 			},
 			Annotations: map[string]string{
-				annotationSourceNS: "test-cluster",
-				annotationManagedLabels: strings.Join([]string{
-					labelManagedBy, propagatedFluxLabel,
-				}, ","),
+				annotationSourceNS:           "test-cluster",
+				annotationManagedLabels:      labelManagedBy + "," + propagatedFluxLabel,
 				annotationManagedAnnotations: annotationSourceNS,
 			},
 		},

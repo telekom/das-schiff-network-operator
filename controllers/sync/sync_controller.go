@@ -418,17 +418,19 @@ func overlayBody(dst, src client.Object) error {
 }
 
 // reconcileManagedMetadata merges the labels and annotations this controller
-// manages (carried on src) into dst and prunes the keys we managed on a previous
-// sync but no longer set. It is the second half of the truce with Flux: foreign
-// keys — anything we never propagated ourselves — are always preserved, so a
-// workload-cluster GitOps controller keeps ownership of its own labels. But keys
-// that WE put there and have since dropped are removed, so existing objects
-// actually converge:
+// manages (carried on src) into dst, prunes the keys we managed on a previous
+// sync but no longer set, and strips GitOps/Flux-owned keys outright. Foreign
+// keys we never propagated ourselves are otherwise preserved. Together this ends
+// the label war and converges existing objects:
 //
 //   - a source label/annotation that was deleted upstream disappears from the
-//     remote instead of lingering forever, and
-//   - a Flux/GitOps key we propagated before this controller learned to strip
-//     them is cleaned up the moment it leaves our managed set.
+//     remote instead of lingering forever;
+//   - a Flux/GitOps key is removed whether we propagated it before (old
+//     full-Update code) or a controller stamped it on the workload cluster — our
+//     synced objects are not part of any Flux inventory, so those keys never
+//     belong on them. If a live Flux genuinely owns the object it will simply
+//     reapply, but the patch helper only emits the keys we actually change, so
+//     unrelated foreign metadata is still never touched.
 //
 // The set of keys we own is read back from the tracking annotations that
 // recordManagedKeys stamped on the previous sync (present on dst) and rewritten
@@ -441,9 +443,10 @@ func reconcileManagedMetadata(dst, src client.Object) {
 	dst.SetAnnotations(mergeAndPrune(dst.GetAnnotations(), src.GetAnnotations(), prevAnnotationKeys))
 }
 
-// mergeAndPrune overlays the keys we manage now (desired) onto existing and
-// removes keys we managed on the previous sync (prevManaged) that are no longer
-// desired. Keys we never managed are left untouched.
+// mergeAndPrune overlays the keys we manage now (desired) onto existing, removes
+// keys we managed on the previous sync (prevManaged) that are no longer desired,
+// and drops any GitOps/Flux-owned key. Foreign keys we never managed and that are
+// not GitOps-owned are left untouched.
 func mergeAndPrune(existing, desired map[string]string, prevManaged []string) map[string]string {
 	out := make(map[string]string, len(existing)+len(desired))
 	for k, v := range existing {
@@ -452,6 +455,16 @@ func mergeAndPrune(existing, desired map[string]string, prevManaged []string) ma
 	// Drop keys we used to own but no longer set.
 	for _, k := range prevManaged {
 		if _, stillManaged := desired[k]; !stillManaged {
+			delete(out, k)
+		}
+	}
+	// Drop GitOps-owned keys outright. buildRemoteObject never propagates them,
+	// so any present here were copied by the old full-Update code or stamped by a
+	// controller on the workload cluster; neither belongs on an object the sync
+	// operator owns. A live Flux would just reapply, but these synced objects are
+	// not part of any Flux inventory.
+	for k := range out {
+		if hasAnyPrefix(k, gitOpsKeyPrefixes) {
 			delete(out, k)
 		}
 	}
