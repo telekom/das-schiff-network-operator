@@ -432,8 +432,13 @@ func (u *Updater) updateBGPPeeringConditions(ctx context.Context, fetched *resol
 // spec resolve to existing intent resources. The checks are mode-specific and
 // mirror the requirements enforced by the BGPPeering builder:
 //   - listenRange requires attachmentRef (an existing Layer2Attachment) and
-//     networkRefs (each an existing Network).
-//   - loopbackPeer requires inboundRefs (each an existing Inbound).
+//     at least one networkRef (each an existing Network).
+//   - loopbackPeer requires at least one inboundRef (each an existing Inbound).
+//
+// An unrecognised spec.mode yields Resolved=False so the condition stays
+// consistent with the Ready=False the builder forces for unknown modes; the
+// CRD schema normally prevents this, but the status path must not silently
+// report an invalid resource as resolved.
 func checkBGPPeeringRefs(bp *nc.BGPPeering, resolved *resolver.ResolvedData) (condStatus metav1.ConditionStatus, reason, message string) {
 	switch bp.Spec.Mode {
 	case nc.BGPPeeringModeListenRange:
@@ -443,17 +448,25 @@ func checkBGPPeeringRefs(bp *nc.BGPPeering, resolved *resolver.ResolvedData) (co
 		if !layer2AttachmentExists(*bp.Spec.Ref.AttachmentRef, resolved) {
 			return metav1.ConditionFalse, "AttachmentNotFound", fmt.Sprintf("referenced Layer2Attachment %q not found", *bp.Spec.Ref.AttachmentRef)
 		}
+		if len(bp.Spec.Ref.NetworkRefs) == 0 {
+			return metav1.ConditionFalse, "NetworkRefsMissing", "listenRange mode requires at least one networkRef"
+		}
 		for _, ref := range bp.Spec.Ref.NetworkRefs {
 			if _, ok := resolved.Networks[ref]; !ok {
 				return metav1.ConditionFalse, "NetworkNotFound", fmt.Sprintf("referenced Network %q not found", ref)
 			}
 		}
 	case nc.BGPPeeringModeLoopbackPeer:
+		if len(bp.Spec.Ref.InboundRefs) == 0 {
+			return metav1.ConditionFalse, "InboundRefsMissing", "loopbackPeer mode requires at least one inboundRef"
+		}
 		for _, ref := range bp.Spec.Ref.InboundRefs {
 			if !inboundExists(ref, resolved) {
 				return metav1.ConditionFalse, "InboundNotFound", fmt.Sprintf("referenced Inbound %q not found", ref)
 			}
 		}
+	default:
+		return metav1.ConditionFalse, "UnknownMode", fmt.Sprintf("unknown BGPPeering mode %q", bp.Spec.Mode)
 	}
 	return metav1.ConditionTrue, reasonAllResolved, msgAllResolved
 }

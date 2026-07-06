@@ -140,6 +140,15 @@ func TestCheckBGPPeeringRefs(t *testing.T) {
 			wantReason: "NetworkNotFound",
 		},
 		{
+			name: "listenRange missing networkRefs",
+			spec: nc.BGPPeeringSpec{
+				Mode: nc.BGPPeeringModeListenRange,
+				Ref:  nc.BGPPeeringRef{AttachmentRef: &attachment},
+			},
+			wantStatus: metav1.ConditionFalse,
+			wantReason: "NetworkRefsMissing",
+		},
+		{
 			name: "loopbackPeer inbound resolves",
 			spec: nc.BGPPeeringSpec{
 				Mode: nc.BGPPeeringModeLoopbackPeer,
@@ -156,6 +165,32 @@ func TestCheckBGPPeeringRefs(t *testing.T) {
 			},
 			wantStatus: metav1.ConditionFalse,
 			wantReason: "InboundNotFound",
+		},
+		{
+			name: "loopbackPeer missing inboundRefs",
+			spec: nc.BGPPeeringSpec{
+				Mode: nc.BGPPeeringModeLoopbackPeer,
+				Ref:  nc.BGPPeeringRef{},
+			},
+			wantStatus: metav1.ConditionFalse,
+			wantReason: "InboundRefsMissing",
+		},
+		{
+			name: "unknown mode is not resolved",
+			spec: nc.BGPPeeringSpec{
+				Mode: nc.BGPPeeringMode("bogus"),
+				Ref:  nc.BGPPeeringRef{},
+			},
+			wantStatus: metav1.ConditionFalse,
+			wantReason: "UnknownMode",
+		},
+		{
+			name: "empty mode is not resolved",
+			spec: nc.BGPPeeringSpec{
+				Ref: nc.BGPPeeringRef{},
+			},
+			wantStatus: metav1.ConditionFalse,
+			wantReason: "UnknownMode",
 		},
 	}
 
