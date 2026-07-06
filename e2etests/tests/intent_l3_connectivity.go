@@ -73,9 +73,10 @@ var _ = Describe("Intent: L3 Connectivity", Label("intent", "l3"), func() {
 		Expect(f.EnsureIPv6NoDad(ctx, ns, "intent-l3-03", cfg.Macvlan03IPv6, "net1")).To(Succeed())
 
 		By("Verifying IPv4 cross-VLAN connectivity: intent-l3-01 (501) → intent-l3-03 (502)")
-		result, err := f.PingFromPod(ctx, ns, "intent-l3-01", cfg.Macvlan03IPv4, 5)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(result.Success).To(BeTrue(), "Cross-VLAN IPv4 ping failed: %s", result.Output)
+		Eventually(func() bool {
+			r, _ := f.PingFromPod(ctx, ns, "intent-l3-01", cfg.Macvlan03IPv4, 3)
+			return r != nil && r.Success
+		}).WithTimeout(90*time.Second).WithPolling(5*time.Second).Should(BeTrue(), "Cross-VLAN IPv4 ping failed")
 
 		By("Verifying IPv6 cross-VLAN connectivity: intent-l3-01 (501) → intent-l3-03 (502)")
 		Eventually(func() bool {

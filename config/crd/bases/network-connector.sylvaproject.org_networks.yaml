@@ -68,7 +68,11 @@ spec:
               It does not carry VRFs, node scope, or usage semantics.
             properties:
               ipv4:
-                description: IPv4 is the IPv4 address pool for this network.
+                description: |-
+                  IPv4 is the IPv4 address pool for this network. The CIDR must be the
+                  network address (host bits zero), e.g. "198.51.100.224/27" — not an
+                  authored host address like "198.51.100.225/27". The anycast gateway is
+                  derived as the first usable host (network address + 1).
                 properties:
                   cidr:
                     description: CIDR is the IP network in CIDR notation (e.g. "198.51.100.0/24").
@@ -89,7 +93,9 @@ spec:
                     or 2001:db8::/32)
                   rule: isCIDR(self.cidr)
               ipv6:
-                description: IPv6 is the IPv6 address pool for this network.
+                description: |-
+                  IPv6 is the IPv6 address pool for this network. The CIDR must be the
+                  network address (host bits zero), e.g. "2001:db8::/64".
                 properties:
                   cidr:
                     description: CIDR is the IP network in CIDR notation (e.g. "198.51.100.0/24").

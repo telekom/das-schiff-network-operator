@@ -235,8 +235,8 @@ func TestL2ABuilder_WithDestinationVRF(t *testing.T) {
 	if l2.IRB.VRF != "prod" {
 		t.Errorf("expected IRB VRF 'prod' (backbone name), got %q", l2.IRB.VRF)
 	}
-	if len(l2.IRB.IPAddresses) != 1 || l2.IRB.IPAddresses[0] != "10.100.0.0/24" {
-		t.Errorf("expected IRB IP [10.100.0.0/24], got %v", l2.IRB.IPAddresses)
+	if len(l2.IRB.IPAddresses) != 1 || l2.IRB.IPAddresses[0] != "10.100.0.1/24" {
+		t.Errorf("expected IRB IP [10.100.0.1/24], got %v", l2.IRB.IPAddresses)
 	}
 
 	// L2 VNI RouteTarget must be empty — FRR auto-derives it.
@@ -676,4 +676,158 @@ func TestL2ABuilder_InterfaceNameAndRef(t *testing.T) {
 	require.True(t, ok, "expected NetplanNodeIPs entry for key 501")
 	assert.Equal(t, "chris-l2", nip.InterfaceName, "InterfaceName should be propagated to netplan device")
 	assert.Equal(t, "bond0", nip.InterfaceRef, "InterfaceRef should be propagated to netplan device")
+}
+
+// TestL2ABuilder_IRBGateway_NetworkAddressCIDR reproduces the production bug
+// where a Network authored with the network-address form of the CIDR (host bits
+// zero) must yield the anycast gateway (network address + 1) in the IRB and in
+// the per-node netplan default gateway, for both IPv4 and IPv6.
+func TestL2ABuilder_IRBGateway_NetworkAddressCIDR(t *testing.T) {
+	b := NewL2ABuilder()
+	vlan := int32(149)
+	vni := int32(100149)
+	data := &resolver.ResolvedData{
+		Nodes: []corev1.Node{
+			{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
+		},
+		Networks: map[string]*resolver.ResolvedNetwork{
+			"net-vlan149": {Name: "net-vlan149", Spec: nc.NetworkSpec{
+				VLAN: &vlan, VNI: &vni,
+				IPv4: &nc.IPNetwork{CIDR: "198.51.100.224/27"},
+				IPv6: &nc.IPNetwork{CIDR: "2001:db8::/64"},
+			}},
+		},
+		RawDestinations: []nc.Destination{
+			{ObjectMeta: metav1.ObjectMeta{Name: "dest-gw", Labels: map[string]string{"type": "gateway"}},
+				Spec: nc.DestinationSpec{VRFRef: ptr("vrf-ztn")}},
+		},
+		Destinations: map[string]*resolver.ResolvedDestination{
+			"dest-gw": {Name: "dest-gw", Spec: nc.DestinationSpec{VRFRef: ptr("vrf-ztn")}, VRFSpec: &nc.VRFSpec{VRF: "ztn", VNI: ptr(int32(100))}},
+		},
+		Layer2Attachments: []nc.Layer2Attachment{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "net-vlan149-l2a"},
+				Spec: nc.Layer2AttachmentSpec{
+					NetworkRef:   "net-vlan149",
+					Destinations: &metav1.LabelSelector{MatchLabels: map[string]string{"type": "gateway"}},
+					NodeIPs:      &nc.NodeIPConfig{Enabled: true},
+				},
+				Status: nc.Layer2AttachmentStatus{
+					NodeAddresses: map[string]nc.AddressAllocation{
+						"node-1": {IPv4: []string{"198.51.100.230"}, IPv6: []string{"2001:db8::30"}},
+					},
+				},
+			},
+		},
+	}
+
+	result, err := b.Build(context.Background(), data)
+	require.NoError(t, err)
+
+	// IRB anycast gateways must be network address + 1, preserving prefix length.
+	l2 := result["node-1"].Layer2s["149"]
+	require.NotNil(t, l2.IRB, "expected IRB to be set")
+	assert.Equal(t, []string{"198.51.100.225/27", "2001:db8::1/64"}, l2.IRB.IPAddresses)
+
+	// The per-node netplan default gateways must also be network address + 1
+	// (bare, without prefix), while the allocated host addresses are unchanged.
+	nip := result["node-1"].NetplanNodeIPs["149"]
+	assert.Equal(t, []string{"198.51.100.230/27", "2001:db8::30/64"}, nip.Addresses)
+	assert.Equal(t, []string{"198.51.100.225", "2001:db8::1"}, nip.Gateways)
+}
+
+// TestL2ABuilder_IRBGateway_SingleHostReportsSkip verifies that a Network CIDR
+// with no usable anycast gateway (a /32) does not abort the reconcile: the L2A
+// is skipped, no IRB is emitted, and a Ready=False build issue with the
+// specific "InvalidIRBGateway" reason is reported for the resource.
+func TestL2ABuilder_IRBGateway_SingleHostReportsSkip(t *testing.T) {
+	b := NewL2ABuilder()
+	vlan := int32(151)
+	vni := int32(100151)
+	data := &resolver.ResolvedData{
+		Nodes: []corev1.Node{
+			{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
+		},
+		Networks: map[string]*resolver.ResolvedNetwork{
+			"single-host": {Name: "single-host", Spec: nc.NetworkSpec{
+				VLAN: &vlan, VNI: &vni,
+				IPv4: &nc.IPNetwork{CIDR: "10.0.0.4/32"},
+			}},
+		},
+		RawDestinations: []nc.Destination{
+			{ObjectMeta: metav1.ObjectMeta{Name: "dest-gw", Labels: map[string]string{"type": "gateway"}},
+				Spec: nc.DestinationSpec{VRFRef: ptr("vrf-sh")}},
+		},
+		Destinations: map[string]*resolver.ResolvedDestination{
+			"dest-gw": {Name: "dest-gw", Spec: nc.DestinationSpec{VRFRef: ptr("vrf-sh")}, VRFSpec: &nc.VRFSpec{VRF: "sh", VNI: ptr(int32(100))}},
+		},
+		Layer2Attachments: []nc.Layer2Attachment{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "l2a-single-host"},
+				Spec: nc.Layer2AttachmentSpec{
+					NetworkRef:   "single-host",
+					Destinations: &metav1.LabelSelector{MatchLabels: map[string]string{"type": "gateway"}},
+				},
+			},
+		},
+	}
+
+	report := NewBuildReport()
+	ctx := WithReport(context.Background(), report)
+
+	// Build must not error (reconcile is not aborted) even though the L2A is skipped.
+	result, err := b.Build(ctx, data)
+	require.NoError(t, err)
+
+	// The L2A produced no Layer2 contribution for the node.
+	if contrib, ok := result["node-1"]; ok {
+		_, hasL2 := contrib.Layer2s["151"]
+		assert.False(t, hasL2, "expected no Layer2 for a Network with no usable gateway")
+	}
+
+	// A build issue with the specific reason is reported for the L2A.
+	issues := report.Issues()
+	require.Len(t, issues, 1)
+	assert.Equal(t, "Layer2Attachment", issues[0].Kind)
+	assert.Equal(t, "l2a-single-host", issues[0].Name)
+	assert.Equal(t, reasonInvalidIRBGateway, issues[0].Reason)
+	assert.Contains(t, issues[0].Message, "no usable host address")
+}
+
+// TestGatewayAddr covers the gateway-derivation edge cases: normal subnets use
+// the first usable host (network address + 1); point-to-point prefixes (/31,
+// /127) use the network address itself; and single-host prefixes (/32, /128)
+// have no usable gateway and return an error.
+func TestGatewayAddr(t *testing.T) {
+	tests := []struct {
+		name     string
+		cidr     string
+		wantCIDR string // expected gatewayCIDR result; "" means expect error
+		wantIP   string // expected parseCIDRParts gateway IP ("" on error)
+		wantLen  string // expected parseCIDRParts prefix length ("" on error)
+	}{
+		{"ipv4 network address /24", "10.0.1.0/24", "10.0.1.1/24", "10.0.1.1", "24"},
+		{"ipv4 network address /27", "198.51.100.224/27", "198.51.100.225/27", "198.51.100.225", "27"},
+		{"ipv6 network address /64", "2001:db8::/64", "2001:db8::1/64", "2001:db8::1", "64"},
+		{"ipv4 point-to-point /31", "10.0.0.0/31", "10.0.0.0/31", "10.0.0.0", "31"},
+		{"ipv6 point-to-point /127", "2001:db8::/127", "2001:db8::/127", "2001:db8::", "127"},
+		{"ipv4 single host /32", "10.0.0.5/32", "", "", ""},
+		{"ipv6 single host /128", "2001:db8::5/128", "", "", ""},
+		{"unparseable", "not-a-cidr", "", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gwCIDR, err := gatewayCIDR(tt.cidr)
+			if tt.wantCIDR == "" {
+				assert.Error(t, err, "expected error for %q", tt.cidr)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tt.wantCIDR, gwCIDR)
+			}
+
+			ip, plen := parseCIDRParts(tt.cidr)
+			assert.Equal(t, tt.wantIP, ip)
+			assert.Equal(t, tt.wantLen, plen)
+		})
+	}
 }
