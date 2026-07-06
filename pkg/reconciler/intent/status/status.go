@@ -142,6 +142,9 @@ func (u *Updater) UpdateConditions(ctx context.Context, fetched *resolver.Fetche
 	if err := u.updateNodeAttachmentConditions(ctx, fetched, resolved, issues); err != nil {
 		return fmt.Errorf("nodeAttachment conditions: %w", err)
 	}
+	if err := u.updateBGPPeeringConditions(ctx, fetched, resolved, issues); err != nil {
+		return fmt.Errorf("bgpPeering conditions: %w", err)
+	}
 	return nil
 }
 
@@ -397,6 +400,84 @@ func (u *Updater) updateNodeAttachmentConditions(ctx context.Context, fetched *r
 		}
 	}
 	return nil
+}
+
+func (u *Updater) updateBGPPeeringConditions(ctx context.Context, fetched *resolver.FetchedResources, resolved *resolver.ResolvedData, issues map[string]ResourceIssue) error {
+	for i := range fetched.BGPPeerings {
+		bp := &fetched.BGPPeerings[i]
+		resolvedStatus, resolvedReason, resolvedMsg := checkBGPPeeringRefs(bp, resolved)
+
+		readyStatus := resolvedStatus
+		readyReason := resolvedReason
+		readyMsg := "BGPPeering is ready"
+		if resolvedStatus != metav1.ConditionTrue {
+			readyMsg = resolvedMsg
+		}
+		readyStatus, readyReason, readyMsg = applyBuildIssue(issues, "BGPPeering", bp.Name, readyStatus, readyReason, readyMsg)
+
+		if err := u.statusUpdateWithRetry(ctx, bp, func(obj client.Object) {
+			b := obj.(*nc.BGPPeering)
+			setCondition(&b.Status.Conditions, nc.ConditionTypeResolved, resolvedStatus, resolvedReason, resolvedMsg, b.Generation)
+			setCondition(&b.Status.Conditions, nc.ConditionTypeReady, readyStatus, readyReason, readyMsg, b.Generation)
+			b.Status.WorkloadASNumber = b.Spec.WorkloadAS
+			b.Status.ObservedGeneration = b.Generation
+		}); err != nil {
+			return fmt.Errorf("updating BGPPeering %q status: %w", bp.Name, err)
+		}
+	}
+	return nil
+}
+
+// checkBGPPeeringRefs validates that the references declared in a BGPPeering
+// spec resolve to existing intent resources. The checks are mode-specific and
+// mirror the requirements enforced by the BGPPeering builder:
+//   - listenRange requires attachmentRef (an existing Layer2Attachment) and
+//     networkRefs (each an existing Network).
+//   - loopbackPeer requires inboundRefs (each an existing Inbound).
+func checkBGPPeeringRefs(bp *nc.BGPPeering, resolved *resolver.ResolvedData) (condStatus metav1.ConditionStatus, reason, message string) {
+	switch bp.Spec.Mode {
+	case nc.BGPPeeringModeListenRange:
+		if bp.Spec.Ref.AttachmentRef == nil {
+			return metav1.ConditionFalse, "AttachmentRefMissing", "listenRange mode requires attachmentRef"
+		}
+		if !layer2AttachmentExists(*bp.Spec.Ref.AttachmentRef, resolved) {
+			return metav1.ConditionFalse, "AttachmentNotFound", fmt.Sprintf("referenced Layer2Attachment %q not found", *bp.Spec.Ref.AttachmentRef)
+		}
+		for _, ref := range bp.Spec.Ref.NetworkRefs {
+			if _, ok := resolved.Networks[ref]; !ok {
+				return metav1.ConditionFalse, "NetworkNotFound", fmt.Sprintf("referenced Network %q not found", ref)
+			}
+		}
+	case nc.BGPPeeringModeLoopbackPeer:
+		for _, ref := range bp.Spec.Ref.InboundRefs {
+			if !inboundExists(ref, resolved) {
+				return metav1.ConditionFalse, "InboundNotFound", fmt.Sprintf("referenced Inbound %q not found", ref)
+			}
+		}
+	}
+	return metav1.ConditionTrue, reasonAllResolved, msgAllResolved
+}
+
+// layer2AttachmentExists reports whether a Layer2Attachment with the given name
+// is present in the resolved data.
+func layer2AttachmentExists(name string, resolved *resolver.ResolvedData) bool {
+	for i := range resolved.Layer2Attachments {
+		if resolved.Layer2Attachments[i].Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// inboundExists reports whether an Inbound with the given name is present in the
+// resolved data.
+func inboundExists(name string, resolved *resolver.ResolvedData) bool {
+	for i := range resolved.Inbounds {
+		if resolved.Inbounds[i].Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 // checkNetworkRef checks if a networkRef resolves to an existing Network.
