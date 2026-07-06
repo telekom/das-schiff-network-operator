@@ -24,7 +24,9 @@ spec:
   routeTarget: "65188:2027"
 ---
 # Networks for gateway VLANs.
-# CIDR is used directly as the anycast gateway IP by the L2A builder.
+# The CIDR is the network address (host bits zero); the L2A builder derives the
+# anycast gateway as the first usable host (network address + 1), e.g.
+# 10.102.0.0/24 -> anycast gateway 10.102.0.1. Gateway pods therefore avoid .1.
 apiVersion: network-connector.sylvaproject.org/v1alpha1
 kind: Network
 metadata:
@@ -34,9 +36,9 @@ spec:
   vlan: 601
   vni: 5000002
   ipv4:
-    cidr: "10.102.0.254/24"
+    cidr: "10.102.0.0/24"
   ipv6:
-    cidr: "fda5:25c1:193c::fe/64"
+    cidr: "fda5:25c1:193c::/64"
 ---
 apiVersion: network-connector.sylvaproject.org/v1alpha1
 kind: Network
@@ -47,9 +49,9 @@ spec:
   vlan: 602
   vni: 5000004
   ipv4:
-    cidr: "10.102.1.254/24"
+    cidr: "10.102.1.0/24"
   ipv6:
-    cidr: "fda5:25c1:193d::fe/64"
+    cidr: "fda5:25c1:193d::/64"
 ---
 # Destinations — export gateway subnets from cluster2 into the EVPN fabric
 apiVersion: network-connector.sylvaproject.org/v1alpha1

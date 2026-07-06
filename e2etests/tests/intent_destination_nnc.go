@@ -52,9 +52,9 @@ var _ = Describe("Intent: Destination NNC Validation", Label("intent", "destinat
 			By("Verifying FabricVRF has VRFImport from cluster VRF and aggregate routes")
 			Expect(framework.NNCFabricVRFHasVRFImport(nnc, "m2m", "cluster")).To(BeTrue(),
 				"FabricVRF m2m should import from cluster VRF")
-			Expect(framework.NNCFabricVRFHasAggregateRoute(nnc, "m2m", "10.250.0.1/24")).To(BeTrue(),
+			Expect(framework.NNCFabricVRFHasAggregateRoute(nnc, "m2m", "10.250.0.0/24")).To(BeTrue(),
 				"FabricVRF m2m should have aggregate static route for IPv4 Network CIDR")
-			Expect(framework.NNCFabricVRFHasAggregateRoute(nnc, "m2m", "fd94:685b:30cf:501::1/64")).To(BeTrue(),
+			Expect(framework.NNCFabricVRFHasAggregateRoute(nnc, "m2m", "fd94:685b:30cf:501::/64")).To(BeTrue(),
 				"FabricVRF m2m should have aggregate static route for IPv6 Network CIDR")
 
 			By("Checking NNC has Layer2 entry")
@@ -196,9 +196,9 @@ var _ = Describe("Intent: Destination NNC Validation", Label("intent", "destinat
 				"FabricVRF m2m should import from cluster VRF")
 			Expect(framework.NNCFabricVRFHasVRFImport(nnc, "c2m", "cluster")).To(BeTrue(),
 				"FabricVRF c2m should import from cluster VRF")
-			Expect(framework.NNCFabricVRFHasAggregateRoute(nnc, "m2m", "10.250.0.1/24")).To(BeTrue(),
+			Expect(framework.NNCFabricVRFHasAggregateRoute(nnc, "m2m", "10.250.0.0/24")).To(BeTrue(),
 				"FabricVRF m2m should have aggregate route for net-vlan501 IPv4 CIDR")
-			Expect(framework.NNCFabricVRFHasAggregateRoute(nnc, "c2m", "10.250.30.1/24")).To(BeTrue(),
+			Expect(framework.NNCFabricVRFHasAggregateRoute(nnc, "c2m", "10.250.30.0/24")).To(BeTrue(),
 				"FabricVRF c2m should have aggregate route for net-vlan503 IPv4 CIDR")
 
 			_ = f.DeleteManifest(ctx, manifest)

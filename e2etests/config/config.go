@@ -109,11 +109,12 @@ func LoadFromEnv() *Config {
 		FailoverPod02IPv4: "10.250.0.170",
 		FailoverPod02IPv6: "fd94:685b:30cf:501::170",
 
-		// Gateways
-		M2MGWIPv4: "10.102.0.1",
-		M2MGWIPv6: "fda5:25c1:193c::1",
-		C2MGWIPv4: "10.102.1.1",
-		C2MGWIPv6: "fda5:25c1:193d::1",
+		// Gateways (the IRB anycast gateway is network+1, i.e. .1/::1, so the
+		// gateway pods use .2/::2 to avoid colliding with it).
+		M2MGWIPv4: "10.102.0.2",
+		M2MGWIPv6: "fda5:25c1:193c::2",
+		C2MGWIPv4: "10.102.1.2",
+		C2MGWIPv6: "fda5:25c1:193d::2",
 
 		// Anycast MACs (VRRP standard MAC used by intent L2A builder)
 		AnycastMAC:        "00:00:5e:00:01:01",

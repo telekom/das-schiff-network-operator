@@ -29,7 +29,7 @@ spec:
   vlan: 590
   vni: 4000090
   ipv4:
-    cidr: "10.250.90.1/24"
+    cidr: "10.250.90.0/24"
 ---
 apiVersion: network-connector.sylvaproject.org/v1alpha1
 kind: Layer2Attachment
