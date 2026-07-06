@@ -23,11 +23,15 @@ import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 // It does not carry VRFs, node scope, or usage semantics.
 // +kubebuilder:validation:XValidation:rule="has(self.ipv4) || has(self.ipv6) || has(self.vlan)",message="at least one of ipv4, ipv6, or vlan must be specified"
 type NetworkSpec struct {
-	// IPv4 is the IPv4 address pool for this network.
+	// IPv4 is the IPv4 address pool for this network. The CIDR must be the
+	// network address (host bits zero), e.g. "198.51.100.224/27" — not an
+	// authored host address like "198.51.100.225/27". The anycast gateway is
+	// derived as the first usable host (network address + 1).
 	// +optional
 	IPv4 *IPNetwork `json:"ipv4,omitempty"`
 
-	// IPv6 is the IPv6 address pool for this network.
+	// IPv6 is the IPv6 address pool for this network. The CIDR must be the
+	// network address (host bits zero), e.g. "2001:db8::/64".
 	// +optional
 	IPv6 *IPNetwork `json:"ipv6,omitempty"`
 

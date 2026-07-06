@@ -18,6 +18,7 @@ package networkconnector
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -113,6 +114,37 @@ func TestNetworkValidateCreate_InvalidIPv6CIDR(t *testing.T) {
 	n := &Network{Spec: NetworkSpec{IPv6: &IPNetwork{CIDR: "xyz"}}}
 	if _, err := n.ValidateCreate(context.Background(), n); err == nil {
 		t.Fatal("expected error for invalid IPv6 CIDR, got nil")
+	}
+}
+
+// A Network CIDR must be the network address (host bits zero); an authored host
+// address like "10.0.0.1/24" is rejected so the anycast gateway (network+1) is
+// unambiguous.
+func TestNetworkValidateCreate_IPv4NotNetworkAddress(t *testing.T) {
+	n := &Network{Spec: NetworkSpec{IPv4: &IPNetwork{CIDR: "10.0.0.1/24"}}}
+	if _, err := n.ValidateCreate(context.Background(), n); err == nil {
+		t.Fatal("expected error for non-network-address IPv4 CIDR, got nil")
+	}
+}
+
+func TestNetworkValidateCreate_IPv6NotNetworkAddress(t *testing.T) {
+	n := &Network{Spec: NetworkSpec{IPv6: &IPNetwork{CIDR: "2001:db8::1/64"}}}
+	if _, err := n.ValidateCreate(context.Background(), n); err == nil {
+		t.Fatal("expected error for non-network-address IPv6 CIDR, got nil")
+	}
+}
+
+// Point-to-point and single-host prefixes are valid as long as they are in
+// canonical (masked) form.
+func TestNetworkValidateCreate_NetworkAddressEdgePrefixes(t *testing.T) {
+	for _, cidr := range []string{"10.0.0.0/31", "10.0.0.4/32", "2001:db8::/127"} {
+		n := &Network{Spec: NetworkSpec{IPv4: &IPNetwork{CIDR: cidr}}}
+		if strings.Contains(cidr, ":") {
+			n = &Network{Spec: NetworkSpec{IPv6: &IPNetwork{CIDR: cidr}}}
+		}
+		if _, err := n.ValidateCreate(context.Background(), n); err != nil {
+			t.Fatalf("unexpected error for canonical CIDR %q: %v", cidr, err)
+		}
 	}
 }
 
