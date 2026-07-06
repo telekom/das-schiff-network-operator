@@ -1052,3 +1052,52 @@ func TestReconcileCreatesNodeNetplanConfig(t *testing.T) {
 	// Verify intent-managed label.
 	assert.Equal(t, "intent", npc.Labels[intentManagedLabel])
 }
+
+// TestReconcileL2ADefaultsToVLANNameFromNetworkRef confirms that when a
+// Layer2Attachment does NOT set spec.interfaceName, the agent-hbn-l2 netplan
+// interface defaults to "vlan.<vlan>", where the VLAN ID is taken from the
+// Network referenced via networkRef (Network.spec.vlan). This is the default
+// naming path (intent/reconciler.go buildNetplanState: ifName = "vlan.%d").
+func TestReconcileL2ADefaultsToVLANNameFromNetworkRef(t *testing.T) {
+	ctx := context.Background()
+	nodeName := "l2a-default-name-node"
+
+	const networkVLAN int32 = 1000
+
+	createNode(t, ctx, nodeName, map[string]string{"node-role": "worker"})
+	// Network carries the VLAN; the L2A references it via networkRef.
+	createObj(t, ctx, makeNetwork("net-be", networkVLAN, 11000, "10.10.0.0/24", ""))
+	// Pure L2 attachment: no destinations (no VRF/IRB) and, crucially, no interfaceName.
+	l2a := makeL2A("l2a-be", "net-be", nil, nil)
+	require.Nil(t, l2a.Spec.InterfaceName, "test precondition: interfaceName must be unset")
+	createObj(t, ctx, l2a)
+
+	nnc := reconcileAndGetNNC(t, ctx, nodeName)
+	require.NotEmpty(t, nnc.Spec.Layer2s, "NNC should have Layer2s")
+
+	npc := getNetplanConfig(t, ctx, nodeName)
+	require.NotNil(t, npc)
+
+	// The interface key must default to "vlan.<vlan from networkRef>" and be the
+	// only VLAN present (i.e. no custom interface-name override leaked in).
+	expectedKey := fmt.Sprintf("vlan.%d", networkVLAN)
+	keys := mapKeys(npc.Spec.DesiredState.Network.VLans)
+	require.Len(t, keys, 1, "expected exactly one VLAN, got keys: %v", keys)
+
+	vlan, ok := npc.Spec.DesiredState.Network.VLans[expectedKey]
+	require.True(t, ok, "expected %q in NodeNetplanConfig, got keys: %v", expectedKey, keys)
+
+	// After API round-trip, Device.Raw is YAML (UnmarshalJSON converts JSON→YAML).
+	var vlanData map[string]interface{}
+	require.NoError(t, k8syaml.Unmarshal(vlan.Raw, &vlanData))
+	assert.InDelta(t, networkVLAN, vlanData["id"], 0.1, "VLAN id must come from the referenced Network")
+	assert.Equal(t, "hbn", vlanData["link"], "parent interface defaults to the HBN trunk")
+	assert.Equal(t, true, vlanData["critical"])
+
+	// The effective interface name must be surfaced on the l2a status so it is
+	// visible in `kubectl get l2a` even when spec.interfaceName is unset.
+	got := &nc.Layer2Attachment{}
+	require.NoError(t, k8sClient.Get(ctx, client.ObjectKey{Namespace: testNamespace, Name: "l2a-be"}, got))
+	assert.Equal(t, expectedKey, got.Status.InterfaceName,
+		"status.interfaceName should default to vlan.<vlan from networkRef>")
+}

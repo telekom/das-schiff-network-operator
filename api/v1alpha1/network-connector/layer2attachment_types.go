@@ -113,6 +113,13 @@ type Layer2AttachmentStatus struct {
 	// ObservedGeneration is the most recent generation observed by the controller.
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
+	// InterfaceName is the interface name the agent creates for this attachment:
+	// the spec.interfaceName override when set, otherwise the default
+	// "vlan.<vlan>" derived from the referenced Network's VLAN. Empty when no
+	// override is set and the Network (or its VLAN) cannot be resolved.
+	// +optional
+	InterfaceName string `json:"interfaceName,omitempty"`
+
 	// SRIOVVlanID is the VLAN ID assigned for SR-IOV device traffic.
 	// +optional
 	SRIOVVlanID *int32 `json:"sriovVlanID,omitempty"`
@@ -141,7 +148,7 @@ type Layer2AttachmentStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:shortName=l2a
 // +kubebuilder:printcolumn:name="NetworkRef",type=string,JSONPath=`.spec.networkRef`
-// +kubebuilder:printcolumn:name="InterfaceName",type=string,JSONPath=`.spec.interfaceName`
+// +kubebuilder:printcolumn:name="InterfaceName",type=string,JSONPath=`.status.interfaceName`
 // +kubebuilder:printcolumn:name="MTU",type=integer,JSONPath=`.spec.mtu`
 // +kubebuilder:printcolumn:name="SRIOV",type=boolean,JSONPath=`.spec.sriov.enabled`
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
