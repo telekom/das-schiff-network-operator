@@ -112,7 +112,7 @@ func (b *BGPPeeringBuilder) buildListenRange(bp *nc.BGPPeering, data *resolver.R
 	// Build BGPPeer with ListenRange, import filter from networkRefs CIDRs,
 	// and EVPN export items for those same CIDRs.
 	peers := b.buildListenRangePeers(bp, net, allowIPv4, allowIPv6, data)
-	evpnExportItems := b.evpnExportItems(allowIPv4, allowIPv6)
+	evpnExportItems := b.evpnExportItems(allowIPv4, allowIPv6, bp.Spec.Export)
 
 	// Sorted iteration for deterministic output.
 	vrfNames := make([]string, 0, len(vrfs))
@@ -268,8 +268,27 @@ func (*BGPPeeringBuilder) buildPeerAF(bp *nc.BGPPeering, prefixes []string, isIP
 }
 
 // evpnExportItems builds EVPN export filter items from the allow-list prefixes
-// (networkRefs CIDRs) so those prefixes are distributed across the fabric.
-func (*BGPPeeringBuilder) evpnExportItems(ipv4, ipv6 []string) []networkv1alpha1.FilterItem {
+// (networkRefs CIDRs) so those prefixes are distributed across the fabric. When
+// export carries communities, they are attached additively to each generated
+// item; otherwise items are plain Accept (community-free).
+func (*BGPPeeringBuilder) evpnExportItems(ipv4, ipv6 []string, export *nc.BGPPeeringExport) []networkv1alpha1.FilterItem {
+	var communities []string
+	if export != nil {
+		communities = export.Communities
+	}
+
+	newAction := func() networkv1alpha1.Action {
+		action := networkv1alpha1.Action{Type: networkv1alpha1.Accept}
+		if len(communities) > 0 {
+			additive := true
+			action.ModifyRoute = &networkv1alpha1.ModifyRouteAction{
+				AddCommunities:      communities,
+				AdditiveCommunities: &additive,
+			}
+		}
+		return action
+	}
+
 	items := make([]networkv1alpha1.FilterItem, 0, len(ipv4)+len(ipv6))
 	for _, pfx := range ipv4 {
 		le := 32
@@ -277,7 +296,7 @@ func (*BGPPeeringBuilder) evpnExportItems(ipv4, ipv6 []string) []networkv1alpha1
 			Matcher: networkv1alpha1.Matcher{
 				Prefix: &networkv1alpha1.PrefixMatcher{Prefix: pfx, Le: &le},
 			},
-			Action: networkv1alpha1.Action{Type: networkv1alpha1.Accept},
+			Action: newAction(),
 		})
 	}
 	for _, pfx := range ipv6 {
@@ -286,7 +305,7 @@ func (*BGPPeeringBuilder) evpnExportItems(ipv4, ipv6 []string) []networkv1alpha1
 			Matcher: networkv1alpha1.Matcher{
 				Prefix: &networkv1alpha1.PrefixMatcher{Prefix: pfx, Le: &le},
 			},
-			Action: networkv1alpha1.Action{Type: networkv1alpha1.Accept},
+			Action: newAction(),
 		})
 	}
 	return items

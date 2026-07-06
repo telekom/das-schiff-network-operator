@@ -114,6 +114,23 @@ spec:
                   EnableBFD enables Bidirectional Forwarding Detection for fast link-failure
                   detection on this BGP session.
                 type: boolean
+              export:
+                description: |-
+                  Export configures BGP communities attached to the routes this peering
+                  re-exports into the EVPN fabric. It only applies to listenRange mode: the
+                  prefixes announced by L2 clients (constrained by networkRefs) are
+                  re-exported into the fabric and, when set, tagged additively with the
+                  configured communities. It is ignored for loopbackPeer mode.
+                properties:
+                  communities:
+                    description: |-
+                      Communities lists BGP community strings attached (additively) to the
+                      prefixes re-exported into the EVPN fabric. Follows the same free-form
+                      convention as AnnouncementPolicy communities (e.g. "65000:100").
+                    items:
+                      type: string
+                    type: array
+                type: object
               holdTime:
                 description: HoldTime is the BGP hold timer duration.
                 type: string
