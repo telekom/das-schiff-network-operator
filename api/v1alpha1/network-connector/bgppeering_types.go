@@ -68,6 +68,19 @@ type BGPPeeringRef struct {
 	InboundRefs []string `json:"inboundRefs,omitempty"`
 }
 
+// BGPPeeringExport configures how routes re-exported into the EVPN fabric are
+// tagged. It only applies to listenRange mode, where prefixes announced by L2
+// clients (matched against networkRefs) are re-exported into the fabric; the
+// configured communities are attached additively to those re-exported prefixes.
+// It has no effect for loopbackPeer mode and is ignored there.
+type BGPPeeringExport struct {
+	// Communities lists BGP community strings attached (additively) to the
+	// prefixes re-exported into the EVPN fabric. Follows the same free-form
+	// convention as AnnouncementPolicy communities (e.g. "65000:100").
+	// +optional
+	Communities []string `json:"communities,omitempty"`
+}
+
 // BGPPeeringSpec defines the desired state of BGPPeering.
 // +kubebuilder:validation:XValidation:rule="self.mode == 'listenRange' ? has(self.ref.attachmentRef) : !has(self.ref.attachmentRef)",message="attachmentRef is required for listenRange mode and forbidden for loopbackPeer mode"
 // +kubebuilder:validation:XValidation:rule="self.mode == 'listenRange' ? (has(self.ref.networkRefs) && size(self.ref.networkRefs) > 0) : !has(self.ref.networkRefs)",message="networkRefs is required for listenRange mode and forbidden for loopbackPeer mode"
@@ -127,6 +140,14 @@ type BGPPeeringSpec struct {
 	// NodeNetworkConfig — node agents never need direct Secret RBAC.
 	// +optional
 	AuthSecretRef *corev1.LocalObjectReference `json:"authSecretRef,omitempty"`
+
+	// Export configures BGP communities attached to the routes this peering
+	// re-exports into the EVPN fabric. It only applies to listenRange mode: the
+	// prefixes announced by L2 clients (constrained by networkRefs) are
+	// re-exported into the fabric and, when set, tagged additively with the
+	// configured communities. It is ignored for loopbackPeer mode.
+	// +optional
+	Export *BGPPeeringExport `json:"export,omitempty"`
 }
 
 // BGPPeeringStatus defines the observed state of BGPPeering.

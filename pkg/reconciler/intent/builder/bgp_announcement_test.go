@@ -191,6 +191,113 @@ func TestBGPPeeringBuilder_ListenRange(t *testing.T) { //nolint:funlen // table-
 	}
 }
 
+// TestBGPPeeringBuilder_ListenRangeExportCommunities verifies that when
+// spec.export.communities is set on a listenRange BGPPeering, the resulting
+// EVPN export FilterItems carry an additive ModifyRoute with those communities;
+// and that when export is unset, no ModifyRoute is present.
+func TestBGPPeeringBuilder_ListenRangeExportCommunities(t *testing.T) { //nolint:funlen // table-driven test
+	makeData := func(export *nc.BGPPeeringExport) *resolver.ResolvedData {
+		return &resolver.ResolvedData{
+			Nodes: []corev1.Node{{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}}},
+			Networks: map[string]*resolver.ResolvedNetwork{
+				"transfer-net": {
+					Name: "transfer-net",
+					Spec: nc.NetworkSpec{
+						IPv4: &nc.IPNetwork{CIDR: "10.100.0.0/24"},
+						IPv6: &nc.IPNetwork{CIDR: "fd00:100::/64"},
+					},
+				},
+				"allowed-net": {
+					Name: "allowed-net",
+					Spec: nc.NetworkSpec{
+						IPv4: &nc.IPNetwork{CIDR: "10.200.0.0/24"},
+						IPv6: &nc.IPNetwork{CIDR: "fd00:200::/64"},
+					},
+				},
+			},
+			VRFs: map[string]*resolver.ResolvedVRF{
+				"prod-vrf": {Name: "prod-vrf", Spec: nc.VRFSpec{VRF: "prod", VNI: ptr(int32(5001)), RouteTarget: ptr("65000:5001")}},
+			},
+			Destinations: map[string]*resolver.ResolvedDestination{
+				"dc-dest": {Name: "dc-dest", Spec: nc.DestinationSpec{VRFRef: ptr("prod-vrf")}, VRFSpec: &nc.VRFSpec{VRF: "prod", VNI: ptr(int32(5001)), RouteTarget: ptr("65000:5001")}},
+			},
+			RawDestinations: []nc.Destination{
+				{ObjectMeta: metav1.ObjectMeta{Name: "dc-dest", Labels: map[string]string{"env": "prod"}}, Spec: nc.DestinationSpec{VRFRef: ptr("prod-vrf")}},
+			},
+			Layer2Attachments: []nc.Layer2Attachment{
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "transfer-l2a"},
+					Spec: nc.Layer2AttachmentSpec{
+						NetworkRef:   "transfer-net",
+						Destinations: &metav1.LabelSelector{MatchLabels: map[string]string{"env": "prod"}},
+					},
+				},
+			},
+			BGPPeerings: []nc.BGPPeering{
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "listen-peer"},
+					Spec: nc.BGPPeeringSpec{
+						Mode:       nc.BGPPeeringModeListenRange,
+						Ref:        nc.BGPPeeringRef{AttachmentRef: ptr("transfer-l2a"), NetworkRefs: []string{"allowed-net"}},
+						WorkloadAS: ptr(int64(65100)),
+						Export:     export,
+					},
+				},
+			},
+		}
+	}
+
+	b := NewBGPPeeringBuilder()
+
+	// With communities: every EVPN export item carries an additive ModifyRoute.
+	comms := []string{"65000:100", "65000:200"}
+	result, err := b.Build(context.Background(), makeData(&nc.BGPPeeringExport{Communities: comms}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	fvrf, ok := result["node-1"].FabricVRFs["prod"]
+	if !ok {
+		t.Fatal("expected FabricVRF 'prod'")
+	}
+	if fvrf.EVPNExportFilter == nil || len(fvrf.EVPNExportFilter.Items) != 2 {
+		t.Fatalf("expected 2 EVPN export items, got %v", fvrf.EVPNExportFilter)
+	}
+	for i, item := range fvrf.EVPNExportFilter.Items {
+		if item.Action.Type != networkv1alpha1.Accept {
+			t.Errorf("item %d: expected accept action, got %v", i, item.Action.Type)
+		}
+		if item.Action.ModifyRoute == nil {
+			t.Fatalf("item %d: expected ModifyRoute with communities, got nil", i)
+		}
+		if len(item.Action.ModifyRoute.AddCommunities) != len(comms) {
+			t.Errorf("item %d: expected communities %v, got %v", i, comms, item.Action.ModifyRoute.AddCommunities)
+		}
+		for j, c := range comms {
+			if item.Action.ModifyRoute.AddCommunities[j] != c {
+				t.Errorf("item %d: expected community %q, got %q", i, c, item.Action.ModifyRoute.AddCommunities[j])
+			}
+		}
+		if item.Action.ModifyRoute.AdditiveCommunities == nil || !*item.Action.ModifyRoute.AdditiveCommunities {
+			t.Errorf("item %d: expected AdditiveCommunities=true, got %v", i, item.Action.ModifyRoute.AdditiveCommunities)
+		}
+	}
+
+	// Without export: EVPN export items are plain Accept, no ModifyRoute.
+	result, err = b.Build(context.Background(), makeData(nil))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	fvrf = result["node-1"].FabricVRFs["prod"]
+	if fvrf.EVPNExportFilter == nil || len(fvrf.EVPNExportFilter.Items) != 2 {
+		t.Fatalf("expected 2 EVPN export items, got %v", fvrf.EVPNExportFilter)
+	}
+	for i, item := range fvrf.EVPNExportFilter.Items {
+		if item.Action.ModifyRoute != nil {
+			t.Errorf("item %d: expected nil ModifyRoute without export, got %v", i, item.Action.ModifyRoute)
+		}
+	}
+}
+
 // assertImportAllows checks that af has a reject-default import filter with a
 // single accept item for the given prefix and le bound.
 func assertImportAllows(t *testing.T, af *networkv1alpha1.AddressFamily, prefix string, le int) {
