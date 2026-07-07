@@ -361,19 +361,16 @@ func PhaseUnderlay(cluster *Cluster) error {
 
 func writeCRAKnownHosts(cluster *Cluster) error {
 	for _, node := range cluster.Nodes {
-		craPID, err := getCRAPID(node.Name)
-		if err != nil {
-			return fmt.Errorf("getting CRA PID on %s: %w", node.Name, err)
-		}
-
-		script := fmt.Sprintf(`nsenter -t %s -m -- sh -c 'for key in /etc/ssh/ssh_host_*_key.pub; do [ -f "$key" ] || continue; read -r key_type key_data _ < "$key"; printf "[169.254.33.1]:830 %%s %%s\n" "$key_type" "$key_data"; done'`, craPID)
-		knownHosts, err := DockerExecShell(node.Name, script)
-		if err != nil {
-			return fmt.Errorf("reading CRA host keys on %s: %w", node.Name, err)
-		}
-		knownHosts = strings.TrimSpace(knownHosts)
-		if knownHosts == "" {
-			return fmt.Errorf("no CRA host keys found on %s", node.Name)
+		var knownHosts string
+		if err := WaitFor("CRA host key on "+node.Name, 30*time.Second, 2*time.Second, func() (bool, error) {
+			out, err := DockerExecShell(node.Name, "ssh-keyscan -T 5 -p 830 169.254.33.1 2>/dev/null")
+			if err != nil {
+				return false, nil
+			}
+			knownHosts = strings.TrimSpace(out)
+			return knownHosts != "", nil
+		}); err != nil {
+			return fmt.Errorf("reading CRA host key on %s: %w", node.Name, err)
 		}
 		if err := DockerExecInput(node.Name, knownHosts+"\n", "tee", "/etc/cra/known_hosts"); err != nil {
 			return fmt.Errorf("writing CRA known_hosts on %s: %w", node.Name, err)
