@@ -55,7 +55,7 @@ func (b *InboundBuilder) Build(ctx context.Context, data *resolver.ResolvedData)
 		if !ok {
 			logger.Info("skipping Inbound with unknown Network reference",
 				"inbound", ib.Name, "networkRef", ib.Spec.NetworkRef)
-			reportSkip(ctx, "Inbound", ib.Name, "NetworkNotFound",
+			reportSkip(ctx, "Inbound", ib.Namespace, ib.Name, "NetworkNotFound",
 				fmt.Sprintf("referenced Network %q not found", ib.Spec.NetworkRef))
 			continue
 		}
@@ -79,7 +79,7 @@ func (b *InboundBuilder) Build(ctx context.Context, data *resolver.ResolvedData)
 			if err != nil {
 				logger.Info("skipping Inbound with ambiguous announcement policy",
 					"inbound", ib.Name, "error", err.Error())
-				reportSkip(ctx, "Inbound", ib.Name, "AmbiguousAnnouncementPolicy", err.Error())
+				reportSkip(ctx, "Inbound", ib.Namespace, ib.Name, "AmbiguousAnnouncementPolicy", err.Error())
 				ambiguous = true
 				break
 			}

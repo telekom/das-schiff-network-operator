@@ -26,6 +26,10 @@ import "context"
 type BuildIssue struct {
 	// Kind is the intent CRD kind (e.g. "Layer2Attachment").
 	Kind string
+	// Namespace is the offending resource's namespace. It is part of the
+	// identity because intent CRDs are namespaced and the reconciler may run
+	// cluster-wide, so name alone is not unique.
+	Namespace string
 	// Name is the offending resource's name.
 	Name string
 	// Reason is a short PascalCase condition reason (e.g. "AmbiguousAnnouncementPolicy").
@@ -53,8 +57,8 @@ func (r *BuildReport) Issues() []BuildIssue {
 	return r.issues
 }
 
-func (r *BuildReport) add(issue BuildIssue) {
-	r.issues = append(r.issues, issue)
+func (r *BuildReport) add(issue *BuildIssue) {
+	r.issues = append(r.issues, *issue)
 }
 
 type reportContextKey struct{}
@@ -68,10 +72,10 @@ func WithReport(ctx context.Context, report *BuildReport) context.Context {
 // reportSkip records a skipped resource on the BuildReport carried by ctx, if
 // any. It is a no-op when no report is present (e.g. in unit tests that call a
 // builder directly), so builders can call it unconditionally.
-func reportSkip(ctx context.Context, kind, name, reason, message string) {
+func reportSkip(ctx context.Context, kind, namespace, name, reason, message string) {
 	report, ok := ctx.Value(reportContextKey{}).(*BuildReport)
 	if !ok || report == nil {
 		return
 	}
-	report.add(BuildIssue{Kind: kind, Name: name, Reason: reason, Message: message})
+	report.add(&BuildIssue{Kind: kind, Namespace: namespace, Name: name, Reason: reason, Message: message})
 }

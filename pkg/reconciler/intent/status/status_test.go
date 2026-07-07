@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/resolver"
@@ -81,3 +82,126 @@ func TestEffectiveInterfaceName(t *testing.T) {
 		})
 	}
 }
+
+func TestCheckBGPPeeringRefs(t *testing.T) {
+	attachment := "l2a-be"
+	resolved := &resolver.ResolvedData{
+		Networks: map[string]*resolver.ResolvedNetwork{
+			"net-be": {Name: "net-be"},
+		},
+		Layer2Attachments: []nc.Layer2Attachment{
+			{ObjectMeta: metav1.ObjectMeta{Name: "l2a-be"}},
+		},
+		Inbounds: []nc.Inbound{
+			{ObjectMeta: metav1.ObjectMeta{Name: "inb-vip"}},
+		},
+	}
+
+	tests := []struct {
+		name       string
+		spec       nc.BGPPeeringSpec
+		wantStatus metav1.ConditionStatus
+		wantReason string
+	}{
+		{
+			name: "listenRange all references resolve",
+			spec: nc.BGPPeeringSpec{
+				Mode: nc.BGPPeeringModeListenRange,
+				Ref:  nc.BGPPeeringRef{AttachmentRef: &attachment, NetworkRefs: []string{"net-be"}},
+			},
+			wantStatus: metav1.ConditionTrue,
+			wantReason: reasonAllResolved,
+		},
+		{
+			name: "listenRange missing attachmentRef",
+			spec: nc.BGPPeeringSpec{
+				Mode: nc.BGPPeeringModeListenRange,
+				Ref:  nc.BGPPeeringRef{NetworkRefs: []string{"net-be"}},
+			},
+			wantStatus: metav1.ConditionFalse,
+			wantReason: "AttachmentRefMissing",
+		},
+		{
+			name: "listenRange unknown attachment",
+			spec: nc.BGPPeeringSpec{
+				Mode: nc.BGPPeeringModeListenRange,
+				Ref:  nc.BGPPeeringRef{AttachmentRef: ptr("nope"), NetworkRefs: []string{"net-be"}},
+			},
+			wantStatus: metav1.ConditionFalse,
+			wantReason: "AttachmentNotFound",
+		},
+		{
+			name: "listenRange unknown network",
+			spec: nc.BGPPeeringSpec{
+				Mode: nc.BGPPeeringModeListenRange,
+				Ref:  nc.BGPPeeringRef{AttachmentRef: &attachment, NetworkRefs: []string{"missing"}},
+			},
+			wantStatus: metav1.ConditionFalse,
+			wantReason: "NetworkNotFound",
+		},
+		{
+			name: "listenRange missing networkRefs",
+			spec: nc.BGPPeeringSpec{
+				Mode: nc.BGPPeeringModeListenRange,
+				Ref:  nc.BGPPeeringRef{AttachmentRef: &attachment},
+			},
+			wantStatus: metav1.ConditionFalse,
+			wantReason: "NetworkRefsMissing",
+		},
+		{
+			name: "loopbackPeer inbound resolves",
+			spec: nc.BGPPeeringSpec{
+				Mode: nc.BGPPeeringModeLoopbackPeer,
+				Ref:  nc.BGPPeeringRef{InboundRefs: []string{"inb-vip"}},
+			},
+			wantStatus: metav1.ConditionTrue,
+			wantReason: reasonAllResolved,
+		},
+		{
+			name: "loopbackPeer unknown inbound",
+			spec: nc.BGPPeeringSpec{
+				Mode: nc.BGPPeeringModeLoopbackPeer,
+				Ref:  nc.BGPPeeringRef{InboundRefs: []string{"missing"}},
+			},
+			wantStatus: metav1.ConditionFalse,
+			wantReason: "InboundNotFound",
+		},
+		{
+			name: "loopbackPeer missing inboundRefs",
+			spec: nc.BGPPeeringSpec{
+				Mode: nc.BGPPeeringModeLoopbackPeer,
+				Ref:  nc.BGPPeeringRef{},
+			},
+			wantStatus: metav1.ConditionFalse,
+			wantReason: "InboundRefsMissing",
+		},
+		{
+			name: "unknown mode is not resolved",
+			spec: nc.BGPPeeringSpec{
+				Mode: nc.BGPPeeringMode("bogus"),
+				Ref:  nc.BGPPeeringRef{},
+			},
+			wantStatus: metav1.ConditionFalse,
+			wantReason: "UnknownMode",
+		},
+		{
+			name: "empty mode is not resolved",
+			spec: nc.BGPPeeringSpec{
+				Ref: nc.BGPPeeringRef{},
+			},
+			wantStatus: metav1.ConditionFalse,
+			wantReason: "UnknownMode",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			bp := &nc.BGPPeering{Spec: tc.spec}
+			gotStatus, gotReason, _ := checkBGPPeeringRefs(bp, resolved)
+			assert.Equal(t, tc.wantStatus, gotStatus)
+			assert.Equal(t, tc.wantReason, gotReason)
+		})
+	}
+}
+
+func ptr(s string) *string { return &s }

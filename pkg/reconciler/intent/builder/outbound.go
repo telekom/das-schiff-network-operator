@@ -62,7 +62,7 @@ func (b *OutboundBuilder) Build(ctx context.Context, data *resolver.ResolvedData
 		if err := b.applyOutbound(ob, net, data, result); err != nil {
 			logger.Info("skipping Outbound with ambiguous announcement policy",
 				"outbound", ob.Name, "error", err.Error())
-			reportSkip(ctx, "Outbound", ob.Name, "AmbiguousAnnouncementPolicy", err.Error())
+			reportSkip(ctx, "Outbound", ob.Namespace, ob.Name, "AmbiguousAnnouncementPolicy", err.Error())
 			continue
 		}
 	}

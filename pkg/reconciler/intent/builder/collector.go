@@ -57,7 +57,7 @@ func (*CollectorBuilder) Build(ctx context.Context, data *resolver.ResolvedData)
 		if !ok {
 			logger.Info("skipping Collector with unknown VRF reference",
 				"collector", col.Name, "vrf", vrfName)
-			reportSkip(ctx, "Collector", col.Name, "VRFNotFound",
+			reportSkip(ctx, "Collector", col.Namespace, col.Name, "VRFNotFound",
 				fmt.Sprintf("referenced VRF %q not found", vrfName))
 			continue
 		}

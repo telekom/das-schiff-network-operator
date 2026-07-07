@@ -62,7 +62,7 @@ func (b *NodeAttachmentBuilder) Build(ctx context.Context, data *resolver.Resolv
 		if err != nil {
 			logger.Info("skipping NodeAttachment with invalid node selector",
 				"nodeattachment", na.Name, "error", err.Error())
-			reportSkip(ctx, "NodeAttachment", na.Name, "InvalidNodeSelector", err.Error())
+			reportSkip(ctx, "NodeAttachment", na.Namespace, na.Name, "InvalidNodeSelector", err.Error())
 			continue
 		}
 		if len(matchedNodes) == 0 {
