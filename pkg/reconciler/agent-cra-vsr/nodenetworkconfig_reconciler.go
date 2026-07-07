@@ -18,7 +18,9 @@ package agent_cra_vsr //nolint:revive
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"reflect"
 
 	"github.com/go-logr/logr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -28,17 +30,42 @@ import (
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/common"
 )
 
+// craManager is the subset of cra.Manager that CRAVSRConfigApplier uses.
+// Extracting this interface allows unit tests to inject a stub without
+// requiring a live NETCONF connection.
+type craManager interface {
+	ApplyConfiguration(ctx context.Context, cfg *v1alpha1.NodeNetworkConfigSpec) error
+}
+
+var errNilCRAManager = errors.New("cra manager must not be nil")
+
 // CRAVSRConfigApplier implements the common.ConfigApplier interface for CRA-VSR.
 type CRAVSRConfigApplier struct {
-	craManager *cra.Manager
+	craManager craManager
 }
 
 // ApplyConfig applies the network configuration using CRA-VSR manager.
 func (a *CRAVSRConfigApplier) ApplyConfig(ctx context.Context, cfg *v1alpha1.NodeNetworkConfig) error {
+	if isNilCRAManager(a.craManager) {
+		return errNilCRAManager
+	}
 	if err := a.craManager.ApplyConfiguration(ctx, &cfg.Spec); err != nil {
 		return fmt.Errorf("error applying cra configuration: %w", err)
 	}
 	return nil
+}
+
+func isNilCRAManager(manager craManager) bool {
+	if manager == nil {
+		return true
+	}
+	value := reflect.ValueOf(manager)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
 }
 
 // NodeNetworkConfigReconciler wraps the common reconciler with CRA-VSR specific logic.
@@ -48,13 +75,17 @@ type NodeNetworkConfigReconciler struct {
 
 // NewNodeNetworkConfigReconciler creates a new NodeNetworkConfigReconciler for CRA-VSR.
 func NewNodeNetworkConfigReconciler(
-	craManager *cra.Manager,
+	manager *cra.Manager,
 	clusterClient client.Client,
 	logger logr.Logger,
 	nodeNetworkConfigPath string,
 ) (*NodeNetworkConfigReconciler, error) {
+	if manager == nil {
+		return nil, errNilCRAManager
+	}
+
 	configApplier := &CRAVSRConfigApplier{
-		craManager: craManager,
+		craManager: manager,
 	}
 
 	commonReconciler, err := common.NewNodeNetworkConfigReconciler(
