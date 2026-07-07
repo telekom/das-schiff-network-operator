@@ -364,22 +364,36 @@ func reconcileExistingInterface(existingInterface netlink.Link, interfaceType, d
 
 // ensureInterfaceName renames link to desiredName when they differ, returning a
 // freshly fetched handle for the (possibly renamed) link. A rename requires the
-// link to be down, so it is brought down, renamed, and brought back up; the
-// caller then reconciles addresses and routes, restoring anything the flap
-// dropped. When the name already matches, the link is returned unchanged.
+// link to be down, so the link's original admin state is captured and restored
+// afterwards: an interface that was up is brought back up, and one that was
+// administratively down stays down. On rename failure the original up state is
+// restored too, so a failed rename does not leave a previously-up interface down
+// (and cause an outage). When the name already matches, the link is returned
+// unchanged.
 func ensureInterfaceName(link netlink.Link, desiredName string) (netlink.Link, error) {
 	if link.Attrs().Name == desiredName {
 		return link, nil
 	}
 	oldName := link.Attrs().Name
+	wasUp := link.Attrs().Flags&net.FlagUp != 0
+
 	if err := netlink.LinkSetDown(link); err != nil {
 		return nil, fmt.Errorf("error bringing %s down for rename: %w", oldName, err)
 	}
 	if err := netlink.LinkSetName(link, desiredName); err != nil {
+		// Restore the prior admin state so a failed rename does not leave a
+		// previously-up interface down.
+		if wasUp {
+			if upErr := netlink.LinkSetUp(link); upErr != nil {
+				return nil, fmt.Errorf("error renaming %s to %s: %w (and restoring up state failed: %w)", oldName, desiredName, err, upErr)
+			}
+		}
 		return nil, fmt.Errorf("error renaming %s to %s: %w", oldName, desiredName, err)
 	}
-	if err := netlink.LinkSetUp(link); err != nil {
-		return nil, fmt.Errorf("error bringing %s up after rename: %w", desiredName, err)
+	if wasUp {
+		if err := netlink.LinkSetUp(link); err != nil {
+			return nil, fmt.Errorf("error bringing %s up after rename: %w", desiredName, err)
+		}
 	}
 	refreshed, err := netlink.LinkByName(desiredName)
 	if err != nil {

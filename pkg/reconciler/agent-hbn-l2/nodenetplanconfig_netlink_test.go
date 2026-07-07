@@ -85,8 +85,14 @@ func assertVLAN(t *testing.T, name string, wantID int, wantAlias string) {
 
 func assertNoInterface(t *testing.T, name string) {
 	t.Helper()
-	if _, err := netlink.LinkByName(name); err == nil {
-		t.Errorf("unexpected interface %q still present", name)
+	links, err := netlink.LinkList()
+	if err != nil {
+		t.Fatalf("listing links: %v", err)
+	}
+	for _, link := range links {
+		if link.Attrs().Name == name {
+			t.Errorf("unexpected interface %q still present", name)
+		}
 	}
 }
 
