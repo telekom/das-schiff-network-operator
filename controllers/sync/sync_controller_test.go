@@ -858,8 +858,9 @@ func TestSyncRecordsManagedKeysOnCreate(t *testing.T) {
 		t.Errorf("managed-labels tracking annotation = %q, want %q",
 			got.Annotations[annotationManagedLabels], wantLabelKeys)
 	}
-	if got.Annotations[annotationManagedAnnotations] != annotationSourceNS {
+	wantAnnKeys := annotationSourceGeneration + "," + annotationSourceNS
+	if got.Annotations[annotationManagedAnnotations] != wantAnnKeys {
 		t.Errorf("managed-annotations tracking annotation = %q, want %q",
-			got.Annotations[annotationManagedAnnotations], annotationSourceNS)
+			got.Annotations[annotationManagedAnnotations], wantAnnKeys)
 	}
 }
