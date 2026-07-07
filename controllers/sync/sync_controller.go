@@ -6,12 +6,14 @@ import (
 	"net"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -32,6 +34,14 @@ const (
 	labelManagedBy      = "network-sync.telekom.com/managed-by"
 	labelManagedByValue = "network-sync"
 	annotationSourceNS  = "network-sync.telekom.com/source-namespace"
+
+	// annotationSourceGeneration records the management object's
+	// metadata.generation that the remote object's spec was built from. Status
+	// sync-back (workload → management) uses it to decide whether the workload
+	// status it reads back corresponds to the intent we last pushed: the remote
+	// copy must carry the current management generation before its Ready/Resolved
+	// conditions are treated as authoritative.
+	annotationSourceGeneration = "network-sync.telekom.com/source-generation"
 
 	// annotationManagedLabels and annotationManagedAnnotations record the label
 	// and annotation keys this controller propagated on the last sync. They let a
@@ -57,6 +67,24 @@ var gitOpsKeyPrefixes = []string{
 }
 
 const syncRequeueInterval = 10 * time.Second
+
+// statusPollInterval is how often Reconcile requeues on success so that status
+// sync-back (workload → management) is refreshed. The controller only watches
+// management-cluster intent CRDs; workload-side status changes do not wake it,
+// so status is pulled on this cadence instead.
+const statusPollInterval = 30 * time.Second
+
+// mirroredConditionTypes is the allowlist of status condition types copied from
+// the workload cluster back onto the management object. Everything else in
+// status — addresses, interfaceName, workloadASNumber, observedGeneration — is
+// deliberately NOT mirrored: those fields are either owned by the management
+// cluster or feed the workload spec (mgmt status.addresses → workload
+// spec.addresses), so copying an empty or lagging workload value back would
+// corrupt the management source of truth.
+var mirroredConditionTypes = map[string]bool{
+	nc.ConditionTypeReady:    true,
+	nc.ConditionTypeResolved: true,
+}
 
 // Controller watches intent CRDs on the management cluster and syncs them
 // to workload clusters via the RemoteClientManager.
@@ -139,6 +167,12 @@ func (r *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		}
 	}
 
+	// A single workload cluster per namespace is required for status sync-back:
+	// with several, one management object cannot carry a single authoritative
+	// status, so we mirror nothing back (forward sync below still fans out to
+	// every workload cluster).
+	singleRemote := len(remoteClients) == 1
+
 	// List and sync every intent CRD type in this namespace.
 	for _, list := range intentCRDLists() {
 		if err := r.Client.List(ctx, list, client.InNamespace(req.Namespace)); err != nil {
@@ -148,6 +182,15 @@ func (r *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		for i := range items {
 			for _, remoteClient := range remoteClients {
 				if err := r.syncObject(ctx, log, remoteClient, items[i]); err != nil {
+					return ctrl.Result{}, err
+				}
+			}
+			// Mirror Ready/Resolved conditions from the workload copy back onto
+			// the management object, reusing the object already listed above so
+			// status sync-back adds no extra LIST traffic. Objects mid-deletion
+			// are handled by the forward path and are not resurrected.
+			if singleRemote && items[i].GetDeletionTimestamp().IsZero() {
+				if err := r.syncObjectStatusBack(ctx, log, remoteClients[0], items[i]); err != nil {
 					return ctrl.Result{}, err
 				}
 			}
@@ -163,6 +206,15 @@ func (r *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		}
 	}
 
+	// Requeue only when status sync-back is active, so workload status changes
+	// are pulled back periodically (the controller does not watch workload
+	// clusters). With multiple workload clusters there is nothing to poll back,
+	// so a change-driven reconcile is enough and we avoid needless full resyncs.
+	if singleRemote {
+		return ctrl.Result{RequeueAfter: statusPollInterval}, nil
+	}
+	log.V(1).Info("Multiple workload clusters in namespace; skipping status sync-back",
+		"count", len(remoteClients))
 	return ctrl.Result{}, nil
 }
 
@@ -238,6 +290,199 @@ func (r *Controller) syncObject(ctx context.Context, log logr.Logger, remoteClie
 	return r.applyRemote(ctx, remoteClient, remote)
 }
 
+// syncObjectStatusBack reads the workload copy of a single intent object and
+// mirrors its Ready/Resolved conditions back onto the management object. It is
+// the reverse of the spec sync — workload → management — and is deliberately
+// restricted to mirroredConditionTypes so a lagging or empty workload status can
+// never overwrite management-owned status fields (addresses, interfaceName,
+// workloadASNumber) that feed the workload spec.
+func (r *Controller) syncObjectStatusBack(ctx context.Context, log logr.Logger, remoteClient client.Client, mgmtObj client.Object) error {
+	kind := mgmtObj.GetObjectKind().GroupVersionKind().Kind
+	name := mgmtObj.GetName()
+
+	mgmtConds := statusConditionsPtr(mgmtObj)
+	if mgmtConds == nil {
+		// Type carries no status.conditions field; nothing to mirror.
+		return nil
+	}
+
+	remote, ok := mgmtObj.DeepCopyObject().(client.Object)
+	if !ok {
+		return fmt.Errorf("DeepCopyObject did not return client.Object for %s/%s", mgmtObj.GetNamespace(), name)
+	}
+	err := remoteClient.Get(ctx, types.NamespacedName{Namespace: r.remoteNamespace(), Name: name}, remote)
+	if apierrors.IsNotFound(err) {
+		// Not synced yet; the forward pass will create it. Nothing to mirror.
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("getting remote %s/%s for status sync-back: %w", kind, name, err)
+	}
+
+	remoteConds := statusConditionsPtr(remote)
+	if remoteConds == nil {
+		return nil
+	}
+
+	caughtUp := workloadCaughtUp(remote, mgmtObj.GetGeneration())
+	desired := desiredMirroredConditions(*remoteConds, caughtUp, mgmtObj.GetGeneration())
+	if len(desired) == 0 {
+		return nil
+	}
+
+	if err := r.writeMirroredConditions(ctx, mgmtObj, desired); err != nil {
+		return err
+	}
+	log.V(1).Info("Mirrored workload status back to management", "kind", kind, "name", name, "caughtUp", caughtUp)
+	return nil
+}
+
+// writeMirroredConditions applies the desired conditions onto obj's status and
+// persists them via the status subresource, retrying on optimistic-lock
+// conflicts. Only the status subresource is written, so spec is never touched.
+// SetStatusCondition is a no-op when a condition is unchanged, so a stable
+// workload status produces no writes and no lastTransitionTime flapping.
+func (r *Controller) writeMirroredConditions(ctx context.Context, obj client.Object, desired []metav1.Condition) error {
+	const maxRetries = 3
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		conds := statusConditionsPtr(obj)
+		if conds == nil {
+			return nil
+		}
+		changed := false
+		for i := range desired {
+			if apimeta.SetStatusCondition(conds, desired[i]) {
+				changed = true
+			}
+		}
+		if !changed {
+			return nil
+		}
+		err := r.Client.Status().Update(ctx, obj)
+		if err == nil {
+			return nil
+		}
+		if !apierrors.IsConflict(err) {
+			return fmt.Errorf("updating status for %s/%s: %w", obj.GetObjectKind().GroupVersionKind().Kind, obj.GetName(), err)
+		}
+		// Conflict: re-fetch to pick up the current resourceVersion and retry.
+		fresh, ok := obj.DeepCopyObject().(client.Object)
+		if !ok {
+			return fmt.Errorf("DeepCopyObject did not return client.Object for %s", obj.GetName())
+		}
+		if err := r.Client.Get(ctx, client.ObjectKeyFromObject(obj), fresh); err != nil {
+			return fmt.Errorf("re-fetching %s/%s for status sync-back: %w", obj.GetObjectKind().GroupVersionKind().Kind, obj.GetName(), err)
+		}
+		obj = fresh
+	}
+	return fmt.Errorf("status sync-back conflict after %d retries for %s/%s", maxRetries, obj.GetObjectKind().GroupVersionKind().Kind, obj.GetName())
+}
+
+// desiredMirroredConditions filters the workload conditions down to the
+// allowlist and rewrites each condition's observedGeneration to the management
+// object's generation (the workload records it against its own, unrelated
+// generation). When the workload has not yet caught up to the intent we pushed,
+// every mirrored condition is reported as non-authoritative for the current
+// generation instead of the stale workload value: Ready=False/Progressing and
+// Resolved=Unknown/Progressing. Downgrading both keeps them consistent with the
+// generation gate — otherwise a previously mirrored Resolved=True (with an old
+// observedGeneration) would linger while Ready is Progressing for a newer
+// generation.
+func desiredMirroredConditions(remoteConds []metav1.Condition, caughtUp bool, mgmtGen int64) []metav1.Condition {
+	if !caughtUp {
+		const msg = "Workload cluster has not yet observed the latest synced spec"
+		return []metav1.Condition{
+			{
+				Type:               nc.ConditionTypeReady,
+				Status:             metav1.ConditionFalse,
+				Reason:             "Progressing",
+				Message:            msg,
+				ObservedGeneration: mgmtGen,
+			},
+			{
+				Type:               nc.ConditionTypeResolved,
+				Status:             metav1.ConditionUnknown,
+				Reason:             "Progressing",
+				Message:            msg,
+				ObservedGeneration: mgmtGen,
+			},
+		}
+	}
+
+	var out []metav1.Condition
+	for i := range remoteConds {
+		c := remoteConds[i]
+		if !mirroredConditionTypes[c.Type] {
+			continue
+		}
+		c.ObservedGeneration = mgmtGen
+		out = append(out, c)
+	}
+	return out
+}
+
+// workloadCaughtUp reports whether the workload copy's status reflects the
+// current management intent. Both must hold:
+//   - the remote object carries the spec built from the current management
+//     generation (source-generation annotation), and
+//   - the workload compiler has observed the remote's current spec
+//     (status.observedGeneration == metadata.generation on the remote).
+//
+// Until both are true the remote status is stale relative to the intent and
+// must not be mirrored as authoritative.
+func workloadCaughtUp(remote client.Object, mgmtGen int64) bool {
+	if remote.GetAnnotations()[annotationSourceGeneration] != strconv.FormatInt(mgmtGen, 10) {
+		return false
+	}
+	observed, ok := statusObservedGeneration(remote)
+	if !ok {
+		return false
+	}
+	return observed == remote.GetGeneration()
+}
+
+// statusConditionsPtr returns a pointer to obj's status.Conditions slice via
+// reflection, or nil if the object has no such field. This keeps status
+// sync-back generic across every intent CRD without a per-type switch, mirroring
+// the reflection approach used by overlayBody and extractItems.
+func statusConditionsPtr(obj client.Object) *[]metav1.Condition {
+	v := reflect.ValueOf(obj)
+	if v.Kind() != reflect.Ptr || v.IsNil() {
+		return nil
+	}
+	status := v.Elem().FieldByName("Status")
+	if !status.IsValid() {
+		return nil
+	}
+	conds := status.FieldByName("Conditions")
+	if !conds.IsValid() || !conds.CanAddr() {
+		return nil
+	}
+	ptr, ok := conds.Addr().Interface().(*[]metav1.Condition)
+	if !ok {
+		return nil
+	}
+	return ptr
+}
+
+// statusObservedGeneration reads obj's status.ObservedGeneration via reflection.
+// The bool is false when the object has no such int64 field.
+func statusObservedGeneration(obj client.Object) (int64, bool) {
+	v := reflect.ValueOf(obj)
+	if v.Kind() != reflect.Ptr || v.IsNil() {
+		return 0, false
+	}
+	status := v.Elem().FieldByName("Status")
+	if !status.IsValid() {
+		return 0, false
+	}
+	og := status.FieldByName("ObservedGeneration")
+	if !og.IsValid() || og.Kind() != reflect.Int64 {
+		return 0, false
+	}
+	return og.Int(), true
+}
+
 // buildRemoteObject creates the desired remote object from the mgmt-side source.
 func (r *Controller) buildRemoteObject(src client.Object, sourceNamespace string) client.Object {
 	dst, ok := src.DeepCopyObject().(client.Object)
@@ -268,6 +513,9 @@ func (r *Controller) buildRemoteObject(src client.Object, sourceNamespace string
 
 	annotations := stripGitOpsKeys(dst.GetAnnotations())
 	annotations[annotationSourceNS] = sourceNamespace
+	// Record the management generation this spec was built from so status
+	// sync-back can tell whether the workload has caught up to the current intent.
+	annotations[annotationSourceGeneration] = strconv.FormatInt(src.GetGeneration(), 10)
 	// Remove system annotations.
 	delete(annotations, "kubectl.kubernetes.io/last-applied-configuration")
 	dst.SetAnnotations(annotations)
