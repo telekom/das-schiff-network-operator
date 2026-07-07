@@ -101,6 +101,7 @@ func main() {
 		Remotes:         remotes,
 		RemoteNamespace: remoteNamespace,
 		IPAMAllocator:   ipam.NewAllocator(mgr.GetClient(), mgr.GetLogger()),
+		Recorder:        mgr.GetEventRecorderFor("network-sync"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Sync")
 		os.Exit(1)

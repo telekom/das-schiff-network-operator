@@ -2,6 +2,7 @@ package sync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"reflect"
@@ -17,6 +18,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/cluster-api/util/patch"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -68,6 +70,13 @@ var gitOpsKeyPrefixes = []string{
 
 const syncRequeueInterval = 10 * time.Second
 
+// errMultipleWorkloadClusters is returned by Reconcile (and surfaced on the
+// intent resources as a condition + event) when a namespace resolves to more
+// than one workload cluster, which is a misconfiguration for the
+// one-cluster-per-namespace design. Returning it lets the controller's rate
+// limiter apply exponential backoff while the misconfiguration persists.
+var errMultipleWorkloadClusters = errors.New("namespace maps to multiple workload clusters")
+
 // statusPollInterval is how often Reconcile requeues on success so that status
 // sync-back (workload → management) is refreshed. The controller only watches
 // management-cluster intent CRDs; workload-side status changes do not wake it,
@@ -95,6 +104,7 @@ type Controller struct {
 	Remotes         *RemoteClientManager
 	RemoteNamespace string
 	IPAMAllocator   *ipam.Allocator
+	Recorder        record.EventRecorder
 }
 
 // intentCRDTypes returns fresh instances of all intent CRD types to sync.
@@ -157,6 +167,27 @@ func (r *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		// ClusterController hasn't set up a client (yet) — wait and retry.
 		return ctrl.Result{RequeueAfter: syncRequeueInterval}, nil
 	}
+	if len(remoteClients) > 1 {
+		// A namespace maps to exactly one workload cluster by design. More than
+		// one CAPI Cluster in the same namespace is a misconfiguration: syncing
+		// the same intent to several clusters would be ambiguous (duplicate
+		// forward writes, no single authoritative status to mirror back), so we
+		// refuse to process the namespace until it is resolved rather than act on
+		// a guess. Surface the block on every intent resource (condition + event)
+		// so it is visible in `kubectl get`, not only in the controller log.
+		if err := r.blockOnMultipleRemotes(ctx, req.Namespace, len(remoteClients)); err != nil {
+			return ctrl.Result{}, err
+		}
+		// Return the error so the controller's rate limiter applies exponential
+		// backoff instead of a tight fixed-interval requeue: nothing can change
+		// until the namespace maps to a single cluster again, and the condition +
+		// event already inform the user, so we must not busy-loop LISTing intent
+		// CRDs. The backoff resets automatically once a reconcile succeeds (i.e.
+		// once the misconfiguration is resolved).
+		return ctrl.Result{}, fmt.Errorf("%w: namespace %q maps to %d clusters",
+			errMultipleWorkloadClusters, req.Namespace, len(remoteClients))
+	}
+	remoteClient := remoteClients[0]
 
 	// Run IPAM allocation for count-mode Inbound/Outbound before syncing,
 	// so that promoteIPAMAddresses can copy status→spec for the remote copy.
@@ -167,12 +198,6 @@ func (r *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		}
 	}
 
-	// A single workload cluster per namespace is required for status sync-back:
-	// with several, one management object cannot carry a single authoritative
-	// status, so we mirror nothing back (forward sync below still fans out to
-	// every workload cluster).
-	singleRemote := len(remoteClients) == 1
-
 	// List and sync every intent CRD type in this namespace.
 	for _, list := range intentCRDLists() {
 		if err := r.Client.List(ctx, list, client.InNamespace(req.Namespace)); err != nil {
@@ -180,17 +205,15 @@ func (r *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		}
 		items := extractItems(list)
 		for i := range items {
-			for _, remoteClient := range remoteClients {
-				if err := r.syncObject(ctx, log, remoteClient, items[i]); err != nil {
-					return ctrl.Result{}, err
-				}
+			if err := r.syncObject(ctx, log, remoteClient, items[i]); err != nil {
+				return ctrl.Result{}, err
 			}
 			// Mirror Ready/Resolved conditions from the workload copy back onto
 			// the management object, reusing the object already listed above so
 			// status sync-back adds no extra LIST traffic. Objects mid-deletion
 			// are handled by the forward path and are not resurrected.
-			if singleRemote && items[i].GetDeletionTimestamp().IsZero() {
-				if err := r.syncObjectStatusBack(ctx, log, remoteClients[0], items[i]); err != nil {
+			if items[i].GetDeletionTimestamp().IsZero() {
+				if err := r.syncObjectStatusBack(ctx, log, remoteClient, items[i]); err != nil {
 					return ctrl.Result{}, err
 				}
 			}
@@ -200,22 +223,13 @@ func (r *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	// Sync Secrets referenced by BGPPeering.spec.authSecretRef into the remote
 	// namespace so the workload-side intent compiler can resolve the password
 	// without any cross-cluster Secret access.
-	for _, remoteClient := range remoteClients {
-		if err := r.syncBGPSecrets(ctx, log, remoteClient, req.Namespace); err != nil {
-			return ctrl.Result{}, err
-		}
+	if err := r.syncBGPSecrets(ctx, log, remoteClient, req.Namespace); err != nil {
+		return ctrl.Result{}, err
 	}
 
-	// Requeue only when status sync-back is active, so workload status changes
-	// are pulled back periodically (the controller does not watch workload
-	// clusters). With multiple workload clusters there is nothing to poll back,
-	// so a change-driven reconcile is enough and we avoid needless full resyncs.
-	if singleRemote {
-		return ctrl.Result{RequeueAfter: statusPollInterval}, nil
-	}
-	log.V(1).Info("Multiple workload clusters in namespace; skipping status sync-back",
-		"count", len(remoteClients))
-	return ctrl.Result{}, nil
+	// Requeue so workload status changes are pulled back periodically; the
+	// controller does not watch the workload clusters.
+	return ctrl.Result{RequeueAfter: statusPollInterval}, nil
 }
 
 // drainFinalizersForLostRemote walks every intent CRD type in the namespace and
@@ -330,24 +344,26 @@ func (r *Controller) syncObjectStatusBack(ctx context.Context, log logr.Logger, 
 		return nil
 	}
 
-	if err := r.writeMirroredConditions(ctx, mgmtObj, desired); err != nil {
+	if _, err := r.writeStatusConditions(ctx, mgmtObj, desired); err != nil {
 		return err
 	}
 	log.V(1).Info("Mirrored workload status back to management", "kind", kind, "name", name, "caughtUp", caughtUp)
 	return nil
 }
 
-// writeMirroredConditions applies the desired conditions onto obj's status and
+// writeStatusConditions applies the desired conditions onto obj's status and
 // persists them via the status subresource, retrying on optimistic-lock
 // conflicts. Only the status subresource is written, so spec is never touched.
 // SetStatusCondition is a no-op when a condition is unchanged, so a stable
-// workload status produces no writes and no lastTransitionTime flapping.
-func (r *Controller) writeMirroredConditions(ctx context.Context, obj client.Object, desired []metav1.Condition) error {
+// status produces no writes and no lastTransitionTime flapping; the returned
+// bool reports whether any condition actually transitioned (so callers can gate
+// side effects such as events on real changes).
+func (r *Controller) writeStatusConditions(ctx context.Context, obj client.Object, desired []metav1.Condition) (bool, error) {
 	const maxRetries = 3
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		conds := statusConditionsPtr(obj)
 		if conds == nil {
-			return nil
+			return false, nil
 		}
 		changed := false
 		for i := range desired {
@@ -356,26 +372,65 @@ func (r *Controller) writeMirroredConditions(ctx context.Context, obj client.Obj
 			}
 		}
 		if !changed {
-			return nil
+			return false, nil
 		}
 		err := r.Client.Status().Update(ctx, obj)
 		if err == nil {
-			return nil
+			return true, nil
 		}
 		if !apierrors.IsConflict(err) {
-			return fmt.Errorf("updating status for %s/%s: %w", obj.GetObjectKind().GroupVersionKind().Kind, obj.GetName(), err)
+			return false, fmt.Errorf("updating status for %s/%s: %w", obj.GetObjectKind().GroupVersionKind().Kind, obj.GetName(), err)
 		}
 		// Conflict: re-fetch to pick up the current resourceVersion and retry.
 		fresh, ok := obj.DeepCopyObject().(client.Object)
 		if !ok {
-			return fmt.Errorf("DeepCopyObject did not return client.Object for %s", obj.GetName())
+			return false, fmt.Errorf("DeepCopyObject did not return client.Object for %s", obj.GetName())
 		}
 		if err := r.Client.Get(ctx, client.ObjectKeyFromObject(obj), fresh); err != nil {
-			return fmt.Errorf("re-fetching %s/%s for status sync-back: %w", obj.GetObjectKind().GroupVersionKind().Kind, obj.GetName(), err)
+			return false, fmt.Errorf("re-fetching %s/%s for status update: %w", obj.GetObjectKind().GroupVersionKind().Kind, obj.GetName(), err)
 		}
 		obj = fresh
 	}
-	return fmt.Errorf("status sync-back conflict after %d retries for %s/%s", maxRetries, obj.GetObjectKind().GroupVersionKind().Kind, obj.GetName())
+	return false, fmt.Errorf("status update conflict after %d retries for %s/%s", maxRetries, obj.GetObjectKind().GroupVersionKind().Kind, obj.GetName())
+}
+
+// blockOnMultipleRemotes surfaces the multiple-workload-cluster misconfiguration
+// on every intent resource in the namespace: it sets Ready=False (reason
+// MultipleWorkloadClusters) and emits a Warning event, so the block is
+// discoverable via `kubectl get`/`describe`, not only in the controller log.
+// Events fire only when the condition actually transitions, so a namespace held
+// in this state across periodic requeues does not spam the event stream.
+func (r *Controller) blockOnMultipleRemotes(ctx context.Context, namespace string, count int) error {
+	const reason = "MultipleWorkloadClusters"
+	message := fmt.Sprintf("Namespace maps to %d workload clusters; refusing to sync until exactly one remains", count)
+
+	for _, list := range intentCRDLists() {
+		if err := r.Client.List(ctx, list, client.InNamespace(namespace)); err != nil {
+			return fmt.Errorf("listing %T while blocking namespace: %w", list, err)
+		}
+		items := extractItems(list)
+		for i := range items {
+			obj := items[i]
+			if !obj.GetDeletionTimestamp().IsZero() {
+				continue
+			}
+			cond := metav1.Condition{
+				Type:               nc.ConditionTypeReady,
+				Status:             metav1.ConditionFalse,
+				Reason:             reason,
+				Message:            message,
+				ObservedGeneration: obj.GetGeneration(),
+			}
+			changed, err := r.writeStatusConditions(ctx, obj, []metav1.Condition{cond})
+			if err != nil {
+				return err
+			}
+			if changed && r.Recorder != nil {
+				r.Recorder.Event(obj, corev1.EventTypeWarning, reason, message)
+			}
+		}
+	}
+	return nil
 }
 
 // desiredMirroredConditions filters the workload conditions down to the

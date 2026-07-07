@@ -2,11 +2,14 @@ package sync
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -278,42 +281,59 @@ func TestReconcileStatusBackDoesNotWipeAddresses(t *testing.T) {
 	}
 }
 
-// TestReconcileSkipsStatusBackForMultipleRemotes verifies that with more than
-// one workload cluster in the namespace, status sync-back is skipped (we cannot
-// attribute a single status) while forward sync still runs.
-func TestReconcileSkipsStatusBackForMultipleRemotes(t *testing.T) {
+// TestReconcileBlocksNamespaceWithMultipleRemotes verifies that a namespace
+// mapping to more than one workload cluster is refused entirely: no forward sync
+// happens, every intent resource is marked Ready=False/MultipleWorkloadClusters,
+// and a Warning event is emitted.
+func TestReconcileBlocksNamespaceWithMultipleRemotes(t *testing.T) {
 	vrf := &nc.VRF{
 		ObjectMeta: metav1.ObjectMeta{Name: "vrf-m2m", Namespace: "test-cluster"},
 		Spec:       nc.VRFSpec{VRF: "m2m", VNI: ptrInt32(2002026), RouteTarget: ptrString("65188:2026")},
 	}
-	remoteA := &nc.VRF{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "vrf-m2m",
-			Namespace: testRemoteNamespace,
-			Labels:    map[string]string{labelManagedBy: labelManagedByValue},
-		},
-		Spec:   nc.VRFSpec{VRF: "m2m", VNI: ptrInt32(2002026), RouteTarget: ptrString("65188:2026")},
-		Status: nc.VRFStatus{Conditions: []metav1.Condition{readyCondition(metav1.ConditionTrue, 0)}},
-	}
 
-	sc, _ := newFakeSyncControllerAllStatus([]client.Object{vrf}, []client.Object{remoteA})
-	// Register a second remote in the same namespace.
+	// Two empty remotes in the same namespace; neither must receive the VRF.
+	remoteA := fake.NewClientBuilder().WithScheme(testScheme()).Build()
+	sc, _ := newFakeSyncControllerAllStatus([]client.Object{vrf}, nil)
+	sc.Remotes.clients[types.NamespacedName{Namespace: "test-cluster", Name: "test-cluster"}] = remoteA
 	sc.Remotes.clients[types.NamespacedName{Namespace: "test-cluster", Name: "second"}] =
 		fake.NewClientBuilder().WithScheme(testScheme()).Build()
+	recorder := record.NewFakeRecorder(10)
+	sc.Recorder = recorder
 
 	ctx := context.Background()
-	if _, err := sc.Reconcile(ctx, ctrl.Request{
+	_, err := sc.Reconcile(ctx, ctrl.Request{
 		NamespacedName: types.NamespacedName{Namespace: "test-cluster", Name: "sync"},
-	}); err != nil {
-		t.Fatalf("Reconcile failed: %v", err)
+	})
+	// The error is returned so the controller's rate limiter applies exponential
+	// backoff while the misconfiguration persists.
+	if !errors.Is(err, errMultipleWorkloadClusters) {
+		t.Fatalf("expected errMultipleWorkloadClusters, got %v", err)
 	}
 
+	// No forward sync: the VRF must not have been created on either remote.
+	remoteVRF := &nc.VRF{}
+	if err := remoteA.Get(ctx, types.NamespacedName{Namespace: testRemoteNamespace, Name: "vrf-m2m"}, remoteVRF); err == nil {
+		t.Error("VRF was forward-synced to a remote despite the namespace being blocked")
+	}
+
+	// The mgmt VRF must be marked not-ready with the block reason.
 	got := &nc.VRF{}
 	if err := sc.Client.Get(ctx, types.NamespacedName{Namespace: "test-cluster", Name: "vrf-m2m"}, got); err != nil {
 		t.Fatalf("Get mgmt VRF: %v", err)
 	}
-	if findCondition(got.Status.Conditions, nc.ConditionTypeReady) != nil {
-		t.Errorf("status sync-back should be skipped with multiple remotes, but a Ready condition was mirrored: %+v", got.Status.Conditions)
+	cond := findCondition(got.Status.Conditions, nc.ConditionTypeReady)
+	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != "MultipleWorkloadClusters" {
+		t.Fatalf("expected Ready=False/MultipleWorkloadClusters, got %+v", got.Status.Conditions)
+	}
+
+	// A Warning event must have been emitted.
+	select {
+	case e := <-recorder.Events:
+		if !strings.Contains(e, "MultipleWorkloadClusters") {
+			t.Errorf("unexpected event %q", e)
+		}
+	default:
+		t.Error("expected a Warning event for the multiple-workload-cluster block")
 	}
 }
 
