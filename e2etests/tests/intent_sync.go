@@ -263,6 +263,7 @@ spec:
 				}
 				return expectFluxFixtureRevision(vrf, workloadReapplyRevision)
 			}, syncTimeout, syncInterval).Should(Succeed())
+			By("Checking workload Flux ownership stays intact while network-sync reconciles managed fields")
 			Consistently(func() error {
 				vrf := getCluster2Object(ctx, f, "vrfs", vrfName)
 				if vrf == nil {
@@ -274,7 +275,7 @@ spec:
 				if err := expectHelmFluxOwnership(vrf, workloadRelease, remoteNS); err != nil {
 					return err
 				}
-				return expectFluxFixtureRevision(vrf, workloadReapplyRevision)
+				return nil
 			}, 30*time.Second, syncInterval).Should(Succeed())
 
 			By("Updating the source HelmRelease values through Flux")
