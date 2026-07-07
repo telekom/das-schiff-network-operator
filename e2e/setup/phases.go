@@ -360,19 +360,12 @@ func PhaseUnderlay(cluster *Cluster) error {
 }
 
 func writeCRAKnownHosts(cluster *Cluster) error {
+	// The FRR-based E2E CRA has no SSH/NETCONF server; this placeholder covers
+	// startup validation of the configured CRA URL without requiring live scan.
+	const e2eCRAKnownHosts = "[169.254.33.1]:830 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8g"
+
 	for _, node := range cluster.Nodes {
-		var knownHosts string
-		if err := WaitFor("CRA host key on "+node.Name, 30*time.Second, 2*time.Second, func() (bool, error) {
-			out, err := DockerExecShell(node.Name, "ssh-keyscan -T 5 -p 830 169.254.33.1 2>/dev/null")
-			if err != nil {
-				return false, nil
-			}
-			knownHosts = strings.TrimSpace(out)
-			return knownHosts != "", nil
-		}); err != nil {
-			return fmt.Errorf("reading CRA host key on %s: %w", node.Name, err)
-		}
-		if err := DockerExecInput(node.Name, knownHosts+"\n", "tee", "/etc/cra/known_hosts"); err != nil {
+		if err := DockerExecInput(node.Name, e2eCRAKnownHosts+"\n", "tee", "/etc/cra/known_hosts"); err != nil {
 			return fmt.Errorf("writing CRA known_hosts on %s: %w", node.Name, err)
 		}
 	}

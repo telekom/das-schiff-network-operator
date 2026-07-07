@@ -15,7 +15,6 @@ RUN apt-get update && \
       iproute2 \
       bridge-utils \
       bpftool \
-      openssh-client \
       tcpdump \
       netplan.io && \
     apt-get clean && \
