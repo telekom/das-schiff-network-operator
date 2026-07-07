@@ -21,9 +21,12 @@ import (
 	"k8s.io/client-go/tools/events"
 	"sigs.k8s.io/cluster-api/util/patch"
 	ctrl "sigs.k8s.io/controller-runtime"
+	ctrlbuilder "sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
@@ -1078,13 +1081,43 @@ func (r *Controller) SetupWithManager(mgr ctrl.Manager) error {
 		Named("sync-controller")
 
 	for _, obj := range intentCRDTypes() {
-		builder = builder.Watches(obj, enqueueNS)
+		builder = builder.Watches(obj, enqueueNS, ctrlbuilder.WithPredicates(syncCRDPredicate()))
 	}
 
 	if err := builder.Complete(r); err != nil {
 		return fmt.Errorf("setting up sync controller: %w", err)
 	}
 	return nil
+}
+
+// syncCRDPredicate filters the intent-CRD watch down to events that require a
+// (re)sync, so the controller does not reconcile in response to its own status
+// sync-back writes. Reconciling on every status write would form a feedback
+// loop — status write → watch event → reconcile → status write — that storms
+// the reconciler and floods the workload-cluster API (rate-limited), delaying
+// the forward spec sync.
+//
+// Forward sync depends only on the spec (generation) and the managed
+// labels/annotations; status sync-back is driven by the periodic requeue, not
+// by watch events. Deletion is surfaced explicitly (deletionTimestamp is a
+// metadata change that does not bump the generation) so remote objects are
+// still cleaned up promptly rather than only on the next poll.
+func syncCRDPredicate() predicate.Predicate {
+	return predicate.Or(
+		predicate.GenerationChangedPredicate{},
+		predicate.LabelChangedPredicate{},
+		predicate.AnnotationChangedPredicate{},
+		predicate.Funcs{
+			UpdateFunc: func(e event.UpdateEvent) bool {
+				if e.ObjectOld == nil || e.ObjectNew == nil {
+					return false
+				}
+				// Fire when the object first enters deletion.
+				return e.ObjectOld.GetDeletionTimestamp() == nil &&
+					e.ObjectNew.GetDeletionTimestamp() != nil
+			},
+		},
+	)
 }
 
 // remoteNamespace returns the target namespace on workload clusters.
