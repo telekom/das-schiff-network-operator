@@ -98,6 +98,45 @@ var mirroredConditionTypes = map[string]bool{
 	nc.ConditionTypeResolved: true,
 }
 
+// ipamAllocations holds the addresses allocated by the management-cluster IPAM
+// during a reconcile, keyed by Inbound/Outbound name. It lets the forward sync
+// promote just-allocated addresses without re-reading the (lagging) client
+// cache. A nil *ipamAllocations is safe to use — the accessors fall back to the
+// object's own status.
+type ipamAllocations struct {
+	inbound  map[string]*nc.AddressAllocation
+	outbound map[string]*nc.AddressAllocation
+}
+
+func newIPAMAllocations() *ipamAllocations {
+	return &ipamAllocations{
+		inbound:  map[string]*nc.AddressAllocation{},
+		outbound: map[string]*nc.AddressAllocation{},
+	}
+}
+
+// inboundAddresses returns the freshly-allocated addresses for the named
+// Inbound, or fallback when none were allocated this reconcile.
+func (a *ipamAllocations) inboundAddresses(name string, fallback *nc.AddressAllocation) *nc.AddressAllocation {
+	if a != nil {
+		if addrs, ok := a.inbound[name]; ok {
+			return addrs
+		}
+	}
+	return fallback
+}
+
+// outboundAddresses returns the freshly-allocated addresses for the named
+// Outbound, or fallback when none were allocated this reconcile.
+func (a *ipamAllocations) outboundAddresses(name string, fallback *nc.AddressAllocation) *nc.AddressAllocation {
+	if a != nil {
+		if addrs, ok := a.outbound[name]; ok {
+			return addrs
+		}
+	}
+	return fallback
+}
+
 // Controller watches intent CRDs on the management cluster and syncs them
 // to workload clusters via the RemoteClientManager.
 type Controller struct {
@@ -192,13 +231,18 @@ func (r *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	}
 	remoteClient := remoteClients[0]
 
-	// Run IPAM allocation for count-mode Inbound/Outbound before syncing,
-	// so that promoteIPAMAddresses can copy status→spec for the remote copy.
+	// Run IPAM allocation for count-mode Inbound/Outbound before syncing, so that
+	// promoteIPAMAddresses can copy status→spec for the remote copy. The returned
+	// allocations carry the freshly-assigned addresses so the promotion does not
+	// depend on the read cache catching up to the status write.
+	var ipamAddrs *ipamAllocations
 	if r.IPAMAllocator != nil {
-		if err := r.reconcileIPAM(ctx, req.Namespace); err != nil {
+		allocs, err := r.reconcileIPAM(ctx, req.Namespace)
+		if err != nil {
 			log.Error(err, "IPAM allocation failed")
 			// Continue — partial allocation should not block syncing.
 		}
+		ipamAddrs = allocs
 	}
 
 	// List and sync every intent CRD type in this namespace.
@@ -208,7 +252,7 @@ func (r *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		}
 		items := extractItems(list)
 		for i := range items {
-			if err := r.syncObject(ctx, log, remoteClient, items[i]); err != nil {
+			if err := r.syncObject(ctx, log, remoteClient, items[i], ipamAddrs); err != nil {
 				return ctrl.Result{}, err
 			}
 			// Mirror Ready/Resolved conditions from the workload copy back onto
@@ -269,7 +313,7 @@ func (r *Controller) drainFinalizersForLostRemote(ctx context.Context, log logr.
 }
 
 // syncObject handles create/update/delete for a single intent CRD object.
-func (r *Controller) syncObject(ctx context.Context, log logr.Logger, remoteClient client.Client, obj client.Object) error {
+func (r *Controller) syncObject(ctx context.Context, log logr.Logger, remoteClient client.Client, obj client.Object, ipamAddrs *ipamAllocations) error {
 	name := obj.GetName()
 	kind := obj.GetObjectKind().GroupVersionKind().Kind
 	ns := obj.GetNamespace()
@@ -299,7 +343,7 @@ func (r *Controller) syncObject(ctx context.Context, log logr.Logger, remoteClie
 	}
 
 	// Build the desired remote object and apply it.
-	remote := r.buildRemoteObject(obj, ns)
+	remote := r.buildRemoteObject(obj, ns, ipamAddrs)
 	if remote == nil {
 		return fmt.Errorf("buildRemoteObject returned nil for %s/%s", kind, name)
 	}
@@ -613,7 +657,7 @@ func statusObservedGeneration(obj client.Object) (int64, bool) {
 }
 
 // buildRemoteObject creates the desired remote object from the mgmt-side source.
-func (r *Controller) buildRemoteObject(src client.Object, sourceNamespace string) client.Object {
+func (r *Controller) buildRemoteObject(src client.Object, sourceNamespace string, ipamAddrs *ipamAllocations) client.Object {
 	dst, ok := src.DeepCopyObject().(client.Object)
 	if !ok {
 		return nil
@@ -653,7 +697,7 @@ func (r *Controller) buildRemoteObject(src client.Object, sourceNamespace string
 	recordManagedKeys(dst)
 
 	// IPAM promotion: copy status.addresses → spec.addresses for Inbound/Outbound.
-	r.promoteIPAMAddresses(dst)
+	r.promoteIPAMAddresses(dst, ipamAddrs)
 
 	return dst
 }
@@ -661,22 +705,31 @@ func (r *Controller) buildRemoteObject(src client.Object, sourceNamespace string
 // reconcileIPAM runs IPAM allocation for count-mode Inbound/Outbound in the given namespace.
 // Allocated IPs are written to status.addresses on the management-cluster resources so that
 // promoteIPAMAddresses can copy them into spec.addresses for the remote copy.
-func (r *Controller) reconcileIPAM(ctx context.Context, namespace string) error {
+//
+// It also returns the freshly-allocated addresses in memory, keyed by object
+// name. The forward sync must NOT rely on re-reading status.addresses from the
+// (cached) client for the promotion: the allocator writes status via a direct
+// API update, but the reconciler's List reads are served from an informer cache
+// that lags that write, and — since status-only updates are filtered by
+// syncCRDPredicate — nothing re-triggers a reconcile to pick up the fresh cache.
+// Threading the in-memory allocations through makes the promotion work within
+// the same reconcile, independent of cache timing.
+func (r *Controller) reconcileIPAM(ctx context.Context, namespace string) (*ipamAllocations, error) {
 	inboundList := &nc.InboundList{}
 	if err := r.Client.List(ctx, inboundList, client.InNamespace(namespace)); err != nil {
-		return fmt.Errorf("listing Inbounds for IPAM: %w", err)
+		return nil, fmt.Errorf("listing Inbounds for IPAM: %w", err)
 	}
 	outboundList := &nc.OutboundList{}
 	if err := r.Client.List(ctx, outboundList, client.InNamespace(namespace)); err != nil {
-		return fmt.Errorf("listing Outbounds for IPAM: %w", err)
+		return nil, fmt.Errorf("listing Outbounds for IPAM: %w", err)
 	}
 	networkList := &nc.NetworkList{}
 	if err := r.Client.List(ctx, networkList, client.InNamespace(namespace)); err != nil {
-		return fmt.Errorf("listing Networks for IPAM: %w", err)
+		return nil, fmt.Errorf("listing Networks for IPAM: %w", err)
 	}
 	l2aList := &nc.Layer2AttachmentList{}
 	if err := r.Client.List(ctx, l2aList, client.InNamespace(namespace)); err != nil {
-		return fmt.Errorf("listing Layer2Attachments for IPAM: %w", err)
+		return nil, fmt.Errorf("listing Layer2Attachments for IPAM: %w", err)
 	}
 
 	fetched := &resolver.FetchedResources{
@@ -688,34 +741,59 @@ func (r *Controller) reconcileIPAM(ctx context.Context, namespace string) error 
 	networks := resolver.ResolveNetworks(fetched.Networks)
 
 	if err := r.IPAMAllocator.ReconcileAllocations(ctx, fetched, networks); err != nil {
-		return fmt.Errorf("IPAM allocation: %w", err)
+		return nil, fmt.Errorf("IPAM allocation: %w", err)
 	}
-	return nil
+
+	// Snapshot the (now freshly-allocated) addresses from the in-memory objects
+	// the allocator just mutated, so the forward sync promotes them without a
+	// cache round-trip.
+	allocs := newIPAMAllocations()
+	for i := range fetched.Inbounds {
+		if a := fetched.Inbounds[i].Status.Addresses; a != nil {
+			allocs.inbound[fetched.Inbounds[i].Name] = a
+		}
+	}
+	for i := range fetched.Outbounds {
+		if a := fetched.Outbounds[i].Status.Addresses; a != nil {
+			allocs.outbound[fetched.Outbounds[i].Name] = a
+		}
+	}
+	return allocs, nil
 }
 
 // promoteIPAMAddresses copies status.addresses into spec.addresses for Inbound/Outbound
 // so the workload operator sees pre-allocated IPs from mgmt-cluster IPAM.
+//
+// The freshly-allocated addresses are taken from allocs (the in-memory result of
+// the IPAM allocation performed earlier in this reconcile) when available, so a
+// lagging read cache cannot hide a just-allocated address; otherwise the object's
+// own status.addresses (from a previous reconcile) is used.
 //
 // IPAM stores allocated addresses as bare host IPs (e.g. "10.100.148.1"), but
 // spec.addresses is a CIDR-typed field: the vinbound/voutbound webhooks validate
 // each entry with net.ParseCIDR. A bare IP therefore gets rejected on the remote
 // cluster. Inbound/Outbound addresses are advertised as individual routed hosts,
 // so each allocated IP is promoted to its /32 (IPv4) or /128 (IPv6) host CIDR.
-func (*Controller) promoteIPAMAddresses(obj client.Object) {
+func (*Controller) promoteIPAMAddresses(obj client.Object, allocs *ipamAllocations) {
 	switch v := obj.(type) {
 	case *nc.Inbound:
-		if v.Spec.Addresses == nil && v.Status.Addresses != nil &&
-			(len(v.Status.Addresses.IPv4) > 0 || len(v.Status.Addresses.IPv6) > 0) {
-			v.Spec.Addresses = hostCIDRAllocation(v.Status.Addresses)
+		addrs := allocs.inboundAddresses(v.Name, v.Status.Addresses)
+		if v.Spec.Addresses == nil && hasAddresses(addrs) {
+			v.Spec.Addresses = hostCIDRAllocation(addrs)
 			v.Spec.Count = nil // Switch from count → manual mode
 		}
 	case *nc.Outbound:
-		if v.Spec.Addresses == nil && v.Status.Addresses != nil &&
-			(len(v.Status.Addresses.IPv4) > 0 || len(v.Status.Addresses.IPv6) > 0) {
-			v.Spec.Addresses = hostCIDRAllocation(v.Status.Addresses)
+		addrs := allocs.outboundAddresses(v.Name, v.Status.Addresses)
+		if v.Spec.Addresses == nil && hasAddresses(addrs) {
+			v.Spec.Addresses = hostCIDRAllocation(addrs)
 			v.Spec.Count = nil
 		}
 	}
+}
+
+// hasAddresses reports whether a is non-nil and carries at least one address.
+func hasAddresses(a *nc.AddressAllocation) bool {
+	return a != nil && (len(a.IPv4) > 0 || len(a.IPv6) > 0)
 }
 
 // hostCIDRAllocation returns a copy of src with every bare host IP normalised to

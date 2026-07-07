@@ -285,7 +285,7 @@ func TestPromoteIPAMAddressesFormatsHostCIDR(t *testing.T) {
 		},
 	}
 
-	(&Controller{}).promoteIPAMAddresses(inbound)
+	(&Controller{}).promoteIPAMAddresses(inbound, nil)
 
 	if inbound.Spec.Addresses == nil {
 		t.Fatal("spec.addresses should be populated from status")
@@ -306,6 +306,31 @@ func TestPromoteIPAMAddressesFormatsHostCIDR(t *testing.T) {
 	// The whole point: the promoted spec now passes admission validation.
 	if _, err := (&nc.Inbound{}).ValidateCreate(context.Background(), inbound); err != nil {
 		t.Errorf("promoted Inbound rejected by vinbound webhook: %v", err)
+	}
+}
+
+// TestPromoteIPAMAddressesUsesFreshAllocations verifies that the promotion uses
+// the freshly-allocated addresses threaded from reconcileIPAM even when the
+// object's own status.addresses is still empty (a stale read cache). This is
+// what keeps IP promotion working in a single reconcile now that status-only
+// updates no longer re-trigger the controller.
+func TestPromoteIPAMAddressesUsesFreshAllocations(t *testing.T) {
+	count := int32(1)
+	// Object as seen from the (lagging) cache: count mode, no status.addresses yet.
+	inbound := &nc.Inbound{
+		ObjectMeta: metav1.ObjectMeta{Name: "ib-fresh"},
+		Spec:       nc.InboundSpec{NetworkRef: "net", Count: &count},
+	}
+	allocs := newIPAMAllocations()
+	allocs.inbound["ib-fresh"] = &nc.AddressAllocation{IPv4: []string{"10.0.0.5"}}
+
+	(&Controller{}).promoteIPAMAddresses(inbound, allocs)
+
+	if inbound.Spec.Addresses == nil || len(inbound.Spec.Addresses.IPv4) != 1 || inbound.Spec.Addresses.IPv4[0] != "10.0.0.5/32" {
+		t.Fatalf("expected spec.addresses promoted from fresh allocation, got %+v", inbound.Spec.Addresses)
+	}
+	if inbound.Spec.Count != nil {
+		t.Error("expected count cleared after promotion")
 	}
 }
 
