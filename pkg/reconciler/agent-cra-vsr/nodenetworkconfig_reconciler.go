@@ -95,7 +95,7 @@ func NewNodeNetworkConfigReconciler(
 		nodeNetworkConfigPath,
 		common.ReconcilerOptions{
 			RestoreOnReconcileFailure: false, // VSR cannot commit invalid configs
-			LocalASN:                  craManager.LocalASN(),
+			LocalASN:                  manager.LocalASN(),
 		},
 	)
 	if err != nil {
