@@ -23,6 +23,16 @@ spec:
     - jsonPath: .status.interfaceName
       name: InterfaceName
       type: string
+    - jsonPath: .status.networkIPv4
+      name: IPv4
+      type: string
+    - jsonPath: .status.networkIPv6
+      name: IPv6
+      priority: 10
+      type: string
+    - jsonPath: .status.vrfs
+      name: VRFs
+      type: string
     - jsonPath: .spec.mtu
       name: MTU
       type: integer
@@ -314,6 +324,17 @@ spec:
                   "vlan.<vlan>" derived from the referenced Network's VLAN. Empty when no
                   override is set and the Network (or its VLAN) cannot be resolved.
                 type: string
+              networkIPv4:
+                description: |-
+                  NetworkIPv4 is the IPv4 CIDR of the referenced Network (spec.ipv4.cidr),
+                  surfaced on the attachment for convenience. Empty when the Network has no
+                  IPv4 pool or cannot be resolved.
+                type: string
+              networkIPv6:
+                description: |-
+                  NetworkIPv6 is the IPv6 CIDR of the referenced Network (spec.ipv6.cidr).
+                  Empty when the Network has no IPv6 pool or cannot be resolved.
+                type: string
               nodeAddresses:
                 additionalProperties:
                   description: AddressAllocation holds allocated IP addresses in status.
@@ -343,6 +364,14 @@ spec:
                   traffic.
                 format: int32
                 type: integer
+              vrfs:
+                description: |-
+                  VRFs lists the VRF names this attachment is plumbed into, derived from the
+                  matched Destinations (spec.destinations → Destination.spec.vrfRef). Sorted
+                  and de-duplicated.
+                items:
+                  type: string
+                type: array
             type: object
         type: object
     served: true

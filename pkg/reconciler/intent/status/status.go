@@ -227,10 +227,13 @@ func (u *Updater) updateInboundConditions(ctx context.Context, fetched *resolver
 		}
 		readyStatus, readyReason, readyMsg = applyBuildIssue(issues, "Inbound", inb.Namespace, inb.Name, readyStatus, readyReason, readyMsg)
 
+		vrfs := resolved.SelectorVRFRefs(inb.Spec.Destinations)
+
 		if err := u.statusUpdateWithRetry(ctx, inb, func(obj client.Object) {
 			in := obj.(*nc.Inbound)
 			setCondition(&in.Status.Conditions, nc.ConditionTypeResolved, resolvedStatus, resolvedReason, resolvedMsg, in.Generation)
 			setCondition(&in.Status.Conditions, nc.ConditionTypeReady, readyStatus, readyReason, readyMsg, in.Generation)
+			in.Status.VRFs = vrfs
 			in.Status.ObservedGeneration = in.Generation
 		}); err != nil {
 			return fmt.Errorf("updating Inbound %q status: %w", inb.Name, err)
@@ -252,10 +255,13 @@ func (u *Updater) updateOutboundConditions(ctx context.Context, fetched *resolve
 		}
 		readyStatus, readyReason, readyMsg = applyBuildIssue(issues, "Outbound", outb.Namespace, outb.Name, readyStatus, readyReason, readyMsg)
 
+		vrfs := resolved.SelectorVRFRefs(outb.Spec.Destinations)
+
 		if err := u.statusUpdateWithRetry(ctx, outb, func(obj client.Object) {
 			o := obj.(*nc.Outbound)
 			setCondition(&o.Status.Conditions, nc.ConditionTypeResolved, resolvedStatus, resolvedReason, resolvedMsg, o.Generation)
 			setCondition(&o.Status.Conditions, nc.ConditionTypeReady, readyStatus, readyReason, readyMsg, o.Generation)
+			o.Status.VRFs = vrfs
 			o.Status.ObservedGeneration = o.Generation
 		}); err != nil {
 			return fmt.Errorf("updating Outbound %q status: %w", outb.Name, err)
@@ -278,12 +284,17 @@ func (u *Updater) updateLayer2AttachmentConditions(ctx context.Context, fetched 
 		readyStatus, readyReason, readyMsg = applyBuildIssue(issues, "Layer2Attachment", l2a.Namespace, l2a.Name, readyStatus, readyReason, readyMsg)
 
 		effIfName := effectiveInterfaceName(l2a, resolved)
+		netIPv4, netIPv6 := resolved.NetworkCIDRs(l2a.Spec.NetworkRef)
+		vrfs := resolved.SelectorVRFRefs(l2a.Spec.Destinations)
 
 		if err := u.statusUpdateWithRetry(ctx, l2a, func(obj client.Object) {
 			la := obj.(*nc.Layer2Attachment)
 			setCondition(&la.Status.Conditions, nc.ConditionTypeResolved, resolvedStatus, resolvedReason, resolvedMsg, la.Generation)
 			setCondition(&la.Status.Conditions, nc.ConditionTypeReady, readyStatus, readyReason, readyMsg, la.Generation)
 			la.Status.InterfaceName = effIfName
+			la.Status.NetworkIPv4 = netIPv4
+			la.Status.NetworkIPv6 = netIPv6
+			la.Status.VRFs = vrfs
 			la.Status.ObservedGeneration = la.Generation
 		}); err != nil {
 			return fmt.Errorf("updating Layer2Attachment %q status: %w", l2a.Name, err)
@@ -305,10 +316,16 @@ func (u *Updater) updatePodNetworkConditions(ctx context.Context, fetched *resol
 		}
 		readyStatus, readyReason, readyMsg = applyBuildIssue(issues, "PodNetwork", pn.Namespace, pn.Name, readyStatus, readyReason, readyMsg)
 
+		netIPv4, netIPv6 := resolved.NetworkCIDRs(pn.Spec.NetworkRef)
+		vrfs := resolved.SelectorVRFRefs(pn.Spec.Destinations)
+
 		if err := u.statusUpdateWithRetry(ctx, pn, func(obj client.Object) {
 			p := obj.(*nc.PodNetwork)
 			setCondition(&p.Status.Conditions, nc.ConditionTypeResolved, resolvedStatus, resolvedReason, resolvedMsg, p.Generation)
 			setCondition(&p.Status.Conditions, nc.ConditionTypeReady, readyStatus, readyReason, readyMsg, p.Generation)
+			p.Status.NetworkIPv4 = netIPv4
+			p.Status.NetworkIPv6 = netIPv6
+			p.Status.VRFs = vrfs
 			p.Status.ObservedGeneration = p.Generation
 		}); err != nil {
 			return fmt.Errorf("updating PodNetwork %q status: %w", pn.Name, err)
@@ -393,10 +410,13 @@ func (u *Updater) updateNodeAttachmentConditions(ctx context.Context, fetched *r
 		}
 		readyStatus, readyReason, readyMsg = applyBuildIssue(issues, "NodeAttachment", na.Namespace, na.Name, readyStatus, readyReason, readyMsg)
 
+		vrfs := resolved.SelectorVRFRefs(na.Spec.Destinations)
+
 		if err := u.statusUpdateWithRetry(ctx, na, func(obj client.Object) {
 			n := obj.(*nc.NodeAttachment)
 			setCondition(&n.Status.Conditions, nc.ConditionTypeResolved, resolvedStatus, resolvedReason, resolvedMsg, n.Generation)
 			setCondition(&n.Status.Conditions, nc.ConditionTypeReady, readyStatus, readyReason, readyMsg, n.Generation)
+			n.Status.VRFs = vrfs
 			n.Status.ObservedGeneration = n.Generation
 		}); err != nil {
 			return fmt.Errorf("updating NodeAttachment %q status: %w", na.Name, err)
@@ -418,11 +438,14 @@ func (u *Updater) updateBGPPeeringConditions(ctx context.Context, fetched *resol
 		}
 		readyStatus, readyReason, readyMsg = applyBuildIssue(issues, "BGPPeering", bp.Namespace, bp.Name, readyStatus, readyReason, readyMsg)
 
+		vrfs := resolved.BGPPeeringVRFRefs(bp)
+
 		if err := u.statusUpdateWithRetry(ctx, bp, func(obj client.Object) {
 			b := obj.(*nc.BGPPeering)
 			setCondition(&b.Status.Conditions, nc.ConditionTypeResolved, resolvedStatus, resolvedReason, resolvedMsg, b.Generation)
 			setCondition(&b.Status.Conditions, nc.ConditionTypeReady, readyStatus, readyReason, readyMsg, b.Generation)
 			b.Status.WorkloadASNumber = b.Spec.WorkloadAS
+			b.Status.VRFs = vrfs
 			b.Status.ObservedGeneration = b.Generation
 		}); err != nil {
 			return fmt.Errorf("updating BGPPeering %q status: %w", bp.Name, err)

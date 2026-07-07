@@ -27,6 +27,9 @@ spec:
     - jsonPath: .spec.ipv4.cidr
       name: IPv4 CIDR
       type: string
+    - jsonPath: .spec.ipv6.cidr
+      name: IPv6 CIDR
+      type: string
     - jsonPath: .status.referenceCount
       name: RefCount
       type: integer

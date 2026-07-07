@@ -37,6 +37,22 @@ type PodNetworkStatus struct {
 	// ObservedGeneration is the most recent generation observed by the controller.
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
+	// NetworkIPv4 is the IPv4 CIDR of the referenced Network (spec.ipv4.cidr).
+	// Empty when the Network has no IPv4 pool or cannot be resolved.
+	// +optional
+	NetworkIPv4 string `json:"networkIPv4,omitempty"`
+
+	// NetworkIPv6 is the IPv6 CIDR of the referenced Network (spec.ipv6.cidr).
+	// Empty when the Network has no IPv6 pool or cannot be resolved.
+	// +optional
+	NetworkIPv6 string `json:"networkIPv6,omitempty"`
+
+	// VRFs lists the VRF names this PodNetwork is plumbed into, derived from the
+	// matched Destinations (spec.destinations → Destination.spec.vrfRef). Sorted
+	// and de-duplicated.
+	// +optional
+	VRFs []string `json:"vrfs,omitempty"`
+
 	// Conditions represent the latest available observations of the
 	// PodNetwork's current state.
 	// +optional
@@ -51,6 +67,9 @@ type PodNetworkStatus struct {
 //+kubebuilder:subresource:status
 //+kubebuilder:resource:shortName=pnet
 //+kubebuilder:printcolumn:name="NetworkRef",type=string,JSONPath=`.spec.networkRef`
+//+kubebuilder:printcolumn:name="IPv4",type=string,JSONPath=`.status.networkIPv4`
+//+kubebuilder:printcolumn:name="IPv6",type=string,JSONPath=`.status.networkIPv6`,priority=10
+//+kubebuilder:printcolumn:name="VRFs",type=string,JSONPath=`.status.vrfs`
 //+kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
 //+kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 

@@ -21,9 +21,12 @@ import (
 	"k8s.io/client-go/tools/events"
 	"sigs.k8s.io/cluster-api/util/patch"
 	ctrl "sigs.k8s.io/controller-runtime"
+	ctrlbuilder "sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
@@ -93,6 +96,45 @@ const statusPollInterval = 30 * time.Second
 var mirroredConditionTypes = map[string]bool{
 	nc.ConditionTypeReady:    true,
 	nc.ConditionTypeResolved: true,
+}
+
+// ipamAllocations holds the addresses allocated by the management-cluster IPAM
+// during a reconcile, keyed by Inbound/Outbound name. It lets the forward sync
+// promote just-allocated addresses without re-reading the (lagging) client
+// cache. A nil *ipamAllocations is safe to use — the accessors fall back to the
+// object's own status.
+type ipamAllocations struct {
+	inbound  map[string]*nc.AddressAllocation
+	outbound map[string]*nc.AddressAllocation
+}
+
+func newIPAMAllocations() *ipamAllocations {
+	return &ipamAllocations{
+		inbound:  map[string]*nc.AddressAllocation{},
+		outbound: map[string]*nc.AddressAllocation{},
+	}
+}
+
+// inboundAddresses returns the freshly-allocated addresses for the named
+// Inbound, or fallback when none were allocated this reconcile.
+func (a *ipamAllocations) inboundAddresses(name string, fallback *nc.AddressAllocation) *nc.AddressAllocation {
+	if a != nil {
+		if addrs, ok := a.inbound[name]; ok {
+			return addrs
+		}
+	}
+	return fallback
+}
+
+// outboundAddresses returns the freshly-allocated addresses for the named
+// Outbound, or fallback when none were allocated this reconcile.
+func (a *ipamAllocations) outboundAddresses(name string, fallback *nc.AddressAllocation) *nc.AddressAllocation {
+	if a != nil {
+		if addrs, ok := a.outbound[name]; ok {
+			return addrs
+		}
+	}
+	return fallback
 }
 
 // Controller watches intent CRDs on the management cluster and syncs them
@@ -189,13 +231,18 @@ func (r *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	}
 	remoteClient := remoteClients[0]
 
-	// Run IPAM allocation for count-mode Inbound/Outbound before syncing,
-	// so that promoteIPAMAddresses can copy status→spec for the remote copy.
+	// Run IPAM allocation for count-mode Inbound/Outbound before syncing, so that
+	// promoteIPAMAddresses can copy status→spec for the remote copy. The returned
+	// allocations carry the freshly-assigned addresses so the promotion does not
+	// depend on the read cache catching up to the status write.
+	var ipamAddrs *ipamAllocations
 	if r.IPAMAllocator != nil {
-		if err := r.reconcileIPAM(ctx, req.Namespace); err != nil {
+		allocs, err := r.reconcileIPAM(ctx, req.Namespace)
+		if err != nil {
 			log.Error(err, "IPAM allocation failed")
 			// Continue — partial allocation should not block syncing.
 		}
+		ipamAddrs = allocs
 	}
 
 	// List and sync every intent CRD type in this namespace.
@@ -205,7 +252,7 @@ func (r *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		}
 		items := extractItems(list)
 		for i := range items {
-			if err := r.syncObject(ctx, log, remoteClient, items[i]); err != nil {
+			if err := r.syncObject(ctx, log, remoteClient, items[i], ipamAddrs); err != nil {
 				return ctrl.Result{}, err
 			}
 			// Mirror Ready/Resolved conditions from the workload copy back onto
@@ -266,7 +313,7 @@ func (r *Controller) drainFinalizersForLostRemote(ctx context.Context, log logr.
 }
 
 // syncObject handles create/update/delete for a single intent CRD object.
-func (r *Controller) syncObject(ctx context.Context, log logr.Logger, remoteClient client.Client, obj client.Object) error {
+func (r *Controller) syncObject(ctx context.Context, log logr.Logger, remoteClient client.Client, obj client.Object, ipamAddrs *ipamAllocations) error {
 	name := obj.GetName()
 	kind := obj.GetObjectKind().GroupVersionKind().Kind
 	ns := obj.GetNamespace()
@@ -296,7 +343,7 @@ func (r *Controller) syncObject(ctx context.Context, log logr.Logger, remoteClie
 	}
 
 	// Build the desired remote object and apply it.
-	remote := r.buildRemoteObject(obj, ns)
+	remote := r.buildRemoteObject(obj, ns, ipamAddrs)
 	if remote == nil {
 		return fmt.Errorf("buildRemoteObject returned nil for %s/%s", kind, name)
 	}
@@ -305,17 +352,18 @@ func (r *Controller) syncObject(ctx context.Context, log logr.Logger, remoteClie
 }
 
 // syncObjectStatusBack reads the workload copy of a single intent object and
-// mirrors its Ready/Resolved conditions back onto the management object. It is
-// the reverse of the spec sync — workload → management — and is deliberately
-// restricted to mirroredConditionTypes so a lagging or empty workload status can
+// mirrors its Ready/Resolved conditions plus the read-only derived status fields
+// (network CIDRs, VRF lists) back onto the management object. It is the reverse
+// of the spec sync — workload → management. Conditions are restricted to
+// mirroredConditionTypes, and derived fields are mirrored only when the workload
+// has caught up to the current intent, so a lagging or empty workload status can
 // never overwrite management-owned status fields (addresses, interfaceName,
 // workloadASNumber) that feed the workload spec.
 func (r *Controller) syncObjectStatusBack(ctx context.Context, log logr.Logger, remoteClient client.Client, mgmtObj client.Object) error {
 	kind := mgmtObj.GetObjectKind().GroupVersionKind().Kind
 	name := mgmtObj.GetName()
 
-	mgmtConds := statusConditionsPtr(mgmtObj)
-	if mgmtConds == nil {
+	if statusConditionsPtr(mgmtObj) == nil {
 		// Type carries no status.conditions field; nothing to mirror.
 		return nil
 	}
@@ -333,45 +381,102 @@ func (r *Controller) syncObjectStatusBack(ctx context.Context, log logr.Logger, 
 		return fmt.Errorf("getting remote %s/%s for status sync-back: %w", kind, name, err)
 	}
 
-	remoteConds := statusConditionsPtr(remote)
-	if remoteConds == nil {
+	remoteCondsPtr := statusConditionsPtr(remote)
+	if remoteCondsPtr == nil {
 		return nil
 	}
-
+	remoteConds := *remoteCondsPtr
 	caughtUp := workloadCaughtUp(remote, mgmtObj.GetGeneration())
-	desired := desiredMirroredConditions(*remoteConds, caughtUp, mgmtObj.GetGeneration())
-	if len(desired) == 0 {
-		return nil
-	}
+	mgmtGen := mgmtObj.GetGeneration()
 
-	if _, err := r.writeStatusConditions(ctx, mgmtObj, desired); err != nil {
+	_, err = r.updateStatusWithRetry(ctx, mgmtObj, func(o client.Object) {
+		if conds := statusConditionsPtr(o); conds != nil {
+			for _, c := range desiredMirroredConditions(remoteConds, caughtUp, mgmtGen) {
+				apimeta.SetStatusCondition(conds, c)
+			}
+		}
+		// Derived fields are only authoritative once the workload has observed
+		// the current spec; until then keep the last mirrored values.
+		if caughtUp {
+			mirrorDerivedStatus(o, remote)
+		}
+	})
+	if err != nil {
 		return err
 	}
 	log.V(1).Info("Mirrored workload status back to management", "kind", kind, "name", name, "caughtUp", caughtUp)
 	return nil
 }
 
+// mirrorDerivedStatus copies the read-only, purely-derived status fields
+// (network CIDRs and VRF lists) from the workload copy (src) onto the management
+// object (dst). These are computed by the intent compiler on the workload
+// cluster from the referenced Network/Destinations; the management cluster has
+// no compiler, so it receives them via this sync-back. Only these specific
+// fields are copied — never addresses/interfaceName/etc.
+func mirrorDerivedStatus(dst, src client.Object) {
+	switch d := dst.(type) {
+	case *nc.Layer2Attachment:
+		if s, ok := src.(*nc.Layer2Attachment); ok {
+			d.Status.NetworkIPv4 = s.Status.NetworkIPv4
+			d.Status.NetworkIPv6 = s.Status.NetworkIPv6
+			d.Status.VRFs = s.Status.VRFs
+		}
+	case *nc.Inbound:
+		if s, ok := src.(*nc.Inbound); ok {
+			d.Status.VRFs = s.Status.VRFs
+		}
+	case *nc.Outbound:
+		if s, ok := src.(*nc.Outbound); ok {
+			d.Status.VRFs = s.Status.VRFs
+		}
+	case *nc.PodNetwork:
+		if s, ok := src.(*nc.PodNetwork); ok {
+			d.Status.NetworkIPv4 = s.Status.NetworkIPv4
+			d.Status.NetworkIPv6 = s.Status.NetworkIPv6
+			d.Status.VRFs = s.Status.VRFs
+		}
+	case *nc.BGPPeering:
+		if s, ok := src.(*nc.BGPPeering); ok {
+			d.Status.VRFs = s.Status.VRFs
+		}
+	case *nc.NodeAttachment:
+		if s, ok := src.(*nc.NodeAttachment); ok {
+			d.Status.VRFs = s.Status.VRFs
+		}
+	}
+}
+
 // writeStatusConditions applies the desired conditions onto obj's status and
-// persists them via the status subresource, retrying on optimistic-lock
-// conflicts. Only the status subresource is written, so spec is never touched.
-// SetStatusCondition is a no-op when a condition is unchanged, so a stable
-// status produces no writes and no lastTransitionTime flapping; the returned
-// bool reports whether any condition actually transitioned (so callers can gate
-// side effects such as events on real changes).
+// persists them via the status subresource when they change, retrying on
+// optimistic-lock conflicts. The returned bool reports whether a write happened
+// (so callers can gate side effects such as events on real changes).
 func (r *Controller) writeStatusConditions(ctx context.Context, obj client.Object, desired []metav1.Condition) (bool, error) {
+	return r.updateStatusWithRetry(ctx, obj, func(o client.Object) {
+		conds := statusConditionsPtr(o)
+		if conds == nil {
+			return
+		}
+		for i := range desired {
+			apimeta.SetStatusCondition(conds, desired[i])
+		}
+	})
+}
+
+// updateStatusWithRetry applies mutate to obj and, when the object's Status
+// actually changed, persists it via the status subresource — retrying on
+// optimistic-lock conflicts by re-fetching and re-applying. Only the status
+// subresource is written, so spec is never touched. Returns whether a write
+// occurred. mutate must be idempotent (it is re-run after a conflict).
+func (r *Controller) updateStatusWithRetry(ctx context.Context, obj client.Object, mutate func(client.Object)) (bool, error) {
 	const maxRetries = 3
 	for attempt := 0; attempt < maxRetries; attempt++ {
-		conds := statusConditionsPtr(obj)
-		if conds == nil {
-			return false, nil
+		before, ok := obj.DeepCopyObject().(client.Object)
+		if !ok {
+			return false, fmt.Errorf("DeepCopyObject did not return client.Object for %s", obj.GetName())
 		}
-		changed := false
-		for i := range desired {
-			if apimeta.SetStatusCondition(conds, desired[i]) {
-				changed = true
-			}
-		}
-		if !changed {
+		mutate(obj)
+		if statusEqual(before, obj) {
 			return false, nil
 		}
 		err := r.Client.Status().Update(ctx, obj)
@@ -392,6 +497,17 @@ func (r *Controller) writeStatusConditions(ctx context.Context, obj client.Objec
 		obj = fresh
 	}
 	return false, fmt.Errorf("status update conflict after %d retries for %s/%s", maxRetries, obj.GetObjectKind().GroupVersionKind().Kind, obj.GetName())
+}
+
+// statusEqual reports whether the Status fields of a and b are deeply equal,
+// via reflection so it works generically across all intent CRD types.
+func statusEqual(a, b client.Object) bool {
+	av := reflect.ValueOf(a).Elem().FieldByName("Status")
+	bv := reflect.ValueOf(b).Elem().FieldByName("Status")
+	if !av.IsValid() || !bv.IsValid() {
+		return true
+	}
+	return reflect.DeepEqual(av.Interface(), bv.Interface())
 }
 
 // blockOnMultipleRemotes surfaces the multiple-workload-cluster misconfiguration
@@ -541,7 +657,7 @@ func statusObservedGeneration(obj client.Object) (int64, bool) {
 }
 
 // buildRemoteObject creates the desired remote object from the mgmt-side source.
-func (r *Controller) buildRemoteObject(src client.Object, sourceNamespace string) client.Object {
+func (r *Controller) buildRemoteObject(src client.Object, sourceNamespace string, ipamAddrs *ipamAllocations) client.Object {
 	dst, ok := src.DeepCopyObject().(client.Object)
 	if !ok {
 		return nil
@@ -581,7 +697,7 @@ func (r *Controller) buildRemoteObject(src client.Object, sourceNamespace string
 	recordManagedKeys(dst)
 
 	// IPAM promotion: copy status.addresses → spec.addresses for Inbound/Outbound.
-	r.promoteIPAMAddresses(dst)
+	r.promoteIPAMAddresses(dst, ipamAddrs)
 
 	return dst
 }
@@ -589,22 +705,31 @@ func (r *Controller) buildRemoteObject(src client.Object, sourceNamespace string
 // reconcileIPAM runs IPAM allocation for count-mode Inbound/Outbound in the given namespace.
 // Allocated IPs are written to status.addresses on the management-cluster resources so that
 // promoteIPAMAddresses can copy them into spec.addresses for the remote copy.
-func (r *Controller) reconcileIPAM(ctx context.Context, namespace string) error {
+//
+// It also returns the freshly-allocated addresses in memory, keyed by object
+// name. The forward sync must NOT rely on re-reading status.addresses from the
+// (cached) client for the promotion: the allocator writes status via a direct
+// API update, but the reconciler's List reads are served from an informer cache
+// that lags that write, and — since status-only updates are filtered by
+// syncCRDPredicate — nothing re-triggers a reconcile to pick up the fresh cache.
+// Threading the in-memory allocations through makes the promotion work within
+// the same reconcile, independent of cache timing.
+func (r *Controller) reconcileIPAM(ctx context.Context, namespace string) (*ipamAllocations, error) {
 	inboundList := &nc.InboundList{}
 	if err := r.Client.List(ctx, inboundList, client.InNamespace(namespace)); err != nil {
-		return fmt.Errorf("listing Inbounds for IPAM: %w", err)
+		return nil, fmt.Errorf("listing Inbounds for IPAM: %w", err)
 	}
 	outboundList := &nc.OutboundList{}
 	if err := r.Client.List(ctx, outboundList, client.InNamespace(namespace)); err != nil {
-		return fmt.Errorf("listing Outbounds for IPAM: %w", err)
+		return nil, fmt.Errorf("listing Outbounds for IPAM: %w", err)
 	}
 	networkList := &nc.NetworkList{}
 	if err := r.Client.List(ctx, networkList, client.InNamespace(namespace)); err != nil {
-		return fmt.Errorf("listing Networks for IPAM: %w", err)
+		return nil, fmt.Errorf("listing Networks for IPAM: %w", err)
 	}
 	l2aList := &nc.Layer2AttachmentList{}
 	if err := r.Client.List(ctx, l2aList, client.InNamespace(namespace)); err != nil {
-		return fmt.Errorf("listing Layer2Attachments for IPAM: %w", err)
+		return nil, fmt.Errorf("listing Layer2Attachments for IPAM: %w", err)
 	}
 
 	fetched := &resolver.FetchedResources{
@@ -616,34 +741,59 @@ func (r *Controller) reconcileIPAM(ctx context.Context, namespace string) error 
 	networks := resolver.ResolveNetworks(fetched.Networks)
 
 	if err := r.IPAMAllocator.ReconcileAllocations(ctx, fetched, networks); err != nil {
-		return fmt.Errorf("IPAM allocation: %w", err)
+		return nil, fmt.Errorf("IPAM allocation: %w", err)
 	}
-	return nil
+
+	// Snapshot the (now freshly-allocated) addresses from the in-memory objects
+	// the allocator just mutated, so the forward sync promotes them without a
+	// cache round-trip.
+	allocs := newIPAMAllocations()
+	for i := range fetched.Inbounds {
+		if a := fetched.Inbounds[i].Status.Addresses; a != nil {
+			allocs.inbound[fetched.Inbounds[i].Name] = a
+		}
+	}
+	for i := range fetched.Outbounds {
+		if a := fetched.Outbounds[i].Status.Addresses; a != nil {
+			allocs.outbound[fetched.Outbounds[i].Name] = a
+		}
+	}
+	return allocs, nil
 }
 
 // promoteIPAMAddresses copies status.addresses into spec.addresses for Inbound/Outbound
 // so the workload operator sees pre-allocated IPs from mgmt-cluster IPAM.
+//
+// The freshly-allocated addresses are taken from allocs (the in-memory result of
+// the IPAM allocation performed earlier in this reconcile) when available, so a
+// lagging read cache cannot hide a just-allocated address; otherwise the object's
+// own status.addresses (from a previous reconcile) is used.
 //
 // IPAM stores allocated addresses as bare host IPs (e.g. "10.100.148.1"), but
 // spec.addresses is a CIDR-typed field: the vinbound/voutbound webhooks validate
 // each entry with net.ParseCIDR. A bare IP therefore gets rejected on the remote
 // cluster. Inbound/Outbound addresses are advertised as individual routed hosts,
 // so each allocated IP is promoted to its /32 (IPv4) or /128 (IPv6) host CIDR.
-func (*Controller) promoteIPAMAddresses(obj client.Object) {
+func (*Controller) promoteIPAMAddresses(obj client.Object, allocs *ipamAllocations) {
 	switch v := obj.(type) {
 	case *nc.Inbound:
-		if v.Spec.Addresses == nil && v.Status.Addresses != nil &&
-			(len(v.Status.Addresses.IPv4) > 0 || len(v.Status.Addresses.IPv6) > 0) {
-			v.Spec.Addresses = hostCIDRAllocation(v.Status.Addresses)
+		addrs := allocs.inboundAddresses(v.Name, v.Status.Addresses)
+		if v.Spec.Addresses == nil && hasAddresses(addrs) {
+			v.Spec.Addresses = hostCIDRAllocation(addrs)
 			v.Spec.Count = nil // Switch from count → manual mode
 		}
 	case *nc.Outbound:
-		if v.Spec.Addresses == nil && v.Status.Addresses != nil &&
-			(len(v.Status.Addresses.IPv4) > 0 || len(v.Status.Addresses.IPv6) > 0) {
-			v.Spec.Addresses = hostCIDRAllocation(v.Status.Addresses)
+		addrs := allocs.outboundAddresses(v.Name, v.Status.Addresses)
+		if v.Spec.Addresses == nil && hasAddresses(addrs) {
+			v.Spec.Addresses = hostCIDRAllocation(addrs)
 			v.Spec.Count = nil
 		}
 	}
+}
+
+// hasAddresses reports whether a is non-nil and carries at least one address.
+func hasAddresses(a *nc.AddressAllocation) bool {
+	return a != nil && (len(a.IPv4) > 0 || len(a.IPv6) > 0)
 }
 
 // hostCIDRAllocation returns a copy of src with every bare host IP normalised to
@@ -1009,13 +1159,43 @@ func (r *Controller) SetupWithManager(mgr ctrl.Manager) error {
 		Named("sync-controller")
 
 	for _, obj := range intentCRDTypes() {
-		builder = builder.Watches(obj, enqueueNS)
+		builder = builder.Watches(obj, enqueueNS, ctrlbuilder.WithPredicates(syncCRDPredicate()))
 	}
 
 	if err := builder.Complete(r); err != nil {
 		return fmt.Errorf("setting up sync controller: %w", err)
 	}
 	return nil
+}
+
+// syncCRDPredicate filters the intent-CRD watch down to events that require a
+// (re)sync, so the controller does not reconcile in response to its own status
+// sync-back writes. Reconciling on every status write would form a feedback
+// loop — status write → watch event → reconcile → status write — that storms
+// the reconciler and floods the workload-cluster API (rate-limited), delaying
+// the forward spec sync.
+//
+// Forward sync depends only on the spec (generation) and the managed
+// labels/annotations; status sync-back is driven by the periodic requeue, not
+// by watch events. Deletion is surfaced explicitly (deletionTimestamp is a
+// metadata change that does not bump the generation) so remote objects are
+// still cleaned up promptly rather than only on the next poll.
+func syncCRDPredicate() predicate.Predicate {
+	return predicate.Or(
+		predicate.GenerationChangedPredicate{},
+		predicate.LabelChangedPredicate{},
+		predicate.AnnotationChangedPredicate{},
+		predicate.Funcs{
+			UpdateFunc: func(e event.UpdateEvent) bool {
+				if e.ObjectOld == nil || e.ObjectNew == nil {
+					return false
+				}
+				// Fire when the object first enters deletion.
+				return e.ObjectOld.GetDeletionTimestamp() == nil &&
+					e.ObjectNew.GetDeletionTimestamp() != nil
+			},
+		},
+	)
 }
 
 // remoteNamespace returns the target namespace on workload clusters.

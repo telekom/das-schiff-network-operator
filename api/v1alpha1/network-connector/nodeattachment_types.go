@@ -46,6 +46,13 @@ type NodeAttachmentStatus struct {
 	// ObservedGeneration is the most recent generation observed by the controller.
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
+	// VRFs lists the VRF names whose prefixes are imported by this attachment,
+	// derived from the matched Destinations (spec.destinations →
+	// Destination.spec.vrfRef). This is distinct from spec.vrfRef (the target
+	// VRF the nodes attach to). Sorted and de-duplicated.
+	// +optional
+	VRFs []string `json:"vrfs,omitempty"`
+
 	// Conditions represent the latest available observations of the NodeAttachment's state.
 	// +optional
 	// +listType=map
@@ -59,6 +66,7 @@ type NodeAttachmentStatus struct {
 //+kubebuilder:subresource:status
 //+kubebuilder:resource:shortName=na
 //+kubebuilder:printcolumn:name="VRFRef",type=string,JSONPath=`.spec.vrfRef`
+//+kubebuilder:printcolumn:name="VRFs",type=string,JSONPath=`.status.vrfs`
 //+kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
 //+kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
