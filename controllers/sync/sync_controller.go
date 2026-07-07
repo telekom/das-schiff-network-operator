@@ -18,7 +18,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	"sigs.k8s.io/cluster-api/util/patch"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -104,7 +104,7 @@ type Controller struct {
 	Remotes         *RemoteClientManager
 	RemoteNamespace string
 	IPAMAllocator   *ipam.Allocator
-	Recorder        record.EventRecorder
+	Recorder        events.EventRecorder
 }
 
 // intentCRDTypes returns fresh instances of all intent CRD types to sync.
@@ -426,7 +426,9 @@ func (r *Controller) blockOnMultipleRemotes(ctx context.Context, namespace strin
 				return err
 			}
 			if changed && r.Recorder != nil {
-				r.Recorder.Event(obj, corev1.EventTypeWarning, reason, message)
+				// action "RefusingSync" describes the operation the reason relates
+				// to; note is passed as a literal to avoid interpreting stray %.
+				r.Recorder.Eventf(obj, nil, corev1.EventTypeWarning, reason, "RefusingSync", "%s", message)
 			}
 		}
 	}

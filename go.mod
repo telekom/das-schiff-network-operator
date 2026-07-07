@@ -22,6 +22,7 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1
 	github.com/vishvananda/netlink v1.3.1
+	github.com/vishvananda/netns v0.0.5
 	go.uber.org/mock v0.6.0
 	golang.org/x/crypto v0.51.0
 	golang.org/x/exp v0.0.0-20251113190631-e25ba8c21ef6
@@ -90,7 +91,6 @@ require (
 	github.com/prometheus/procfs v0.19.2 // indirect
 	github.com/rackn/gohai v0.6.1 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
-	github.com/vishvananda/netns v0.0.5 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect

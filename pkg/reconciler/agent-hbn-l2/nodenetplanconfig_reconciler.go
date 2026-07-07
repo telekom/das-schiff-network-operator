@@ -119,7 +119,13 @@ nmstate or netplan. This just creates VLAN and dummy interfaces and nothing else
 func createVLAN(masterInterface netlink.Link, vlanConfig *netplanVlan, name string, vlan netplan.Device, bridge *netlink.Bridge) error {
 	link := netlink.Vlan{
 		LinkAttrs: netlink.LinkAttrs{
-			Name:        fmt.Sprintf("%s.%d", vlanNamePrefix, vlanConfig.ID),
+			// The netplan map key (name) is the desired interface name: it is
+			// spec.interfaceName when set, otherwise the default "vlan.<id>".
+			// This mirrors the non-HBN netplan path and the dummy/loopback path
+			// below, and matches what Layer2Attachment.Status.InterfaceName
+			// reports. Naming the link "vlan.<id>" unconditionally would ignore
+			// a configured interfaceName.
+			Name:        name,
 			ParentIndex: masterInterface.Attrs().Index,
 			MTU:         vlanConfig.Mtu,
 		},
@@ -311,7 +317,7 @@ func reconcileExisting(prefix, interfaceType string, devices map[string]netplan.
 							return fmt.Errorf("error deleting vlan %s from bridge %s: %w", existingInterface.Attrs().Name, (*bridge).Attrs().Name, err)
 						}
 					}
-				} else if err := reconcileExistingInterface(existingInterface, interfaceType, devices[name]); err != nil {
+				} else if err := reconcileExistingInterface(existingInterface, interfaceType, name, devices[name]); err != nil {
 					return fmt.Errorf("error reconciling existing %s: %w", existingInterface.Attrs().Name, err)
 				}
 			}
@@ -321,7 +327,18 @@ func reconcileExisting(prefix, interfaceType string, devices map[string]netplan.
 	return nil
 }
 
-func reconcileExistingInterface(existingInterface netlink.Link, interfaceType string, device netplan.Device) error {
+func reconcileExistingInterface(existingInterface netlink.Link, interfaceType, desiredName string, device netplan.Device) error {
+	// Converge the kernel interface name with the desired name (the netplan map
+	// key). Interfaces created before interfaceName was honored carry the old
+	// "vlan.<id>" name while their alias already encodes the desired name, so a
+	// pure create-path fix would never rename them; this makes live nodes
+	// converge. The rename is a no-op once names match.
+	renamed, err := ensureInterfaceName(existingInterface, desiredName)
+	if err != nil {
+		return err
+	}
+	existingInterface = renamed
+
 	if err := reconcileExistingAddresses(existingInterface, device); err != nil {
 		return err
 	}
@@ -343,6 +360,46 @@ func reconcileExistingInterface(existingInterface netlink.Link, interfaceType st
 		return fmt.Errorf("error disabling segmentation offload: %w", err)
 	}
 	return nil
+}
+
+// ensureInterfaceName renames link to desiredName when they differ, returning a
+// freshly fetched handle for the (possibly renamed) link. A rename requires the
+// link to be down, so the link's original admin state is captured and restored
+// afterwards: an interface that was up is brought back up, and one that was
+// administratively down stays down. On rename failure the original up state is
+// restored too, so a failed rename does not leave a previously-up interface down
+// (and cause an outage). When the name already matches, the link is returned
+// unchanged.
+func ensureInterfaceName(link netlink.Link, desiredName string) (netlink.Link, error) {
+	if link.Attrs().Name == desiredName {
+		return link, nil
+	}
+	oldName := link.Attrs().Name
+	wasUp := link.Attrs().Flags&net.FlagUp != 0
+
+	if err := netlink.LinkSetDown(link); err != nil {
+		return nil, fmt.Errorf("error bringing %s down for rename: %w", oldName, err)
+	}
+	if err := netlink.LinkSetName(link, desiredName); err != nil {
+		// Restore the prior admin state so a failed rename does not leave a
+		// previously-up interface down.
+		if wasUp {
+			if upErr := netlink.LinkSetUp(link); upErr != nil {
+				return nil, fmt.Errorf("error renaming %s to %s: %w (and restoring up state failed: %w)", oldName, desiredName, err, upErr)
+			}
+		}
+		return nil, fmt.Errorf("error renaming %s to %s: %w", oldName, desiredName, err)
+	}
+	if wasUp {
+		if err := netlink.LinkSetUp(link); err != nil {
+			return nil, fmt.Errorf("error bringing %s up after rename: %w", desiredName, err)
+		}
+	}
+	refreshed, err := netlink.LinkByName(desiredName)
+	if err != nil {
+		return nil, fmt.Errorf("error fetching renamed interface %s: %w", desiredName, err)
+	}
+	return refreshed, nil
 }
 
 func reconcileLoopbacks(devices map[string]netplan.Device) error {
