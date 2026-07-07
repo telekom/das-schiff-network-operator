@@ -319,7 +319,7 @@ func PhaseUnderlay(cluster *Cluster) error {
 
 	// Wait for BGP convergence
 	Logf("Waiting for BGP convergence...")
-	return WaitFor("BGP convergence", 120*time.Second, 5*time.Second, func() (bool, error) {
+	if err := WaitFor("BGP convergence", 120*time.Second, 5*time.Second, func() (bool, error) {
 		out, err := DockerExec("clab-nwop-leaf1", "vtysh", "-c", "show bgp summary json")
 		if err != nil {
 			return false, err
@@ -352,7 +352,34 @@ func PhaseUnderlay(cluster *Cluster) error {
 		}
 		Logf("  BGP: %d/4 peers established on leaf1", established)
 		return established >= 4, nil
-	})
+	}); err != nil {
+		return err
+	}
+
+	return writeCRAKnownHosts(cluster)
+}
+
+func writeCRAKnownHosts(cluster *Cluster) error {
+	for _, node := range cluster.Nodes {
+		craPID, err := getCRAPID(node.Name)
+		if err != nil {
+			return fmt.Errorf("getting CRA PID on %s: %w", node.Name, err)
+		}
+
+		script := fmt.Sprintf(`nsenter -t %s -m -- sh -c 'for key in /etc/ssh/ssh_host_*_key.pub; do [ -f "$key" ] || continue; read -r key_type key_data _ < "$key"; printf "[169.254.33.1]:830 %%s %%s\n" "$key_type" "$key_data"; done'`, craPID)
+		knownHosts, err := DockerExecShell(node.Name, script)
+		if err != nil {
+			return fmt.Errorf("reading CRA host keys on %s: %w", node.Name, err)
+		}
+		knownHosts = strings.TrimSpace(knownHosts)
+		if knownHosts == "" {
+			return fmt.Errorf("no CRA host keys found on %s", node.Name)
+		}
+		if err := DockerExecInput(node.Name, knownHosts+"\n", "tee", "/etc/cra/known_hosts"); err != nil {
+			return fmt.Errorf("writing CRA known_hosts on %s: %w", node.Name, err)
+		}
+	}
+	return nil
 }
 
 // Phase 3: Configure NAT64/DNS64 and deploy kube-vip.
