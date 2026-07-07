@@ -223,20 +223,7 @@ func (r *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 	remoteClients := r.Remotes.GetByNamespace(req.Namespace)
 	if len(remoteClients) == 0 {
-		clusterExists, err := r.remoteClusterExists(ctx, req.Namespace)
-		if err != nil {
-			return ctrl.Result{}, err
-		}
-		if !clusterExists {
-			// The workload cluster's CAPI Cluster is gone. Drain finalizers from
-			// intent CRs that are mid-deletion; otherwise they would block forever
-			// waiting for a workload cluster that no longer exists.
-			if err := r.drainFinalizersForLostRemote(ctx, log, req.Namespace); err != nil {
-				return ctrl.Result{}, err
-			}
-		}
-		// ClusterController hasn't set up a client (yet) — wait and retry.
-		return ctrl.Result{RequeueAfter: syncRequeueInterval}, nil
+		return r.requeueForMissingRemoteClient(ctx, log, req.Namespace)
 	}
 	if len(remoteClients) > 1 {
 		// A namespace maps to exactly one workload cluster by design. More than
@@ -362,6 +349,23 @@ func (r *Controller) drainFinalizersForLostRemote(ctx context.Context, log logr.
 		}
 	}
 	return nil
+}
+
+func (r *Controller) requeueForMissingRemoteClient(ctx context.Context, log logr.Logger, namespace string) (ctrl.Result, error) {
+	clusterExists, err := r.remoteClusterExists(ctx, namespace)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if !clusterExists {
+		// The workload cluster's CAPI Cluster is gone. Drain finalizers from
+		// intent CRs that are mid-deletion; otherwise they would block forever
+		// waiting for a workload cluster that no longer exists.
+		if err := r.drainFinalizersForLostRemote(ctx, log, namespace); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+	// ClusterController hasn't set up a client (yet) - wait and retry.
+	return ctrl.Result{RequeueAfter: syncRequeueInterval}, nil
 }
 
 // syncObject handles create/update/delete for a single intent CRD object.
@@ -951,7 +955,7 @@ func (r *Controller) applyRemote(ctx context.Context, remoteClient client.Client
 	}
 
 	if needsLegacySSAAdoption(existing) {
-		if err := r.adoptLegacyRemoteObject(ctx, remoteClient, existing, desired); err != nil {
+		if err := adoptLegacyRemoteObject(ctx, remoteClient, existing, desired); err != nil {
 			return err
 		}
 	}
@@ -963,7 +967,7 @@ func needsLegacySSAAdoption(existing client.Object) bool {
 	return existing.GetAnnotations()[annotationSSAAdopted] != annotationSSAAdoptedValue
 }
 
-func (r *Controller) adoptLegacyRemoteObject(ctx context.Context, remoteClient client.Client, existing, desired client.Object) error {
+func adoptLegacyRemoteObject(ctx context.Context, remoteClient client.Client, existing, desired client.Object) error {
 	if err := overlayBody(existing, desired); err != nil {
 		return fmt.Errorf("overlaying desired state onto %s/%s for SSA adoption: %w",
 			desired.GetNamespace(), desired.GetName(), err)
