@@ -68,7 +68,7 @@ jobs:
             if make licenses-report; then
               exit 0
             fi
-            sleep 1000 65534 65534 65534 65534 65534 65534 65534 65534 65534 65534 65534 65534 1000(attempt * 10))
+            sleep 10
           done
           make licenses-report
 
