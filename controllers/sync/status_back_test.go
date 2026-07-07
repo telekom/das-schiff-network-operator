@@ -18,6 +18,10 @@ import (
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 )
 
+// reasonProgressing is the condition reason reported while the workload has not
+// yet caught up to the current intent.
+const reasonProgressing = "Progressing"
+
 // newFakeSyncControllerAllStatus builds a controller whose management client
 // registers every intent type as a status subresource, so status sync-back can
 // be exercised for any CRD (not just Inbound/Outbound).
@@ -104,11 +108,11 @@ func TestDesiredMirroredConditionsProgressing(t *testing.T) {
 		t.Fatalf("expected Ready+Resolved Progressing conditions, got %d: %+v", len(got), got)
 	}
 	ready := findCondition(got, nc.ConditionTypeReady)
-	if ready == nil || ready.Status != metav1.ConditionFalse || ready.Reason != "Progressing" {
+	if ready == nil || ready.Status != metav1.ConditionFalse || ready.Reason != reasonProgressing {
 		t.Errorf("expected Ready=False/Progressing, got %+v", ready)
 	}
 	resolved := findCondition(got, nc.ConditionTypeResolved)
-	if resolved == nil || resolved.Status != metav1.ConditionUnknown || resolved.Reason != "Progressing" {
+	if resolved == nil || resolved.Status != metav1.ConditionUnknown || resolved.Reason != reasonProgressing {
 		t.Errorf("expected Resolved=Unknown/Progressing, got %+v", resolved)
 	}
 	for _, c := range got {
@@ -344,4 +348,98 @@ func findCondition(conds []metav1.Condition, condType string) *metav1.Condition 
 		}
 	}
 	return nil
+}
+
+// TestReconcileMirrorsDerivedStatusBack verifies that the read-only derived
+// status fields (network CIDRs, VRF list) computed on the workload cluster are
+// mirrored back onto the management object when the workload has caught up.
+func TestReconcileMirrorsDerivedStatusBack(t *testing.T) {
+	l2a := &nc.Layer2Attachment{
+		ObjectMeta: metav1.ObjectMeta{Name: "l2a-m2m", Namespace: "test-cluster"},
+		Spec:       nc.Layer2AttachmentSpec{NetworkRef: "net-m2m"},
+	}
+	remote := &nc.Layer2Attachment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "l2a-m2m",
+			Namespace: testRemoteNamespace,
+			Labels:    map[string]string{labelManagedBy: labelManagedByValue},
+		},
+		Spec: nc.Layer2AttachmentSpec{NetworkRef: "net-m2m"},
+		Status: nc.Layer2AttachmentStatus{
+			ObservedGeneration: 0,
+			NetworkIPv4:        "10.0.0.0/24",
+			NetworkIPv6:        "2001:db8::/64",
+			VRFs:               []string{"vrf-c2m", "vrf-m2m"},
+			Conditions:         []metav1.Condition{readyCondition(metav1.ConditionTrue, 0)},
+		},
+	}
+
+	sc, _ := newFakeSyncControllerAllStatus([]client.Object{l2a}, []client.Object{remote})
+	ctx := context.Background()
+
+	if _, err := sc.Reconcile(ctx, ctrl.Request{
+		NamespacedName: types.NamespacedName{Namespace: "test-cluster", Name: "sync"},
+	}); err != nil {
+		t.Fatalf("Reconcile failed: %v", err)
+	}
+
+	got := &nc.Layer2Attachment{}
+	if err := sc.Client.Get(ctx, types.NamespacedName{Namespace: "test-cluster", Name: "l2a-m2m"}, got); err != nil {
+		t.Fatalf("Get mgmt L2A: %v", err)
+	}
+	if got.Status.NetworkIPv4 != "10.0.0.0/24" || got.Status.NetworkIPv6 != "2001:db8::/64" {
+		t.Errorf("network CIDRs not mirrored: v4=%q v6=%q", got.Status.NetworkIPv4, got.Status.NetworkIPv6)
+	}
+	if len(got.Status.VRFs) != 2 || got.Status.VRFs[0] != "vrf-c2m" || got.Status.VRFs[1] != "vrf-m2m" {
+		t.Errorf("VRFs not mirrored: %v", got.Status.VRFs)
+	}
+}
+
+// TestReconcileDoesNotMirrorDerivedStatusWhenNotCaughtUp verifies that derived
+// fields are NOT overwritten while the workload is still converging (a stale or
+// empty workload value must not clobber the last-known management value).
+func TestReconcileDoesNotMirrorDerivedStatusWhenNotCaughtUp(t *testing.T) {
+	// mgmt L2A already carries a known-good VRF list (e.g. from a prior sync).
+	l2a := &nc.Layer2Attachment{
+		ObjectMeta: metav1.ObjectMeta{Name: "l2a-m2m", Namespace: "test-cluster", Generation: 5},
+		Spec:       nc.Layer2AttachmentSpec{NetworkRef: "net-m2m"},
+		Status:     nc.Layer2AttachmentStatus{VRFs: []string{"vrf-prev"}},
+	}
+	// Workload copy has NOT observed the current generation (observedGeneration <
+	// generation) and reports an empty derived status.
+	remote := &nc.Layer2Attachment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "l2a-m2m",
+			Namespace:  testRemoteNamespace,
+			Generation: 2,
+			Labels:     map[string]string{labelManagedBy: labelManagedByValue},
+		},
+		Spec: nc.Layer2AttachmentSpec{NetworkRef: "net-m2m"},
+		Status: nc.Layer2AttachmentStatus{
+			ObservedGeneration: 1,
+			Conditions:         []metav1.Condition{readyCondition(metav1.ConditionTrue, 1)},
+		},
+	}
+
+	sc, _ := newFakeSyncControllerAllStatus([]client.Object{l2a}, []client.Object{remote})
+	ctx := context.Background()
+
+	if _, err := sc.Reconcile(ctx, ctrl.Request{
+		NamespacedName: types.NamespacedName{Namespace: "test-cluster", Name: "sync"},
+	}); err != nil {
+		t.Fatalf("Reconcile failed: %v", err)
+	}
+
+	got := &nc.Layer2Attachment{}
+	if err := sc.Client.Get(ctx, types.NamespacedName{Namespace: "test-cluster", Name: "l2a-m2m"}, got); err != nil {
+		t.Fatalf("Get mgmt L2A: %v", err)
+	}
+	if len(got.Status.VRFs) != 1 || got.Status.VRFs[0] != "vrf-prev" {
+		t.Errorf("derived VRFs were overwritten while not caught up: %v", got.Status.VRFs)
+	}
+	// Ready should be reported as Progressing (not the stale workload value).
+	cond := findCondition(got.Status.Conditions, nc.ConditionTypeReady)
+	if cond == nil || cond.Reason != reasonProgressing {
+		t.Errorf("expected Ready=Progressing while not caught up, got %+v", cond)
+	}
 }

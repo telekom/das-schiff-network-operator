@@ -58,6 +58,12 @@ type OutboundStatus struct {
 	// +optional
 	Addresses *AddressAllocation `json:"addresses,omitempty"`
 
+	// VRFs lists the VRF names this Outbound is plumbed into, derived from the
+	// matched Destinations (spec.destinations → Destination.spec.vrfRef). Sorted
+	// and de-duplicated.
+	// +optional
+	VRFs []string `json:"vrfs,omitempty"`
+
 	// Conditions represent the latest available observations of the Outbound's state.
 	// +optional
 	// +listType=map
@@ -73,6 +79,9 @@ type OutboundStatus struct {
 //+kubebuilder:printcolumn:name="NetworkRef",type=string,JSONPath=`.spec.networkRef`
 //+kubebuilder:printcolumn:name="Count",type=integer,JSONPath=`.spec.count`
 //+kubebuilder:printcolumn:name="Replicas",type=integer,JSONPath=`.spec.replicas`
+//+kubebuilder:printcolumn:name="VRFs",type=string,JSONPath=`.status.vrfs`
+//+kubebuilder:printcolumn:name="IPv4",type=string,JSONPath=`.status.addresses.ipv4`,priority=10
+//+kubebuilder:printcolumn:name="IPv6",type=string,JSONPath=`.status.addresses.ipv6`,priority=10
 //+kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
 //+kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 

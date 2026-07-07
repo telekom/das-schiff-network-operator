@@ -29,6 +29,17 @@ spec:
     - jsonPath: .spec.advertisement.type
       name: Advertisement
       type: string
+    - jsonPath: .status.vrfs
+      name: VRFs
+      type: string
+    - jsonPath: .status.addresses.ipv4
+      name: IPv4
+      priority: 10
+      type: string
+    - jsonPath: .status.addresses.ipv6
+      name: IPv6
+      priority: 10
+      type: string
     - jsonPath: .status.conditions[?(@.type=="Ready")].status
       name: Ready
       type: string
@@ -252,6 +263,14 @@ spec:
               poolName:
                 description: PoolName is the resolved MetalLB IPAddressPool name.
                 type: string
+              vrfs:
+                description: |-
+                  VRFs lists the VRF names this Inbound is plumbed into, derived from the
+                  matched Destinations (spec.destinations → Destination.spec.vrfRef). Sorted
+                  and de-duplicated.
+                items:
+                  type: string
+                type: array
             type: object
         type: object
     served: true

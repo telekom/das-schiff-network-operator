@@ -20,6 +20,9 @@ spec:
     - jsonPath: .spec.vrfRef
       name: VRFRef
       type: string
+    - jsonPath: .status.vrfs
+      name: VRFs
+      type: string
     - jsonPath: .status.conditions[?(@.type=="Ready")].status
       name: Ready
       type: string
@@ -232,6 +235,15 @@ spec:
                   by the controller.
                 format: int64
                 type: integer
+              vrfs:
+                description: |-
+                  VRFs lists the VRF names whose prefixes are imported by this attachment,
+                  derived from the matched Destinations (spec.destinations →
+                  Destination.spec.vrfRef). This is distinct from spec.vrfRef (the target
+                  VRF the nodes attach to). Sorted and de-duplicated.
+                items:
+                  type: string
+                type: array
             type: object
         type: object
     served: true

@@ -26,6 +26,9 @@ spec:
     - jsonPath: .spec.enableBFD
       name: BFD
       type: boolean
+    - jsonPath: .status.vrfs
+      name: VRFs
+      type: string
     - jsonPath: .status.conditions[?(@.type=="Ready")].status
       name: Ready
       type: string
@@ -297,6 +300,16 @@ spec:
                   by the controller.
                 format: int64
                 type: integer
+              vrfs:
+                description: |-
+                  VRFs lists the VRF names this peering relates to, derived from the
+                  referenced Layer2Attachment (listenRange mode: ref.attachmentRef →
+                  Layer2Attachment.spec.destinations) and/or referenced Inbounds
+                  (loopbackPeer mode: ref.inboundRefs → Inbound.spec.destinations). Sorted
+                  and de-duplicated.
+                items:
+                  type: string
+                type: array
               workloadASNumber:
                 description: WorkloadASNumber is the AS number assigned to the workload
                   (observed; mirrors spec.workloadAS).

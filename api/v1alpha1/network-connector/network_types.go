@@ -74,6 +74,7 @@ type NetworkStatus struct {
 //+kubebuilder:printcolumn:name="VLAN",type=integer,JSONPath=`.spec.vlan`
 //+kubebuilder:printcolumn:name="VNI",type=integer,JSONPath=`.spec.vni`,priority=10
 //+kubebuilder:printcolumn:name="IPv4 CIDR",type=string,JSONPath=`.spec.ipv4.cidr`
+//+kubebuilder:printcolumn:name="IPv6 CIDR",type=string,JSONPath=`.spec.ipv6.cidr`
 //+kubebuilder:printcolumn:name="RefCount",type=integer,JSONPath=`.status.referenceCount`
 //+kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
 //+kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`

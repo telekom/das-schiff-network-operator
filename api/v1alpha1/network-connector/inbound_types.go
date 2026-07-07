@@ -70,6 +70,12 @@ type InboundStatus struct {
 	// +optional
 	PoolName *string `json:"poolName,omitempty"`
 
+	// VRFs lists the VRF names this Inbound is plumbed into, derived from the
+	// matched Destinations (spec.destinations → Destination.spec.vrfRef). Sorted
+	// and de-duplicated.
+	// +optional
+	VRFs []string `json:"vrfs,omitempty"`
+
 	// Conditions represent the latest available observations of the Inbound's state.
 	// +optional
 	// +listType=map
@@ -86,6 +92,9 @@ type InboundStatus struct {
 //+kubebuilder:printcolumn:name="Count",type=integer,JSONPath=`.spec.count`
 //+kubebuilder:printcolumn:name="Pool",type=string,JSONPath=`.status.poolName`
 //+kubebuilder:printcolumn:name="Advertisement",type=string,JSONPath=`.spec.advertisement.type`
+//+kubebuilder:printcolumn:name="VRFs",type=string,JSONPath=`.status.vrfs`
+//+kubebuilder:printcolumn:name="IPv4",type=string,JSONPath=`.status.addresses.ipv4`,priority=10
+//+kubebuilder:printcolumn:name="IPv6",type=string,JSONPath=`.status.addresses.ipv6`,priority=10
 //+kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
 //+kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 

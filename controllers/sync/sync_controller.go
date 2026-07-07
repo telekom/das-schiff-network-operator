@@ -305,17 +305,18 @@ func (r *Controller) syncObject(ctx context.Context, log logr.Logger, remoteClie
 }
 
 // syncObjectStatusBack reads the workload copy of a single intent object and
-// mirrors its Ready/Resolved conditions back onto the management object. It is
-// the reverse of the spec sync — workload → management — and is deliberately
-// restricted to mirroredConditionTypes so a lagging or empty workload status can
+// mirrors its Ready/Resolved conditions plus the read-only derived status fields
+// (network CIDRs, VRF lists) back onto the management object. It is the reverse
+// of the spec sync — workload → management. Conditions are restricted to
+// mirroredConditionTypes, and derived fields are mirrored only when the workload
+// has caught up to the current intent, so a lagging or empty workload status can
 // never overwrite management-owned status fields (addresses, interfaceName,
 // workloadASNumber) that feed the workload spec.
 func (r *Controller) syncObjectStatusBack(ctx context.Context, log logr.Logger, remoteClient client.Client, mgmtObj client.Object) error {
 	kind := mgmtObj.GetObjectKind().GroupVersionKind().Kind
 	name := mgmtObj.GetName()
 
-	mgmtConds := statusConditionsPtr(mgmtObj)
-	if mgmtConds == nil {
+	if statusConditionsPtr(mgmtObj) == nil {
 		// Type carries no status.conditions field; nothing to mirror.
 		return nil
 	}
@@ -333,45 +334,102 @@ func (r *Controller) syncObjectStatusBack(ctx context.Context, log logr.Logger, 
 		return fmt.Errorf("getting remote %s/%s for status sync-back: %w", kind, name, err)
 	}
 
-	remoteConds := statusConditionsPtr(remote)
-	if remoteConds == nil {
+	remoteCondsPtr := statusConditionsPtr(remote)
+	if remoteCondsPtr == nil {
 		return nil
 	}
-
+	remoteConds := *remoteCondsPtr
 	caughtUp := workloadCaughtUp(remote, mgmtObj.GetGeneration())
-	desired := desiredMirroredConditions(*remoteConds, caughtUp, mgmtObj.GetGeneration())
-	if len(desired) == 0 {
-		return nil
-	}
+	mgmtGen := mgmtObj.GetGeneration()
 
-	if _, err := r.writeStatusConditions(ctx, mgmtObj, desired); err != nil {
+	_, err = r.updateStatusWithRetry(ctx, mgmtObj, func(o client.Object) {
+		if conds := statusConditionsPtr(o); conds != nil {
+			for _, c := range desiredMirroredConditions(remoteConds, caughtUp, mgmtGen) {
+				apimeta.SetStatusCondition(conds, c)
+			}
+		}
+		// Derived fields are only authoritative once the workload has observed
+		// the current spec; until then keep the last mirrored values.
+		if caughtUp {
+			mirrorDerivedStatus(o, remote)
+		}
+	})
+	if err != nil {
 		return err
 	}
 	log.V(1).Info("Mirrored workload status back to management", "kind", kind, "name", name, "caughtUp", caughtUp)
 	return nil
 }
 
+// mirrorDerivedStatus copies the read-only, purely-derived status fields
+// (network CIDRs and VRF lists) from the workload copy (src) onto the management
+// object (dst). These are computed by the intent compiler on the workload
+// cluster from the referenced Network/Destinations; the management cluster has
+// no compiler, so it receives them via this sync-back. Only these specific
+// fields are copied — never addresses/interfaceName/etc.
+func mirrorDerivedStatus(dst, src client.Object) {
+	switch d := dst.(type) {
+	case *nc.Layer2Attachment:
+		if s, ok := src.(*nc.Layer2Attachment); ok {
+			d.Status.NetworkIPv4 = s.Status.NetworkIPv4
+			d.Status.NetworkIPv6 = s.Status.NetworkIPv6
+			d.Status.VRFs = s.Status.VRFs
+		}
+	case *nc.Inbound:
+		if s, ok := src.(*nc.Inbound); ok {
+			d.Status.VRFs = s.Status.VRFs
+		}
+	case *nc.Outbound:
+		if s, ok := src.(*nc.Outbound); ok {
+			d.Status.VRFs = s.Status.VRFs
+		}
+	case *nc.PodNetwork:
+		if s, ok := src.(*nc.PodNetwork); ok {
+			d.Status.NetworkIPv4 = s.Status.NetworkIPv4
+			d.Status.NetworkIPv6 = s.Status.NetworkIPv6
+			d.Status.VRFs = s.Status.VRFs
+		}
+	case *nc.BGPPeering:
+		if s, ok := src.(*nc.BGPPeering); ok {
+			d.Status.VRFs = s.Status.VRFs
+		}
+	case *nc.NodeAttachment:
+		if s, ok := src.(*nc.NodeAttachment); ok {
+			d.Status.VRFs = s.Status.VRFs
+		}
+	}
+}
+
 // writeStatusConditions applies the desired conditions onto obj's status and
-// persists them via the status subresource, retrying on optimistic-lock
-// conflicts. Only the status subresource is written, so spec is never touched.
-// SetStatusCondition is a no-op when a condition is unchanged, so a stable
-// status produces no writes and no lastTransitionTime flapping; the returned
-// bool reports whether any condition actually transitioned (so callers can gate
-// side effects such as events on real changes).
+// persists them via the status subresource when they change, retrying on
+// optimistic-lock conflicts. The returned bool reports whether a write happened
+// (so callers can gate side effects such as events on real changes).
 func (r *Controller) writeStatusConditions(ctx context.Context, obj client.Object, desired []metav1.Condition) (bool, error) {
+	return r.updateStatusWithRetry(ctx, obj, func(o client.Object) {
+		conds := statusConditionsPtr(o)
+		if conds == nil {
+			return
+		}
+		for i := range desired {
+			apimeta.SetStatusCondition(conds, desired[i])
+		}
+	})
+}
+
+// updateStatusWithRetry applies mutate to obj and, when the object's Status
+// actually changed, persists it via the status subresource — retrying on
+// optimistic-lock conflicts by re-fetching and re-applying. Only the status
+// subresource is written, so spec is never touched. Returns whether a write
+// occurred. mutate must be idempotent (it is re-run after a conflict).
+func (r *Controller) updateStatusWithRetry(ctx context.Context, obj client.Object, mutate func(client.Object)) (bool, error) {
 	const maxRetries = 3
 	for attempt := 0; attempt < maxRetries; attempt++ {
-		conds := statusConditionsPtr(obj)
-		if conds == nil {
-			return false, nil
+		before, ok := obj.DeepCopyObject().(client.Object)
+		if !ok {
+			return false, fmt.Errorf("DeepCopyObject did not return client.Object for %s", obj.GetName())
 		}
-		changed := false
-		for i := range desired {
-			if apimeta.SetStatusCondition(conds, desired[i]) {
-				changed = true
-			}
-		}
-		if !changed {
+		mutate(obj)
+		if statusEqual(before, obj) {
 			return false, nil
 		}
 		err := r.Client.Status().Update(ctx, obj)
@@ -392,6 +450,17 @@ func (r *Controller) writeStatusConditions(ctx context.Context, obj client.Objec
 		obj = fresh
 	}
 	return false, fmt.Errorf("status update conflict after %d retries for %s/%s", maxRetries, obj.GetObjectKind().GroupVersionKind().Kind, obj.GetName())
+}
+
+// statusEqual reports whether the Status fields of a and b are deeply equal,
+// via reflection so it works generically across all intent CRD types.
+func statusEqual(a, b client.Object) bool {
+	av := reflect.ValueOf(a).Elem().FieldByName("Status")
+	bv := reflect.ValueOf(b).Elem().FieldByName("Status")
+	if !av.IsValid() || !bv.IsValid() {
+		return true
+	}
+	return reflect.DeepEqual(av.Interface(), bv.Interface())
 }
 
 // blockOnMultipleRemotes surfaces the multiple-workload-cluster misconfiguration

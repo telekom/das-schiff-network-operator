@@ -171,6 +171,14 @@ type BGPPeeringStatus struct {
 	// WorkloadASNumber is the AS number assigned to the workload (observed; mirrors spec.workloadAS).
 	WorkloadASNumber *int64 `json:"workloadASNumber,omitempty"`
 
+	// VRFs lists the VRF names this peering relates to, derived from the
+	// referenced Layer2Attachment (listenRange mode: ref.attachmentRef →
+	// Layer2Attachment.spec.destinations) and/or referenced Inbounds
+	// (loopbackPeer mode: ref.inboundRefs → Inbound.spec.destinations). Sorted
+	// and de-duplicated.
+	// +optional
+	VRFs []string `json:"vrfs,omitempty"`
+
 	// Conditions represent the latest available observations of the
 	// BGPPeering's current state.
 	// +optional
@@ -188,6 +196,7 @@ type BGPPeeringStatus struct {
 //+kubebuilder:printcolumn:name="Mode",type=string,JSONPath=`.spec.mode`
 //+kubebuilder:printcolumn:name="WorkloadAS",type=integer,JSONPath=`.spec.workloadAS`
 //+kubebuilder:printcolumn:name="BFD",type=boolean,JSONPath=`.spec.enableBFD`
+//+kubebuilder:printcolumn:name="VRFs",type=string,JSONPath=`.status.vrfs`
 //+kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
 //+kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 

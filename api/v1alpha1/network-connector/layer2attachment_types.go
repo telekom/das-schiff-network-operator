@@ -120,6 +120,23 @@ type Layer2AttachmentStatus struct {
 	// +optional
 	InterfaceName string `json:"interfaceName,omitempty"`
 
+	// NetworkIPv4 is the IPv4 CIDR of the referenced Network (spec.ipv4.cidr),
+	// surfaced on the attachment for convenience. Empty when the Network has no
+	// IPv4 pool or cannot be resolved.
+	// +optional
+	NetworkIPv4 string `json:"networkIPv4,omitempty"`
+
+	// NetworkIPv6 is the IPv6 CIDR of the referenced Network (spec.ipv6.cidr).
+	// Empty when the Network has no IPv6 pool or cannot be resolved.
+	// +optional
+	NetworkIPv6 string `json:"networkIPv6,omitempty"`
+
+	// VRFs lists the VRF names this attachment is plumbed into, derived from the
+	// matched Destinations (spec.destinations → Destination.spec.vrfRef). Sorted
+	// and de-duplicated.
+	// +optional
+	VRFs []string `json:"vrfs,omitempty"`
+
 	// SRIOVVlanID is the VLAN ID assigned for SR-IOV device traffic.
 	// +optional
 	SRIOVVlanID *int32 `json:"sriovVlanID,omitempty"`
@@ -149,6 +166,9 @@ type Layer2AttachmentStatus struct {
 // +kubebuilder:resource:shortName=l2a
 // +kubebuilder:printcolumn:name="NetworkRef",type=string,JSONPath=`.spec.networkRef`
 // +kubebuilder:printcolumn:name="InterfaceName",type=string,JSONPath=`.status.interfaceName`
+// +kubebuilder:printcolumn:name="IPv4",type=string,JSONPath=`.status.networkIPv4`
+// +kubebuilder:printcolumn:name="IPv6",type=string,JSONPath=`.status.networkIPv6`,priority=10
+// +kubebuilder:printcolumn:name="VRFs",type=string,JSONPath=`.status.vrfs`
 // +kubebuilder:printcolumn:name="MTU",type=integer,JSONPath=`.spec.mtu`
 // +kubebuilder:printcolumn:name="SRIOV",type=boolean,JSONPath=`.spec.sriov.enabled`
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
