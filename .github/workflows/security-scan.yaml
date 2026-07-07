@@ -36,7 +36,10 @@ jobs:
           go-version-file: go.mod
 
       - name: Install packages
-        run: sudo apt-get update && sudo apt-get install -y llvm clang libbpf-dev gcc-multilib linux-headers-$(uname -r)
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/azure-cli.* /etc/apt/sources.list.d/microsoft-prod.* /etc/apt/sources.list.d/packages-microsoft-prod.*
+          sudo apt-get update
+          sudo apt-get install -y llvm clang libbpf-dev gcc-multilib linux-headers-$(uname -r)
 
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
@@ -93,7 +96,10 @@ jobs:
           go-version-file: go.mod
 
       - name: Install packages
-        run: sudo apt-get update && sudo apt-get install -y llvm clang libbpf-dev gcc-multilib linux-headers-$(uname -r)
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/azure-cli.* /etc/apt/sources.list.d/microsoft-prod.* /etc/apt/sources.list.d/packages-microsoft-prod.*
+          sudo apt-get update
+          sudo apt-get install -y llvm clang libbpf-dev gcc-multilib linux-headers-$(uname -r)
 
       # Note: This workflow intentionally uses go-licenses v2 for `check`.
       # The Makefile still uses go-licenses v1 for other tasks (e.g. save/report),
