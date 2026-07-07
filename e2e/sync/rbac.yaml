@@ -35,12 +35,29 @@ rules:
   - interfaceconfigs
   - nodeattachments
   verbs: ["get", "list", "watch", "update", "patch"]
-# Read intent CRD status (for IPAM promotion)
+# Read intent CRD status (for IPAM promotion) and write it back (status
+# sync-back mirrors workload Ready/Resolved conditions onto the mgmt objects,
+# and marks resources when a namespace maps to multiple workload clusters).
 - apiGroups: ["network-connector.sylvaproject.org"]
   resources:
+  - vrfs/status
+  - networks/status
+  - destinations/status
+  - layer2attachments/status
   - inbounds/status
   - outbounds/status
-  verbs: ["get"]
+  - podnetworks/status
+  - bgppeerings/status
+  - collectors/status
+  - trafficmirrors/status
+  - announcementpolicies/status
+  - interfaceconfigs/status
+  - nodeattachments/status
+  verbs: ["get", "update", "patch"]
+# Emit events on intent resources (e.g. multiple-workload-cluster block)
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["create", "patch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
