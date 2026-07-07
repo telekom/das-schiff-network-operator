@@ -59,7 +59,14 @@ jobs:
           go-version-file: go.mod
 
       - name: Create Licenses Report
-        run: make licenses-report
+        run: |
+          for attempt in 1 2 3; do
+            if make licenses-report; then
+              exit 0
+            fi
+            sleep 1000 65534 65534 65534 65534 65534 65534 65534 65534 65534 65534 65534 65534 1000(attempt * 10))
+          done
+          make licenses-report
 
       - name: Read Go version
         id: go-version
