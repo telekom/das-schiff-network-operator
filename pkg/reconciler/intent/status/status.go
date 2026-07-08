@@ -113,8 +113,10 @@ func (u *Updater) statusUpdateWithRetry(ctx context.Context, obj client.Object, 
 
 // UpdateConditions sets Ready/Resolved conditions on intent CRDs. The issues
 // map (keyed by IssueKey(kind, namespace, name)) carries per-resource build failures so
-// resources skipped during the build phase surface Ready=False.
-func (u *Updater) UpdateConditions(ctx context.Context, fetched *resolver.FetchedResources, resolved *resolver.ResolvedData, issues map[string]ResourceIssue) error {
+// resources skipped during the build phase surface Ready=False. clusterASN is
+// the local (platform-side) BGP AS number observed across the cluster's nodes
+// (0 when unknown); it is surfaced on BGPPeering.status.asNumber.
+func (u *Updater) UpdateConditions(ctx context.Context, fetched *resolver.FetchedResources, resolved *resolver.ResolvedData, issues map[string]ResourceIssue, clusterASN int64) error {
 	if err := u.updateVRFConditions(ctx, fetched); err != nil {
 		return fmt.Errorf("VRF conditions: %w", err)
 	}
@@ -145,7 +147,7 @@ func (u *Updater) UpdateConditions(ctx context.Context, fetched *resolver.Fetche
 	if err := u.updateNodeAttachmentConditions(ctx, fetched, resolved, issues); err != nil {
 		return fmt.Errorf("nodeAttachment conditions: %w", err)
 	}
-	if err := u.updateBGPPeeringConditions(ctx, fetched, resolved, issues); err != nil {
+	if err := u.updateBGPPeeringConditions(ctx, fetched, resolved, issues, clusterASN); err != nil {
 		return fmt.Errorf("bgpPeering conditions: %w", err)
 	}
 	return nil
@@ -425,7 +427,7 @@ func (u *Updater) updateNodeAttachmentConditions(ctx context.Context, fetched *r
 	return nil
 }
 
-func (u *Updater) updateBGPPeeringConditions(ctx context.Context, fetched *resolver.FetchedResources, resolved *resolver.ResolvedData, issues map[string]ResourceIssue) error {
+func (u *Updater) updateBGPPeeringConditions(ctx context.Context, fetched *resolver.FetchedResources, resolved *resolver.ResolvedData, issues map[string]ResourceIssue, clusterASN int64) error {
 	for i := range fetched.BGPPeerings {
 		bp := &fetched.BGPPeerings[i]
 		resolvedStatus, resolvedReason, resolvedMsg := checkBGPPeeringRefs(bp, resolved)
@@ -439,13 +441,25 @@ func (u *Updater) updateBGPPeeringConditions(ctx context.Context, fetched *resol
 		readyStatus, readyReason, readyMsg = applyBuildIssue(issues, "BGPPeering", bp.Namespace, bp.Name, readyStatus, readyReason, readyMsg)
 
 		vrfs := resolved.BGPPeeringVRFRefs(bp)
+		localIPs := resolved.BGPPeeringLocalIPs(bp)
+
+		// asNumber is the platform-side (server) ASN, observed cluster-wide from
+		// the node agents' base config. It is the same for the whole cluster, so
+		// a single observed value applies to every BGPPeering.
+		var asNumber *int64
+		if clusterASN != 0 {
+			asn := clusterASN
+			asNumber = &asn
+		}
 
 		if err := u.statusUpdateWithRetry(ctx, bp, func(obj client.Object) {
 			b := obj.(*nc.BGPPeering)
 			setCondition(&b.Status.Conditions, nc.ConditionTypeResolved, resolvedStatus, resolvedReason, resolvedMsg, b.Generation)
 			setCondition(&b.Status.Conditions, nc.ConditionTypeReady, readyStatus, readyReason, readyMsg, b.Generation)
 			b.Status.WorkloadASNumber = b.Spec.WorkloadAS
+			b.Status.ASNumber = asNumber
 			b.Status.VRFs = vrfs
+			b.Status.LocalIPs = localIPs
 			b.Status.ObservedGeneration = b.Generation
 		}); err != nil {
 			return fmt.Errorf("updating BGPPeering %q status: %w", bp.Name, err)

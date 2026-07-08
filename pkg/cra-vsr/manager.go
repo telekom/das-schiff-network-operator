@@ -60,6 +60,12 @@ type Manager struct {
 	nc         *Netconf
 }
 
+// LocalASN returns the local (platform-side) BGP autonomous system number from
+// the manager's base config.
+func (m *Manager) LocalASN() int {
+	return m.baseConfig.LocalASN
+}
+
 type Metrics struct {
 	State            VRouter
 	V4RouteSummaries map[string]ShowRouteSummaryOutput

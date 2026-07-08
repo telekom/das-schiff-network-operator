@@ -18,10 +18,8 @@ package builder
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
-	"net/netip"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -29,6 +27,7 @@ import (
 
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
+	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/ipmath"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/resolver"
 )
 
@@ -274,17 +273,17 @@ func (*L2ABuilder) buildIRB(_ *nc.Layer2Attachment, net *resolver.ResolvedNetwor
 	// Collect anycast gateway IPs from the Network CIDR. The Network resource
 	// carries the network address (host bits zero); the anycast gateway is the
 	// first usable host (network address + 1), preserving the prefix length.
-	// See gatewayCIDR for point-to-point (/31, /127) and single-host handling.
+	// See ipmath.GatewayCIDR for point-to-point (/31, /127) and single-host handling.
 	var ipAddresses []string
 	if net.Spec.IPv4 != nil {
-		gw, err := gatewayCIDR(net.Spec.IPv4.CIDR)
+		gw, err := ipmath.GatewayCIDR(net.Spec.IPv4.CIDR)
 		if err != nil {
 			return nil, fmt.Errorf("network %q IPv4 CIDR: %w", net.Name, err)
 		}
 		ipAddresses = append(ipAddresses, gw)
 	}
 	if net.Spec.IPv6 != nil {
-		gw, err := gatewayCIDR(net.Spec.IPv6.CIDR)
+		gw, err := ipmath.GatewayCIDR(net.Spec.IPv6.CIDR)
 		if err != nil {
 			return nil, fmt.Errorf("network %q IPv6 CIDR: %w", net.Name, err)
 		}
@@ -371,7 +370,7 @@ func buildNetplanNodeIP(l2a *nc.Layer2Attachment, nw *resolver.ResolvedNetwork, 
 	result := &NetplanNodeIP{}
 
 	if nw.Spec.IPv4 != nil && len(alloc.IPv4) > 0 {
-		gwIP, prefixLen := parseCIDRParts(nw.Spec.IPv4.CIDR)
+		gwIP, prefixLen := ipmath.ParseCIDRParts(nw.Spec.IPv4.CIDR)
 		if gwIP != "" {
 			for _, ip := range alloc.IPv4 {
 				result.Addresses = append(result.Addresses, fmt.Sprintf("%s/%s", ip, prefixLen))
@@ -381,7 +380,7 @@ func buildNetplanNodeIP(l2a *nc.Layer2Attachment, nw *resolver.ResolvedNetwork, 
 	}
 
 	if nw.Spec.IPv6 != nil && len(alloc.IPv6) > 0 {
-		gwIP, prefixLen := parseCIDRParts(nw.Spec.IPv6.CIDR)
+		gwIP, prefixLen := ipmath.ParseCIDRParts(nw.Spec.IPv6.CIDR)
 		if gwIP != "" {
 			for _, ip := range alloc.IPv6 {
 				result.Addresses = append(result.Addresses, fmt.Sprintf("%s/%s", ip, prefixLen))
@@ -394,98 +393,4 @@ func buildNetplanNodeIP(l2a *nc.Layer2Attachment, nw *resolver.ResolvedNetwork, 
 		return nil
 	}
 	return result
-}
-
-// gatewayCIDR returns the anycast gateway CIDR for a Network CIDR: the first
-// usable host (network address + 1) with the original prefix length preserved,
-// e.g. "198.51.100.224/27" → "198.51.100.225/27" and "2001:db8::/64"
-// → "2001:db8::1/64".
-//
-// NOTE: Network resources are expected to carry the *network address* (host
-// bits zero) — not an authored host address like "10.0.1.1/24". The
-// vnetwork.kb.io webhook enforces this, so we can treat the CIDR's base as the
-// network address and derive the gateway as network+1.
-func gatewayCIDR(cidr string) (string, error) {
-	gw, bits, err := gatewayAddr(cidr)
-	if err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("%s/%d", gw.String(), bits), nil
-}
-
-// parseCIDRParts extracts the anycast gateway host IP (network address + 1) and
-// the prefix length string from a Network CIDR, e.g. "198.51.100.224/27" →
-// ("198.51.100.225", "27"). The gateway is returned without a prefix because
-// callers use it as a bare default gateway. On any error (unparseable CIDR or a
-// prefix with no usable host, e.g. /32) it returns empty strings so the caller
-// skips gateway rendering.
-func parseCIDRParts(cidr string) (gatewayIP, prefixLen string) {
-	gw, bits, err := gatewayAddr(cidr)
-	if err != nil {
-		return "", ""
-	}
-	return gw.String(), fmt.Sprintf("%d", bits)
-}
-
-// gatewayAddr derives the anycast gateway for a Network CIDR, returning the
-// gateway address and the original prefix length.
-//
-// Network resources carry the network address (host bits zero; enforced by the
-// vnetwork.kb.io webhook), so the gateway is the first usable host: network
-// address + 1. Two edge cases are handled:
-//
-//   - Point-to-point prefixes (/31 for IPv4, /127 for IPv6, RFC 3021) have no
-//     dedicated network/broadcast address; both addresses are usable hosts, so
-//     the network address itself is used as the gateway.
-//   - Single-host prefixes (/32, /128) — and any case where network+1 would
-//     fall outside the prefix or land on the IPv4 broadcast address — have no
-//     usable gateway and return an error rather than emitting an invalid CIDR.
-func gatewayAddr(cidr string) (netip.Addr, int, error) {
-	prefix, err := netip.ParsePrefix(cidr)
-	if err != nil {
-		return netip.Addr{}, 0, fmt.Errorf("invalid CIDR %q: %w", cidr, err)
-	}
-	// Mask defensively so a stray host bit never skews the derived gateway.
-	prefix = prefix.Masked()
-	network := prefix.Addr()
-	bits := prefix.Bits()
-	maxBits := network.BitLen() // 32 for IPv4, 128 for IPv6
-
-	// Point-to-point (/31, /127): use the network address itself.
-	if bits == maxBits-1 {
-		return network, bits, nil
-	}
-
-	gw := network.Next()
-	if !gw.IsValid() || !prefix.Contains(gw) {
-		return netip.Addr{}, 0, fmt.Errorf(
-			"cannot derive gateway for CIDR %q: no usable host address in prefix", cidr)
-	}
-	// Reject the IPv4 broadcast (all-ones host) address. For prefixes wider
-	// than /31 network+1 is never the broadcast, but guard explicitly so the
-	// invariant is enforced rather than assumed.
-	if bcast, ok := broadcastAddr(prefix); ok && gw == bcast {
-		return netip.Addr{}, 0, fmt.Errorf(
-			"cannot derive gateway for CIDR %q: only the broadcast address is available", cidr)
-	}
-	return gw, bits, nil
-}
-
-// broadcastAddr returns the IPv4 broadcast (last) address of a prefix. The
-// second return value is false for IPv6 (no broadcast concept) and for prefixes
-// without host bits.
-func broadcastAddr(prefix netip.Prefix) (netip.Addr, bool) {
-	addr := prefix.Masked().Addr()
-	if !addr.Is4() {
-		return netip.Addr{}, false
-	}
-	hostBits := ipv4MaxPrefixLen - prefix.Bits()
-	if hostBits == 0 {
-		return netip.Addr{}, false
-	}
-	b := addr.As4()
-	v := binary.BigEndian.Uint32(b[:])
-	v |= (uint32(1) << hostBits) - 1 // set the host bits to all-ones
-	binary.BigEndian.PutUint32(b[:], v)
-	return netip.AddrFrom4(b), true
 }

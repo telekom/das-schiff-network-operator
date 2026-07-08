@@ -281,6 +281,15 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              localIPs:
+                description: |-
+                  LocalIPs lists the local peering IP addresses on the platform side.
+                  For listenRange mode these are the IRB anycast gateway addresses (CIDR
+                  notation) the node listens on, derived from the referenced
+                  Layer2Attachment's Network (one per address family).
+                items:
+                  type: string
+                type: array
               neighborASNumber:
                 description: NeighborASNumber is the AS number of the remote peer
                   (observed).

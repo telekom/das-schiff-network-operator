@@ -3966,6 +3966,15 @@ spec:
           status:
             description: NodeNetworkConfigStatus defines the observed state of NodeConfig.
             properties:
+              asNumber:
+                description: |-
+                  ASNumber is the local (platform-side) BGP autonomous system number the
+                  node agent is configured with, taken from the agent's base config
+                  (localASN). It is surfaced here so cluster-wide consumers (e.g. the
+                  operator populating BGPPeering.status.asNumber) can read the server ASN
+                  without needing access to the base config themselves. Zero means unset.
+                format: int64
+                type: integer
               configStatus:
                 description: ConfigStatus describes provisioning state of the NodeConfig.
                   Can be either 'provisioning', 'provisioned' or 'invalid'.

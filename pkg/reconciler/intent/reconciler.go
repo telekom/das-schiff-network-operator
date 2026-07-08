@@ -195,12 +195,32 @@ func (r *Reconciler) ReconcileDebounced(ctx context.Context) error {
 			Message: issue.Message,
 		}
 	}
-	if err := r.statusUpdater.UpdateConditions(timeoutCtx, fetched, resolved, issuesMap); err != nil {
+	if err := r.statusUpdater.UpdateConditions(timeoutCtx, fetched, resolved, issuesMap, r.clusterLocalASN(timeoutCtx)); err != nil {
 		r.logger.Error(err, "status condition update failed")
 	}
 
 	r.logger.Info("intent reconciliation complete")
 	return nil
+}
+
+// clusterLocalASN returns the local (platform-side) BGP AS number observed
+// across the cluster. Node agents surface their base-config localASN onto
+// NodeNetworkConfig.status.asNumber; the ASN is uniform cluster-wide, so the
+// first non-zero value found is representative. Returns 0 when no node has
+// reported an ASN yet (e.g. before the first agent reconcile), in which case
+// consumers leave the field unset.
+func (r *Reconciler) clusterLocalASN(ctx context.Context) int64 {
+	nncList := &networkv1alpha1.NodeNetworkConfigList{}
+	if err := r.client.List(ctx, nncList); err != nil {
+		r.logger.Error(err, "unable to list NodeNetworkConfigs for cluster ASN")
+		return 0
+	}
+	for i := range nncList.Items {
+		if asn := nncList.Items[i].Status.ASNumber; asn != 0 {
+			return asn
+		}
+	}
+	return 0
 }
 
 // applyNodeConfigs assembles each node's contributions and applies the resulting

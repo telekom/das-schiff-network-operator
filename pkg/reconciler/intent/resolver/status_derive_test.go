@@ -47,6 +47,11 @@ func testData() *ResolvedData {
 		},
 		Layer2Attachments: []nc.Layer2Attachment{
 			{ObjectMeta: metav1.ObjectMeta{Name: "l2a-gw"}, Spec: nc.Layer2AttachmentSpec{
+				NetworkRef:   "net-a",
+				Destinations: &metav1.LabelSelector{MatchLabels: map[string]string{"type": "gw"}},
+			}},
+			{ObjectMeta: metav1.ObjectMeta{Name: "l2a-v4"}, Spec: nc.Layer2AttachmentSpec{
+				NetworkRef:   "net-v4only",
 				Destinations: &metav1.LabelSelector{MatchLabels: map[string]string{"type": "gw"}},
 			}},
 		},
@@ -103,5 +108,45 @@ func TestBGPPeeringVRFRefs(t *testing.T) {
 	none := &nc.BGPPeering{Spec: nc.BGPPeeringSpec{Ref: nc.BGPPeeringRef{AttachmentRef: ptrStr("nope")}}}
 	if got := d.BGPPeeringVRFRefs(none); got != nil {
 		t.Errorf("unknown attachment = %v, want nil", got)
+	}
+}
+
+func TestBGPPeeringLocalIPs(t *testing.T) {
+	d := testData()
+
+	// listenRange dual-stack: IRB anycast gateways (network+1) for both families.
+	dual := &nc.BGPPeering{Spec: nc.BGPPeeringSpec{
+		Mode: nc.BGPPeeringModeListenRange,
+		Ref:  nc.BGPPeeringRef{AttachmentRef: ptrStr("l2a-gw")},
+	}}
+	if got, want := d.BGPPeeringLocalIPs(dual), []string{"10.0.0.1/24", "2001:db8::1/64"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("dual-stack localIPs = %v, want %v", got, want)
+	}
+
+	// listenRange v4-only network: single gateway.
+	v4 := &nc.BGPPeering{Spec: nc.BGPPeeringSpec{
+		Mode: nc.BGPPeeringModeListenRange,
+		Ref:  nc.BGPPeeringRef{AttachmentRef: ptrStr("l2a-v4")},
+	}}
+	if got, want := d.BGPPeeringLocalIPs(v4), []string{"10.1.0.1/24"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("v4-only localIPs = %v, want %v", got, want)
+	}
+
+	// loopbackPeer mode has no listen-range/IRB → nil.
+	loop := &nc.BGPPeering{Spec: nc.BGPPeeringSpec{
+		Mode: nc.BGPPeeringModeLoopbackPeer,
+		Ref:  nc.BGPPeeringRef{InboundRefs: []string{"ib-gw"}},
+	}}
+	if got := d.BGPPeeringLocalIPs(loop); got != nil {
+		t.Errorf("loopbackPeer localIPs = %v, want nil", got)
+	}
+
+	// unresolvable attachment → nil.
+	none := &nc.BGPPeering{Spec: nc.BGPPeeringSpec{
+		Mode: nc.BGPPeeringModeListenRange,
+		Ref:  nc.BGPPeeringRef{AttachmentRef: ptrStr("nope")},
+	}}
+	if got := d.BGPPeeringLocalIPs(none); got != nil {
+		t.Errorf("unknown attachment localIPs = %v, want nil", got)
 	}
 }

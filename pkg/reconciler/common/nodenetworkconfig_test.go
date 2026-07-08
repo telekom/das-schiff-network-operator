@@ -275,6 +275,39 @@ var _ = Describe("NodeNetworkConfigReconciler", func() {
 		})
 	})
 
+	Context("ensureStatusASNumber", func() {
+		It("writes the local ASN onto the status when set and changed", func() {
+			cfg := createTestNodeNetworkConfig("1")
+			fakeClient = fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithRuntimeObjects(cfg).
+				WithStatusSubresource(cfg).
+				Build()
+
+			r := &NodeNetworkConfigReconciler{client: fakeClient, logger: logger, localASN: 64497}
+			Expect(r.ensureStatusASNumber(context.Background(), cfg)).To(Succeed())
+			Expect(cfg.Status.ASNumber).To(Equal(int64(64497)))
+
+			// Persisted on the API server.
+			fetched := &v1alpha1.NodeNetworkConfig{}
+			Expect(fakeClient.Get(context.Background(), client.ObjectKeyFromObject(cfg), fetched)).To(Succeed())
+			Expect(fetched.Status.ASNumber).To(Equal(int64(64497)))
+		})
+
+		It("is a no-op when the ASN is unset (zero)", func() {
+			cfg := createTestNodeNetworkConfig("1")
+			fakeClient = fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithRuntimeObjects(cfg).
+				WithStatusSubresource(cfg).
+				Build()
+
+			r := &NodeNetworkConfigReconciler{client: fakeClient, logger: logger, localASN: 0}
+			Expect(r.ensureStatusASNumber(context.Background(), cfg)).To(Succeed())
+			Expect(cfg.Status.ASNumber).To(BeZero())
+		})
+	})
+
 	Context("storeConfig", func() {
 		It("should store config to file and update in-memory config", func() {
 			cfg := createTestNodeNetworkConfig("1")

@@ -347,6 +347,13 @@ type NodeNetworkConfigStatus struct {
 	// This field is cleared whenever ConfigStatus transitions to any non-'invalid' state
 	// (including 'provisioning' and 'provisioned'), so stale errors do not persist.
 	ErrorMessage string `json:"errorMessage,omitempty"`
+	// ASNumber is the local (platform-side) BGP autonomous system number the
+	// node agent is configured with, taken from the agent's base config
+	// (localASN). It is surfaced here so cluster-wide consumers (e.g. the
+	// operator populating BGPPeering.status.asNumber) can read the server ASN
+	// without needing access to the base config themselves. Zero means unset.
+	// +optional
+	ASNumber int64 `json:"asNumber,omitempty"`
 }
 
 //+kubebuilder:object:root=true

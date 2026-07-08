@@ -23,6 +23,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
+	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/ipmath"
 )
 
 // NetworkCIDRs returns the IPv4 and IPv6 CIDRs of the Network referenced by
@@ -111,6 +112,47 @@ func (d *ResolvedData) BGPPeeringVRFRefs(bp *nc.BGPPeering) []string {
 		}
 	}
 	return sortedStringSet(set)
+}
+
+// BGPPeeringLocalIPs returns the local peering IP addresses (in CIDR notation)
+// for a BGPPeering. For listenRange mode these are the IRB anycast gateway
+// addresses the node listens on: the first usable host of the referenced
+// Layer2Attachment's Network CIDR, one per address family. This mirrors exactly
+// what the L2A builder installs as IRB.IPAddresses. Returns nil for other modes
+// or when the attachment/Network cannot be resolved.
+func (d *ResolvedData) BGPPeeringLocalIPs(bp *nc.BGPPeering) []string {
+	if bp.Spec.Mode != nc.BGPPeeringModeListenRange || bp.Spec.Ref.AttachmentRef == nil {
+		return nil
+	}
+
+	var l2a *nc.Layer2Attachment
+	for i := range d.Layer2Attachments {
+		if d.Layer2Attachments[i].Name == *bp.Spec.Ref.AttachmentRef {
+			l2a = &d.Layer2Attachments[i]
+			break
+		}
+	}
+	if l2a == nil {
+		return nil
+	}
+
+	net, ok := d.Networks[l2a.Spec.NetworkRef]
+	if !ok {
+		return nil
+	}
+
+	var ips []string
+	if net.Spec.IPv4 != nil && net.Spec.IPv4.CIDR != "" {
+		if gw, err := ipmath.GatewayCIDR(net.Spec.IPv4.CIDR); err == nil {
+			ips = append(ips, gw)
+		}
+	}
+	if net.Spec.IPv6 != nil && net.Spec.IPv6.CIDR != "" {
+		if gw, err := ipmath.GatewayCIDR(net.Spec.IPv6.CIDR); err == nil {
+			ips = append(ips, gw)
+		}
+	}
+	return ips
 }
 
 // sortedStringSet returns the keys of set as a sorted slice, or nil when empty

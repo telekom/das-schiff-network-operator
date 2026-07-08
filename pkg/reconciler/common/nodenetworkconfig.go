@@ -61,6 +61,12 @@ type ReconcilerOptions struct {
 	// configs can be partially applied. Set to false for agents like VSR where
 	// invalid configs cannot be committed.
 	RestoreOnReconcileFailure bool
+
+	// LocalASN is the local (platform-side) BGP autonomous system number the
+	// agent is configured with (base config localASN). It is surfaced onto the
+	// node's NodeNetworkConfig.status.asNumber so the operator can report the
+	// server ASN on BGPPeering status. Zero means unset (nothing is surfaced).
+	LocalASN int
 }
 
 // NodeNetworkConfigReconciler handles the common reconciliation logic for NodeNetworkConfig.
@@ -72,6 +78,7 @@ type NodeNetworkConfigReconciler struct {
 	NodeNetworkConfig         *v1alpha1.NodeNetworkConfig
 	NodeNetworkConfigPath     string
 	restoreOnReconcileFailure bool
+	localASN                  int64
 }
 
 // NewNodeNetworkConfigReconciler creates a new NodeNetworkConfigReconciler.
@@ -88,6 +95,7 @@ func NewNodeNetworkConfigReconciler(
 		configApplier:             configApplier,
 		NodeNetworkConfigPath:     nodeNetworkConfigPath,
 		restoreOnReconcileFailure: opts.RestoreOnReconcileFailure,
+		localASN:                  int64(opts.LocalASN),
 	}
 
 	nc, err := healthcheck.LoadConfig(healthcheck.NetHealthcheckFile)
@@ -122,6 +130,15 @@ func (r *NodeNetworkConfigReconciler) Reconcile(ctx context.Context) (ctrl.Resul
 		if apierrors.IsNotFound(err) {
 			return ctrl.Result{}, nil
 		}
+		return ctrl.Result{}, err
+	}
+
+	// Surface the agent's local (platform-side) ASN onto the node's status so
+	// the operator can report the server ASN on BGPPeering status. This is
+	// independent of the config-provisioning state machine below: write it once
+	// (and only when it changes) so it is present even for nodes that are
+	// already provisioned and would otherwise skip all status writes.
+	if err := r.ensureStatusASNumber(ctx, cfg); err != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -360,6 +377,25 @@ func ReadNodeNetworkConfig(path string) (*v1alpha1.NodeNetworkConfig, error) {
 	}
 
 	return nodeNetworkConfig, nil
+}
+
+// ensureStatusASNumber makes sure the node's local (platform-side) ASN is
+// reflected on NodeNetworkConfig.status.asNumber. It writes the status only
+// when the value is set and differs from what is already stored, so it is a
+// no-op on steady state. The in-memory cfg is updated regardless so later
+// status writes preserve the value.
+func (r *NodeNetworkConfigReconciler) ensureStatusASNumber(
+	ctx context.Context,
+	cfg *v1alpha1.NodeNetworkConfig,
+) error {
+	if r.localASN == 0 || cfg.Status.ASNumber == r.localASN {
+		return nil
+	}
+	cfg.Status.ASNumber = r.localASN
+	if err := r.client.Status().Update(ctx, cfg); err != nil {
+		return fmt.Errorf("error updating NodeNetworkConfig status asNumber: %w", err)
+	}
+	return nil
 }
 
 // SetStatus updates the status of a NodeNetworkConfig.
