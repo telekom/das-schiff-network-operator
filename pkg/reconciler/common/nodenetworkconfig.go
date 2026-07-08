@@ -134,13 +134,13 @@ func (r *NodeNetworkConfigReconciler) Reconcile(ctx context.Context) (ctrl.Resul
 	}
 
 	// Surface the agent's local (platform-side) ASN onto the node's status so
-	// the operator can report the server ASN on BGPPeering status. This is
-	// independent of the config-provisioning state machine below: write it once
-	// (and only when it changes) so it is present even for nodes that are
-	// already provisioned and would otherwise skip all status writes.
-	if err := r.ensureStatusASNumber(ctx, cfg); err != nil {
-		return ctrl.Result{}, err
-	}
+	// the operator can report the server ASN on BGPPeering status. This is done
+	// in-band with the existing status writes below (no separate API call) so it
+	// can never block config provisioning. asnNeedsWrite forces a status write in
+	// the already-provisioned fast path when the stored ASN is out of date (e.g.
+	// first run after upgrade, or a cleared value when localASN is unset).
+	asnNeedsWrite := cfg.Status.ASNumber != r.localASN
+	cfg.Status.ASNumber = r.localASN
 
 	if r.NodeNetworkConfig != nil && r.NodeNetworkConfig.Spec.Revision == cfg.Spec.Revision {
 		// replace in-memory working NodeNetworkConfig and store it on the disk
@@ -150,7 +150,7 @@ func (r *NodeNetworkConfigReconciler) Reconcile(ctx context.Context) (ctrl.Resul
 
 		// current in-memory config has the same revision as the fetched one
 		// this means that NodeNetworkConfig was already provisioned - skip
-		if cfg.Status.ConfigStatus != operator.StatusProvisioned {
+		if cfg.Status.ConfigStatus != operator.StatusProvisioned || asnNeedsWrite {
 			if err := SetStatus(ctx, r.client, cfg, operator.StatusProvisioned, r.logger); err != nil {
 				return ctrl.Result{}, fmt.Errorf("error setting NodeNetworkConfig status: %w", err)
 			}
@@ -377,27 +377,6 @@ func ReadNodeNetworkConfig(path string) (*v1alpha1.NodeNetworkConfig, error) {
 	}
 
 	return nodeNetworkConfig, nil
-}
-
-// ensureStatusASNumber makes sure the node's local (platform-side) ASN is
-// reflected on NodeNetworkConfig.status.asNumber. It writes the status only
-// when the stored value differs from the agent's configured ASN, so it is a
-// no-op on steady state. When the agent has no ASN configured (localASN == 0)
-// it fails closed: any previously reported value is cleared to 0 rather than
-// left stale, so downstream consumers never surface an outdated ASN. The
-// in-memory cfg is updated regardless so later status writes preserve the value.
-func (r *NodeNetworkConfigReconciler) ensureStatusASNumber(
-	ctx context.Context,
-	cfg *v1alpha1.NodeNetworkConfig,
-) error {
-	if cfg.Status.ASNumber == r.localASN {
-		return nil
-	}
-	cfg.Status.ASNumber = r.localASN
-	if err := r.client.Status().Update(ctx, cfg); err != nil {
-		return fmt.Errorf("error updating NodeNetworkConfig status asNumber: %w", err)
-	}
-	return nil
 }
 
 // SetStatus updates the status of a NodeNetworkConfig.

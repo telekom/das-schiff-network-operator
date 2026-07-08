@@ -101,6 +101,7 @@ func newMockReconciler(
 		healthChecker:             mockHealthChecker,
 		NodeNetworkConfigPath:     configPath,
 		restoreOnReconcileFailure: opts.RestoreOnReconcileFailure,
+		localASN:                  int64(opts.LocalASN),
 	}
 
 	return &mockReconciler{
@@ -275,40 +276,31 @@ var _ = Describe("NodeNetworkConfigReconciler", func() {
 		})
 	})
 
-	Context("ensureStatusASNumber", func() {
-		It("writes the local ASN onto the status when set and changed", func() {
+	Context("Reconcile surfaces local ASN on status", func() {
+		It("writes status.asNumber in-band with the provisioned status (fast path)", func() {
 			cfg := createTestNodeNetworkConfig("1")
+			cfg.Status.ConfigStatus = operator.StatusProvisioned
 			fakeClient = fake.NewClientBuilder().
 				WithScheme(scheme).
 				WithRuntimeObjects(cfg).
 				WithStatusSubresource(cfg).
 				Build()
 
-			r := &NodeNetworkConfigReconciler{client: fakeClient, logger: logger, localASN: 64497}
-			Expect(r.ensureStatusASNumber(context.Background(), cfg)).To(Succeed())
-			Expect(cfg.Status.ASNumber).To(Equal(int64(64497)))
+			r := newMockReconciler(mockCtrl, fakeClient, configPath, ReconcilerOptions{LocalASN: 64497})
+			r.NodeNetworkConfig = createTestNodeNetworkConfig("1") // same revision → fast path
+			r.mockHealthChecker.EXPECT().TaintsRemoved().Return(true)
 
-			// Persisted on the API server.
+			_, err := r.Reconcile(context.Background())
+			Expect(err).ToNot(HaveOccurred())
+
 			fetched := &v1alpha1.NodeNetworkConfig{}
 			Expect(fakeClient.Get(context.Background(), client.ObjectKeyFromObject(cfg), fetched)).To(Succeed())
 			Expect(fetched.Status.ASNumber).To(Equal(int64(64497)))
 		})
 
-		It("is a no-op when the ASN is unset (zero) and status is already zero", func() {
+		It("clears a stale ASN when the agent has none configured (fail closed)", func() {
 			cfg := createTestNodeNetworkConfig("1")
-			fakeClient = fake.NewClientBuilder().
-				WithScheme(scheme).
-				WithRuntimeObjects(cfg).
-				WithStatusSubresource(cfg).
-				Build()
-
-			r := &NodeNetworkConfigReconciler{client: fakeClient, logger: logger, localASN: 0}
-			Expect(r.ensureStatusASNumber(context.Background(), cfg)).To(Succeed())
-			Expect(cfg.Status.ASNumber).To(BeZero())
-		})
-
-		It("clears a previously reported ASN when the agent has none configured (fail closed)", func() {
-			cfg := createTestNodeNetworkConfig("1")
+			cfg.Status.ConfigStatus = operator.StatusProvisioned
 			cfg.Status.ASNumber = 64497
 			fakeClient = fake.NewClientBuilder().
 				WithScheme(scheme).
@@ -316,9 +308,12 @@ var _ = Describe("NodeNetworkConfigReconciler", func() {
 				WithStatusSubresource(cfg).
 				Build()
 
-			r := &NodeNetworkConfigReconciler{client: fakeClient, logger: logger, localASN: 0}
-			Expect(r.ensureStatusASNumber(context.Background(), cfg)).To(Succeed())
-			Expect(cfg.Status.ASNumber).To(BeZero())
+			r := newMockReconciler(mockCtrl, fakeClient, configPath, ReconcilerOptions{LocalASN: 0})
+			r.NodeNetworkConfig = createTestNodeNetworkConfig("1")
+			r.mockHealthChecker.EXPECT().TaintsRemoved().Return(true)
+
+			_, err := r.Reconcile(context.Background())
+			Expect(err).ToNot(HaveOccurred())
 
 			fetched := &v1alpha1.NodeNetworkConfig{}
 			Expect(fakeClient.Get(context.Background(), client.ObjectKeyFromObject(cfg), fetched)).To(Succeed())
