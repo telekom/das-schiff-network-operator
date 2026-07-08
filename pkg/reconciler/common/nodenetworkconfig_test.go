@@ -294,7 +294,7 @@ var _ = Describe("NodeNetworkConfigReconciler", func() {
 			Expect(fetched.Status.ASNumber).To(Equal(int64(64497)))
 		})
 
-		It("is a no-op when the ASN is unset (zero)", func() {
+		It("is a no-op when the ASN is unset (zero) and status is already zero", func() {
 			cfg := createTestNodeNetworkConfig("1")
 			fakeClient = fake.NewClientBuilder().
 				WithScheme(scheme).
@@ -305,6 +305,24 @@ var _ = Describe("NodeNetworkConfigReconciler", func() {
 			r := &NodeNetworkConfigReconciler{client: fakeClient, logger: logger, localASN: 0}
 			Expect(r.ensureStatusASNumber(context.Background(), cfg)).To(Succeed())
 			Expect(cfg.Status.ASNumber).To(BeZero())
+		})
+
+		It("clears a previously reported ASN when the agent has none configured (fail closed)", func() {
+			cfg := createTestNodeNetworkConfig("1")
+			cfg.Status.ASNumber = 64497
+			fakeClient = fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithRuntimeObjects(cfg).
+				WithStatusSubresource(cfg).
+				Build()
+
+			r := &NodeNetworkConfigReconciler{client: fakeClient, logger: logger, localASN: 0}
+			Expect(r.ensureStatusASNumber(context.Background(), cfg)).To(Succeed())
+			Expect(cfg.Status.ASNumber).To(BeZero())
+
+			fetched := &v1alpha1.NodeNetworkConfig{}
+			Expect(fakeClient.Get(context.Background(), client.ObjectKeyFromObject(cfg), fetched)).To(Succeed())
+			Expect(fetched.Status.ASNumber).To(BeZero())
 		})
 	})
 

@@ -284,8 +284,8 @@ spec:
               localIPs:
                 description: |-
                   LocalIPs lists the local peering IP addresses on the platform side.
-                  For listenRange mode these are the IRB anycast gateway addresses (CIDR
-                  notation) the node listens on, derived from the referenced
+                  For listenRange mode these are the IRB anycast gateway addresses (bare
+                  IPs, no prefix) the node listens on, derived from the referenced
                   Layer2Attachment's Network (one per address family).
                 items:
                   type: string

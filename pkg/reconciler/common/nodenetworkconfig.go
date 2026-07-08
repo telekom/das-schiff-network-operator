@@ -381,14 +381,16 @@ func ReadNodeNetworkConfig(path string) (*v1alpha1.NodeNetworkConfig, error) {
 
 // ensureStatusASNumber makes sure the node's local (platform-side) ASN is
 // reflected on NodeNetworkConfig.status.asNumber. It writes the status only
-// when the value is set and differs from what is already stored, so it is a
-// no-op on steady state. The in-memory cfg is updated regardless so later
-// status writes preserve the value.
+// when the stored value differs from the agent's configured ASN, so it is a
+// no-op on steady state. When the agent has no ASN configured (localASN == 0)
+// it fails closed: any previously reported value is cleared to 0 rather than
+// left stale, so downstream consumers never surface an outdated ASN. The
+// in-memory cfg is updated regardless so later status writes preserve the value.
 func (r *NodeNetworkConfigReconciler) ensureStatusASNumber(
 	ctx context.Context,
 	cfg *v1alpha1.NodeNetworkConfig,
 ) error {
-	if r.localASN == 0 || cfg.Status.ASNumber == r.localASN {
+	if cfg.Status.ASNumber == r.localASN {
 		return nil
 	}
 	cfg.Status.ASNumber = r.localASN

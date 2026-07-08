@@ -20,6 +20,7 @@ import (
 	"reflect"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
@@ -54,6 +55,16 @@ func testData() *ResolvedData {
 				NetworkRef:   "net-v4only",
 				Destinations: &metav1.LabelSelector{MatchLabels: map[string]string{"type": "gw"}},
 			}},
+			{ObjectMeta: metav1.ObjectMeta{Name: "l2a-sel"}, Spec: nc.Layer2AttachmentSpec{
+				NetworkRef:   "net-a",
+				Destinations: &metav1.LabelSelector{MatchLabels: map[string]string{"type": "gw"}},
+				NodeSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"rack": "a"}},
+			}},
+		},
+		Nodes: []corev1.Node{
+			{ObjectMeta: metav1.ObjectMeta{Name: "node-a1", Labels: map[string]string{"rack": "a"}}},
+			{ObjectMeta: metav1.ObjectMeta{Name: "node-a2", Labels: map[string]string{"rack": "a"}}},
+			{ObjectMeta: metav1.ObjectMeta{Name: "node-b1", Labels: map[string]string{"rack": "b"}}},
 		},
 		Inbounds: []nc.Inbound{
 			{ObjectMeta: metav1.ObjectMeta{Name: "ib-gw"}, Spec: nc.InboundSpec{
@@ -119,7 +130,7 @@ func TestBGPPeeringLocalIPs(t *testing.T) {
 		Mode: nc.BGPPeeringModeListenRange,
 		Ref:  nc.BGPPeeringRef{AttachmentRef: ptrStr("l2a-gw")},
 	}}
-	if got, want := d.BGPPeeringLocalIPs(dual), []string{"10.0.0.1/24", "2001:db8::1/64"}; !reflect.DeepEqual(got, want) {
+	if got, want := d.BGPPeeringLocalIPs(dual), []string{"10.0.0.1", "2001:db8::1"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("dual-stack localIPs = %v, want %v", got, want)
 	}
 
@@ -128,7 +139,7 @@ func TestBGPPeeringLocalIPs(t *testing.T) {
 		Mode: nc.BGPPeeringModeListenRange,
 		Ref:  nc.BGPPeeringRef{AttachmentRef: ptrStr("l2a-v4")},
 	}}
-	if got, want := d.BGPPeeringLocalIPs(v4), []string{"10.1.0.1/24"}; !reflect.DeepEqual(got, want) {
+	if got, want := d.BGPPeeringLocalIPs(v4), []string{"10.1.0.1"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("v4-only localIPs = %v, want %v", got, want)
 	}
 
@@ -148,5 +159,45 @@ func TestBGPPeeringLocalIPs(t *testing.T) {
 	}}
 	if got := d.BGPPeeringLocalIPs(none); got != nil {
 		t.Errorf("unknown attachment localIPs = %v, want nil", got)
+	}
+}
+
+func TestBGPPeeringNodes(t *testing.T) {
+	d := testData()
+
+	// listenRange with a node-scoped L2A → only the matching nodes.
+	scoped := &nc.BGPPeering{Spec: nc.BGPPeeringSpec{
+		Mode: nc.BGPPeeringModeListenRange,
+		Ref:  nc.BGPPeeringRef{AttachmentRef: ptrStr("l2a-sel")},
+	}}
+	if got, want := d.BGPPeeringNodes(scoped), []string{"node-a1", "node-a2"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("scoped nodes = %v, want %v", got, want)
+	}
+
+	// listenRange with no NodeSelector → all nodes.
+	all := &nc.BGPPeering{Spec: nc.BGPPeeringSpec{
+		Mode: nc.BGPPeeringModeListenRange,
+		Ref:  nc.BGPPeeringRef{AttachmentRef: ptrStr("l2a-gw")},
+	}}
+	if got, want := d.BGPPeeringNodes(all), []string{"node-a1", "node-a2", "node-b1"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("all nodes = %v, want %v", got, want)
+	}
+
+	// loopbackPeer is node-independent → all nodes.
+	loop := &nc.BGPPeering{Spec: nc.BGPPeeringSpec{
+		Mode: nc.BGPPeeringModeLoopbackPeer,
+		Ref:  nc.BGPPeeringRef{InboundRefs: []string{"ib-gw"}},
+	}}
+	if got, want := d.BGPPeeringNodes(loop), []string{"node-a1", "node-a2", "node-b1"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("loopbackPeer nodes = %v, want %v", got, want)
+	}
+
+	// unresolvable attachment → nil.
+	none := &nc.BGPPeering{Spec: nc.BGPPeeringSpec{
+		Mode: nc.BGPPeeringModeListenRange,
+		Ref:  nc.BGPPeeringRef{AttachmentRef: ptrStr("nope")},
+	}}
+	if got := d.BGPPeeringNodes(none); got != nil {
+		t.Errorf("unknown attachment nodes = %v, want nil", got)
 	}
 }

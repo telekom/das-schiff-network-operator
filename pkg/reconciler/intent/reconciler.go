@@ -195,7 +195,7 @@ func (r *Reconciler) ReconcileDebounced(ctx context.Context) error {
 			Message: issue.Message,
 		}
 	}
-	if err := r.statusUpdater.UpdateConditions(timeoutCtx, fetched, resolved, issuesMap, r.clusterLocalASN(timeoutCtx)); err != nil {
+	if err := r.statusUpdater.UpdateConditions(timeoutCtx, fetched, resolved, issuesMap, r.nodeLocalASNs(timeoutCtx)); err != nil {
 		r.logger.Error(err, "status condition update failed")
 	}
 
@@ -203,24 +203,25 @@ func (r *Reconciler) ReconcileDebounced(ctx context.Context) error {
 	return nil
 }
 
-// clusterLocalASN returns the local (platform-side) BGP AS number observed
-// across the cluster. Node agents surface their base-config localASN onto
-// NodeNetworkConfig.status.asNumber; the ASN is uniform cluster-wide, so the
-// first non-zero value found is representative. Returns 0 when no node has
-// reported an ASN yet (e.g. before the first agent reconcile), in which case
-// consumers leave the field unset.
-func (r *Reconciler) clusterLocalASN(ctx context.Context) int64 {
+// nodeLocalASNs returns a map of node name → local (platform-side) BGP AS
+// number, as reported by each node's agent on NodeNetworkConfig.status.asNumber
+// (the NNC object name is the node name). Nodes that have not reported an ASN
+// yet (value 0) are omitted. The map lets the status updater resolve the ASN
+// per BGPPeering from only the nodes that peering actually lands on, and fail
+// closed when those nodes disagree.
+func (r *Reconciler) nodeLocalASNs(ctx context.Context) map[string]int64 {
 	nncList := &networkv1alpha1.NodeNetworkConfigList{}
 	if err := r.client.List(ctx, nncList); err != nil {
-		r.logger.Error(err, "unable to list NodeNetworkConfigs for cluster ASN")
-		return 0
+		r.logger.Error(err, "unable to list NodeNetworkConfigs for local ASN")
+		return nil
 	}
+	asns := make(map[string]int64, len(nncList.Items))
 	for i := range nncList.Items {
 		if asn := nncList.Items[i].Status.ASNumber; asn != 0 {
-			return asn
+			asns[nncList.Items[i].Name] = asn
 		}
 	}
-	return 0
+	return asns
 }
 
 // applyNodeConfigs assembles each node's contributions and applies the resulting
