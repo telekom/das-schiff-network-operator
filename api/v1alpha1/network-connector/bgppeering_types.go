@@ -168,6 +168,13 @@ type BGPPeeringStatus struct {
 	// NeighborASNumber is the AS number of the remote peer (observed).
 	NeighborASNumber *int64 `json:"neighborASNumber,omitempty"`
 
+	// LocalIPs lists the local peering IP addresses on the platform side.
+	// For listenRange mode these are the IRB anycast gateway addresses (bare
+	// IPs, no prefix) the node listens on, derived from the referenced
+	// Layer2Attachment's Network (one per address family).
+	// +optional
+	LocalIPs []string `json:"localIPs,omitempty"`
+
 	// WorkloadASNumber is the AS number assigned to the workload (observed; mirrors spec.workloadAS).
 	WorkloadASNumber *int64 `json:"workloadASNumber,omitempty"`
 

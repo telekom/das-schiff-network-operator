@@ -61,6 +61,12 @@ type ReconcilerOptions struct {
 	// configs can be partially applied. Set to false for agents like VSR where
 	// invalid configs cannot be committed.
 	RestoreOnReconcileFailure bool
+
+	// LocalASN is the local (platform-side) BGP autonomous system number the
+	// agent is configured with (base config localASN). It is surfaced onto the
+	// node's NodeNetworkConfig.status.asNumber so the operator can report the
+	// server ASN on BGPPeering status. Zero means unset (nothing is surfaced).
+	LocalASN int
 }
 
 // NodeNetworkConfigReconciler handles the common reconciliation logic for NodeNetworkConfig.
@@ -72,6 +78,7 @@ type NodeNetworkConfigReconciler struct {
 	NodeNetworkConfig         *v1alpha1.NodeNetworkConfig
 	NodeNetworkConfigPath     string
 	restoreOnReconcileFailure bool
+	localASN                  int64
 }
 
 // NewNodeNetworkConfigReconciler creates a new NodeNetworkConfigReconciler.
@@ -88,6 +95,7 @@ func NewNodeNetworkConfigReconciler(
 		configApplier:             configApplier,
 		NodeNetworkConfigPath:     nodeNetworkConfigPath,
 		restoreOnReconcileFailure: opts.RestoreOnReconcileFailure,
+		localASN:                  int64(opts.LocalASN),
 	}
 
 	nc, err := healthcheck.LoadConfig(healthcheck.NetHealthcheckFile)
@@ -125,6 +133,15 @@ func (r *NodeNetworkConfigReconciler) Reconcile(ctx context.Context) (ctrl.Resul
 		return ctrl.Result{}, err
 	}
 
+	// Surface the agent's local (platform-side) ASN onto the node's status so
+	// the operator can report the server ASN on BGPPeering status. This is done
+	// in-band with the existing status writes below (no separate API call) so it
+	// can never block config provisioning. asnNeedsWrite forces a status write in
+	// the already-provisioned fast path when the stored ASN is out of date (e.g.
+	// first run after upgrade, or a cleared value when localASN is unset).
+	asnNeedsWrite := cfg.Status.ASNumber != r.localASN
+	cfg.Status.ASNumber = r.localASN
+
 	if r.NodeNetworkConfig != nil && r.NodeNetworkConfig.Spec.Revision == cfg.Spec.Revision {
 		// replace in-memory working NodeNetworkConfig and store it on the disk
 		if err := r.storeConfig(cfg, r.NodeNetworkConfigPath); err != nil {
@@ -133,7 +150,7 @@ func (r *NodeNetworkConfigReconciler) Reconcile(ctx context.Context) (ctrl.Resul
 
 		// current in-memory config has the same revision as the fetched one
 		// this means that NodeNetworkConfig was already provisioned - skip
-		if cfg.Status.ConfigStatus != operator.StatusProvisioned {
+		if cfg.Status.ConfigStatus != operator.StatusProvisioned || asnNeedsWrite {
 			if err := SetStatus(ctx, r.client, cfg, operator.StatusProvisioned, r.logger); err != nil {
 				return ctrl.Result{}, fmt.Errorf("error setting NodeNetworkConfig status: %w", err)
 			}

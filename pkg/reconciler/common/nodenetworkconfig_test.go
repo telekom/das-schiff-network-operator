@@ -101,6 +101,7 @@ func newMockReconciler(
 		healthChecker:             mockHealthChecker,
 		NodeNetworkConfigPath:     configPath,
 		restoreOnReconcileFailure: opts.RestoreOnReconcileFailure,
+		localASN:                  int64(opts.LocalASN),
 	}
 
 	return &mockReconciler{
@@ -272,6 +273,51 @@ var _ = Describe("NodeNetworkConfigReconciler", func() {
 			err := SetStatus(context.Background(), fakeClient, cfg, operator.StatusProvisioned, logger)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(cfg.Status.ErrorMessage).To(BeEmpty())
+		})
+	})
+
+	Context("Reconcile surfaces local ASN on status", func() {
+		It("writes status.asNumber in-band with the provisioned status (fast path)", func() {
+			cfg := createTestNodeNetworkConfig("1")
+			cfg.Status.ConfigStatus = operator.StatusProvisioned
+			fakeClient = fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithRuntimeObjects(cfg).
+				WithStatusSubresource(cfg).
+				Build()
+
+			r := newMockReconciler(mockCtrl, fakeClient, configPath, ReconcilerOptions{LocalASN: 64497})
+			r.NodeNetworkConfig = createTestNodeNetworkConfig("1") // same revision → fast path
+			r.mockHealthChecker.EXPECT().TaintsRemoved().Return(true)
+
+			_, err := r.Reconcile(context.Background())
+			Expect(err).ToNot(HaveOccurred())
+
+			fetched := &v1alpha1.NodeNetworkConfig{}
+			Expect(fakeClient.Get(context.Background(), client.ObjectKeyFromObject(cfg), fetched)).To(Succeed())
+			Expect(fetched.Status.ASNumber).To(Equal(int64(64497)))
+		})
+
+		It("clears a stale ASN when the agent has none configured (fail closed)", func() {
+			cfg := createTestNodeNetworkConfig("1")
+			cfg.Status.ConfigStatus = operator.StatusProvisioned
+			cfg.Status.ASNumber = 64497
+			fakeClient = fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithRuntimeObjects(cfg).
+				WithStatusSubresource(cfg).
+				Build()
+
+			r := newMockReconciler(mockCtrl, fakeClient, configPath, ReconcilerOptions{LocalASN: 0})
+			r.NodeNetworkConfig = createTestNodeNetworkConfig("1")
+			r.mockHealthChecker.EXPECT().TaintsRemoved().Return(true)
+
+			_, err := r.Reconcile(context.Background())
+			Expect(err).ToNot(HaveOccurred())
+
+			fetched := &v1alpha1.NodeNetworkConfig{}
+			Expect(fakeClient.Get(context.Background(), client.ObjectKeyFromObject(cfg), fetched)).To(Succeed())
+			Expect(fetched.Status.ASNumber).To(BeZero())
 		})
 	})
 

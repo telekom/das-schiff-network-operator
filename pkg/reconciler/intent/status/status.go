@@ -113,8 +113,11 @@ func (u *Updater) statusUpdateWithRetry(ctx context.Context, obj client.Object, 
 
 // UpdateConditions sets Ready/Resolved conditions on intent CRDs. The issues
 // map (keyed by IssueKey(kind, namespace, name)) carries per-resource build failures so
-// resources skipped during the build phase surface Ready=False.
-func (u *Updater) UpdateConditions(ctx context.Context, fetched *resolver.FetchedResources, resolved *resolver.ResolvedData, issues map[string]ResourceIssue) error {
+// resources skipped during the build phase surface Ready=False. nodeASNs maps
+// node name → local (platform-side) BGP AS number observed from that node's
+// agent; it is used to resolve BGPPeering.status.asNumber from only the nodes
+// each peering lands on.
+func (u *Updater) UpdateConditions(ctx context.Context, fetched *resolver.FetchedResources, resolved *resolver.ResolvedData, issues map[string]ResourceIssue, nodeASNs map[string]int64) error {
 	if err := u.updateVRFConditions(ctx, fetched); err != nil {
 		return fmt.Errorf("VRF conditions: %w", err)
 	}
@@ -145,7 +148,7 @@ func (u *Updater) UpdateConditions(ctx context.Context, fetched *resolver.Fetche
 	if err := u.updateNodeAttachmentConditions(ctx, fetched, resolved, issues); err != nil {
 		return fmt.Errorf("nodeAttachment conditions: %w", err)
 	}
-	if err := u.updateBGPPeeringConditions(ctx, fetched, resolved, issues); err != nil {
+	if err := u.updateBGPPeeringConditions(ctx, fetched, resolved, issues, nodeASNs); err != nil {
 		return fmt.Errorf("bgpPeering conditions: %w", err)
 	}
 	return nil
@@ -425,7 +428,7 @@ func (u *Updater) updateNodeAttachmentConditions(ctx context.Context, fetched *r
 	return nil
 }
 
-func (u *Updater) updateBGPPeeringConditions(ctx context.Context, fetched *resolver.FetchedResources, resolved *resolver.ResolvedData, issues map[string]ResourceIssue) error {
+func (u *Updater) updateBGPPeeringConditions(ctx context.Context, fetched *resolver.FetchedResources, resolved *resolver.ResolvedData, issues map[string]ResourceIssue, nodeASNs map[string]int64) error {
 	for i := range fetched.BGPPeerings {
 		bp := &fetched.BGPPeerings[i]
 		resolvedStatus, resolvedReason, resolvedMsg := checkBGPPeeringRefs(bp, resolved)
@@ -439,19 +442,58 @@ func (u *Updater) updateBGPPeeringConditions(ctx context.Context, fetched *resol
 		readyStatus, readyReason, readyMsg = applyBuildIssue(issues, "BGPPeering", bp.Namespace, bp.Name, readyStatus, readyReason, readyMsg)
 
 		vrfs := resolved.BGPPeeringVRFRefs(bp)
+		localIPs := resolved.BGPPeeringLocalIPs(bp)
+
+		// asNumber is the platform-side (server) ASN, observed from the nodes
+		// this peering actually lands on (its L2A's NodeSelector for listenRange,
+		// all nodes for loopbackPeer). Fail closed: if those nodes disagree, leave
+		// it unset rather than surfacing an arbitrary value.
+		asNumber := u.bgpPeeringASNumber(bp, resolved, nodeASNs)
 
 		if err := u.statusUpdateWithRetry(ctx, bp, func(obj client.Object) {
 			b := obj.(*nc.BGPPeering)
 			setCondition(&b.Status.Conditions, nc.ConditionTypeResolved, resolvedStatus, resolvedReason, resolvedMsg, b.Generation)
 			setCondition(&b.Status.Conditions, nc.ConditionTypeReady, readyStatus, readyReason, readyMsg, b.Generation)
 			b.Status.WorkloadASNumber = b.Spec.WorkloadAS
+			b.Status.ASNumber = asNumber
 			b.Status.VRFs = vrfs
+			b.Status.LocalIPs = localIPs
 			b.Status.ObservedGeneration = b.Generation
 		}); err != nil {
 			return fmt.Errorf("updating BGPPeering %q status: %w", bp.Name, err)
 		}
 	}
 	return nil
+}
+
+// bgpPeeringASNumber resolves the platform-side ASN for a BGPPeering from the
+// nodes it lands on. It returns nil (leave status unset) when no relevant node
+// has reported an ASN, or — failing closed — when the relevant nodes report
+// differing ASNs.
+func (u *Updater) bgpPeeringASNumber(bp *nc.BGPPeering, resolved *resolver.ResolvedData, nodeASNs map[string]int64) *int64 {
+	if len(nodeASNs) == 0 {
+		return nil
+	}
+	var asn int64
+	for _, node := range resolved.BGPPeeringNodes(bp) {
+		v, ok := nodeASNs[node]
+		if !ok || v == 0 {
+			continue
+		}
+		if asn == 0 {
+			asn = v
+			continue
+		}
+		if v != asn {
+			u.logger.Info("nodes report differing local ASNs for BGPPeering; leaving asNumber unset",
+				"bgppeering", bp.Name, "asn", asn, "conflictingASN", v, "node", node)
+			return nil
+		}
+	}
+	if asn == 0 {
+		return nil
+	}
+	return &asn
 }
 
 // checkBGPPeeringRefs validates, for status reporting, that the references

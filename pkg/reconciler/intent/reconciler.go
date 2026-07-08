@@ -195,12 +195,33 @@ func (r *Reconciler) ReconcileDebounced(ctx context.Context) error {
 			Message: issue.Message,
 		}
 	}
-	if err := r.statusUpdater.UpdateConditions(timeoutCtx, fetched, resolved, issuesMap); err != nil {
+	if err := r.statusUpdater.UpdateConditions(timeoutCtx, fetched, resolved, issuesMap, r.nodeLocalASNs(timeoutCtx)); err != nil {
 		r.logger.Error(err, "status condition update failed")
 	}
 
 	r.logger.Info("intent reconciliation complete")
 	return nil
+}
+
+// nodeLocalASNs returns a map of node name → local (platform-side) BGP AS
+// number, as reported by each node's agent on NodeNetworkConfig.status.asNumber
+// (the NNC object name is the node name). Nodes that have not reported an ASN
+// yet (value 0) are omitted. The map lets the status updater resolve the ASN
+// per BGPPeering from only the nodes that peering actually lands on, and fail
+// closed when those nodes disagree.
+func (r *Reconciler) nodeLocalASNs(ctx context.Context) map[string]int64 {
+	nncList := &networkv1alpha1.NodeNetworkConfigList{}
+	if err := r.client.List(ctx, nncList); err != nil {
+		r.logger.Error(err, "unable to list NodeNetworkConfigs for local ASN")
+		return nil
+	}
+	asns := make(map[string]int64, len(nncList.Items))
+	for i := range nncList.Items {
+		if asn := nncList.Items[i].Status.ASNumber; asn != 0 {
+			asns[nncList.Items[i].Name] = asn
+		}
+	}
+	return asns
 }
 
 // applyNodeConfigs assembles each node's contributions and applies the resulting

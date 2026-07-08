@@ -440,6 +440,11 @@ func (in *BGPPeeringStatus) DeepCopyInto(out *BGPPeeringStatus) {
 		*out = new(int64)
 		**out = **in
 	}
+	if in.LocalIPs != nil {
+		in, out := &in.LocalIPs, &out.LocalIPs
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	if in.WorkloadASNumber != nil {
 		in, out := &in.WorkloadASNumber, &out.WorkloadASNumber
 		*out = new(int64)

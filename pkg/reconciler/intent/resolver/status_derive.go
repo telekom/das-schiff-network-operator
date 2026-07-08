@@ -23,6 +23,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
+	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/ipmath"
 )
 
 // NetworkCIDRs returns the IPv4 and IPv6 CIDRs of the Network referenced by
@@ -111,6 +112,96 @@ func (d *ResolvedData) BGPPeeringVRFRefs(bp *nc.BGPPeering) []string {
 		}
 	}
 	return sortedStringSet(set)
+}
+
+// BGPPeeringLocalIPs returns the local peering IP addresses for a BGPPeering.
+// For listenRange mode these are the IRB anycast gateway addresses the node
+// listens on: the first usable host of the referenced Layer2Attachment's
+// Network CIDR, one per address family, as bare IPs (no prefix). This is the
+// same gateway the L2A builder installs as IRB.IPAddresses (which keeps the
+// prefix). Returns nil for other modes or when the attachment/Network cannot be
+// resolved.
+func (d *ResolvedData) BGPPeeringLocalIPs(bp *nc.BGPPeering) []string {
+	if bp.Spec.Mode != nc.BGPPeeringModeListenRange || bp.Spec.Ref.AttachmentRef == nil {
+		return nil
+	}
+
+	var l2a *nc.Layer2Attachment
+	for i := range d.Layer2Attachments {
+		if d.Layer2Attachments[i].Name == *bp.Spec.Ref.AttachmentRef {
+			l2a = &d.Layer2Attachments[i]
+			break
+		}
+	}
+	if l2a == nil {
+		return nil
+	}
+
+	net, ok := d.Networks[l2a.Spec.NetworkRef]
+	if !ok {
+		return nil
+	}
+
+	var ips []string
+	if net.Spec.IPv4 != nil && net.Spec.IPv4.CIDR != "" {
+		if ip, _ := ipmath.ParseCIDRParts(net.Spec.IPv4.CIDR); ip != "" {
+			ips = append(ips, ip)
+		}
+	}
+	if net.Spec.IPv6 != nil && net.Spec.IPv6.CIDR != "" {
+		if ip, _ := ipmath.ParseCIDRParts(net.Spec.IPv6.CIDR); ip != "" {
+			ips = append(ips, ip)
+		}
+	}
+	return ips
+}
+
+// BGPPeeringNodes returns the names of the nodes a BGPPeering's configuration
+// lands on. In listenRange mode these are the nodes selected by the referenced
+// Layer2Attachment's NodeSelector (all nodes when the L2A has no selector). In
+// loopbackPeer mode the peering is node-independent (ClusterVRF), so all nodes
+// apply. Returns nil when the referenced Layer2Attachment cannot be resolved.
+func (d *ResolvedData) BGPPeeringNodes(bp *nc.BGPPeering) []string {
+	var selector *metav1.LabelSelector
+	if bp.Spec.Mode == nc.BGPPeeringModeListenRange {
+		if bp.Spec.Ref.AttachmentRef == nil {
+			return nil
+		}
+		var l2a *nc.Layer2Attachment
+		for i := range d.Layer2Attachments {
+			if d.Layer2Attachments[i].Name == *bp.Spec.Ref.AttachmentRef {
+				l2a = &d.Layer2Attachments[i]
+				break
+			}
+		}
+		if l2a == nil {
+			return nil
+		}
+		selector = l2a.Spec.NodeSelector
+	}
+	// loopbackPeer (and listenRange with a nil NodeSelector) applies to all nodes.
+	return d.matchNodeNames(selector)
+}
+
+// matchNodeNames returns the names of nodes matching selector. A nil selector
+// matches all nodes (mirrors the builder's matchNodes; note that
+// LabelSelectorAsSelector(nil) matches nothing, which is not what we want here).
+func (d *ResolvedData) matchNodeNames(selector *metav1.LabelSelector) []string {
+	sel := labels.Everything()
+	if selector != nil {
+		var err error
+		sel, err = metav1.LabelSelectorAsSelector(selector)
+		if err != nil {
+			return nil
+		}
+	}
+	var names []string
+	for i := range d.Nodes {
+		if sel.Matches(labels.Set(d.Nodes[i].Labels)) {
+			names = append(names, d.Nodes[i].Name)
+		}
+	}
+	return names
 }
 
 // sortedStringSet returns the keys of set as a sorted slice, or nil when empty

@@ -214,6 +214,7 @@ func NewNodeNetworkConfigReconciler(
 		nodeNetworkConfigPath,
 		common.ReconcilerOptions{
 			RestoreOnReconcileFailure: true, // FRR can partially apply invalid configs
+			LocalASN:                  baseConfig.LocalASN,
 		},
 	)
 	if err != nil {
