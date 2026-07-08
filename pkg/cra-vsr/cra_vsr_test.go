@@ -497,8 +497,9 @@ var _ = Describe("CRA-VSR", func() {
 
 		// Configure a dedicated management interface; PBR and node-IP static
 		// routes must use it instead of the trunk interface.
+		prevMgmtInterface := manager.baseConfig.MgmtInterfaceName
 		manager.baseConfig.MgmtInterfaceName = "oam0"
-		defer func() { manager.baseConfig.MgmtInterfaceName = "" }()
+		defer func() { manager.baseConfig.MgmtInterfaceName = prevMgmtInterface }()
 
 		generated, err := manager.makeVRouter(&nodeConfig.Spec)
 		Expect(err).ToNot(HaveOccurred())
@@ -526,7 +527,10 @@ var _ = Describe("CRA-VSR", func() {
 		Expect(nodeRoute.NextHops[0].NextHop).To(Equal("oam0"))
 	})
 	It("Falls back to the trunk interface when no management interface is set", func() {
-		Expect(manager.baseConfig.MgmtInterfaceName).To(BeEmpty())
+		prevMgmtInterface := manager.baseConfig.MgmtInterfaceName
+		manager.baseConfig.MgmtInterfaceName = ""
+		defer func() { manager.baseConfig.MgmtInterfaceName = prevMgmtInterface }()
+
 		Expect(manager.baseConfig.MgmtInterface()).To(Equal(manager.baseConfig.TrunkInterfaceName))
 	})
 })
