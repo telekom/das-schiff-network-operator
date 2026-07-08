@@ -323,7 +323,7 @@ func (l *LayerBGP) setupPolicyRoute(i int, conf v1alpha1.PolicyRoute) error {
 	// for IPv6 it sets flowi6_iif to the cluster VRF device; matching the trunk
 	// there would cause the subsequent table lookup to repeat the same lookup,
 	// resulting in circular routing.
-	match.Interface = &l.mgr.baseConfig.TrunkInterfaceName
+	match.Interface = types.ToPtr(l.mgr.baseConfig.MgmtInterface())
 	if match.ipVersion() == IPv6 {
 		match.Interface = &l.mgr.baseConfig.ClusterVRF.Name
 	}
@@ -836,7 +836,7 @@ func (l *LayerBGP) setupClusterVRF() error {
 			Destination: *neigh.IP + mask,
 			NextHops: []NextHop{
 				{
-					NextHop: baseCfg.TrunkInterfaceName,
+					NextHop: baseCfg.MgmtInterface(),
 				},
 			},
 		})

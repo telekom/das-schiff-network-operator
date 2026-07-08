@@ -464,4 +464,96 @@ var _ = Describe("CRA-VSR", func() {
 
 		Expect(generatedXML).To(MatchXML(expectedXML))
 	})
+	It("Uses the management interface for PBR and node-IP static routes", func() {
+		scheme := runtime.NewScheme()
+		utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+		utilruntime.Must(v1alpha1.AddToScheme(scheme))
+
+		client := fake.NewClientBuilder().
+			WithScheme(scheme).
+			Build()
+
+		reconciler, err := operator.NewNodeConfigReconciler(
+			client, logr.Logger{}, 3, 3, 3, scheme, 3, operator.ImportModeImport)
+		Expect(err).ToNot(HaveOccurred())
+
+		node := &corev1.Node{}
+		node.Name = "server1"
+
+		nodeConfig, err := reconciler.CreateNodeNetworkConfig(context.Background(), node, revision)
+		Expect(err).ToNot(HaveOccurred())
+
+		nodeConfig.Spec.ClusterVRF.PolicyRoutes = []v1alpha1.PolicyRoute{
+			{
+				TrafficMatch: v1alpha1.TrafficMatch{
+					SrcPrefix: types.ToPtr("1.1.1.0/24"),
+					DstPrefix: types.ToPtr("2.2.2.3"),
+				},
+				NextHop: v1alpha1.NextHop{
+					Vrf: types.ToPtr("mgmt"),
+				},
+			},
+		}
+
+		// Configure a dedicated management interface; PBR and node-IP static
+		// routes must use it instead of the trunk interface.
+		manager.baseConfig.MgmtInterfaceName = "oam0"
+		defer func() { manager.baseConfig.MgmtInterfaceName = "" }()
+
+		generated, err := manager.makeVRouter(&nodeConfig.Spec)
+		Expect(err).ToNot(HaveOccurred())
+
+		ns := findNamespace(generated, manager.WorkNSName)
+		Expect(ns).ToNot(BeNil())
+
+		// IPv4 PBR rule must match on the management interface.
+		Expect(ns.Routing).ToNot(BeNil())
+		Expect(ns.Routing.PBR).ToNot(BeNil())
+		Expect(ns.Routing.PBR.IPv4).ToNot(BeEmpty())
+		Expect(ns.Routing.PBR.IPv4[0].Match).ToNot(BeNil())
+		Expect(ns.Routing.PBR.IPv4[0].Match.Interface).ToNot(BeNil())
+		Expect(*ns.Routing.PBR.IPv4[0].Match.Interface).To(Equal("oam0"))
+
+		// Static route to the cluster node IP must egress via the mgmt interface.
+		clusterVRF := findVRFByName(ns, "cluster")
+		Expect(clusterVRF).ToNot(BeNil())
+		Expect(clusterVRF.Routing).ToNot(BeNil())
+		Expect(clusterVRF.Routing.Static).ToNot(BeNil())
+
+		nodeRoute := findStaticRoute(clusterVRF.Routing.Static.IPv4, "10.100.0.10/32")
+		Expect(nodeRoute).ToNot(BeNil())
+		Expect(nodeRoute.NextHops).ToNot(BeEmpty())
+		Expect(nodeRoute.NextHops[0].NextHop).To(Equal("oam0"))
+	})
+	It("Falls back to the trunk interface when no management interface is set", func() {
+		Expect(manager.baseConfig.MgmtInterfaceName).To(BeEmpty())
+		Expect(manager.baseConfig.MgmtInterface()).To(Equal(manager.baseConfig.TrunkInterfaceName))
+	})
 })
+
+func findNamespace(v *VRouter, name string) *Namespace {
+	for i := range v.Namespaces {
+		if v.Namespaces[i].Name == name {
+			return &v.Namespaces[i]
+		}
+	}
+	return nil
+}
+
+func findVRFByName(ns *Namespace, name string) *VRF {
+	for i := range ns.VRFs {
+		if ns.VRFs[i].Name == name {
+			return &ns.VRFs[i]
+		}
+	}
+	return nil
+}
+
+func findStaticRoute(routes []StaticRoute, destination string) *StaticRoute {
+	for i := range routes {
+		if routes[i].Destination == destination {
+			return &routes[i]
+		}
+	}
+	return nil
+}
