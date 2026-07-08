@@ -11,12 +11,22 @@ import (
 type BaseConfig struct {
 	VTEPLoopbackIP     string     `yaml:"vtepLoopbackIP"`
 	TrunkInterfaceName string     `yaml:"trunkInterfaceName"`
+	MgmtInterfaceName  string     `yaml:"mgmtInterfaceName"`
 	ExportCIDRs        []string   `yaml:"exportCIDRs"`
 	ManagementVRF      BaseVRF    `yaml:"managementVRF"`
 	ClusterVRF         BaseVRF    `yaml:"clusterVRF"`
 	LocalASN           int        `yaml:"localASN"`
 	UnderlayNeighbors  []Neighbor `yaml:"underlayNeighbors"`
 	ClusterNeighbors   []Neighbor `yaml:"clusterNeighbors"`
+}
+
+// MgmtInterface returns the management interface name, falling back to the
+// trunk interface when no dedicated management interface is configured.
+func (c *BaseConfig) MgmtInterface() string {
+	if c.MgmtInterfaceName != "" {
+		return c.MgmtInterfaceName
+	}
+	return c.TrunkInterfaceName
 }
 
 type BaseVRF struct {

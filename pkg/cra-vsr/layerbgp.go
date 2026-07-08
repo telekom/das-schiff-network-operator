@@ -319,11 +319,12 @@ func (l *LayerBGP) setupPolicyRoute(i int, conf v1alpha1.PolicyRoute) error {
 	}
 
 	// Select the inbound (source) interface based on the rule's address family.
-	// For IPv4 the kernel's receive path matches on the trunk interface, while
-	// for IPv6 it sets flowi6_iif to the cluster VRF device; matching the trunk
-	// there would cause the subsequent table lookup to repeat the same lookup,
-	// resulting in circular routing.
-	match.Interface = &l.mgr.baseConfig.TrunkInterfaceName
+	// For IPv4 the kernel's receive path matches on the management interface
+	// (which falls back to the trunk interface when unset), while for IPv6 it
+	// sets flowi6_iif to the cluster VRF device; matching the management
+	// interface there would cause the subsequent table lookup to repeat the
+	// same lookup, resulting in circular routing.
+	match.Interface = types.ToPtr(l.mgr.baseConfig.MgmtInterface())
 	if match.ipVersion() == IPv6 {
 		match.Interface = &l.mgr.baseConfig.ClusterVRF.Name
 	}
@@ -836,7 +837,7 @@ func (l *LayerBGP) setupClusterVRF() error {
 			Destination: *neigh.IP + mask,
 			NextHops: []NextHop{
 				{
-					NextHop: baseCfg.TrunkInterfaceName,
+					NextHop: baseCfg.MgmtInterface(),
 				},
 			},
 		})

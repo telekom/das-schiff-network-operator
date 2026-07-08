@@ -272,7 +272,7 @@ func setRuleFamily(rule *netlink.Rule) {
 		rule.IifName = baseConfig.ClusterVRF.Name
 	} else {
 		rule.Family = unix.AF_INET
-		rule.IifName = baseConfig.TrunkInterfaceName
+		rule.IifName = baseConfig.MgmtInterface()
 	}
 }
 
