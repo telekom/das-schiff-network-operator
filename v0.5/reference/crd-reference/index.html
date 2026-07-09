@@ -1,0 +1,5305 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Auto-generated field reference for the network-connector.sylvaproject.org/v1alpha1 API group. Do not edit by hand; run `make docs-api`.">
+      
+      
+        <meta name="author" content="Deutsche Telekom AG">
+      
+      
+      
+        <link rel="prev" href="../../guides/traffic-mirroring/">
+      
+      
+        <link rel="next" href="../metrics/">
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.5.44">
+    
+    
+      
+        <title>CRD Reference - Das Schiff Network Operator</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.0253249f.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/telekom.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#crd-reference" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Das Schiff Network Operator" class="md-header__button md-logo" aria-label="Das Schiff Network Operator" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Das Schiff Network Operator
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              CRD Reference
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      <label class="md-header__button md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+      </label>
+      <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/telekom/das-schiff-network-operator" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.6.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8M97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    telekom/das-schiff-network-operator
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../getting-started/concepts/" class="md-tabs__link">
+          
+  
+  Getting Started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../guides/inbound/" class="md-tabs__link">
+          
+  
+  Guides
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="./" class="md-tabs__link">
+          
+  
+  Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../advanced/debugging/" class="md-tabs__link">
+          
+  
+  Advanced
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../design/intent-based-config/" class="md-tabs__link">
+          
+  
+  Design
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Das Schiff Network Operator" class="md-nav__button md-logo" aria-label="Das Schiff Network Operator" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Das Schiff Network Operator
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/telekom/das-schiff-network-operator" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.6.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8M97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    telekom/das-schiff-network-operator
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Home
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Getting Started
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            Getting Started
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/concepts/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Concepts
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/installation/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Installation
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/quick-start/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Quick Start
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Guides
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            Guides
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/inbound/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Inbound (ingress LBs)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/outbound/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Outbound (egress / SNAT)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/layer2-attachment/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer2Attachment (L2A)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/bgp-peering/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    BGPPeering
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/pod-network/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    PodNetwork
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/traffic-mirroring/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Traffic Mirroring
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  <span class="md-ellipsis">
+    Reference
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            Reference
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    CRD Reference
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  <span class="md-ellipsis">
+    CRD Reference
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#packages" class="md-nav__link">
+    <span class="md-ellipsis">
+      Packages
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#network-connectorsylvaprojectorgv1alpha1" class="md-nav__link">
+    <span class="md-ellipsis">
+      network-connector.sylvaproject.org/v1alpha1
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="network-connector.sylvaproject.org/v1alpha1">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#resource-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      Resource Types
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Resource Types">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#addressallocation" class="md-nav__link">
+    <span class="md-ellipsis">
+      AddressAllocation
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#advertisementconfig" class="md-nav__link">
+    <span class="md-ellipsis">
+      AdvertisementConfig
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#aggregateconfig" class="md-nav__link">
+    <span class="md-ellipsis">
+      AggregateConfig
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#announcementpolicy" class="md-nav__link">
+    <span class="md-ellipsis">
+      AnnouncementPolicy
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#announcementpolicyspec" class="md-nav__link">
+    <span class="md-ellipsis">
+      AnnouncementPolicySpec
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#announcementpolicystatus" class="md-nav__link">
+    <span class="md-ellipsis">
+      AnnouncementPolicyStatus
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#anycaststatus" class="md-nav__link">
+    <span class="md-ellipsis">
+      AnycastStatus
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bfdprofile" class="md-nav__link">
+    <span class="md-ellipsis">
+      BFDProfile
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bgpaddressfamily" class="md-nav__link">
+    <span class="md-ellipsis">
+      BGPAddressFamily
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bgppeering" class="md-nav__link">
+    <span class="md-ellipsis">
+      BGPPeering
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bgppeeringexport" class="md-nav__link">
+    <span class="md-ellipsis">
+      BGPPeeringExport
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bgppeeringmode" class="md-nav__link">
+    <span class="md-ellipsis">
+      BGPPeeringMode
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bgppeeringref" class="md-nav__link">
+    <span class="md-ellipsis">
+      BGPPeeringRef
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bgppeeringspec" class="md-nav__link">
+    <span class="md-ellipsis">
+      BGPPeeringSpec
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bgppeeringstatus" class="md-nav__link">
+    <span class="md-ellipsis">
+      BGPPeeringStatus
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bondconfig" class="md-nav__link">
+    <span class="md-ellipsis">
+      BondConfig
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bondparameters" class="md-nav__link">
+    <span class="md-ellipsis">
+      BondParameters
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#collector" class="md-nav__link">
+    <span class="md-ellipsis">
+      Collector
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#collectorspec" class="md-nav__link">
+    <span class="md-ellipsis">
+      CollectorSpec
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#collectorstatus" class="md-nav__link">
+    <span class="md-ellipsis">
+      CollectorStatus
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#destination" class="md-nav__link">
+    <span class="md-ellipsis">
+      Destination
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#destinationport" class="md-nav__link">
+    <span class="md-ellipsis">
+      DestinationPort
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#destinationspec" class="md-nav__link">
+    <span class="md-ellipsis">
+      DestinationSpec
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#destinationstatus" class="md-nav__link">
+    <span class="md-ellipsis">
+      DestinationStatus
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ethernetconfig" class="md-nav__link">
+    <span class="md-ellipsis">
+      EthernetConfig
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ipnetwork" class="md-nav__link">
+    <span class="md-ellipsis">
+      IPNetwork
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#inbound" class="md-nav__link">
+    <span class="md-ellipsis">
+      Inbound
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#inboundspec" class="md-nav__link">
+    <span class="md-ellipsis">
+      InboundSpec
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#inboundstatus" class="md-nav__link">
+    <span class="md-ellipsis">
+      InboundStatus
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#interfaceconfig" class="md-nav__link">
+    <span class="md-ellipsis">
+      InterfaceConfig
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#interfaceconfignodestatus" class="md-nav__link">
+    <span class="md-ellipsis">
+      InterfaceConfigNodeStatus
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#interfaceconfigspec" class="md-nav__link">
+    <span class="md-ellipsis">
+      InterfaceConfigSpec
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#interfaceconfigstatus" class="md-nav__link">
+    <span class="md-ellipsis">
+      InterfaceConfigStatus
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#layer2attachment" class="md-nav__link">
+    <span class="md-ellipsis">
+      Layer2Attachment
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#layer2attachmentspec" class="md-nav__link">
+    <span class="md-ellipsis">
+      Layer2AttachmentSpec
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#layer2attachmentstatus" class="md-nav__link">
+    <span class="md-ellipsis">
+      Layer2AttachmentStatus
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#loopbackconfig" class="md-nav__link">
+    <span class="md-ellipsis">
+      LoopbackConfig
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mirrorsource" class="md-nav__link">
+    <span class="md-ellipsis">
+      MirrorSource
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mirrorvrfref" class="md-nav__link">
+    <span class="md-ellipsis">
+      MirrorVRFRef
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#network" class="md-nav__link">
+    <span class="md-ellipsis">
+      Network
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#networkspec" class="md-nav__link">
+    <span class="md-ellipsis">
+      NetworkSpec
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#networkstatus" class="md-nav__link">
+    <span class="md-ellipsis">
+      NetworkStatus
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#nexthopconfig" class="md-nav__link">
+    <span class="md-ellipsis">
+      NextHopConfig
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#nodeattachment" class="md-nav__link">
+    <span class="md-ellipsis">
+      NodeAttachment
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#nodeattachmentspec" class="md-nav__link">
+    <span class="md-ellipsis">
+      NodeAttachmentSpec
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#nodeattachmentstatus" class="md-nav__link">
+    <span class="md-ellipsis">
+      NodeAttachmentStatus
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#nodeipconfig" class="md-nav__link">
+    <span class="md-ellipsis">
+      NodeIPConfig
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#nodeinterface" class="md-nav__link">
+    <span class="md-ellipsis">
+      NodeInterface
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#nodeinterfacestate" class="md-nav__link">
+    <span class="md-ellipsis">
+      NodeInterfaceState
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#nodeinterfacetype" class="md-nav__link">
+    <span class="md-ellipsis">
+      NodeInterfaceType
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#nodenetworkstatus" class="md-nav__link">
+    <span class="md-ellipsis">
+      NodeNetworkStatus
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#nodenetworkstatusspec" class="md-nav__link">
+    <span class="md-ellipsis">
+      NodeNetworkStatusSpec
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#nodenetworkstatusstatus" class="md-nav__link">
+    <span class="md-ellipsis">
+      NodeNetworkStatusStatus
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#noderoute" class="md-nav__link">
+    <span class="md-ellipsis">
+      NodeRoute
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#outbound" class="md-nav__link">
+    <span class="md-ellipsis">
+      Outbound
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#outboundspec" class="md-nav__link">
+    <span class="md-ellipsis">
+      OutboundSpec
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#outboundstatus" class="md-nav__link">
+    <span class="md-ellipsis">
+      OutboundStatus
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#podnetwork" class="md-nav__link">
+    <span class="md-ellipsis">
+      PodNetwork
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#podnetworkspec" class="md-nav__link">
+    <span class="md-ellipsis">
+      PodNetworkSpec
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#podnetworkstatus" class="md-nav__link">
+    <span class="md-ellipsis">
+      PodNetworkStatus
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#portrange" class="md-nav__link">
+    <span class="md-ellipsis">
+      PortRange
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#routeannouncementconfig" class="md-nav__link">
+    <span class="md-ellipsis">
+      RouteAnnouncementConfig
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sriovconfig" class="md-nav__link">
+    <span class="md-ellipsis">
+      SRIOVConfig
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#trafficmatch" class="md-nav__link">
+    <span class="md-ellipsis">
+      TrafficMatch
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#trafficmirror" class="md-nav__link">
+    <span class="md-ellipsis">
+      TrafficMirror
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#trafficmirrorspec" class="md-nav__link">
+    <span class="md-ellipsis">
+      TrafficMirrorSpec
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#trafficmirrorstatus" class="md-nav__link">
+    <span class="md-ellipsis">
+      TrafficMirrorStatus
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#vrf" class="md-nav__link">
+    <span class="md-ellipsis">
+      VRF
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#vrfspec" class="md-nav__link">
+    <span class="md-ellipsis">
+      VRFSpec
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#vrfstatus" class="md-nav__link">
+    <span class="md-ellipsis">
+      VRFStatus
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../metrics/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Metrics
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../node-readiness/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Node Readiness
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Advanced
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            Advanced
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../advanced/debugging/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Debugging
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../advanced/legacy-api/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Legacy API
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Design
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            Design
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../design/intent-based-config/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Intent-Based Config
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../design/traffic-mirroring/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Traffic Mirroring
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#packages" class="md-nav__link">
+    <span class="md-ellipsis">
+      Packages
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#network-connectorsylvaprojectorgv1alpha1" class="md-nav__link">
+    <span class="md-ellipsis">
+      network-connector.sylvaproject.org/v1alpha1
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="network-connector.sylvaproject.org/v1alpha1">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#resource-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      Resource Types
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Resource Types">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#addressallocation" class="md-nav__link">
+    <span class="md-ellipsis">
+      AddressAllocation
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#advertisementconfig" class="md-nav__link">
+    <span class="md-ellipsis">
+      AdvertisementConfig
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#aggregateconfig" class="md-nav__link">
+    <span class="md-ellipsis">
+      AggregateConfig
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#announcementpolicy" class="md-nav__link">
+    <span class="md-ellipsis">
+      AnnouncementPolicy
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#announcementpolicyspec" class="md-nav__link">
+    <span class="md-ellipsis">
+      AnnouncementPolicySpec
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#announcementpolicystatus" class="md-nav__link">
+    <span class="md-ellipsis">
+      AnnouncementPolicyStatus
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#anycaststatus" class="md-nav__link">
+    <span class="md-ellipsis">
+      AnycastStatus
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bfdprofile" class="md-nav__link">
+    <span class="md-ellipsis">
+      BFDProfile
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bgpaddressfamily" class="md-nav__link">
+    <span class="md-ellipsis">
+      BGPAddressFamily
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bgppeering" class="md-nav__link">
+    <span class="md-ellipsis">
+      BGPPeering
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bgppeeringexport" class="md-nav__link">
+    <span class="md-ellipsis">
+      BGPPeeringExport
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bgppeeringmode" class="md-nav__link">
+    <span class="md-ellipsis">
+      BGPPeeringMode
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bgppeeringref" class="md-nav__link">
+    <span class="md-ellipsis">
+      BGPPeeringRef
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bgppeeringspec" class="md-nav__link">
+    <span class="md-ellipsis">
+      BGPPeeringSpec
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bgppeeringstatus" class="md-nav__link">
+    <span class="md-ellipsis">
+      BGPPeeringStatus
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bondconfig" class="md-nav__link">
+    <span class="md-ellipsis">
+      BondConfig
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bondparameters" class="md-nav__link">
+    <span class="md-ellipsis">
+      BondParameters
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#collector" class="md-nav__link">
+    <span class="md-ellipsis">
+      Collector
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#collectorspec" class="md-nav__link">
+    <span class="md-ellipsis">
+      CollectorSpec
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#collectorstatus" class="md-nav__link">
+    <span class="md-ellipsis">
+      CollectorStatus
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#destination" class="md-nav__link">
+    <span class="md-ellipsis">
+      Destination
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#destinationport" class="md-nav__link">
+    <span class="md-ellipsis">
+      DestinationPort
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#destinationspec" class="md-nav__link">
+    <span class="md-ellipsis">
+      DestinationSpec
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#destinationstatus" class="md-nav__link">
+    <span class="md-ellipsis">
+      DestinationStatus
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ethernetconfig" class="md-nav__link">
+    <span class="md-ellipsis">
+      EthernetConfig
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ipnetwork" class="md-nav__link">
+    <span class="md-ellipsis">
+      IPNetwork
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#inbound" class="md-nav__link">
+    <span class="md-ellipsis">
+      Inbound
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#inboundspec" class="md-nav__link">
+    <span class="md-ellipsis">
+      InboundSpec
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#inboundstatus" class="md-nav__link">
+    <span class="md-ellipsis">
+      InboundStatus
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#interfaceconfig" class="md-nav__link">
+    <span class="md-ellipsis">
+      InterfaceConfig
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#interfaceconfignodestatus" class="md-nav__link">
+    <span class="md-ellipsis">
+      InterfaceConfigNodeStatus
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#interfaceconfigspec" class="md-nav__link">
+    <span class="md-ellipsis">
+      InterfaceConfigSpec
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#interfaceconfigstatus" class="md-nav__link">
+    <span class="md-ellipsis">
+      InterfaceConfigStatus
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#layer2attachment" class="md-nav__link">
+    <span class="md-ellipsis">
+      Layer2Attachment
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#layer2attachmentspec" class="md-nav__link">
+    <span class="md-ellipsis">
+      Layer2AttachmentSpec
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#layer2attachmentstatus" class="md-nav__link">
+    <span class="md-ellipsis">
+      Layer2AttachmentStatus
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#loopbackconfig" class="md-nav__link">
+    <span class="md-ellipsis">
+      LoopbackConfig
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mirrorsource" class="md-nav__link">
+    <span class="md-ellipsis">
+      MirrorSource
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mirrorvrfref" class="md-nav__link">
+    <span class="md-ellipsis">
+      MirrorVRFRef
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#network" class="md-nav__link">
+    <span class="md-ellipsis">
+      Network
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#networkspec" class="md-nav__link">
+    <span class="md-ellipsis">
+      NetworkSpec
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#networkstatus" class="md-nav__link">
+    <span class="md-ellipsis">
+      NetworkStatus
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#nexthopconfig" class="md-nav__link">
+    <span class="md-ellipsis">
+      NextHopConfig
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#nodeattachment" class="md-nav__link">
+    <span class="md-ellipsis">
+      NodeAttachment
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#nodeattachmentspec" class="md-nav__link">
+    <span class="md-ellipsis">
+      NodeAttachmentSpec
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#nodeattachmentstatus" class="md-nav__link">
+    <span class="md-ellipsis">
+      NodeAttachmentStatus
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#nodeipconfig" class="md-nav__link">
+    <span class="md-ellipsis">
+      NodeIPConfig
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#nodeinterface" class="md-nav__link">
+    <span class="md-ellipsis">
+      NodeInterface
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#nodeinterfacestate" class="md-nav__link">
+    <span class="md-ellipsis">
+      NodeInterfaceState
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#nodeinterfacetype" class="md-nav__link">
+    <span class="md-ellipsis">
+      NodeInterfaceType
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#nodenetworkstatus" class="md-nav__link">
+    <span class="md-ellipsis">
+      NodeNetworkStatus
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#nodenetworkstatusspec" class="md-nav__link">
+    <span class="md-ellipsis">
+      NodeNetworkStatusSpec
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#nodenetworkstatusstatus" class="md-nav__link">
+    <span class="md-ellipsis">
+      NodeNetworkStatusStatus
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#noderoute" class="md-nav__link">
+    <span class="md-ellipsis">
+      NodeRoute
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#outbound" class="md-nav__link">
+    <span class="md-ellipsis">
+      Outbound
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#outboundspec" class="md-nav__link">
+    <span class="md-ellipsis">
+      OutboundSpec
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#outboundstatus" class="md-nav__link">
+    <span class="md-ellipsis">
+      OutboundStatus
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#podnetwork" class="md-nav__link">
+    <span class="md-ellipsis">
+      PodNetwork
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#podnetworkspec" class="md-nav__link">
+    <span class="md-ellipsis">
+      PodNetworkSpec
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#podnetworkstatus" class="md-nav__link">
+    <span class="md-ellipsis">
+      PodNetworkStatus
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#portrange" class="md-nav__link">
+    <span class="md-ellipsis">
+      PortRange
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#routeannouncementconfig" class="md-nav__link">
+    <span class="md-ellipsis">
+      RouteAnnouncementConfig
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sriovconfig" class="md-nav__link">
+    <span class="md-ellipsis">
+      SRIOVConfig
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#trafficmatch" class="md-nav__link">
+    <span class="md-ellipsis">
+      TrafficMatch
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#trafficmirror" class="md-nav__link">
+    <span class="md-ellipsis">
+      TrafficMirror
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#trafficmirrorspec" class="md-nav__link">
+    <span class="md-ellipsis">
+      TrafficMirrorSpec
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#trafficmirrorstatus" class="md-nav__link">
+    <span class="md-ellipsis">
+      TrafficMirrorStatus
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#vrf" class="md-nav__link">
+    <span class="md-ellipsis">
+      VRF
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#vrfspec" class="md-nav__link">
+    <span class="md-ellipsis">
+      VRFSpec
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#vrfstatus" class="md-nav__link">
+    <span class="md-ellipsis">
+      VRFStatus
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+  
+    <a href="https://github.com/telekom/das-schiff-network-operator/edit/main/docs/reference/crd-reference.md" title="Edit this page" class="md-content__button md-icon">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="crd-reference">CRD Reference<a class="headerlink" href="#crd-reference" title="Permanent link">&para;</a></h1>
+<h2 id="packages">Packages<a class="headerlink" href="#packages" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="#network-connectorsylvaprojectorgv1alpha1">network-connector.sylvaproject.org/v1alpha1</a></li>
+</ul>
+<h2 id="network-connectorsylvaprojectorgv1alpha1">network-connector.sylvaproject.org/v1alpha1<a class="headerlink" href="#network-connectorsylvaprojectorgv1alpha1" title="Permanent link">&para;</a></h2>
+<p>Package networkconnector contains API types for the network-connector.sylvaproject.org API group.
+These types implement intent-based network configuration CRDs that span management
+and workload clusters. See docs/proposals/02-intent-based-config/README.md for the
+full design proposal.</p>
+<h3 id="resource-types">Resource Types<a class="headerlink" href="#resource-types" title="Permanent link">&para;</a></h3>
+<ul>
+<li><a href="#announcementpolicy">AnnouncementPolicy</a></li>
+<li><a href="#bgppeering">BGPPeering</a></li>
+<li><a href="#collector">Collector</a></li>
+<li><a href="#destination">Destination</a></li>
+<li><a href="#inbound">Inbound</a></li>
+<li><a href="#interfaceconfig">InterfaceConfig</a></li>
+<li><a href="#layer2attachment">Layer2Attachment</a></li>
+<li><a href="#network">Network</a></li>
+<li><a href="#nodeattachment">NodeAttachment</a></li>
+<li><a href="#nodenetworkstatus">NodeNetworkStatus</a></li>
+<li><a href="#outbound">Outbound</a></li>
+<li><a href="#podnetwork">PodNetwork</a></li>
+<li><a href="#trafficmirror">TrafficMirror</a></li>
+<li><a href="#vrf">VRF</a></li>
+</ul>
+<h4 id="addressallocation">AddressAllocation<a class="headerlink" href="#addressallocation" title="Permanent link">&para;</a></h4>
+<p>AddressAllocation holds allocated IP addresses in status.</p>
+<p><em>Appears in:</em>
+- <a href="#inboundspec">InboundSpec</a>
+- <a href="#inboundstatus">InboundStatus</a>
+- <a href="#layer2attachmentstatus">Layer2AttachmentStatus</a>
+- <a href="#outboundspec">OutboundSpec</a>
+- <a href="#outboundstatus">OutboundStatus</a></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ipv4</code> <em>string array</em></td>
+<td>IPv4 lists allocated IPv4 addresses.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>ipv6</code> <em>string array</em></td>
+<td>IPv6 lists allocated IPv6 addresses.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+</tbody>
+</table>
+<h4 id="advertisementconfig">AdvertisementConfig<a class="headerlink" href="#advertisementconfig" title="Permanent link">&para;</a></h4>
+<p>AdvertisementConfig configures MetalLB advertisement mode.</p>
+<p><em>Appears in:</em>
+- <a href="#inboundspec">InboundSpec</a></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>type</code> <em>string</em></td>
+<td>Type is the advertisement mode.</td>
+<td></td>
+<td>Enum: [bgp l2] <br />Required: {} <br /></td>
+</tr>
+</tbody>
+</table>
+<h4 id="aggregateconfig">AggregateConfig<a class="headerlink" href="#aggregateconfig" title="Permanent link">&para;</a></h4>
+<p>AggregateConfig controls aggregate (covering prefix) route export behavior.</p>
+<p><em>Appears in:</em>
+- <a href="#announcementpolicyspec">AnnouncementPolicySpec</a></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>enabled</code> <em>boolean</em></td>
+<td>Enabled controls whether an aggregate route is exported alongside host routes.<br />Default: true (auto-computed covering prefix from allocated IPs).<br />Set to false to export only host routes.</td>
+<td>true</td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>communities</code> <em>string array</em></td>
+<td>Communities attached to the aggregate route.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>prefixLengthV4</code> <em>integer</em></td>
+<td>PrefixLengthV4 overrides the auto-computed IPv4 aggregate size.<br />Must be between the Network CIDR prefix length and 32.<br />If omitted, controller auto-computes the smallest covering prefix.</td>
+<td></td>
+<td>Maximum: 32 <br />Minimum: 1 <br />Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>prefixLengthV6</code> <em>integer</em></td>
+<td>PrefixLengthV6 overrides the auto-computed IPv6 aggregate size.<br />Must be between the Network CIDR prefix length and 128.<br />If omitted, controller auto-computes the smallest covering prefix.</td>
+<td></td>
+<td>Maximum: 128 <br />Minimum: 1 <br />Optional: {} <br /></td>
+</tr>
+</tbody>
+</table>
+<h4 id="announcementpolicy">AnnouncementPolicy<a class="headerlink" href="#announcementpolicy" title="Permanent link">&para;</a></h4>
+<p>AnnouncementPolicy controls how routes are exported into a VRF: communities
+on host routes and whether to also export an aggregate covering prefix.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>apiVersion</code> <em>string</em></td>
+<td><code>network-connector.sylvaproject.org/v1alpha1</code></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>kind</code> <em>string</em></td>
+<td><code>AnnouncementPolicy</code></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>metadata</code> <em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#objectmeta-v1-meta">ObjectMeta</a></em></td>
+<td>Refer to Kubernetes API documentation for fields of <code>metadata</code>.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>spec</code> <em><a href="#announcementpolicyspec">AnnouncementPolicySpec</a></em></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>status</code> <em><a href="#announcementpolicystatus">AnnouncementPolicyStatus</a></em></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h4 id="announcementpolicyspec">AnnouncementPolicySpec<a class="headerlink" href="#announcementpolicyspec" title="Permanent link">&para;</a></h4>
+<p>AnnouncementPolicySpec defines the desired state of AnnouncementPolicy.
+Host routes (/32, /128) are always exported — the DC fabric needs them as
+more-specifics. This policy controls communities on host routes and whether
+to also export an aggregate covering prefix.</p>
+<p><em>Appears in:</em>
+- <a href="#announcementpolicy">AnnouncementPolicy</a></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>vrfRef</code> <em>string</em></td>
+<td>VRFRef is the VRF this policy governs exports into. Required.</td>
+<td></td>
+<td>MinLength: 1 <br />Required: {} <br /></td>
+</tr>
+<tr>
+<td><code>selector</code> <em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#labelselector-v1-meta">LabelSelector</a></em></td>
+<td>Selector matches usage CRDs (Inbound, Outbound, Layer2Attachment, PodNetwork)<br />by label. The policy applies to exports from matched usage CRDs into the<br />specified VRF. If omitted, applies to ALL usage CRDs exporting into this VRF.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>hostRoutes</code> <em><a href="#routeannouncementconfig">RouteAnnouncementConfig</a></em></td>
+<td>HostRoutes configures communities for host routes (/32, /128).<br />Host routes are always exported; this controls their community tags.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>aggregate</code> <em><a href="#aggregateconfig">AggregateConfig</a></em></td>
+<td>Aggregate configures the aggregate (covering prefix) route.<br />Default: enabled with auto-computed prefix from allocated IPs.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+</tbody>
+</table>
+<h4 id="announcementpolicystatus">AnnouncementPolicyStatus<a class="headerlink" href="#announcementpolicystatus" title="Permanent link">&para;</a></h4>
+<p>AnnouncementPolicyStatus defines the observed state of AnnouncementPolicy.</p>
+<p><em>Appears in:</em>
+- <a href="#announcementpolicy">AnnouncementPolicy</a></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>observedGeneration</code> <em>integer</em></td>
+<td>ObservedGeneration is the most recent generation observed by the controller.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>matchedUsageCRDs</code> <em>integer</em></td>
+<td>MatchedUsageCRDs is the number of usage CRDs matched by the selector.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>conditions</code> <em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#condition-v1-meta">Condition</a> array</em></td>
+<td>Conditions represent the latest available observations of the resource's state.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+</tbody>
+</table>
+<h4 id="anycaststatus">AnycastStatus<a class="headerlink" href="#anycaststatus" title="Permanent link">&para;</a></h4>
+<p>AnycastStatus holds anycast gateway information written by the controller.</p>
+<p><em>Appears in:</em>
+- <a href="#layer2attachmentstatus">Layer2AttachmentStatus</a></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>mac</code> <em>string</em></td>
+<td>MAC is the anycast gateway MAC address.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>gateways</code> <em>string array</em></td>
+<td>Gateways lists the anycast gateway addresses (IPv4 and/or IPv6).</td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h4 id="bfdprofile">BFDProfile<a class="headerlink" href="#bfdprofile" title="Permanent link">&para;</a></h4>
+<p>BFDProfile represents BFD timer configuration.
+Consistent with the existing BFDProfile in network.t-caas.telekom.com/v1alpha1.</p>
+<p><em>Appears in:</em>
+- <a href="#bgppeeringspec">BGPPeeringSpec</a></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>minInterval</code> <em>integer</em></td>
+<td>MinInterval is the minimum interval for BFD packets in milliseconds.</td>
+<td></td>
+<td>Maximum: 60000 <br />Minimum: 50 <br /></td>
+</tr>
+</tbody>
+</table>
+<h4 id="bgpaddressfamily">BGPAddressFamily<a class="headerlink" href="#bgpaddressfamily" title="Permanent link">&para;</a></h4>
+<p><em>Underlying type:</em> <em>string</em></p>
+<p>BGPAddressFamily specifies a BGP address family for session negotiation.</p>
+<p><em>Validation:</em>
+- Enum: [ipv4Unicast ipv6Unicast]</p>
+<p><em>Appears in:</em>
+- <a href="#bgppeeringspec">BGPPeeringSpec</a></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ipv4Unicast</code></td>
+<td>BGPAddressFamilyIPv4Unicast negotiates IPv4 unicast routes.<br /></td>
+</tr>
+<tr>
+<td><code>ipv6Unicast</code></td>
+<td>BGPAddressFamilyIPv6Unicast negotiates IPv6 unicast routes.<br /></td>
+</tr>
+</tbody>
+</table>
+<h4 id="bgppeering">BGPPeering<a class="headerlink" href="#bgppeering" title="Permanent link">&para;</a></h4>
+<p>BGPPeering is the Schema for the bgppeerings API.
+It defines a BGP session — either for an L2 attachment (listenRange mode)
+or for tenant BGPaaS (loopbackPeer mode with auto-generated ULA addresses).</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>apiVersion</code> <em>string</em></td>
+<td><code>network-connector.sylvaproject.org/v1alpha1</code></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>kind</code> <em>string</em></td>
+<td><code>BGPPeering</code></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>metadata</code> <em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#objectmeta-v1-meta">ObjectMeta</a></em></td>
+<td>Refer to Kubernetes API documentation for fields of <code>metadata</code>.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>spec</code> <em><a href="#bgppeeringspec">BGPPeeringSpec</a></em></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>status</code> <em><a href="#bgppeeringstatus">BGPPeeringStatus</a></em></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h4 id="bgppeeringexport">BGPPeeringExport<a class="headerlink" href="#bgppeeringexport" title="Permanent link">&para;</a></h4>
+<p>BGPPeeringExport configures how routes re-exported into the EVPN fabric are
+tagged. It only applies to listenRange mode, where prefixes announced by L2
+clients (matched against networkRefs) are re-exported into the fabric; the
+configured communities are attached additively to those re-exported prefixes.
+It has no effect for loopbackPeer mode and is ignored there.</p>
+<p><em>Appears in:</em>
+- <a href="#bgppeeringspec">BGPPeeringSpec</a></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>communities</code> <em>string array</em></td>
+<td>Communities lists BGP community strings attached (additively) to the<br />prefixes re-exported into the EVPN fabric. Follows the same free-form<br />convention as AnnouncementPolicy communities (e.g. "65000:100").</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+</tbody>
+</table>
+<h4 id="bgppeeringmode">BGPPeeringMode<a class="headerlink" href="#bgppeeringmode" title="Permanent link">&para;</a></h4>
+<p><em>Underlying type:</em> <em>string</em></p>
+<p>BGPPeeringMode describes what this peering session is for.</p>
+<p><em>Validation:</em>
+- Enum: [listenRange loopbackPeer]</p>
+<p><em>Appears in:</em>
+- <a href="#bgppeeringspec">BGPPeeringSpec</a></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>listenRange</code></td>
+<td>BGPPeeringModeListenRange creates a BGP listen-range session for an L2 attachment.<br />The node peers with workloads on the L2 segment.<br /></td>
+</tr>
+<tr>
+<td><code>loopbackPeer</code></td>
+<td>BGPPeeringModeLoopbackPeer creates a loopback peer BGP session (BGPaaS).<br />A tenant workload (e.g., kube-vip) speaks BGP directly through auto-generated<br />ULA IPv6 loopback addresses.<br /></td>
+</tr>
+</tbody>
+</table>
+<h4 id="bgppeeringref">BGPPeeringRef<a class="headerlink" href="#bgppeeringref" title="Permanent link">&para;</a></h4>
+<p>BGPPeeringRef identifies the resources this peering session relates to.
+The reference kind is mode-specific and mutually exclusive:
+  - listenRange requires attachmentRef (the L2 segment to listen on) and
+    networkRefs (the Networks whose prefixes L2 clients may announce);
+    inboundRefs must not be set.
+  - loopbackPeer requires inboundRefs (the allocated VIP pools the tenant
+    advertises); attachmentRef and networkRefs must not be set.</p>
+<p><em>Appears in:</em>
+- <a href="#bgppeeringspec">BGPPeeringSpec</a></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>attachmentRef</code> <em>string</em></td>
+<td>AttachmentRef references a Layer2Attachment by name.<br />Required for listenRange mode — identifies the L2 segment the BGP<br />listen-range is opened on (the listen-range CIDR comes from the L2A's<br />Network). Must not be set for loopbackPeer mode.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>networkRefs</code> <em>string array</em></td>
+<td>NetworkRefs references Network resources by name. For listenRange mode<br />their CIDRs form the import allow-list: L2 clients may only announce<br />prefixes contained within these Networks (matched with le 32 / le 128),<br />and those prefixes are re-exported into the EVPN fabric.<br />Required for listenRange mode; must not be set for loopbackPeer mode.</td>
+<td></td>
+<td>MinItems: 1 <br />Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>inboundRefs</code> <em>string array</em></td>
+<td>InboundRefs references Inbound resources whose IP pools the tenant<br />advertises (BGPaaS). Required for loopbackPeer mode; must not be set<br />for listenRange mode.</td>
+<td></td>
+<td>MinItems: 1 <br />Optional: {} <br /></td>
+</tr>
+</tbody>
+</table>
+<h4 id="bgppeeringspec">BGPPeeringSpec<a class="headerlink" href="#bgppeeringspec" title="Permanent link">&para;</a></h4>
+<p>BGPPeeringSpec defines the desired state of BGPPeering.</p>
+<p><em>Appears in:</em>
+- <a href="#bgppeering">BGPPeering</a></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>mode</code> <em><a href="#bgppeeringmode">BGPPeeringMode</a></em></td>
+<td>Mode selects the peering type: listenRange (L2 attachment BGP) or loopbackPeer (BGPaaS).<br />Immutable after creation.</td>
+<td></td>
+<td>Enum: [listenRange loopbackPeer] <br />Required: {} <br /></td>
+</tr>
+<tr>
+<td><code>ref</code> <em><a href="#bgppeeringref">BGPPeeringRef</a></em></td>
+<td>Ref identifies what this peering session is for.</td>
+<td></td>
+<td>Required: {} <br /></td>
+</tr>
+<tr>
+<td><code>advertiseTransferNetwork</code> <em>boolean</em></td>
+<td>AdvertiseTransferNetwork controls whether the transfer network prefix<br />is advertised to the BGP peer.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>holdTime</code> <em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#duration-v1-meta">Duration</a></em></td>
+<td>HoldTime is the BGP hold timer duration.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>keepaliveTime</code> <em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#duration-v1-meta">Duration</a></em></td>
+<td>KeepaliveTime is the BGP keepalive timer duration.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>maximumPrefixes</code> <em>integer</em></td>
+<td>MaximumPrefixes limits the number of prefixes accepted from the peer.</td>
+<td></td>
+<td>Minimum: 1 <br />Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>workloadAS</code> <em>integer</em></td>
+<td>WorkloadAS is the autonomous system number for the workload/tenant side.<br />Uses asplain notation; for 4-byte ASNs use the full 32-bit integer.</td>
+<td></td>
+<td>Maximum: 4.294967295e+09 <br />Minimum: 1 <br />Required: {} <br /></td>
+</tr>
+<tr>
+<td><code>addressFamilies</code> <em><a href="#bgpaddressfamily">BGPAddressFamily</a> array</em></td>
+<td>AddressFamilies specifies which BGP address families to negotiate.<br />If omitted, defaults to dual-stack (both IPv4 and IPv6 unicast).</td>
+<td></td>
+<td>Enum: [ipv4Unicast ipv6Unicast] <br />MinItems: 1 <br />Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>enableBFD</code> <em>boolean</em></td>
+<td>EnableBFD enables Bidirectional Forwarding Detection for fast link-failure<br />detection on this BGP session.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>bfdProfile</code> <em><a href="#bfdprofile">BFDProfile</a></em></td>
+<td>BFDProfile configures BFD timer parameters. Only relevant when EnableBFD is true.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>authSecretRef</code> <em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#localobjectreference-v1-core">LocalObjectReference</a></em></td>
+<td>AuthSecretRef references a Secret containing the BGP session password (key: "password").<br />The controller reads the Secret and propagates the password to nodes via<br />NodeNetworkConfig — node agents never need direct Secret RBAC.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>export</code> <em><a href="#bgppeeringexport">BGPPeeringExport</a></em></td>
+<td>Export configures BGP communities attached to the routes this peering<br />re-exports into the EVPN fabric. It only applies to listenRange mode: the<br />prefixes announced by L2 clients (constrained by networkRefs) are<br />re-exported into the fabric and, when set, tagged additively with the<br />configured communities. It is ignored for loopbackPeer mode.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+</tbody>
+</table>
+<h4 id="bgppeeringstatus">BGPPeeringStatus<a class="headerlink" href="#bgppeeringstatus" title="Permanent link">&para;</a></h4>
+<p>BGPPeeringStatus defines the observed state of BGPPeering.</p>
+<p><em>Appears in:</em>
+- <a href="#bgppeering">BGPPeering</a></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>observedGeneration</code> <em>integer</em></td>
+<td>ObservedGeneration is the most recent generation observed by the controller.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>asNumber</code> <em>integer</em></td>
+<td>ASNumber is the autonomous system number of the platform side (observed).</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>neighborIPs</code> <em>string array</em></td>
+<td>NeighborIPs lists the IP addresses used for the BGP session.<br />For loopbackPeer: auto-generated ULA IPv6 addresses.<br />For listenRange: derived from the L2 attachment's transfer network.<br />For SR-IOV with VTEP_NODE: route reflector IPs from infrastructure provisioning.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>neighborASNumber</code> <em>integer</em></td>
+<td>NeighborASNumber is the AS number of the remote peer (observed).</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>localIPs</code> <em>string array</em></td>
+<td>LocalIPs lists the local peering IP addresses on the platform side.<br />For listenRange mode these are the IRB anycast gateway addresses (bare<br />IPs, no prefix) the node listens on, derived from the referenced<br />Layer2Attachment's Network (one per address family).</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>workloadASNumber</code> <em>integer</em></td>
+<td>WorkloadASNumber is the AS number assigned to the workload (observed; mirrors spec.workloadAS).</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>vrfs</code> <em>string array</em></td>
+<td>VRFs lists the VRF names this peering relates to, derived from the<br />referenced Layer2Attachment (listenRange mode: ref.attachmentRef →<br />Layer2Attachment.spec.destinations) and/or referenced Inbounds<br />(loopbackPeer mode: ref.inboundRefs → Inbound.spec.destinations). Sorted<br />and de-duplicated.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>conditions</code> <em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#condition-v1-meta">Condition</a> array</em></td>
+<td>Conditions represent the latest available observations of the<br />BGPPeering's current state.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+</tbody>
+</table>
+<h4 id="bondconfig">BondConfig<a class="headerlink" href="#bondconfig" title="Permanent link">&para;</a></h4>
+<p>BondConfig defines configuration for a bond interface.</p>
+<p><em>Appears in:</em>
+- <a href="#interfaceconfigspec">InterfaceConfigSpec</a></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>interfaces</code> <em>string array</em></td>
+<td>Interfaces lists member ethernet interfaces.</td>
+<td></td>
+<td>MinItems: 1 <br /></td>
+</tr>
+<tr>
+<td><code>mtu</code> <em>integer</em></td>
+<td>Mtu is the maximum transmission unit.</td>
+<td></td>
+<td>Maximum: 9000 <br />Minimum: 1000 <br />Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>parameters</code> <em><a href="#bondparameters">BondParameters</a></em></td>
+<td>Parameters are the bonding driver parameters.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+</tbody>
+</table>
+<h4 id="bondparameters">BondParameters<a class="headerlink" href="#bondparameters" title="Permanent link">&para;</a></h4>
+<p>BondParameters defines bonding driver parameters.</p>
+<p><em>Appears in:</em>
+- <a href="#bondconfig">BondConfig</a></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>mode</code> <em>string</em></td>
+<td>Mode is the bonding mode.</td>
+<td></td>
+<td>Enum: [active-backup 802.3ad balance-rr balance-xor broadcast balance-tlb balance-alb] <br /></td>
+</tr>
+<tr>
+<td><code>miiMonitorInterval</code> <em>integer</em></td>
+<td>MiiMonitorInterval is the MII monitoring interval in milliseconds.</td>
+<td></td>
+<td>Minimum: 0 <br />Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>lacpRate</code> <em>string</em></td>
+<td>LacpRate is the LACP rate (802.3ad only).</td>
+<td></td>
+<td>Enum: [fast slow] <br />Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>upDelay</code> <em>integer</em></td>
+<td>UpDelay is the delay before enabling a recovered member in milliseconds.</td>
+<td></td>
+<td>Minimum: 0 <br />Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>downDelay</code> <em>integer</em></td>
+<td>DownDelay is the delay before disabling a failed member in milliseconds.</td>
+<td></td>
+<td>Minimum: 0 <br />Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>transmitHashPolicy</code> <em>string</em></td>
+<td>TransmitHashPolicy is the hash policy for load balancing.</td>
+<td></td>
+<td>Enum: [layer2 layer3+4 layer2+3 encap2+3 encap3+4] <br />Optional: {} <br /></td>
+</tr>
+</tbody>
+</table>
+<h4 id="collector">Collector<a class="headerlink" href="#collector" title="Permanent link">&para;</a></h4>
+<p>Collector defines a GRE collector endpoint and mirror VRF binding.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>apiVersion</code> <em>string</em></td>
+<td><code>network-connector.sylvaproject.org/v1alpha1</code></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>kind</code> <em>string</em></td>
+<td><code>Collector</code></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>metadata</code> <em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#objectmeta-v1-meta">ObjectMeta</a></em></td>
+<td>Refer to Kubernetes API documentation for fields of <code>metadata</code>.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>spec</code> <em><a href="#collectorspec">CollectorSpec</a></em></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>status</code> <em><a href="#collectorstatus">CollectorStatus</a></em></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h4 id="collectorspec">CollectorSpec<a class="headerlink" href="#collectorspec" title="Permanent link">&para;</a></h4>
+<p>CollectorSpec defines the desired state of Collector.</p>
+<p><em>Appears in:</em>
+- <a href="#collector">Collector</a></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>address</code> <em>string</em></td>
+<td>Address is the remote collector IP address.</td>
+<td></td>
+<td>Required: {} <br /></td>
+</tr>
+<tr>
+<td><code>protocol</code> <em>string</em></td>
+<td>Protocol is the GRE encapsulation type.</td>
+<td></td>
+<td>Enum: [l3gre l2gre] <br />Required: {} <br /></td>
+</tr>
+<tr>
+<td><code>key</code> <em>integer</em></td>
+<td>Key is the GRE tunnel key. The full unsigned 32-bit range is permitted;<br />stored as int64 so values above the signed 32-bit range round-trip cleanly.</td>
+<td></td>
+<td>Maximum: 4.294967295e+09 <br />Minimum: 0 <br />Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>mirrorVRF</code> <em><a href="#mirrorvrfref">MirrorVRFRef</a></em></td>
+<td>MirrorVRF references a VRF for the mirror VRF.</td>
+<td></td>
+<td>Required: {} <br /></td>
+</tr>
+</tbody>
+</table>
+<h4 id="collectorstatus">CollectorStatus<a class="headerlink" href="#collectorstatus" title="Permanent link">&para;</a></h4>
+<p>CollectorStatus defines the observed state of Collector.</p>
+<p><em>Appears in:</em>
+- <a href="#collector">Collector</a></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>observedGeneration</code> <em>integer</em></td>
+<td>ObservedGeneration is the most recent generation observed by the controller.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>greInterface</code> <em>string</em></td>
+<td>GREInterface is the GRE interface name generated.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>referenceCount</code> <em>integer</em></td>
+<td>ReferenceCount is the number of TrafficMirrors referencing this Collector.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>activeNodes</code> <em>integer</em></td>
+<td>ActiveNodes is the number of nodes where the collector is active.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>nodeAddresses</code> <em>object (keys:string, values:string)</em></td>
+<td>NodeAddresses maps node name to the loopback source address allocated<br />from spec.mirrorVRF.loopback.subnet. Allocations are persisted across<br />reconciles; an entry is removed only when the corresponding node leaves<br />the cluster. This is the sole source of truth for per-node GRE source<br />IPs — it is intentionally not mirrored to a ConfigMap.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>conditions</code> <em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#condition-v1-meta">Condition</a> array</em></td>
+<td>Conditions represent the latest available observations of the Collector's state.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+</tbody>
+</table>
+<h4 id="destination">Destination<a class="headerlink" href="#destination" title="Permanent link">&para;</a></h4>
+<p>Destination is the Schema for the destinations API.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>apiVersion</code> <em>string</em></td>
+<td><code>network-connector.sylvaproject.org/v1alpha1</code></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>kind</code> <em>string</em></td>
+<td><code>Destination</code></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>metadata</code> <em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#objectmeta-v1-meta">ObjectMeta</a></em></td>
+<td>Refer to Kubernetes API documentation for fields of <code>metadata</code>.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>spec</code> <em><a href="#destinationspec">DestinationSpec</a></em></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>status</code> <em><a href="#destinationstatus">DestinationStatus</a></em></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h4 id="destinationport">DestinationPort<a class="headerlink" href="#destinationport" title="Permanent link">&para;</a></h4>
+<p>DestinationPort describes a port (or port range) allowed for traffic
+to a Destination's prefixes. Mirrors K8s NetworkPolicy port semantics.
+Exactly one of Port or PortRange must be set per entry.</p>
+<p><em>Appears in:</em>
+- <a href="#destinationspec">DestinationSpec</a></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>protocol</code> <em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#protocol-v1-core">Protocol</a></em></td>
+<td>Protocol is the network protocol.</td>
+<td></td>
+<td>Enum: [TCP UDP SCTP] <br />Required: {} <br /></td>
+</tr>
+<tr>
+<td><code>port</code> <em>integer</em></td>
+<td>Port is a single port number (1–65535).<br />Mutually exclusive with PortRange.</td>
+<td></td>
+<td>Maximum: 65535 <br />Minimum: 1 <br />Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>portRange</code> <em><a href="#portrange">PortRange</a></em></td>
+<td>PortRange specifies a contiguous range of ports.<br />Mutually exclusive with Port.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+</tbody>
+</table>
+<h4 id="destinationspec">DestinationSpec<a class="headerlink" href="#destinationspec" title="Permanent link">&para;</a></h4>
+<p>DestinationSpec defines the desired state of Destination.</p>
+<p><em>Appears in:</em>
+- <a href="#destination">Destination</a></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>vrfRef</code> <em>string</em></td>
+<td>References a VRF resource by name. Mutually exclusive with nextHop.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>prefixes</code> <em>string array</em></td>
+<td>Subnets reachable via this destination (CIDR notation).</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>nextHop</code> <em><a href="#nexthopconfig">NextHopConfig</a></em></td>
+<td>Next-hop addresses for static routing. Mutually exclusive with vrfRef.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>ports</code> <em><a href="#destinationport">DestinationPort</a> array</em></td>
+<td>Port restrictions for egress NetworkPolicy.</td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h4 id="destinationstatus">DestinationStatus<a class="headerlink" href="#destinationstatus" title="Permanent link">&para;</a></h4>
+<p>DestinationStatus defines the observed state of Destination.</p>
+<p><em>Appears in:</em>
+- <a href="#destination">Destination</a></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>observedGeneration</code> <em>integer</em></td>
+<td>ObservedGeneration is the most recent generation observed by the controller.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>referenceCount</code> <em>integer</em></td>
+<td>How many attachments/connections reference this destination.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>conditions</code> <em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#condition-v1-meta">Condition</a> array</em></td>
+<td>Standard Kubernetes conditions.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+</tbody>
+</table>
+<h4 id="ethernetconfig">EthernetConfig<a class="headerlink" href="#ethernetconfig" title="Permanent link">&para;</a></h4>
+<p>EthernetConfig defines configuration for an ethernet interface.</p>
+<p><em>Appears in:</em>
+- <a href="#interfaceconfigspec">InterfaceConfigSpec</a></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>mtu</code> <em>integer</em></td>
+<td>Mtu is the maximum transmission unit.</td>
+<td></td>
+<td>Maximum: 9000 <br />Minimum: 1000 <br />Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>virtualFunctionCount</code> <em>integer</em></td>
+<td>VirtualFunctionCount is the number of SR-IOV virtual functions to create.</td>
+<td></td>
+<td>Minimum: 1 <br />Optional: {} <br /></td>
+</tr>
+</tbody>
+</table>
+<h4 id="ipnetwork">IPNetwork<a class="headerlink" href="#ipnetwork" title="Permanent link">&para;</a></h4>
+<p>IPNetwork describes an IP address pool for a single address family.</p>
+<p><em>Appears in:</em>
+- <a href="#networkspec">NetworkSpec</a></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>cidr</code> <em>string</em></td>
+<td>CIDR is the IP network in CIDR notation (e.g. "198.51.100.0/24").</td>
+<td></td>
+<td>Required: {} <br /></td>
+</tr>
+<tr>
+<td><code>prefixLength</code> <em>integer</em></td>
+<td>PrefixLength is the allocation slice size (e.g. 28 means /28 per consumer).<br />Must be &gt;= the CIDR prefix length.</td>
+<td></td>
+<td>Maximum: 128 <br />Minimum: 1 <br />Optional: {} <br /></td>
+</tr>
+</tbody>
+</table>
+<h4 id="inbound">Inbound<a class="headerlink" href="#inbound" title="Permanent link">&para;</a></h4>
+<p>Inbound allocates IPs from a Network for MetalLB pools and BGP/L2 advertisement.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>apiVersion</code> <em>string</em></td>
+<td><code>network-connector.sylvaproject.org/v1alpha1</code></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>kind</code> <em>string</em></td>
+<td><code>Inbound</code></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>metadata</code> <em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#objectmeta-v1-meta">ObjectMeta</a></em></td>
+<td>Refer to Kubernetes API documentation for fields of <code>metadata</code>.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>spec</code> <em><a href="#inboundspec">InboundSpec</a></em></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>status</code> <em><a href="#inboundstatus">InboundStatus</a></em></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h4 id="inboundspec">InboundSpec<a class="headerlink" href="#inboundspec" title="Permanent link">&para;</a></h4>
+<p>InboundSpec defines the desired state of Inbound.
+Allocates IPs from a Network for MetalLB pools and BGP/L2 advertisement.
+Optionally exports IPs as host routes into VRFs (HBN mode).</p>
+<p><em>Appears in:</em>
+- <a href="#inbound">Inbound</a></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>networkRef</code> <em>string</em></td>
+<td>NetworkRef references a Network CRD by name.</td>
+<td></td>
+<td>MinLength: 1 <br />Required: {} <br /></td>
+</tr>
+<tr>
+<td><code>destinations</code> <em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#labelselector-v1-meta">LabelSelector</a></em></td>
+<td>Destinations selects Destination CRDs. If omitted, non-HBN mode is used.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>count</code> <em>integer</em></td>
+<td>Count is the number of IPs to allocate. Mutually exclusive with Addresses.</td>
+<td></td>
+<td>Minimum: 1 <br />Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>addresses</code> <em><a href="#addressallocation">AddressAllocation</a></em></td>
+<td>Addresses specifies explicit address allocations. Mutually exclusive with Count.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>poolName</code> <em>string</em></td>
+<td>PoolName overrides the MetalLB IPAddressPool name.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>tenantLoadBalancerClass</code> <em>string</em></td>
+<td>TenantLoadBalancerClass specifies the LoadBalancerClass for tenant-managed LB.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>advertisement</code> <em><a href="#advertisementconfig">AdvertisementConfig</a></em></td>
+<td>Advertisement configures the MetalLB advertisement mode (bgp or l2).</td>
+<td></td>
+<td>Required: {} <br /></td>
+</tr>
+</tbody>
+</table>
+<h4 id="inboundstatus">InboundStatus<a class="headerlink" href="#inboundstatus" title="Permanent link">&para;</a></h4>
+<p>InboundStatus defines the observed state of Inbound.</p>
+<p><em>Appears in:</em>
+- <a href="#inbound">Inbound</a></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>observedGeneration</code> <em>integer</em></td>
+<td>ObservedGeneration is the most recent generation observed by the controller.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>addresses</code> <em><a href="#addressallocation">AddressAllocation</a></em></td>
+<td>Addresses holds the allocated IP addresses.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>poolName</code> <em>string</em></td>
+<td>PoolName is the resolved MetalLB IPAddressPool name.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>vrfs</code> <em>string array</em></td>
+<td>VRFs lists the VRF names this Inbound is plumbed into, derived from the<br />matched Destinations (spec.destinations → Destination.spec.vrfRef). Sorted<br />and de-duplicated.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>conditions</code> <em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#condition-v1-meta">Condition</a> array</em></td>
+<td>Conditions represent the latest available observations of the Inbound's state.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+</tbody>
+</table>
+<h4 id="interfaceconfig">InterfaceConfig<a class="headerlink" href="#interfaceconfig" title="Permanent link">&para;</a></h4>
+<p>InterfaceConfig is the Schema for the interfaceconfigs API.
+It defines node-level interface provisioning (bonds, ethernets).</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>apiVersion</code> <em>string</em></td>
+<td><code>network-connector.sylvaproject.org/v1alpha1</code></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>kind</code> <em>string</em></td>
+<td><code>InterfaceConfig</code></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>metadata</code> <em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#objectmeta-v1-meta">ObjectMeta</a></em></td>
+<td>Refer to Kubernetes API documentation for fields of <code>metadata</code>.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>spec</code> <em><a href="#interfaceconfigspec">InterfaceConfigSpec</a></em></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>status</code> <em><a href="#interfaceconfigstatus">InterfaceConfigStatus</a></em></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h4 id="interfaceconfignodestatus">InterfaceConfigNodeStatus<a class="headerlink" href="#interfaceconfignodestatus" title="Permanent link">&para;</a></h4>
+<p>InterfaceConfigNodeStatus describes the per-node application status.</p>
+<p><em>Appears in:</em>
+- <a href="#interfaceconfigstatus">InterfaceConfigStatus</a></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>node</code> <em>string</em></td>
+<td>Node is the name of the node.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>applied</code> <em>boolean</em></td>
+<td>Applied indicates whether the configuration has been applied.</td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h4 id="interfaceconfigspec">InterfaceConfigSpec<a class="headerlink" href="#interfaceconfigspec" title="Permanent link">&para;</a></h4>
+<p>InterfaceConfigSpec defines the desired state of InterfaceConfig.
+The typed fields (Ethernets, Bonds) cover common use cases. For netplan
+features not modeled here, use RawNetplan as an escape hatch.</p>
+<p><em>Appears in:</em>
+- <a href="#interfaceconfig">InterfaceConfig</a></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>nodeSelector</code> <em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#labelselector-v1-meta">LabelSelector</a></em></td>
+<td>NodeSelector selects the target nodes for interface configuration.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>ethernets</code> <em>object (keys:string, values:<a href="#ethernetconfig">EthernetConfig</a>)</em></td>
+<td>Ethernets maps interface names to ethernet configurations.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>bonds</code> <em>object (keys:string, values:<a href="#bondconfig">BondConfig</a>)</em></td>
+<td>Bonds maps bond names to bond configurations.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>rawNetplan</code> <em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#rawextension-runtime-pkg">RawExtension</a></em></td>
+<td>RawNetplan is an optional escape hatch for netplan features not covered<br />by the typed fields above. Contents are merged into the generated netplan<br />config, with typed fields taking precedence on conflict.</td>
+<td></td>
+<td>Type: object <br />Optional: {} <br /></td>
+</tr>
+</tbody>
+</table>
+<h4 id="interfaceconfigstatus">InterfaceConfigStatus<a class="headerlink" href="#interfaceconfigstatus" title="Permanent link">&para;</a></h4>
+<p>InterfaceConfigStatus defines the observed state of InterfaceConfig.</p>
+<p><em>Appears in:</em>
+- <a href="#interfaceconfig">InterfaceConfig</a></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>observedGeneration</code> <em>integer</em></td>
+<td>ObservedGeneration is the most recent generation observed by the controller.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>conditions</code> <em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#condition-v1-meta">Condition</a> array</em></td>
+<td>Conditions represent the latest available observations of the resource's state.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>nodeStatuses</code> <em><a href="#interfaceconfignodestatus">InterfaceConfigNodeStatus</a> array</em></td>
+<td>NodeStatuses lists the per-node application status.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+</tbody>
+</table>
+<h4 id="layer2attachment">Layer2Attachment<a class="headerlink" href="#layer2attachment" title="Permanent link">&para;</a></h4>
+<p>Layer2Attachment attaches a Network as a Layer 2 segment to a set of nodes.
+Supports HBN mode (VXLAN + VRF) and non-HBN mode (physical interface).</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>apiVersion</code> <em>string</em></td>
+<td><code>network-connector.sylvaproject.org/v1alpha1</code></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>kind</code> <em>string</em></td>
+<td><code>Layer2Attachment</code></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>metadata</code> <em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#objectmeta-v1-meta">ObjectMeta</a></em></td>
+<td>Refer to Kubernetes API documentation for fields of <code>metadata</code>.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>spec</code> <em><a href="#layer2attachmentspec">Layer2AttachmentSpec</a></em></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>status</code> <em><a href="#layer2attachmentstatus">Layer2AttachmentStatus</a></em></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h4 id="layer2attachmentspec">Layer2AttachmentSpec<a class="headerlink" href="#layer2attachmentspec" title="Permanent link">&para;</a></h4>
+<p>Layer2AttachmentSpec defines the desired state of Layer2Attachment.</p>
+<p><em>Appears in:</em>
+- <a href="#layer2attachment">Layer2Attachment</a></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>networkRef</code> <em>string</em></td>
+<td>NetworkRef references a Network CRD by name.</td>
+<td></td>
+<td>MinLength: 1 <br />Required: {} <br /></td>
+</tr>
+<tr>
+<td><code>destinations</code> <em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#labelselector-v1-meta">LabelSelector</a></em></td>
+<td>Destinations selects Destination resources by label.<br />If omitted, no VRF plumbing is performed.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>nodeSelector</code> <em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#labelselector-v1-meta">LabelSelector</a></em></td>
+<td>NodeSelector selects which nodes receive this attachment.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>interfaceRef</code> <em>string</em></td>
+<td>InterfaceRef points to an existing host interface for non-HBN mode.<br />On bare metal: the agent creates a VLAN sub-interface on this NIC/bond.<br />On VMs: the hypervisor provides the NIC; the agent creates a VLAN sub-interface on it.<br />If nil (HBN mode), a VXLAN interface is created automatically.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>interfaceName</code> <em>string</em></td>
+<td>InterfaceName is the interface name suffix. Immutable once set.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>mtu</code> <em>integer</em></td>
+<td>MTU is the interface MTU.</td>
+<td></td>
+<td>Maximum: 9000 <br />Minimum: 1000 <br />Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>disableAnycast</code> <em>boolean</em></td>
+<td>DisableAnycast disables the anycast gateway.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>disableNeighborSuppression</code> <em>boolean</em></td>
+<td>DisableNeighborSuppression disables neighbor suppression.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>disableSegmentation</code> <em>boolean</em></td>
+<td>DisableSegmentation disables TX/RX segmentation offload on the interface.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>sriov</code> <em><a href="#sriovconfig">SRIOVConfig</a></em></td>
+<td>SRIOV is the SR-IOV configuration. When set, the CRA agent skips<br />VXLAN/VLAN bridge setup and configures VF passthrough instead.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>nodeIPs</code> <em><a href="#nodeipconfig">NodeIPConfig</a></em></td>
+<td>NodeIPs is the node IP assignment configuration.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+</tbody>
+</table>
+<h4 id="layer2attachmentstatus">Layer2AttachmentStatus<a class="headerlink" href="#layer2attachmentstatus" title="Permanent link">&para;</a></h4>
+<p>Layer2AttachmentStatus defines the observed state of Layer2Attachment.</p>
+<p><em>Appears in:</em>
+- <a href="#layer2attachment">Layer2Attachment</a></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>observedGeneration</code> <em>integer</em></td>
+<td>ObservedGeneration is the most recent generation observed by the controller.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>interfaceName</code> <em>string</em></td>
+<td>InterfaceName is the interface name the agent creates for this attachment:<br />the spec.interfaceName override when set, otherwise the default<br />"vlan.<vlan>" derived from the referenced Network's VLAN. Empty when no<br />override is set and the Network (or its VLAN) cannot be resolved.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>networkIPv4</code> <em>string</em></td>
+<td>NetworkIPv4 is the IPv4 CIDR of the referenced Network (spec.ipv4.cidr),<br />surfaced on the attachment for convenience. Empty when the Network has no<br />IPv4 pool or cannot be resolved.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>networkIPv6</code> <em>string</em></td>
+<td>NetworkIPv6 is the IPv6 CIDR of the referenced Network (spec.ipv6.cidr).<br />Empty when the Network has no IPv6 pool or cannot be resolved.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>vrfs</code> <em>string array</em></td>
+<td>VRFs lists the VRF names this attachment is plumbed into, derived from the<br />matched Destinations (spec.destinations → Destination.spec.vrfRef). Sorted<br />and de-duplicated.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>sriovVlanID</code> <em>integer</em></td>
+<td>SRIOVVlanID is the VLAN ID assigned for SR-IOV device traffic.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>anycast</code> <em><a href="#anycaststatus">AnycastStatus</a></em></td>
+<td>Anycast holds anycast gateway information.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>nodeAddresses</code> <em>object (keys:string, values:<a href="#addressallocation">AddressAllocation</a>)</em></td>
+<td>NodeAddresses holds per-node IP addresses allocated when nodeIPs.enabled is true.<br />Key is node name, value contains the allocated addresses.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>conditions</code> <em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#condition-v1-meta">Condition</a> array</em></td>
+<td>Conditions represent the latest available observations of the resource's state.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+</tbody>
+</table>
+<h4 id="loopbackconfig">LoopbackConfig<a class="headerlink" href="#loopbackconfig" title="Permanent link">&para;</a></h4>
+<p>LoopbackConfig defines a loopback interface whose per-node source address
+is allocated from a CIDR by the intent controller. Allocations are
+persisted in Collector.status.nodeAddresses and remain stable across
+reconciles unless the node is removed from the cluster.</p>
+<p><em>Appears in:</em>
+- <a href="#mirrorvrfref">MirrorVRFRef</a></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>name</code> <em>string</em></td>
+<td>Name is the loopback interface name (e.g. "lo.mir").</td>
+<td></td>
+<td>MinLength: 1 <br />Required: {} <br /></td>
+</tr>
+<tr>
+<td><code>subnet</code> <em>string</em></td>
+<td>Subnet is the CIDR from which per-node loopback source addresses are<br />allocated by the intent controller. Each in-scope node receives one<br />host address from this subnet, recorded in Collector.status.nodeAddresses.<br />The subnet must be large enough to accommodate every node in scope; an<br />IPv4 /29 yields 6 usable hosts after skipping network and broadcast.</td>
+<td></td>
+<td>MinLength: 1 <br />Required: {} <br /></td>
+</tr>
+</tbody>
+</table>
+<h4 id="mirrorsource">MirrorSource<a class="headerlink" href="#mirrorsource" title="Permanent link">&para;</a></h4>
+<p>MirrorSource identifies an attachment to mirror traffic from.</p>
+<p><em>Appears in:</em>
+- <a href="#trafficmirrorspec">TrafficMirrorSpec</a></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>kind</code> <em>string</em></td>
+<td>Kind is the type of attachment.</td>
+<td></td>
+<td>Enum: [Layer2Attachment Inbound Outbound] <br />Required: {} <br /></td>
+</tr>
+<tr>
+<td><code>name</code> <em>string</em></td>
+<td>Name is the name of the attachment resource.</td>
+<td></td>
+<td>MinLength: 1 <br />Required: {} <br /></td>
+</tr>
+</tbody>
+</table>
+<h4 id="mirrorvrfref">MirrorVRFRef<a class="headerlink" href="#mirrorvrfref" title="Permanent link">&para;</a></h4>
+<p>MirrorVRFRef references a VRF CRD for the mirror VRF and specifies its loopback config.</p>
+<p><em>Appears in:</em>
+- <a href="#collectorspec">CollectorSpec</a></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>name</code> <em>string</em></td>
+<td>Name of the VRF resource.</td>
+<td></td>
+<td>MinLength: 1 <br />Required: {} <br /></td>
+</tr>
+<tr>
+<td><code>loopback</code> <em><a href="#loopbackconfig">LoopbackConfig</a></em></td>
+<td>Loopback defines a loopback interface backed by a CAPI IPAM pool for per-node<br />GRE source IP allocation. The controller provisions IPAddressClaims from the<br />referenced pool on each node in scope.</td>
+<td></td>
+<td>Required: {} <br /></td>
+</tr>
+</tbody>
+</table>
+<h4 id="network">Network<a class="headerlink" href="#network" title="Permanent link">&para;</a></h4>
+<p>Network is the Schema for the networks API.
+A Network represents a pure pool definition referenced by name via networkRef
+from usage CRDs such as Layer2Attachment, Inbound, Outbound, and PodNetwork.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>apiVersion</code> <em>string</em></td>
+<td><code>network-connector.sylvaproject.org/v1alpha1</code></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>kind</code> <em>string</em></td>
+<td><code>Network</code></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>metadata</code> <em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#objectmeta-v1-meta">ObjectMeta</a></em></td>
+<td>Refer to Kubernetes API documentation for fields of <code>metadata</code>.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>spec</code> <em><a href="#networkspec">NetworkSpec</a></em></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>status</code> <em><a href="#networkstatus">NetworkStatus</a></em></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h4 id="networkspec">NetworkSpec<a class="headerlink" href="#networkspec" title="Permanent link">&para;</a></h4>
+<p>NetworkSpec defines the desired state of Network.
+A Network is a pure pool definition — CIDR, VLAN, VNI, allocation properties.
+It does not carry VRFs, node scope, or usage semantics.</p>
+<p><em>Appears in:</em>
+- <a href="#network">Network</a></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ipv4</code> <em><a href="#ipnetwork">IPNetwork</a></em></td>
+<td>IPv4 is the IPv4 address pool for this network. The CIDR must be the<br />network address (host bits zero), e.g. "198.51.100.224/27" — not an<br />authored host address like "198.51.100.225/27". The anycast gateway is<br />derived as the first usable host (network address + 1).</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>ipv6</code> <em><a href="#ipnetwork">IPNetwork</a></em></td>
+<td>IPv6 is the IPv6 address pool for this network. The CIDR must be the<br />network address (host bits zero), e.g. "2001:db8::/64".</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>vlan</code> <em>integer</em></td>
+<td>VLAN is the VLAN ID for this network.</td>
+<td></td>
+<td>Maximum: 4094 <br />Minimum: 1 <br />Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>vni</code> <em>integer</em></td>
+<td>VNI is the VXLAN Network Identifier for this network.<br />In BM4X (bare-metal) mode without SR-IOV, the VNI is provided by the<br />service integration engineer. The node VTEP IP comes from the underlay,<br />not from this CRD.</td>
+<td></td>
+<td>Maximum: 1.6777215e+07 <br />Minimum: 1 <br />Optional: {} <br /></td>
+</tr>
+</tbody>
+</table>
+<h4 id="networkstatus">NetworkStatus<a class="headerlink" href="#networkstatus" title="Permanent link">&para;</a></h4>
+<p>NetworkStatus defines the observed state of Network.</p>
+<p><em>Appears in:</em>
+- <a href="#network">Network</a></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>observedGeneration</code> <em>integer</em></td>
+<td>ObservedGeneration is the most recent generation observed by the controller.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>referenceCount</code> <em>integer</em></td>
+<td>ReferenceCount is the number of usage CRDs that reference this Network.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>conditions</code> <em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#condition-v1-meta">Condition</a> array</em></td>
+<td>Conditions represent the latest available observations of the Network's state.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+</tbody>
+</table>
+<h4 id="nexthopconfig">NextHopConfig<a class="headerlink" href="#nexthopconfig" title="Permanent link">&para;</a></h4>
+<p>NextHopConfig specifies next-hop addresses for static routing in non-HBN mode.
+At least one of IPv4 or IPv6 must be set.</p>
+<p><em>Appears in:</em>
+- <a href="#destinationspec">DestinationSpec</a></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ipv4</code> <em>string</em></td>
+<td>IPv4 is the IPv4 next-hop address (e.g. "198.51.100.1").</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>ipv6</code> <em>string</em></td>
+<td>IPv6 is the IPv6 next-hop address (e.g. "2001:db8:100::1").</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+</tbody>
+</table>
+<h4 id="nodeattachment">NodeAttachment<a class="headerlink" href="#nodeattachment" title="Permanent link">&para;</a></h4>
+<p>NodeAttachment attaches cluster nodes to a remote VRF. Node IPs (from
+node.status.addresses) are exported as host routes into the VRF, and the
+VRF's destination prefixes are imported back for the attached nodes via SBR.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>apiVersion</code> <em>string</em></td>
+<td><code>network-connector.sylvaproject.org/v1alpha1</code></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>kind</code> <em>string</em></td>
+<td><code>NodeAttachment</code></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>metadata</code> <em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#objectmeta-v1-meta">ObjectMeta</a></em></td>
+<td>Refer to Kubernetes API documentation for fields of <code>metadata</code>.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>spec</code> <em><a href="#nodeattachmentspec">NodeAttachmentSpec</a></em></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>status</code> <em><a href="#nodeattachmentstatus">NodeAttachmentStatus</a></em></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h4 id="nodeattachmentspec">NodeAttachmentSpec<a class="headerlink" href="#nodeattachmentspec" title="Permanent link">&para;</a></h4>
+<p>NodeAttachmentSpec defines the desired state of NodeAttachment.
+A NodeAttachment leaks node IPs into a remote VRF and imports remote prefixes
+back into the cluster VRF via source-based routing.</p>
+<p><em>Appears in:</em>
+- <a href="#nodeattachment">NodeAttachment</a></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>vrfRef</code> <em>string</em></td>
+<td>VRFRef references a VRF CRD by name. The VRF provides the L3VNI and<br />route target for the fabric VRF that node IPs will be exported into.</td>
+<td></td>
+<td>MinLength: 1 <br />Required: {} <br /></td>
+</tr>
+<tr>
+<td><code>destinations</code> <em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#labelselector-v1-meta">LabelSelector</a></em></td>
+<td>Destinations selects Destination CRDs whose prefixes should be imported<br />back into the cluster VRF (via SBR) for the attached nodes.</td>
+<td></td>
+<td>Required: {} <br /></td>
+</tr>
+<tr>
+<td><code>nodeSelector</code> <em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#labelselector-v1-meta">LabelSelector</a></em></td>
+<td>NodeSelector restricts which nodes are attached. If omitted, all nodes<br />are attached to the VRF.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+</tbody>
+</table>
+<h4 id="nodeattachmentstatus">NodeAttachmentStatus<a class="headerlink" href="#nodeattachmentstatus" title="Permanent link">&para;</a></h4>
+<p>NodeAttachmentStatus defines the observed state of NodeAttachment.</p>
+<p><em>Appears in:</em>
+- <a href="#nodeattachment">NodeAttachment</a></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>observedGeneration</code> <em>integer</em></td>
+<td>ObservedGeneration is the most recent generation observed by the controller.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>vrfs</code> <em>string array</em></td>
+<td>VRFs lists the VRF names whose prefixes are imported by this attachment,<br />derived from the matched Destinations (spec.destinations →<br />Destination.spec.vrfRef). This is distinct from spec.vrfRef (the target<br />VRF the nodes attach to). Sorted and de-duplicated.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>conditions</code> <em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#condition-v1-meta">Condition</a> array</em></td>
+<td>Conditions represent the latest available observations of the NodeAttachment's state.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+</tbody>
+</table>
+<h4 id="nodeipconfig">NodeIPConfig<a class="headerlink" href="#nodeipconfig" title="Permanent link">&para;</a></h4>
+<p>NodeIPConfig defines node IP assignment configuration for a Layer2Attachment.</p>
+<p><em>Appears in:</em>
+- <a href="#layer2attachmentspec">Layer2AttachmentSpec</a></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>enabled</code> <em>boolean</em></td>
+<td>Enabled controls whether node IPs are assigned from the referenced Network.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>reservedRanges</code> <em>string array</em></td>
+<td>ReservedRanges lists IP ranges (CIDRs) within the Network that are reserved<br />for pod use and must not be allocated to nodes. Each entry must be a valid<br />CIDR that falls within the parent Network's address space.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+</tbody>
+</table>
+<h4 id="nodeinterface">NodeInterface<a class="headerlink" href="#nodeinterface" title="Permanent link">&para;</a></h4>
+<p>NodeInterface describes a network interface on a node.</p>
+<p><em>Appears in:</em>
+- <a href="#nodenetworkstatusstatus">NodeNetworkStatusStatus</a></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>name</code> <em>string</em></td>
+<td>Name is the interface name.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>mac</code> <em>string</em></td>
+<td>Mac is the MAC address of the interface.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>mtu</code> <em>integer</em></td>
+<td>Mtu is the maximum transmission unit.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>state</code> <em><a href="#nodeinterfacestate">NodeInterfaceState</a></em></td>
+<td>State is the link state.</td>
+<td></td>
+<td>Enum: [up down unknown] <br /></td>
+</tr>
+<tr>
+<td><code>type</code> <em><a href="#nodeinterfacetype">NodeInterfaceType</a></em></td>
+<td>Type is the interface type.</td>
+<td></td>
+<td>Enum: [physical bond vlan bridge vxlan loopback virtual] <br />Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>members</code> <em>string array</em></td>
+<td>Members lists bonded member interfaces (for type=bond).</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>parent</code> <em>string</em></td>
+<td>Parent is the parent interface (for type=vlan).</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>vlanID</code> <em>integer</em></td>
+<td>VlanID is the VLAN ID (for type=vlan).</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>addresses</code> <em>string array</em></td>
+<td>Addresses lists assigned IP addresses.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+</tbody>
+</table>
+<h4 id="nodeinterfacestate">NodeInterfaceState<a class="headerlink" href="#nodeinterfacestate" title="Permanent link">&para;</a></h4>
+<p><em>Underlying type:</em> <em>string</em></p>
+<p>NodeInterfaceState describes the link state of an interface.</p>
+<p><em>Validation:</em>
+- Enum: [up down unknown]</p>
+<p><em>Appears in:</em>
+- <a href="#nodeinterface">NodeInterface</a></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>up</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>down</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>unknown</code></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h4 id="nodeinterfacetype">NodeInterfaceType<a class="headerlink" href="#nodeinterfacetype" title="Permanent link">&para;</a></h4>
+<p><em>Underlying type:</em> <em>string</em></p>
+<p>NodeInterfaceType describes the type of a network interface.</p>
+<p><em>Validation:</em>
+- Enum: [physical bond vlan bridge vxlan loopback virtual]</p>
+<p><em>Appears in:</em>
+- <a href="#nodeinterface">NodeInterface</a></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>physical</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>bond</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>vlan</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>bridge</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>vxlan</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>loopback</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>virtual</code></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h4 id="nodenetworkstatus">NodeNetworkStatus<a class="headerlink" href="#nodenetworkstatus" title="Permanent link">&para;</a></h4>
+<p>NodeNetworkStatus is the Schema for the nodenetworkstatuses API.
+It represents per-node network inventory populated by CRA agents.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>apiVersion</code> <em>string</em></td>
+<td><code>network-connector.sylvaproject.org/v1alpha1</code></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>kind</code> <em>string</em></td>
+<td><code>NodeNetworkStatus</code></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>metadata</code> <em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#objectmeta-v1-meta">ObjectMeta</a></em></td>
+<td>Refer to Kubernetes API documentation for fields of <code>metadata</code>.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>spec</code> <em><a href="#nodenetworkstatusspec">NodeNetworkStatusSpec</a></em></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>status</code> <em><a href="#nodenetworkstatusstatus">NodeNetworkStatusStatus</a></em></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h4 id="nodenetworkstatusspec">NodeNetworkStatusSpec<a class="headerlink" href="#nodenetworkstatusspec" title="Permanent link">&para;</a></h4>
+<p>NodeNetworkStatusSpec is intentionally empty; the resource is agent-populated.</p>
+<p><em>Appears in:</em>
+- <a href="#nodenetworkstatus">NodeNetworkStatus</a></p>
+<h4 id="nodenetworkstatusstatus">NodeNetworkStatusStatus<a class="headerlink" href="#nodenetworkstatusstatus" title="Permanent link">&para;</a></h4>
+<p>NodeNetworkStatusStatus contains the observed network state of a node.</p>
+<p><em>Appears in:</em>
+- <a href="#nodenetworkstatus">NodeNetworkStatus</a></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>interfaces</code> <em><a href="#nodeinterface">NodeInterface</a> array</em></td>
+<td>Interfaces lists the network interfaces on the node.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>routes</code> <em><a href="#noderoute">NodeRoute</a> array</em></td>
+<td>Routes lists the routing table entries on the node.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>lastUpdated</code> <em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#time-v1-meta">Time</a></em></td>
+<td>LastUpdated is the timestamp of the last status update.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>conditions</code> <em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#condition-v1-meta">Condition</a> array</em></td>
+<td>Conditions represent the latest available observations of the resource's state.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+</tbody>
+</table>
+<h4 id="noderoute">NodeRoute<a class="headerlink" href="#noderoute" title="Permanent link">&para;</a></h4>
+<p>NodeRoute describes a routing table entry on a node.</p>
+<p><em>Appears in:</em>
+- <a href="#nodenetworkstatusstatus">NodeNetworkStatusStatus</a></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>destination</code> <em>string</em></td>
+<td>Destination is the route destination in CIDR notation.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>gateway</code> <em>string</em></td>
+<td>Gateway is the next-hop gateway address.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>interface</code> <em>string</em></td>
+<td>Interface is the egress interface for this route.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>table</code> <em>string</em></td>
+<td>Table is the routing table name.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+</tbody>
+</table>
+<h4 id="outbound">Outbound<a class="headerlink" href="#outbound" title="Permanent link">&para;</a></h4>
+<p>Outbound enables egress via SNAT, allocating IPs from a Network for Coil Egress and Calico pools.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>apiVersion</code> <em>string</em></td>
+<td><code>network-connector.sylvaproject.org/v1alpha1</code></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>kind</code> <em>string</em></td>
+<td><code>Outbound</code></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>metadata</code> <em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#objectmeta-v1-meta">ObjectMeta</a></em></td>
+<td>Refer to Kubernetes API documentation for fields of <code>metadata</code>.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>spec</code> <em><a href="#outboundspec">OutboundSpec</a></em></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>status</code> <em><a href="#outboundstatus">OutboundStatus</a></em></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h4 id="outboundspec">OutboundSpec<a class="headerlink" href="#outboundspec" title="Permanent link">&para;</a></h4>
+<p>OutboundSpec defines the desired state of Outbound.
+Enables egress via SNAT, allocating IPs from a Network for Coil Egress and Calico pools.</p>
+<p><em>Appears in:</em>
+- <a href="#outbound">Outbound</a></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>networkRef</code> <em>string</em></td>
+<td>NetworkRef references a Network CRD by name.</td>
+<td></td>
+<td>MinLength: 1 <br />Required: {} <br /></td>
+</tr>
+<tr>
+<td><code>destinations</code> <em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#labelselector-v1-meta">LabelSelector</a></em></td>
+<td>Destinations selects Destination CRDs.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>count</code> <em>integer</em></td>
+<td>Count is the number of IPs to allocate. Mutually exclusive with Addresses.</td>
+<td></td>
+<td>Minimum: 1 <br />Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>addresses</code> <em><a href="#addressallocation">AddressAllocation</a></em></td>
+<td>Addresses specifies explicit address allocations. Mutually exclusive with Count.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>replicas</code> <em>integer</em></td>
+<td>Replicas is the number of Coil egress pod replicas.</td>
+<td></td>
+<td>Minimum: 1 <br />Optional: {} <br /></td>
+</tr>
+</tbody>
+</table>
+<h4 id="outboundstatus">OutboundStatus<a class="headerlink" href="#outboundstatus" title="Permanent link">&para;</a></h4>
+<p>OutboundStatus defines the observed state of Outbound.</p>
+<p><em>Appears in:</em>
+- <a href="#outbound">Outbound</a></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>observedGeneration</code> <em>integer</em></td>
+<td>ObservedGeneration is the most recent generation observed by the controller.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>addresses</code> <em><a href="#addressallocation">AddressAllocation</a></em></td>
+<td>Addresses holds the allocated IP addresses.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>vrfs</code> <em>string array</em></td>
+<td>VRFs lists the VRF names this Outbound is plumbed into, derived from the<br />matched Destinations (spec.destinations → Destination.spec.vrfRef). Sorted<br />and de-duplicated.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>conditions</code> <em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#condition-v1-meta">Condition</a> array</em></td>
+<td>Conditions represent the latest available observations of the Outbound's state.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+</tbody>
+</table>
+<h4 id="podnetwork">PodNetwork<a class="headerlink" href="#podnetwork" title="Permanent link">&para;</a></h4>
+<p>PodNetwork is the Schema for the podnetworks API.
+It allocates additional pod-level networks from a Network for CNI integration.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>apiVersion</code> <em>string</em></td>
+<td><code>network-connector.sylvaproject.org/v1alpha1</code></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>kind</code> <em>string</em></td>
+<td><code>PodNetwork</code></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>metadata</code> <em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#objectmeta-v1-meta">ObjectMeta</a></em></td>
+<td>Refer to Kubernetes API documentation for fields of <code>metadata</code>.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>spec</code> <em><a href="#podnetworkspec">PodNetworkSpec</a></em></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>status</code> <em><a href="#podnetworkstatus">PodNetworkStatus</a></em></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h4 id="podnetworkspec">PodNetworkSpec<a class="headerlink" href="#podnetworkspec" title="Permanent link">&para;</a></h4>
+<p>PodNetworkSpec defines the desired state of PodNetwork.</p>
+<p><em>Appears in:</em>
+- <a href="#podnetwork">PodNetwork</a></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>networkRef</code> <em>string</em></td>
+<td>NetworkRef is the name of the Network resource this PodNetwork allocates from.</td>
+<td></td>
+<td>MinLength: 1 <br />Required: {} <br /></td>
+</tr>
+<tr>
+<td><code>destinations</code> <em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#labelselector-v1-meta">LabelSelector</a></em></td>
+<td>Destinations selects the destination workloads that may use this pod network.</td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h4 id="podnetworkstatus">PodNetworkStatus<a class="headerlink" href="#podnetworkstatus" title="Permanent link">&para;</a></h4>
+<p>PodNetworkStatus defines the observed state of PodNetwork.</p>
+<p><em>Appears in:</em>
+- <a href="#podnetwork">PodNetwork</a></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>observedGeneration</code> <em>integer</em></td>
+<td>ObservedGeneration is the most recent generation observed by the controller.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>networkIPv4</code> <em>string</em></td>
+<td>NetworkIPv4 is the IPv4 CIDR of the referenced Network (spec.ipv4.cidr).<br />Empty when the Network has no IPv4 pool or cannot be resolved.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>networkIPv6</code> <em>string</em></td>
+<td>NetworkIPv6 is the IPv6 CIDR of the referenced Network (spec.ipv6.cidr).<br />Empty when the Network has no IPv6 pool or cannot be resolved.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>vrfs</code> <em>string array</em></td>
+<td>VRFs lists the VRF names this PodNetwork is plumbed into, derived from the<br />matched Destinations (spec.destinations → Destination.spec.vrfRef). Sorted<br />and de-duplicated.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>conditions</code> <em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#condition-v1-meta">Condition</a> array</em></td>
+<td>Conditions represent the latest available observations of the<br />PodNetwork's current state.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+</tbody>
+</table>
+<h4 id="portrange">PortRange<a class="headerlink" href="#portrange" title="Permanent link">&para;</a></h4>
+<p>PortRange defines an inclusive start–end port range.</p>
+<p><em>Appears in:</em>
+- <a href="#destinationport">DestinationPort</a></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>start</code> <em>integer</em></td>
+<td>Start is the first port in the range (1–65535).</td>
+<td></td>
+<td>Maximum: 65535 <br />Minimum: 1 <br /></td>
+</tr>
+<tr>
+<td><code>end</code> <em>integer</em></td>
+<td>End is the last port in the range (≥ Start, 1–65535).</td>
+<td></td>
+<td>Maximum: 65535 <br />Minimum: 1 <br /></td>
+</tr>
+</tbody>
+</table>
+<h4 id="routeannouncementconfig">RouteAnnouncementConfig<a class="headerlink" href="#routeannouncementconfig" title="Permanent link">&para;</a></h4>
+<p>RouteAnnouncementConfig configures communities for a class of routes.</p>
+<p><em>Appears in:</em>
+- <a href="#announcementpolicyspec">AnnouncementPolicySpec</a></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>communities</code> <em>string array</em></td>
+<td>Communities lists BGP community strings to attach to these routes.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+</tbody>
+</table>
+<h4 id="sriovconfig">SRIOVConfig<a class="headerlink" href="#sriovconfig" title="Permanent link">&para;</a></h4>
+<p>SRIOVConfig defines SR-IOV configuration for a Layer2Attachment.
+When enabled, the agent performs SR-IOV VF passthrough instead of
+creating VXLAN/VLAN interfaces via CRA. The CRA bridge and VXLAN
+setup is skipped entirely for SR-IOV attachments.</p>
+<p><em>Appears in:</em>
+- <a href="#layer2attachmentspec">Layer2AttachmentSpec</a></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>enabled</code> <em>boolean</em></td>
+<td>Enabled controls whether SR-IOV is active. Immutable once set.</td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h4 id="trafficmatch">TrafficMatch<a class="headerlink" href="#trafficmatch" title="Permanent link">&para;</a></h4>
+<p>TrafficMatch optionally filters which traffic to mirror.</p>
+<p><em>Appears in:</em>
+- <a href="#trafficmirrorspec">TrafficMirrorSpec</a></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>srcPrefix</code> <em>string</em></td>
+<td>SrcPrefix filters by source IP prefix in CIDR notation.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>dstPrefix</code> <em>string</em></td>
+<td>DstPrefix filters by destination IP prefix in CIDR notation.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>protocol</code> <em>string</em></td>
+<td>Protocol filters by IP protocol.</td>
+<td></td>
+<td>Enum: [TCP UDP ICMP] <br />Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>srcPort</code> <em>integer</em></td>
+<td>SrcPort filters by source port (requires protocol to be tcp or udp).</td>
+<td></td>
+<td>Maximum: 65535 <br />Minimum: 1 <br />Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>dstPort</code> <em>integer</em></td>
+<td>DstPort filters by destination port (requires protocol to be tcp or udp).</td>
+<td></td>
+<td>Maximum: 65535 <br />Minimum: 1 <br />Optional: {} <br /></td>
+</tr>
+</tbody>
+</table>
+<h4 id="trafficmirror">TrafficMirror<a class="headerlink" href="#trafficmirror" title="Permanent link">&para;</a></h4>
+<p>TrafficMirror declaratively mirrors traffic from an attachment to a Collector.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>apiVersion</code> <em>string</em></td>
+<td><code>network-connector.sylvaproject.org/v1alpha1</code></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>kind</code> <em>string</em></td>
+<td><code>TrafficMirror</code></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>metadata</code> <em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#objectmeta-v1-meta">ObjectMeta</a></em></td>
+<td>Refer to Kubernetes API documentation for fields of <code>metadata</code>.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>spec</code> <em><a href="#trafficmirrorspec">TrafficMirrorSpec</a></em></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>status</code> <em><a href="#trafficmirrorstatus">TrafficMirrorStatus</a></em></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h4 id="trafficmirrorspec">TrafficMirrorSpec<a class="headerlink" href="#trafficmirrorspec" title="Permanent link">&para;</a></h4>
+<p>TrafficMirrorSpec defines the desired state of TrafficMirror.</p>
+<p><em>Appears in:</em>
+- <a href="#trafficmirror">TrafficMirror</a></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>source</code> <em><a href="#mirrorsource">MirrorSource</a></em></td>
+<td>Source identifies the attachment to mirror traffic from.</td>
+<td></td>
+<td>Required: {} <br /></td>
+</tr>
+<tr>
+<td><code>collector</code> <em>string</em></td>
+<td>Collector is the name of the Collector resource.</td>
+<td></td>
+<td>MinLength: 1 <br />Required: {} <br /></td>
+</tr>
+<tr>
+<td><code>direction</code> <em>string</em></td>
+<td>Direction is the mirror direction. Defaults to "both" to match the underlying<br />NodeNetworkConfig MirrorACL behavior when the field is omitted.</td>
+<td>both</td>
+<td>Enum: [ingress egress both] <br />Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>trafficMatch</code> <em><a href="#trafficmatch">TrafficMatch</a></em></td>
+<td>TrafficMatch optionally filters which traffic to mirror.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+</tbody>
+</table>
+<h4 id="trafficmirrorstatus">TrafficMirrorStatus<a class="headerlink" href="#trafficmirrorstatus" title="Permanent link">&para;</a></h4>
+<p>TrafficMirrorStatus defines the observed state of TrafficMirror.</p>
+<p><em>Appears in:</em>
+- <a href="#trafficmirror">TrafficMirror</a></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>observedGeneration</code> <em>integer</em></td>
+<td>ObservedGeneration is the most recent generation observed by the controller.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>activeNodes</code> <em>integer</em></td>
+<td>ActiveNodes is the number of nodes where the mirror is active.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>conditions</code> <em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#condition-v1-meta">Condition</a> array</em></td>
+<td>Conditions represent the latest available observations of the TrafficMirror's state.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+</tbody>
+</table>
+<h4 id="vrf">VRF<a class="headerlink" href="#vrf" title="Permanent link">&para;</a></h4>
+<p>VRF represents a backbone VRF identity — name and overlay parameters (VNI, route target).
+Defined once per VRF, referenced by name from Destination resources.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>apiVersion</code> <em>string</em></td>
+<td><code>network-connector.sylvaproject.org/v1alpha1</code></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>kind</code> <em>string</em></td>
+<td><code>VRF</code></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>metadata</code> <em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#objectmeta-v1-meta">ObjectMeta</a></em></td>
+<td>Refer to Kubernetes API documentation for fields of <code>metadata</code>.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>spec</code> <em><a href="#vrfspec">VRFSpec</a></em></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>status</code> <em><a href="#vrfstatus">VRFStatus</a></em></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h4 id="vrfspec">VRFSpec<a class="headerlink" href="#vrfspec" title="Permanent link">&para;</a></h4>
+<p>VRFSpec defines the desired state of VRF.</p>
+<p><em>Appears in:</em>
+- <a href="#vrf">VRF</a></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>vrf</code> <em>string</em></td>
+<td>VRF is the name of the VRF in the backbone. It may be a readable name; the<br />controller reduces it to a datapath-safe form (&lt;=15 chars). The webhook<br />rejects names that cannot be reduced to fit. The generous upper bound here<br />is only a sanity limit.</td>
+<td></td>
+<td>MaxLength: 63 <br />Required: {} <br /></td>
+</tr>
+<tr>
+<td><code>vni</code> <em>integer</em></td>
+<td>VNI is the VXLAN Network Identifier. When omitted, the controller resolves it from operator config.</td>
+<td></td>
+<td>Maximum: 1.6777215e+07 <br />Minimum: 1 <br />Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>routeTarget</code> <em>string</em></td>
+<td>RouteTarget is the BGP route target for the VRF. When omitted, the controller resolves it.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+</tbody>
+</table>
+<h4 id="vrfstatus">VRFStatus<a class="headerlink" href="#vrfstatus" title="Permanent link">&para;</a></h4>
+<p>VRFStatus defines the observed state of VRF.</p>
+<p><em>Appears in:</em>
+- <a href="#vrf">VRF</a></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+<th>Default</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>observedGeneration</code> <em>integer</em></td>
+<td>ObservedGeneration is the most recent generation observed by the controller.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>referenceCount</code> <em>integer</em></td>
+<td>ReferenceCount is the number of Destinations that reference this VRF.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>references</code> <em>string array</em></td>
+<td>References lists the names of Destinations that reference this VRF.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+<tr>
+<td><code>conditions</code> <em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#condition-v1-meta">Condition</a> array</em></td>
+<td>Conditions represent the latest available observations of the VRF's state.</td>
+<td></td>
+<td>Optional: {} <br /></td>
+</tr>
+</tbody>
+</table>
+
+
+
+
+
+
+
+  
+  
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../../guides/traffic-mirroring/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Traffic Mirroring">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Traffic Mirroring
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../metrics/" class="md-footer__link md-footer__link--next" aria-label="Next: Metrics">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Metrics
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright &copy; 2022-2026 Deutsche Telekom AG
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    <script id="__config" type="application/json">{"base": "../..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.sections", "navigation.top", "navigation.footer", "toc.follow", "content.code.copy", "content.code.annotate", "content.action.edit", "search.suggest", "search.highlight"], "search": "../../assets/javascripts/workers/search.6ce7567c.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"default": "latest", "provider": "mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.83f73b43.min.js"></script>
+      
+    
+  </body>
+</html>
