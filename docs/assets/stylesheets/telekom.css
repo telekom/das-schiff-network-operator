@@ -1,0 +1,83 @@
+/*
+ * Telekom brand theming for the documentation site.
+ * Colours are taken from the Scale design system tokens:
+ * https://github.com/telekom/scale  (packages/design-tokens/src/telekom/tokens.js)
+ */
+
+:root {
+  /* Telekom Magenta */
+  --tk-magenta: #e20074;
+  --tk-magenta-hover: #f90984;
+  --tk-magenta-active: #cb0068;
+
+  /* Scale functional colours */
+  --tk-link: #0d39df;
+  --tk-link-hover: #000bbf;
+  --tk-success: #187431;
+  --tk-error: #d82a48;
+  --tk-info: #0d39df;
+}
+
+/* Primary (header, nav highlights, etc.) */
+[data-md-color-primary="custom"] {
+  --md-primary-fg-color: var(--tk-magenta);
+  --md-primary-fg-color--light: var(--tk-magenta-hover);
+  --md-primary-fg-color--dark: var(--tk-magenta-active);
+  --md-primary-bg-color: #ffffff;
+  --md-primary-bg-color--light: rgba(255, 255, 255, 0.7);
+}
+
+/* Accent (links on hover, active states) */
+[data-md-color-accent="custom"] {
+  --md-accent-fg-color: var(--tk-magenta);
+  --md-accent-fg-color--transparent: rgba(226, 0, 116, 0.1);
+}
+
+/* Fallback so the brand colour applies even without the attribute. */
+:root {
+  --md-primary-fg-color: var(--tk-magenta);
+  --md-accent-fg-color: var(--tk-magenta);
+}
+
+/* Telekom-style bold headings. */
+.md-typeset h1,
+.md-typeset h2,
+.md-typeset h3 {
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+.md-typeset h1 {
+  color: var(--md-default-fg-color);
+}
+
+/* Admonition + link accents that echo Scale functional colours. */
+.md-typeset .admonition.note,
+.md-typeset details.note {
+  border-color: var(--tk-info);
+}
+
+.md-typeset .admonition.warning,
+.md-typeset details.warning {
+  border-color: var(--tk-error);
+}
+
+.md-typeset .admonition.tip,
+.md-typeset details.tip {
+  border-color: var(--tk-magenta);
+}
+
+/* Grid "cards" hover uses the brand magenta. */
+.md-typeset .grid.cards > ul > li:hover {
+  border-color: var(--tk-magenta);
+  box-shadow: 0 4px 16px rgba(226, 0, 116, 0.15);
+}
+
+/* Dark mode: keep magenta primary, brighten the accent for contrast. */
+[data-md-color-scheme="slate"] {
+  --md-accent-fg-color: var(--tk-magenta-hover);
+}
+
+[data-md-color-scheme="slate"][data-md-color-accent="custom"] {
+  --md-accent-fg-color: var(--tk-magenta-hover);
+}

@@ -5,6 +5,14 @@
 
 With our BGP-EVPN to the host architecture, `network-operator` is responsible for the configuration and monitoring of the host router according to the specified declarative state.
 
+## Documentation
+
+User documentation (concepts, installation, and task guides for Inbound,
+Outbound, Layer2Attachment, BGPPeering, PodNetwork and Traffic Mirroring) lives
+under [`docs/`](docs/index.md) and is published as a versioned site with
+MkDocs Material. Build it locally with `make docs-serve`; regenerate the
+auto-generated CRD reference with `make docs-api`.
+
 The project provides five components:
 - One central `operator`, taking in desired state and deriving config revisions out of it. Further it controls the gradual rollout of the revisions.
   This is achieved by generating the `NodeNetworkConfig` and `NodeNetplanConfig` resources for each node, waiting for them to be provisioned successfully and then choosing the next node.
@@ -56,9 +64,9 @@ A sample healthcheck configuration file is provided at [config/samples/net-healt
 
 ## Prometheus metrics
 
-The network operator exposes Prometheus metrics for observability. See [docs/metrics.md](docs/metrics.md) for the complete list of metrics.
+The network operator exposes Prometheus metrics for observability. See [docs/reference/metrics.md](docs/reference/metrics.md) for the complete list of metrics.
 
-![schematic diagram of CRA and the host ns](./docs/cra-architecture.png)
+![schematic diagram of CRA and the host ns](./docs/assets/cra-architecture.png)
 
 ## Deploying the operator
 There are two possibilities to deploy the operator:

@@ -1,3 +1,8 @@
+---
+title: Metrics
+description: Prometheus metrics exposed by the network-operator and its agents.
+---
+
 # Prometheus Metrics
 
 The network operator exposes Prometheus metrics for observability. All metrics use the `nwop_` namespace.

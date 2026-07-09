@@ -70,6 +70,36 @@ vet: ## Run go vet against code.
 test: manifests generate fmt vet envtest ## Run tests.
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" go test $(shell go list ./... 2>/dev/null | grep -v -e '/e2etests$$' -e /e2etests/tests -e /e2etests/config -e /e2e/ || true) -coverprofile cover.out
 
+##@ Documentation
+
+.PHONY: docs-api
+docs-api: crd-ref-docs ## Generate the CRD field reference (docs/reference/crd-reference.md) from Go types.
+	$(CRD_REF_DOCS) \
+		--source-path=./api/v1alpha1/network-connector \
+		--config=.crd-ref-docs.yaml \
+		--renderer=markdown \
+		--output-path=docs/reference/crd-reference.md
+	@# Prepend front matter / title expected by MkDocs.
+	@printf '%s\n' \
+		'---' \
+		'title: CRD Reference' \
+		'description: Auto-generated field reference for the network-connector.sylvaproject.org/v1alpha1 API group. Do not edit by hand; run `make docs-api`.' \
+		'---' \
+		'' > docs/reference/crd-reference.md.tmp
+	@cat docs/reference/crd-reference.md >> docs/reference/crd-reference.md.tmp
+	@# Normalize the generated top-level heading so it matches the page title.
+	@sed -i.bak 's/^# API Reference$$/# CRD Reference/' docs/reference/crd-reference.md.tmp && rm -f docs/reference/crd-reference.md.tmp.bak
+	@mv docs/reference/crd-reference.md.tmp docs/reference/crd-reference.md
+	@echo "Wrote docs/reference/crd-reference.md"
+
+.PHONY: docs-serve
+docs-serve: ## Serve the documentation site locally with live reload (requires mkdocs-material + mike).
+	mkdocs serve
+
+.PHONY: docs-build
+docs-build: docs-api ## Build the documentation site (strict; fails on warnings/broken links).
+	mkdocs build --strict
+
 ##@ Build
 
 .PHONY: build
@@ -247,6 +277,11 @@ GO_LICENSES = $(shell pwd)/bin/go-licenses
 .PHONY: go-licenses
 go-licenses: ## Download go-licenses locally if necessary.
 	$(call go-get-tool,$(GO_LICENSES),github.com/google/go-licenses@latest)
+
+CRD_REF_DOCS = $(shell pwd)/bin/crd-ref-docs
+.PHONY: crd-ref-docs
+crd-ref-docs: ## Download crd-ref-docs locally if necessary.
+	$(call go-get-tool,$(CRD_REF_DOCS),github.com/elastic/crd-ref-docs@v0.3.0)
 
 # go-get-tool will 'go get' any package $2 and install it to $1.
 PROJECT_DIR := $(shell dirname $(abspath $(lastword $(MAKEFILE_LIST))))

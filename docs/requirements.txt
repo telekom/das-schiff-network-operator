@@ -1,0 +1,9 @@
+# Documentation site toolchain (pinned for reproducible CI + local builds).
+# Install with: pip install -r docs/requirements.txt
+#
+# mkdocs is pinned explicitly (not just via mkdocs-material's range) so the
+# resolved version cannot drift; the site uses the `validation:` config which
+# requires MkDocs >= 1.5.
+mkdocs==1.6.1
+mkdocs-material==9.5.44
+mike==2.1.3

@@ -1,0 +1,69 @@
+name: docs-release
+
+# Publish versioned documentation to GitHub Pages on every release tag.
+# Uses mike to maintain one subpath per minor version (e.g. v0.5) plus a
+# "latest" alias. Patch/pre-release tags overwrite their minor track.
+#
+# One-time setup: in the repository settings enable GitHub Pages with
+# "Deploy from a branch" -> branch "gh-pages" / root.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions: {}
+
+concurrency:
+  group: docs-release
+  cancel-in-progress: false
+
+jobs:
+  publish-docs:
+    name: publish docs
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # mike needs the full history of the gh-pages branch to update it.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Install docs toolchain
+        run: pip install -r docs/requirements.txt
+
+      - name: Regenerate the CRD reference
+        run: make docs-api
+
+      - name: Build the site (strict)
+        # Catch broken links/anchors before publishing; mike deploy does not
+        # build with --strict, so validate explicitly on tag builds too.
+        run: mkdocs build --strict
+
+      - name: Derive the minor-version label
+        id: version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"          # v0.5.1-alpha.8 -> 0.5.1-alpha.8
+          minor="$(echo "$tag" | cut -d. -f1-2)"  # -> 0.5
+          echo "label=v${minor}" >> "$GITHUB_OUTPUT"
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Deploy versioned docs
+        run: |
+          mike deploy --push --update-aliases \
+            --title "${{ steps.version.outputs.label }}" \
+            "${{ steps.version.outputs.label }}" latest
+          mike set-default --push latest
