@@ -1,0 +1,11 @@
+processor:
+  # Drop the generated *List wrapper types and boilerplate helper structs;
+  # they add noise to user-facing docs.
+  ignoreTypes:
+    - "(\\w+)List$"
+  ignoreFields:
+    - "TypeMeta$"
+
+render:
+  # Kubernetes types are linked to the upstream API reference.
+  kubernetesVersion: "1.31"

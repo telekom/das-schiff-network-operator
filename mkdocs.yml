@@ -1,0 +1,118 @@
+site_name: Das Schiff Network Operator
+site_description: >-
+  User documentation for the Das Schiff network-operator — declarative
+  BGP-EVPN-to-the-host networking for Kubernetes.
+site_author: Deutsche Telekom AG
+repo_name: telekom/das-schiff-network-operator
+repo_url: https://github.com/telekom/das-schiff-network-operator
+edit_uri: edit/main/docs/
+copyright: Copyright &copy; 2022-2025 Deutsche Telekom AG
+
+theme:
+  name: material
+  language: en
+  icon:
+    repo: fontawesome/brands/github
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - toc.follow
+    - content.code.copy
+    - content.code.annotate
+    - content.action.edit
+    - search.suggest
+    - search.highlight
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+extra_css:
+  - assets/stylesheets/telekom.css
+
+extra:
+  version:
+    provider: mike
+    default: latest
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - def_list
+  - footnotes
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+plugins:
+  - search
+
+# Fail the build on broken internal links and unresolved heading anchors.
+validation:
+  links:
+    not_found: warn
+    anchors: warn
+  nav:
+    omitted_files: info
+
+# Files kept in the docs/ tree for GitHub browsing but not part of the built
+# site (design proposals and the redirect stub for the old CRD docs location).
+exclude_docs: |
+  proposals/
+  crds/
+  requirements.txt
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Concepts: getting-started/concepts.md
+      - Installation: getting-started/installation.md
+      - Quick Start: getting-started/quick-start.md
+  - Guides:
+      - Inbound (ingress LBs): guides/inbound.md
+      - Outbound (egress / SNAT): guides/outbound.md
+      - Layer2Attachment (L2A): guides/layer2-attachment.md
+      - BGPPeering: guides/bgp-peering.md
+      - PodNetwork: guides/pod-network.md
+      - Traffic Mirroring: guides/traffic-mirroring.md
+  - Reference:
+      - CRD Reference: reference/crd-reference.md
+      - Metrics: reference/metrics.md
+      - Node Readiness: reference/node-readiness.md
+  - Advanced:
+      - Debugging: advanced/debugging.md
+      - Legacy API: advanced/legacy-api.md
+  - Design:
+      - Intent-Based Config: design/intent-based-config.md
+      - Traffic Mirroring: design/traffic-mirroring.md

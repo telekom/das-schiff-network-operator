@@ -1,0 +1,53 @@
+name: docs-pr
+
+# Validate the documentation site on pull requests that touch docs, the API
+# types, or the docs toolchain. Build-only (no deploy) so changes can be
+# reviewed before release.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - "docs/**"
+      - "mkdocs.yml"
+      - ".crd-ref-docs.yaml"
+      - "api/v1alpha1/network-connector/**"
+      - "Makefile"
+      - ".github/workflows/docs-pr.yaml"
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-docs:
+    name: build docs
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Install docs toolchain
+        run: pip install -r docs/requirements.txt
+
+      - name: Regenerate the CRD reference
+        run: make docs-api
+
+      - name: Ensure the CRD reference is up to date
+        run: |
+          git diff --exit-code -- docs/reference/crd-reference.md \
+            || (echo "::error::docs/reference/crd-reference.md is out of sync. Run 'make docs-api' and commit the result."; exit 1)
+
+      - name: Build the site (strict)
+        run: mkdocs build --strict
