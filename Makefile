@@ -87,6 +87,8 @@ docs-api: crd-ref-docs ## Generate the CRD field reference (docs/reference/crd-r
 		'---' \
 		'' > docs/reference/crd-reference.md.tmp
 	@cat docs/reference/crd-reference.md >> docs/reference/crd-reference.md.tmp
+	@# Normalize the generated top-level heading so it matches the page title.
+	@sed -i.bak 's/^# API Reference$$/# CRD Reference/' docs/reference/crd-reference.md.tmp && rm -f docs/reference/crd-reference.md.tmp.bak
 	@mv docs/reference/crd-reference.md.tmp docs/reference/crd-reference.md
 	@echo "Wrote docs/reference/crd-reference.md"
 

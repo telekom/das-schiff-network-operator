@@ -6,7 +6,7 @@ site_author: Deutsche Telekom AG
 repo_name: telekom/das-schiff-network-operator
 repo_url: https://github.com/telekom/das-schiff-network-operator
 edit_uri: edit/main/docs/
-copyright: Copyright &copy; 2022-2025 Deutsche Telekom AG
+copyright: Copyright &copy; 2022-2026 Deutsche Telekom AG
 
 theme:
   name: material

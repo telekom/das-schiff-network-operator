@@ -3,7 +3,7 @@ title: CRD Reference
 description: Auto-generated field reference for the network-connector.sylvaproject.org/v1alpha1 API group. Do not edit by hand; run `make docs-api`.
 ---
 
-# API Reference
+# CRD Reference
 
 ## Packages
 - [network-connector.sylvaproject.org/v1alpha1](#network-connectorsylvaprojectorgv1alpha1)
