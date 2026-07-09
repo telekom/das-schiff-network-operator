@@ -44,6 +44,11 @@ jobs:
       - name: Regenerate the CRD reference
         run: make docs-api
 
+      - name: Build the site (strict)
+        # Catch broken links/anchors before publishing; mike deploy does not
+        # build with --strict, so validate explicitly on tag builds too.
+        run: mkdocs build --strict
+
       - name: Derive the minor-version label
         id: version
         run: |
