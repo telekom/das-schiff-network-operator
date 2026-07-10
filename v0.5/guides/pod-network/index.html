@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Redistribute a pod Network's CIDR into a VRF (BGP-EVPN) so an additional pod network is reachable across the fabric.">
+        <meta name="description" content="Provision a Calico IPPool (natOutgoing=false) for a pod Network and redistribute its CIDR into a VRF (BGP-EVPN) so pods can use it and it is reachable across the fabric.">
       
       
         <meta name="author" content="Deutsche Telekom AG">
@@ -695,6 +695,15 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#using-the-pool-on-pods" class="md-nav__link">
+    <span class="md-ellipsis">
+      Using the pool on pods
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#prerequisites" class="md-nav__link">
     <span class="md-ellipsis">
       Prerequisites
@@ -1109,6 +1118,15 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#using-the-pool-on-pods" class="md-nav__link">
+    <span class="md-ellipsis">
+      Using the pool on pods
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#prerequisites" class="md-nav__link">
     <span class="md-ellipsis">
       Prerequisites
@@ -1186,54 +1204,96 @@
 
 
 <h1 id="podnetwork">PodNetwork<a class="headerlink" href="#podnetwork" title="Permanent link">&para;</a></h1>
-<p>A <code>PodNetwork</code> makes an additional pod network <strong>reachable across the fabric</strong> by
-redistributing the referenced
-<a href="../../getting-started/concepts/#foundation-vrf-and-network"><code>Network</code></a>'s CIDR into
-a VRF. It surfaces the Network's IPv4/IPv6 CIDRs in status and, via a
-<code>destinations</code> selector, plumbs the network into the matched VRFs so pod traffic
-on this network is routed there.</p>
-<p>Use a <code>PodNetwork</code> when pods have a <strong>secondary / additional network</strong> (assigned
-by your CNI) that must be advertised through a specific VRF backbone — for
-example a tenant overlay reachable via the fabric. <code>PodNetwork</code> handles only the
-L3 fabric side (route redistribution); your CNI/IPAM owns the pod addresses.</p>
+<p>A <code>PodNetwork</code> makes an additional pod network <strong>usable by pods and reachable
+across the fabric</strong>. It provisions a
+<a href="https://docs.tigera.io/calico/latest/reference/">Calico</a> <code>IPPool</code> (with
+<code>natOutgoing: false</code>) for the referenced
+<a href="../../getting-started/concepts/#foundation-vrf-and-network"><code>Network</code></a>'s CIDR so
+pods can be allocated addresses from it, and — via a <code>destinations</code> selector —
+redistributes that CIDR into the matched VRFs so the pod traffic is routed across
+the BGP-EVPN backbone.</p>
+<p>Use a <code>PodNetwork</code> when pods need a <strong>secondary / additional network</strong> that is
+routable through a specific VRF backbone — for example a tenant overlay reachable
+via the fabric. The operator provisions the Calico <code>IPPool</code> and the L3 fabric
+routing; you opt pods into the pool via a Calico annotation (see
+<a href="#using-the-pool-on-pods">Using the pool on pods</a>).</p>
 <h2 id="how-it-works">How it works<a class="headerlink" href="#how-it-works" title="Permanent link">&para;</a></h2>
-<p>A <code>PodNetwork</code> does two things on the operator side:</p>
+<p>A <code>PodNetwork</code> does three things on the operator side:</p>
 <ol>
 <li><strong>Resolves the Network</strong> referenced by <code>spec.networkRef</code> and surfaces its
    CIDRs in status as <code>networkIPv4</code> (<code>Network.spec.ipv4.cidr</code>) and <code>networkIPv6</code>
    (<code>Network.spec.ipv6.cidr</code>). These are empty when the Network has no pool for
    that family or cannot be resolved.</li>
-<li><strong>Redistributes the network into VRFs.</strong> When <code>spec.destinations</code> is set, the
+<li>
+<p><strong>Provisions a Calico <code>IPPool</code> per address family</strong> covering the Network's
+   full CIDR, with:</p>
+<ul>
+<li><code>natOutgoing: false</code> — the <strong>fabric</strong> performs SNAT (via the VRF), so pod
+    addresses stay routable instead of being masqueraded behind the node IP;</li>
+<li><code>nodeSelector: "!all()"</code> — the pool is <strong>not</strong> auto-assigned to ordinary
+    pods, so it never steals addresses from your default pod network; pods
+    opt in explicitly (see below);</li>
+<li><code>allowedUses: [Workload]</code> — usable for pod (workload) addressing.</li>
+</ul>
+<p>The generated pool names are reported in <code>status.ipPools</code> (sorted). This is
+handled by the <strong><code>platform-coil</code></strong> controller.
+3. <strong>Redistributes the network into VRFs.</strong> When <code>spec.destinations</code> is set, the
    matched <a href="../../getting-started/concepts/#routing-destination"><code>Destination</code></a>
    CRDs resolve to a VRF (<code>Destination.spec.vrfRef</code>). The operator adds a
    <strong>redistribute-connected</strong> filter for the Network's CIDR into that FabricVRF
    (so the pod network's connected routes enter BGP-EVPN), plus any <strong>aggregate
    routes</strong> from a matching <code>AnnouncementPolicy</code>. The VRF names are reported in
    <code>status.vrfs</code> (sorted, de-duplicated). If <code>destinations</code> is omitted, no VRF
-   plumbing is performed.</li>
+   plumbing is performed.</p>
+</li>
 </ol>
 <div class="admonition note">
-<p class="admonition-title">PodNetwork does not allocate IPs or attach pods</p>
-<p>Unlike <a href="../inbound/"><code>Inbound</code></a> / <a href="../outbound/"><code>Outbound</code></a>, a <code>PodNetwork</code>
-allocates <strong>no</strong> addresses and creates <strong>no</strong> MetalLB pools, Calico
-<code>IPPool</code>s or Coil <code>Egress</code> — there is no platform controller behind it. It
-only contributes L3 routing (redistribute + aggregate) to the per-node
-<code>NodeNetworkConfig</code>. Pod <strong>IP address management</strong> and <strong>interface
-attachment</strong> are handled entirely by your <strong>CNI</strong> (for example the primary
-CNI, or Multus via a <code>NetworkAttachmentDefinition</code>) — those resources are
-external to this operator.</p>
+<p class="admonition-title">PodNetwork provisions the IPPool, not IPAM or attachment</p>
+<p>A <code>PodNetwork</code> creates the Calico <code>IPPool</code> and the L3 routing, but it does
+<strong>not</strong> run IPAM or attach interfaces itself: <strong>address allocation</strong> from the
+pool and <strong>interface attachment</strong> are still performed by <strong>Calico</strong> (the CNI)
+at pod-creation time, driven by the pod annotation below. It allocates no
+MetalLB pools and no Coil <code>Egress</code>.</p>
 </div>
-<p><code>PodNetwork</code> has no <code>nodeSelector</code>; the contribution applies to <strong>all nodes</strong>,
-and pod placement is the scheduler's job.</p>
+<p><code>PodNetwork</code> has no <code>nodeSelector</code>; the routing contribution applies to <strong>all
+nodes</strong>, and pod placement is the scheduler's job.</p>
+<h2 id="using-the-pool-on-pods">Using the pool on pods<a class="headerlink" href="#using-the-pool-on-pods" title="Permanent link">&para;</a></h2>
+<p>Because the generated <code>IPPool</code> uses <code>nodeSelector: "!all()"</code>, Calico will <strong>not</strong>
+hand out its addresses to pods automatically — you opt a pod (or its namespace /
+workload) in with the
+<a href="https://docs.tigera.io/calico/latest/networking/ipam/use-specific-ip"><code>cni.projectcalico.org/ipv4pools</code></a>
+/ <code>ipv6pools</code> annotation, referencing the pool names from <code>status.ipPools</code>.</p>
+<p>First read the provisioned pool names:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>kubectl<span class="w"> </span>get<span class="w"> </span>podnetwork<span class="w"> </span>tenant-pods<span class="w"> </span>-o<span class="w"> </span>json<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-c<span class="w"> </span><span class="s1">&#39;.status.ipPools&#39;</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="c1"># e.g. [&quot;pn-tenant-pods-v4-1a2b3c4d&quot;,&quot;pn-tenant-pods-v6-9f8e7d6c&quot;]</span>
+</code></pre></div>
+<p>Then reference them on the pod template (values are JSON arrays of pool names):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v1</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Pod</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="nt">metadata</span><span class="p">:</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">app</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">  </span><span class="nt">annotations</span><span class="p">:</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">    </span><span class="nt">cni.projectcalico.org/ipv4pools</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;[&quot;pn-tenant-pods-v4-1a2b3c4d&quot;]&#39;</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">    </span><span class="nt">cni.projectcalico.org/ipv6pools</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;[&quot;pn-tenant-pods-v6-9f8e7d6c&quot;]&#39;</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="w">  </span><span class="nt">containers</span><span class="p">:</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">app</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nginx</span>
+</code></pre></div>
+<p>The pod then receives its address(es) from the PodNetwork's pool and — provided a
+<code>destinations</code> selector plumbs the network into a VRF — is reachable across the
+fabric with the fabric handling SNAT (<code>natOutgoing: false</code>).</p>
 <h2 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h2>
 <p>Before creating a <code>PodNetwork</code> you need:</p>
 <ul>
 <li>A <strong><code>Network</code></strong> referenced by <code>spec.networkRef</code>, in the same namespace, with an
-  <code>ipv4</code> and/or <code>ipv6</code> CIDR. The <code>PodNetwork</code> surfaces these CIDRs in its status.</li>
+  <code>ipv4</code> and/or <code>ipv6</code> CIDR. The <code>PodNetwork</code> surfaces these CIDRs in its status
+  and provisions a Calico <code>IPPool</code> for each.</li>
 <li>For <strong>VRF routing</strong>, one or more <strong><code>Destination</code></strong> CRDs carrying labels your
   <code>spec.destinations</code> selector matches, each bound to a <strong>VRF</strong> via <code>vrfRef</code>.</li>
-<li>A <strong>CNI</strong> capable of consuming an additional network (e.g. the primary CNI, or
-  Multus). This is external to the operator.</li>
+<li><strong>Calico</strong> as the (or a) CNI, and the <strong><code>platform-coil</code></strong> controller running in
+  the cluster (it provisions the <code>IPPool</code>s). Pods opt into the pool via the
+  <code>cni.projectcalico.org/ipv4pools</code> / <code>ipv6pools</code> annotation.</li>
 </ul>
 <h2 id="minimal-example">Minimal example<a class="headerlink" href="#minimal-example" title="Permanent link">&para;</a></h2>
 <p>The example below assumes the <code>Network</code> <code>net-pods</code> and one or more
@@ -1241,31 +1301,31 @@ and pod placement is the scheduler's job.</p>
 <a href="../../getting-started/concepts/">Concepts</a> for the model and the
 <a href="../../getting-started/quick-start/">Quick Start</a> for creating these foundation
 resources by hand.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Foundation (created earlier / by a provisioner)</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">network-connector.sylvaproject.org/v1alpha1</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Network</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="nt">metadata</span><span class="p">:</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">net-pods</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="nt">spec</span><span class="p">:</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">  </span><span class="nt">vlan</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">601</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="w">  </span><span class="nt">vni</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">4000601</span>
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="w">  </span><span class="nt">ipv4</span><span class="p">:</span>
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="w">    </span><span class="nt">cidr</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;10.244.0.0/16&quot;</span>
-<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="w">  </span><span class="nt">ipv6</span><span class="p">:</span>
-<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="w">    </span><span class="nt">cidr</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;fd00:10:244::/48&quot;</span>
-<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="nn">---</span>
-<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">network-connector.sylvaproject.org/v1alpha1</span>
-<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">PodNetwork</span>
-<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="nt">metadata</span><span class="p">:</span>
-<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">tenant-pods</span>
-<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a><span class="nt">spec</span><span class="p">:</span>
-<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a><span class="w">  </span><span class="nt">networkRef</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;net-pods&quot;</span>
-<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a><span class="w">  </span><span class="nt">destinations</span><span class="p">:</span>
-<a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a><span class="w">    </span><span class="nt">matchLabels</span><span class="p">:</span>
-<a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a><span class="w">      </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">gateway</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># Foundation (created earlier / by a provisioner)</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">network-connector.sylvaproject.org/v1alpha1</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Network</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="nt">metadata</span><span class="p">:</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">net-pods</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">  </span><span class="nt">vlan</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">601</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">  </span><span class="nt">vni</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">4000601</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">  </span><span class="nt">ipv4</span><span class="p">:</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="w">    </span><span class="nt">cidr</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;10.244.0.0/16&quot;</span>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="w">  </span><span class="nt">ipv6</span><span class="p">:</span>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="w">    </span><span class="nt">cidr</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;fd00:10:244::/48&quot;</span>
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="nn">---</span>
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">network-connector.sylvaproject.org/v1alpha1</span>
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">PodNetwork</span>
+<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="nt">metadata</span><span class="p">:</span>
+<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">tenant-pods</span>
+<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a><span class="w">  </span><span class="nt">networkRef</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;net-pods&quot;</span>
+<a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a><span class="w">  </span><span class="nt">destinations</span><span class="p">:</span>
+<a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a><span class="w">    </span><span class="nt">matchLabels</span><span class="p">:</span>
+<a id="__codelineno-2-22" name="__codelineno-2-22" href="#__codelineno-2-22"></a><span class="w">      </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">gateway</span>
 </code></pre></div>
 <p>Apply it:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>pod-network.yaml
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>pod-network.yaml
 </code></pre></div>
 <h2 id="field-reference">Field reference<a class="headerlink" href="#field-reference" title="Permanent link">&para;</a></h2>
 <p><code>PodNetworkSpec</code> is intentionally minimal — it has only two fields.</p>
@@ -1297,20 +1357,25 @@ resources by hand.</p>
 auto-generated schema including status fields.</p>
 <h2 id="verify">Verify<a class="headerlink" href="#verify" title="Permanent link">&para;</a></h2>
 <p>List your PodNetworks (short name <code>pnet</code>):</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>kubectl<span class="w"> </span>get<span class="w"> </span>podnetwork
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="c1"># or</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>kubectl<span class="w"> </span>get<span class="w"> </span>pnet
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>kubectl<span class="w"> </span>get<span class="w"> </span>podnetwork
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="c1"># or</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>kubectl<span class="w"> </span>get<span class="w"> </span>pnet
 </code></pre></div>
-<p>The print columns show <code>NetworkRef</code>, <code>IPv4</code>, <code>VRFs</code> and <code>Ready</code> (with <code>IPv6</code>
-available at higher verbosity). Inspect the resolved status:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>kubectl<span class="w"> </span>get<span class="w"> </span>podnetwork<span class="w"> </span>tenant-pods<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.networkIPv4}&#39;</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>kubectl<span class="w"> </span>get<span class="w"> </span>podnetwork<span class="w"> </span>tenant-pods<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.networkIPv6}&#39;</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>kubectl<span class="w"> </span>get<span class="w"> </span>podnetwork<span class="w"> </span>tenant-pods<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.vrfs}&#39;</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>kubectl<span class="w"> </span>get<span class="w"> </span>podnetwork<span class="w"> </span>tenant-pods<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.conditions}&#39;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq
+<p>The print columns show <code>NetworkRef</code>, <code>IPv4</code>, <code>VRFs</code> and <code>Ready</code> (with <code>IPv6</code> and
+<code>IPPools</code> available at higher verbosity). Inspect the resolved status:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>kubectl<span class="w"> </span>get<span class="w"> </span>podnetwork<span class="w"> </span>tenant-pods<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.networkIPv4}&#39;</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>kubectl<span class="w"> </span>get<span class="w"> </span>podnetwork<span class="w"> </span>tenant-pods<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.networkIPv6}&#39;</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>kubectl<span class="w"> </span>get<span class="w"> </span>podnetwork<span class="w"> </span>tenant-pods<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.ipPools}&#39;</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>kubectl<span class="w"> </span>get<span class="w"> </span>podnetwork<span class="w"> </span>tenant-pods<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.vrfs}&#39;</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>kubectl<span class="w"> </span>get<span class="w"> </span>podnetwork<span class="w"> </span>tenant-pods<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.conditions}&#39;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq
 </code></pre></div>
 <p>A healthy <code>PodNetwork</code> reports the Network's CIDRs in <code>status.networkIPv4</code> /
-<code>status.networkIPv6</code>, the resolved VRF names in <code>status.vrfs</code>, and a <code>Ready</code>
-condition with status <code>True</code>.</p>
+<code>status.networkIPv6</code>, the provisioned Calico <code>IPPool</code> names in <code>status.ipPools</code>,
+the resolved VRF names in <code>status.vrfs</code>, and a <code>Ready</code> condition with status
+<code>True</code>. You can confirm the pools directly:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>kubectl<span class="w"> </span>get<span class="w"> </span>ippools.crd.projectcalico.org<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span>-l<span class="w"> </span>network-connector.sylvaproject.org/podnetwork<span class="o">=</span>tenant-pods,network-connector.sylvaproject.org/namespace<span class="o">=</span>default
+</code></pre></div>
 <h2 id="troubleshooting">Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">&para;</a></h2>
 <div class="admonition warning">
 <p class="admonition-title">Network missing or not resolvable</p>
@@ -1328,9 +1393,17 @@ resource.</p>
 <div class="admonition note">
 <p class="admonition-title">No <code>destinations</code> means no VRF plumbing</p>
 <p>Omitting <code>spec.destinations</code> is valid: the <code>PodNetwork</code> still surfaces the
-Network's CIDRs, but <code>status.vrfs</code> stays empty and no VRF routing is
-programmed. Add a <code>destinations</code> selector matching a VRF-bound <code>Destination</code>
-if you need the network plumbed into a VRF.</p>
+Network's CIDRs and provisions the Calico <code>IPPool</code>(s), but <code>status.vrfs</code> stays
+empty and no VRF routing is programmed. Add a <code>destinations</code> selector matching
+a VRF-bound <code>Destination</code> if you need the network plumbed into a VRF.</p>
+</div>
+<div class="admonition warning">
+<p class="admonition-title"><code>status.ipPools</code> stays empty</p>
+<p>The <code>IPPool</code>s are provisioned by the <strong><code>platform-coil</code></strong> controller. If
+<code>status.ipPools</code> is empty while the Network resolves, check that
+<code>platform-coil</code> is running and that the Calico <code>IPPool</code> CRD
+(<code>ippools.crd.projectcalico.org</code>) is installed — the controller waits for the
+CRD before creating pools.</p>
 </div>
 <h2 id="related">Related<a class="headerlink" href="#related" title="Permanent link">&para;</a></h2>
 <ul>
