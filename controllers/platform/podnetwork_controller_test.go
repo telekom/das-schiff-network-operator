@@ -111,8 +111,8 @@ func TestPodNetworkReconciler_CreatesDualStackPools(t *testing.T) {
 	if cidr, _, _ := unstructured.NestedString(poolV4.Object, "spec", "cidr"); cidr != "10.244.0.0/16" {
 		t.Errorf("expected cidr 10.244.0.0/16, got %s", cidr)
 	}
-	if nat, _, _ := unstructured.NestedBool(poolV4.Object, "spec", "natOutgoing"); nat {
-		t.Error("expected natOutgoing false")
+	if nat, found, _ := unstructured.NestedBool(poolV4.Object, "spec", "natOutgoing"); !found || nat {
+		t.Errorf("expected natOutgoing to be explicitly false, got value=%v found=%v", nat, found)
 	}
 	if bs, _, _ := unstructured.NestedInt64(poolV4.Object, "spec", "blockSize"); bs != defaultIPv4BlockSize {
 		t.Errorf("expected blockSize %d, got %d", defaultIPv4BlockSize, bs)

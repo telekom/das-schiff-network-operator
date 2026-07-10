@@ -93,8 +93,8 @@ func (r *PodNetworkReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	// Wait for the Calico IPPool CRD before adding a finalizer or creating pools.
-	if ready, result := r.checkCalicoCRD(ctx, logger); !ready {
-		return result, nil
+	if ready, result, err := r.checkCalicoCRD(ctx, logger); !ready {
+		return result, err
 	}
 
 	if !controllerutil.ContainsFinalizer(pn, podNetworkFinalizer) {
@@ -366,17 +366,22 @@ func (r *PodNetworkReconciler) mapNetworkToPodNetworks(ctx context.Context, obj 
 }
 
 // checkCalicoCRD verifies that the Calico IPPool CRD is registered. Returns
-// (true, _) if ready, or (false, requeueResult) if not.
-func (r *PodNetworkReconciler) checkCalicoCRD(ctx context.Context, logger logr.Logger) (bool, ctrl.Result) {
+// (true, _, nil) if ready, (false, requeueResult, nil) if the CRD is not yet
+// registered (a benign, expected state during bootstrap), or (false, _, err)
+// for any other List failure (e.g. RBAC Forbidden or a transient API error) so
+// the controller requeues and surfaces the failure here rather than proceeding
+// to create IPPools and failing later.
+func (r *PodNetworkReconciler) checkCalicoCRD(ctx context.Context, logger logr.Logger) (bool, ctrl.Result, error) {
 	list := &unstructured.UnstructuredList{}
 	list.SetGroupVersionKind(calicoIPPoolGVK)
 	if err := r.List(ctx, list, client.Limit(1)); err != nil {
 		if apimeta.IsNoMatchError(err) {
 			logger.Info("Calico IPPool CRD not yet available, will retry", "gvk", calicoIPPoolGVK.String())
-			return false, ctrl.Result{RequeueAfter: crdRequeueInterval}
+			return false, ctrl.Result{RequeueAfter: crdRequeueInterval}, nil
 		}
+		return false, ctrl.Result{}, fmt.Errorf("error checking Calico IPPool CRD: %w", err)
 	}
-	return true, ctrl.Result{}
+	return true, ctrl.Result{}, nil
 }
 
 // SetupWithManager registers the PodNetwork controller.
