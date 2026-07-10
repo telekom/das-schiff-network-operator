@@ -53,6 +53,14 @@ type PodNetworkStatus struct {
 	// +optional
 	VRFs []string `json:"vrfs,omitempty"`
 
+	// IPPools lists the names of the Calico IPPools created for this PodNetwork
+	// (one per address family, natOutgoing=false). Reference these names from a
+	// pod's cni.projectcalico.org/ipv4pools / ipv6pools annotation to allocate
+	// pod addresses from this network. Sorted. Empty until the platform-coil
+	// controller has provisioned the pools.
+	// +optional
+	IPPools []string `json:"ipPools,omitempty"`
+
 	// Conditions represent the latest available observations of the
 	// PodNetwork's current state.
 	// +optional
@@ -70,6 +78,7 @@ type PodNetworkStatus struct {
 //+kubebuilder:printcolumn:name="IPv4",type=string,JSONPath=`.status.networkIPv4`
 //+kubebuilder:printcolumn:name="IPv6",type=string,JSONPath=`.status.networkIPv6`,priority=10
 //+kubebuilder:printcolumn:name="VRFs",type=string,JSONPath=`.status.vrfs`
+//+kubebuilder:printcolumn:name="IPPools",type=string,JSONPath=`.status.ipPools`,priority=10
 //+kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
 //+kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 

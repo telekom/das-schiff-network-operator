@@ -30,6 +30,10 @@ spec:
     - jsonPath: .status.vrfs
       name: VRFs
       type: string
+    - jsonPath: .status.ipPools
+      name: IPPools
+      priority: 10
+      type: string
     - jsonPath: .status.conditions[?(@.type=="Ready")].status
       name: Ready
       type: string
@@ -186,6 +190,16 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              ipPools:
+                description: |-
+                  IPPools lists the names of the Calico IPPools created for this PodNetwork
+                  (one per address family, natOutgoing=false). Reference these names from a
+                  pod's cni.projectcalico.org/ipv4pools / ipv6pools annotation to allocate
+                  pod addresses from this network. Sorted. Empty until the platform-coil
+                  controller has provisioned the pools.
+                items:
+                  type: string
+                type: array
               networkIPv4:
                 description: |-
                   NetworkIPv4 is the IPv4 CIDR of the referenced Network (spec.ipv4.cidr).
