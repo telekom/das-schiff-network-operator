@@ -257,7 +257,8 @@ func TestPodNetworkReconciler_DeletionCleanup(t *testing.T) {
 	reconcilePodNetworkOnce(t, r, "del-pods")
 	reconcilePodNetworkOnce(t, r, "del-pods")
 
-	if pools := listPodNetworkPools(t, r, "del-pods", ""); len(pools) == 0 {
+	existingPools := listPodNetworkPools(t, r, "del-pods", "")
+	if len(existingPools) == 0 {
 		t.Fatal("expected pools to exist before deletion")
 	}
 
@@ -269,10 +270,21 @@ func TestPodNetworkReconciler_DeletionCleanup(t *testing.T) {
 	fresh.DeletionTimestamp = &now
 	// The fake client does not allow setting DeletionTimestamp via Update, so
 	// rebuild the client with the modified object (mirrors coil_controller_test).
+	// Carry the already-created IPPools into the new client so the deletion path
+	// has real objects to remove -- otherwise the post-deletion assertion would
+	// pass vacuously.
 	scheme := newScheme()
-	cli := fake.NewClientBuilder().WithScheme(scheme).WithObjects(fresh, network).Build()
+	seed := []client.Object{fresh, network}
+	for i := range existingPools {
+		seed = append(seed, &existingPools[i])
+	}
+	cli := fake.NewClientBuilder().WithScheme(scheme).WithObjects(seed...).Build()
 	r.Client = cli
 	r.APIReader = cli
+
+	if pools := listPodNetworkPools(t, r, "del-pods", ""); len(pools) != len(existingPools) {
+		t.Fatalf("expected %d pools carried into rebuilt client, got %d", len(existingPools), len(pools))
+	}
 
 	reconcilePodNetworkOnce(t, r, "del-pods")
 
@@ -300,6 +312,18 @@ func TestPodNetworkPoolName(t *testing.T) {
 	}
 	if strings.ContainsAny(n1, "./:") {
 		t.Errorf("name %q contains invalid characters", n1)
+	}
+
+	// A near-max-length PodNetwork name must still yield a valid (<=253 char)
+	// pool name; the hash keeps distinct long names distinct after truncation.
+	longName := strings.Repeat("a", 253)
+	long1 := podNetworkPoolName("default", longName, "v4", "10.0.0.0/16")
+	long2 := podNetworkPoolName("default", longName, "v4", "10.1.0.0/16")
+	if len(long1) > dns1123SubdomainMaxLen {
+		t.Errorf("pool name exceeds DNS-1123 limit: len=%d", len(long1))
+	}
+	if long1 == long2 {
+		t.Errorf("expected distinct pool names for distinct CIDRs even when truncated")
 	}
 }
 

@@ -50,6 +50,10 @@ const (
 	// default block we fall back to the pool prefix (see poolBlockSize).
 	defaultIPv4BlockSize = int64(26)
 	defaultIPv6BlockSize = int64(122)
+
+	// dns1123SubdomainMaxLen is the maximum length of a Kubernetes object name
+	// (RFC 1123 subdomain). Calico IPPool names must satisfy it.
+	dns1123SubdomainMaxLen = 253
 )
 
 // PodNetworkReconciler watches PodNetwork resources and reconciles the Calico
@@ -174,10 +178,17 @@ func (r *PodNetworkReconciler) resolveNetworkCIDRs(ctx context.Context, pn *nc.P
 // podNetworkPoolName derives a stable, DNS-safe, cluster-unique IPPool name from
 // the PodNetwork's namespace/name, address family and CIDR. IPPools are
 // cluster-scoped, so the namespace is folded into the hash to avoid collisions
-// between equally named PodNetworks in different namespaces.
+// between equally named PodNetworks in different namespaces. The readable name
+// portion is truncated so the full name stays within the DNS-1123 subdomain
+// limit even for near-max-length PodNetwork names; the hash preserves uniqueness.
 func podNetworkPoolName(namespace, name, family, cidr string) string {
 	sum := sha256.Sum256([]byte(namespace + "/" + name + "/" + cidr))
-	return fmt.Sprintf("pn-%s-%s-%s", name, family, hex.EncodeToString(sum[:4]))
+	const prefix = "pn-"
+	suffix := fmt.Sprintf("-%s-%s", family, hex.EncodeToString(sum[:4]))
+	if budget := dns1123SubdomainMaxLen - len(prefix) - len(suffix); len(name) > budget {
+		name = name[:budget]
+	}
+	return prefix + name + suffix
 }
 
 // poolBlockSize returns a valid Calico blockSize for a pool: the default block
@@ -286,6 +297,9 @@ func (r *PodNetworkReconciler) prunePodNetworkPools(ctx context.Context, pn *nc.
 // updateIPPoolStatus writes the desired pool names into status.ipPools using
 // optimistic concurrency. Only the ipPools field is touched so it never clobbers
 // the fields owned by the intent status updater (conditions, networkIPv4/6, vrfs).
+// Re-fetches use the uncached APIReader: because the PodNetwork status is also
+// written by the intent controller, the cache may be stale after a conflict, and
+// retrying against it would just keep conflicting.
 func (r *PodNetworkReconciler) updateIPPoolStatus(ctx context.Context, pn *nc.PodNetwork, poolNames []string) error {
 	if stringSlicesEqual(pn.Status.IPPools, poolNames) {
 		return nil
@@ -294,7 +308,7 @@ func (r *PodNetworkReconciler) updateIPPoolStatus(ctx context.Context, pn *nc.Po
 	key := types.NamespacedName{Name: pn.Name, Namespace: pn.Namespace}
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		fresh := &nc.PodNetwork{}
-		if err := r.Get(ctx, key, fresh); err != nil {
+		if err := r.APIReader.Get(ctx, key, fresh); err != nil {
 			return fmt.Errorf("error re-fetching PodNetwork for status update: %w", err)
 		}
 		if stringSlicesEqual(fresh.Status.IPPools, poolNames) {
