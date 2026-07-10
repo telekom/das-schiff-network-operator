@@ -1211,6 +1211,7 @@ _Appears in:_
 | `networkIPv4` _string_ | NetworkIPv4 is the IPv4 CIDR of the referenced Network (spec.ipv4.cidr).<br />Empty when the Network has no IPv4 pool or cannot be resolved. |  | Optional: \{\} <br /> |
 | `networkIPv6` _string_ | NetworkIPv6 is the IPv6 CIDR of the referenced Network (spec.ipv6.cidr).<br />Empty when the Network has no IPv6 pool or cannot be resolved. |  | Optional: \{\} <br /> |
 | `vrfs` _string array_ | VRFs lists the VRF names this PodNetwork is plumbed into, derived from the<br />matched Destinations (spec.destinations → Destination.spec.vrfRef). Sorted<br />and de-duplicated. |  | Optional: \{\} <br /> |
+| `ipPools` _string array_ | IPPools lists the names of the Calico IPPools created for this PodNetwork<br />(one per address family, natOutgoing=false). Reference these names from a<br />pod's cni.projectcalico.org/ipv4pools / ipv6pools annotation to allocate<br />pod addresses from this network. Sorted. Empty until the platform-coil<br />controller has provisioned the pools. |  | Optional: \{\} <br /> |
 | `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#condition-v1-meta) array_ | Conditions represent the latest available observations of the<br />PodNetwork's current state. |  | Optional: \{\} <br /> |
 
 

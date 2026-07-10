@@ -2007,6 +2007,11 @@ func (in *PodNetworkStatus) DeepCopyInto(out *PodNetworkStatus) {
 		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}
+	if in.IPPools != nil {
+		in, out := &in.IPPools, &out.IPPools
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	if in.Conditions != nil {
 		in, out := &in.Conditions, &out.Conditions
 		*out = make([]v1.Condition, len(*in))

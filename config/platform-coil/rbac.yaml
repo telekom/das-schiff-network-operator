@@ -24,7 +24,20 @@ rules:
 - apiGroups:
   - network-connector.sylvaproject.org
   resources:
+  - podnetworks
+  - podnetworks/status
+  - podnetworks/finalizers
+  verbs:
+  - get
+  - list
+  - watch
+  - update
+  - patch
+- apiGroups:
+  - network-connector.sylvaproject.org
+  resources:
   - destinations
+  - networks
   verbs:
   - get
   - list

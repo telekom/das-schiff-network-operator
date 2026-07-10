@@ -102,6 +102,7 @@ rules:
   - interfaceconfigs/finalizers
   - networks/finalizers
   - outbounds/finalizers
+  - podnetworks/finalizers
   - vrfs/finalizers
   verbs:
   - update
