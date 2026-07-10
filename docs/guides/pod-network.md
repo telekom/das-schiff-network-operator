@@ -72,7 +72,7 @@ workload) in with the
 First read the provisioned pool names:
 
 ```bash
-kubectl get podnetwork tenant-pods -o jsonpath='{.status.ipPools}'
+kubectl get podnetwork tenant-pods -o json | jq -c '.status.ipPools'
 # e.g. ["pn-tenant-pods-v4-1a2b3c4d","pn-tenant-pods-v6-9f8e7d6c"]
 ```
 
@@ -188,7 +188,7 @@ the resolved VRF names in `status.vrfs`, and a `Ready` condition with status
 
 ```bash
 kubectl get ippools.crd.projectcalico.org \
-  -l network-connector.sylvaproject.org/podnetwork=tenant-pods
+  -l network-connector.sylvaproject.org/podnetwork=tenant-pods,network-connector.sylvaproject.org/namespace=default
 ```
 
 ## Troubleshooting

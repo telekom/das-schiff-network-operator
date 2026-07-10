@@ -79,6 +79,7 @@ type PodNetworkReconciler struct {
 //+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=podnetworks/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=podnetworks/finalizers,verbs=update
 //+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=networks,verbs=get;list;watch
+// crd.projectcalico.org/ippools RBAC (create/update/delete) is in config/platform-coil/rbac.yaml.
 
 // Reconcile handles PodNetwork create/update/delete events.
 func (r *PodNetworkReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -337,7 +338,13 @@ func (r *PodNetworkReconciler) handlePodNetworkDeletion(ctx context.Context, pn 
 		"network-connector.sylvaproject.org/podnetwork": pn.Name,
 		"network-connector.sylvaproject.org/namespace":  pn.Namespace,
 	}); err != nil {
-		return ctrl.Result{}, fmt.Errorf("error listing Calico IPPools for deletion: %w", err)
+		// If the Calico IPPool CRD has been uninstalled there is nothing left to
+		// clean up; treat it as benign so the finalizer can still be removed and
+		// the PodNetwork is not stuck terminating.
+		if !apimeta.IsNoMatchError(err) {
+			return ctrl.Result{}, fmt.Errorf("error listing Calico IPPools for deletion: %w", err)
+		}
+		logger.Info("Calico IPPool CRD not present during deletion, nothing to clean up", "podnetwork", pn.Name)
 	}
 	for i := range pools.Items {
 		if err := r.Delete(ctx, &pools.Items[i]); err != nil && !apierrors.IsNotFound(err) {

@@ -274,7 +274,8 @@ func TestPodNetworkReconciler_DeletionCleanup(t *testing.T) {
 	// has real objects to remove -- otherwise the post-deletion assertion would
 	// pass vacuously.
 	scheme := newScheme()
-	seed := []client.Object{fresh, network}
+	seed := make([]client.Object, 0, 2+len(existingPools))
+	seed = append(seed, fresh, network)
 	for i := range existingPools {
 		seed = append(seed, &existingPools[i])
 	}
