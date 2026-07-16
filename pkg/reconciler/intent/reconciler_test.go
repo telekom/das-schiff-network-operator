@@ -1018,6 +1018,140 @@ func TestBuildNetplanState(t *testing.T) {
 		_, hasAddrs := vlan["addresses"]
 		assert.False(t, hasAddrs, "VLAN 501 should not have addresses from non-matching key")
 	})
+
+	t.Run("non-HBN VLAN links to parent without synthesizing it", func(t *testing.T) {
+		spec := &networkv1alpha1.NodeNetworkConfigSpec{
+			Layer2s: map[string]networkv1alpha1.Layer2{
+				"700": {VLAN: 700, MTU: 1500},
+			},
+		}
+		nodeIPs := map[string]builder.NetplanNodeIP{
+			"700": {VLAN: 700, MTU: 1500, InterfaceRef: "eth1", Addresses: []string{"192.0.2.10/24"}, Gateways: []string{"192.0.2.1"}},
+		}
+		state := buildNetplanState(spec, nodeIPs)
+		yml := state.YAML()
+		assert.Contains(t, yml, "vlan.700")
+		assert.Contains(t, yml, "link: eth1")
+		// The parent (eth1/bond0/…) must be declared out-of-band (host netplan
+		// or InterfaceConfig); the builder must not synthesize an ethernets stub
+		// because it cannot know the parent's type (NIC vs bond vs bridge).
+		assert.Empty(t, state.Network.Ethernets, "parent must not be synthesized")
+	})
+
+	t.Run("pure L2 renders from nodeIPs alone (nil spec Layer2)", func(t *testing.T) {
+		nodeIPs := map[string]builder.NetplanNodeIP{
+			"700": {VLAN: 700, MTU: 1500, InterfaceRef: "eth1", Addresses: []string{"192.0.2.10/24"}, Gateways: []string{"192.0.2.1"}},
+		}
+		state := buildNetplanState(nil, nodeIPs)
+		yml := state.YAML()
+		assert.Contains(t, yml, "vlan.700")
+		assert.Contains(t, yml, "link: eth1")
+		assert.Empty(t, state.Network.Ethernets, "parent must not be synthesized")
+	})
+
+	t.Run("native VLAN puts config on parent ethernet, not a VLAN", func(t *testing.T) {
+		nodeIPs := map[string]builder.NetplanNodeIP{
+			"eth:eth1": {
+				VLAN: 0, InterfaceRef: "eth1",
+				Addresses: []string{"192.0.2.10/24"},
+				Routes:    []builder.NetplanRoute{{To: "1.1.1.1/32", Via: "192.0.2.1"}},
+			},
+		}
+		state := buildNetplanState(nil, nodeIPs)
+		yml := state.YAML()
+		assert.Contains(t, yml, "eth1:")
+		assert.Contains(t, yml, "192.0.2.10/24")
+		assert.Contains(t, yml, "to: 1.1.1.1/32")
+		assert.Contains(t, yml, "via: 192.0.2.1")
+		assert.Empty(t, state.Network.VLans, "native VLAN must not create a vlan device")
+	})
+
+	t.Run("native VLAN without MTU override omits mtu", func(t *testing.T) {
+		nodeIPs := map[string]builder.NetplanNodeIP{
+			"eth:eth1": {VLAN: 0, InterfaceRef: "eth1", Addresses: []string{"10.0.0.1/24"}},
+		}
+		state := buildNetplanState(nil, nodeIPs)
+		dev := state.Network.Ethernets["eth1"]
+		var eth map[string]interface{}
+		require.NoError(t, json.Unmarshal(dev.Raw, &eth))
+		_, hasMTU := eth["mtu"]
+		assert.False(t, hasMTU, "native device must not force parent MTU")
+	})
+
+	t.Run("native VLAN renders even when interfaceRef equals the trunk name", func(t *testing.T) {
+		// Gating on explicit InterfaceRef (not link != "hbn") means naming the
+		// parent "hbn" still renders the native ethernet device.
+		nodeIPs := map[string]builder.NetplanNodeIP{
+			"eth:hbn": {VLAN: 0, InterfaceRef: "hbn", Addresses: []string{"10.0.0.1/24"}},
+		}
+		state := buildNetplanState(nil, nodeIPs)
+		dev, ok := state.Network.Ethernets["hbn"]
+		require.True(t, ok, "native device must render even for interfaceRef=hbn")
+		var eth map[string]interface{}
+		require.NoError(t, json.Unmarshal(dev.Raw, &eth))
+		assert.Contains(t, eth["addresses"], "10.0.0.1/24")
+		assert.Empty(t, state.Network.VLans)
+	})
+
+	t.Run("static routes without addresses still render", func(t *testing.T) {
+		nodeIPs := map[string]builder.NetplanNodeIP{
+			"700": {
+				VLAN: 700, MTU: 1500, InterfaceRef: "eth1",
+				Routes: []builder.NetplanRoute{{To: "10.0.0.0/8", Via: "192.0.2.1"}},
+			},
+		}
+		state := buildNetplanState(nil, nodeIPs)
+		dev := state.Network.VLans["vlan.700"]
+		var vlan map[string]interface{}
+		require.NoError(t, json.Unmarshal(dev.Raw, &vlan))
+		_, hasAddrs := vlan["addresses"]
+		assert.False(t, hasAddrs)
+		routes := vlan["routes"].([]interface{})
+		require.Len(t, routes, 1)
+		route := routes[0].(map[string]interface{})
+		assert.Equal(t, "10.0.0.0/8", route["to"])
+		assert.Equal(t, "192.0.2.1", route["via"])
+	})
+
+	t.Run("mixed HBN and non-HBN VLANs coexist", func(t *testing.T) {
+		spec := &networkv1alpha1.NodeNetworkConfigSpec{
+			Layer2s: map[string]networkv1alpha1.Layer2{
+				"500": {VLAN: 500, MTU: 1500},
+				"700": {VLAN: 700, MTU: 1500},
+			},
+		}
+		nodeIPs := map[string]builder.NetplanNodeIP{
+			"700": {VLAN: 700, MTU: 1500, InterfaceRef: "eth1", Addresses: []string{"192.0.2.10/24"}, Gateways: []string{"192.0.2.1"}},
+		}
+		state := buildNetplanState(spec, nodeIPs)
+		yml := state.YAML()
+		assert.Contains(t, yml, "vlan.500")
+		assert.Contains(t, yml, "link: hbn")
+		assert.Contains(t, yml, "vlan.700")
+		assert.Contains(t, yml, "link: eth1")
+		assert.Empty(t, state.Network.Ethernets, "parent must not be synthesized")
+	})
+
+	t.Run("mirror-only Layer2 (zero scalars) still renders tagged VLAN from nodeIPs", func(t *testing.T) {
+		// A mirror-only contribution can leave a Layer2 entry with zero
+		// VLAN/MTU; the tagged VLAN metadata must still come from nodeIPs.
+		spec := &networkv1alpha1.NodeNetworkConfigSpec{
+			Layer2s: map[string]networkv1alpha1.Layer2{
+				"700": {MirrorACLs: []networkv1alpha1.MirrorACL{{Direction: networkv1alpha1.MirrorDirectionIngress}}},
+			},
+		}
+		nodeIPs := map[string]builder.NetplanNodeIP{
+			"700": {VLAN: 700, MTU: 1500, InterfaceRef: "eth1", Addresses: []string{"192.0.2.10/24"}},
+		}
+		state := buildNetplanState(spec, nodeIPs)
+		dev, ok := state.Network.VLans["vlan.700"]
+		require.True(t, ok, "must render vlan.700 from nodeIPs metadata, not treat zero VLAN as native")
+		var vlan map[string]interface{}
+		require.NoError(t, json.Unmarshal(dev.Raw, &vlan))
+		assert.Equal(t, float64(700), vlan["id"])
+		assert.Equal(t, "eth1", vlan["link"])
+		assert.Empty(t, state.Network.Ethernets)
+	})
 }
 
 func TestReconcileCreatesNodeNetplanConfig(t *testing.T) {

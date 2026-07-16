@@ -20,7 +20,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	stdnet "net"
+	"sort"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -50,8 +53,9 @@ func (*L2ABuilder) Name() string {
 func (b *L2ABuilder) Build(ctx context.Context, data *resolver.ResolvedData) (map[string]*NodeContribution, error) {
 	logger := log.FromContext(ctx).WithName("l2a-builder")
 	result := make(map[string]*NodeContribution)
-	// Track which L2A owns each interface name per node.
-	// Key: "node/ifName", value: L2A name.
+	// Track which L2A owns each per-node netplan slot and device name.
+	// Keys are namespaced: "<node>\x00slot\x00<mapKey>" and
+	// "<node>\x00dev\x00<deviceName>"; value is the owning L2A name.
 	ifOwner := make(map[string]string)
 
 	for i := range data.Layer2Attachments {
@@ -68,8 +72,11 @@ func (b *L2ABuilder) Build(ctx context.Context, data *resolver.ResolvedData) (ma
 		// Resolve destinations to find VRF for IRB — skip on resolution errors.
 		vrfName, vrfSpec, err := b.resolveDestinationVRF(l2a, data)
 		if err != nil {
+			// Surface the misconfiguration (e.g. an invalid destinations
+			// selector) as Ready=False, not just a log line.
 			logger.Info("skipping Layer2Attachment with unresolvable destinations",
 				"l2a", l2a.Name, "error", err.Error())
+			reportSkip(ctx, "Layer2Attachment", l2a.Namespace, l2a.Name, skipReason(err), err.Error())
 			continue
 		}
 
@@ -103,7 +110,8 @@ func (b *L2ABuilder) applyL2AToNodes(
 	result map[string]*NodeContribution,
 	ifOwner map[string]string,
 ) error {
-	mapKey := fmt.Sprintf("%d", b.vlanID(net))
+	vlanID := b.vlanID(net)
+	mapKey := netplanMapKey(vlanID, l2a)
 
 	matchingNodes, err := matchNodes(data.Nodes, l2a.Spec.NodeSelector)
 	if err != nil {
@@ -125,32 +133,47 @@ func (b *L2ABuilder) applyL2AToNodes(
 		}
 	}
 
-	// Detect interface-name ownership conflicts across L2As before claiming any.
-	var ifKeys []string
-	if l2a.Spec.InterfaceName != nil && *l2a.Spec.InterfaceName != "" {
-		for i := range matchingNodes {
-			ifKey := matchingNodes[i].Name + "/" + *l2a.Spec.InterfaceName
-			if prev, exists := ifOwner[ifKey]; exists {
-				return fmt.Errorf("Layer2Attachments %q and %q both claim interface name %q on node %q",
-					prev, l2a.Name, *l2a.Spec.InterfaceName, matchingNodes[i].Name)
-			}
-			ifKeys = append(ifKeys, ifKey)
+	// Detect ownership conflicts across L2As before claiming any. Two kinds of
+	// collision are surfaced (the offending L2A is skipped with Ready=False)
+	// rather than silently overwriting depending on list order:
+	//   - contribution slot (mapKey): the key into contrib.Layer2s /
+	//     NetplanNodeIPs. Two L2As sharing a mapKey on a node — the same VLAN ID,
+	//     or the same native interfaceRef — would overwrite each other.
+	//   - rendered device name: the netplan interface the config lands on (the
+	//     parent interfaceRef in native mode, or the InterfaceName override for a
+	//     tagged VLAN). Two L2As on different VLANs but the same device name also
+	//     collide.
+	claims := ownershipClaims(matchingNodes, mapKey, netplanClaimName(net, l2a))
+	for i := range claims {
+		if prev, exists := ifOwner[claims[i].key]; exists {
+			return fmt.Errorf("Layer2Attachments %q and %q both configure %s on node %q",
+				prev, l2a.Name, claims[i].what, claims[i].node)
 		}
 	}
 
+	// Destination-derived static routes are node-independent; compute once. An
+	// invalid destinations selector is a configuration error that must surface
+	// (Ready=False), so validate it here before the mutation phase.
+	routes, err := destinationRoutes(l2a, data)
+	if err != nil {
+		return fmt.Errorf("Layer2Attachment %q: %w", l2a.Name, err)
+	}
+
 	// Mutation phase — validation passed, so nothing below can fail.
-	for _, ifKey := range ifKeys {
-		ifOwner[ifKey] = l2a.Name
+	for i := range claims {
+		ifOwner[claims[i].key] = l2a.Name
 	}
 
 	for i := range matchingNodes {
 		node := &matchingNodes[i]
 		contrib := ensureContrib(result, node.Name)
-		contrib.Layer2s[mapKey] = *layer2
+		if layer2 != nil {
+			contrib.Layer2s[mapKey] = *layer2
+		}
 
 		// Carry netplan-only device info for this VLAN (interface name/parent
 		// overrides plus, when enabled, per-node IPs). Kept off the NNC API.
-		if dev, ok := buildNetplanDevice(l2a, net, node.Name); ok {
+		if dev, ok := buildNetplanDevice(l2a, net, node.Name, routes); ok {
 			contrib.NetplanNodeIPs[mapKey] = dev
 		}
 
@@ -213,8 +236,30 @@ func (b *L2ABuilder) buildLayer2(l2a *nc.Layer2Attachment, net *resolver.Resolve
 	// A shared RT causes FRR to import link-local type-2 routes (which lack
 	// RMAC) into the VRF, corrupting nexthop router MACs for EVPN type-5.
 	if rt != "" && vrfSpec != nil && vrfSpec.RouteTarget != nil && rt == *vrfSpec.RouteTarget {
-		return nil, fmt.Errorf("Layer2Attachment %q: L2 VNI route target %q must not equal VRF %q route target — this causes EVPN RMAC corruption",
-			l2a.Name, rt, vrfSpec.VRF)
+		return nil, fmt.Errorf("L2 VNI route target %q must not equal VRF %q route target — this causes EVPN RMAC corruption",
+			rt, vrfSpec.VRF)
+	}
+
+	if net.Spec.VNI == nil {
+		// Pure L2 mode: no NNC Layer2 entry. interfaceRef must be set so the
+		// netplan agent knows which parent interface to configure.
+		if l2a.Spec.InterfaceRef == nil || *l2a.Spec.InterfaceRef == "" {
+			return nil, errors.New("network has no VNI (pure L2 mode) but interfaceRef is not set — cannot determine parent interface")
+		}
+		return nil, nil
+	}
+
+	// HBN mode requires a VLAN: without it the NNC Layer2.VLAN field would be
+	// 0 which the API server rejects (minimum 1).
+	if net.Spec.VLAN == nil {
+		return nil, fmt.Errorf("network has VNI %d but no VLAN — HBN mode requires both VNI and VLAN", *net.Spec.VNI)
+	}
+
+	// interfaceRef is a non-HBN (pure L2) concept; an HBN Network (VNI set)
+	// plumbs its VLAN onto the out-of-band trunk. Allowing interfaceRef here
+	// would re-parent the HBN VLAN and contradicts the documented contract.
+	if l2a.Spec.InterfaceRef != nil && *l2a.Spec.InterfaceRef != "" {
+		return nil, errors.New("interfaceRef is set but Network has a VNI (HBN mode) — interfaceRef is only valid for non-HBN (pure L2) Networks without a VNI")
 	}
 
 	layer2 := &networkv1alpha1.Layer2{
@@ -309,6 +354,72 @@ func (*L2ABuilder) vlanID(net *resolver.ResolvedNetwork) int32 {
 	return 0
 }
 
+// netplanMapKey produces a key for the per-node NetplanNodeIPs map.
+// For tagged VLANs this is the VLAN ID, allowing VLAN-based dedup.
+// For native VLAN (vlanID == 0) this includes the interface reference to
+// prevent collisions when multiple pure-L2 attachments use different NICs.
+func netplanMapKey(vlanID int32, l2a *nc.Layer2Attachment) string {
+	if vlanID != 0 {
+		return fmt.Sprintf("%d", vlanID)
+	}
+	if l2a.Spec.InterfaceRef != nil && *l2a.Spec.InterfaceRef != "" {
+		return fmt.Sprintf("eth:%s", *l2a.Spec.InterfaceRef)
+	}
+	return "0"
+}
+
+// netplanClaimName returns the netplan device name whose config this L2A owns
+// on a node. In native/untagged mode the config lands directly on the parent
+// interfaceRef (InterfaceName is ignored). For a tagged VLAN it is the
+// InterfaceName override when set, otherwise the default "vlan.<vlan>". Two L2As
+// claiming the same name on the same node conflict. Returns "" only when the
+// name cannot be determined (native mode without an interfaceRef).
+func netplanClaimName(net *resolver.ResolvedNetwork, l2a *nc.Layer2Attachment) string {
+	if net.Spec.VLAN == nil {
+		if l2a.Spec.InterfaceRef != nil && *l2a.Spec.InterfaceRef != "" {
+			return *l2a.Spec.InterfaceRef
+		}
+		return ""
+	}
+	if l2a.Spec.InterfaceName != nil && *l2a.Spec.InterfaceName != "" {
+		return *l2a.Spec.InterfaceName
+	}
+	return fmt.Sprintf("vlan.%d", *net.Spec.VLAN)
+}
+
+// claim is a per-node ownership claim used to detect L2A conflicts.
+type claim struct {
+	key  string // namespaced ownership key stored in ifOwner
+	what string // human-readable subject for the error message
+	node string
+}
+
+// ownershipClaims builds the per-node ownership claims for an L2A: the
+// contribution slot (mapKey, always) and the rendered netplan device name
+// (devName, when it lands on a fixed interface). Keys are namespaced so a
+// mapKey and a device name can never alias each other.
+func ownershipClaims(nodes []corev1.Node, mapKey, devName string) []claim {
+	// Up to two claims per node: the contribution slot and, optionally, a device name.
+	const claimsPerNode = 2
+	claims := make([]claim, 0, len(nodes)*claimsPerNode)
+	for i := range nodes {
+		n := nodes[i].Name
+		claims = append(claims, claim{
+			key:  n + "\x00slot\x00" + mapKey,
+			what: "netplan slot " + mapKey,
+			node: n,
+		})
+		if devName != "" {
+			claims = append(claims, claim{
+				key:  n + "\x00dev\x00" + devName,
+				what: "interface " + devName,
+				node: n,
+			})
+		}
+	}
+	return claims
+}
+
 // vniValue extracts the VNI from a Network, defaulting to 0 if unset.
 func (*L2ABuilder) vniValue(net *resolver.ResolvedNetwork) int32 {
 	if net.Spec.VNI != nil {
@@ -338,8 +449,21 @@ func (*L2ABuilder) routeTarget(_ *resolver.ResolvedNetwork, _ *nc.VRFSpec) strin
 // enabled, the per-node IP addresses and IRB anycast gateways. It returns false
 // when there is nothing to carry. This data is intentionally kept off the
 // NodeNetworkConfig API and only rendered into the NodeNetplanConfig.
-func buildNetplanDevice(l2a *nc.Layer2Attachment, nw *resolver.ResolvedNetwork, nodeName string) (NetplanNodeIP, bool) {
+func buildNetplanDevice(l2a *nc.Layer2Attachment, nw *resolver.ResolvedNetwork, nodeName string, routes []NetplanRoute) (NetplanNodeIP, bool) {
 	var dev NetplanNodeIP
+	tagged := nw.Spec.VLAN != nil
+	if tagged {
+		dev.VLAN = uint16(*nw.Spec.VLAN) //nolint:gosec
+	}
+	// Default the MTU only for tagged VLAN sub-interfaces (which the operator
+	// creates). A native/untagged device targets a pre-existing parent NIC, so
+	// only carry an MTU when the user explicitly overrides it — otherwise we
+	// would force the parent MTU (e.g. shrink a jumbo link to 1500).
+	if l2a.Spec.MTU != nil {
+		dev.MTU = uint16(*l2a.Spec.MTU) //nolint:gosec
+	} else if tagged {
+		dev.MTU = defaultMTU
+	}
 	if l2a.Spec.InterfaceName != nil && *l2a.Spec.InterfaceName != "" {
 		dev.InterfaceName = *l2a.Spec.InterfaceName
 	}
@@ -352,10 +476,107 @@ func buildNetplanDevice(l2a *nc.Layer2Attachment, nw *resolver.ResolvedNetwork, 
 			dev.Gateways = nodeIP.Gateways
 		}
 	}
-	if dev.InterfaceName == "" && dev.InterfaceRef == "" && len(dev.Addresses) == 0 && len(dev.Gateways) == 0 {
+	dev.Routes = routes
+
+	if netplanDeviceEmpty(&dev, tagged, l2a.Spec.MTU != nil) {
 		return NetplanNodeIP{}, false
 	}
 	return dev, true
+}
+
+// netplanDeviceEmpty reports whether a netplan device carries nothing
+// actionable. A native (untagged) device with only an interfaceRef and no
+// addresses/routes/MTU override is skipped so the operator does not mutate the
+// parent link merely to declare it.
+func netplanDeviceEmpty(dev *NetplanNodeIP, tagged, hasMTUOverride bool) bool {
+	hasPayload := len(dev.Addresses) > 0 || len(dev.Gateways) > 0 || len(dev.Routes) > 0
+	if !tagged && !hasPayload && !hasMTUOverride {
+		return true
+	}
+	return dev.InterfaceName == "" && dev.InterfaceRef == "" && !hasPayload
+}
+
+// destinationRoutes collects the static routes contributed by the Destinations
+// an L2A selects: each prefix routed via the next hop of its own address family.
+// It is node-independent. The result is sorted and de-duplicated so the rendered
+// netplan YAML is stable across reconciles regardless of Kubernetes list order.
+// An invalid destinations selector is returned as an error so the caller can
+// surface the misconfiguration instead of silently dropping routes.
+func destinationRoutes(l2a *nc.Layer2Attachment, data *resolver.ResolvedData) ([]NetplanRoute, error) {
+	if l2a.Spec.Destinations == nil {
+		return nil, nil
+	}
+	selector, err := metav1.LabelSelectorAsSelector(l2a.Spec.Destinations)
+	if err != nil {
+		return nil, fmt.Errorf("invalid destinations selector: %w", err)
+	}
+	seen := make(map[NetplanRoute]struct{})
+	var routes []NetplanRoute
+	for i := range data.RawDestinations {
+		destination := &data.RawDestinations[i]
+		if !selector.Matches(labels.Set(destination.Labels)) {
+			continue
+		}
+		resolved, ok := data.Destinations[destination.Name]
+		if !ok || resolved.Spec.NextHop == nil {
+			continue
+		}
+		v4, v6 := validNextHops(resolved.Spec.NextHop)
+		for _, prefix := range resolved.Spec.Prefixes {
+			route, ok := prefixRoute(prefix, v4, v6)
+			if !ok {
+				continue
+			}
+			if _, dup := seen[route]; dup {
+				continue
+			}
+			seen[route] = struct{}{}
+			routes = append(routes, route)
+		}
+	}
+	sort.Slice(routes, func(i, j int) bool {
+		if routes[i].To != routes[j].To {
+			return routes[i].To < routes[j].To
+		}
+		return routes[i].Via < routes[j].Via
+	})
+	return routes, nil
+}
+
+// validNextHops returns the syntactically valid IPv4 and IPv6 next-hop
+// addresses from a NextHopConfig. The CRD does not enforce an IP format, so a
+// value that is not a valid address of its declared family is dropped (returned
+// as "").
+func validNextHops(nh *nc.NextHopConfig) (v4, v6 string) {
+	if nh.IPv4 != nil {
+		if ip := stdnet.ParseIP(*nh.IPv4); ip != nil && ip.To4() != nil {
+			v4 = *nh.IPv4
+		}
+	}
+	if nh.IPv6 != nil {
+		if ip := stdnet.ParseIP(*nh.IPv6); ip != nil && ip.To4() == nil {
+			v6 = *nh.IPv6
+		}
+	}
+	return v4, v6
+}
+
+// prefixRoute builds a route for a prefix via the next hop of its own address
+// family. It returns ok=false for an invalid CIDR or when no next hop of the
+// matching family is available.
+func prefixRoute(prefix, v4, v6 string) (NetplanRoute, bool) {
+	_, ipNet, err := stdnet.ParseCIDR(prefix)
+	if err != nil {
+		return NetplanRoute{}, false
+	}
+	via := v4
+	if ipNet.IP.To4() == nil {
+		via = v6
+	}
+	if via == "" {
+		return NetplanRoute{}, false
+	}
+	return NetplanRoute{To: prefix, Via: via}, true
 }
 
 // buildNetplanNodeIP creates a NetplanNodeIP for a node from the L2A's allocated

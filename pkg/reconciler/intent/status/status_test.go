@@ -30,6 +30,7 @@ func TestEffectiveInterfaceName(t *testing.T) {
 	vlan1000 := int32(1000)
 	override := "chris-l2"
 	empty := ""
+	ifref := "eth1"
 
 	resolved := &resolver.ResolvedData{
 		Networks: map[string]*resolver.ResolvedNetwork{
@@ -64,9 +65,19 @@ func TestEffectiveInterfaceName(t *testing.T) {
 			want: "",
 		},
 		{
-			name: "network without VLAN yields empty",
+			name: "network without VLAN and no interfaceRef yields empty",
 			spec: nc.Layer2AttachmentSpec{NetworkRef: "net-no-vlan"},
 			want: "",
+		},
+		{
+			name: "native mode reports interfaceRef",
+			spec: nc.Layer2AttachmentSpec{NetworkRef: "net-no-vlan", InterfaceRef: &ifref},
+			want: "eth1",
+		},
+		{
+			name: "native mode ignores interfaceName override",
+			spec: nc.Layer2AttachmentSpec{NetworkRef: "net-no-vlan", InterfaceRef: &ifref, InterfaceName: &override},
+			want: "eth1",
 		},
 		{
 			name: "override still reported when networkRef unresolved",

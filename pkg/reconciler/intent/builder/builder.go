@@ -23,20 +23,36 @@ import (
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/resolver"
 )
 
-// NetplanNodeIP holds per-VLAN netplan device info that is rendered into the
+// NetplanNodeIP holds per-device netplan info that is rendered into the
 // NodeNetplanConfig but does not belong on the NodeNetworkConfig API surface.
-// It carries the optional interface name/parent overrides and, when NodeIPConfig
-// is enabled on an L2A, the per-node IP addresses and IRB anycast gateways.
+// It carries the VLAN ID and MTU, optional interface name/parent overrides,
+// Destination-derived static routes, and — when NodeIPConfig is enabled on an
+// L2A — the per-node IP addresses and IRB anycast gateways. Any subset of these
+// may be set: e.g. routes can be present even when nodeIPs is disabled.
 type NetplanNodeIP struct {
+	// VLAN is the VLAN ID; 0 means native/untagged (config on the parent NIC).
+	VLAN uint16
+	// MTU is the device MTU; 0 means "not set" (do not emit an mtu).
+	MTU uint16
 	// Addresses are per-node IPs with prefix length (e.g., "10.0.1.10/24").
 	Addresses []string
 	// Gateways are the IRB anycast gateway IPs (e.g., "10.0.1.1").
 	Gateways []string
+	// Routes are Destination-derived static routes (prefix via next hop).
+	Routes []NetplanRoute
 	// InterfaceName overrides the default VLAN sub-interface name (vlan.<ID>).
 	InterfaceName string
-	// InterfaceRef is the parent/master interface for the VLAN sub-interface.
-	// Defaults to the HBN trunk interface if empty.
+	// InterfaceRef is the parent/master interface for the VLAN sub-interface,
+	// or the target interface in native/untagged mode. Defaults to the HBN
+	// trunk interface if empty.
 	InterfaceRef string
+}
+
+// NetplanRoute is a static route (destination prefix via a next-hop address)
+// rendered onto a netplan device.
+type NetplanRoute struct {
+	To  string
+	Via string
 }
 
 // NodeContribution is what each builder produces for a single node.

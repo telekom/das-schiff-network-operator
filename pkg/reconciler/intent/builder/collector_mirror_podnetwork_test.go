@@ -268,6 +268,63 @@ func TestMirrorBuilder_Layer2Source(t *testing.T) {
 	}
 }
 
+func TestMirrorBuilder_PureL2SourceRejected(t *testing.T) {
+	b := NewMirrorBuilder()
+
+	data := &resolver.ResolvedData{
+		Nodes: []corev1.Node{{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}}},
+		Networks: map[string]*resolver.ResolvedNetwork{
+			// Pure L2: no VNI. Mirroring is a CRA/HBN feature.
+			"pure-l2": {Name: "pure-l2", Spec: nc.NetworkSpec{VLAN: ptr(int32(700))}},
+		},
+		Collectors: []nc.Collector{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "col-1"},
+				Spec: nc.CollectorSpec{
+					Address:   "10.0.0.99",
+					Protocol:  "l3gre",
+					MirrorVRF: nc.MirrorVRFRef{Name: "mirror-vrf", Loopback: nc.LoopbackConfig{Name: "lo.mir"}},
+				},
+			},
+		},
+		Layer2Attachments: []nc.Layer2Attachment{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "pl2-l2a"},
+				Spec:       nc.Layer2AttachmentSpec{NetworkRef: "pure-l2", InterfaceRef: ptr("eth1")},
+			},
+		},
+		TrafficMirrors: []nc.TrafficMirror{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "tm-1"},
+				Spec: nc.TrafficMirrorSpec{
+					Source:    nc.MirrorSource{Kind: "Layer2Attachment", Name: "pl2-l2a"},
+					Collector: "col-1",
+					Direction: "ingress",
+				},
+			},
+		},
+	}
+
+	report := NewBuildReport()
+	result, err := b.Build(WithReport(context.Background(), report), data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// No bare Layer2 entry (VLAN/VNI/MTU=0) must be produced; the mirror is
+	// skipped with a Ready=False condition instead.
+	if contrib := result["node-1"]; contrib != nil && len(contrib.Layer2s) != 0 {
+		t.Errorf("expected no Layer2 entry for a pure-L2 mirror source, got keys %v", keys(contrib.Layer2s))
+	}
+	issues := report.Issues()
+	if len(issues) != 1 {
+		t.Fatalf("expected 1 issue, got %d", len(issues))
+	}
+	if issues[0].Kind != "TrafficMirror" {
+		t.Errorf("expected TrafficMirror issue, got %q", issues[0].Kind)
+	}
+}
+
 func TestMirrorBuilder_InboundSource(t *testing.T) {
 	b := NewMirrorBuilder()
 

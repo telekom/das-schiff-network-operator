@@ -152,6 +152,18 @@ func Assemble(contributions []*builder.NodeContribution) (*AssembleResult, error
 		}
 	}
 
+	// Drop orphan Layer2 entries that never received a base config (VLAN stays
+	// 0). These arise when a mirror-only contribution keys a VLAN whose L2A base
+	// entry does not exist on this node — e.g. a non-HBN source, a node outside
+	// the L2A's nodeSelector, or an L2A skipped by a build error. A Layer2 with
+	// VLAN 0 is rejected by the NNC schema (Minimum=1) and would invalidate the
+	// entire NodeNetworkConfig, so it is pruned defensively.
+	for k := range spec.Layer2s {
+		if spec.Layer2s[k].VLAN == 0 {
+			delete(spec.Layer2s, k)
+		}
+	}
+
 	return &AssembleResult{Spec: spec, Origins: origins, NetplanNodeIPs: netplanNodeIPs}, nil
 }
 

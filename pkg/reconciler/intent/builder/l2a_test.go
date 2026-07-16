@@ -31,6 +31,8 @@ import (
 
 func ptr[T any](v T) *T { return &v }
 
+const testInterfaceRef = "eth1"
+
 func TestL2ABuilder_Name(t *testing.T) {
 	b := NewL2ABuilder()
 	if b.Name() != "l2a" {
@@ -336,6 +338,66 @@ func TestL2ABuilder_DisableAnycast(t *testing.T) {
 	}
 }
 
+func TestL2ABuilder_VNIWithoutVLAN_SkipsWithError(t *testing.T) {
+	b := NewL2ABuilder()
+
+	data := &resolver.ResolvedData{
+		Nodes: []corev1.Node{{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}}},
+		Networks: map[string]*resolver.ResolvedNetwork{
+			"hbn-no-vlan": {
+				Name: "hbn-no-vlan",
+				Spec: nc.NetworkSpec{VNI: ptr(int32(10700))}, // VNI set, VLAN absent
+			},
+		},
+		Destinations: map[string]*resolver.ResolvedDestination{},
+		Layer2Attachments: []nc.Layer2Attachment{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "l2a-bad"},
+				Spec:       nc.Layer2AttachmentSpec{NetworkRef: "hbn-no-vlan"},
+			},
+		},
+	}
+
+	report := NewBuildReport()
+	result, err := b.Build(WithReport(context.Background(), report), data)
+	require.NoError(t, err)
+	assert.Empty(t, result, "VNI-without-VLAN attachment must be skipped")
+	issues := report.Issues()
+	require.Len(t, issues, 1)
+	assert.Equal(t, "Layer2Attachment", issues[0].Kind)
+	assert.Equal(t, "l2a-bad", issues[0].Name)
+}
+
+func TestL2ABuilder_PureL2WithoutInterfaceRef_SkipsWithError(t *testing.T) {
+	b := NewL2ABuilder()
+
+	data := &resolver.ResolvedData{
+		Nodes: []corev1.Node{{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}}},
+		Networks: map[string]*resolver.ResolvedNetwork{
+			"pure-l2": {
+				Name: "pure-l2",
+				Spec: nc.NetworkSpec{VLAN: ptr(int32(700))}, // no VNI → pure L2, but no interfaceRef
+			},
+		},
+		Destinations: map[string]*resolver.ResolvedDestination{},
+		Layer2Attachments: []nc.Layer2Attachment{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "l2a-bad"},
+				Spec:       nc.Layer2AttachmentSpec{NetworkRef: "pure-l2"},
+			},
+		},
+	}
+
+	report := NewBuildReport()
+	result, err := b.Build(WithReport(context.Background(), report), data)
+	require.NoError(t, err)
+	assert.Empty(t, result, "pure L2 without interfaceRef must be skipped")
+	issues := report.Issues()
+	require.Len(t, issues, 1)
+	assert.Equal(t, "Layer2Attachment", issues[0].Kind)
+	assert.Equal(t, "l2a-bad", issues[0].Name)
+}
+
 func TestL2ABuilder_UnknownNetwork(t *testing.T) {
 	b := NewL2ABuilder()
 
@@ -501,6 +563,120 @@ func TestL2ABuilder_DuplicateInterfaceNameOnSameNode(t *testing.T) {
 	}
 }
 
+func TestL2ABuilder_DefaultVLANNameConflictsWithInterfaceName(t *testing.T) {
+	b := NewL2ABuilder()
+
+	// L2A-a on VLAN 100 renders the default device name "vlan.100". L2A-b on a
+	// different VLAN explicitly names its device "vlan.100" — a device-name
+	// collision that must be detected even though the mapKeys (100 vs 200)
+	// differ.
+	ifName := "vlan.100"
+	data := &resolver.ResolvedData{
+		Nodes: []corev1.Node{{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}}},
+		Networks: map[string]*resolver.ResolvedNetwork{
+			"net-a": {Name: "net-a", Spec: nc.NetworkSpec{VLAN: ptr(int32(100)), IPv4: &nc.IPNetwork{CIDR: "10.0.1.0/24"}}},
+			"net-b": {Name: "net-b", Spec: nc.NetworkSpec{VLAN: ptr(int32(200)), IPv4: &nc.IPNetwork{CIDR: "10.0.2.0/24"}}},
+		},
+		Destinations: map[string]*resolver.ResolvedDestination{},
+		Layer2Attachments: []nc.Layer2Attachment{
+			{ObjectMeta: metav1.ObjectMeta{Name: "l2a-a"}, Spec: nc.Layer2AttachmentSpec{NetworkRef: "net-a", InterfaceRef: ptr("bond0")}},
+			{ObjectMeta: metav1.ObjectMeta{Name: "l2a-b"}, Spec: nc.Layer2AttachmentSpec{NetworkRef: "net-b", InterfaceRef: ptr("bond0"), InterfaceName: &ifName}},
+		},
+	}
+
+	report := NewBuildReport()
+	result, err := b.Build(WithReport(context.Background(), report), data)
+	require.NoError(t, err)
+
+	contrib := result["node-1"]
+	require.Len(t, contrib.NetplanNodeIPs, 1, "the L2A colliding on device name vlan.100 must be skipped")
+	_, hasA := contrib.NetplanNodeIPs["100"]
+	assert.True(t, hasA, "first L2A (default vlan.100) is applied")
+	issues := report.Issues()
+	require.Len(t, issues, 1)
+	assert.Equal(t, "Layer2Attachment", issues[0].Kind)
+}
+
+func TestL2ABuilder_DuplicateVLANMapKeyOnSameNode(t *testing.T) {
+	b := NewL2ABuilder()
+
+	// Two different pure-L2 Networks sharing VLAN 700 on the same node collide
+	// on mapKey "700"; the second attachment must be skipped, not silently
+	// overwrite the first.
+	data := &resolver.ResolvedData{
+		Nodes: []corev1.Node{{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}}},
+		Networks: map[string]*resolver.ResolvedNetwork{
+			"net-a": {Name: "net-a", Spec: nc.NetworkSpec{VLAN: ptr(int32(700))}},
+			"net-b": {Name: "net-b", Spec: nc.NetworkSpec{VLAN: ptr(int32(700))}},
+		},
+		Destinations: map[string]*resolver.ResolvedDestination{},
+		Layer2Attachments: []nc.Layer2Attachment{
+			{ObjectMeta: metav1.ObjectMeta{Name: "l2a-a"}, Spec: nc.Layer2AttachmentSpec{NetworkRef: "net-a", InterfaceRef: ptr("eth1")}},
+			{ObjectMeta: metav1.ObjectMeta{Name: "l2a-b"}, Spec: nc.Layer2AttachmentSpec{NetworkRef: "net-b", InterfaceRef: ptr("eth2")}},
+		},
+	}
+
+	report := NewBuildReport()
+	result, err := b.Build(WithReport(context.Background(), report), data)
+	require.NoError(t, err)
+
+	contrib := result["node-1"]
+	require.Len(t, contrib.NetplanNodeIPs, 1, "second L2A sharing VLAN 700 must be skipped")
+	issues := report.Issues()
+	require.Len(t, issues, 1)
+	assert.Equal(t, "Layer2Attachment", issues[0].Kind)
+}
+
+func TestL2ABuilder_DuplicateNativeInterfaceRefOnSameNode(t *testing.T) {
+	b := NewL2ABuilder()
+	ifRef := testInterfaceRef
+
+	data := &resolver.ResolvedData{
+		Nodes: []corev1.Node{{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}}},
+		Networks: map[string]*resolver.ResolvedNetwork{
+			// Both native (no VLAN, no VNI), same interfaceRef.
+			"net-a": {Name: "net-a", Spec: nc.NetworkSpec{IPv4: &nc.IPNetwork{CIDR: "10.0.1.0/24"}}},
+			"net-b": {Name: "net-b", Spec: nc.NetworkSpec{IPv4: &nc.IPNetwork{CIDR: "10.0.2.0/24"}}},
+		},
+		Destinations: map[string]*resolver.ResolvedDestination{},
+		Layer2Attachments: []nc.Layer2Attachment{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "l2a-a"},
+				Spec: nc.Layer2AttachmentSpec{
+					NetworkRef: "net-a", InterfaceRef: &ifRef,
+					NodeIPs: &nc.NodeIPConfig{Enabled: true},
+				},
+				Status: nc.Layer2AttachmentStatus{
+					NodeAddresses: map[string]nc.AddressAllocation{"node-1": {IPv4: []string{"10.0.1.10"}}},
+				},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "l2a-b"},
+				Spec: nc.Layer2AttachmentSpec{
+					NetworkRef: "net-b", InterfaceRef: &ifRef,
+					NodeIPs: &nc.NodeIPConfig{Enabled: true},
+				},
+				Status: nc.Layer2AttachmentStatus{
+					NodeAddresses: map[string]nc.AddressAllocation{"node-1": {IPv4: []string{"10.0.2.10"}}},
+				},
+			},
+		},
+	}
+
+	report := NewBuildReport()
+	result, err := b.Build(WithReport(context.Background(), report), data)
+	require.NoError(t, err)
+
+	// Exactly one of the two native L2As lands on eth1; the other is skipped
+	// with a Ready=False condition instead of silently overwriting it.
+	contrib := result["node-1"]
+	require.Len(t, contrib.NetplanNodeIPs, 1, "second native L2A on same interfaceRef must be skipped")
+
+	issues := report.Issues()
+	require.Len(t, issues, 1)
+	assert.Equal(t, "Layer2Attachment", issues[0].Kind)
+}
+
 func TestL2ABuilder_NodeIPs_NotInIRB(t *testing.T) {
 	b := NewL2ABuilder()
 	vlan := int32(501)
@@ -645,14 +821,16 @@ func TestL2ABuilder_NodeIPs_NotEnabled(t *testing.T) {
 func TestL2ABuilder_InterfaceNameAndRef(t *testing.T) {
 	b := NewL2ABuilder()
 	vlan := int32(501)
-	vni := int32(10501)
 	ifName := "chris-l2"
 	ifRef := "bond0"
 	data := &resolver.ResolvedData{
 		Nodes: []corev1.Node{{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}}},
 		Networks: map[string]*resolver.ResolvedNetwork{
-			"net-vlan501": {Name: "net-vlan501", Spec: nc.NetworkSpec{VLAN: &vlan, VNI: &vni, IPv4: &nc.IPNetwork{CIDR: "10.0.1.1/24"}}},
+			// Pure L2 (no VNI): interfaceRef is valid here; the VLAN sub-interface
+			// takes the InterfaceName override.
+			"net-vlan501": {Name: "net-vlan501", Spec: nc.NetworkSpec{VLAN: &vlan, IPv4: &nc.IPNetwork{CIDR: "10.0.1.1/24"}}},
 		},
+		Destinations: map[string]*resolver.ResolvedDestination{},
 		Layer2Attachments: []nc.Layer2Attachment{
 			{
 				ObjectMeta: metav1.ObjectMeta{Name: "l2a-named"},
@@ -670,8 +848,8 @@ func TestL2ABuilder_InterfaceNameAndRef(t *testing.T) {
 	require.Contains(t, result, "node-1")
 
 	contrib := result["node-1"]
-	_, ok := contrib.Layer2s["501"]
-	require.True(t, ok, "expected layer2 key 501")
+	_, hasL2 := contrib.Layer2s["501"]
+	assert.False(t, hasL2, "pure L2 (no VNI) emits no NNC Layer2 entry")
 	nip, ok := contrib.NetplanNodeIPs["501"]
 	require.True(t, ok, "expected NetplanNodeIPs entry for key 501")
 	assert.Equal(t, "chris-l2", nip.InterfaceName, "InterfaceName should be propagated to netplan device")
@@ -792,4 +970,521 @@ func TestL2ABuilder_IRBGateway_SingleHostReportsSkip(t *testing.T) {
 	assert.Equal(t, "l2a-single-host", issues[0].Name)
 	assert.Equal(t, reasonInvalidIRBGateway, issues[0].Reason)
 	assert.Contains(t, issues[0].Message, "no usable host address")
+}
+
+func TestL2ABuilder_PureL2NoVNI_SkipsNNC(t *testing.T) {
+	b := NewL2ABuilder()
+	ifName := "my-bond.700"
+	ifRef := testInterfaceRef
+
+	data := &resolver.ResolvedData{
+		Nodes: []corev1.Node{
+			{ObjectMeta: metav1.ObjectMeta{Name: "node-1", Labels: map[string]string{"role": "compute"}}},
+		},
+		Networks: map[string]*resolver.ResolvedNetwork{
+			"l2-only": {
+				Name: "l2-only",
+				Spec: nc.NetworkSpec{
+					VLAN: ptr(int32(700)),
+					IPv4: &nc.IPNetwork{CIDR: "192.0.2.0/24"},
+				},
+			},
+		},
+		Destinations: map[string]*resolver.ResolvedDestination{
+			"gw-ds": {
+				Name: "gw-ds",
+				Spec: nc.DestinationSpec{
+					NextHop:  &nc.NextHopConfig{IPv4: ptrString("192.0.2.1")},
+					Prefixes: []string{"1.1.1.1/32"},
+				},
+			},
+		},
+		RawDestinations: []nc.Destination{
+			{ObjectMeta: metav1.ObjectMeta{Name: "gw-ds", Labels: map[string]string{"role": "gateway"}}},
+		},
+		Layer2Attachments: []nc.Layer2Attachment{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "l2a-eth1"},
+				Spec: nc.Layer2AttachmentSpec{
+					NetworkRef:    "l2-only",
+					InterfaceRef:  &ifRef,
+					InterfaceName: &ifName,
+					Destinations:  &metav1.LabelSelector{MatchLabels: map[string]string{"role": "gateway"}},
+					NodeIPs:       &nc.NodeIPConfig{Enabled: true},
+					NodeSelector:  &metav1.LabelSelector{MatchLabels: map[string]string{"role": "compute"}},
+				},
+				Status: nc.Layer2AttachmentStatus{
+					NodeAddresses: map[string]nc.AddressAllocation{
+						"node-1": {IPv4: []string{"192.0.2.10"}},
+					},
+				},
+			},
+		},
+	}
+
+	result, err := b.Build(context.Background(), data)
+	require.NoError(t, err)
+
+	contrib, ok := result["node-1"]
+	require.True(t, ok, "expected contribution for node-1")
+
+	_, hasL2 := contrib.Layer2s["700"]
+	assert.False(t, hasL2, "pure L2 (no VNI) must not generate NNC Layer2 entry")
+
+	nip, ok := contrib.NetplanNodeIPs["700"]
+	assert.True(t, ok, "pure L2 must generate NodeNetplanConfig entry")
+	assert.Equal(t, "eth1", nip.InterfaceRef)
+	assert.Equal(t, "my-bond.700", nip.InterfaceName)
+	assert.Equal(t, uint16(700), nip.VLAN)
+	assert.Len(t, nip.Addresses, 1)
+	assert.Equal(t, "192.0.2.10/24", nip.Addresses[0])
+	assert.Len(t, nip.Gateways, 1)
+	assert.Equal(t, "192.0.2.1", nip.Gateways[0])
+	require.Len(t, nip.Routes, 1)
+	assert.Equal(t, "1.1.1.1/32", nip.Routes[0].To)
+	assert.Equal(t, "192.0.2.1", nip.Routes[0].Via)
+}
+
+func TestL2ABuilder_EmptyNetworkNoLayer2(t *testing.T) {
+	b := NewL2ABuilder()
+	ifRef := testInterfaceRef
+
+	data := &resolver.ResolvedData{
+		Nodes: []corev1.Node{
+			{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
+		},
+		Networks: map[string]*resolver.ResolvedNetwork{
+			"empty-net": {
+				Name: "empty-net",
+			},
+		},
+		Destinations: map[string]*resolver.ResolvedDestination{},
+		Layer2Attachments: []nc.Layer2Attachment{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "l2a-eth1"},
+				Spec: nc.Layer2AttachmentSpec{
+					NetworkRef:   "empty-net",
+					InterfaceRef: &ifRef,
+				},
+			},
+		},
+	}
+
+	result, err := b.Build(context.Background(), data)
+	require.NoError(t, err)
+	contrib := result["node-1"]
+	assert.Empty(t, contrib.Layer2s, "empty network (no VLAN, no VNI) must not produce Layer2")
+}
+
+func TestL2ABuilder_NoNodeIPs_PureRouteOnly(t *testing.T) {
+	b := NewL2ABuilder()
+	ifRef := testInterfaceRef
+
+	data := &resolver.ResolvedData{
+		Nodes: []corev1.Node{
+			{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
+		},
+		Networks: map[string]*resolver.ResolvedNetwork{
+			"l2-routes": {
+				Name: "l2-routes",
+				Spec: nc.NetworkSpec{
+					VLAN: ptr(int32(700)),
+				},
+			},
+		},
+		Destinations: map[string]*resolver.ResolvedDestination{
+			"static": {
+				Name: "static",
+				Spec: nc.DestinationSpec{
+					NextHop:  &nc.NextHopConfig{IPv4: ptrString("10.0.0.1")},
+					Prefixes: []string{"8.8.8.8/32", "8.8.4.4/32"},
+				},
+			},
+		},
+		RawDestinations: []nc.Destination{
+			{ObjectMeta: metav1.ObjectMeta{Name: "static", Labels: map[string]string{"role": "static"}}},
+		},
+		Layer2Attachments: []nc.Layer2Attachment{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "l2a-routes"},
+				Spec: nc.Layer2AttachmentSpec{
+					NetworkRef:   "l2-routes",
+					InterfaceRef: &ifRef,
+					Destinations: &metav1.LabelSelector{MatchLabels: map[string]string{"role": "static"}},
+				},
+			},
+		},
+	}
+
+	result, err := b.Build(context.Background(), data)
+	require.NoError(t, err)
+
+	contrib := result["node-1"]
+	_, hasL2 := contrib.Layer2s["700"]
+	assert.False(t, hasL2, "no VNI — no NNC Layer2")
+
+	nip, ok := contrib.NetplanNodeIPs["700"]
+	assert.True(t, ok, "must produce netplan entry with routes")
+	assert.Empty(t, nip.Addresses, "no node IPs enabled")
+	assert.Empty(t, nip.Gateways, "no IRB gateway")
+	require.Len(t, nip.Routes, 2)
+	// Routes are sorted by prefix for deterministic output.
+	assert.Equal(t, "8.8.4.4/32", nip.Routes[0].To)
+	assert.Equal(t, "10.0.0.1", nip.Routes[0].Via)
+	assert.Equal(t, "8.8.8.8/32", nip.Routes[1].To)
+	assert.Equal(t, "10.0.0.1", nip.Routes[1].Via)
+}
+
+func TestBuildNetplanDevice_NativeVLAN_InterfaceRefOnlyIsSkipped(t *testing.T) {
+	ifRef := testInterfaceRef
+	l2a := &nc.Layer2Attachment{
+		Spec: nc.Layer2AttachmentSpec{
+			InterfaceRef: &ifRef,
+		},
+	}
+	nw := &resolver.ResolvedNetwork{Spec: nc.NetworkSpec{VLAN: nil}}
+	_, ok := buildNetplanDevice(l2a, nw, "node-1", nil)
+	assert.False(t, ok, "native device with only interfaceRef carries nothing actionable")
+}
+
+func TestBuildNetplanDevice_NativeVLAN_NoDefaultMTU(t *testing.T) {
+	ifRef := testInterfaceRef
+	l2a := &nc.Layer2Attachment{
+		Spec: nc.Layer2AttachmentSpec{
+			InterfaceRef: &ifRef,
+			NodeIPs:      &nc.NodeIPConfig{Enabled: true},
+		},
+		Status: nc.Layer2AttachmentStatus{
+			NodeAddresses: map[string]nc.AddressAllocation{
+				"node-1": {IPv4: []string{"10.0.0.10"}},
+			},
+		},
+	}
+	nw := &resolver.ResolvedNetwork{Spec: nc.NetworkSpec{IPv4: &nc.IPNetwork{CIDR: "10.0.0.0/24"}}}
+	dev, ok := buildNetplanDevice(l2a, nw, "node-1", nil)
+	require.True(t, ok)
+	assert.Equal(t, uint16(0), dev.VLAN)
+	assert.Equal(t, uint16(0), dev.MTU, "native device must not default MTU (would mutate parent link)")
+	assert.Equal(t, "eth1", dev.InterfaceRef)
+}
+
+func TestBuildNetplanDevice_TaggedVLAN_DefaultsMTU(t *testing.T) {
+	ifRef := testInterfaceRef
+	l2a := &nc.Layer2Attachment{
+		Spec: nc.Layer2AttachmentSpec{InterfaceRef: &ifRef},
+	}
+	nw := &resolver.ResolvedNetwork{Spec: nc.NetworkSpec{VLAN: ptr(int32(700))}}
+	dev, ok := buildNetplanDevice(l2a, nw, "node-1", nil)
+	require.True(t, ok)
+	assert.Equal(t, uint16(700), dev.VLAN)
+	assert.Equal(t, uint16(defaultMTU), dev.MTU, "tagged VLAN sub-interface defaults MTU")
+}
+
+func TestBuildNetplanDevice_NativeVLAN_MTUOverride(t *testing.T) {
+	ifRef := testInterfaceRef
+	l2a := &nc.Layer2Attachment{
+		Spec: nc.Layer2AttachmentSpec{InterfaceRef: &ifRef, MTU: ptr(int32(9000))},
+	}
+	nw := &resolver.ResolvedNetwork{Spec: nc.NetworkSpec{VLAN: nil}}
+	dev, ok := buildNetplanDevice(l2a, nw, "node-1", nil)
+	require.True(t, ok, "explicit MTU override is actionable payload")
+	assert.Equal(t, uint16(9000), dev.MTU)
+}
+
+func TestL2ABuilder_DestinationRoutes_IPv6(t *testing.T) {
+	b := NewL2ABuilder()
+	ifRef := testInterfaceRef
+
+	data := &resolver.ResolvedData{
+		Nodes: []corev1.Node{
+			{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
+		},
+		Networks: map[string]*resolver.ResolvedNetwork{
+			"l2-v6": {
+				Name: "l2-v6",
+				Spec: nc.NetworkSpec{
+					VLAN: ptr(int32(700)),
+					IPv6: &nc.IPNetwork{CIDR: "2001:db8:1::/64"},
+				},
+			},
+		},
+		Destinations: map[string]*resolver.ResolvedDestination{
+			"gw-v6": {
+				Name: "gw-v6",
+				Spec: nc.DestinationSpec{
+					NextHop:  &nc.NextHopConfig{IPv6: ptrString("2001:db8:1::1")},
+					Prefixes: []string{"2001:db8:f::/48"},
+				},
+			},
+		},
+		RawDestinations: []nc.Destination{
+			{ObjectMeta: metav1.ObjectMeta{Name: "gw-v6", Labels: map[string]string{"role": "gw"}}},
+		},
+		Layer2Attachments: []nc.Layer2Attachment{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "l2a-v6"},
+				Spec: nc.Layer2AttachmentSpec{
+					NetworkRef:   "l2-v6",
+					InterfaceRef: &ifRef,
+					Destinations: &metav1.LabelSelector{MatchLabels: map[string]string{"role": "gw"}},
+					NodeIPs:      &nc.NodeIPConfig{Enabled: true},
+				},
+				Status: nc.Layer2AttachmentStatus{
+					NodeAddresses: map[string]nc.AddressAllocation{
+						"node-1": {IPv6: []string{"2001:db8:1::a"}},
+					},
+				},
+			},
+		},
+	}
+
+	result, err := b.Build(context.Background(), data)
+	require.NoError(t, err)
+
+	nip, ok := result["node-1"].NetplanNodeIPs["700"]
+	require.True(t, ok)
+	assert.Equal(t, "2001:db8:1::a/64", nip.Addresses[0])
+	assert.Equal(t, "2001:db8:1::1", nip.Gateways[0])
+	require.Len(t, nip.Routes, 1)
+	assert.Equal(t, "2001:db8:f::/48", nip.Routes[0].To)
+	assert.Equal(t, "2001:db8:1::1", nip.Routes[0].Via)
+}
+
+func TestL2ABuilder_NativeVLAN_MapKey(t *testing.T) {
+	b := NewL2ABuilder()
+	ifRef1 := "eth1"
+	ifRef2 := "eth2"
+
+	data := &resolver.ResolvedData{
+		Nodes: []corev1.Node{
+			{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
+		},
+		Networks: map[string]*resolver.ResolvedNetwork{
+			"native-1": {
+				Name: "native-1",
+				Spec: nc.NetworkSpec{IPv4: &nc.IPNetwork{CIDR: "10.0.0.0/24"}},
+			},
+			"native-2": {
+				Name: "native-2",
+				Spec: nc.NetworkSpec{IPv4: &nc.IPNetwork{CIDR: "10.0.1.0/24"}},
+			},
+		},
+		Destinations: map[string]*resolver.ResolvedDestination{},
+		Layer2Attachments: []nc.Layer2Attachment{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "l2a-eth1"},
+				Spec: nc.Layer2AttachmentSpec{
+					NetworkRef:   "native-1",
+					InterfaceRef: &ifRef1,
+					NodeIPs:      &nc.NodeIPConfig{Enabled: true},
+				},
+				Status: nc.Layer2AttachmentStatus{
+					NodeAddresses: map[string]nc.AddressAllocation{
+						"node-1": {IPv4: []string{"10.0.0.10"}},
+					},
+				},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "l2a-eth2"},
+				Spec: nc.Layer2AttachmentSpec{
+					NetworkRef:   "native-2",
+					InterfaceRef: &ifRef2,
+					NodeIPs:      &nc.NodeIPConfig{Enabled: true},
+				},
+				Status: nc.Layer2AttachmentStatus{
+					NodeAddresses: map[string]nc.AddressAllocation{
+						"node-1": {IPv4: []string{"10.0.1.10"}},
+					},
+				},
+			},
+		},
+	}
+
+	result, err := b.Build(context.Background(), data)
+	require.NoError(t, err)
+
+	contrib := result["node-1"]
+	assert.Empty(t, contrib.Layer2s, "native VLAN should not produce Layer2 entries")
+
+	nip1, ok := contrib.NetplanNodeIPs["eth:eth1"]
+	require.True(t, ok)
+	assert.Equal(t, "10.0.0.10/24", nip1.Addresses[0])
+
+	nip2, ok := contrib.NetplanNodeIPs["eth:eth2"]
+	require.True(t, ok)
+	assert.Equal(t, "10.0.1.10/24", nip2.Addresses[0])
+}
+
+func TestNetplanMapKey(t *testing.T) {
+	assert.Equal(t, "700", netplanMapKey(700, &nc.Layer2Attachment{}))
+	assert.Equal(t, "0", netplanMapKey(0, &nc.Layer2Attachment{}))
+	assert.Equal(t, "0", netplanMapKey(0, &nc.Layer2Attachment{
+		Spec: nc.Layer2AttachmentSpec{InterfaceRef: ptr("")},
+	}))
+	assert.Equal(t, "eth:bond0", netplanMapKey(0, &nc.Layer2Attachment{
+		Spec: nc.Layer2AttachmentSpec{InterfaceRef: ptr("bond0")},
+	}))
+}
+
+func TestDestinationRoutes_MixedIPv4IPv6(t *testing.T) {
+	l2a := &nc.Layer2Attachment{
+		Spec: nc.Layer2AttachmentSpec{
+			Destinations: &metav1.LabelSelector{MatchLabels: map[string]string{"role": "gw"}},
+		},
+	}
+
+	data := &resolver.ResolvedData{
+		Destinations: map[string]*resolver.ResolvedDestination{
+			"mixed": {
+				Name: "mixed",
+				Spec: nc.DestinationSpec{
+					NextHop:  &nc.NextHopConfig{IPv4: ptrString("10.0.0.1"), IPv6: ptrString("2001:db8::1")},
+					Prefixes: []string{"1.1.1.1/32", "2001:db8:ffff::/48", "not-a-cidr"},
+				},
+			},
+		},
+		RawDestinations: []nc.Destination{
+			{ObjectMeta: metav1.ObjectMeta{Name: "mixed", Labels: map[string]string{"role": "gw"}}},
+		},
+	}
+
+	routes, err := destinationRoutes(l2a, data)
+	require.NoError(t, err)
+	require.Len(t, routes, 2, "invalid CIDR must be skipped")
+
+	assert.Equal(t, "1.1.1.1/32", routes[0].To)
+	assert.Equal(t, "10.0.0.1", routes[0].Via)
+
+	assert.Equal(t, "2001:db8:ffff::/48", routes[1].To)
+	assert.Equal(t, "2001:db8::1", routes[1].Via)
+}
+
+func TestDestinationRoutes_SkipsNoMatchingFamily(t *testing.T) {
+	l2a := &nc.Layer2Attachment{
+		Spec: nc.Layer2AttachmentSpec{
+			Destinations: &metav1.LabelSelector{MatchLabels: map[string]string{"role": "gw"}},
+		},
+	}
+
+	// IPv4-only nextHop but has an IPv6 prefix → IPv6 route must be skipped.
+	data := &resolver.ResolvedData{
+		Destinations: map[string]*resolver.ResolvedDestination{
+			"v4only": {
+				Name: "v4only",
+				Spec: nc.DestinationSpec{
+					NextHop:  &nc.NextHopConfig{IPv4: ptrString("10.0.0.1")},
+					Prefixes: []string{"1.1.1.1/32", "2001:db8::/32"},
+				},
+			},
+		},
+		RawDestinations: []nc.Destination{
+			{ObjectMeta: metav1.ObjectMeta{Name: "v4only", Labels: map[string]string{"role": "gw"}}},
+		},
+	}
+
+	routes, err := destinationRoutes(l2a, data)
+	require.NoError(t, err)
+	require.Len(t, routes, 1, "IPv6 prefix without IPv6 nextHop must be skipped")
+	assert.Equal(t, "1.1.1.1/32", routes[0].To)
+	assert.Equal(t, "10.0.0.1", routes[0].Via)
+}
+
+func TestDestinationRoutes_InvalidSelectorErrors(t *testing.T) {
+	l2a := &nc.Layer2Attachment{
+		Spec: nc.Layer2AttachmentSpec{
+			Destinations: &metav1.LabelSelector{
+				MatchExpressions: []metav1.LabelSelectorRequirement{
+					{Key: "role", Operator: "BadOperator", Values: []string{"gw"}},
+				},
+			},
+		},
+	}
+
+	_, err := destinationRoutes(l2a, &resolver.ResolvedData{})
+	require.Error(t, err, "an invalid destinations selector must surface as an error")
+}
+
+func TestDestinationRoutes_InvalidNextHopSkipped(t *testing.T) {
+	l2a := &nc.Layer2Attachment{
+		Spec: nc.Layer2AttachmentSpec{
+			Destinations: &metav1.LabelSelector{MatchLabels: map[string]string{"role": "gw"}},
+		},
+	}
+
+	data := &resolver.ResolvedData{
+		Destinations: map[string]*resolver.ResolvedDestination{
+			"bad4": { // garbage IPv4 next hop
+				Name: "bad4",
+				Spec: nc.DestinationSpec{
+					NextHop:  &nc.NextHopConfig{IPv4: ptrString("not-an-ip")},
+					Prefixes: []string{"1.1.1.1/32"},
+				},
+			},
+			"wrongfamily": { // IPv6 value in the IPv4 field
+				Name: "wrongfamily",
+				Spec: nc.DestinationSpec{
+					NextHop:  &nc.NextHopConfig{IPv4: ptrString("2001:db8::1")},
+					Prefixes: []string{"2.2.2.2/32"},
+				},
+			},
+			"good": {
+				Name: "good",
+				Spec: nc.DestinationSpec{
+					NextHop:  &nc.NextHopConfig{IPv4: ptrString("10.0.0.1")},
+					Prefixes: []string{"3.3.3.3/32"},
+				},
+			},
+		},
+		RawDestinations: []nc.Destination{
+			{ObjectMeta: metav1.ObjectMeta{Name: "bad4", Labels: map[string]string{"role": "gw"}}},
+			{ObjectMeta: metav1.ObjectMeta{Name: "wrongfamily", Labels: map[string]string{"role": "gw"}}},
+			{ObjectMeta: metav1.ObjectMeta{Name: "good", Labels: map[string]string{"role": "gw"}}},
+		},
+	}
+
+	routes, err := destinationRoutes(l2a, data)
+	require.NoError(t, err)
+	require.Len(t, routes, 1, "invalid and wrong-family next hops are skipped")
+	assert.Equal(t, "3.3.3.3/32", routes[0].To)
+	assert.Equal(t, "10.0.0.1", routes[0].Via)
+}
+
+func TestDestinationRoutes_SortedAndDeduplicated(t *testing.T) {
+	l2a := &nc.Layer2Attachment{
+		Spec: nc.Layer2AttachmentSpec{
+			Destinations: &metav1.LabelSelector{MatchLabels: map[string]string{"role": "gw"}},
+		},
+	}
+
+	// Two matching Destinations sharing the same next hop; overlapping prefixes
+	// and reverse ordering must collapse to a stable, de-duplicated result.
+	data := &resolver.ResolvedData{
+		Destinations: map[string]*resolver.ResolvedDestination{
+			"a": {
+				Name: "a",
+				Spec: nc.DestinationSpec{
+					NextHop:  &nc.NextHopConfig{IPv4: ptrString("10.0.0.1")},
+					Prefixes: []string{"9.9.9.9/32", "1.1.1.1/32"},
+				},
+			},
+			"b": {
+				Name: "b",
+				Spec: nc.DestinationSpec{
+					NextHop:  &nc.NextHopConfig{IPv4: ptrString("10.0.0.1")},
+					Prefixes: []string{"1.1.1.1/32", "5.5.5.5/32"},
+				},
+			},
+		},
+		RawDestinations: []nc.Destination{
+			{ObjectMeta: metav1.ObjectMeta{Name: "a", Labels: map[string]string{"role": "gw"}}},
+			{ObjectMeta: metav1.ObjectMeta{Name: "b", Labels: map[string]string{"role": "gw"}}},
+		},
+	}
+
+	routes, err := destinationRoutes(l2a, data)
+	require.NoError(t, err)
+	require.Len(t, routes, 3, "duplicate 1.1.1.1/32 collapsed")
+	assert.Equal(t, "1.1.1.1/32", routes[0].To)
+	assert.Equal(t, "5.5.5.5/32", routes[1].To)
+	assert.Equal(t, "9.9.9.9/32", routes[2].To)
 }

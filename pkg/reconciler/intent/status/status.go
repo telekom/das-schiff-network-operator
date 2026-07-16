@@ -571,18 +571,26 @@ func checkNetworkRef(networkRef string, resolved *resolver.ResolvedData) (condSt
 	return metav1.ConditionTrue, reasonAllResolved, msgAllResolved
 }
 
-// effectiveInterfaceName returns the interface name the agent will create for
-// the attachment: the explicit spec.interfaceName override when set, otherwise
-// the default "vlan.<vlan>" derived from the referenced Network's VLAN. It
-// returns "" when no override is set and the Network (or its VLAN) cannot be
-// resolved. This mirrors the naming logic in intent.buildNetplanState so the
-// status reflects exactly what lands on the node.
+// effectiveInterfaceName returns the interface name the agent will configure for
+// the attachment. In native/untagged mode (the referenced Network has no VLAN)
+// the config lands directly on the parent interfaceRef and InterfaceName is
+// ignored. Otherwise it is the explicit spec.interfaceName override when set,
+// else the default "vlan.<vlan>" derived from the Network's VLAN. It returns ""
+// when the name cannot be determined. This mirrors the naming logic in
+// intent.buildNetplanState so the status reflects what lands on the node.
 func effectiveInterfaceName(l2a *nc.Layer2Attachment, resolved *resolver.ResolvedData) string {
+	net, ok := resolved.Networks[l2a.Spec.NetworkRef]
+	if ok && net.Spec.VLAN == nil {
+		// Native/untagged mode: the parent interfaceRef is configured directly.
+		if l2a.Spec.InterfaceRef != nil && *l2a.Spec.InterfaceRef != "" {
+			return *l2a.Spec.InterfaceRef
+		}
+		return ""
+	}
 	if l2a.Spec.InterfaceName != nil && *l2a.Spec.InterfaceName != "" {
 		return *l2a.Spec.InterfaceName
 	}
-	net, ok := resolved.Networks[l2a.Spec.NetworkRef]
-	if !ok || net.Spec.VLAN == nil {
+	if !ok {
 		return ""
 	}
 	return fmt.Sprintf("vlan.%d", *net.Spec.VLAN)
