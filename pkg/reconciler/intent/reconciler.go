@@ -602,72 +602,57 @@ func (r *Reconciler) cleanupOrphanedNNCs(ctx context.Context, nodes []corev1.Nod
 }
 
 // buildNetplanState derives a netplan State from the assembled NNC spec.
-// It creates VLAN devices from the NNC Layer2 entries. The hbn parent
-// ethernet is defined in a static netplan config on the node (10-hbn.yaml),
-// so netplan can wire VLANs to it when this state is applied.
-// When nodeIPs are allocated, the VLAN device also gets per-node addresses
-// and routes pointing to the IRB anycast gateway.
+// It creates VLAN devices from the NNC Layer2 entries and pure-L2 netplan-only
+// entries. The parent link of a VLAN (the hbn trunk in HBN mode, or the
+// interfaceRef NIC/bond in non-HBN mode) must be declared out-of-band — via the
+// static 10-hbn.yaml for hbn, or via an InterfaceConfig / host netplan for a
+// non-HBN parent — since its type (ethernet vs bond vs bridge) is not knowable
+// here. When nodeIPs are allocated, the VLAN device also gets per-node addresses
+// and routes pointing to the IRB anycast gateway. When no VLAN tag is set
+// (native/untagged mode), addresses and routes are placed directly on the parent
+// ethernet interface.
 func buildNetplanState(spec *networkv1alpha1.NodeNetworkConfigSpec, nodeIPs map[string]builder.NetplanNodeIP) *netplan.State {
 	state := netplan.NewEmptyState()
 
-	if spec == nil || len(spec.Layer2s) == 0 {
+	if (spec == nil || len(spec.Layer2s) == 0) && len(nodeIPs) == 0 {
 		return &state
 	}
 
-	// Sort VLAN keys for deterministic output.
-	keys := make([]string, 0, len(spec.Layer2s))
-	for k := range spec.Layer2s {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
+	for _, k := range sortedNetplanKeys(spec, nodeIPs) {
+		l2 := layer2Entry(spec, k)
+		nip, hasNip := nodeIPs[k]
+		vlanID, mtu, link := netplanDeviceParams(l2, &nip, hasNip)
 
-	for _, k := range keys {
-		l2 := spec.Layer2s[k]
-		if l2.VLAN == 0 {
+		if hasNip && vlanID == 0 && nip.InterfaceRef != "" {
+			// Native/untagged mode writes the per-node addresses/routes directly
+			// onto the parent interface under ethernets:. Gated on an explicit
+			// InterfaceRef (not link != hbnTrunk) so it also triggers if a user
+			// names the parent "hbn". This is scoped to physical ethernet NICs
+			// (the driving VMware/bare-metal use case). A bond/bridge parent must
+			// instead be addressed via a tagged VLAN (vlans: link: <bond>), where
+			// the bond/bridge stays declared out-of-band under bonds:/bridges:
+			// and is never rewritten here — emitting it under ethernets: would be
+			// an invalid device-type redefinition. See the Layer2Attachment guide.
+			rawDev, err := json.Marshal(buildNativeEthernetDevice(&nip, mtu))
+			if err != nil {
+				continue
+			}
+			state.Network.Ethernets[link] = netplan.Device{Raw: rawDev}
 			continue
 		}
 
-		nip, hasNip := nodeIPs[k]
-
-		link := "hbn"
-		if hasNip && nip.InterfaceRef != "" {
-			link = nip.InterfaceRef
+		if vlanID == 0 {
+			continue
 		}
 
-		vlan := map[string]interface{}{
-			"id":         l2.VLAN,
-			"link":       link,
-			"mtu":        l2.MTU,
-			"critical":   true,
-			"link-local": []interface{}{},
-		}
-
-		// Add per-node IP addresses and gateway routes when nodeIPs is enabled.
-		if hasNip && len(nip.Addresses) > 0 {
-			addrs := make([]interface{}, 0, len(nip.Addresses))
-			for _, a := range nip.Addresses {
-				addrs = append(addrs, a)
-			}
-			vlan["addresses"] = addrs
-
-			if len(nip.Gateways) > 0 {
-				routes := make([]interface{}, 0, len(nip.Gateways))
-				for _, gw := range nip.Gateways {
-					routes = append(routes, map[string]interface{}{
-						"to":  "default",
-						"via": gw,
-					})
-				}
-				vlan["routes"] = routes
-			}
-		}
+		vlan := buildVLANDevice(vlanID, mtu, link, &nip)
 
 		rawVlan, err := json.Marshal(vlan)
 		if err != nil {
 			continue
 		}
 
-		ifName := fmt.Sprintf("vlan.%d", l2.VLAN)
+		ifName := fmt.Sprintf("vlan.%d", vlanID)
 		if hasNip && nip.InterfaceName != "" {
 			ifName = nip.InterfaceName
 		}
@@ -678,6 +663,111 @@ func buildNetplanState(spec *networkv1alpha1.NodeNetworkConfigSpec, nodeIPs map[
 	}
 
 	return &state
+}
+
+func sortedNetplanKeys(spec *networkv1alpha1.NodeNetworkConfigSpec, nodeIPs map[string]builder.NetplanNodeIP) []string {
+	keys := make([]string, 0, len(nodeIPs))
+	for k := range nodeIPs {
+		keys = append(keys, k)
+	}
+	if spec != nil {
+		for k := range spec.Layer2s {
+			if _, exists := nodeIPs[k]; !exists {
+				keys = append(keys, k)
+			}
+		}
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func layer2Entry(spec *networkv1alpha1.NodeNetworkConfigSpec, key string) networkv1alpha1.Layer2 {
+	if spec == nil {
+		return networkv1alpha1.Layer2{}
+	}
+	return spec.Layer2s[key]
+}
+
+func netplanDeviceParams(l2 networkv1alpha1.Layer2, nip *builder.NetplanNodeIP, hasNip bool) (vlanID, mtu uint16, link string) {
+	vlanID, mtu = l2.VLAN, l2.MTU
+	// Fall back to the netplan-only metadata when the NNC Layer2 entry carries
+	// no VLAN — either there is no Layer2 entry, or one exists with zero scalars
+	// (e.g. a mirror-only entry contributing just MirrorACLs).
+	if vlanID == 0 && hasNip {
+		vlanID, mtu = nip.VLAN, nip.MTU
+	}
+	link = hbnTrunk
+	if hasNip && nip.InterfaceRef != "" {
+		link = nip.InterfaceRef
+	}
+	return
+}
+
+const hbnTrunk = "hbn"
+
+func buildNetplanRoutes(nip *builder.NetplanNodeIP) []interface{} {
+	routes := make([]interface{}, 0, len(nip.Gateways)+len(nip.Routes))
+	for _, gw := range nip.Gateways {
+		routes = append(routes, map[string]interface{}{"to": "default", "via": gw})
+	}
+	for _, route := range nip.Routes {
+		routes = append(routes, map[string]interface{}{"to": route.To, "via": route.Via})
+	}
+	return routes
+}
+
+// buildNativeEthernetDevice renders a native/untagged device: per-node
+// addresses and routes placed directly on the parent NIC. It emits an
+// ethernets: device and is therefore scoped to physical ethernet parents; a
+// bond/bridge parent must be addressed via a tagged VLAN instead.
+func buildNativeEthernetDevice(nip *builder.NetplanNodeIP, mtu uint16) map[string]interface{} {
+	dev := map[string]interface{}{
+		"link-local": []interface{}{},
+		"critical":   true,
+	}
+	if mtu != 0 {
+		dev["mtu"] = mtu
+	}
+	if len(nip.Addresses) > 0 {
+		addrs := make([]interface{}, 0, len(nip.Addresses))
+		for _, a := range nip.Addresses {
+			addrs = append(addrs, a)
+		}
+		dev["addresses"] = addrs
+	}
+	if len(nip.Gateways) > 0 || len(nip.Routes) > 0 {
+		routes := buildNetplanRoutes(nip)
+		if len(routes) > 0 {
+			dev["routes"] = routes
+		}
+	}
+	return dev
+}
+
+func buildVLANDevice(vlanID, mtu uint16, link string, nip *builder.NetplanNodeIP) map[string]interface{} {
+	vlan := map[string]interface{}{
+		"id":         vlanID,
+		"link":       link,
+		"mtu":        mtu,
+		"critical":   true,
+		"link-local": []interface{}{},
+	}
+	if len(nip.Addresses) > 0 || len(nip.Gateways) > 0 || len(nip.Routes) > 0 {
+		if len(nip.Addresses) > 0 {
+			addrs := make([]interface{}, 0, len(nip.Addresses))
+			for _, a := range nip.Addresses {
+				addrs = append(addrs, a)
+			}
+			vlan["addresses"] = addrs
+		}
+		if len(nip.Gateways) > 0 || len(nip.Routes) > 0 {
+			routes := buildNetplanRoutes(nip)
+			if len(routes) > 0 {
+				vlan["routes"] = routes
+			}
+		}
+	}
+	return vlan
 }
 
 // applyNetplanConfig creates or updates a NodeNetplanConfig for a node.

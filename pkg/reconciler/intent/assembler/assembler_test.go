@@ -74,6 +74,51 @@ func TestAssemble_SingleContribution(t *testing.T) {
 	}
 }
 
+func TestAssemble_PrunesOrphanMirrorLayer2(t *testing.T) {
+	// A mirror-only contribution (VLAN 0, just MirrorACLs) with no base L2A
+	// entry must be pruned so the NodeNetworkConfig stays schema-valid.
+	c := builder.NewNodeContribution()
+	c.Layer2s["700"] = networkv1alpha1.Layer2{
+		MirrorACLs: []networkv1alpha1.MirrorACL{{Direction: networkv1alpha1.MirrorDirectionIngress}},
+	}
+
+	result, err := Assemble([]*builder.NodeContribution{c})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := result.Spec.Layer2s["700"]; ok {
+		t.Errorf("expected orphan mirror-only Layer2 (VLAN 0) to be pruned")
+	}
+}
+
+func TestAssemble_KeepsMirrorMergedWithBase(t *testing.T) {
+	// A base L2A entry (VLAN>0) plus a mirror-only entry on the same key must
+	// merge and be kept, regardless of contribution order.
+	base := builder.NewNodeContribution()
+	base.Layer2s["700"] = networkv1alpha1.Layer2{VNI: 10700, VLAN: 700, MTU: 1500}
+	mirror := builder.NewNodeContribution()
+	mirror.Layer2s["700"] = networkv1alpha1.Layer2{
+		MirrorACLs: []networkv1alpha1.MirrorACL{{Direction: networkv1alpha1.MirrorDirectionIngress}},
+	}
+
+	for _, order := range [][]*builder.NodeContribution{{base, mirror}, {mirror, base}} {
+		result, err := Assemble(order)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		l2, ok := result.Spec.Layer2s["700"]
+		if !ok {
+			t.Fatalf("expected merged Layer2 700 to be kept")
+		}
+		if l2.VLAN != 700 || l2.VNI != 10700 || l2.MTU != 1500 {
+			t.Errorf("expected base scalars preserved, got vlan=%d vni=%d mtu=%d", l2.VLAN, l2.VNI, l2.MTU)
+		}
+		if len(l2.MirrorACLs) != 1 {
+			t.Errorf("expected 1 MirrorACL merged, got %d", len(l2.MirrorACLs))
+		}
+	}
+}
+
 func TestAssemble_MergeFabricVRFs(t *testing.T) {
 	c1 := builder.NewNodeContribution()
 	c1.FabricVRFs["vrf-a"] = networkv1alpha1.FabricVRF{

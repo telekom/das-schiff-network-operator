@@ -201,6 +201,14 @@ func (*MirrorBuilder) addToLayer2(l2aName string, acl *networkv1alpha1.MirrorACL
 	if !ok {
 		return fmt.Errorf("Layer2Attachment %q references unknown Network %q", l2a.Name, l2a.Spec.NetworkRef)
 	}
+	// MirrorACLs are programmed in the CRA (HBN) datapath on the L2VNI. A source
+	// that is not a valid HBN L2 segment (needs both a VNI and a VLAN) is applied
+	// by the netplan agent and cannot carry mirror rules. Creating a bare Layer2
+	// entry here (VLAN/VNI/MTU = 0) would also make the NodeNetworkConfig invalid.
+	if net.Spec.VNI == nil || net.Spec.VLAN == nil {
+		return fmt.Errorf("Layer2Attachment %q references Network %q that is not a valid HBN L2 segment (needs both VNI and VLAN); traffic mirroring is only supported on HBN segments",
+			l2a.Name, l2a.Spec.NetworkRef)
+	}
 	var vlan int32
 	if net.Spec.VLAN != nil {
 		vlan = *net.Spec.VLAN

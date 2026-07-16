@@ -910,6 +910,7 @@ func TestL2ABuilder_WithAnnouncementPolicy(t *testing.T) {
 		Networks: map[string]*resolver.ResolvedNetwork{
 			"prod-net": {
 				Spec: nc.NetworkSpec{
+					VLAN: ptr(int32(100)),
 					VNI:  ptr(int32(10100)),
 					IPv4: &nc.IPNetwork{CIDR: "10.1.0.0/24"},
 					IPv6: &nc.IPNetwork{CIDR: "fd00:1::/64"},

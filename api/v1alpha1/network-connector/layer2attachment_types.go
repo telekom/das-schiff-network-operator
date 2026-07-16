@@ -69,9 +69,16 @@ type Layer2AttachmentSpec struct {
 	// +optional
 	NodeSelector *metav1.LabelSelector `json:"nodeSelector,omitempty"`
 
-	// InterfaceRef points to an existing host interface for non-HBN mode.
-	// On bare metal: the agent creates a VLAN sub-interface on this NIC/bond.
-	// On VMs: the hypervisor provides the NIC; the agent creates a VLAN sub-interface on it.
+	// InterfaceRef points to an existing host interface for non-HBN mode. The
+	// referenced Network must have no VNI (non-HBN / pure L2).
+	// When that Network carries a VLAN, the agent creates a VLAN sub-interface
+	// on this NIC or bond (the parent stays declared out-of-band).
+	// When the Network has neither VNI nor VLAN (native/untagged mode), the
+	// per-node addresses and routes are placed directly on this interface;
+	// native mode is supported only for physical ethernet NICs, not
+	// bonds/bridges — address a bond/bridge via a VLAN sub-interface instead.
+	// (A Network with a VNI but no VLAN is rejected: HBN requires both.)
+	// On VMs the hypervisor provides the NIC.
 	// If nil (HBN mode), a VXLAN interface is created automatically.
 	// +optional
 	InterfaceRef *string `json:"interfaceRef,omitempty"`

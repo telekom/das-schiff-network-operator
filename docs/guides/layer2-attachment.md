@@ -166,6 +166,25 @@ sub-interface on `bond0` — on every node matched by the `nodeSelector`. Becaus
     `InterfaceNotFound` condition. On VMs the hypervisor provides the NIC; on
     bare metal it is a physical NIC or bond.
 
+### Native / untagged mode (address the interface directly)
+
+If the referenced `Network` has **no `vlan`** (and no `vni`), no VLAN
+sub-interface is created: the per-node addresses and routes are placed
+**directly on `interfaceRef`**. This suits handing a whole physical NIC to a
+workload — e.g. a VMware vNIC — without tagging.
+
+!!! warning "Native mode is ethernet-only"
+    Native/untagged addressing is written under netplan `ethernets:`, so
+    `interfaceRef` must be a **physical ethernet NIC**. A bond or bridge cannot
+    be addressed this way — netplan would reject redefining it under
+    `ethernets:`. To put a segment on a bond/bridge, give the `Network` a `vlan`
+    and use the VLAN sub-interface (the bond/bridge stays declared out-of-band).
+
+The parent interface is **not** synthesized by the operator: for a tagged VLAN
+the parent (`eth1`/`bond0`) must already be declared out-of-band — via host
+netplan for a physical NIC, or an `InterfaceConfig` for a bond/bridge — the same
+way the HBN trunk is declared in a static `10-hbn.yaml`.
+
 ## Field reference
 
 Key `spec` fields — see the
