@@ -57,6 +57,68 @@ type Layer2 struct {
 	MirrorACLs []MirrorACL `json:"mirrorAcls,omitempty"`
 	// DisableSegmentation indicates whether to disable segmentation for the Layer 2 network.
 	DisableSegmentation bool `json:"disableSegmentation,omitempty"`
+	// AttachmentRef identifies the Layer2Attachment that produced this Layer2.
+	// It lets routed-CNI L2 port attachments (see AttachedPorts) bind to the
+	// correct L2 domain by reference rather than by VNI. Empty for Layer2s built
+	// from the legacy Layer2NetworkConfiguration path.
+	// +optional
+	AttachmentRef *Layer2AttachmentRef `json:"attachmentRef,omitempty"`
+	// AttachedPorts are routed-CNI ports enslaved to this L2 bridge (moved into
+	// the CRA netns and added as bridge link-interfaces). They are rendered as
+	// bridge slaves (VSR link-interface, FRR master) with no L3 addressing.
+	// +optional
+	AttachedPorts []AttachedPort `json:"attachedPorts,omitempty"`
+}
+
+// Layer2AttachmentRef identifies a Layer2Attachment by namespaced name.
+type Layer2AttachmentRef struct {
+	// Name is the Layer2Attachment name.
+	Name string `json:"name"`
+	// Namespace is the Layer2Attachment namespace.
+	Namespace string `json:"namespace"`
+}
+
+// PortTransport selects how an attached CRA-side port is wired.
+// +kubebuilder:validation:Enum=veth;vhostuser
+type PortTransport string
+
+const (
+	// PortTransportVeth is the default transport: a veth pair whose CRA-side end
+	// is moved into the CRA network namespace and referenced by VSR as
+	// infra-<ifname>. Supported by both the FRR and VSR flavors.
+	PortTransportVeth PortTransport = "veth"
+	// PortTransportVhostUser is a DPDK/virtio-user vhost-user socket, rendered by
+	// VSR as an fpvhost fast-path virtual-port. VSR-only; unsupported on FRR.
+	PortTransportVhostUser PortTransport = "vhostuser"
+)
+
+// PortWiring describes how a CRA-side attached port is wired. It is shared by
+// routed ports (RoutedPort) and L2-attached ports (AttachedPort).
+type PortWiring struct {
+	// Transport selects the CRA-side wiring: "veth" (default, an infrastructure
+	// port) or "vhostuser" (a VSR fpvhost fast-path virtual-port, VSR-only).
+	// +optional
+	// +kubebuilder:default=veth
+	Transport PortTransport `json:"transport,omitempty"`
+	// SocketPath is the vhost-user unix socket path shared with the workload.
+	// Only meaningful when Transport is "vhostuser".
+	// +optional
+	SocketPath string `json:"socketPath,omitempty"`
+	// SocketMode is the vhost-user socket mode ("client" or "server") from the
+	// VSR fast-path perspective (already inverted from the workload's view).
+	// Only meaningful when Transport is "vhostuser".
+	// +optional
+	SocketMode string `json:"socketMode,omitempty"`
+}
+
+// AttachedPort is a routed-CNI port bound to a Layer2 bridge (L2 attach mode).
+// It carries no L3 addressing: the port is added as a bridge slave only.
+type AttachedPort struct {
+	// Interface is the interface name inside the CRA network namespace (the moved
+	// veth end for veth transport, or the fpvhost interface for vhostuser).
+	Interface string `json:"interface"`
+	// PortWiring selects the CRA-side transport (veth default, or vhostuser).
+	PortWiring `json:",inline"`
 }
 
 // IRB represents the Integrated Routing and Bridging configuration.
@@ -103,6 +165,9 @@ type RoutedPort struct {
 	// Interface is the interface name inside the CRA network namespace (the moved
 	// veth end, e.g. "cra0123456789ab"). VSR references it as infra-<interface>.
 	Interface string `json:"interface"`
+	// PortWiring selects the CRA-side transport (veth default, or vhostuser for
+	// the VSR fpvhost fast-path virtual-port).
+	PortWiring `json:",inline"`
 	// GatewayV4 is the on-link IPv4 gateway address (with prefix length, e.g.
 	// "169.254.100.100/32") configured on the infrastructure interface.
 	GatewayV4 string `json:"gatewayV4,omitempty"`

@@ -1122,6 +1122,26 @@ spec:
                             Interface is the interface name inside the CRA network namespace (the moved
                             veth end, e.g. "cra0123456789ab"). VSR references it as infra-<interface>.
                           type: string
+                        socketMode:
+                          description: |-
+                            SocketMode is the vhost-user socket mode ("client" or "server") from the
+                            VSR fast-path perspective (already inverted from the workload's view).
+                            Only meaningful when Transport is "vhostuser".
+                          type: string
+                        socketPath:
+                          description: |-
+                            SocketPath is the vhost-user unix socket path shared with the workload.
+                            Only meaningful when Transport is "vhostuser".
+                          type: string
+                        transport:
+                          default: veth
+                          description: |-
+                            Transport selects the CRA-side wiring: "veth" (default, an infrastructure
+                            port) or "vhostuser" (a VSR fpvhost fast-path virtual-port, VSR-only).
+                          enum:
+                          - veth
+                          - vhostuser
+                          type: string
                       required:
                       - interface
                       type: object
@@ -2530,6 +2550,26 @@ spec:
                               Interface is the interface name inside the CRA network namespace (the moved
                               veth end, e.g. "cra0123456789ab"). VSR references it as infra-<interface>.
                             type: string
+                          socketMode:
+                            description: |-
+                              SocketMode is the vhost-user socket mode ("client" or "server") from the
+                              VSR fast-path perspective (already inverted from the workload's view).
+                              Only meaningful when Transport is "vhostuser".
+                            type: string
+                          socketPath:
+                            description: |-
+                              SocketPath is the vhost-user unix socket path shared with the workload.
+                              Only meaningful when Transport is "vhostuser".
+                            type: string
+                          transport:
+                            default: veth
+                            description: |-
+                              Transport selects the CRA-side wiring: "veth" (default, an infrastructure
+                              port) or "vhostuser" (a VSR fpvhost fast-path virtual-port, VSR-only).
+                            enum:
+                            - veth
+                            - vhostuser
+                            type: string
                         required:
                         - interface
                         type: object
@@ -2736,6 +2776,62 @@ spec:
                 additionalProperties:
                   description: Layer2 represents a Layer 2 network configuration.
                   properties:
+                    attachedPorts:
+                      description: |-
+                        AttachedPorts are routed-CNI ports enslaved to this L2 bridge (moved into
+                        the CRA netns and added as bridge link-interfaces). They are rendered as
+                        bridge slaves (VSR link-interface, FRR master) with no L3 addressing.
+                      items:
+                        description: |-
+                          AttachedPort is a routed-CNI port bound to a Layer2 bridge (L2 attach mode).
+                          It carries no L3 addressing: the port is added as a bridge slave only.
+                        properties:
+                          interface:
+                            description: |-
+                              Interface is the interface name inside the CRA network namespace (the moved
+                              veth end for veth transport, or the fpvhost interface for vhostuser).
+                            type: string
+                          socketMode:
+                            description: |-
+                              SocketMode is the vhost-user socket mode ("client" or "server") from the
+                              VSR fast-path perspective (already inverted from the workload's view).
+                              Only meaningful when Transport is "vhostuser".
+                            type: string
+                          socketPath:
+                            description: |-
+                              SocketPath is the vhost-user unix socket path shared with the workload.
+                              Only meaningful when Transport is "vhostuser".
+                            type: string
+                          transport:
+                            default: veth
+                            description: |-
+                              Transport selects the CRA-side wiring: "veth" (default, an infrastructure
+                              port) or "vhostuser" (a VSR fpvhost fast-path virtual-port, VSR-only).
+                            enum:
+                            - veth
+                            - vhostuser
+                            type: string
+                        required:
+                        - interface
+                        type: object
+                      type: array
+                    attachmentRef:
+                      description: |-
+                        AttachmentRef identifies the Layer2Attachment that produced this Layer2.
+                        It lets routed-CNI L2 port attachments (see AttachedPorts) bind to the
+                        correct L2 domain by reference rather than by VNI. Empty for Layer2s built
+                        from the legacy Layer2NetworkConfiguration path.
+                      properties:
+                        name:
+                          description: Name is the Layer2Attachment name.
+                          type: string
+                        namespace:
+                          description: Namespace is the Layer2Attachment namespace.
+                          type: string
+                      required:
+                      - name
+                      - namespace
+                      type: object
                     disableSegmentation:
                       description: DisableSegmentation indicates whether to disable
                         segmentation for the Layer 2 network.
@@ -3909,6 +4005,26 @@ spec:
                             description: |-
                               Interface is the interface name inside the CRA network namespace (the moved
                               veth end, e.g. "cra0123456789ab"). VSR references it as infra-<interface>.
+                            type: string
+                          socketMode:
+                            description: |-
+                              SocketMode is the vhost-user socket mode ("client" or "server") from the
+                              VSR fast-path perspective (already inverted from the workload's view).
+                              Only meaningful when Transport is "vhostuser".
+                            type: string
+                          socketPath:
+                            description: |-
+                              SocketPath is the vhost-user unix socket path shared with the workload.
+                              Only meaningful when Transport is "vhostuser".
+                            type: string
+                          transport:
+                            default: veth
+                            description: |-
+                              Transport selects the CRA-side wiring: "veth" (default, an infrastructure
+                              port) or "vhostuser" (a VSR fpvhost fast-path virtual-port, VSR-only).
+                            enum:
+                            - veth
+                            - vhostuser
                             type: string
                         required:
                         - interface

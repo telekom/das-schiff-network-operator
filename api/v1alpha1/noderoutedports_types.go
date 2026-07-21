@@ -35,6 +35,7 @@ type NodeRoutedPortsSpec struct {
 // RoutedPortEntry is a single routed CNI attachment recorded on a node. The
 // identity fields (PodNamespace/PodName/ContainerID/Interface) key the entry so
 // CNI ADD upserts and CNI DEL removes exactly one attachment.
+// +kubebuilder:validation:XValidation:rule="!has(self.layer2AttachmentRef) || (!has(self.vrf) && !has(self.gatewayV4) && !has(self.gatewayV6) && (!has(self.hostRoutes) || size(self.hostRoutes) == 0))",message="layer2AttachmentRef (L2 attach mode) is mutually exclusive with vrf, gatewayV4, gatewayV6 and hostRoutes"
 type RoutedPortEntry struct {
 	// PodNamespace is the namespace of the pod owning the attachment.
 	PodNamespace string `json:"podNamespace"`
@@ -44,8 +45,15 @@ type RoutedPortEntry struct {
 	// the sandbox, so an attachment survives a pod name reuse).
 	ContainerID string `json:"containerID"`
 	// VRF is the target VRF the port is bound into. Empty (or "default"/"main")
-	// means the underlay/default table.
+	// means the underlay/default table. Ignored in L2 attach mode (see
+	// Layer2AttachmentRef).
 	VRF string `json:"vrf,omitempty"`
+	// Layer2AttachmentRef, when set, selects L2 attach mode: the port is added as
+	// a bridge slave of the Layer2 produced by the referenced Layer2Attachment,
+	// instead of being routed. It is mutually exclusive with VRF, GatewayV4,
+	// GatewayV6 and HostRoutes (which must be empty in L2 mode).
+	// +optional
+	Layer2AttachmentRef *Layer2AttachmentRef `json:"layer2AttachmentRef,omitempty"`
 	// RoutedPort carries the datapath payload: the moved interface name, on-link
 	// gateway addresses and workload host routes.
 	RoutedPort `json:",inline"`
