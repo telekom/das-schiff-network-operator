@@ -1,0 +1,47 @@
+# DaemonSet that installs the cni-routed plugin binary onto every node's CNI bin
+# directory. The per-network CNI config is delivered via the
+# NetworkAttachmentDefinition (Multus), so this only ships the binary.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: cni-routed-installer
+  namespace: kube-system
+  labels:
+    app: cni-routed-installer
+spec:
+  selector:
+    matchLabels:
+      app: cni-routed-installer
+  template:
+    metadata:
+      labels:
+        app: cni-routed-installer
+    spec:
+      hostNetwork: true
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: installer
+          image: ghcr.io/telekom/das-schiff-cni-routed:latest
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            privileged: true
+          env:
+            - name: CNI_BIN_DIR
+              value: /host/opt/cni/bin
+            - name: CNI_CONF_DIR
+              value: /host/etc/cni/net.d
+          volumeMounts:
+            - name: cni-bin
+              mountPath: /host/opt/cni/bin
+            - name: cni-conf
+              mountPath: /host/etc/cni/net.d
+      volumes:
+        - name: cni-bin
+          hostPath:
+            path: /opt/cni/bin
+            type: DirectoryOrCreate
+        - name: cni-conf
+          hostPath:
+            path: /etc/cni/net.d
+            type: DirectoryOrCreate

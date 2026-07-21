@@ -250,7 +250,12 @@ e2e-down: ## Tear down the E2E lab.
 .PHONY: e2e-test
 e2e-test: ## Run legacy E2E tests (includes legacy traffic mirror; excludes intent/sync tests).
 	docker exec clab-nwop-tester bash -c \
-	  'cd /repo && KUBECONFIG=/repo/e2etests/.kubeconfig go test -v -count=1 -timeout=30m ./e2etests -ginkgo.label-filter="!intent && !intent-exclusive && !sync"'
+	  'cd /repo && KUBECONFIG=/repo/e2etests/.kubeconfig go test -v -count=1 -timeout=30m ./e2etests -ginkgo.label-filter="!intent && !intent-exclusive && !sync && !kubevirt"'
+
+.PHONY: e2e-test-kubevirt
+e2e-test-kubevirt: ## Run the routed KubeVirt VM datapath E2E test (requires E2E_KUBEVIRT lab).
+	docker exec clab-nwop-tester bash -c \
+	  'cd /repo && KUBECONFIG=/repo/e2etests/.kubeconfig E2E_KUBEVIRT=1 go test -v -count=1 -timeout=30m ./e2etests -ginkgo.label-filter="kubevirt"'
 
 .PHONY: e2e-test-intent
 e2e-test-intent: ## Run E2E tests with intent reconciler enabled (replaces legacy pipeline).

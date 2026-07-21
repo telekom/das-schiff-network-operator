@@ -41,6 +41,22 @@ router bgp 64497
   neighbor eth2 route-map TAG-FABRIC-IN in
   neighbor eth2 route-map DENY-TAG-FABRIC-OUT out
   network {{ .VtepIP }}/32
+  ! Routed VM/pod /32s land in the CRA netns main table as kernel (proto boot)
+  ! routes; advertise them into the UNDERLAY, filtered to the routed pool only.
+  redistribute kernel route-map rm_underlay_export
+ exit-address-family
+ !
+ address-family ipv6 unicast
+  neighbor eth1 activate
+  neighbor eth1 allowas-in
+  neighbor eth1 route-map TAG-FABRIC-IN in
+  neighbor eth1 route-map DENY-TAG-FABRIC-OUT out
+  neighbor eth2 activate
+  neighbor eth2 allowas-in
+  neighbor eth2 route-map TAG-FABRIC-IN in
+  neighbor eth2 route-map DENY-TAG-FABRIC-OUT out
+  ! Routed VM/pod /128s in the CRA netns main table (underlay).
+  redistribute kernel route-map rm_underlay_export
  exit-address-family
  !
  address-family l2vpn evpn
@@ -144,6 +160,10 @@ ipv6 prefix-list DEFAULT permit ::/0
 ip prefix-list pl_link_local permit 169.254.0.0/16 le 32
 ipv6 prefix-list pl_link_local permit fd00:7:caa5::/48 le 128
 !
+! Routed VM/pod underlay pool — only these host routes may be exported to the fabric.
+ip prefix-list pl_underlay_vm permit {{ .UnderlayVMv4 }} le 32
+ipv6 prefix-list pl_underlay_vm permit {{ .UnderlayVMv6 }} le 128
+!
 route-map rm_mgmt_import permit 2
  match ip address prefix-list pl_export_base
  match source-vrf cluster
@@ -205,6 +225,19 @@ route-map rm_export_local deny 12
 exit
 !
 route-map rm_export_local permit 20
+!
+! rm_underlay_export — restrict `redistribute kernel` in the underlay (default VRF)
+! to the routed VM/pod pool, so node/underlay/link-local kernel routes are NOT leaked.
+route-map rm_underlay_export permit 10
+ match ip address prefix-list pl_underlay_vm
+exit
+!
+route-map rm_underlay_export permit 11
+ match ipv6 address prefix-list pl_underlay_vm
+exit
+!
+route-map rm_underlay_export deny 65535
+exit
 !
 bfd
  profile underlay

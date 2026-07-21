@@ -1,0 +1,67 @@
+# Test VirtualMachine whose ONLY data NIC is the routed secondary network.
+#
+# - Uses the first-class KubeVirt "bridge" binding on the secondary Multus
+#   network (no binding-plugin registration, no shared L2: bridge binding builds
+#   a private per-pod 2-port bridge k6t-<pod> connecting the qemu tap to our
+#   cni-routed veth end).
+# - cloud-init sets the SAME static /32 + /128 as the NAD's static IPAM, plus an
+#   on-link default route via the CRA-side link-local gateway (169.254.1.1 /
+#   fe80::1). No dynamic routing runs in the guest.
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: routed-vm
+  namespace: default
+spec:
+  runStrategy: Always
+  template:
+    metadata:
+      labels:
+        kubevirt.io/vm: routed-vm
+    spec:
+      domain:
+        devices:
+          disks:
+            - name: containerdisk
+              disk:
+                bus: virtio
+            - name: cloudinitdisk
+              disk:
+                bus: virtio
+          interfaces:
+            - name: routed
+              bridge: {}
+        resources:
+          requests:
+            memory: 256Mi
+      networks:
+        - name: routed
+          multus:
+            networkName: default/routed-vm-net
+      volumes:
+        - name: containerdisk
+          containerDisk:
+            image: quay.io/kubevirt/fedora-cloud-container-disk-demo:latest
+        - name: cloudinitdisk
+          cloudInitNoCloud:
+            networkData: |
+              version: 2
+              ethernets:
+                eth0:
+                  addresses:
+                    - 10.201.0.10/32
+                    - fd00:201::10/128
+                  routes:
+                    - to: 0.0.0.0/0
+                      via: 169.254.1.1
+                      on-link: true
+                    - to: "::/0"
+                      via: fe80::1
+                      on-link: true
+            userData: |
+              #cloud-config
+              password: fedora
+              chpasswd: { expire: False }
+              # A tiny listener so the e2e can curl the VM on IPv4 and IPv6.
+              runcmd:
+                - [ sh, -c, "nohup python3 -m http.server 8080 --bind :: >/var/log/http.log 2>&1 &" ]

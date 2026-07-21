@@ -1,0 +1,36 @@
+# NetworkAttachmentDefinition for the routed VM data NIC.
+#
+# - type "cni-routed": our routed, no-shared-L2 plugin.
+# - vrf omitted => UNDERLAY: the CRA-side port is left in the CRA netns default
+#   table so the fabric BGP session advertises the VM /32 + /128 (not EVPN).
+#   Set "vrf": "<name>" to instead export via a tenant L3VNI VRF (EVPN type-5).
+# - craNetns "auto": discover the CRA netns by its trunk interface (hbn).
+# - static IPAM pins a routable IPv4 /32 + IPv6 /128 so the guest cloud-init can
+#   configure the exact same addresses (no reliance on bridge-binding DHCP relay,
+#   which is IPv4-only). These addresses must be redistributed by the underlay
+#   towards leaf/dcgw.
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: routed-vm-net
+  namespace: default
+spec:
+  config: |
+    {
+      "cniVersion": "1.0.0",
+      "name": "routed-vm-net",
+      "type": "cni-routed",
+      "craNetns": "auto",
+      "trunkInterface": "hbn",
+      "linkLocalGateways": {
+        "ipv4": "169.254.1.1",
+        "ipv6": "fe80::1"
+      },
+      "ipam": {
+        "type": "static",
+        "addresses": [
+          { "address": "10.201.0.10/32" },
+          { "address": "fd00:201::10/128" }
+        ]
+      }
+    }
