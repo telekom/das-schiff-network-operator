@@ -62,6 +62,97 @@ type Layer2 struct {
 	MirrorACLs []MirrorACL `json:"mirrorAcls,omitempty"`
 	// DisableSegmentation indicates whether to disable segmentation for the Layer 2 network.
 	DisableSegmentation bool `json:"disableSegmentation,omitempty"`
+	// AttachmentRef identifies the Layer2Attachment that produced this Layer2.
+	// It lets workload-CNI L2 port attachments (see AttachedPorts) bind to the
+	// correct L2 domain by reference rather than by VNI. Empty for Layer2s built
+	// from the legacy Layer2NetworkConfiguration path.
+	// +optional
+	AttachmentRef *Layer2AttachmentRef `json:"attachmentRef,omitempty"`
+	// AttachedPorts are workload-CNI ports enslaved to this L2 bridge (moved into
+	// the CRA netns and added as bridge link-interfaces). They are rendered as
+	// bridge slaves (VSR link-interface, FRR master) with no L3 addressing.
+	// +optional
+	AttachedPorts []AttachedPort `json:"attachedPorts,omitempty"`
+}
+
+// Layer2AttachmentRef identifies a Layer2Attachment by namespaced name.
+type Layer2AttachmentRef struct {
+	// Name is the Layer2Attachment name.
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+	// Namespace is the Layer2Attachment namespace.
+	// +kubebuilder:validation:MinLength=1
+	Namespace string `json:"namespace"`
+}
+
+// PortTransport selects how an attached CRA-side port is wired.
+// +kubebuilder:validation:Enum=veth;vhostuser
+type PortTransport string
+
+const (
+	// PortTransportVeth is the default transport: a veth pair whose CRA-side end
+	// is moved into the CRA network namespace and referenced by VSR as
+	// infra-<ifname>. Supported by both the FRR and VSR flavors.
+	PortTransportVeth PortTransport = "veth"
+	// PortTransportVhostUser is a DPDK/virtio-user vhost-user socket, rendered by
+	// VSR as an fpvhost fast-path virtual-port. VSR-only; unsupported on FRR.
+	PortTransportVhostUser PortTransport = "vhostuser"
+)
+
+const (
+	// SocketModeServer / SocketModeClient are the two vhost-user socket modes.
+	// PortWiring.SocketMode states the workload's side; the CRA renderer inverts
+	// it for the fast path.
+	SocketModeServer = "server"
+	SocketModeClient = "client"
+)
+
+// PortWiring describes how a CRA-side attached port is wired. It is shared by
+// routed ports (WorkloadPort) and L2-attached ports (AttachedPort).
+type PortWiring struct {
+	// Transport selects the CRA-side wiring: "veth" (default, an infrastructure
+	// port) or "vhostuser" (a VSR fpvhost fast-path virtual-port, VSR-only).
+	// +optional
+	// +kubebuilder:default=veth
+	Transport PortTransport `json:"transport,omitempty"`
+	// SocketPath is the vhost-user unix socket path shared with the workload.
+	// Only meaningful when Transport is "vhostuser".
+	// +optional
+	SocketPath string `json:"socketPath,omitempty"`
+	// SocketMode is the vhost-user socket mode ("client" or "server") from the
+	// workload's perspective, as allocated by the device plugin. The CRA
+	// renderer inverts it for the fast path (workload server <-> VSR client),
+	// so callers must not pre-invert it.
+	// Only meaningful when Transport is "vhostuser".
+	// +optional
+	SocketMode string `json:"socketMode,omitempty"`
+}
+
+// AttachedPort is a workload-CNI port bound to a Layer2 bridge (L2 attach mode).
+// It carries no L3 addressing: the port is added as a bridge slave only.
+type AttachedPort struct {
+	// Interface is the interface name inside the CRA network namespace (the moved
+	// veth end for veth transport, or the fpvhost interface for vhostuser).
+	Interface string `json:"interface"`
+	// PortWiring selects the CRA-side transport (veth default, or vhostuser).
+	PortWiring `json:",inline"`
+	// VLAN is the 802.1Q VLAN id the port carries this L2 domain under on the
+	// workload side. Zero means the port is an untagged access port and is
+	// bridged in directly. A non-zero value makes it one member of a trunk: the
+	// CRA renders a VLAN sub-interface of the port for that id and bridges that
+	// instead, which also translates the tag whenever the id differs from the
+	// domain's own VLAN.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=4094
+	VLAN uint16 `json:"vlan,omitempty"`
+	// MTU is the MTU the attachment requested (the CNI configuration's mtu). The
+	// CRA sizes the interfaces it derives from the port with it; the port itself
+	// is set up by the CNI. Zero means the default.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=9216
+	MTU uint16 `json:"mtu,omitempty"`
 }
 
 // IRB represents the Integrated Routing and Bridging configuration.
@@ -111,6 +202,18 @@ type WorkloadPort struct {
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=9
 	Interface string `json:"interface"`
+	// PortWiring selects the CRA-side transport (veth default, or vhostuser for
+	// the VSR fpvhost fast-path virtual-port).
+	PortWiring `json:",inline"`
+	// MTU is the MTU the attachment requested (the CNI configuration's mtu, which
+	// the plugin also applied to both ends of the veth). Zero means the default.
+	// In L2 attach mode it additionally has to fit the domain: an access port
+	// requires its Layer2 to carry at least this much, a trunk requires at least
+	// one of its members to. Routed attachments are not constrained by it.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=9216
+	MTU uint16 `json:"mtu,omitempty"`
 	// GatewayV4 is the on-link IPv4 gateway address (with prefix length, e.g.
 	// "169.254.100.100/32") configured on the infrastructure interface.
 	// +kubebuilder:validation:Format=cidr
