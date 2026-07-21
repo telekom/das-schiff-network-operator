@@ -126,6 +126,21 @@ func TestServerDelRemoves(t *testing.T) {
 	}
 }
 
+const (
+	testTransportVhostUser = "vhostuser"
+	testVhostSocketPath    = "/run/vsr-vhost-user/abc/socket"
+	testSocketModeServer   = "server"
+)
+
+// clearRouted strips the routed-mode fields from a request so it can carry an
+// L2 attachment, which is mutually exclusive with them.
+func clearRouted(r *pb.AddRequest) {
+	r.Vrf = ""
+	r.Port.GatewayV4 = ""
+	r.Port.GatewayV6 = ""
+	r.Port.HostRoutes = nil
+}
+
 func TestServerAddValidatesInput(t *testing.T) {
 	s := NewServer(newFakeClient(t), "node-1", logr.Discard())
 	ctx := context.Background()
@@ -159,6 +174,83 @@ func TestServerAddValidatesInput(t *testing.T) {
 		"v6 subnet host route": func(r *pb.AddRequest) { r.Port.HostRoutes = []string{"fd00:201::/64"} },
 		"subnet gateway v4":    func(r *pb.AddRequest) { r.Port.GatewayV4 = "169.254.1.1/24" },
 		"subnet gateway v6":    func(r *pb.AddRequest) { r.Port.GatewayV6 = "fe80::1/64" },
+		"vhostuser interface too long": func(r *pb.AddRequest) {
+			// fpvhost-<ifname> is two characters longer than infra-<ifname>, so a
+			// name that is fine for veth overflows the kernel limit here.
+			r.Port.Interface = "cra012345"
+			r.Port.Transport = testTransportVhostUser
+			r.Port.SocketPath = testVhostSocketPath
+			r.Port.SocketMode = testSocketModeServer
+		},
+		"unknown transport": func(r *pb.AddRequest) {
+			r.Port.Transport = "sriov"
+		},
+		"socket path on veth": func(r *pb.AddRequest) {
+			r.Port.SocketPath = testVhostSocketPath
+		},
+		"socket mode on veth": func(r *pb.AddRequest) {
+			r.Port.SocketMode = testSocketModeServer
+		},
+		"vhostuser without socket path": func(r *pb.AddRequest) {
+			r.Port.Transport = testTransportVhostUser
+			r.Port.SocketMode = testSocketModeServer
+		},
+		"vhostuser without socket mode": func(r *pb.AddRequest) {
+			r.Port.Transport = testTransportVhostUser
+			r.Port.SocketPath = testVhostSocketPath
+		},
+		"vhostuser bad socket mode": func(r *pb.AddRequest) {
+			r.Port.Transport = testTransportVhostUser
+			r.Port.SocketPath = testVhostSocketPath
+			r.Port.SocketMode = "bogus"
+		},
+		"l2 ref without name": func(r *pb.AddRequest) {
+			clearRouted(r)
+			r.Layer2AttachmentRef = &pb.Layer2AttachmentRef{}
+		},
+		"l2 ref with routed fields": func(r *pb.AddRequest) {
+			r.Layer2AttachmentRef = &pb.Layer2AttachmentRef{Name: "blue"}
+		},
+		"l2 ref and trunk together": func(r *pb.AddRequest) {
+			clearRouted(r)
+			r.Layer2AttachmentRef = &pb.Layer2AttachmentRef{Name: "blue"}
+			r.Layer2Trunk = []*pb.Layer2TrunkMember{
+				{Ref: &pb.Layer2AttachmentRef{Name: "green"}},
+			}
+		},
+		"trunk member without name": func(r *pb.AddRequest) {
+			clearRouted(r)
+			r.Layer2Trunk = []*pb.Layer2TrunkMember{{Ref: &pb.Layer2AttachmentRef{}}}
+		},
+		"trunk member without ref": func(r *pb.AddRequest) {
+			clearRouted(r)
+			r.Layer2Trunk = []*pb.Layer2TrunkMember{{Vlan: 100}}
+		},
+		"trunk vlan out of range": func(r *pb.AddRequest) {
+			clearRouted(r)
+			r.Layer2Trunk = []*pb.Layer2TrunkMember{
+				{Ref: &pb.Layer2AttachmentRef{Name: "green"}, Vlan: 4095},
+			}
+		},
+		"trunk duplicate ref": func(r *pb.AddRequest) {
+			clearRouted(r)
+			r.Layer2Trunk = []*pb.Layer2TrunkMember{
+				{Ref: &pb.Layer2AttachmentRef{Name: "green"}},
+				{Ref: &pb.Layer2AttachmentRef{Name: "green"}, Vlan: 100},
+			}
+		},
+		"trunk duplicate vlan": func(r *pb.AddRequest) {
+			clearRouted(r)
+			r.Layer2Trunk = []*pb.Layer2TrunkMember{
+				{Ref: &pb.Layer2AttachmentRef{Name: "green"}, Vlan: 100},
+				{Ref: &pb.Layer2AttachmentRef{Name: "red"}, Vlan: 100},
+			}
+		},
+		"trunk with routed fields": func(r *pb.AddRequest) {
+			r.Layer2Trunk = []*pb.Layer2TrunkMember{
+				{Ref: &pb.Layer2AttachmentRef{Name: "green"}},
+			}
+		},
 	}
 	for name, mutate := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -172,6 +264,17 @@ func TestServerAddValidatesInput(t *testing.T) {
 				t.Fatalf("expected InvalidArgument, got %v", status.Code(err))
 			}
 		})
+	}
+
+	// A well-formed vhost-user request is accepted.
+	vhost := valid()
+	vhost.ContainerId = "cid-vhost"
+	vhost.Port.Interface = "v012345"
+	vhost.Port.Transport = testTransportVhostUser
+	vhost.Port.SocketPath = testVhostSocketPath
+	vhost.Port.SocketMode = testSocketModeServer
+	if _, err := s.Add(ctx, vhost); err != nil {
+		t.Fatalf("valid vhost-user request rejected: %v", err)
 	}
 
 	// A well-formed dual-stack request is accepted.
@@ -225,5 +328,123 @@ func TestServeRefusesToRemoveNonSocketPath(t *testing.T) {
 	}
 	if _, err := os.Stat(regular); err != nil {
 		t.Fatalf("Serve removed a path that was not a socket: %v", err)
+	}
+}
+
+func TestServerAddRecordsLayer2Trunk(t *testing.T) {
+	c := newFakeClient(t)
+	ctx := context.Background()
+	s := NewServer(c, "node-1", logr.Discard(), WithLayer2Namespace("tenant-a"))
+
+	if _, err := s.Add(ctx, &pb.AddRequest{
+		PodNamespace: "ns",
+		PodName:      "vnf",
+		ContainerId:  "cid-1",
+		Port:         &pb.WorkloadPort{Interface: "cra0cid1"},
+		Layer2Trunk: []*pb.Layer2TrunkMember{
+			{Ref: &pb.Layer2AttachmentRef{Name: "green"}},
+			{Ref: &pb.Layer2AttachmentRef{Name: "red"}, Vlan: 200},
+		},
+	}); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	ports := getNRP(t, c, "node-1").Spec.Ports
+	if len(ports) != 1 {
+		t.Fatalf("expected 1 port, got %d", len(ports))
+	}
+	entry := &ports[0]
+	if entry.Layer2AttachmentRef != nil {
+		t.Fatalf("expected no access ref, got %+v", entry.Layer2AttachmentRef)
+	}
+	if len(entry.Layer2Trunk) != 2 {
+		t.Fatalf("expected 2 trunk members, got %+v", entry.Layer2Trunk)
+	}
+	// The wire carries bare names; the configured namespace is stamped on.
+	for i := range entry.Layer2Trunk {
+		if ns := entry.Layer2Trunk[i].Namespace; ns != "tenant-a" {
+			t.Fatalf("member %d: expected namespace %q, got %q", i, "tenant-a", ns)
+		}
+	}
+	// vlan 0 on the wire means "inherit the domain's own id", which stays
+	// unresolved until the merge sees the NodeNetworkConfig.
+	if entry.Layer2Trunk[0].VLAN != nil {
+		t.Fatalf("expected an inherited vlan, got %d", *entry.Layer2Trunk[0].VLAN)
+	}
+	if entry.Layer2Trunk[1].VLAN == nil || *entry.Layer2Trunk[1].VLAN != 200 {
+		t.Fatalf("expected vlan 200, got %v", entry.Layer2Trunk[1].VLAN)
+	}
+}
+
+func TestServerAddStampsLayer2Namespace(t *testing.T) {
+	c := newFakeClient(t)
+	ctx := context.Background()
+	// No option: references are resolved in the default intent namespace.
+	s := NewServer(c, "node-1", logr.Discard())
+
+	if _, err := s.Add(ctx, &pb.AddRequest{
+		PodNamespace:        "ns",
+		PodName:             "vnf",
+		ContainerId:         "cid-1",
+		Port:                &pb.WorkloadPort{Interface: "cra0cid1"},
+		Layer2AttachmentRef: &pb.Layer2AttachmentRef{Name: "blue"},
+	}); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	ports := getNRP(t, c, "node-1").Spec.Ports
+	if len(ports) != 1 || ports[0].Layer2AttachmentRef == nil {
+		t.Fatalf("unexpected ports %+v", ports)
+	}
+	ref := ports[0].Layer2AttachmentRef
+	if ref.Name != "blue" || ref.Namespace != DefaultLayer2Namespace {
+		t.Fatalf("unexpected ref %+v", ref)
+	}
+}
+
+// TestServerAddRecordsRequestedMTU covers the requested MTU reaching the
+// recorded attachment, and an unset one becoming the default rather than a zero
+// each renderer would have to interpret for itself.
+func TestServerAddRecordsRequestedMTU(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		mtu  uint32
+		want uint16
+	}{
+		{name: "explicit", mtu: 9000, want: 9000},
+		{name: "unset defaults", mtu: 0, want: DefaultPortMTU},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := newFakeClient(t)
+			s := NewServer(c, "node-1", logr.Discard())
+
+			if _, err := s.Add(context.Background(), &pb.AddRequest{
+				PodNamespace: "ns", PodName: "pod", ContainerId: "c1",
+				Port: &pb.WorkloadPort{Interface: "cra012345", Mtu: tc.mtu},
+			}); err != nil {
+				t.Fatalf("Add: %v", err)
+			}
+			ports := getNRP(t, c, "node-1").Spec.Ports
+			if len(ports) != 1 || ports[0].MTU != tc.want {
+				t.Fatalf("recorded ports = %+v, want mtu %d", ports, tc.want)
+			}
+		})
+	}
+}
+
+// TestServerAddRejectsOutOfRangeMTU covers a request asking for a size no
+// datapath could configure being refused at the door.
+func TestServerAddRejectsOutOfRangeMTU(t *testing.T) {
+	for _, mtu := range []uint32{68, 65535} {
+		c := newFakeClient(t)
+		s := NewServer(c, "node-1", logr.Discard())
+
+		_, err := s.Add(context.Background(), &pb.AddRequest{
+			PodNamespace: "ns", PodName: "pod", ContainerId: "c1",
+			Port: &pb.WorkloadPort{Interface: "cra012345", Mtu: mtu},
+		})
+		if status.Code(err) != codes.InvalidArgument {
+			t.Errorf("Add with mtu %d = %v, want InvalidArgument", mtu, err)
+		}
 	}
 }
