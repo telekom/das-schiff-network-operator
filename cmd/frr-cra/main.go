@@ -643,6 +643,12 @@ func reconcileNetlink(cfg *nl.NetlinkConfiguration) error {
 		return fmt.Errorf("failed to reconcile Layer2 (create): %w", err)
 	}
 
+	// Program routed CNI attachments (on-link host routes for moved veths).
+	// Additive and adopt-only: the veths are created/removed by the CNI.
+	if err := nlManager.ReconcileRoutedPorts(cfg); err != nil {
+		return fmt.Errorf("failed to reconcile routed ports: %w", err)
+	}
+
 	reconcileNeighborSync(cfg)
 	return nil
 }

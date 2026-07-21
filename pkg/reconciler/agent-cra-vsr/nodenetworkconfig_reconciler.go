@@ -19,13 +19,16 @@ package agent_cra_vsr //nolint:revive
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/go-logr/logr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	cra "github.com/telekom/das-schiff-network-operator/pkg/cra-vsr"
+	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/common"
+	"github.com/telekom/das-schiff-network-operator/pkg/routedcni"
 )
 
 // CRAVSRConfigApplier implements the common.ConfigApplier interface for CRA-VSR.
@@ -65,6 +68,10 @@ func NewNodeNetworkConfigReconciler(
 		common.ReconcilerOptions{
 			RestoreOnReconcileFailure: false, // VSR cannot commit invalid configs
 			LocalASN:                  craManager.LocalASN(),
+			// Merge routed CNI attachments (recorded in the node's
+			// NodeRoutedPorts object) into the config before NETCONF rendering:
+			// VSR's CRA-side FIB is owned by the agent, not the CNI.
+			RoutedPortsSource: routedcni.NewNodeSource(clusterClient, os.Getenv(healthcheck.NodenameEnv)),
 		},
 	)
 	if err != nil {

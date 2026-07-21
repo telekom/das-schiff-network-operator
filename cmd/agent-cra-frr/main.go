@@ -43,9 +43,11 @@ import (
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	controllerfrr "github.com/telekom/das-schiff-network-operator/controllers/agent-cra-frr"
 	"github.com/telekom/das-schiff-network-operator/pkg/cra-frr"
+	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
 	"github.com/telekom/das-schiff-network-operator/pkg/monitoring"
 	reconcilerfrr "github.com/telekom/das-schiff-network-operator/pkg/reconciler/agent-cra-frr"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/common"
+	"github.com/telekom/das-schiff-network-operator/pkg/routedcni"
 	"github.com/telekom/das-schiff-network-operator/pkg/version"
 )
 
@@ -146,11 +148,32 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Start the node-local routed-cni gRPC server so the routed CNI plugin can
+	// hand attachments to this agent (which programs them via frr-cra netlink).
+	if err := startRoutedCNIServer(mgr); err != nil {
+		setupLog.Error(err, "unable to start routed-cni server")
+		os.Exit(1)
+	}
+
 	setupLog.Info("starting manager")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
+}
+
+// startRoutedCNIServer registers the node-local routed-cni gRPC server as a
+// manager runnable so it shares the manager's lifecycle and client.
+func startRoutedCNIServer(mgr manager.Manager) error {
+	nodeName := os.Getenv(healthcheck.NodenameEnv)
+	socketPath := os.Getenv("ROUTED_CNI_SOCKET")
+	srv := routedcni.NewServer(mgr.GetClient(), nodeName, mgr.GetLogger())
+	if err := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
+		return srv.Serve(ctx, socketPath)
+	})); err != nil {
+		return fmt.Errorf("unable to add routed-cni server to manager: %w", err)
+	}
+	return nil
 }
 
 func updateManagerOptions(options *manager.Options, craManager *cra.Manager) error {

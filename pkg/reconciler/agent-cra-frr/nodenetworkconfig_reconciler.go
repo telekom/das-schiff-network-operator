@@ -3,6 +3,7 @@ package agent_cra_frr //nolint:revive
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/go-logr/logr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -10,8 +11,10 @@ import (
 	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/pkg/config"
 	cra "github.com/telekom/das-schiff-network-operator/pkg/cra-frr"
+	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/common"
+	"github.com/telekom/das-schiff-network-operator/pkg/routedcni"
 )
 
 const (
@@ -44,6 +47,8 @@ func (a *CRAFRRConfigApplier) ApplyConfig(ctx context.Context, cfg *v1alpha1.Nod
 }
 
 func (a *CRAFRRConfigApplier) convertNodeConfigToNetlink(nodeCfg *v1alpha1.NodeNetworkConfig) (netlinkConfig nl.NetlinkConfiguration) {
+	netlinkConfig.RoutedPorts = convertRoutedPorts(nodeCfg)
+
 	for _, layer2 := range nodeCfg.Spec.Layer2s {
 		nlLayer2 := nl.Layer2Information{
 			VlanID:              int(layer2.VLAN),
@@ -95,6 +100,37 @@ func (a *CRAFRRConfigApplier) convertNodeConfigToNetlink(nodeCfg *v1alpha1.NodeN
 	}
 
 	return netlinkConfig
+}
+
+// convertRoutedPorts flattens the routed CNI attachments merged into the config
+// (on the cluster/underlay VRF, fabric VRFs and local VRFs) into the netlink
+// routed-port list the frr-cra server programs.
+func convertRoutedPorts(nodeCfg *v1alpha1.NodeNetworkConfig) []nl.RoutedPort {
+	var ports []nl.RoutedPort
+	appendPorts := func(vrf string, rps []v1alpha1.RoutedPort) {
+		for i := range rps {
+			ports = append(ports, nl.RoutedPort{
+				Interface:  rps[i].Interface,
+				VRF:        vrf,
+				GatewayV4:  rps[i].GatewayV4,
+				GatewayV6:  rps[i].GatewayV6,
+				HostRoutes: rps[i].HostRoutes,
+			})
+		}
+	}
+
+	if nodeCfg.Spec.ClusterVRF != nil {
+		appendPorts("", nodeCfg.Spec.ClusterVRF.RoutedPorts)
+	}
+	for name := range nodeCfg.Spec.FabricVRFs {
+		fv := nodeCfg.Spec.FabricVRFs[name]
+		appendPorts(name, fv.RoutedPorts)
+	}
+	for name := range nodeCfg.Spec.LocalVRFs {
+		lv := nodeCfg.Spec.LocalVRFs[name]
+		appendPorts(name, lv.RoutedPorts)
+	}
+	return ports
 }
 
 // appendMirrorVRFConfig adds the GRE tunnels, loopbacks and mirror rules carried by
@@ -215,6 +251,11 @@ func NewNodeNetworkConfigReconciler(
 		common.ReconcilerOptions{
 			RestoreOnReconcileFailure: true, // FRR can partially apply invalid configs
 			LocalASN:                  baseConfig.LocalASN,
+			// Merge routed CNI attachments (recorded in the node's
+			// NodeRoutedPorts object) into the config before rendering: the
+			// frr-cra server programs their on-link routes so FRR redistributes
+			// the VM /32 + /128 into BGP.
+			RoutedPortsSource: routedcni.NewNodeSource(clusterClient, os.Getenv(healthcheck.NodenameEnv)),
 		},
 	)
 	if err != nil {

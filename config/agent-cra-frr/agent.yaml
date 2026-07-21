@@ -97,6 +97,8 @@ spec:
               name: certs
             - mountPath: /opt/healthcheck/
               name: healthcheck-config
+            - mountPath: /run/das-schiff
+              name: routed-cni-socket
       terminationGracePeriodSeconds: 10
       serviceAccountName: controller-manager
       volumes:
@@ -114,3 +116,10 @@ spec:
         - configMap:
             name: healthcheck-config
           name: healthcheck-config
+        # Shared with the routed CNI plugin (which runs in the host mount
+        # namespace): the agent serves the routed-cni gRPC socket here so the
+        # plugin can hand routed attachments over on CNI ADD/DEL.
+        - hostPath:
+            path: /run/das-schiff
+            type: DirectoryOrCreate
+          name: routed-cni-socket

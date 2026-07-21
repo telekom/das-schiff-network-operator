@@ -214,6 +214,35 @@ var _ = Describe("NodeNetworkConfigReconciler", func() {
 			Expect(cfg.Status.ConfigStatus).To(Equal(operator.StatusInvalid))
 			Expect(cfg.Status.LastAppliedRevision).To(Equal("3"))
 		})
+
+		It("should preserve in-memory Spec changes not persisted to the server", func() {
+			// Regression guard: merged routed ports live only in the in-memory
+			// cfg.Spec (never persisted). Writing the status subresource must not
+			// revert cfg.Spec to the server state, or the merged ports are dropped
+			// before rendering. See SetStatusWithError deep-copy write.
+			cfg := createTestNodeNetworkConfig("1")
+			fakeClient = fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithRuntimeObjects(cfg).
+				WithStatusSubresource(cfg).
+				Build()
+
+			// Simulate the in-memory merge that mutates Spec after fetching.
+			cfg.Spec.ClusterVRF = &v1alpha1.VRF{
+				RoutedPorts: []v1alpha1.RoutedPort{{
+					Interface:  "cra0123456789ab",
+					GatewayV4:  "169.254.1.1/32",
+					HostRoutes: []string{"10.201.0.99/32"},
+				}},
+			}
+
+			err := SetStatus(context.Background(), fakeClient, cfg, operator.StatusProvisioning, logger)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(cfg.Status.ConfigStatus).To(Equal(operator.StatusProvisioning))
+			Expect(cfg.Spec.ClusterVRF).ToNot(BeNil())
+			Expect(cfg.Spec.ClusterVRF.RoutedPorts).To(HaveLen(1))
+			Expect(cfg.Spec.ClusterVRF.RoutedPorts[0].Interface).To(Equal("cra0123456789ab"))
+		})
 	})
 
 	Context("SetStatusWithError", func() {

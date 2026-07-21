@@ -36,6 +36,7 @@ import (
 	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/operator"
+	"github.com/telekom/das-schiff-network-operator/pkg/routedcni"
 )
 
 const (
@@ -54,6 +55,14 @@ type ConfigApplier interface {
 	ApplyConfig(ctx context.Context, cfg *v1alpha1.NodeNetworkConfig) error
 }
 
+// RoutedPortsSource supplies the routed-port attachments recorded for this node
+// (via the routed CNI, over the node-local gRPC channel) so they can be merged
+// into the NodeNetworkConfig before it is rendered. Agents that do not use the
+// routed CNI (e.g. FRR, which programs the CRA-side FIB directly) leave it nil.
+type RoutedPortsSource interface {
+	RoutedPorts(ctx context.Context) ([]v1alpha1.RoutedPortEntry, error)
+}
+
 // ReconcilerOptions contains configuration options for the reconciler.
 type ReconcilerOptions struct {
 	// RestoreOnReconcileFailure controls whether to restore the previous config
@@ -67,6 +76,12 @@ type ReconcilerOptions struct {
 	// node's NodeNetworkConfig.status.asNumber so the operator can report the
 	// server ASN on BGPPeering status. Zero means unset (nothing is surfaced).
 	LocalASN int
+
+	// RoutedPortsSource, when set, supplies routed-port attachments recorded for
+	// this node; they are merged into the NodeNetworkConfig before rendering.
+	// Used by VSR, whose CRA-side FIB is programmed by the agent (NETCONF) rather
+	// than by the CNI. Leave nil to disable.
+	RoutedPortsSource RoutedPortsSource
 }
 
 // NodeNetworkConfigReconciler handles the common reconciliation logic for NodeNetworkConfig.
@@ -79,6 +94,8 @@ type NodeNetworkConfigReconciler struct {
 	NodeNetworkConfigPath     string
 	restoreOnReconcileFailure bool
 	localASN                  int64
+	routedPortsSource         RoutedPortsSource
+	lastRoutedPortsHash       string
 }
 
 // NewNodeNetworkConfigReconciler creates a new NodeNetworkConfigReconciler.
@@ -96,6 +113,7 @@ func NewNodeNetworkConfigReconciler(
 		NodeNetworkConfigPath:     nodeNetworkConfigPath,
 		restoreOnReconcileFailure: opts.RestoreOnReconcileFailure,
 		localASN:                  int64(opts.LocalASN),
+		routedPortsSource:         opts.RoutedPortsSource,
 	}
 
 	nc, err := healthcheck.LoadConfig(healthcheck.NetHealthcheckFile)
@@ -142,11 +160,22 @@ func (r *NodeNetworkConfigReconciler) Reconcile(ctx context.Context) (ctrl.Resul
 	asnNeedsWrite := cfg.Status.ASNumber != r.localASN
 	cfg.Status.ASNumber = r.localASN
 
-	if r.NodeNetworkConfig != nil && r.NodeNetworkConfig.Spec.Revision == cfg.Spec.Revision {
+	// Merge routed-port attachments recorded for this node (via the routed CNI)
+	// into the fetched config before rendering. These arrive out-of-band from the
+	// NodeNetworkConfig revision, so a change is tracked by a content hash that
+	// forces re-rendering even when the revision is unchanged.
+	routedHash, err := r.mergeRoutedPorts(ctx, cfg)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	if r.NodeNetworkConfig != nil && r.NodeNetworkConfig.Spec.Revision == cfg.Spec.Revision &&
+		r.lastRoutedPortsHash == routedHash {
 		// replace in-memory working NodeNetworkConfig and store it on the disk
 		if err := r.storeConfig(cfg, r.NodeNetworkConfigPath); err != nil {
 			return ctrl.Result{}, fmt.Errorf("error saving NodeNetworkConfig status: %w", err)
 		}
+		r.lastRoutedPortsHash = routedHash
 
 		// current in-memory config has the same revision as the fetched one
 		// this means that NodeNetworkConfig was already provisioned - skip
@@ -183,8 +212,27 @@ func (r *NodeNetworkConfigReconciler) Reconcile(ctx context.Context) (ctrl.Resul
 	if err := r.storeConfig(cfg, r.NodeNetworkConfigPath); err != nil {
 		return ctrl.Result{}, fmt.Errorf("error saving NodeNetworkConfig status: %w", err)
 	}
+	r.lastRoutedPortsHash = routedHash
 
 	return result, nil
+}
+
+// mergeRoutedPorts merges routed-port attachments recorded for this node into
+// cfg and returns a content hash of the merged entries. When no source is
+// configured (e.g. FRR) it is a no-op returning an empty hash.
+func (r *NodeNetworkConfigReconciler) mergeRoutedPorts(
+	ctx context.Context,
+	cfg *v1alpha1.NodeNetworkConfig,
+) (string, error) {
+	if r.routedPortsSource == nil {
+		return "", nil
+	}
+	entries, err := r.routedPortsSource.RoutedPorts(ctx)
+	if err != nil {
+		return "", fmt.Errorf("error fetching routed ports: %w", err)
+	}
+	routedcni.MergeIntoNodeNetworkConfig(cfg, entries)
+	return routedcni.HashEntries(entries), nil
 }
 
 func (r *NodeNetworkConfigReconciler) storeConfig(
@@ -401,23 +449,33 @@ func SetStatusWithError(
 ) error {
 	logger.Info("setting NodeNetworkConfig status", "name", cfg.Name, "status", status)
 
-	cfg.Status.ConfigStatus = status
-	cfg.Status.LastUpdate = metav1.Now()
+	// Write the status subresource against a copy: client.Status().Update refreshes
+	// the passed object from the server, which would otherwise revert any in-memory
+	// additions to cfg.Spec (e.g. routed ports merged from NodeRoutedPorts) back to
+	// the persisted, unmerged spec before the config is rendered/applied.
+	statusObj := cfg.DeepCopy()
+	statusObj.Status.ConfigStatus = status
+	statusObj.Status.LastUpdate = metav1.Now()
 
 	if status == operator.StatusProvisioned || status == operator.StatusInvalid {
-		cfg.Status.LastAppliedRevision = cfg.Spec.Revision
+		statusObj.Status.LastAppliedRevision = statusObj.Spec.Revision
 	}
 
 	// Set or clear error message based on status
 	if status == operator.StatusInvalid {
-		cfg.Status.ErrorMessage = errorMsg
+		statusObj.Status.ErrorMessage = errorMsg
 	} else {
-		cfg.Status.ErrorMessage = ""
+		statusObj.Status.ErrorMessage = ""
 	}
 
-	if err := c.Status().Update(ctx, cfg); err != nil {
+	if err := c.Status().Update(ctx, statusObj); err != nil {
 		return fmt.Errorf("error updating NodeNetworkConfig status: %w", err)
 	}
+
+	// Propagate the persisted status and resource version back onto cfg without
+	// clobbering cfg.Spec (which may carry merged routed ports).
+	cfg.Status = statusObj.Status
+	cfg.ResourceVersion = statusObj.ResourceVersion
 
 	return nil
 }
