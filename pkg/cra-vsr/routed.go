@@ -49,41 +49,14 @@ type RoutedPort struct {
 	HostRoutes []string
 }
 
-// BuildRoutedVRF renders the l3vrf config that binds a routed CNI port into the
-// given VRF within the CRA network namespace: it declares the infrastructure
-// interface (port infra-<ifname> + on-link gateway addresses) and installs the
-// workload's host routes as interface-static routes pointing at the port.
-//
-// The returned VRF is meant to be attached to the working Namespace's VRFs and
-// pushed via NETCONF. Passing vrfTable <= 0 omits the table-id leaf (VSR keeps
-// its own allocation).
-func BuildRoutedVRF(vrfName string, vrfTable int, ports ...RoutedPort) (*VRF, error) {
-	if vrfName == "" {
-		return nil, fmt.Errorf("vrf name is required")
-	}
-
-	vrf := &VRF{
-		Name:       vrfName,
-		Interfaces: &Interfaces{},
-		Routing: &Routing{
-			NCOperation: Merge,
-			Static:      &StaticRouting{},
-		},
-	}
-	if err := applyRoutedPorts(vrf, ports...); err != nil {
-		return nil, err
-	}
-	if vrfTable > 0 {
-		vrf.TableID = vrfTable
-	}
-	return vrf, nil
-}
-
 // applyRoutedPorts merges the given routed ports into an already-composed VRF:
 // each port adds an infrastructure interface (port infra-<ifname> + on-link
 // gateway addresses) and interface-static routes for the workload host routes.
-// It is used both by BuildRoutedVRF and by the NNC reconcile path, which layers
-// routed ports onto the cluster/fabric/local VRFs assembled from the spec.
+//
+// It never creates a VRF. The VSR reconcile path looks up the existing
+// cluster/fabric/local L3VRF (LookupVRF) assembled from the NodeNetworkConfig
+// spec and layers the routed ports onto it, so a routed attachment is bound into
+// the VRF that already exists rather than a duplicate one.
 func applyRoutedPorts(vrf *VRF, ports ...RoutedPort) error {
 	if len(ports) == 0 {
 		return nil

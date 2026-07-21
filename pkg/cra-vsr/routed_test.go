@@ -24,69 +24,22 @@ import (
 	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 )
 
-func TestBuildRoutedVRF(t *testing.T) {
-	vrf, err := BuildRoutedVRF("cluster", 100, RoutedPort{
-		IfName:    "cra0123456789ab",
-		GatewayV4: "169.254.100.100/32",
-		GatewayV6: "fd00:7:caa5:1::/128",
-		HostRoutes: []string{
-			"10.0.0.5/32",
-			"fd00:200::5/128",
-		},
-	})
-	if err != nil {
-		t.Fatalf("BuildRoutedVRF: %v", err)
+// TestApplyRoutedPortsXML verifies that layering a routed port onto an existing
+// VRF (as the VSR reconcile path does) renders the NETCONF constructs VSR
+// expects. The VRF is composed first (mirroring LookupVRF) and then merged into.
+func TestApplyRoutedPortsXML(t *testing.T) {
+	vrf := &VRF{
+		Name:       "cluster",
+		Interfaces: &Interfaces{},
+		Routing:    &Routing{NCOperation: Merge, Static: &StaticRouting{}},
 	}
-
-	if vrf.Name != "cluster" || vrf.TableID != 100 {
-		t.Errorf("vrf = %q table %d, want cluster/100", vrf.Name, vrf.TableID)
-	}
-	if vrf.Routing == nil || vrf.Routing.NCOperation != Merge {
-		t.Fatalf("expected merge routing operation")
-	}
-
-	// Infrastructure interface: port infra-<ifname> + on-link gateways.
-	if len(vrf.Interfaces.Infras) != 1 {
-		t.Fatalf("expected 1 infra interface, got %d", len(vrf.Interfaces.Infras))
-	}
-	infra := vrf.Interfaces.Infras[0]
-	if infra.Name != "cra0123456789ab" {
-		t.Errorf("infra name = %q", infra.Name)
-	}
-	if infra.Port == nil || *infra.Port != "infra-cra0123456789ab" {
-		t.Errorf("infra port = %v, want infra-cra0123456789ab", infra.Port)
-	}
-	if infra.IPv4 == nil || infra.IPv4.IPAddresses[0].IP != "169.254.100.100/32" {
-		t.Errorf("infra ipv4 = %v", infra.IPv4)
-	}
-	if infra.IPv6 == nil || infra.IPv6.IPAddresses[0].IP != "fd00:7:caa5:1::/128" {
-		t.Errorf("infra ipv6 = %v", infra.IPv6)
-	}
-
-	// Host routes split by family, next-hop = ifname (on-link).
-	if len(vrf.Routing.Static.IPv4) != 1 || vrf.Routing.Static.IPv4[0].Destination != "10.0.0.5/32" {
-		t.Errorf("ipv4 static = %+v", vrf.Routing.Static.IPv4)
-	}
-	if got := vrf.Routing.Static.IPv4[0].NextHops[0].NextHop; got != "cra0123456789ab" {
-		t.Errorf("ipv4 next-hop = %q, want ifname", got)
-	}
-	if len(vrf.Routing.Static.IPv6) != 1 || vrf.Routing.Static.IPv6[0].Destination != "fd00:200::5/128" {
-		t.Errorf("ipv6 static = %+v", vrf.Routing.Static.IPv6)
-	}
-	if got := vrf.Routing.Static.IPv6[0].NextHops[0].NextHop; got != "cra0123456789ab" {
-		t.Errorf("ipv6 next-hop = %q, want ifname", got)
-	}
-}
-
-func TestBuildRoutedVRFXML(t *testing.T) {
-	vrf, err := BuildRoutedVRF("cluster", 0, RoutedPort{
+	if err := applyRoutedPorts(vrf, RoutedPort{
 		IfName:     "craport0",
 		GatewayV4:  "169.254.100.100/32",
 		GatewayV6:  "fd00:7:caa5:1::/128",
 		HostRoutes: []string{"10.0.0.5/32", "fd00:200::5/128"},
-	})
-	if err != nil {
-		t.Fatalf("BuildRoutedVRF: %v", err)
+	}); err != nil {
+		t.Fatalf("applyRoutedPorts: %v", err)
 	}
 
 	out, err := xml.Marshal(vrf)
@@ -110,17 +63,11 @@ func TestBuildRoutedVRFXML(t *testing.T) {
 			t.Errorf("rendered XML missing %q\nfull XML:\n%s", w, got)
 		}
 	}
-	// vrfTable <= 0 must omit table-id.
-	if strings.Contains(got, "<table-id>") {
-		t.Errorf("expected table-id omitted for vrfTable<=0, got:\n%s", got)
-	}
 }
 
-func TestBuildRoutedVRFErrors(t *testing.T) {
-	if _, err := BuildRoutedVRF("", 0); err == nil {
-		t.Errorf("expected error for empty vrf name")
-	}
-	if _, err := BuildRoutedVRF("cluster", 0, RoutedPort{}); err == nil {
+func TestApplyRoutedPortsErrors(t *testing.T) {
+	vrf := &VRF{Name: "cluster"}
+	if err := applyRoutedPorts(vrf, RoutedPort{}); err == nil {
 		t.Errorf("expected error for empty ifname")
 	}
 }
