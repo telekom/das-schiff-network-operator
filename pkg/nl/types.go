@@ -62,10 +62,31 @@ type LoopbackConfig struct {
 	Addresses []string `json:"addresses"`
 }
 
+// RoutedPort describes a routed CNI attachment whose CRA-side veth was moved
+// into this (CRA-FRR) network namespace by the routed CNI. The frr-cra server
+// programs its on-link datapath: enslave to the target VRF (or leave in the main
+// table for the underlay), bring it up, add the on-link gateway addresses and
+// install the workload host routes so FRR redistributes them into BGP.
+type RoutedPort struct {
+	// Interface is the moved interface name inside the CRA netns.
+	Interface string `json:"interface"`
+	// VRF is the target VRF device name; empty (or "default"/"main") keeps the
+	// port in the main table (the underlay).
+	VRF string `json:"vrf,omitempty"`
+	// GatewayV4 is the on-link IPv4 gateway address (CIDR, e.g. 169.254.1.1/32).
+	GatewayV4 string `json:"gatewayV4,omitempty"`
+	// GatewayV6 is the on-link IPv6 gateway address (CIDR, e.g. fe80::1/128).
+	GatewayV6 string `json:"gatewayV6,omitempty"`
+	// HostRoutes are the workload host addresses (CIDR /32, /128) installed as
+	// on-link routes via Interface.
+	HostRoutes []string `json:"hostRoutes,omitempty"`
+}
+
 type NetlinkConfiguration struct {
-	VRFs       []VRFInformation    `json:"vrf"`
-	Layer2s    []Layer2Information `json:"layer2"`
-	GRETunnels []GRETunnel         `json:"greTunnels,omitempty"`
-	Loopbacks  []LoopbackConfig    `json:"loopbacks,omitempty"`
-	Mirrors    []MirrorRule        `json:"mirrors,omitempty"`
+	VRFs        []VRFInformation    `json:"vrf"`
+	Layer2s     []Layer2Information `json:"layer2"`
+	GRETunnels  []GRETunnel         `json:"greTunnels,omitempty"`
+	Loopbacks   []LoopbackConfig    `json:"loopbacks,omitempty"`
+	Mirrors     []MirrorRule        `json:"mirrors,omitempty"`
+	RoutedPorts []RoutedPort        `json:"routedPorts,omitempty"`
 }
