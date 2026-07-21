@@ -19,6 +19,7 @@ limitations under the License.
 package nl
 
 import (
+	"fmt"
 	"os"
 	"testing"
 
@@ -43,7 +44,10 @@ const routedTestVRFTable = 1234
 
 // addDummyPort creates a dummy netdev that stands in for the CNI-moved veth end.
 func addDummyPort(name string) error {
-	return netlink.LinkAdd(&netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: name}})
+	if err := netlink.LinkAdd(&netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: name}}); err != nil {
+		return fmt.Errorf("adding dummy port: %w", err)
+	}
+	return nil
 }
 
 func TestReconcileRoutedPortsVRF(t *testing.T) {
@@ -59,10 +63,10 @@ func TestReconcileRoutedPortsVRF(t *testing.T) {
 	if derr := testNS.Do(func(_ ns.NetNS) error {
 		vrf := &netlink.Vrf{LinkAttrs: netlink.LinkAttrs{Name: "cluster"}, Table: routedTestVRFTable}
 		if e := netlink.LinkAdd(vrf); e != nil {
-			return e
+			return fmt.Errorf("adding vrf: %w", e)
 		}
 		if e := netlink.LinkSetUp(vrf); e != nil {
-			return e
+			return fmt.Errorf("setting vrf up: %w", e)
 		}
 		return addDummyPort(port)
 	}); derr != nil {

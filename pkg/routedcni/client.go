@@ -23,7 +23,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	pb "github.com/telekom/das-schiff-network-operator/pkg/routedcni/pb"
+	"github.com/telekom/das-schiff-network-operator/pkg/routedcni/pb"
 )
 
 // dial connects to the node-local routed-cni gRPC socket. An empty socketPath

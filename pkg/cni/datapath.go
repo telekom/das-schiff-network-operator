@@ -34,6 +34,11 @@ import (
 // stays within the 15-character interface-name limit.
 const portNamePrefix = "cra"
 
+// onLinkRouteMetric keeps the routed on-link default at a lower priority than the
+// pod's own primary default (on eth0) so the virt-launcher pod itself is
+// unaffected while the guest still learns the CRA gateway as its next hop.
+const onLinkRouteMetric = 4096
+
 // portName derives a deterministic, unique CRA-side port name from the CNI
 // container ID. The name is bounded to 15 characters (kernel IFNAMSIZ-1).
 func portName(containerID string) string {
@@ -88,47 +93,11 @@ func setupPodSide(conf *NetConf, args *skel.CmdArgs, craNetnsPath, portName stri
 
 		// KubeVirt bridge binding derives the guest gateway from a route on the
 		// pod interface (filterIPv4RoutesByInterface): it needs at least one
-		// IPv4 route whose next-hop interface is this link and relays that
-		// next-hop to the guest as its DHCP gateway. Install on-link default
-		// routes via the CRA link-local gateways. A high metric keeps the pod
-		// primary default (on eth0) preferred for the virt-launcher pod itself.
-		var haveV4, haveV6 bool
-		for _, ipc := range result.IPs {
-			if ipc.Address.IP.To4() != nil {
-				haveV4 = true
-			} else {
-				haveV6 = true
-			}
-		}
-		addOnLinkDefault := func(gw net.IP) error {
-			r := &netlink.Route{
-				LinkIndex: podLink.Attrs().Index,
-				Gw:        gw,
-				Flags:     int(netlink.FLAG_ONLINK),
-				Priority:  4096,
-			}
-			if rerr := netlink.RouteReplace(r); rerr != nil {
-				return fmt.Errorf("failed to add on-link default route via %s: %w", gw, rerr)
-			}
-			return nil
-		}
-		if haveV4 {
-			gw, gerr := conf.gatewayV4()
-			if gerr != nil {
-				return gerr
-			}
-			if rerr := addOnLinkDefault(gw); rerr != nil {
-				return rerr
-			}
-		}
-		if haveV6 {
-			gw, gerr := conf.gatewayV6()
-			if gerr != nil {
-				return gerr
-			}
-			if rerr := addOnLinkDefault(gw); rerr != nil {
-				return rerr
-			}
+		// route whose next-hop interface is this link and relays that next-hop
+		// to the guest as its gateway. Install on-link default routes via the
+		// CRA link-local gateways.
+		if rerr := installOnLinkDefaults(conf, podLink, result); rerr != nil {
+			return rerr
 		}
 
 		// Move the peer end into the CRA network namespace.
@@ -142,9 +111,53 @@ func setupPodSide(conf *NetConf, args *skel.CmdArgs, craNetnsPath, portName stri
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("configuring pod-side veth: %w", err)
 	}
 	return iface, nil
+}
+
+// installOnLinkDefaults adds on-link default routes via the CRA link-local
+// gateways for whichever address families were allocated on the pod interface.
+func installOnLinkDefaults(conf *NetConf, podLink netlink.Link, result *current.Result) error {
+	var haveV4, haveV6 bool
+	for _, ipc := range result.IPs {
+		if ipc.Address.IP.To4() != nil {
+			haveV4 = true
+		} else {
+			haveV6 = true
+		}
+	}
+	addOnLinkDefault := func(gw net.IP) error {
+		r := &netlink.Route{
+			LinkIndex: podLink.Attrs().Index,
+			Gw:        gw,
+			Flags:     int(netlink.FLAG_ONLINK),
+			Priority:  onLinkRouteMetric,
+		}
+		if rerr := netlink.RouteReplace(r); rerr != nil {
+			return fmt.Errorf("failed to add on-link default route via %s: %w", gw, rerr)
+		}
+		return nil
+	}
+	if haveV4 {
+		gw, gerr := conf.gatewayV4()
+		if gerr != nil {
+			return gerr
+		}
+		if rerr := addOnLinkDefault(gw); rerr != nil {
+			return rerr
+		}
+	}
+	if haveV6 {
+		gw, gerr := conf.gatewayV6()
+		if gerr != nil {
+			return gerr
+		}
+		if rerr := addOnLinkDefault(gw); rerr != nil {
+			return rerr
+		}
+	}
+	return nil
 }
 
 // setupCRASide brings the moved CRA-side port up inside the CRA network
@@ -171,32 +184,38 @@ func setupCRASide(craNetnsPath, portName string) (*current.Interface, error) {
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("bringing up CRA-side port: %w", err)
 	}
 	return iface, nil
 }
 
 // teardownPodSide removes the pod-side veth (which also deletes its moved peer).
 func teardownPodSide(netnsPath, ifName string) error {
-	return ns.WithNetNSPath(netnsPath, func(_ ns.NetNS) error {
+	if err := ns.WithNetNSPath(netnsPath, func(_ ns.NetNS) error {
 		link, err := netlink.LinkByName(ifName)
 		if err != nil {
 			return nil //nolint:nilerr // already gone
 		}
 		return netlink.LinkDel(link)
-	})
+	}); err != nil {
+		return fmt.Errorf("tearing down pod-side veth: %w", err)
+	}
+	return nil
 }
 
 // teardownCRASide removes the CRA-side port (and its on-link routes) from the
 // CRA network namespace.
 func teardownCRASide(craNetnsPath, portName string) error {
-	return ns.WithNetNSPath(craNetnsPath, func(_ ns.NetNS) error {
+	if err := ns.WithNetNSPath(craNetnsPath, func(_ ns.NetNS) error {
 		link, err := netlink.LinkByName(portName)
 		if err != nil {
 			return nil //nolint:nilerr // already gone
 		}
 		return netlink.LinkDel(link)
-	})
+	}); err != nil {
+		return fmt.Errorf("tearing down CRA-side port: %w", err)
+	}
+	return nil
 }
 
 // isExists reports whether err indicates the object already exists.

@@ -20,6 +20,7 @@ package cni
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"strings"
 	"time"
@@ -28,7 +29,7 @@ import (
 	current "github.com/containernetworking/cni/pkg/types/100"
 
 	"github.com/telekom/das-schiff-network-operator/pkg/routedcni"
-	pb "github.com/telekom/das-schiff-network-operator/pkg/routedcni/pb"
+	"github.com/telekom/das-schiff-network-operator/pkg/routedcni/pb"
 )
 
 // agentCallTimeout bounds the node-local gRPC call so a stuck agent cannot hang
@@ -54,17 +55,23 @@ func notifyAgentAdd(conf *NetConf, args *skel.CmdArgs, portName string, gwV4, gw
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), agentCallTimeout)
 	defer cancel()
-	return routedcni.Add(ctx, conf.AgentSocket, req)
+	if err := routedcni.Add(ctx, conf.AgentSocket, req); err != nil {
+		return fmt.Errorf("notifying agent of routed add: %w", err)
+	}
+	return nil
 }
 
 // notifyAgentDel tells the node-local CRA agent to drop the routed attachment.
 func notifyAgentDel(conf *NetConf, args *skel.CmdArgs, portName string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), agentCallTimeout)
 	defer cancel()
-	return routedcni.Del(ctx, conf.AgentSocket, &pb.DelRequest{
+	if err := routedcni.Del(ctx, conf.AgentSocket, &pb.DelRequest{
 		ContainerId: args.ContainerID,
 		Interface:   portName,
-	})
+	}); err != nil {
+		return fmt.Errorf("notifying agent of routed del: %w", err)
+	}
+	return nil
 }
 
 // hostRoutes renders the workload's allocated addresses as host routes

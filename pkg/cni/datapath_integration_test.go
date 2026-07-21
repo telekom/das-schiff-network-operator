@@ -19,6 +19,7 @@ limitations under the License.
 package cni
 
 import (
+	"fmt"
 	"net"
 	"os"
 	"testing"
@@ -56,13 +57,16 @@ func newCRANetns(t *testing.T, trunk string) ns.NetNS {
 			Table:     testVRFTable,
 		}
 		if e := netlink.LinkAdd(vrf); e != nil {
-			return e
+			return fmt.Errorf("adding vrf: %w", e)
 		}
 		if e := netlink.LinkSetUp(vrf); e != nil {
-			return e
+			return fmt.Errorf("setting vrf up: %w", e)
 		}
 		hbn := &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: trunk}}
-		return netlink.LinkAdd(hbn)
+		if e := netlink.LinkAdd(hbn); e != nil {
+			return fmt.Errorf("adding trunk dummy: %w", e)
+		}
+		return nil
 	})
 	if err != nil {
 		_ = testutils.UnmountNS(craNS)

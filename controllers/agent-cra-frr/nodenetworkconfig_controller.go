@@ -98,7 +98,7 @@ func (r *NodeNetworkConfigReconciler) SetupWithManager(mgr ctrl.Manager) error {
 // mapNodeRoutedPorts enqueues a reconcile for the node's NodeNetworkConfig when
 // its NodeRoutedPorts object changes. NodeRoutedPorts and NodeNetworkConfig
 // share the node name, so the request maps by name.
-func (r *NodeNetworkConfigReconciler) mapNodeRoutedPorts(_ context.Context, obj client.Object) []reconcile.Request {
+func (*NodeNetworkConfigReconciler) mapNodeRoutedPorts(_ context.Context, obj client.Object) []reconcile.Request {
 	return []reconcile.Request{{
 		NamespacedName: types.NamespacedName{Name: obj.GetName()},
 	}}

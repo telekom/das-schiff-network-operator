@@ -31,8 +31,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
-	pb "github.com/telekom/das-schiff-network-operator/pkg/routedcni/pb"
+	"github.com/telekom/das-schiff-network-operator/pkg/routedcni/pb"
 )
+
+// socketDirPerm is the permission for the directory holding the unix socket.
+const socketDirPerm = 0o755
 
 // Server is the node-local gRPC service the routed CNI plugin calls on ADD/DEL.
 // It persists attachments into the node's NodeRoutedPorts object (the durable
@@ -55,7 +58,7 @@ func (s *Server) Serve(ctx context.Context, socketPath string) error {
 	if socketPath == "" {
 		socketPath = DefaultSocketPath
 	}
-	if err := os.MkdirAll(filepath.Dir(socketPath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(socketPath), socketDirPerm); err != nil {
 		return fmt.Errorf("creating socket dir: %w", err)
 	}
 	// Remove a stale socket left by a previous run so Listen can bind.
@@ -63,7 +66,8 @@ func (s *Server) Serve(ctx context.Context, socketPath string) error {
 		return fmt.Errorf("removing stale socket %s: %w", socketPath, err)
 	}
 
-	lis, err := net.Listen("unix", socketPath)
+	var lc net.ListenConfig
+	lis, err := lc.Listen(ctx, "unix", socketPath)
 	if err != nil {
 		return fmt.Errorf("listen %s: %w", socketPath, err)
 	}
@@ -107,7 +111,7 @@ func (s *Server) Add(ctx context.Context, req *pb.AddRequest) (*pb.AddResponse, 
 	}
 
 	if err := s.mutate(ctx, func(spec *v1alpha1.NodeRoutedPortsSpec) bool {
-		UpsertEntry(spec, entry)
+		UpsertEntry(spec, &entry)
 		return true
 	}); err != nil {
 		return nil, fmt.Errorf("recording routed port: %w", err)
@@ -134,7 +138,7 @@ func (s *Server) Del(ctx context.Context, req *pb.DelRequest) (*pb.DelResponse, 
 // spec under conflict retry. fn returns whether it changed the spec; if not, no
 // write is issued.
 func (s *Server) mutate(ctx context.Context, fn func(*v1alpha1.NodeRoutedPortsSpec) bool) error {
-	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		nrp := &v1alpha1.NodeRoutedPorts{}
 		err := s.client.Get(ctx, types.NamespacedName{Name: s.nodeName}, nrp)
 		if apierrors.IsNotFound(err) {
@@ -143,14 +147,23 @@ func (s *Server) mutate(ctx context.Context, fn func(*v1alpha1.NodeRoutedPortsSp
 			if !fn(&fresh.Spec) {
 				return nil
 			}
-			return s.client.Create(ctx, fresh)
+			if cerr := s.client.Create(ctx, fresh); cerr != nil {
+				return fmt.Errorf("creating NodeRoutedPorts: %w", cerr)
+			}
+			return nil
 		}
 		if err != nil {
-			return err
+			return fmt.Errorf("getting NodeRoutedPorts: %w", err)
 		}
 		if !fn(&nrp.Spec) {
 			return nil
 		}
-		return s.client.Update(ctx, nrp)
-	})
+		if uerr := s.client.Update(ctx, nrp); uerr != nil {
+			return fmt.Errorf("updating NodeRoutedPorts: %w", uerr)
+		}
+		return nil
+	}); err != nil {
+		return fmt.Errorf("mutating NodeRoutedPorts %q: %w", s.nodeName, err)
+	}
+	return nil
 }

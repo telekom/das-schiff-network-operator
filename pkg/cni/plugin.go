@@ -106,7 +106,10 @@ func CmdAdd(args *skel.CmdArgs) error {
 	}
 
 	success = true
-	return types.PrintResult(result, conf.CNIVersion)
+	if err := types.PrintResult(result, conf.CNIVersion); err != nil {
+		return fmt.Errorf("printing CNI result: %w", err)
+	}
+	return nil
 }
 
 // CmdDel implements the CNI DEL command.
@@ -146,12 +149,15 @@ func CmdCheck(args *skel.CmdArgs) error {
 	if args.Netns == "" {
 		return nil
 	}
-	return ns.WithNetNSPath(args.Netns, func(_ ns.NetNS) error {
+	if err := ns.WithNetNSPath(args.Netns, func(_ ns.NetNS) error {
 		if _, lerr := netlink.LinkByName(args.IfName); lerr != nil {
 			return fmt.Errorf("pod interface %q missing: %w", args.IfName, lerr)
 		}
 		return nil
-	})
+	}); err != nil {
+		return fmt.Errorf("checking pod interface: %w", err)
+	}
+	return nil
 }
 
 // PluginMain is the CNI entrypoint wiring for the plugin.

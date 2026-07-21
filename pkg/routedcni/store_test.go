@@ -22,8 +22,8 @@ import (
 	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 )
 
-func entry(containerID, iface, vrf string) v1alpha1.RoutedPortEntry {
-	return v1alpha1.RoutedPortEntry{
+func entry(containerID, iface, vrf string) *v1alpha1.RoutedPortEntry {
+	return &v1alpha1.RoutedPortEntry{
 		PodNamespace: "ns",
 		PodName:      "pod",
 		ContainerID:  containerID,
@@ -101,9 +101,9 @@ func TestMergeIntoNodeNetworkConfig(t *testing.T) {
 	}
 
 	entries := []v1alpha1.RoutedPortEntry{
-		entry("c1", "eth1", ""),         // -> underlay / ClusterVRF
-		entry("c2", "eth2", "cluster"),  // -> fabric VRF "cluster"
-		entry("c3", "eth3", "tenant-a"), // -> new local VRF
+		*entry("c1", "eth1", ""),         // -> underlay / ClusterVRF
+		*entry("c2", "eth2", "cluster"),  // -> fabric VRF "cluster"
+		*entry("c3", "eth3", "tenant-a"), // -> new local VRF
 	}
 
 	if !MergeIntoNodeNetworkConfig(cfg, entries) {
@@ -129,13 +129,13 @@ func TestMergeEmptyIsNoOp(t *testing.T) {
 }
 
 func TestHashEntriesStableAndSensitive(t *testing.T) {
-	a := []v1alpha1.RoutedPortEntry{entry("c1", "eth1", "")}
-	b := []v1alpha1.RoutedPortEntry{entry("c1", "eth1", "")}
+	a := []v1alpha1.RoutedPortEntry{*entry("c1", "eth1", "")}
+	b := []v1alpha1.RoutedPortEntry{*entry("c1", "eth1", "")}
 	if HashEntries(a) != HashEntries(b) {
 		t.Fatal("expected identical entries to hash equal")
 	}
 
-	c := []v1alpha1.RoutedPortEntry{entry("c1", "eth1", "tenant-a")}
+	c := []v1alpha1.RoutedPortEntry{*entry("c1", "eth1", "tenant-a")}
 	if HashEntries(a) == HashEntries(c) {
 		t.Fatal("expected differing entries to hash differently")
 	}

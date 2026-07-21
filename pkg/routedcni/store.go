@@ -26,6 +26,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -51,14 +52,14 @@ func isDefaultVRF(name string) bool {
 }
 
 // UpsertEntry inserts or replaces the entry keyed by (ContainerID, Interface).
-func UpsertEntry(spec *v1alpha1.NodeRoutedPortsSpec, entry v1alpha1.RoutedPortEntry) {
+func UpsertEntry(spec *v1alpha1.NodeRoutedPortsSpec, entry *v1alpha1.RoutedPortEntry) {
 	for i := range spec.Ports {
 		if spec.Ports[i].ContainerID == entry.ContainerID && spec.Ports[i].Interface == entry.Interface {
-			spec.Ports[i] = entry
+			spec.Ports[i] = *entry
 			return
 		}
 	}
-	spec.Ports = append(spec.Ports, entry)
+	spec.Ports = append(spec.Ports, *entry)
 }
 
 // RemoveEntry removes entries matching containerID (and ifname when non-empty).
@@ -66,12 +67,13 @@ func UpsertEntry(spec *v1alpha1.NodeRoutedPortsSpec, entry v1alpha1.RoutedPortEn
 func RemoveEntry(spec *v1alpha1.NodeRoutedPortsSpec, containerID, ifname string) bool {
 	out := spec.Ports[:0]
 	removed := false
-	for _, p := range spec.Ports {
+	for i := range spec.Ports {
+		p := &spec.Ports[i]
 		if p.ContainerID == containerID && (ifname == "" || p.Interface == ifname) {
 			removed = true
 			continue
 		}
-		out = append(out, p)
+		out = append(out, *p)
 	}
 	spec.Ports = out
 	return removed
@@ -86,28 +88,25 @@ func RemoveEntry(spec *v1alpha1.NodeRoutedPortsSpec, containerID, ifname string)
 //
 // It returns true if the config was changed.
 func MergeIntoNodeNetworkConfig(cfg *v1alpha1.NodeNetworkConfig, entries []v1alpha1.RoutedPortEntry) bool {
-	changed := false
 	for i := range entries {
-		if applyEntryToVRF(&cfg.Spec, entries[i]) {
-			changed = true
-		}
+		applyEntryToVRF(&cfg.Spec, &entries[i])
 	}
-	return changed
+	return len(entries) > 0
 }
 
-func applyEntryToVRF(spec *v1alpha1.NodeNetworkConfigSpec, e v1alpha1.RoutedPortEntry) bool {
+func applyEntryToVRF(spec *v1alpha1.NodeNetworkConfigSpec, e *v1alpha1.RoutedPortEntry) {
 	if isDefaultVRF(e.VRF) {
 		if spec.ClusterVRF == nil {
 			spec.ClusterVRF = &v1alpha1.VRF{}
 		}
 		spec.ClusterVRF.RoutedPorts = append(spec.ClusterVRF.RoutedPorts, e.RoutedPort)
-		return true
+		return
 	}
 
 	if fv, ok := spec.FabricVRFs[e.VRF]; ok {
 		fv.RoutedPorts = append(fv.RoutedPorts, e.RoutedPort)
 		spec.FabricVRFs[e.VRF] = fv
-		return true
+		return
 	}
 
 	if spec.LocalVRFs == nil {
@@ -116,7 +115,6 @@ func applyEntryToVRF(spec *v1alpha1.NodeNetworkConfigSpec, e v1alpha1.RoutedPort
 	lv := spec.LocalVRFs[e.VRF]
 	lv.RoutedPorts = append(lv.RoutedPorts, e.RoutedPort)
 	spec.LocalVRFs[e.VRF] = lv
-	return true
 }
 
 // HashEntries returns a stable content hash of the routed-port entries. It is
@@ -152,7 +150,7 @@ func (s *NodeSource) RoutedPorts(ctx context.Context) ([]v1alpha1.RoutedPortEntr
 		if apierrors.IsNotFound(err) {
 			return nil, nil
 		}
-		return nil, err
+		return nil, fmt.Errorf("getting NodeRoutedPorts %q: %w", s.nodeName, err)
 	}
 	return nrp.Spec.Ports, nil
 }

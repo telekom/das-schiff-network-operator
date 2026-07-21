@@ -27,7 +27,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
-	pb "github.com/telekom/das-schiff-network-operator/pkg/routedcni/pb"
+	"github.com/telekom/das-schiff-network-operator/pkg/routedcni/pb"
 )
 
 func newFakeClient(t *testing.T) client.Client {

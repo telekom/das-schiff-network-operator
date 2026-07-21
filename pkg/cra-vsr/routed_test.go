@@ -24,6 +24,9 @@ import (
 	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 )
 
+// craPortIfName is the reusable test interface name for the moved CRA-side port.
+const craPortIfName = "craport0"
+
 // TestApplyRoutedPortsXML verifies that layering a routed port onto an existing
 // VRF (as the VSR reconcile path does) renders the NETCONF constructs VSR
 // expects. The VRF is composed first (mirroring LookupVRF) and then merged into.
@@ -34,7 +37,7 @@ func TestApplyRoutedPortsXML(t *testing.T) {
 		Routing:    &Routing{NCOperation: Merge, Static: &StaticRouting{}},
 	}
 	if err := applyRoutedPorts(vrf, RoutedPort{
-		IfName:     "craport0",
+		IfName:     craPortIfName,
 		GatewayV4:  "169.254.100.100/32",
 		GatewayV6:  "fd00:7:caa5:1::/128",
 		HostRoutes: []string{"10.0.0.5/32", "fd00:200::5/128"},
@@ -87,7 +90,7 @@ func TestApplyRoutedPortsMerge(t *testing.T) {
 	}
 
 	err := applyRoutedPorts(vrf, RoutedPort{
-		IfName:     "craport0",
+		IfName:     craPortIfName,
 		GatewayV4:  "169.254.1.1/32",
 		HostRoutes: []string{"10.0.0.5/32", "fd00:200::5/128"},
 	})
@@ -104,10 +107,10 @@ func TestApplyRoutedPortsMerge(t *testing.T) {
 	if len(vrf.Routing.Static.IPv4) != 2 || vrf.Routing.Static.IPv4[0].Destination != "10.9.9.0/24" {
 		t.Errorf("existing v4 static not preserved: %+v", vrf.Routing.Static.IPv4)
 	}
-	if vrf.Routing.Static.IPv4[1].NextHops[0].NextHop != "craport0" {
+	if vrf.Routing.Static.IPv4[1].NextHops[0].NextHop != craPortIfName {
 		t.Errorf("routed v4 next-hop = %q", vrf.Routing.Static.IPv4[1].NextHops[0].NextHop)
 	}
-	if len(vrf.Routing.Static.IPv6) != 1 || vrf.Routing.Static.IPv6[0].NextHops[0].NextHop != "craport0" {
+	if len(vrf.Routing.Static.IPv6) != 1 || vrf.Routing.Static.IPv6[0].NextHops[0].NextHop != craPortIfName {
 		t.Errorf("routed v6 static = %+v", vrf.Routing.Static.IPv6)
 	}
 
@@ -124,7 +127,7 @@ func TestApplyRoutedPortsMerge(t *testing.T) {
 // TestConvStaticRouteInterfaceNextHop verifies the NNC interface (on-link)
 // next-hop is rendered as `next-hop <ifname>`.
 func TestConvStaticRouteInterfaceNextHop(t *testing.T) {
-	ifname := "craport0"
+	ifname := craPortIfName
 	got := LayerBGP{}.convStaticRoute(v1alpha1.StaticRoute{
 		Prefix:  "10.0.0.5/32",
 		NextHop: &v1alpha1.NextHop{Interface: &ifname},
@@ -132,7 +135,7 @@ func TestConvStaticRouteInterfaceNextHop(t *testing.T) {
 	if got.Destination != "10.0.0.5/32" {
 		t.Errorf("destination = %q", got.Destination)
 	}
-	if len(got.NextHops) != 1 || got.NextHops[0].NextHop != "craport0" {
+	if len(got.NextHops) != 1 || got.NextHops[0].NextHop != craPortIfName {
 		t.Errorf("next-hop = %+v, want craport0", got.NextHops)
 	}
 	if got.NextHops[0].VRF != nil {
