@@ -122,6 +122,10 @@ build-platform-metallb: ## Build platform-metallb binary.
 build-network-sync: ## Build network-sync binary.
 	go build -ldflags "$(LDFLAGS)" -o bin/network-sync ./cmd/network-sync/
 
+.PHONY: build-cni-routed
+build-cni-routed: ## Build cni-routed plugin binary (Linux).
+	CGO_ENABLED=0 GOOS=linux go build -ldflags "$(LDFLAGS)" -o bin/cni-routed ./cmd/cni-routed/
+
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
 	go run -ldflags "$(LDFLAGS)" ./cmd/operator/main.go
@@ -141,6 +145,7 @@ docker-build: #test ## Build docker image with the manager.
 	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-platform-coil.Dockerfile -t ${IMG_BASE}/das-schiff-platform-coil:latest .
 	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-platform-metallb.Dockerfile -t ${IMG_BASE}/das-schiff-platform-metallb:latest .
 	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-network-sync.Dockerfile -t ${IMG_BASE}/das-schiff-network-sync:latest .
+	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-cni-routed.Dockerfile -t ${IMG_BASE}/das-schiff-cni-routed:latest .
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
@@ -161,6 +166,7 @@ kind-load: docker-build ## Load docker image into kind cluster.
 	kind load docker-image ${IMG_BASE}/das-schiff-platform-coil:latest
 	kind load docker-image ${IMG_BASE}/das-schiff-platform-metallb:latest
 	kind load docker-image ${IMG_BASE}/das-schiff-network-sync:latest
+	kind load docker-image ${IMG_BASE}/das-schiff-cni-routed:latest
 
 ##@ Release
 
