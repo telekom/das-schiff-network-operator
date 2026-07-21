@@ -47,7 +47,15 @@ type RoutedPort struct {
 	GatewayV6 string `protobuf:"bytes,3,opt,name=gateway_v6,json=gatewayV6,proto3" json:"gateway_v6,omitempty"`
 	// host_routes are the workload host addresses (/32, /128) reachable via the
 	// interface.
-	HostRoutes    []string `protobuf:"bytes,4,rep,name=host_routes,json=hostRoutes,proto3" json:"host_routes,omitempty"`
+	HostRoutes []string `protobuf:"bytes,4,rep,name=host_routes,json=hostRoutes,proto3" json:"host_routes,omitempty"`
+	// transport selects the datapath wiring: "veth" (default) or "vhostuser".
+	// vhost-user is VSR-only (fpvhost fast-path virtual-port).
+	Transport string `protobuf:"bytes,5,opt,name=transport,proto3" json:"transport,omitempty"`
+	// socket_path is the vhost-user unix socket path (transport=vhostuser only).
+	SocketPath string `protobuf:"bytes,6,opt,name=socket_path,json=socketPath,proto3" json:"socket_path,omitempty"`
+	// socket_mode is the pod-side vhost-user socket mode ("client"|"server").
+	// VSR renders the inverted mode (pod server => VSR client).
+	SocketMode    string `protobuf:"bytes,7,opt,name=socket_mode,json=socketMode,proto3" json:"socket_mode,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -110,6 +118,80 @@ func (x *RoutedPort) GetHostRoutes() []string {
 	return nil
 }
 
+func (x *RoutedPort) GetTransport() string {
+	if x != nil {
+		return x.Transport
+	}
+	return ""
+}
+
+func (x *RoutedPort) GetSocketPath() string {
+	if x != nil {
+		return x.SocketPath
+	}
+	return ""
+}
+
+func (x *RoutedPort) GetSocketMode() string {
+	if x != nil {
+		return x.SocketMode
+	}
+	return ""
+}
+
+// Layer2AttachmentRef identifies a Layer2Attachment for an L2 (bridge) attach.
+type Layer2AttachmentRef struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Namespace     string                 `protobuf:"bytes,2,opt,name=namespace,proto3" json:"namespace,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Layer2AttachmentRef) Reset() {
+	*x = Layer2AttachmentRef{}
+	mi := &file_routedcni_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Layer2AttachmentRef) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Layer2AttachmentRef) ProtoMessage() {}
+
+func (x *Layer2AttachmentRef) ProtoReflect() protoreflect.Message {
+	mi := &file_routedcni_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Layer2AttachmentRef.ProtoReflect.Descriptor instead.
+func (*Layer2AttachmentRef) Descriptor() ([]byte, []int) {
+	return file_routedcni_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *Layer2AttachmentRef) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *Layer2AttachmentRef) GetNamespace() string {
+	if x != nil {
+		return x.Namespace
+	}
+	return ""
+}
+
 type AddRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// pod_namespace / pod_name identify the owning pod.
@@ -118,15 +200,20 @@ type AddRequest struct {
 	// container_id is the CNI container ID (sandbox identity).
 	ContainerId string `protobuf:"bytes,3,opt,name=container_id,json=containerId,proto3" json:"container_id,omitempty"`
 	// vrf is the target VRF; empty means the underlay/default table.
-	Vrf           string      `protobuf:"bytes,4,opt,name=vrf,proto3" json:"vrf,omitempty"`
-	Port          *RoutedPort `protobuf:"bytes,5,opt,name=port,proto3" json:"port,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// Mutually exclusive with layer2_attachment_ref.
+	Vrf  string      `protobuf:"bytes,4,opt,name=vrf,proto3" json:"vrf,omitempty"`
+	Port *RoutedPort `protobuf:"bytes,5,opt,name=port,proto3" json:"port,omitempty"`
+	// layer2_attachment_ref, when set, enslaves the moved interface into the L2
+	// bridge of the referenced Layer2Attachment instead of routing it. The
+	// routed fields (vrf, gateways, host_routes) must be empty in L2 mode.
+	Layer2AttachmentRef *Layer2AttachmentRef `protobuf:"bytes,6,opt,name=layer2_attachment_ref,json=layer2AttachmentRef,proto3" json:"layer2_attachment_ref,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *AddRequest) Reset() {
 	*x = AddRequest{}
-	mi := &file_routedcni_proto_msgTypes[1]
+	mi := &file_routedcni_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -138,7 +225,7 @@ func (x *AddRequest) String() string {
 func (*AddRequest) ProtoMessage() {}
 
 func (x *AddRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_routedcni_proto_msgTypes[1]
+	mi := &file_routedcni_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -151,7 +238,7 @@ func (x *AddRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AddRequest.ProtoReflect.Descriptor instead.
 func (*AddRequest) Descriptor() ([]byte, []int) {
-	return file_routedcni_proto_rawDescGZIP(), []int{1}
+	return file_routedcni_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *AddRequest) GetPodNamespace() string {
@@ -189,6 +276,13 @@ func (x *AddRequest) GetPort() *RoutedPort {
 	return nil
 }
 
+func (x *AddRequest) GetLayer2AttachmentRef() *Layer2AttachmentRef {
+	if x != nil {
+		return x.Layer2AttachmentRef
+	}
+	return nil
+}
+
 type AddResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -197,7 +291,7 @@ type AddResponse struct {
 
 func (x *AddResponse) Reset() {
 	*x = AddResponse{}
-	mi := &file_routedcni_proto_msgTypes[2]
+	mi := &file_routedcni_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -209,7 +303,7 @@ func (x *AddResponse) String() string {
 func (*AddResponse) ProtoMessage() {}
 
 func (x *AddResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_routedcni_proto_msgTypes[2]
+	mi := &file_routedcni_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -222,7 +316,7 @@ func (x *AddResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AddResponse.ProtoReflect.Descriptor instead.
 func (*AddResponse) Descriptor() ([]byte, []int) {
-	return file_routedcni_proto_rawDescGZIP(), []int{2}
+	return file_routedcni_proto_rawDescGZIP(), []int{3}
 }
 
 type DelRequest struct {
@@ -236,7 +330,7 @@ type DelRequest struct {
 
 func (x *DelRequest) Reset() {
 	*x = DelRequest{}
-	mi := &file_routedcni_proto_msgTypes[3]
+	mi := &file_routedcni_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -248,7 +342,7 @@ func (x *DelRequest) String() string {
 func (*DelRequest) ProtoMessage() {}
 
 func (x *DelRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_routedcni_proto_msgTypes[3]
+	mi := &file_routedcni_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -261,7 +355,7 @@ func (x *DelRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DelRequest.ProtoReflect.Descriptor instead.
 func (*DelRequest) Descriptor() ([]byte, []int) {
-	return file_routedcni_proto_rawDescGZIP(), []int{3}
+	return file_routedcni_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *DelRequest) GetContainerId() string {
@@ -286,7 +380,7 @@ type DelResponse struct {
 
 func (x *DelResponse) Reset() {
 	*x = DelResponse{}
-	mi := &file_routedcni_proto_msgTypes[4]
+	mi := &file_routedcni_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -298,7 +392,7 @@ func (x *DelResponse) String() string {
 func (*DelResponse) ProtoMessage() {}
 
 func (x *DelResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_routedcni_proto_msgTypes[4]
+	mi := &file_routedcni_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -311,14 +405,14 @@ func (x *DelResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DelResponse.ProtoReflect.Descriptor instead.
 func (*DelResponse) Descriptor() ([]byte, []int) {
-	return file_routedcni_proto_rawDescGZIP(), []int{4}
+	return file_routedcni_proto_rawDescGZIP(), []int{5}
 }
 
 var File_routedcni_proto protoreflect.FileDescriptor
 
 const file_routedcni_proto_rawDesc = "" +
 	"\n" +
-	"\x0froutedcni.proto\x12\froutedcni.v1\"\x89\x01\n" +
+	"\x0froutedcni.proto\x12\froutedcni.v1\"\xe9\x01\n" +
 	"\n" +
 	"RoutedPort\x12\x1c\n" +
 	"\tinterface\x18\x01 \x01(\tR\tinterface\x12\x1d\n" +
@@ -327,14 +421,23 @@ const file_routedcni_proto_rawDesc = "" +
 	"\n" +
 	"gateway_v6\x18\x03 \x01(\tR\tgatewayV6\x12\x1f\n" +
 	"\vhost_routes\x18\x04 \x03(\tR\n" +
-	"hostRoutes\"\xaf\x01\n" +
+	"hostRoutes\x12\x1c\n" +
+	"\ttransport\x18\x05 \x01(\tR\ttransport\x12\x1f\n" +
+	"\vsocket_path\x18\x06 \x01(\tR\n" +
+	"socketPath\x12\x1f\n" +
+	"\vsocket_mode\x18\a \x01(\tR\n" +
+	"socketMode\"G\n" +
+	"\x13Layer2AttachmentRef\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1c\n" +
+	"\tnamespace\x18\x02 \x01(\tR\tnamespace\"\x86\x02\n" +
 	"\n" +
 	"AddRequest\x12#\n" +
 	"\rpod_namespace\x18\x01 \x01(\tR\fpodNamespace\x12\x19\n" +
 	"\bpod_name\x18\x02 \x01(\tR\apodName\x12!\n" +
 	"\fcontainer_id\x18\x03 \x01(\tR\vcontainerId\x12\x10\n" +
 	"\x03vrf\x18\x04 \x01(\tR\x03vrf\x12,\n" +
-	"\x04port\x18\x05 \x01(\v2\x18.routedcni.v1.RoutedPortR\x04port\"\r\n" +
+	"\x04port\x18\x05 \x01(\v2\x18.routedcni.v1.RoutedPortR\x04port\x12U\n" +
+	"\x15layer2_attachment_ref\x18\x06 \x01(\v2!.routedcni.v1.Layer2AttachmentRefR\x13layer2AttachmentRef\"\r\n" +
 	"\vAddResponse\"M\n" +
 	"\n" +
 	"DelRequest\x12!\n" +
@@ -357,25 +460,27 @@ func file_routedcni_proto_rawDescGZIP() []byte {
 	return file_routedcni_proto_rawDescData
 }
 
-var file_routedcni_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_routedcni_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_routedcni_proto_goTypes = []any{
-	(*RoutedPort)(nil),  // 0: routedcni.v1.RoutedPort
-	(*AddRequest)(nil),  // 1: routedcni.v1.AddRequest
-	(*AddResponse)(nil), // 2: routedcni.v1.AddResponse
-	(*DelRequest)(nil),  // 3: routedcni.v1.DelRequest
-	(*DelResponse)(nil), // 4: routedcni.v1.DelResponse
+	(*RoutedPort)(nil),          // 0: routedcni.v1.RoutedPort
+	(*Layer2AttachmentRef)(nil), // 1: routedcni.v1.Layer2AttachmentRef
+	(*AddRequest)(nil),          // 2: routedcni.v1.AddRequest
+	(*AddResponse)(nil),         // 3: routedcni.v1.AddResponse
+	(*DelRequest)(nil),          // 4: routedcni.v1.DelRequest
+	(*DelResponse)(nil),         // 5: routedcni.v1.DelResponse
 }
 var file_routedcni_proto_depIdxs = []int32{
 	0, // 0: routedcni.v1.AddRequest.port:type_name -> routedcni.v1.RoutedPort
-	1, // 1: routedcni.v1.RoutedCNI.Add:input_type -> routedcni.v1.AddRequest
-	3, // 2: routedcni.v1.RoutedCNI.Del:input_type -> routedcni.v1.DelRequest
-	2, // 3: routedcni.v1.RoutedCNI.Add:output_type -> routedcni.v1.AddResponse
-	4, // 4: routedcni.v1.RoutedCNI.Del:output_type -> routedcni.v1.DelResponse
-	3, // [3:5] is the sub-list for method output_type
-	1, // [1:3] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	1, // 1: routedcni.v1.AddRequest.layer2_attachment_ref:type_name -> routedcni.v1.Layer2AttachmentRef
+	2, // 2: routedcni.v1.RoutedCNI.Add:input_type -> routedcni.v1.AddRequest
+	4, // 3: routedcni.v1.RoutedCNI.Del:input_type -> routedcni.v1.DelRequest
+	3, // 4: routedcni.v1.RoutedCNI.Add:output_type -> routedcni.v1.AddResponse
+	5, // 5: routedcni.v1.RoutedCNI.Del:output_type -> routedcni.v1.DelResponse
+	4, // [4:6] is the sub-list for method output_type
+	2, // [2:4] is the sub-list for method input_type
+	2, // [2:2] is the sub-list for extension type_name
+	2, // [2:2] is the sub-list for extension extendee
+	0, // [0:2] is the sub-list for field type_name
 }
 
 func init() { file_routedcni_proto_init() }
@@ -389,7 +494,7 @@ func file_routedcni_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_routedcni_proto_rawDesc), len(file_routedcni_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   5,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
