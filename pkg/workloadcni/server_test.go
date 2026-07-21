@@ -126,6 +126,12 @@ func TestServerDelRemoves(t *testing.T) {
 	}
 }
 
+const (
+	testTransportVhostUser = "vhostuser"
+	testVhostSocketPath    = "/run/vsr-vhost-user/abc/socket"
+	testSocketModeServer   = "server"
+)
+
 func TestServerAddValidatesInput(t *testing.T) {
 	s := NewServer(newFakeClient(t), "node-1", logr.Discard())
 	ctx := context.Background()
@@ -159,6 +165,48 @@ func TestServerAddValidatesInput(t *testing.T) {
 		"v6 subnet host route": func(r *pb.AddRequest) { r.Port.HostRoutes = []string{"fd00:201::/64"} },
 		"subnet gateway v4":    func(r *pb.AddRequest) { r.Port.GatewayV4 = "169.254.1.1/24" },
 		"subnet gateway v6":    func(r *pb.AddRequest) { r.Port.GatewayV6 = "fe80::1/64" },
+		"vhostuser interface too long": func(r *pb.AddRequest) {
+			// fpvhost-<ifname> is two characters longer than infra-<ifname>, so a
+			// name that is fine for veth overflows the kernel limit here.
+			r.Port.Interface = "cra012345"
+			r.Port.Transport = testTransportVhostUser
+			r.Port.SocketPath = testVhostSocketPath
+			r.Port.SocketMode = testSocketModeServer
+		},
+		"unknown transport": func(r *pb.AddRequest) {
+			r.Port.Transport = "sriov"
+		},
+		"socket path on veth": func(r *pb.AddRequest) {
+			r.Port.SocketPath = testVhostSocketPath
+		},
+		"socket mode on veth": func(r *pb.AddRequest) {
+			r.Port.SocketMode = testSocketModeServer
+		},
+		"vhostuser without socket path": func(r *pb.AddRequest) {
+			r.Port.Transport = testTransportVhostUser
+			r.Port.SocketMode = testSocketModeServer
+		},
+		"vhostuser without socket mode": func(r *pb.AddRequest) {
+			r.Port.Transport = testTransportVhostUser
+			r.Port.SocketPath = testVhostSocketPath
+		},
+		"vhostuser bad socket mode": func(r *pb.AddRequest) {
+			r.Port.Transport = testTransportVhostUser
+			r.Port.SocketPath = testVhostSocketPath
+			r.Port.SocketMode = "bogus"
+		},
+		"l2 ref without namespace": func(r *pb.AddRequest) {
+			r.Vrf = ""
+			r.Port.GatewayV4 = ""
+			r.Port.HostRoutes = nil
+			r.Layer2AttachmentRef = &pb.Layer2AttachmentRef{Name: "blue"}
+		},
+		"l2 ref without name": func(r *pb.AddRequest) {
+			r.Vrf = ""
+			r.Port.GatewayV4 = ""
+			r.Port.HostRoutes = nil
+			r.Layer2AttachmentRef = &pb.Layer2AttachmentRef{Namespace: "tenant-a"}
+		},
 	}
 	for name, mutate := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -172,6 +220,17 @@ func TestServerAddValidatesInput(t *testing.T) {
 				t.Fatalf("expected InvalidArgument, got %v", status.Code(err))
 			}
 		})
+	}
+
+	// A well-formed vhost-user request is accepted.
+	vhost := valid()
+	vhost.ContainerId = "cid-vhost"
+	vhost.Port.Interface = "v012345"
+	vhost.Port.Transport = testTransportVhostUser
+	vhost.Port.SocketPath = testVhostSocketPath
+	vhost.Port.SocketMode = testSocketModeServer
+	if _, err := s.Add(ctx, vhost); err != nil {
+		t.Fatalf("valid vhost-user request rejected: %v", err)
 	}
 
 	// A well-formed dual-stack request is accepted.
