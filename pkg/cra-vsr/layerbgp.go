@@ -110,12 +110,26 @@ func (LayerBGP) convRoutedPorts(from []v1alpha1.RoutedPort) []RoutedPort {
 	for i := range from {
 		out = append(out, RoutedPort{
 			IfName:     from[i].Interface,
+			Transport:  from[i].Transport,
+			SocketMode: from[i].SocketMode,
 			GatewayV4:  from[i].GatewayV4,
 			GatewayV6:  from[i].GatewayV6,
 			HostRoutes: from[i].HostRoutes,
 		})
 	}
 	return out
+}
+
+// applyRoutedPorts layers the NNC routed ports of a VRF onto the composed VSR
+// VRF and registers any fast-path fpvhost virtual-ports (vhostuser transport) on
+// the global system subtree.
+func (l *LayerBGP) applyRoutedPorts(vrf *VRF, ports []v1alpha1.RoutedPort) error {
+	vports, err := applyRoutedPorts(vrf, l.convRoutedPorts(ports)...)
+	if err != nil {
+		return err
+	}
+	registerFpvhostVirtualPorts(l.vrouter, vports)
+	return nil
 }
 
 func (LayerBGP) mkStaticRoute(routing *Routing, routes ...StaticRoute) {
@@ -676,7 +690,7 @@ func (l *LayerBGP) setupLocalVRF(name string, conf *v1alpha1.VRF) error {
 		l.setupNeighbor(bgp, &conf.BGPPeers[i])
 	}
 
-	if err := applyRoutedPorts(vrf, l.convRoutedPorts(conf.RoutedPorts)...); err != nil {
+	if err := l.applyRoutedPorts(vrf, conf.RoutedPorts); err != nil {
 		return fmt.Errorf("applying routed ports to vrf %s: %w", name, err)
 	}
 
@@ -764,7 +778,7 @@ func (l *LayerBGP) setupFabricVRF(name string, conf *v1alpha1.FabricVRF) error {
 		l.setupNeighbor(bgp, &conf.BGPPeers[i])
 	}
 
-	if err := applyRoutedPorts(vrf, l.convRoutedPorts(conf.RoutedPorts)...); err != nil {
+	if err := l.applyRoutedPorts(vrf, conf.RoutedPorts); err != nil {
 		return fmt.Errorf("applying routed ports to fabric vrf %s: %w", name, err)
 	}
 
@@ -846,7 +860,7 @@ func (l *LayerBGP) setupClusterVRF() error {
 			l.mkStaticRoute(vrf.Routing, l.convStaticRoute(rt))
 		}
 
-		if err := applyRoutedPorts(vrf, l.convRoutedPorts(conf.RoutedPorts)...); err != nil {
+		if err := l.applyRoutedPorts(vrf, conf.RoutedPorts); err != nil {
 			return fmt.Errorf("applying routed ports to cluster vrf %s: %w", name, err)
 		}
 	}
@@ -977,7 +991,7 @@ func (l *LayerBGP) setupManagementVRF() error {
 			l.setupVRFImport(vrf, i, imprt)
 		}
 
-		if err := applyRoutedPorts(vrf, l.convRoutedPorts(conf.RoutedPorts)...); err != nil {
+		if err := l.applyRoutedPorts(vrf, conf.RoutedPorts); err != nil {
 			return fmt.Errorf("applying routed ports to management vrf %s: %w", name, err)
 		}
 	}
