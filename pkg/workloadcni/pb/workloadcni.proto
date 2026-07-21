@@ -43,6 +43,40 @@ message WorkloadPort {
   // host_routes are the workload host addresses (/32, /128) reachable via the
   // interface.
   repeated string host_routes = 4;
+  // transport selects the datapath wiring: "veth" (default) or "vhostuser".
+  // vhost-user is VSR-only (fpvhost fast-path virtual-port).
+  string transport = 5;
+  // socket_path is the vhost-user unix socket path (transport=vhostuser only).
+  string socket_path = 6;
+  // socket_mode is the pod-side vhost-user socket mode ("client"|"server").
+  // VSR renders the inverted mode (pod server => VSR client).
+  string socket_mode = 7;
+  // mtu is the MTU the attachment requested (the CNI config's mtu, which the
+  // plugin also applied to the workload-side interface). The CRA needs it to
+  // size the interfaces it derives from the port, and to reject a request the
+  // L2 domain cannot carry.
+  uint32 mtu = 8;
+}
+
+// Layer2AttachmentRef identifies a Layer2Attachment for an L2 (bridge) attach.
+// It is a bare name: Layer2Attachments are only ever read from one namespace
+// (the agent's --intent-namespace, mirroring the operator's), which the agent
+// stamps onto the recorded attachment.
+message Layer2AttachmentRef {
+  string name = 1;
+  reserved 2;
+  reserved "namespace";
+}
+
+// Layer2TrunkMember is one tagged member of an L2 trunk attachment.
+message Layer2TrunkMember {
+  // ref identifies the Layer2Attachment whose L2 domain the member is bridged
+  // into.
+  Layer2AttachmentRef ref = 1;
+  // vlan is the 802.1Q VLAN id the member is tagged with on the workload side.
+  // 0 means the L2 domain's own VLAN id, which the agent only learns once the
+  // referenced Layer2 is present on the node, so it is resolved there.
+  uint32 vlan = 2;
 }
 
 message AddRequest {
@@ -52,8 +86,19 @@ message AddRequest {
   // container_id is the CNI container ID (sandbox identity).
   string container_id = 3;
   // vrf is the target VRF; empty means the underlay/default table.
+  // Mutually exclusive with layer2_attachment_ref and layer2_trunk.
   string vrf = 4;
   WorkloadPort port = 5;
+  // layer2_attachment_ref, when set, enslaves the moved interface into the L2
+  // bridge of the referenced Layer2Attachment as an untagged access port
+  // instead of routing it. The routed fields (vrf, gateways, host_routes) must
+  // be empty in L2 mode.
+  Layer2AttachmentRef layer2_attachment_ref = 6;
+  // layer2_trunk, when non-empty, makes the moved interface an 802.1Q trunk
+  // carrying one tagged member per entry. The interface itself is not bridged,
+  // so untagged and unmapped-VLAN frames go nowhere. Mutually exclusive with
+  // layer2_attachment_ref and with the routed fields.
+  repeated Layer2TrunkMember layer2_trunk = 7;
 }
 
 message AddResponse {}
