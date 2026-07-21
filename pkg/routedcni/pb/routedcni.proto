@@ -1,0 +1,67 @@
+// Copyright 2025.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+syntax = "proto3";
+
+package routedcni.v1;
+
+option go_package = "github.com/telekom/das-schiff-network-operator/pkg/routedcni/pb";
+
+// RoutedCNI is the node-local API the routed CNI plugin calls, over a unix
+// socket, to hand a routed attachment to the CRA agent. The agent persists the
+// attachment into the aggregate per-node NodeRoutedPorts object and reconciles
+// it into the CRA (NETCONF for VSR, netlink for FRR).
+service RoutedCNI {
+  // Add records a routed attachment (CNI ADD). It is idempotent: repeating an
+  // Add with the same identity upserts the entry.
+  rpc Add(AddRequest) returns (AddResponse);
+  // Del removes a routed attachment (CNI DEL). It is idempotent: removing an
+  // unknown attachment succeeds.
+  rpc Del(DelRequest) returns (DelResponse);
+}
+
+// RoutedPort is the datapath payload for a routed attachment.
+message RoutedPort {
+  // interface is the moved interface name inside the CRA network namespace.
+  // VSR references it as infra-<interface>.
+  string interface = 1;
+  // gateway_v4 is the on-link IPv4 gateway address (with prefix length).
+  string gateway_v4 = 2;
+  // gateway_v6 is the on-link IPv6 gateway address (with prefix length).
+  string gateway_v6 = 3;
+  // host_routes are the workload host addresses (/32, /128) reachable via the
+  // interface.
+  repeated string host_routes = 4;
+}
+
+message AddRequest {
+  // pod_namespace / pod_name identify the owning pod.
+  string pod_namespace = 1;
+  string pod_name = 2;
+  // container_id is the CNI container ID (sandbox identity).
+  string container_id = 3;
+  // vrf is the target VRF; empty means the underlay/default table.
+  string vrf = 4;
+  RoutedPort port = 5;
+}
+
+message AddResponse {}
+
+message DelRequest {
+  string container_id = 1;
+  // interface is optional; when set, only the matching attachment is removed.
+  string interface = 2;
+}
+
+message DelResponse {}
