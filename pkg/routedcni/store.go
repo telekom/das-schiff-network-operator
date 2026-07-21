@@ -86,12 +86,47 @@ func RemoveEntry(spec *v1alpha1.NodeRoutedPortsSpec, containerID, ifname string)
 //   - a name matching a fabric VRF -> that fabric VRF;
 //   - any other name -> a local VRF (created if absent).
 //
+// L2 attach entries (those carrying a Layer2AttachmentRef) are instead enslaved
+// to the Layer2 whose AttachmentRef matches, as bridge slaves with no L3
+// addressing. An L2 entry whose referenced Layer2 is not (yet) present on the
+// node is skipped: the bridge is a precondition owned by the L2A pipeline.
+//
 // It returns true if the config was changed.
 func MergeIntoNodeNetworkConfig(cfg *v1alpha1.NodeNetworkConfig, entries []v1alpha1.RoutedPortEntry) bool {
 	for i := range entries {
+		if entries[i].Layer2AttachmentRef != nil {
+			applyEntryToLayer2(&cfg.Spec, &entries[i])
+			continue
+		}
 		applyEntryToVRF(&cfg.Spec, &entries[i])
 	}
 	return len(entries) > 0
+}
+
+// applyEntryToLayer2 enslaves an L2 attach entry to the Layer2 whose
+// AttachmentRef matches the entry's Layer2AttachmentRef, as a bridge slave. If
+// no such Layer2 is present on the node the entry is dropped (assume-exists).
+func applyEntryToLayer2(spec *v1alpha1.NodeNetworkConfigSpec, e *v1alpha1.RoutedPortEntry) {
+	for name, l2 := range spec.Layer2s {
+		if !layer2AttachmentRefEqual(l2.AttachmentRef, e.Layer2AttachmentRef) {
+			continue
+		}
+		l2.AttachedPorts = append(l2.AttachedPorts, v1alpha1.AttachedPort{
+			Interface:  e.Interface,
+			PortWiring: e.PortWiring,
+		})
+		spec.Layer2s[name] = l2
+		return
+	}
+}
+
+// layer2AttachmentRefEqual reports whether two Layer2AttachmentRefs denote the
+// same Layer2Attachment. Nil refs never match.
+func layer2AttachmentRefEqual(a, b *v1alpha1.Layer2AttachmentRef) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	return a.Name == b.Name && a.Namespace == b.Namespace
 }
 
 func applyEntryToVRF(spec *v1alpha1.NodeNetworkConfigSpec, e *v1alpha1.RoutedPortEntry) {
