@@ -7,6 +7,7 @@ resources:
 - bases/network.t-caas.telekom.com_layer2networkconfigurations.yaml
 - bases/network.t-caas.telekom.com_nodenetplanconfigs.yaml
 - bases/network.t-caas.telekom.com_nodenetworkconfigs.yaml
+- bases/network.t-caas.telekom.com_noderoutedports.yaml
 - bases/network.t-caas.telekom.com_networkconfigrevisions.yaml
 - bases/network-connector.sylvaproject.org_announcementpolicies.yaml
 - bases/network-connector.sylvaproject.org_bgppeerings.yaml

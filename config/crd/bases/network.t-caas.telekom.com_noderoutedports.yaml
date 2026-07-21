@@ -1,0 +1,121 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.0
+  name: noderoutedports.network.t-caas.telekom.com
+spec:
+  group: network.t-caas.telekom.com
+  names:
+    kind: NodeRoutedPorts
+    listKind: NodeRoutedPortsList
+    plural: noderoutedports
+    shortNames:
+    - nrp
+    singular: noderoutedports
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.ports[*].interface
+      name: Ports
+      priority: 1
+      type: integer
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          NodeRoutedPorts is the Schema for the per-node routed CNI attachments.
+          Name of the object is the name of the node.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              NodeRoutedPortsSpec is the desired set of routed CNI attachments that are
+              currently live on a node. It is written by the node-local routed-cni agent in
+              response to CNI ADD/DEL (delivered over the node's gRPC socket), and consumed
+              by the CRA agent, which merges the entries into the NodeNetworkConfig before
+              rendering (NETCONF for VSR, netlink for FRR). Storing the state in this
+              aggregate per-node object makes it durable across agent restarts and directly
+              observable, without a round-trip through the central intent pipeline.
+            properties:
+              ports:
+                description: Ports is the list of routed attachments currently live
+                  on the node.
+                items:
+                  description: |-
+                    RoutedPortEntry is a single routed CNI attachment recorded on a node. The
+                    identity fields (PodNamespace/PodName/ContainerID/Interface) key the entry so
+                    CNI ADD upserts and CNI DEL removes exactly one attachment.
+                  properties:
+                    containerID:
+                      description: |-
+                        ContainerID is the CNI container ID of the attachment (uniquely identifies
+                        the sandbox, so an attachment survives a pod name reuse).
+                      type: string
+                    gatewayV4:
+                      description: |-
+                        GatewayV4 is the on-link IPv4 gateway address (with prefix length, e.g.
+                        "169.254.100.100/32") configured on the infrastructure interface.
+                      type: string
+                    gatewayV6:
+                      description: |-
+                        GatewayV6 is the on-link IPv6 gateway address (with prefix length, e.g.
+                        "fd00:7:caa5:1::/128") configured on the infrastructure interface.
+                      type: string
+                    hostRoutes:
+                      description: |-
+                        HostRoutes are the workload host addresses (e.g. "10.0.0.5/32",
+                        "fd00:200::5/128") installed as interface-static routes via Interface so
+                        VSR redistributes them into BGP.
+                      items:
+                        type: string
+                      type: array
+                    interface:
+                      description: |-
+                        Interface is the interface name inside the CRA network namespace (the moved
+                        veth end, e.g. "cra0123456789ab"). VSR references it as infra-<interface>.
+                      type: string
+                    podName:
+                      description: PodName is the name of the pod owning the attachment.
+                      type: string
+                    podNamespace:
+                      description: PodNamespace is the namespace of the pod owning
+                        the attachment.
+                      type: string
+                    vrf:
+                      description: |-
+                        VRF is the target VRF the port is bound into. Empty (or "default"/"main")
+                        means the underlay/default table.
+                      type: string
+                  required:
+                  - containerID
+                  - interface
+                  - podName
+                  - podNamespace
+                  type: object
+                type: array
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources: {}
