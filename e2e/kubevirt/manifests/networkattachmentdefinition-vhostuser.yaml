@@ -1,0 +1,48 @@
+# NetworkAttachmentDefinition for a vhost-user (DPDK/virtio-user) attach.
+#
+# VSR-ONLY. Modeled on the 6WIND HNA reference (multus-kubevirt.yaml). Unlike the
+# veth transport there is no veth pair: the workload connects to a shared vhost
+# unix socket that the VSR fast-path terminates as an fpvhost virtual-port.
+#
+# - resourceName annotation: the virtio-user device plugin backing the socket
+#   (the 6WIND reference uses nc-k8s-plugin.6wind.com/virtio-user).
+# - transport "vhostuser": our plugin publishes a CNIDeviceInfoFile and hands the
+#   socket path/mode to the agent, which renders the VSR fpvhost virtual-port.
+# - capabilities CNIDeviceInfoFile + deviceID: the runtime injects the device id
+#   and the device-info file path so the downstream KubeVirt hook can attach the
+#   socket to the domain.
+# - socketMode "server" is from the workload's perspective; VSR inverts it when
+#   rendering fpvhost (pod server => VSR client).
+# - attachMode is "routed" here (fpvhost with on-link gateway + host routes); set
+#   "l2" + a layer2AttachmentRef to bridge the fpvhost instead.
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: vhostuser-vm-net
+  namespace: default
+  annotations:
+    k8s.v1.cni.cncf.io/resourceName: nc-k8s-plugin.6wind.com/virtio-user
+spec:
+  config: |
+    {
+      "cniVersion": "1.0.0",
+      "name": "vhostuser-vm-net",
+      "type": "cni-routed",
+      "craNetns": "auto",
+      "trunkInterface": "hbn",
+      "transport": "vhostuser",
+      "socketPath": "/var/run/vhostuser/vhostuser-vm-net.sock",
+      "socketMode": "server",
+      "capabilities": { "CNIDeviceInfoFile": true, "deviceID": true },
+      "linkLocalGateways": {
+        "ipv4": "169.254.1.1",
+        "ipv6": "fe80::1"
+      },
+      "ipam": {
+        "type": "static",
+        "addresses": [
+          { "address": "10.201.0.11/32" },
+          { "address": "fd00:201::11/128" }
+        ]
+      }
+    }

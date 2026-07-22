@@ -1,0 +1,92 @@
+# Test VirtualMachine whose data NIC is a vhost-user (DPDK/virtio-user) attach.
+#
+# VSR-ONLY. Modeled on the 6WIND HNA reference (deploy-kubevirt-green1.yaml).
+# Cannot be exercised without the 6WIND virtio-user device plugin and a DPDK
+# fast path, so this manifest is illustrative and validated blind.
+#
+# Key differences from the routed/L2 (bridge-binding) VMs:
+# - The interface uses the "sriov" binding: KubeVirt attaches the vhost-user
+#   device (resolved from the device plugin allocation + CNIDeviceInfoFile) to
+#   the domain rather than building a k6t bridge + tap.
+# - The pod requests the virtio-user device-plugin resource and hugepages
+#   (DPDK vhost-user requires shared hugepage memory).
+# - A hook sidecar (onDefineDomain) wires the vhost-user device into the domain
+#   XML from the published CNIDeviceInfoFile.
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: vhostuser-vm
+  namespace: default
+spec:
+  runStrategy: Always
+  template:
+    metadata:
+      annotations:
+        hooks.kubevirt.io/hookSidecars: >
+          [
+            {
+              "args": ["--version", "v1alpha2"],
+              "image": "quay.io/kubevirt/sidecar-shim:v1.5.2",
+              "configMap": {"name": "kubevirt-vhostuser-sidecar", "key": "sidecar.py", "hookPath": "/usr/bin/onDefineDomain"}
+            }
+          ]
+      labels:
+        kubevirt.io/vm: vhostuser-vm
+    spec:
+      domain:
+        cpu:
+          dedicatedCpuPlacement: true
+          sockets: 1
+          cores: 1
+          threads: 2
+        devices:
+          disks:
+            - name: containerdisk
+              disk:
+                bus: virtio
+            - name: cloudinitdisk
+              disk:
+                bus: virtio
+          interfaces:
+            - name: vhostuser
+              sriov: {}
+        memory:
+          hugepages:
+            pageSize: "2Mi"
+        resources:
+          requests:
+            memory: 2048Mi
+            nc-k8s-plugin.6wind.com/virtio-user: "1"
+          limits:
+            memory: 2048Mi
+            nc-k8s-plugin.6wind.com/virtio-user: "1"
+      networks:
+        - name: vhostuser
+          multus:
+            networkName: default/vhostuser-vm-net
+      volumes:
+        - name: containerdisk
+          containerDisk:
+            image: quay.io/kubevirt/fedora-cloud-container-disk-demo:latest
+        - name: cloudinitdisk
+          cloudInitNoCloud:
+            networkData: |
+              version: 2
+              ethernets:
+                eth0:
+                  addresses:
+                    - 10.201.0.11/32
+                    - fd00:201::11/128
+                  routes:
+                    - to: 0.0.0.0/0
+                      via: 169.254.1.1
+                      on-link: true
+                    - to: "::/0"
+                      via: fe80::1
+                      on-link: true
+            userData: |
+              #cloud-config
+              password: fedora
+              chpasswd: { expire: False }
+              runcmd:
+                - [ sh, -c, "nohup python3 -m http.server 8080 --bind :: >/var/log/http.log 2>&1 &" ]
