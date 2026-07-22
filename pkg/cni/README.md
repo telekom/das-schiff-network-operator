@@ -8,7 +8,8 @@ on-link host routes to it via BGP.
 
 ## How it works
 
-Multus invokes the plugin for a secondary network. On `ADD` the plugin:
+Multus invokes the plugin for a secondary network. On `ADD` the plugin (for the
+default `veth` + `routed` path):
 
 1. Delegates to the configured **IPAM** (`static` or `host-local`) to obtain the
    workload's `/32` + `/128`.
@@ -17,13 +18,19 @@ Multus invokes the plugin for a secondary network. On `ADD` the plugin:
    enslaves it to a private, per-pod 2-port bridge together with the qemu tap —
    this is the only L2 and it is **not** a shared broadcast domain).
 3. Moves the **peer end** into the CRA network namespace (see *netns discovery*),
-   names it `cra<sha256(containerID)[:12]>`, brings it up and:
-   - configures the on-link **link-local gateway** addresses the workload uses as
-     its next-hop (`169.254.1.1/32`, `fe80::1/128` by default);
-   - installs **on-link host routes** (`<ip>/32`, `<ip>/128`, scope link) for the
-     workload's addresses.
+   names it `cra<sha256(containerID)[:12]>` and brings it up.
+4. Hands the attachment to the **node-local CRA agent** over gRPC. The plugin is
+   flavor-agnostic; the agent programs the CRA-side datapath its own way per
+   flavor (netlink via `frr-cra` for FRR, NETCONF for VSR): the on-link
+   **link-local gateway** addresses the workload uses as its next-hop
+   (`169.254.1.1/32`, `fe80::1/128` by default) and the **on-link host routes**
+   (`<ip>/32`, `<ip>/128`) for the workload's addresses.
 
-`DEL` reverses everything (removing the veth removes both ends).
+`DEL` reverses everything (removing the veth removes both ends; the agent drops
+the attachment).
+
+The `l2` attach mode and the `vhostuser` transport vary steps 2–4 — see *Attach
+modes and transports* below.
 
 ### VRF vs underlay
 
@@ -43,17 +50,49 @@ Delivered per secondary network via a `NetworkAttachmentDefinition`
 | field               | required | default | description |
 | ------------------- | -------- | ------- | ----------- |
 | `type`              | yes      | —       | must be `cni-routed` |
-| `ipam`              | yes      | —       | delegated IPAM block (`static` or `host-local`) |
-| `vrf`               | no       | *(underlay)* | CRA VRF device name; omit/`default`/`main` for the underlay/default table |
-| `flavor`            | no       | `frr`   | CRA flavor: `frr` (plugin programs the CRA-side FIB with netlink) or `vsr` (plugin only moves the port and hands the attachment to the node-local agent over gRPC, which renders it via NETCONF) |
-| `agentSocket`       | no       | `/run/das-schiff/routed-cni.sock` | unix socket of the node-local CRA agent; only used for `flavor: vsr` |
+| `ipam`              | for `veth` | —     | delegated IPAM block (`static` or `host-local`); optional for `vhostuser` (guest-side addressing) |
+| `attachMode`        | no       | `routed`| `routed` (VRF/underlay + on-link gateway + host routes) or `l2` (bridge-slave to an existing L2 domain) |
+| `transport`         | no       | `veth`  | `veth` (a veth pair moved into the CRA netns) or `vhostuser` (DPDK/virtio-user fast-path socket, **VSR-only**) |
+| `vrf`               | no       | *(underlay)* | CRA VRF device name; omit/`default`/`main` for the underlay/default table. Only for `attachMode: routed` (must be unset for `l2`) |
+| `layer2AttachmentRef` | for `l2` | —     | `{name, namespace}` of the originating `Layer2Attachment`; the agent binds the port to the NNC `Layer2` whose stamped `attachmentRef` matches |
+| `socketPath`        | for `vhostuser` | — | vhost-user unix socket path shared with the workload |
+| `socketMode`        | for `vhostuser` | — | `client` or `server` from the workload's perspective (VSR inverts it) |
+| `agentSocket`       | no       | `/run/das-schiff/routed-cni.sock` | unix socket of the node-local CRA agent that programs the CRA-side datapath |
 | `craNetns`          | no       | `auto`  | `auto` (discover by trunk), a named netns under `/var/run/netns/<name>`, or an absolute path (e.g. `/proc/<pid>/ns/net`) |
 | `trunkInterface`    | no       | `hbn`   | interface that identifies the CRA netns during auto-discovery |
-| `linkLocalGateways` | no       | `169.254.1.1` / `fe80::1` | on-link next-hop addresses configured on the CRA-side port |
+| `linkLocalGateways` | no       | `169.254.1.1` / `fe80::1` | on-link next-hop addresses configured on the CRA-side port (`routed` only) |
 | `mtu`               | no       | `1500`  | veth MTU |
 
 Example (underlay, static IPAM) — see
-[`e2e/kubevirt/manifests/networkattachmentdefinition.yaml`](../../e2e/kubevirt/manifests/networkattachmentdefinition.yaml).
+[`e2e/kubevirt/manifests/networkattachmentdefinition.yaml`](../../e2e/kubevirt/manifests/networkattachmentdefinition.yaml),
+plus the L2-attach and vhost-user variants alongside it.
+
+## Attach modes and transports (two orthogonal axes)
+
+The attachment is described by two independent axes:
+
+- **transport** — how the CRA-side port is wired:
+  - `veth` (default): a veth pair whose CRA-side end is moved into the CRA netns.
+  - `vhostuser`: a DPDK/virtio-user vhost socket. **VSR-only** — there is no
+    veth and no netns port move; the VSR fast-path terminates the socket as an
+    `fpvhost` virtual-port. The FRR agent rejects it.
+- **attach mode** — what is done with that port:
+  - `routed` (default): VRF/underlay + on-link gateway + workload host routes.
+  - `l2`: the port is enslaved to an **existing** L2 bridge (referenced by
+    `layer2AttachmentRef`) as a bridge slave, with no L3 addressing. The
+    bridge/L2VNI is assumed to already exist on the node (from the
+    `Layer2Attachment` / `Layer2NetworkConfiguration` pipeline).
+
+All four combinations are valid except `vhostuser` + FRR. The `veth` + `routed`
+combination is the original behaviour and is unchanged.
+
+**L2 binding by attachment ref.** The intent builder stamps the originating
+`Layer2Attachment` identity (`AttachmentRef`) onto each NNC `Layer2`. An `l2`
+port entry carries a `layer2AttachmentRef`; the node-local agent matches it
+against the stamped `Layer2.AttachmentRef` and enslaves the port to that
+Layer2's bridge (FRR `l2.<vlanID>`, VSR `l2.<vlanID>` link-interface). No VNI or
+VLAN id is needed in the CNI config, and the node-local server does no extra API
+lookups.
 
 ## netns discovery
 
@@ -70,27 +109,31 @@ for generating this per node.
 
 ## CRA flavor notes
 
-- **cra-frr:** the plugin writes netlink directly in the CRA-FRR netns. FRR
-  redistributes connected/kernel/static, so the on-link `/32` + `/128` are
-  advertised. For the **underlay** path the FRR *default* instance must
-  redistribute connected/kernel toward the fabric neighbors (and gain an IPv6
-  unicast address-family); see the plan for the exact template change.
-- **cra-vsr:** the VSR fast path owns the FIB, so the moved port cannot be
-  programmed via raw netlink. With `flavor: vsr` the plugin only creates the
-  veth and moves the CRA-side port into the CRA netns, then calls the node-local
-  agent over the gRPC socket (`agentSocket`). The agent records the attachment in
-  the node's `NodeRoutedPorts` object (durable, aggregate per-node state) and
-  merges it into the `NodeNetworkConfig` before rendering it as NETCONF: an
-  `interface infrastructure <ifname>` with `port infra-<ifname>` + the on-link
-  gateway addresses, plus interface-static routes
-  (`ipv4-route/ipv6-route <ip> next-hop <ifname>`). See
-  `pkg/cra-vsr/routed.go` (`BuildRoutedVRF`) and `pkg/routedcni` (transport).
+The plugin is **flavor-agnostic**: for the `veth` transport it only creates the
+veth and moves the CRA-side port into the CRA netns, then hands the attachment to
+the node-local agent over the gRPC socket (`agentSocket`). The agent records it
+in the node's `NodeRoutedPorts` object (durable, aggregate per-node state) and
+merges it into the `NodeNetworkConfig` before programming it per flavor:
 
-### Transport (vsr)
+- **cra-frr:** the agent writes netlink in the CRA-FRR netns. Routed ports get
+  the on-link `/32` + `/128` (redistributed via connected/kernel/static); `l2`
+  ports are enslaved to the `l2.<vlanID>` bridge. For the **underlay** path the
+  FRR *default* instance must redistribute connected/kernel toward the fabric
+  neighbors (and gain an IPv6 unicast address-family); see the plan for the exact
+  template change. FRR **rejects** the `vhostuser` transport.
+- **cra-vsr:** the VSR fast path owns the FIB, so the port is programmed via
+  NETCONF: an `interface infrastructure <ifname>` with `port infra-<ifname>` +
+  the on-link gateway addresses, plus interface-static routes
+  (`ipv4-route/ipv6-route <ip> next-hop <ifname>`) for `routed`; a bridge
+  `link-interface` for `l2`. The `vhostuser` transport renders an `fpvhost`
+  fast-path virtual-port (`system fast-path virtual-port fpvhost fpvhost-<net>
+  socket-mode <inverted>`) + `interface fpvhost <ifname> port fpvhost-<net>`.
+  See `pkg/cra-vsr/routed.go` / `layer2.go` and `pkg/routedcni` (transport).
 
 ```
 CNI ADD/DEL --gRPC(unix)--> agent --> NodeRoutedPorts CR (durable)
-                                   \-> merge into NodeNetworkConfig --> NETCONF
+                                   \-> merge into NodeNetworkConfig
+                                       --> netlink (FRR) | NETCONF (VSR)
 ```
 
 The agent serves the socket at `/run/das-schiff/routed-cni.sock` (a hostPath
