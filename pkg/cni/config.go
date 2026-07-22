@@ -132,8 +132,29 @@ type NetConf struct {
 	// IPAM is the delegated IPAM configuration (e.g. host-local).
 	IPAM json.RawMessage `json:"ipam,omitempty"`
 
+	// DeviceID is the device-plugin-allocated device identifier, set directly by
+	// some runtimes (Multus also mirrors it into RuntimeConfig.DeviceID when the
+	// "deviceID" capability is enabled). Only meaningful for vhost-user.
+	DeviceID string `json:"deviceID,omitempty"`
+
+	// RuntimeConfig carries per-invocation values injected by the runtime when
+	// the matching capabilities are enabled in the NetworkAttachmentDefinition
+	// (deviceID, CNIDeviceInfoFile). Only meaningful for vhost-user.
+	RuntimeConfig RuntimeConfig `json:"runtimeConfig,omitempty"`
+
 	// PrevResult is populated by the runtime when chaining.
 	RawPrevResult map[string]interface{} `json:"prevResult,omitempty"`
+}
+
+// RuntimeConfig holds the runtime-injected capability values.
+type RuntimeConfig struct {
+	// DeviceID is the device-plugin-allocated device (from the "deviceID"
+	// capability).
+	DeviceID string `json:"deviceID,omitempty"`
+	// CNIDeviceInfoFile is the path the plugin writes the device info JSON to
+	// (from the "CNIDeviceInfoFile" capability), consumed downstream (e.g. the
+	// KubeVirt vhost-user hook sidecar).
+	CNIDeviceInfoFile string `json:"CNIDeviceInfoFile,omitempty"`
 }
 
 // LinkLocalGateways holds the on-link next-hop addresses for each family.
@@ -238,10 +259,14 @@ func parseConfig(stdin []byte) (*NetConf, error) {
 	if err := json.Unmarshal(stdin, conf); err != nil {
 		return nil, fmt.Errorf("failed to parse network configuration: %w", err)
 	}
+	// IPAM is required for the veth transport (the pod-side address is relayed
+	// to the guest). vhost-user addressing may be guest-side, so IPAM is
+	// optional there.
 	if len(conf.IPAM) == 0 {
-		return nil, fmt.Errorf("%q is required", "ipam")
-	}
-	if _, err := conf.ipamType(); err != nil {
+		if !conf.isVhostUser() {
+			return nil, fmt.Errorf("%q is required", "ipam")
+		}
+	} else if _, err := conf.ipamType(); err != nil {
 		return nil, err
 	}
 	if err := conf.validateModes(); err != nil {
