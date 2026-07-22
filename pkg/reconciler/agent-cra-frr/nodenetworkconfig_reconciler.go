@@ -64,6 +64,14 @@ func (a *CRAFRRConfigApplier) convertNodeConfigToNetlink(nodeCfg *v1alpha1.NodeN
 			nlLayer2.VRF = layer2.IRB.VRF
 		}
 
+		for j := range layer2.AttachedPorts {
+			ap := &layer2.AttachedPorts[j]
+			nlLayer2.AttachedPorts = append(nlLayer2.AttachedPorts, nl.L2AttachedPort{
+				Interface: ap.Interface,
+				Transport: string(ap.Transport),
+			})
+		}
+
 		netlinkConfig.Layer2s = append(netlinkConfig.Layer2s, nlLayer2)
 
 		source := nl.MirrorSourceL2(int(layer2.VLAN))
@@ -112,6 +120,7 @@ func convertRoutedPorts(nodeCfg *v1alpha1.NodeNetworkConfig) []nl.RoutedPort {
 			ports = append(ports, nl.RoutedPort{
 				Interface:  rps[i].Interface,
 				VRF:        vrf,
+				Transport:  string(rps[i].Transport),
 				GatewayV4:  rps[i].GatewayV4,
 				GatewayV6:  rps[i].GatewayV6,
 				HostRoutes: rps[i].HostRoutes,

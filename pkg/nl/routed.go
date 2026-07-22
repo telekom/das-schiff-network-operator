@@ -11,6 +11,11 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// transportVhostUser is the vhost-user transport value. It is VSR-only: the FRR
+// flavor programs the datapath with raw netlink and cannot back a DPDK vhost
+// socket, so a port declaring it is rejected.
+const transportVhostUser = "vhostuser"
+
 // ReconcileRoutedPorts programs the on-link datapath for routed CNI attachments
 // whose CRA-side veth was moved into this network namespace by the routed CNI.
 //
@@ -28,7 +33,54 @@ func (n *Manager) ReconcileRoutedPorts(cfg *NetlinkConfiguration) error {
 	return nil
 }
 
+// ReconcileL2AttachedPorts enslaves the routed-CNI L2 attach ports (moved into
+// this netns by the CNI) to their Layer2 bridge (l2.<vlanID>) as bridge slaves
+// with no L3 addressing. Like ReconcileRoutedPorts it is adopt-only: a port that
+// is not present yet (or already gone) is skipped.
+func (n *Manager) ReconcileL2AttachedPorts(cfg *NetlinkConfiguration) error {
+	for i := range cfg.Layer2s {
+		l2 := &cfg.Layer2s[i]
+		for j := range l2.AttachedPorts {
+			if err := n.reconcileL2AttachedPort(l2, &l2.AttachedPorts[j]); err != nil {
+				return fmt.Errorf("error reconciling L2 attached port %q (vlan %d): %w",
+					l2.AttachedPorts[j].Interface, l2.VlanID, err)
+			}
+		}
+	}
+	return nil
+}
+
+func (n *Manager) reconcileL2AttachedPort(l2 *Layer2Information, p *L2AttachedPort) error {
+	if p.Transport == transportVhostUser {
+		return fmt.Errorf("L2 attached port %q uses vhost-user transport, which is unsupported on the FRR flavor (VSR-only)", p.Interface)
+	}
+
+	link, err := n.toolkit.LinkByName(p.Interface)
+	if err != nil {
+		// Adopt-only: the port is created/removed by the CNI.
+		return nil //nolint:nilerr // a missing port is not an error
+	}
+
+	bridgeName := fmt.Sprintf("%s%d", layer2SVI, l2.VlanID)
+	bridgeLink, err := n.toolkit.LinkByName(bridgeName)
+	if err != nil {
+		return fmt.Errorf("L2 bridge %q not found for attached port %q: %w", bridgeName, p.Interface, err)
+	}
+	if err := n.toolkit.LinkSetMaster(link, bridgeLink); err != nil {
+		return fmt.Errorf("failed to enslave port %q to bridge %q: %w", p.Interface, bridgeName, err)
+	}
+	if err := n.toolkit.LinkSetUp(link); err != nil {
+		return fmt.Errorf("failed to set L2 attached port %q up: %w", p.Interface, err)
+	}
+	return nil
+}
+
 func (n *Manager) reconcileRoutedPort(p *RoutedPort) error {
+	// The FRR flavor programs the datapath with raw netlink and cannot back a
+	// DPDK vhost-user socket; that transport is VSR-only.
+	if p.Transport == transportVhostUser {
+		return fmt.Errorf("routed port %q uses vhost-user transport, which is unsupported on the FRR flavor (VSR-only)", p.Interface)
+	}
 	link, err := n.toolkit.LinkByName(p.Interface)
 	if err != nil {
 		// The port is created/removed by the CNI; if it is not present (yet, or

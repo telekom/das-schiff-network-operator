@@ -70,6 +70,9 @@ type LoopbackConfig struct {
 type RoutedPort struct {
 	// Interface is the moved interface name inside the CRA netns.
 	Interface string `json:"interface"`
+	// Transport selects the CRA-side wiring: "veth" (default) or "vhostuser".
+	// The FRR flavor only supports veth; a vhostuser port is rejected.
+	Transport string `json:"transport,omitempty"`
 	// VRF is the target VRF device name; empty (or "default"/"main") keeps the
 	// port in the main table (the underlay).
 	VRF string `json:"vrf,omitempty"`
@@ -80,6 +83,16 @@ type RoutedPort struct {
 	// HostRoutes are the workload host addresses (CIDR /32, /128) installed as
 	// on-link routes via Interface.
 	HostRoutes []string `json:"hostRoutes,omitempty"`
+}
+
+// L2AttachedPort is a routed-CNI port enslaved to a Layer2 bridge (L2 attach
+// mode): the moved interface is added as a bridge slave with no L3 addressing.
+type L2AttachedPort struct {
+	// Interface is the moved interface name inside the CRA netns.
+	Interface string `json:"interface"`
+	// Transport selects the CRA-side wiring: "veth" (default) or "vhostuser".
+	// The FRR flavor only supports veth; a vhostuser port is rejected.
+	Transport string `json:"transport,omitempty"`
 }
 
 type NetlinkConfiguration struct {

@@ -202,6 +202,125 @@ func TestReconcileRoutedPortsAdoptOnly(t *testing.T) {
 	}
 }
 
+// TestReconcileL2AttachedPorts validates that a routed-CNI L2 attach port is
+// enslaved to its Layer2 bridge (l2.<vlanID>) with no addressing.
+func TestReconcileL2AttachedPorts(t *testing.T) {
+	requireRoot(t)
+
+	testNS, err := testutils.NewNS()
+	if err != nil {
+		t.Fatalf("create netns: %v", err)
+	}
+	defer testutils.UnmountNS(testNS) //nolint:errcheck
+
+	const (
+		port   = "cral201234567"
+		vlanID = 100
+	)
+	bridgeName := fmt.Sprintf("l2.%d", vlanID)
+	if derr := testNS.Do(func(_ ns.NetNS) error {
+		br := &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{Name: bridgeName}}
+		if e := netlink.LinkAdd(br); e != nil {
+			return fmt.Errorf("adding bridge: %w", e)
+		}
+		if e := netlink.LinkSetUp(br); e != nil {
+			return fmt.Errorf("setting bridge up: %w", e)
+		}
+		return addDummyPort(port)
+	}); derr != nil {
+		t.Fatalf("populate netns: %v", derr)
+	}
+
+	mgr := NewManager(&Toolkit{}, nil)
+	cfg := &NetlinkConfiguration{
+		Layer2s: []Layer2Information{{
+			VlanID: vlanID,
+			AttachedPorts: []L2AttachedPort{{
+				Interface: port,
+			}},
+		}},
+	}
+
+	if derr := testNS.Do(func(_ ns.NetNS) error {
+		return mgr.ReconcileL2AttachedPorts(cfg)
+	}); derr != nil {
+		t.Fatalf("ReconcileL2AttachedPorts: %v", derr)
+	}
+
+	if derr := testNS.Do(func(_ ns.NetNS) error {
+		link, e := netlink.LinkByName(port)
+		if e != nil {
+			t.Errorf("port %s missing: %v", port, e)
+			return nil
+		}
+		brLink, _ := netlink.LinkByName(bridgeName)
+		if link.Attrs().MasterIndex != brLink.Attrs().Index {
+			t.Errorf("port not enslaved to bridge %s (master=%d, want %d)",
+				bridgeName, link.Attrs().MasterIndex, brLink.Attrs().Index)
+		}
+		// L2 attach carries no L3 addressing.
+		addrs, _ := netlink.AddrList(link, netlink.FAMILY_ALL)
+		for i := range addrs {
+			if addrs[i].IP.IsGlobalUnicast() {
+				t.Errorf("L2 attach port unexpectedly has address %s", addrs[i].IPNet.String())
+			}
+		}
+		return nil
+	}); derr != nil {
+		t.Fatalf("netns check: %v", derr)
+	}
+}
+
+// TestReconcileL2AttachedPortsAdoptOnly ensures a missing L2 attach port is a
+// no-op (the CNI owns the veth lifecycle).
+func TestReconcileL2AttachedPortsAdoptOnly(t *testing.T) {
+	requireRoot(t)
+
+	testNS, err := testutils.NewNS()
+	if err != nil {
+		t.Fatalf("create netns: %v", err)
+	}
+	defer testutils.UnmountNS(testNS) //nolint:errcheck
+
+	mgr := NewManager(&Toolkit{}, nil)
+	cfg := &NetlinkConfiguration{
+		Layer2s: []Layer2Information{{
+			VlanID:        200,
+			AttachedPorts: []L2AttachedPort{{Interface: "cramissingl2"}},
+		}},
+	}
+	if derr := testNS.Do(func(_ ns.NetNS) error {
+		// Missing port: must be a no-op, not an error.
+		return mgr.ReconcileL2AttachedPorts(cfg)
+	}); derr != nil {
+		t.Fatalf("adopt-only L2 reconcile: %v", derr)
+	}
+}
+
+// TestReconcileVhostUserRejectedOnFRR ensures the FRR flavor rejects the
+// VSR-only vhost-user transport for both routed and L2 attach ports. The guard
+// fires before any netlink call, so no root/netns is required.
+func TestReconcileVhostUserRejectedOnFRR(t *testing.T) {
+	mgr := NewManager(&Toolkit{}, nil)
+
+	routedCfg := &NetlinkConfiguration{
+		RoutedPorts: []RoutedPort{{Interface: "cravhost01", Transport: "vhostuser"}},
+	}
+	if err := mgr.ReconcileRoutedPorts(routedCfg); err == nil {
+		t.Error("expected error for vhost-user routed port on FRR, got nil")
+	}
+
+	l2Cfg := &NetlinkConfiguration{
+		Layer2s: []Layer2Information{{
+			VlanID:        300,
+			AttachedPorts: []L2AttachedPort{{Interface: "cravhostl2", Transport: "vhostuser"}},
+		}},
+	}
+	if err := mgr.ReconcileL2AttachedPorts(l2Cfg); err == nil {
+		t.Error("expected error for vhost-user L2 attach port on FRR, got nil")
+	}
+}
+
 func assertHostRoutes(t *testing.T, table int, wantV4, wantV6 string) {
 	t.Helper()
 	routes, _ := netlink.RouteListFiltered(netlink.FAMILY_ALL,

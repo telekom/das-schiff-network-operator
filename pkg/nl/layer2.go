@@ -49,9 +49,12 @@ type Layer2Information struct {
 	AnycastGateways     []string `json:"anycastGateways"`
 	NeighSuppression    *bool    `json:"neighSuppression"`
 	DisableSegmentation bool     `json:"disableSegmentation"`
-	bridge              *netlink.Bridge
-	vxlan               *netlink.Vxlan
-	vlanInterface       *netlink.Vlan
+	// AttachedPorts are routed-CNI ports enslaved to this L2 bridge (L2 attach
+	// mode): bridge slaves with no L3 addressing.
+	AttachedPorts []L2AttachedPort `json:"attachedPorts,omitempty"`
+	bridge        *netlink.Bridge
+	vxlan         *netlink.Vxlan
+	vlanInterface *netlink.Vlan
 }
 
 type NeighborInformation struct {
