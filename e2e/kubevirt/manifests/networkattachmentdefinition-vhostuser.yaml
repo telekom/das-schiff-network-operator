@@ -1,0 +1,53 @@
+# NetworkAttachmentDefinition for a vhost-user (DPDK/virtio-user) attach.
+#
+# VSR-ONLY. Modeled on the 6WIND HNA reference (multus-kubevirt.yaml). Unlike the
+# veth transport there is no veth pair: the workload connects to a shared vhost
+# unix socket that the VSR fast-path terminates as an fpvhost virtual-port.
+#
+# - resourceName annotation: the device-plugin resource backing the socket. The
+#   pod MUST request the same resource in resources.limits, otherwise Multus
+#   hands us an empty deviceID and the plugin fails the ADD (see the VM manifest).
+# - transport "vhostuser": our plugin resolves the allocation into a host-side
+#   and a pod-side socket path, publishes the pod-side one in a CNIDeviceInfoFile
+#   and hands the host-side one to the agent, which renders the VSR fpvhost
+#   virtual-port.
+# - capabilities CNIDeviceInfoFile + deviceID: the runtime injects the device id
+#   and the device-info file path. Multus also pre-copies the device plugin's own
+#   device-info file there, and that file is authoritative for the pod-side path
+#   and socket mode.
+# - the socket path is NOT configurable: it is allocated by the device plugin and
+#   derived from the device id (/run/vsr-vhost-user/<deviceID>/socket on the host,
+#   /run/vsr-virtio-user/<index>/socket in the pod). socketPath/socketMode exist
+#   only as overrides and are deliberately left unset here.
+# - attachMode is "routed" here (fpvhost with on-link gateway + host routes); set
+#   "l2" + a layer2AttachmentRef to bridge the fpvhost instead.
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: vhostuser-vm-net
+  namespace: default
+  annotations:
+    k8s.v1.cni.cncf.io/resourceName: nc-k8s-plugin.6wind.com/virtio-user
+spec:
+  config: |
+    {
+      "cniVersion": "1.0.0",
+      "name": "vhostuser-vm-net",
+      "type": "cni-workload",
+      "craNetns": "auto",
+      "trunkInterface": "hbn",
+      "transport": "vhostuser",
+      "deviceResource": "nc-k8s-plugin.6wind.com/virtio-user",
+      "capabilities": { "CNIDeviceInfoFile": true, "deviceID": true },
+      "linkLocalGateways": {
+        "ipv4": "169.254.1.1",
+        "ipv6": "fe80::1"
+      },
+      "ipam": {
+        "type": "static",
+        "addresses": [
+          { "address": "10.201.0.11/32" },
+          { "address": "fd00:201::11/128" }
+        ]
+      }
+    }
