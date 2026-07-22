@@ -621,7 +621,7 @@ func buildNetplanState(spec *networkv1alpha1.NodeNetworkConfigSpec, nodeIPs map[
 	for _, k := range sortedNetplanKeys(spec, nodeIPs) {
 		l2 := layer2Entry(spec, k)
 		nip, hasNip := nodeIPs[k]
-		vlanID, mtu, link := netplanDeviceParams(l2, &nip, hasNip)
+		vlanID, mtu, link := netplanDeviceParams(&l2, &nip, hasNip)
 
 		if hasNip && vlanID == 0 && nip.InterfaceRef != "" {
 			// Native/untagged mode writes the per-node addresses/routes directly
@@ -688,7 +688,7 @@ func layer2Entry(spec *networkv1alpha1.NodeNetworkConfigSpec, key string) networ
 	return spec.Layer2s[key]
 }
 
-func netplanDeviceParams(l2 networkv1alpha1.Layer2, nip *builder.NetplanNodeIP, hasNip bool) (vlanID, mtu uint16, link string) {
+func netplanDeviceParams(l2 *networkv1alpha1.Layer2, nip *builder.NetplanNodeIP, hasNip bool) (vlanID, mtu uint16, link string) {
 	vlanID, mtu = l2.VLAN, l2.MTU
 	// Fall back to the netplan-only metadata when the NNC Layer2 entry carries
 	// no VLAN — either there is no Layer2 entry, or one exists with zero scalars
