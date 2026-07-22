@@ -1,3 +1,5 @@
+//go:build linux
+
 /*
 Copyright 2024.
 
@@ -141,8 +143,8 @@ func TestParseConfigModeErrors(t *testing.T) {
 		"l2 without ref":       `{"cniVersion":"1.0.0","type":"cni-workload","attachMode":"l2","ipam":{"type":"host-local"}}`,
 		"l2 with vrf":          `{"cniVersion":"1.0.0","type":"cni-workload","attachMode":"l2","vrf":"cluster","layer2AttachmentRef":{"name":"blue","namespace":"tenant-a"},"ipam":{"type":"host-local"}}`,
 		"l2 without namespace": `{"cniVersion":"1.0.0","type":"cni-workload","attachMode":"l2","layer2AttachmentRef":{"name":"blue"},"ipam":{"type":"host-local"}}`,
-		"vhostuser no socket":  `{"cniVersion":"1.0.0","type":"cni-workload","transport":"vhostuser","socketMode":"server","ipam":{"type":"host-local"}}`,
-		"vhostuser bad mode":   `{"cniVersion":"1.0.0","type":"cni-workload","transport":"vhostuser","socketPath":"/run/vhost.sock","socketMode":"bogus","ipam":{"type":"host-local"}}`,
+		"vhostuser bad mode":   `{"cniVersion":"1.0.0","type":"cni-workload","transport":"vhostuser","socketMode":"bogus","ipam":{"type":"host-local"}}`,
+		"veth with socket":     `{"cniVersion":"1.0.0","type":"cni-workload","socketPath":"/run/vhost.sock","ipam":{"type":"host-local"}}`,
 	}
 	for name, conf := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -154,9 +156,11 @@ func TestParseConfigModeErrors(t *testing.T) {
 }
 
 func TestParseConfigVhostUser(t *testing.T) {
+	// Neither socketPath nor socketMode is required: both are derived from the
+	// device-plugin allocation.
 	conf := `{
 	  "cniVersion":"1.0.0","type":"cni-workload","vrf":"cluster",
-	  "transport":"vhostuser","socketPath":"/run/vhost/net1.sock","socketMode":"server",
+	  "transport":"vhostuser","deviceID":"3f9a2b1c7d",
 	  "ipam":{"type":"host-local"}
 	}`
 	c, err := parseConfig([]byte(conf))
@@ -166,7 +170,10 @@ func TestParseConfigVhostUser(t *testing.T) {
 	if !c.isVhostUser() {
 		t.Errorf("isVhostUser() = false, want true")
 	}
-	if c.SocketMode != SocketModeServer {
-		t.Errorf("SocketMode = %q, want %q", c.SocketMode, SocketModeServer)
+	if c.deviceID() != "3f9a2b1c7d" {
+		t.Errorf("deviceID() = %q, want 3f9a2b1c7d", c.deviceID())
+	}
+	if c.socketMode() != SocketModeServer {
+		t.Errorf("socketMode() = %q, want %q", c.socketMode(), SocketModeServer)
 	}
 }

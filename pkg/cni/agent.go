@@ -42,13 +42,20 @@ const agentCallTimeout = 10 * time.Second
 // L2 attach modes differ in the request payload: routed carries VRF + on-link
 // gateways + host routes, while L2 carries only the Layer2AttachmentRef (the
 // agent enslaves the port to the matching bridge).
-func notifyAgentAdd(conf *NetConf, args *skel.CmdArgs, portName string, gwV4, gwV6 net.IP, result *current.Result) error {
+//
+// att is non-nil only for the vhost-user transport, and carries the HOST-side
+// socket path: that is the namespace the CRA agent and vSR run in.
+func notifyAgentAdd(conf *NetConf, args *skel.CmdArgs, portName string, gwV4, gwV6 net.IP,
+	result *current.Result, att *vhostUserAttachment,
+) error {
 	podNs, name := podIdentity(args.Args)
 	port := &pb.WorkloadPort{
-		Interface:  portName,
-		Transport:  conf.transport(),
-		SocketPath: conf.SocketPath,
-		SocketMode: conf.SocketMode,
+		Interface: portName,
+		Transport: conf.transport(),
+	}
+	if att != nil {
+		port.SocketPath = att.HostPath
+		port.SocketMode = att.Mode
 	}
 	req := &pb.AddRequest{
 		PodNamespace: podNs,

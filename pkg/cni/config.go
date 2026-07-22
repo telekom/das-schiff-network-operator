@@ -1,3 +1,5 @@
+//go:build linux
+
 /*
 Copyright 2024.
 
@@ -61,6 +63,10 @@ const (
 	// the workload's perspective. VSR inverts them when rendering fpvhost.
 	SocketModeClient = "client"
 	SocketModeServer = "server"
+	// defaultSocketMode is assumed when neither the config nor the device
+	// plugin's device-info file states a mode: the workload runs the server
+	// socket and vSR connects to it, matching the reference manifests.
+	defaultSocketMode = SocketModeServer
 )
 
 // NetConf is the CNI configuration for the cni-workload plugin.
@@ -94,14 +100,24 @@ type NetConf struct {
 	// otherwise ignored.
 	Layer2AttachmentRef *Layer2AttachmentRef `json:"layer2AttachmentRef,omitempty"`
 
-	// SocketPath is the vhost-user unix socket path shared with the workload.
-	// Required when Transport is "vhostuser".
+	// SocketPath overrides the host-side vhost-user unix socket path that is
+	// otherwise derived from the device-plugin allocation. It never replaces the
+	// allocation itself: an attachment with no deviceID is rejected outright.
+	// Only meaningful for "vhostuser".
 	SocketPath string `json:"socketPath,omitempty"`
 
 	// SocketMode is the vhost-user socket mode from the workload's perspective
-	// ("client" or "server"). Required when Transport is "vhostuser". VSR
-	// inverts it when rendering the fpvhost virtual-port.
+	// ("client" or "server"). It is only a fallback: the device plugin's own
+	// device-info file states the mode it allocated and wins over this value.
+	// VSR inverts the resulting mode when rendering the fpvhost virtual-port.
 	SocketMode string `json:"socketMode,omitempty"`
+
+	// DeviceResource is the device-plugin resource the attachment is allocated
+	// from, i.e. the value of the NAD's k8s.v1.cni.cncf.io/resourceName
+	// annotation. It selects which of the two 6WIND socket trees holds the
+	// host-side and which the pod-side path; it does not allocate anything.
+	// Defaults to nc-k8s-plugin.6wind.com/virtio-user.
+	DeviceResource string `json:"deviceResource,omitempty"`
 
 	// AgentSocket overrides the unix socket the plugin uses to reach the
 	// node-local CRA agent (workloadcni.DefaultSocketPath when empty). The plugin
@@ -132,8 +148,29 @@ type NetConf struct {
 	// IPAM is the delegated IPAM configuration (e.g. host-local).
 	IPAM json.RawMessage `json:"ipam,omitempty"`
 
+	// DeviceID is the device-plugin-allocated device identifier, set directly by
+	// some runtimes (Multus also mirrors it into RuntimeConfig.DeviceID when the
+	// "deviceID" capability is enabled). Only meaningful for vhost-user.
+	DeviceID string `json:"deviceID,omitempty"`
+
+	// RuntimeConfig carries per-invocation values injected by the runtime when
+	// the matching capabilities are enabled in the NetworkAttachmentDefinition
+	// (deviceID, CNIDeviceInfoFile). Only meaningful for vhost-user.
+	RuntimeConfig RuntimeConfig `json:"runtimeConfig,omitempty"`
+
 	// PrevResult is populated by the runtime when chaining.
 	RawPrevResult map[string]interface{} `json:"prevResult,omitempty"`
+}
+
+// RuntimeConfig holds the runtime-injected capability values.
+type RuntimeConfig struct {
+	// DeviceID is the device-plugin-allocated device (from the "deviceID"
+	// capability).
+	DeviceID string `json:"deviceID,omitempty"`
+	// CNIDeviceInfoFile is the path the plugin writes the device info JSON to
+	// (from the "CNIDeviceInfoFile" capability), consumed downstream (e.g. the
+	// KubeVirt vhost-user hook sidecar).
+	CNIDeviceInfoFile string `json:"CNIDeviceInfoFile,omitempty"`
 }
 
 // LinkLocalGateways holds the on-link next-hop addresses for each family.
@@ -238,10 +275,14 @@ func parseConfig(stdin []byte) (*NetConf, error) {
 	if err := json.Unmarshal(stdin, conf); err != nil {
 		return nil, fmt.Errorf("failed to parse network configuration: %w", err)
 	}
+	// IPAM is required for the veth transport (the pod-side address is relayed
+	// to the guest). vhost-user addressing may be guest-side, so IPAM is
+	// optional there.
 	if len(conf.IPAM) == 0 {
-		return nil, fmt.Errorf("%q is required", "ipam")
-	}
-	if _, err := conf.ipamType(); err != nil {
+		if !conf.isVhostUser() {
+			return nil, fmt.Errorf("%q is required", "ipam")
+		}
+	} else if _, err := conf.ipamType(); err != nil {
 		return nil, err
 	}
 	if err := conf.validateModes(); err != nil {
@@ -289,15 +330,29 @@ func (c *NetConf) validateModes() error {
 		}
 	}
 
-	if c.isVhostUser() {
-		if c.SocketPath == "" {
-			return fmt.Errorf("socketPath is required when transport is %q", TransportVhostUser)
-		}
+	if c.isVhostUser() && c.SocketMode != "" {
+		// socketPath and socketMode are both optional: they are normally derived
+		// from the device-plugin allocation (see deviceplugin.go). A stated mode
+		// must still be one of the two valid values.
 		switch c.SocketMode {
 		case SocketModeClient, SocketModeServer:
 		default:
-			return fmt.Errorf("socketMode must be %q or %q when transport is %q", SocketModeClient, SocketModeServer, TransportVhostUser)
+			return fmt.Errorf("socketMode must be %q or %q when transport is %q",
+				SocketModeClient, SocketModeServer, TransportVhostUser)
 		}
 	}
+	if !c.isVhostUser() && (c.SocketPath != "" || c.SocketMode != "" || c.DeviceResource != "") {
+		return fmt.Errorf("socketPath, socketMode and deviceResource are only valid when transport is %q",
+			TransportVhostUser)
+	}
 	return nil
+}
+
+// socketMode returns the configured workload-side vhost-user socket mode or the
+// default. The device plugin's device-info file overrides it when present.
+func (c *NetConf) socketMode() string {
+	if c.SocketMode != "" {
+		return c.SocketMode
+	}
+	return defaultSocketMode
 }
