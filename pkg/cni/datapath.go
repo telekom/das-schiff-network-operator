@@ -91,13 +91,16 @@ func setupPodSide(conf *NetConf, args *skel.CmdArgs, craNetnsPath, portName stri
 			return fmt.Errorf("failed to set pod interface up: %w", uerr)
 		}
 
-		// KubeVirt bridge binding derives the guest gateway from a route on the
-		// pod interface (filterIPv4RoutesByInterface): it needs at least one
-		// route whose next-hop interface is this link and relays that next-hop
-		// to the guest as its gateway. Install on-link default routes via the
-		// CRA link-local gateways.
-		if rerr := installOnLinkDefaults(conf, podLink, result); rerr != nil {
-			return rerr
+		// In routed mode, KubeVirt bridge binding derives the guest gateway from
+		// a route on the pod interface (filterIPv4RoutesByInterface): it needs
+		// at least one route whose next-hop interface is this link and relays
+		// that next-hop to the guest as its gateway. Install on-link default
+		// routes via the CRA link-local gateways. In L2 mode the guest reaches
+		// its gateway over the shared L2 domain, so no on-link default is added.
+		if !conf.isL2() {
+			if rerr := installOnLinkDefaults(conf, podLink, result); rerr != nil {
+				return rerr
+			}
 		}
 
 		// Move the peer end into the CRA network namespace.
