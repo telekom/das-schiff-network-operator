@@ -1,3 +1,5 @@
+//go:build linux
+
 /*
 Copyright 2024.
 
@@ -16,7 +18,11 @@ limitations under the License.
 
 package cni
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/telekom/das-schiff-network-operator/pkg/workloadcni"
+)
 
 const validConf = `{
   "cniVersion": "1.0.0",
@@ -112,12 +118,12 @@ func TestGatewayOverride(t *testing.T) {
 }
 
 func TestParseConfigL2Mode(t *testing.T) {
-	// L2 mode needs a Layer2AttachmentRef and no VRF; gateways are not required.
+	// L2 mode needs a Layer2 reference and no VRF; gateways are not required and
+	// IPAM is optional (the workload is addressed inside the L2 domain).
 	conf := `{
 	  "cniVersion":"1.0.0","type":"cni-workload",
 	  "attachMode":"l2",
-	  "layer2AttachmentRef":{"name":"blue"},
-	  "ipam":{"type":"host-local"}
+	  "layer2AttachmentRef":{"name":"blue"}
 	}`
 	c, err := parseConfig([]byte(conf))
 	if err != nil {
@@ -134,14 +140,66 @@ func TestParseConfigL2Mode(t *testing.T) {
 	}
 }
 
+func TestParseConfigL2Trunk(t *testing.T) {
+	// A member without a vlan keeps the domain's own id (resolved by the agent),
+	// one with a vlan is translated to that workload-side id.
+	conf := `{
+	  "cniVersion":"1.0.0","type":"cni-workload",
+	  "attachMode":"l2",
+	  "layer2Trunk":[{"name":"green"},{"name":"red","vlan":200}],
+	  "ipam":{"type":"host-local"}
+	}`
+	c, err := parseConfig([]byte(conf))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if c.Layer2AttachmentRef != nil {
+		t.Errorf("Layer2AttachmentRef = %+v, want nil", c.Layer2AttachmentRef)
+	}
+	if len(c.Layer2Trunk) != 2 {
+		t.Fatalf("Layer2Trunk = %+v, want 2 members", c.Layer2Trunk)
+	}
+	if c.Layer2Trunk[0].Name != "green" || c.Layer2Trunk[0].VLAN != nil {
+		t.Errorf("member 0 = %+v, want green with an inherited vlan", c.Layer2Trunk[0])
+	}
+	if c.Layer2Trunk[1].VLAN == nil || *c.Layer2Trunk[1].VLAN != 200 {
+		t.Errorf("member 1 = %+v, want vlan 200", c.Layer2Trunk[1])
+	}
+}
+
+func TestParseConfigIPAMRequirement(t *testing.T) {
+	// IPAM is required for routed attachments, optional in L2 mode.
+	if _, err := parseConfig([]byte(
+		`{"cniVersion":"1.0.0","type":"cni-workload","vrf":"cluster"}`)); err == nil {
+		t.Error("expected an error for a routed attachment without ipam")
+	}
+	if _, err := parseConfig([]byte(
+		`{"cniVersion":"1.0.0","type":"cni-workload","attachMode":"l2","layer2Trunk":[{"name":"green"}]}`,
+	)); err != nil {
+		t.Errorf("unexpected error for a trunk without ipam: %v", err)
+	}
+}
+
 func TestParseConfigModeErrors(t *testing.T) {
 	tests := map[string]string{
 		"invalid attach mode":  `{"cniVersion":"1.0.0","type":"cni-workload","attachMode":"bogus","ipam":{"type":"host-local"}}`,
 		"invalid transport":    `{"cniVersion":"1.0.0","type":"cni-workload","transport":"bogus","ipam":{"type":"host-local"}}`,
 		"l2 without ref":       `{"cniVersion":"1.0.0","type":"cni-workload","attachMode":"l2","ipam":{"type":"host-local"}}`,
 		"l2 with vrf":          `{"cniVersion":"1.0.0","type":"cni-workload","attachMode":"l2","vrf":"cluster","layer2AttachmentRef":{"name":"blue"},"ipam":{"type":"host-local"}}`,
-		"vhostuser no socket":  `{"cniVersion":"1.0.0","type":"cni-workload","transport":"vhostuser","socketMode":"server","ipam":{"type":"host-local"}}`,
-		"vhostuser bad mode":   `{"cniVersion":"1.0.0","type":"cni-workload","transport":"vhostuser","socketPath":"/run/vhost.sock","socketMode":"bogus","ipam":{"type":"host-local"}}`,
+		"l2 ref without name":  `{"cniVersion":"1.0.0","type":"cni-workload","attachMode":"l2","layer2AttachmentRef":{},"ipam":{"type":"host-local"}}`,
+		"ref and trunk":        `{"cniVersion":"1.0.0","type":"cni-workload","attachMode":"l2","layer2AttachmentRef":{"name":"blue"},"layer2Trunk":[{"name":"green"}]}`,
+		"trunk without l2":     `{"cniVersion":"1.0.0","type":"cni-workload","layer2Trunk":[{"name":"green"}],"ipam":{"type":"host-local"}}`,
+		"ref without l2":       `{"cniVersion":"1.0.0","type":"cni-workload","layer2AttachmentRef":{"name":"blue"},"ipam":{"type":"host-local"}}`,
+		"trunk with vrf":       `{"cniVersion":"1.0.0","type":"cni-workload","attachMode":"l2","vrf":"cluster","layer2Trunk":[{"name":"green"}]}`,
+		"trunk member no name": `{"cniVersion":"1.0.0","type":"cni-workload","attachMode":"l2","layer2Trunk":[{"vlan":100}]}`,
+		"trunk vlan zero":      `{"cniVersion":"1.0.0","type":"cni-workload","attachMode":"l2","layer2Trunk":[{"name":"green","vlan":0}]}`,
+		"trunk vlan too high":  `{"cniVersion":"1.0.0","type":"cni-workload","attachMode":"l2","layer2Trunk":[{"name":"green","vlan":4095}]}`,
+		"trunk duplicate ref":  `{"cniVersion":"1.0.0","type":"cni-workload","attachMode":"l2","layer2Trunk":[{"name":"green"},{"name":"green","vlan":100}]}`,
+		"trunk duplicate vlan": `{"cniVersion":"1.0.0","type":"cni-workload","attachMode":"l2","layer2Trunk":[{"name":"green","vlan":100},{"name":"red","vlan":100}]}`,
+		"mtu too small":        `{"cniVersion":"1.0.0","type":"cni-workload","mtu":68,"ipam":{"type":"host-local"}}`,
+		"mtu too large":        `{"cniVersion":"1.0.0","type":"cni-workload","mtu":9217,"ipam":{"type":"host-local"}}`,
+		"vhostuser bad mode":   `{"cniVersion":"1.0.0","type":"cni-workload","transport":"vhostuser","socketMode":"bogus","ipam":{"type":"host-local"}}`,
+		"veth with socket":     `{"cniVersion":"1.0.0","type":"cni-workload","socketPath":"/run/vhost.sock","ipam":{"type":"host-local"}}`,
 	}
 	for name, conf := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -152,10 +210,29 @@ func TestParseConfigModeErrors(t *testing.T) {
 	}
 }
 
+// TestParseConfigMTU covers the requested MTU being the one the attachment is
+// sized with, and an unset one falling back to the shared default the agent
+// applies to a request that carries none.
+func TestParseConfigMTU(t *testing.T) {
+	conf, err := parseConfig([]byte(
+		`{"cniVersion":"1.0.0","type":"cni-workload","mtu":9000,"ipam":{"type":"host-local"}}`))
+	if err != nil {
+		t.Fatalf("parseConfig: %v", err)
+	}
+	if conf.mtu() != 9000 {
+		t.Errorf("mtu() = %d, want 9000", conf.mtu())
+	}
+	if defaultMTU != workloadcni.DefaultPortMTU {
+		t.Errorf("defaultMTU = %d, want the agent's %d", defaultMTU, workloadcni.DefaultPortMTU)
+	}
+}
+
 func TestParseConfigVhostUser(t *testing.T) {
+	// Neither socketPath nor socketMode is required: both are derived from the
+	// device-plugin allocation.
 	conf := `{
 	  "cniVersion":"1.0.0","type":"cni-workload","vrf":"cluster",
-	  "transport":"vhostuser","socketPath":"/run/vhost/net1.sock","socketMode":"server",
+	  "transport":"vhostuser","deviceID":"3f9a2b1c7d",
 	  "ipam":{"type":"host-local"}
 	}`
 	c, err := parseConfig([]byte(conf))
@@ -165,7 +242,10 @@ func TestParseConfigVhostUser(t *testing.T) {
 	if !c.isVhostUser() {
 		t.Errorf("isVhostUser() = false, want true")
 	}
-	if c.SocketMode != SocketModeServer {
-		t.Errorf("SocketMode = %q, want %q", c.SocketMode, SocketModeServer)
+	if c.deviceID() != "3f9a2b1c7d" {
+		t.Errorf("deviceID() = %q, want 3f9a2b1c7d", c.deviceID())
+	}
+	if c.socketMode() != SocketModeServer {
+		t.Errorf("socketMode() = %q, want %q", c.socketMode(), SocketModeServer)
 	}
 }

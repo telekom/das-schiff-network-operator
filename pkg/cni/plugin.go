@@ -41,13 +41,22 @@ func CmdAdd(args *skel.CmdArgs) error {
 		return err
 	}
 
+	// vhost-user is a fast-path socket transport (VSR-only): no veth, no
+	// CRA-side netns port move. It is handled entirely by the agent, so it does
+	// not need the CRA netns resolved.
+	if conf.isVhostUser() {
+		return cmdAddVhostUser(conf, args)
+	}
+
 	craNetnsPath, err := resolveCRANetnsPath(conf)
 	if err != nil {
 		return err
 	}
 
-	// Delegate address allocation to the configured IPAM plugin.
-	ipamResult, err := runIPAM(conf, args)
+	// Delegate address allocation to the configured IPAM plugin. IPAM is
+	// optional in the L2 attach mode, where the workload is addressed inside
+	// the shared L2 domain rather than by this plugin.
+	result, releaseIPAM, err := runOptionalIPAM(conf, args)
 	if err != nil {
 		return err
 	}
@@ -55,15 +64,11 @@ func CmdAdd(args *skel.CmdArgs) error {
 	success := false
 	defer func() {
 		if !success {
-			_ = ipam.ExecDel(ipamTypeOrEmpty(conf), args.StdinData)
+			releaseIPAM()
 		}
 	}()
 
-	result, err := current.NewResultFromResult(ipamResult)
-	if err != nil {
-		return fmt.Errorf("failed to convert IPAM result: %w", err)
-	}
-	if len(result.IPs) == 0 {
+	if len(result.IPs) == 0 && !conf.isL2() {
 		return fmt.Errorf("IPAM plugin returned no addresses")
 	}
 
@@ -100,7 +105,7 @@ func CmdAdd(args *skel.CmdArgs) error {
 	// Hand the attachment to the node-local CRA agent over gRPC. The agent
 	// programs the CRA-side datapath (netlink via frr-cra for FRR, NETCONF for
 	// VSR); the plugin itself is flavor-agnostic.
-	if err := notifyAgentAdd(conf, args, portName, gwV4, gwV6, result); err != nil {
+	if err := notifyAgentAdd(conf, args, portName, gwV4, gwV6, result, nil); err != nil {
 		return err
 	}
 	defer func() {
@@ -137,12 +142,18 @@ func CmdDel(args *skel.CmdArgs) error {
 		return err
 	}
 
+	if conf.isVhostUser() {
+		return cmdDelVhostUser(conf, args)
+	}
+
 	portName := portName(args.ContainerID, args.IfName)
 	var errs []error
 
-	// Release the IPAM allocation.
-	if err := ipam.ExecDel(ipamTypeOrEmpty(conf), args.StdinData); err != nil {
-		errs = append(errs, fmt.Errorf("failed to release IPAM allocation: %w", err))
+	// Release the IPAM allocation, if one was requested.
+	if len(conf.IPAM) != 0 {
+		if err := ipam.ExecDel(ipamTypeOrEmpty(conf), args.StdinData); err != nil {
+			errs = append(errs, fmt.Errorf("failed to release IPAM allocation: %w", err))
+		}
 	}
 
 	// Tell the node-local agent to drop the attachment. A stale NodeWorkloadPorts
@@ -171,8 +182,15 @@ func CmdDel(args *skel.CmdArgs) error {
 
 // CmdCheck implements the CNI CHECK command.
 func CmdCheck(args *skel.CmdArgs) error {
-	if _, err := parseConfig(args.StdinData); err != nil {
+	conf, err := parseConfig(args.StdinData)
+	if err != nil {
 		return err
+	}
+	// The vhost-user transport creates no pod-side netdev at all: the workload
+	// talks to a unix socket owned by the device plugin. There is nothing to
+	// look up in the pod netns, so checking for a link would always fail.
+	if conf.isVhostUser() {
+		return nil
 	}
 	if args.Netns == "" {
 		return nil
