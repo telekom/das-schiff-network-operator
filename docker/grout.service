@@ -1,0 +1,23 @@
+[Unit]
+Description=grout DPDK graph router
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+
+EnvironmentFile=/etc/default/grout
+
+# Test-mode (no hugepages) by default so the flavor runs on a plain node / in
+# the CRA netns without host DPDK tuning. For a production fast path drop the
+# `-t` (set ARGS in /etc/default/grout) once hugepages + vfio-pci are prepared.
+Restart=on-failure
+RestartSec=5
+
+ExecStart=/usr/local/bin/grout $ARGS
+ExecStartPost=/usr/local/bin/grout-wait-ready
+
+[Install]
+WantedBy=multi-user.target

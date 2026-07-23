@@ -45,7 +45,7 @@ help: ## Display this help.
 .PHONY: manifests
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
 	$(CONTROLLER_GEN) crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
-	$(CONTROLLER_GEN) rbac:roleName=manager-role paths="./controllers/operator/..." paths="./controllers/intent/..." paths="./controllers/platform/..." paths="./controllers/agent-cra-frr/..." paths="./controllers/agent-cra-vsr/..." paths="./controllers/agent-hbn-l2/..." paths="./controllers/agent-netplan/..." paths="./pkg/monitoring/..."
+	$(CONTROLLER_GEN) rbac:roleName=manager-role paths="./controllers/operator/..." paths="./controllers/intent/..." paths="./controllers/platform/..." paths="./controllers/agent-cra-frr/..." paths="./controllers/agent-cra-vsr/..." paths="./controllers/agent-cra-grout/..." paths="./controllers/agent-hbn-l2/..." paths="./controllers/agent-netplan/..." paths="./pkg/monitoring/..."
 	$(CONTROLLER_GEN) rbac:roleName=network-sync-role paths="./controllers/sync/..." output:rbac:artifacts:config=config/network-sync
 
 .PHONY: generate
@@ -140,6 +140,8 @@ docker-build: #test ## Build docker image with the manager.
 	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-network-operator.Dockerfile -t ${IMG_BASE}/das-schiff-network-operator:latest .
 	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-nwop-agent-cra-frr.Dockerfile -t ${IMG_BASE}/das-schiff-nwop-agent-cra-frr:latest .
 	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-nwop-agent-cra-vsr.Dockerfile -t ${IMG_BASE}/das-schiff-nwop-agent-cra-vsr:latest .
+	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-cra-grout.Dockerfile -t ${IMG_BASE}/das-schiff-cra-grout:latest .
+	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-nwop-agent-cra-grout.Dockerfile -t ${IMG_BASE}/das-schiff-nwop-agent-cra-grout:latest .
 	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-nwop-agent-hbn-l2.Dockerfile -t ${IMG_BASE}/das-schiff-nwop-agent-hbn-l2:latest .
 	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-nwop-agent-netplan.Dockerfile -t ${IMG_BASE}/das-schiff-nwop-agent-netplan:latest .
 	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-platform-coil.Dockerfile -t ${IMG_BASE}/das-schiff-platform-coil:latest .
@@ -161,6 +163,8 @@ kind-load: docker-build ## Load docker image into kind cluster.
 	kind load docker-image ${IMG_BASE}/das-schiff-network-operator:latest
 	kind load docker-image ${IMG_BASE}/das-schiff-nwop-agent-cra-frr:latest
 	kind load docker-image ${IMG_BASE}/das-schiff-nwop-agent-cra-vsr:latest
+	kind load docker-image ${IMG_BASE}/das-schiff-cra-grout:latest
+	kind load docker-image ${IMG_BASE}/das-schiff-nwop-agent-cra-grout:latest
 	kind load docker-image ${IMG_BASE}/das-schiff-nwop-agent-hbn-l2:latest
 	kind load docker-image ${IMG_BASE}/das-schiff-nwop-agent-netplan:latest
 	kind load docker-image ${IMG_BASE}/das-schiff-platform-coil:latest
@@ -223,6 +227,10 @@ E2E_TESTER_IMAGE ?= $(IMG_BASE)/das-schiff-e2e-tester:latest
 e2e-build-cra-frr: ## Build the CRA-FRR image.
 	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-cra-frr.Dockerfile -t das-schiff-cra-frr:latest .
 
+.PHONY: e2e-build-cra-grout
+e2e-build-cra-grout: ## Build the CRA-GROUT image (grout + FRR + grout-cra).
+	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-cra-grout.Dockerfile -t das-schiff-cra-grout:latest .
+
 .PHONY: e2e-build-node-image
 e2e-build-node-image: e2e-build-cra-frr ## Build kind node image with CRA-FRR baked in.
 	docker save das-schiff-cra-frr:latest -o e2e/images/kind-node/cra-frr.tar
@@ -233,12 +241,23 @@ e2e-build-node-image: e2e-build-cra-frr ## Build kind node image with CRA-FRR ba
 	  e2e/images/kind-node/
 	rm -f e2e/images/kind-node/cra-frr.tar
 
+.PHONY: e2e-build-node-image-grout
+e2e-build-node-image-grout: e2e-build-cra-grout ## Build kind node image with CRA-GROUT baked in.
+	docker save das-schiff-cra-grout:latest -o e2e/images/kind-node-grout/cra-grout.tar
+	docker build \
+	  --build-arg KIND_NODE_VERSION=$(KIND_NODE_VERSION) \
+	  -t $(E2E_NODE_IMAGE) \
+	  -f e2e/images/kind-node-grout/Dockerfile \
+	  .
+	rm -f e2e/images/kind-node-grout/cra-grout.tar
+
 .PHONY: e2e-up
-e2e-up: ## Stand up the full E2E lab (containerlab + CRA + kubeadm + components).
+e2e-up: ## Stand up the full E2E lab (containerlab + CRA + kubeadm + components). Set E2E_CRA_FLAVOR=grout for the grout DPDK fast path.
 	cd e2e/setup && \
 	  E2E_NODE_IMAGE=$(E2E_NODE_IMAGE) \
 	  E2E_NAT64_IMAGE=$(E2E_NAT64_IMAGE) \
 	  E2E_TESTER_IMAGE=$(E2E_TESTER_IMAGE) \
+	  E2E_CRA_FLAVOR=$${E2E_CRA_FLAVOR:-frr} \
 	  E2E_SKIP_BUILD=$${E2E_SKIP_BUILD:-} \
 	  E2E_IMAGE_DIR=$${E2E_IMAGE_DIR:-} \
 	  go run ./cmd up

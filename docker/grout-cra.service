@@ -1,0 +1,20 @@
+[Unit]
+Description=grout CRA sidecar (grcli + FRR apply over mTLS)
+After=network.target grout.service
+Wants=network.target
+Requires=grout.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+
+EnvironmentFile=/etc/default/grout-cra
+
+Restart=on-failure
+RestartSec=10
+
+ExecStart=/usr/local/bin/grout-cra $ARGS
+
+[Install]
+WantedBy=multi-user.target
