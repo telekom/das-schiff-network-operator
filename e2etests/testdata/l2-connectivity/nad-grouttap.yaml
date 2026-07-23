@@ -1,0 +1,36 @@
+# NetworkAttachmentDefinition for grout net_tap L2 attach on VLAN 501 (m2m VRF).
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: grouttap-l2-vlan501
+  namespace: e2e-test
+  annotations:
+    k8s.v1.cni.cncf.io/resourceName: ""
+spec:
+  config: |
+    {
+      "cniVersion": "1.0.0",
+      "name": "grouttap-l2-vlan501",
+      "plugins": [
+        {
+          "type": "cni-routed",
+          "craNetns": "auto",
+          "trunkInterface": "hbn",
+          "transport": "grouttap",
+          "attachMode": "l2",
+          "layer2AttachmentRef": {
+            "name": "l2a-base-vlan501",
+            "namespace": "default"
+          },
+          "ipam": {
+            "type": "static"
+          }
+        },
+        {
+          "type": "tuning",
+          "sysctl": {
+            "net.ipv6.conf.IFNAME.accept_dad": "0"
+          }
+        }
+      ]
+    }
