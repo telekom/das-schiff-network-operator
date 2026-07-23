@@ -169,3 +169,55 @@ func TestParseConfigVhostUser(t *testing.T) {
 		t.Errorf("SocketMode = %q, want %q", c.SocketMode, SocketModeServer)
 	}
 }
+
+func TestParseConfigGroutTap(t *testing.T) {
+	// The grout tap transport is a routed attachment programmed by the grout
+	// fast path: it needs no socket, and behaves like a routed veth attach.
+	conf := `{
+	  "cniVersion":"1.0.0","type":"cni-routed","vrf":"cluster",
+	  "transport":"grouttap",
+	  "ipam":{"type":"host-local"}
+	}`
+	c, err := parseConfig([]byte(conf))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !c.isGroutTap() {
+		t.Errorf("isGroutTap() = false, want true")
+	}
+	if c.isVhostUser() {
+		t.Errorf("isVhostUser() = true, want false")
+	}
+	if c.isL2() {
+		t.Errorf("isL2() = true, want false")
+	}
+}
+
+func TestParseConfigGroutTapL2(t *testing.T) {
+	// grouttap may also be used for an L2 (bridge-slave) attach.
+	conf := `{
+	  "cniVersion":"1.0.0","type":"cni-routed",
+	  "transport":"grouttap","attachMode":"l2",
+	  "layer2AttachmentRef":{"name":"blue","namespace":"tenant-a"},
+	  "ipam":{"type":"host-local"}
+	}`
+	c, err := parseConfig([]byte(conf))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !c.isGroutTap() || !c.isL2() {
+		t.Errorf("isGroutTap()=%v isL2()=%v, want both true", c.isGroutTap(), c.isL2())
+	}
+}
+
+func TestParseConfigInvalidTransport(t *testing.T) {
+	// An unknown transport must be rejected by validateModes at parse time.
+	conf := `{
+	  "cniVersion":"1.0.0","type":"cni-routed","vrf":"cluster",
+	  "transport":"memif",
+	  "ipam":{"type":"host-local"}
+	}`
+	if _, err := parseConfig([]byte(conf)); err == nil {
+		t.Fatalf("expected error for invalid transport, got nil")
+	}
+}

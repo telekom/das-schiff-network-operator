@@ -43,8 +43,11 @@ message RoutedPort {
   // host_routes are the workload host addresses (/32, /128) reachable via the
   // interface.
   repeated string host_routes = 4;
-  // transport selects the datapath wiring: "veth" (default) or "vhostuser".
-  // vhost-user is VSR-only (fpvhost fast-path virtual-port).
+  // transport selects the datapath wiring: "veth" (default), "vhostuser", or
+  // "grouttap". vhost-user is VSR/grout VM attach (fpvhost / net_vhost).
+  // "grouttap" (grout flavor) means the fast path creates a net_tap in the CRA
+  // netns which the CNI moves into the pod netns instead of creating a veth; it
+  // is persisted as the veth/net_tap transport.
   string transport = 5;
   // socket_path is the vhost-user unix socket path (transport=vhostuser only).
   string socket_path = 6;
@@ -75,7 +78,14 @@ message AddRequest {
   Layer2AttachmentRef layer2_attachment_ref = 6;
 }
 
-message AddResponse {}
+message AddResponse {
+  // tap_name is the kernel netdev name of the CRA-side port for this attachment
+  // (equals RoutedPort.interface). For the grout flavor the fast path creates a
+  // net_tap with this name in the CRA netns; the CNI waits for it to appear and
+  // moves it into the pod netns (the grout-tap handoff). For veth flavors the
+  // CNI already created the port, so this is purely informational.
+  string tap_name = 1;
+}
 
 message DelRequest {
   string container_id = 1;

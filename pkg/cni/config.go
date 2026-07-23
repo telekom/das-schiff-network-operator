@@ -56,6 +56,11 @@ const (
 	// rendered by VSR as an fpvhost fast-path virtual-port. It is VSR-only; the
 	// FRR agent rejects it.
 	TransportVhostUser = "vhostuser"
+	// TransportGroutTap is the grout-flavor transport: the CRA fast path (grout)
+	// creates a net_tap in the CRA netns and the CNI waits for it to appear and
+	// moves it into the pod netns, instead of creating a veth pair. Grout cannot
+	// adopt a moved-in kernel veth, so the tap-move replaces the veth datapath.
+	TransportGroutTap = "grouttap"
 
 	// SocketModeClient / SocketModeServer are the vhost-user socket modes from
 	// the workload's perspective. VSR inverts them when rendering fpvhost.
@@ -85,8 +90,11 @@ type NetConf struct {
 	// Transport selects the CRA-side wiring:
 	//   - "veth" (default): a veth pair whose CRA-side end is moved into the CRA
 	//     netns.
-	//   - "vhostuser": a DPDK/virtio-user vhost-user socket (VSR-only, rendered
-	//     as an fpvhost fast-path virtual-port).
+	//   - "vhostuser": a DPDK/virtio-user vhost-user socket (VSR/grout VM attach,
+	//     rendered as an fpvhost / net_vhost fast-path virtual-port).
+	//   - "grouttap": the grout fast path creates a net_tap in the CRA netns and
+	//     the CNI moves it into the pod netns (grout cannot adopt a moved-in
+	//     kernel veth).
 	Transport string `json:"transport,omitempty"`
 
 	// Layer2AttachmentRef identifies the Layer2Attachment whose bridge the port
@@ -197,6 +205,12 @@ func (c *NetConf) isVhostUser() bool {
 	return c.transport() == TransportVhostUser
 }
 
+// isGroutTap reports whether the CRA-side transport is the grout net_tap handoff
+// (the grout flavor moves a grout-created tap into the pod instead of a veth).
+func (c *NetConf) isGroutTap() bool {
+	return c.transport() == TransportGroutTap
+}
+
 // mtu returns the configured MTU or the default.
 func (c *NetConf) mtu() int {
 	if c.MTU > 0 {
@@ -294,9 +308,9 @@ func (c *NetConf) validateModes() error {
 		return fmt.Errorf("invalid attachMode %q (want %q or %q)", c.AttachMode, AttachModeRouted, AttachModeL2)
 	}
 	switch c.transport() {
-	case TransportVeth, TransportVhostUser:
+	case TransportVeth, TransportVhostUser, TransportGroutTap:
 	default:
-		return fmt.Errorf("invalid transport %q (want %q or %q)", c.Transport, TransportVeth, TransportVhostUser)
+		return fmt.Errorf("invalid transport %q (want %q, %q or %q)", c.Transport, TransportVeth, TransportVhostUser, TransportGroutTap)
 	}
 
 	if c.isL2() {

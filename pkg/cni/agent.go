@@ -37,12 +37,14 @@ import (
 const agentCallTimeout = 10 * time.Second
 
 // notifyAgentAdd hands the attachment to the node-local CRA agent so it can
-// render the CRA-side datapath (netlink via frr-cra for FRR, NETCONF for VSR).
-// The plugin is flavor-agnostic; the agent decides how to program it. Routed and
-// L2 attach modes differ in the request payload: routed carries VRF + on-link
-// gateways + host routes, while L2 carries only the Layer2AttachmentRef (the
-// agent enslaves the port to the matching bridge).
-func notifyAgentAdd(conf *NetConf, args *skel.CmdArgs, portName string, gwV4, gwV6 net.IP, result *current.Result) error {
+// render the CRA-side datapath (netlink via frr-cra for FRR, NETCONF for VSR,
+// grcli net_tap for grout). The plugin is flavor-agnostic; the agent decides how
+// to program it. Routed and L2 attach modes differ in the request payload:
+// routed carries VRF + on-link gateways + host routes, while L2 carries only the
+// Layer2AttachmentRef (the agent enslaves the port to the matching bridge). It
+// returns the agent-reported tap name (the CRA-side netdev the grout flavor
+// waits for; echoed for veth flavors).
+func notifyAgentAdd(conf *NetConf, args *skel.CmdArgs, portName string, gwV4, gwV6 net.IP, result *current.Result) (string, error) {
 	podNs, name := podIdentity(args.Args)
 	port := &pb.RoutedPort{
 		Interface:  portName,
@@ -71,10 +73,11 @@ func notifyAgentAdd(conf *NetConf, args *skel.CmdArgs, portName string, gwV4, gw
 
 	ctx, cancel := context.WithTimeout(context.Background(), agentCallTimeout)
 	defer cancel()
-	if err := routedcni.Add(ctx, conf.AgentSocket, req); err != nil {
-		return fmt.Errorf("notifying agent of attach add: %w", err)
+	resp, err := routedcni.Add(ctx, conf.AgentSocket, req)
+	if err != nil {
+		return "", fmt.Errorf("notifying agent of attach add: %w", err)
 	}
-	return nil
+	return resp.GetTapName(), nil
 }
 
 // notifyAgentDel tells the node-local CRA agent to drop the routed attachment.

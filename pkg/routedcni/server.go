@@ -124,7 +124,9 @@ func (s *Server) Add(ctx context.Context, req *pb.AddRequest) (*pb.AddResponse, 
 	}
 	s.log.Info("recorded routed port", "container", entry.ContainerID, "interface", entry.Interface,
 		"vrf", entry.VRF, "transport", entry.Transport, "l2a", layer2AttachmentRefLog(entry.Layer2AttachmentRef))
-	return &pb.AddResponse{}, nil
+	// tap_name lets the grout-flavor CNI know which net_tap to wait for in the
+	// CRA netns and move into the pod. It equals the persisted interface name.
+	return &pb.AddResponse{TapName: entry.Interface}, nil
 }
 
 // portTransportFromPB maps the wire transport string to the API enum, defaulting
