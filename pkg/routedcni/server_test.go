@@ -30,6 +30,9 @@ import (
 	"github.com/telekom/das-schiff-network-operator/pkg/routedcni/pb"
 )
 
+// testPortIface is the CRA-side interface/tap name used across the Add/Del tests.
+const testPortIface = "port-cid-1"
+
 func newFakeClient(t *testing.T) client.Client {
 	t.Helper()
 	scheme := runtime.NewScheme()
@@ -59,21 +62,25 @@ func TestServerAddCreatesAndUpserts(t *testing.T) {
 		ContainerId:  "cid-1",
 		Vrf:          "",
 		Port: &pb.RoutedPort{
-			Interface:  "port-cid-1",
+			Interface:  testPortIface,
 			GatewayV4:  "169.254.1.1/32",
 			GatewayV6:  "fe80::1/128",
 			HostRoutes: []string{"10.201.0.10/32", "fd00:201::10/128"},
 		},
 	}
-	if _, err := s.Add(ctx, addReq); err != nil {
+	resp, err := s.Add(ctx, addReq)
+	if err != nil {
 		t.Fatalf("Add: %v", err)
+	}
+	if resp.GetTapName() != testPortIface {
+		t.Fatalf("Add returned TapName %q, want %q (the grout flavor waits for this tap)", resp.GetTapName(), testPortIface)
 	}
 
 	nrp := getNRP(t, c, "node-1")
 	if len(nrp.Spec.Ports) != 1 {
 		t.Fatalf("expected 1 port after add, got %d", len(nrp.Spec.Ports))
 	}
-	if nrp.Spec.Ports[0].Interface != "port-cid-1" {
+	if nrp.Spec.Ports[0].Interface != testPortIface {
 		t.Fatalf("unexpected interface %q", nrp.Spec.Ports[0].Interface)
 	}
 
@@ -94,12 +101,12 @@ func TestServerDelRemoves(t *testing.T) {
 
 	if _, err := s.Add(ctx, &pb.AddRequest{
 		ContainerId: "cid-1",
-		Port:        &pb.RoutedPort{Interface: "port-cid-1"},
+		Port:        &pb.RoutedPort{Interface: testPortIface},
 	}); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
 
-	if _, err := s.Del(ctx, &pb.DelRequest{ContainerId: "cid-1", Interface: "port-cid-1"}); err != nil {
+	if _, err := s.Del(ctx, &pb.DelRequest{ContainerId: "cid-1", Interface: testPortIface}); err != nil {
 		t.Fatalf("Del: %v", err)
 	}
 	nrp := getNRP(t, c, "node-1")
@@ -146,7 +153,7 @@ func TestNodeSourceReadsEntries(t *testing.T) {
 	s := NewServer(c, "node-1", logr.Discard())
 	if _, err := s.Add(ctx, &pb.AddRequest{
 		ContainerId: "cid-1",
-		Port:        &pb.RoutedPort{Interface: "port-cid-1"},
+		Port:        &pb.RoutedPort{Interface: testPortIface},
 	}); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
@@ -155,7 +162,29 @@ func TestNodeSourceReadsEntries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RoutedPorts: %v", err)
 	}
-	if len(entries) != 1 || entries[0].Interface != "port-cid-1" {
+	if len(entries) != 1 || entries[0].Interface != testPortIface {
 		t.Fatalf("unexpected entries %+v", entries)
+	}
+}
+
+// TestPortTransportFromPB locks the wire-transport -> API-enum mapping the CRA
+// renderers depend on. In particular the grout flavor's "grouttap" transport
+// must map to the veth enum: for an L2 attach the grout renderer emits the port
+// as a net_tap enslaved to the L2VNI bridge (AddTapPortToBridge), exactly like a
+// veth attach. Only "vhostuser" maps to the vhost-user enum.
+func TestPortTransportFromPB(t *testing.T) {
+	cases := []struct {
+		in   string
+		want v1alpha1.PortTransport
+	}{
+		{"grouttap", v1alpha1.PortTransportVeth},
+		{"veth", v1alpha1.PortTransportVeth},
+		{"", v1alpha1.PortTransportVeth},
+		{"vhostuser", v1alpha1.PortTransportVhostUser},
+	}
+	for _, tc := range cases {
+		if got := portTransportFromPB(tc.in); got != tc.want {
+			t.Errorf("portTransportFromPB(%q) = %q, want %q", tc.in, got, tc.want)
+		}
 	}
 }

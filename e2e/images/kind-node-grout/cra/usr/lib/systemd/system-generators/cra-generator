@@ -1,0 +1,85 @@
+#!/bin/bash
+# systemd generator for CRA service (grout flavour, nerdctl runtime).
+#
+# grout overlay: this REPLACES the das-schiff e2e nspawn-only cra-generator
+# (which only understands flavour=frr). It is modelled on the vSR overlay
+# cra-generator: grout, like vSR, runs as a CONTAINER (DPDK graph router) rather
+# than a systemd-nspawn machine, so the lifecycle is driven by the
+# cra-setup-network.sh / cra-start.sh / cra-stop.sh / cra-cleanup-network.sh
+# scripts wired as the cra.service Exec* hooks.
+#
+# Reads /etc/cra/interfaces + /etc/cra/flavour and emits cra.service. For
+# flavour=grout it launches the grout container via nerdctl in the pre-created
+# "cra" network namespace (see cra-start.sh / cra-setup-network.sh).
+
+set -euo pipefail
+
+GENERATOR_DIR="$1"
+INTERFACES_FILE="/etc/cra/interfaces"
+FLAVOUR_FILE="/etc/cra/flavour"
+
+# Exit early if no interfaces file exists (fabric uplinks not attached yet).
+if [[ ! -f "$INTERFACES_FILE" ]]; then
+    exit 0
+fi
+
+# Read flavour (default to grout for this overlay).
+FLAVOUR="grout"
+if [[ -f "$FLAVOUR_FILE" ]]; then
+    FLAVOUR=$(cat "$FLAVOUR_FILE" | tr -d '[:space:]')
+fi
+
+# Read interfaces and check if we have any.
+mapfile -t INTERFACES < <(grep -v '^#' "$INTERFACES_FILE" | grep -v '^[[:space:]]*$' || true)
+
+if [[ ${#INTERFACES[@]} -eq 0 ]]; then
+    exit 0
+fi
+
+if [[ "$FLAVOUR" == "grout" ]]; then
+    # grout flavour using nerdctl (memory/extra-args overridable via
+    # `systemctl edit cra.service`). TimeoutStartSec is generous because grout's
+    # first DPDK EAL init + hugepage mapping can be slow on a cold node.
+    cat > "$GENERATOR_DIR/cra.service" <<'EOF'
+[Unit]
+Description=CRA Container Service (grout)
+Documentation=man:cra(8)
+After=network-pre.target sys-devices-virtual-net.device
+Before=network.target
+Wants=network-pre.target
+ConditionPathExists=/etc/cra/interfaces
+
+[Service]
+Type=forking
+RemainAfterExit=yes
+Environment="CRA_MEMORY=2048m"
+Environment="CRA_EXTRA_ARGS="
+ExecStartPre=/usr/libexec/cra/cra-setup-network.sh
+ExecStart=/usr/libexec/cra/cra-start.sh
+ExecStop=/usr/libexec/cra/cra-stop.sh
+ExecStopPost=/usr/libexec/cra/cra-cleanup-network.sh
+TimeoutStartSec=180
+TimeoutStopSec=30
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # Drop-in: wait for the fabric interfaces to appear (containerlab veths in
+    # the lab; the underlay NICs' netdevs on real hardware).
+    mkdir -p "$GENERATOR_DIR/cra.service.d"
+    AFTER_DEVICES=""
+    for iface in "${INTERFACES[@]}"; do
+        escaped_iface=$(systemd-escape -p "$iface")
+        AFTER_DEVICES+="sys-subsystem-net-devices-${escaped_iface}.device "
+    done
+    cat > "$GENERATOR_DIR/cra.service.d/devices.conf" <<EOF
+[Unit]
+After=$AFTER_DEVICES
+Wants=$AFTER_DEVICES
+EOF
+fi
+
+exit 0

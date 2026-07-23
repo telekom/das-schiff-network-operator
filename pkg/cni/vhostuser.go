@@ -102,10 +102,11 @@ func cmdAddVhostUser(conf *NetConf, args *skel.CmdArgs) error {
 		return err
 	}
 
-	// Hand the attachment to the node-local agent (VSR renders fpvhost). The
-	// request carries transport=vhostuser plus the socket path/mode, so the
-	// agent knows to create an fpvhost virtual-port rather than a veth port.
-	if err := notifyAgentAdd(conf, args, port, gwV4, gwV6, result); err != nil {
+	// Hand the attachment to the node-local agent (VSR/grout render the vhost
+	// port). The request carries transport=vhostuser plus the socket path/mode,
+	// so the agent knows to create an fpvhost / net_vhost virtual-port rather
+	// than a veth/tap port.
+	if _, err := notifyAgentAdd(conf, args, port, gwV4, gwV6, result); err != nil {
 		_ = removeDeviceInfo(conf)
 		return err
 	}

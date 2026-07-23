@@ -48,8 +48,11 @@ type RoutedPort struct {
 	// host_routes are the workload host addresses (/32, /128) reachable via the
 	// interface.
 	HostRoutes []string `protobuf:"bytes,4,rep,name=host_routes,json=hostRoutes,proto3" json:"host_routes,omitempty"`
-	// transport selects the datapath wiring: "veth" (default) or "vhostuser".
-	// vhost-user is VSR-only (fpvhost fast-path virtual-port).
+	// transport selects the datapath wiring: "veth" (default), "vhostuser", or
+	// "grouttap". vhost-user is VSR/grout VM attach (fpvhost / net_vhost).
+	// "grouttap" (grout flavor) means the fast path creates a net_tap in the CRA
+	// netns which the CNI moves into the pod netns instead of creating a veth; it
+	// is persisted as the veth/net_tap transport.
 	Transport string `protobuf:"bytes,5,opt,name=transport,proto3" json:"transport,omitempty"`
 	// socket_path is the vhost-user unix socket path (transport=vhostuser only).
 	SocketPath string `protobuf:"bytes,6,opt,name=socket_path,json=socketPath,proto3" json:"socket_path,omitempty"`
@@ -284,7 +287,13 @@ func (x *AddRequest) GetLayer2AttachmentRef() *Layer2AttachmentRef {
 }
 
 type AddResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// tap_name is the kernel netdev name of the CRA-side port for this attachment
+	// (equals RoutedPort.interface). For the grout flavor the fast path creates a
+	// net_tap with this name in the CRA netns; the CNI waits for it to appear and
+	// moves it into the pod netns (the grout-tap handoff). For veth flavors the
+	// CNI already created the port, so this is purely informational.
+	TapName       string `protobuf:"bytes,1,opt,name=tap_name,json=tapName,proto3" json:"tap_name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -317,6 +326,13 @@ func (x *AddResponse) ProtoReflect() protoreflect.Message {
 // Deprecated: Use AddResponse.ProtoReflect.Descriptor instead.
 func (*AddResponse) Descriptor() ([]byte, []int) {
 	return file_routedcni_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *AddResponse) GetTapName() string {
+	if x != nil {
+		return x.TapName
+	}
+	return ""
 }
 
 type DelRequest struct {
@@ -437,8 +453,9 @@ const file_routedcni_proto_rawDesc = "" +
 	"\fcontainer_id\x18\x03 \x01(\tR\vcontainerId\x12\x10\n" +
 	"\x03vrf\x18\x04 \x01(\tR\x03vrf\x12,\n" +
 	"\x04port\x18\x05 \x01(\v2\x18.routedcni.v1.RoutedPortR\x04port\x12U\n" +
-	"\x15layer2_attachment_ref\x18\x06 \x01(\v2!.routedcni.v1.Layer2AttachmentRefR\x13layer2AttachmentRef\"\r\n" +
-	"\vAddResponse\"M\n" +
+	"\x15layer2_attachment_ref\x18\x06 \x01(\v2!.routedcni.v1.Layer2AttachmentRefR\x13layer2AttachmentRef\"(\n" +
+	"\vAddResponse\x12\x19\n" +
+	"\btap_name\x18\x01 \x01(\tR\atapName\"M\n" +
 	"\n" +
 	"DelRequest\x12!\n" +
 	"\fcontainer_id\x18\x01 \x01(\tR\vcontainerId\x12\x1c\n" +

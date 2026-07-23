@@ -62,8 +62,17 @@ func generateNodeConfig(genDir, tplDir string, node Node, clusterVNI int, cluste
 	if err := os.WriteFile(filepath.Join(nodeDir, "cra/interfaces"), []byte("eth1\neth2\n"), 0o644); err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(nodeDir, "cra/flavour"), []byte("frr\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(nodeDir, "cra/flavour"), []byte(craFlavor()+"\n"), 0o644); err != nil {
 		return err
+	}
+	// grout: the CRA runs as a nerdctl container in namespace "hbr"; its image
+	// ref (baked into the node image's containerd store at build time) is read
+	// by cra-start.sh from /etc/cra/image. The harness regenerates /etc/cra on
+	// each deploy, so it must (re)write this file for the grout flavour.
+	if isGrout() {
+		if err := os.WriteFile(filepath.Join(nodeDir, "cra/image"), []byte("das-schiff-cra-grout:latest\n"), 0o644); err != nil {
+			return err
+		}
 	}
 
 	data := templateData{
@@ -103,8 +112,13 @@ func generateNodeConfig(genDir, tplDir string, node Node, clusterVNI int, cluste
 		}
 	}
 
-	// CRA-side systemd-networkd drop-in: routes for node IPs via hbn
-	hbnRoutes := fmt.Sprintf(`[Route]
+	// CRA-side systemd-networkd drop-in: routes for node IPs via hbn.
+	// FRR only: the FRR sidecar is reached over the `hbn` veth. The grout flavour
+	// uses a dedicated `cra-mgmt` veth (created by cra-setup-network.sh) for the
+	// agent<->sidecar path and its `hbn` is a DPDK data net_tap, so these
+	// hbn-based mgmt drop-ins/netplan do not apply.
+	if !isGrout() {
+		hbnRoutes := fmt.Sprintf(`[Route]
 Destination=%s/32
 Gateway=fd00:7:caa5::1
 
@@ -112,25 +126,26 @@ Gateway=fd00:7:caa5::1
 Destination=%s/128
 Gateway=fd00:7:caa5::1
 `, node.IPv4, node.IPv6)
-	if err := os.WriteFile(
-		filepath.Join(nodeDir, "cra/systemd-network/10-netplan-hbn.network.d/systemd-hbn-routes.conf"),
-		[]byte(hbnRoutes), 0o644,
-	); err != nil {
-		return err
-	}
+		if err := os.WriteFile(
+			filepath.Join(nodeDir, "cra/systemd-network/10-netplan-hbn.network.d/systemd-hbn-routes.conf"),
+			[]byte(hbnRoutes), 0o644,
+		); err != nil {
+			return err
+		}
 
-	// Host-side systemd-networkd drop-in: IPv4 default via IPv6 next-hop (cross-family / RFC 5549).
-	// Netplan can't express cross-family routes, so we add the IPv4 default via a networkd drop-in.
-	hostHbnRoutes := fmt.Sprintf(`[Route]
+		// Host-side systemd-networkd drop-in: IPv4 default via IPv6 next-hop (cross-family / RFC 5549).
+		// Netplan can't express cross-family routes, so we add the IPv4 default via a networkd drop-in.
+		hostHbnRoutes := fmt.Sprintf(`[Route]
 Destination=0.0.0.0/0
 Gateway=fd00:7:caa5::
 Source=%s
 `, node.IPv4)
-	if err := os.WriteFile(
-		filepath.Join(nodeDir, "systemd-network/10-netplan-hbn.network.d/ipv4-default-route.conf"),
-		[]byte(hostHbnRoutes), 0o644,
-	); err != nil {
-		return err
+		if err := os.WriteFile(
+			filepath.Join(nodeDir, "systemd-network/10-netplan-hbn.network.d/ipv4-default-route.conf"),
+			[]byte(hostHbnRoutes), 0o644,
+		); err != nil {
+			return err
+		}
 	}
 
 	// Node identity env file
@@ -138,6 +153,14 @@ Source=%s
 		node.IPv4, node.IPv6, node.VtepIP, node.Hostname)
 	if err := os.WriteFile(filepath.Join(nodeDir, "node-identity.env"), []byte(identity), 0o644); err != nil {
 		return err
+	}
+
+	// grout: the host-side `hbn` is a grout net_tap that only appears once grout
+	// is up (moved to the host by cra-start.sh), so there is no boot-time netplan
+	// for it — cra-start.sh brings it up as the pure data/VLAN trunk, and the
+	// agent<->sidecar management addresses live on the `cra-mgmt` veth.
+	if isGrout() {
+		return nil
 	}
 
 	// Host-side netplan config for hbn trunk interface.

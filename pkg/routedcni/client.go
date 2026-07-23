@@ -42,18 +42,21 @@ func dial(socketPath string) (*grpc.ClientConn, error) {
 	return conn, nil
 }
 
-// Add calls the node-local agent to record a routed attachment (CNI ADD).
-func Add(ctx context.Context, socketPath string, req *pb.AddRequest) error {
+// Add calls the node-local agent to record a routed attachment (CNI ADD). It
+// returns the agent's response, whose tap_name tells the grout-flavor CNI which
+// net_tap to wait for in the CRA netns and move into the pod.
+func Add(ctx context.Context, socketPath string, req *pb.AddRequest) (*pb.AddResponse, error) {
 	conn, err := dial(socketPath)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer conn.Close()
 
-	if _, err := pb.NewRoutedCNIClient(conn).Add(ctx, req); err != nil {
-		return fmt.Errorf("routed-cni Add: %w", err)
+	resp, err := pb.NewRoutedCNIClient(conn).Add(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("routed-cni Add: %w", err)
 	}
-	return nil
+	return resp, nil
 }
 
 // Del calls the node-local agent to remove a routed attachment (CNI DEL).

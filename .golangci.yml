@@ -206,6 +206,8 @@ linters:
         text: 'package-directory-mismatch:'
       - path: pkg/cra-vsr/
         text: 'package-directory-mismatch:'
+      - path: pkg/cra-grout/
+        text: 'package-directory-mismatch:'
       # Exclude enforce-switch-style for existing code
       - linters:
           - revive

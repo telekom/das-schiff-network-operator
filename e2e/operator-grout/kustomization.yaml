@@ -1,0 +1,22 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: kube-system
+namePrefix: network-operator-
+# grout-flavor E2E operator overlay: identical to e2e/operator but deploys the
+# agent-cra-grout DaemonSet instead of agent-cra-frr, so the intent suite runs
+# against the grout DPDK fast path. Shared patch/rbac files are reused from
+# ../operator to avoid drift.
+resources:
+- ../../config/crd
+- ../../config/rbac
+- ../../config/cert
+- ../../config/operator
+- ../../config/agent-cra-grout
+- ../../config/agent-netplan
+- ../../config/healthcheck
+- ../../config/platform-coil
+- ../../config/platform-metallb
+- ../../config/webhook
+- ../operator/intent_rbac.yaml
+patches:
+- path: ../operator/manager_webhook_patch.yaml

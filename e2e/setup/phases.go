@@ -61,36 +61,42 @@ func phaseBuildAllImages(repoRoot string) error {
 
 	ldflags := getLDFlags(repoRoot)
 
-	// 1. Build cra-frr image
-	Logf("  Building das-schiff-cra-frr...")
+	logFlavor()
+
+	// 1. Build the CRA image for the selected flavor (cra-frr or cra-grout).
+	craImage := craImageName()
+	Logf("  Building %s...", craImage)
 	if err := RunCmd("docker", "build",
 		"--build-arg", "ldflags="+ldflags,
-		"-f", filepath.Join(repoRoot, "das-schiff-cra-frr.Dockerfile"),
-		"-t", "das-schiff-cra-frr:latest",
+		"-f", filepath.Join(repoRoot, craDockerfile()),
+		"-t", craImage,
 		repoRoot,
 	); err != nil {
-		return fmt.Errorf("building cra-frr: %w", err)
+		return fmt.Errorf("building CRA image %s: %w", craImage, err)
 	}
 
-	// 2. Export cra-frr and build kind node image (with cra-frr baked in)
-	craFRRTar := filepath.Join(repoRoot, "e2e", "images", "kind-node", "cra-frr.tar")
-	Logf("  Exporting cra-frr tar...")
-	if err := RunCmd("docker", "save", "-o", craFRRTar, "das-schiff-cra-frr:latest"); err != nil {
-		return fmt.Errorf("saving cra-frr tar: %w", err)
+	// 2. Export the CRA image and build the kind node image (with the CRA image
+	// baked in).
+	kindNodeCtx, craTar := kindNodeContext(repoRoot)
+	Logf("  Exporting CRA image to %s...", filepath.Base(craTar))
+	if err := RunCmd("docker", "save", "-o", craTar, craImage); err != nil {
+		return fmt.Errorf("saving CRA image tar: %w", err)
 	}
 
 	Logf("  Building kind node image (%s)...", nodeImage)
-	kindNodeCtx := filepath.Join(repoRoot, "e2e", "images", "kind-node")
 	if err := RunCmd("docker", "build",
 		"--build-arg", "KIND_NODE_VERSION="+kindNodeVersion,
 		"-t", nodeImage,
-		"-f", filepath.Join(kindNodeCtx, "Dockerfile"),
-		kindNodeCtx,
+		"-f", kindNodeDockerfile(repoRoot),
+		// The grout node Dockerfile builds from the repo root (it COPYs the
+		// shared kind-node host tooling); the cra-frr node builds from its own
+		// context.
+		kindNodeBuildContext(repoRoot, kindNodeCtx),
 	); err != nil {
-		os.Remove(craFRRTar)
+		os.Remove(craTar)
 		return fmt.Errorf("building kind-node: %w", err)
 	}
-	os.Remove(craFRRTar)
+	os.Remove(craTar)
 
 	// 3. Build operator + agent + platform images
 	Logf("  Building operator + agent + platform images...")
@@ -105,11 +111,11 @@ func phaseBuildAllImages(repoRoot string) error {
 
 	if err := RunCmd("docker", "build",
 		"--build-arg", "ldflags="+ldflags,
-		"-f", filepath.Join(repoRoot, "das-schiff-nwop-agent-cra-frr.Dockerfile"),
-		"-t", imgBase+"/das-schiff-nwop-agent-cra-frr:latest",
+		"-f", filepath.Join(repoRoot, agentDockerfile()),
+		"-t", agentImage(imgBase),
 		repoRoot,
 	); err != nil {
-		return fmt.Errorf("building agent-cra-frr: %w", err)
+		return fmt.Errorf("building agent (%s): %w", craFlavor(), err)
 	}
 
 	if err := RunCmd("docker", "build",
@@ -501,7 +507,7 @@ func PhaseComponents(cluster *Cluster, repoRoot string) error {
 	imgBase := EnvOr("IMG_BASE", "ghcr.io/telekom")
 	images := []string{
 		imgBase + "/das-schiff-network-operator:latest",
-		imgBase + "/das-schiff-nwop-agent-cra-frr:latest",
+		agentImage(imgBase),
 		imgBase + "/das-schiff-nwop-agent-netplan:latest",
 		imgBase + "/das-schiff-platform-coil:latest",
 		imgBase + "/das-schiff-platform-metallb:latest",
@@ -621,8 +627,8 @@ ports:
 	// Operator + agents
 	Logf("Installing operator + agents...")
 	if _, err := DockerExecShell(cp.Name, fmt.Sprintf(
-		"kubectl --kubeconfig=%s kustomize /repo/e2e/operator | kubectl --kubeconfig=%s apply -f -",
-		kubeconfigPath, kubeconfigPath)); err != nil {
+		"kubectl --kubeconfig=%s kustomize %s | kubectl --kubeconfig=%s apply -f -",
+		kubeconfigPath, operatorOverlay(), kubeconfigPath)); err != nil {
 		return fmt.Errorf("installing operator: %w", err)
 	}
 
@@ -674,7 +680,7 @@ func PhaseFinalize(cluster *Cluster, repoRoot string) error {
 	Logf("Waiting for agent DaemonSet...")
 	WaitFor("agent DaemonSet", 120*time.Second, 5*time.Second, func() (bool, error) { //nolint:errcheck
 		out, err := DockerExec(cp.Name, "kubectl", "--kubeconfig="+kubeconfigPath,
-			"get", "ds", "network-operator-agent-cra-frr", "-n", "kube-system",
+			"get", "ds", agentDaemonSet(), "-n", "kube-system",
 			"-o", "jsonpath={.status.desiredNumberScheduled},{.status.numberReady}")
 		if err != nil {
 			return false, err
@@ -820,7 +826,7 @@ func PhaseCluster2Components(cluster *Cluster, repoRoot string) error {
 	imgBase := EnvOr("IMG_BASE", "ghcr.io/telekom")
 	images := []string{
 		imgBase + "/das-schiff-network-operator:latest",
-		imgBase + "/das-schiff-nwop-agent-cra-frr:latest",
+		agentImage(imgBase),
 		imgBase + "/das-schiff-nwop-agent-netplan:latest",
 		imgBase + "/das-schiff-platform-coil:latest",
 		imgBase + "/das-schiff-platform-metallb:latest",
@@ -865,8 +871,8 @@ func PhaseCluster2Components(cluster *Cluster, repoRoot string) error {
 
 	// Operator + agents
 	if _, err := DockerExecShell(cp.Name, fmt.Sprintf(
-		"kubectl --kubeconfig=%s kustomize /repo/e2e/operator | kubectl --kubeconfig=%s apply -f -",
-		kubeconfigPath, kubeconfigPath)); err != nil {
+		"kubectl --kubeconfig=%s kustomize %s | kubectl --kubeconfig=%s apply -f -",
+		kubeconfigPath, operatorOverlay(), kubeconfigPath)); err != nil {
 		return fmt.Errorf("installing operator: %w", err)
 	}
 
@@ -891,7 +897,7 @@ func PhaseCluster2Components(cluster *Cluster, repoRoot string) error {
 	// Wait for agent DaemonSet
 	WaitFor("cluster2 agent DaemonSet", 120*time.Second, 5*time.Second, func() (bool, error) { //nolint:errcheck
 		out, err := DockerExec(cp.Name, "kubectl", "--kubeconfig="+kubeconfigPath,
-			"get", "ds", "network-operator-agent-cra-frr", "-n", "kube-system",
+			"get", "ds", agentDaemonSet(), "-n", "kube-system",
 			"-o", "jsonpath={.status.desiredNumberScheduled},{.status.numberReady}")
 		if err != nil {
 			return false, err

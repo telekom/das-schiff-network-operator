@@ -1,0 +1,125 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: agent-cra-grout
+  namespace: system
+  labels:
+    app.kubernetes.io/component: agent-cra-grout
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: agent-cra-grout
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/default-container: agent-cra-grout
+      labels:
+        app.kubernetes.io/component: agent-cra-grout
+    spec:
+      tolerations:
+        - effect: NoSchedule
+          key: node-role.kubernetes.io/control-plane
+          operator: Exists
+        - key: node.cloudprovider.kubernetes.io/uninitialized
+          value: "true"
+          effect: NoSchedule
+        - key: node.kubernetes.io/not-ready
+          effect: NoSchedule
+          operator: Exists
+      hostNetwork: true
+      hostPID: true
+      containers:
+        - args:
+            - "--nodenetworkconfig-path=/tmp/current-config.yaml"
+            - "--health-addr=[$(HOST_IP)]:7081"
+            - "--metrics-addr=[$(HOST_IP)]:7080"
+          command:
+            - /agent
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            # grout-cra sidecar (mTLS HTTP) inside the CRA netns -- same
+            # transport contract as frr-cra.
+            - name: CRA_URL
+              value: https://[fd00:7:caa5::]:8443,https://169.254.1.0:8443
+            - name: CRA_TIMEOUT
+              value: 30s
+            - name: CRA_CLIENT_CERT
+              value: /etc/cra/certs/cert.pem
+            - name: CRA_CLIENT_KEY
+              value: /etc/cra/certs/key.pem
+            - name: OPERATOR_NETHEALTHCHECK_CONFIG
+              value: /opt/healthcheck/config.yaml
+            - name: HOST_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+          image: ghcr.io/telekom/das-schiff-nwop-agent-cra-grout:latest
+          imagePullPolicy: IfNotPresent
+          name: agent-cra-grout
+          ports:
+            - containerPort: 7081
+              name: health
+              protocol: TCP
+            - containerPort: 7080
+              name: metrics
+              protocol: TCP
+          securityContext:
+            privileged: true
+            runAsUser: 0
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            limits:
+              cpu: 500m
+              memory: 128Mi
+            requests:
+              cpu: 10m
+              memory: 64Mi
+          volumeMounts:
+            - mountPath: /opt/network-operator/
+              name: network-config
+            - mountPath: /etc/cra/config/base-config.yaml
+              name: base-config
+            - mountPath: /etc/cra/certs/
+              name: certs
+            - mountPath: /opt/healthcheck/
+              name: healthcheck-config
+            - mountPath: /run/das-schiff
+              name: routed-cni-socket
+      terminationGracePeriodSeconds: 10
+      serviceAccountName: controller-manager
+      volumes:
+        - configMap:
+            name: frr-template
+          name: network-config
+        - hostPath:
+            path: /etc/cra/base-config.yaml
+            type: File
+          name: base-config
+        - hostPath:
+            path: /etc/cra/certs/
+            type: Directory
+          name: certs
+        - configMap:
+            name: healthcheck-config
+          name: healthcheck-config
+        # Shared with the routed CNI plugin (which runs in the host mount
+        # namespace): the agent serves the routed-cni gRPC socket here so the
+        # plugin can hand routed/grout-tap attachments over on CNI ADD/DEL.
+        - hostPath:
+            path: /run/das-schiff
+            type: DirectoryOrCreate
+          name: routed-cni-socket
