@@ -103,7 +103,7 @@ so attachments are (de)provisioned promptly.
 
 ```sh
 make build-cni-routed          # host build of bin/cni-routed (Linux)
-make docker-build              # also builds das-schiff-cni-routed:latest
+make docker-build              # also builds das-schiff-nwop-cni-routed:latest
 make kind-load                 # loads images into the kind cluster
 kubectl apply -f e2e/kubevirt/install/daemonset.yaml   # install plugin on nodes
 ```

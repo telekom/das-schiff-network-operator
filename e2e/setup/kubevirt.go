@@ -26,7 +26,7 @@ func PhaseKubeVirt(cluster *Cluster, repoRoot string) error {
 
 	// Load the cni-routed image into every node's containerd.
 	imgBase := EnvOr("IMG_BASE", "ghcr.io/telekom")
-	cniImg := imgBase + "/das-schiff-cni-routed:latest"
+	cniImg := imgBase + "/das-schiff-nwop-cni-routed:latest"
 	Logf("Loading %s into nodes...", cniImg)
 	for _, node := range cluster.Nodes {
 		if err := importImage(node.Name, cniImg); err != nil {

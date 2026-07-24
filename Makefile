@@ -145,7 +145,7 @@ docker-build: #test ## Build docker image with the manager.
 	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-platform-coil.Dockerfile -t ${IMG_BASE}/das-schiff-platform-coil:latest .
 	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-platform-metallb.Dockerfile -t ${IMG_BASE}/das-schiff-platform-metallb:latest .
 	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-network-sync.Dockerfile -t ${IMG_BASE}/das-schiff-network-sync:latest .
-	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-cni-routed.Dockerfile -t ${IMG_BASE}/das-schiff-cni-routed:latest .
+	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-nwop-cni-routed.Dockerfile -t ${IMG_BASE}/das-schiff-nwop-cni-routed:latest .
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
@@ -166,7 +166,7 @@ kind-load: docker-build ## Load docker image into kind cluster.
 	kind load docker-image ${IMG_BASE}/das-schiff-platform-coil:latest
 	kind load docker-image ${IMG_BASE}/das-schiff-platform-metallb:latest
 	kind load docker-image ${IMG_BASE}/das-schiff-network-sync:latest
-	kind load docker-image ${IMG_BASE}/das-schiff-cni-routed:latest
+	kind load docker-image ${IMG_BASE}/das-schiff-nwop-cni-routed:latest
 
 ##@ Release
 

@@ -22,7 +22,7 @@ spec:
         - operator: Exists
       containers:
         - name: installer
-          image: ghcr.io/telekom/das-schiff-cni-routed:latest
+          image: ghcr.io/telekom/das-schiff-nwop-cni-routed:latest
           imagePullPolicy: IfNotPresent
           securityContext:
             privileged: true
