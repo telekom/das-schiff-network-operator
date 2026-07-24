@@ -782,6 +782,11 @@ spec:
                             address:
                               description: Address is the address of the next hop.
                               type: string
+                            interface:
+                              description: |-
+                                Interface is the egress interface for an interface (on-link) next hop, used
+                                for routed CNI host routes that point at the moved CRA-side interface.
+                              type: string
                             vrf:
                               description: Vrf is the VRF of the next hop.
                               type: string
@@ -1082,6 +1087,45 @@ spec:
                         - defaultAction
                         type: object
                     type: object
+                  routedPorts:
+                    description: |-
+                      RoutedPorts is a list of routed CNI attachments (interfaces moved into the
+                      CRA network namespace) bound into this VRF. The VSR flavor renders these as
+                      infrastructure interfaces plus interface-static routes via NETCONF, because
+                      the fast path owns the FIB and netlink cannot be used to program it.
+                    items:
+                      description: |-
+                        RoutedPort describes a routed workload attachment whose CRA-side interface was
+                        moved into the CRA network namespace by the routed CNI. On the VSR flavor the
+                        on-link gateway addresses and the workload host routes are pushed via NETCONF.
+                      properties:
+                        gatewayV4:
+                          description: |-
+                            GatewayV4 is the on-link IPv4 gateway address (with prefix length, e.g.
+                            "169.254.100.100/32") configured on the infrastructure interface.
+                          type: string
+                        gatewayV6:
+                          description: |-
+                            GatewayV6 is the on-link IPv6 gateway address (with prefix length, e.g.
+                            "fd00:7:caa5:1::/128") configured on the infrastructure interface.
+                          type: string
+                        hostRoutes:
+                          description: |-
+                            HostRoutes are the workload host addresses (e.g. "10.0.0.5/32",
+                            "fd00:200::5/128") installed as interface-static routes via Interface so
+                            VSR redistributes them into BGP.
+                          items:
+                            type: string
+                          type: array
+                        interface:
+                          description: |-
+                            Interface is the interface name inside the CRA network namespace (the moved
+                            veth end, e.g. "cra0123456789ab"). VSR references it as infra-<interface>.
+                          type: string
+                      required:
+                      - interface
+                      type: object
+                    type: array
                   staticRoutes:
                     description: StaticRoutes is a list of static routes.
                     items:
@@ -1104,6 +1148,11 @@ spec:
                           properties:
                             address:
                               description: Address is the address of the next hop.
+                              type: string
+                            interface:
+                              description: |-
+                                Interface is the egress interface for an interface (on-link) next hop, used
+                                for routed CNI host routes that point at the moved CRA-side interface.
                               type: string
                             vrf:
                               description: Vrf is the VRF of the next hop.
@@ -2141,6 +2190,11 @@ spec:
                               address:
                                 description: Address is the address of the next hop.
                                 type: string
+                              interface:
+                                description: |-
+                                  Interface is the egress interface for an interface (on-link) next hop, used
+                                  for routed CNI host routes that point at the moved CRA-side interface.
+                                type: string
                               vrf:
                                 description: Vrf is the VRF of the next hop.
                                 type: string
@@ -2441,6 +2495,45 @@ spec:
                           - defaultAction
                           type: object
                       type: object
+                    routedPorts:
+                      description: |-
+                        RoutedPorts is a list of routed CNI attachments (interfaces moved into the
+                        CRA network namespace) bound into this VRF. The VSR flavor renders these as
+                        infrastructure interfaces plus interface-static routes via NETCONF, because
+                        the fast path owns the FIB and netlink cannot be used to program it.
+                      items:
+                        description: |-
+                          RoutedPort describes a routed workload attachment whose CRA-side interface was
+                          moved into the CRA network namespace by the routed CNI. On the VSR flavor the
+                          on-link gateway addresses and the workload host routes are pushed via NETCONF.
+                        properties:
+                          gatewayV4:
+                            description: |-
+                              GatewayV4 is the on-link IPv4 gateway address (with prefix length, e.g.
+                              "169.254.100.100/32") configured on the infrastructure interface.
+                            type: string
+                          gatewayV6:
+                            description: |-
+                              GatewayV6 is the on-link IPv6 gateway address (with prefix length, e.g.
+                              "fd00:7:caa5:1::/128") configured on the infrastructure interface.
+                            type: string
+                          hostRoutes:
+                            description: |-
+                              HostRoutes are the workload host addresses (e.g. "10.0.0.5/32",
+                              "fd00:200::5/128") installed as interface-static routes via Interface so
+                              VSR redistributes them into BGP.
+                            items:
+                              type: string
+                            type: array
+                          interface:
+                            description: |-
+                              Interface is the interface name inside the CRA network namespace (the moved
+                              veth end, e.g. "cra0123456789ab"). VSR references it as infra-<interface>.
+                            type: string
+                        required:
+                        - interface
+                        type: object
+                      type: array
                     staticRoutes:
                       description: StaticRoutes is a list of static routes.
                       items:
@@ -2463,6 +2556,11 @@ spec:
                             properties:
                               address:
                                 description: Address is the address of the next hop.
+                                type: string
+                              interface:
+                                description: |-
+                                  Interface is the egress interface for an interface (on-link) next hop, used
+                                  for routed CNI host routes that point at the moved CRA-side interface.
                                 type: string
                               vrf:
                                 description: Vrf is the VRF of the next hop.
@@ -3472,6 +3570,11 @@ spec:
                               address:
                                 description: Address is the address of the next hop.
                                 type: string
+                              interface:
+                                description: |-
+                                  Interface is the egress interface for an interface (on-link) next hop, used
+                                  for routed CNI host routes that point at the moved CRA-side interface.
+                                type: string
                               vrf:
                                 description: Vrf is the VRF of the next hop.
                                 type: string
@@ -3772,6 +3875,45 @@ spec:
                           - defaultAction
                           type: object
                       type: object
+                    routedPorts:
+                      description: |-
+                        RoutedPorts is a list of routed CNI attachments (interfaces moved into the
+                        CRA network namespace) bound into this VRF. The VSR flavor renders these as
+                        infrastructure interfaces plus interface-static routes via NETCONF, because
+                        the fast path owns the FIB and netlink cannot be used to program it.
+                      items:
+                        description: |-
+                          RoutedPort describes a routed workload attachment whose CRA-side interface was
+                          moved into the CRA network namespace by the routed CNI. On the VSR flavor the
+                          on-link gateway addresses and the workload host routes are pushed via NETCONF.
+                        properties:
+                          gatewayV4:
+                            description: |-
+                              GatewayV4 is the on-link IPv4 gateway address (with prefix length, e.g.
+                              "169.254.100.100/32") configured on the infrastructure interface.
+                            type: string
+                          gatewayV6:
+                            description: |-
+                              GatewayV6 is the on-link IPv6 gateway address (with prefix length, e.g.
+                              "fd00:7:caa5:1::/128") configured on the infrastructure interface.
+                            type: string
+                          hostRoutes:
+                            description: |-
+                              HostRoutes are the workload host addresses (e.g. "10.0.0.5/32",
+                              "fd00:200::5/128") installed as interface-static routes via Interface so
+                              VSR redistributes them into BGP.
+                            items:
+                              type: string
+                            type: array
+                          interface:
+                            description: |-
+                              Interface is the interface name inside the CRA network namespace (the moved
+                              veth end, e.g. "cra0123456789ab"). VSR references it as infra-<interface>.
+                            type: string
+                        required:
+                        - interface
+                        type: object
+                      type: array
                     staticRoutes:
                       description: StaticRoutes is a list of static routes.
                       items:
@@ -3794,6 +3936,11 @@ spec:
                             properties:
                               address:
                                 description: Address is the address of the next hop.
+                                type: string
+                              interface:
+                                description: |-
+                                  Interface is the egress interface for an interface (on-link) next hop, used
+                                  for routed CNI host routes that point at the moved CRA-side interface.
                                 type: string
                               vrf:
                                 description: Vrf is the VRF of the next hop.

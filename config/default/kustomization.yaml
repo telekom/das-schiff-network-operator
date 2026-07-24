@@ -39,6 +39,7 @@ resources:
 - ../agent-cra-frr
 - ../agent-netplan
 - ../agent-hbn-l2
+- ../cni-routed
 # [CERTMANAGER] To enable cert-manager, please comment cert related line below.
 - ../cert
 - ../operator

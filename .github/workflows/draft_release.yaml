@@ -54,6 +54,7 @@ jobs:
             "das-schiff-nwop-agent-cra-vsr"
             "das-schiff-nwop-agent-netplan"
             "das-schiff-nwop-agent-hbn-l2"
+            "das-schiff-nwop-cni-routed"
           )
 
           # Build kustomize set-image args: match by image name, set release tag

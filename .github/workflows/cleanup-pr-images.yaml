@@ -21,6 +21,7 @@ jobs:
           - das-schiff-nwop-agent-cra-vsr
           - das-schiff-nwop-agent-netplan
           - das-schiff-nwop-agent-hbn-l2
+          - das-schiff-nwop-cni-routed
     steps:
       - name: Delete PR image tag
         uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5.0.0

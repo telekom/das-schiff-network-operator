@@ -122,6 +122,10 @@ build-platform-metallb: ## Build platform-metallb binary.
 build-network-sync: ## Build network-sync binary.
 	go build -ldflags "$(LDFLAGS)" -o bin/network-sync ./cmd/network-sync/
 
+.PHONY: build-cni-routed
+build-cni-routed: ## Build cni-routed plugin binary (Linux).
+	CGO_ENABLED=0 GOOS=linux go build -ldflags "$(LDFLAGS)" -o bin/cni-routed ./cmd/cni-routed/
+
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
 	go run -ldflags "$(LDFLAGS)" ./cmd/operator/main.go
@@ -141,6 +145,7 @@ docker-build: #test ## Build docker image with the manager.
 	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-platform-coil.Dockerfile -t ${IMG_BASE}/das-schiff-platform-coil:latest .
 	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-platform-metallb.Dockerfile -t ${IMG_BASE}/das-schiff-platform-metallb:latest .
 	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-network-sync.Dockerfile -t ${IMG_BASE}/das-schiff-network-sync:latest .
+	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-nwop-cni-routed.Dockerfile -t ${IMG_BASE}/das-schiff-nwop-cni-routed:latest .
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
@@ -161,6 +166,7 @@ kind-load: docker-build ## Load docker image into kind cluster.
 	kind load docker-image ${IMG_BASE}/das-schiff-platform-coil:latest
 	kind load docker-image ${IMG_BASE}/das-schiff-platform-metallb:latest
 	kind load docker-image ${IMG_BASE}/das-schiff-network-sync:latest
+	kind load docker-image ${IMG_BASE}/das-schiff-nwop-cni-routed:latest
 
 ##@ Release
 
@@ -244,7 +250,12 @@ e2e-down: ## Tear down the E2E lab.
 .PHONY: e2e-test
 e2e-test: ## Run legacy E2E tests (includes legacy traffic mirror; excludes intent/sync tests).
 	docker exec clab-nwop-tester bash -c \
-	  'cd /repo && KUBECONFIG=/repo/e2etests/.kubeconfig go test -v -count=1 -timeout=30m ./e2etests -ginkgo.label-filter="!intent && !intent-exclusive && !sync"'
+	  'cd /repo && KUBECONFIG=/repo/e2etests/.kubeconfig go test -v -count=1 -timeout=30m ./e2etests -ginkgo.label-filter="!intent && !intent-exclusive && !sync && !kubevirt"'
+
+.PHONY: e2e-test-kubevirt
+e2e-test-kubevirt: ## Run the routed KubeVirt VM datapath E2E test (requires E2E_KUBEVIRT lab).
+	docker exec clab-nwop-tester bash -c \
+	  'cd /repo && KUBECONFIG=/repo/e2etests/.kubeconfig E2E_KUBEVIRT=1 go test -v -count=1 -timeout=30m ./e2etests -ginkgo.label-filter="kubevirt"'
 
 .PHONY: e2e-test-intent
 e2e-test-intent: ## Run E2E tests with intent reconciler enabled (replaces legacy pipeline).

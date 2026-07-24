@@ -9,15 +9,20 @@ import (
 )
 
 type BaseConfig struct {
-	VTEPLoopbackIP     string     `yaml:"vtepLoopbackIP"`
-	TrunkInterfaceName string     `yaml:"trunkInterfaceName"`
-	MgmtInterfaceName  string     `yaml:"mgmtInterfaceName"`
-	ExportCIDRs        []string   `yaml:"exportCIDRs"`
-	ManagementVRF      BaseVRF    `yaml:"managementVRF"`
-	ClusterVRF         BaseVRF    `yaml:"clusterVRF"`
-	LocalASN           int        `yaml:"localASN"`
-	UnderlayNeighbors  []Neighbor `yaml:"underlayNeighbors"`
-	ClusterNeighbors   []Neighbor `yaml:"clusterNeighbors"`
+	VTEPLoopbackIP     string `yaml:"vtepLoopbackIP"`
+	TrunkInterfaceName string `yaml:"trunkInterfaceName"`
+	MgmtInterfaceName  string `yaml:"mgmtInterfaceName"`
+	// CRANetns optionally pins the CRA network namespace used by the routed CNI
+	// (cni-routed). Accepted values: "" or "auto" (auto-discover the namespace
+	// owning TrunkInterfaceName), a named namespace under /var/run/netns/<name>,
+	// or an absolute netns path. When empty the CNI auto-discovers by trunk.
+	CRANetns          string     `yaml:"craNetns,omitempty"`
+	ExportCIDRs       []string   `yaml:"exportCIDRs"`
+	ManagementVRF     BaseVRF    `yaml:"managementVRF"`
+	ClusterVRF        BaseVRF    `yaml:"clusterVRF"`
+	LocalASN          int        `yaml:"localASN"`
+	UnderlayNeighbors []Neighbor `yaml:"underlayNeighbors"`
+	ClusterNeighbors  []Neighbor `yaml:"clusterNeighbors"`
 }
 
 // MgmtInterface returns the management interface name, falling back to the

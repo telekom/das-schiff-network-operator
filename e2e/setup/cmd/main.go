@@ -119,6 +119,13 @@ func up(repoRoot string) error {
 		return fmt.Errorf("sync setup: %w", err)
 	}
 
+	// Optional: KubeVirt + routed VM datapath fixture (opt-in via E2E_KUBEVIRT).
+	if setup.EnvOr("E2E_KUBEVIRT", "") != "" {
+		if err := setup.PhaseKubeVirt(cluster, repoRoot); err != nil {
+			return fmt.Errorf("kubevirt: %w", err)
+		}
+	}
+
 	setup.Logf("E2E lab ready in %v", time.Since(start).Round(time.Second))
 	return nil
 }

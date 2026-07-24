@@ -89,10 +89,33 @@ func (LayerBGP) convStaticRoute(from v1alpha1.StaticRoute) StaticRoute {
 			nh.NextHop = *from.NextHop.Vrf
 			nh.VRF = from.NextHop.Vrf
 		}
+		if from.NextHop.Interface != nil {
+			// Interface (on-link) next hop, e.g. routed CNI host routes pointing
+			// at the moved CRA-side interface: `... next-hop <ifname>`.
+			nh.NextHop = *from.NextHop.Interface
+		}
 	}
 	to.NextHops = append(to.NextHops, nh)
 
 	return to
+}
+
+// convRoutedPorts converts the NNC routed-port spec into the cra-vsr renderer's
+// RoutedPort form (see routed.go / applyRoutedPorts).
+func (LayerBGP) convRoutedPorts(from []v1alpha1.RoutedPort) []RoutedPort {
+	if len(from) == 0 {
+		return nil
+	}
+	out := make([]RoutedPort, 0, len(from))
+	for i := range from {
+		out = append(out, RoutedPort{
+			IfName:     from[i].Interface,
+			GatewayV4:  from[i].GatewayV4,
+			GatewayV6:  from[i].GatewayV6,
+			HostRoutes: from[i].HostRoutes,
+		})
+	}
+	return out
 }
 
 func (LayerBGP) mkStaticRoute(routing *Routing, routes ...StaticRoute) {
@@ -653,6 +676,10 @@ func (l *LayerBGP) setupLocalVRF(name string, conf *v1alpha1.VRF) error {
 		l.setupNeighbor(bgp, &conf.BGPPeers[i])
 	}
 
+	if err := applyRoutedPorts(vrf, l.convRoutedPorts(conf.RoutedPorts)...); err != nil {
+		return fmt.Errorf("applying routed ports to vrf %s: %w", name, err)
+	}
+
 	return nil
 }
 
@@ -737,6 +764,10 @@ func (l *LayerBGP) setupFabricVRF(name string, conf *v1alpha1.FabricVRF) error {
 		l.setupNeighbor(bgp, &conf.BGPPeers[i])
 	}
 
+	if err := applyRoutedPorts(vrf, l.convRoutedPorts(conf.RoutedPorts)...); err != nil {
+		return fmt.Errorf("applying routed ports to fabric vrf %s: %w", name, err)
+	}
+
 	return nil
 }
 
@@ -813,6 +844,10 @@ func (l *LayerBGP) setupClusterVRF() error {
 
 		for _, rt := range conf.StaticRoutes {
 			l.mkStaticRoute(vrf.Routing, l.convStaticRoute(rt))
+		}
+
+		if err := applyRoutedPorts(vrf, l.convRoutedPorts(conf.RoutedPorts)...); err != nil {
+			return fmt.Errorf("applying routed ports to cluster vrf %s: %w", name, err)
 		}
 	}
 
@@ -940,6 +975,10 @@ func (l *LayerBGP) setupManagementVRF() error {
 		}
 		for i, imprt := range conf.VRFImports {
 			l.setupVRFImport(vrf, i, imprt)
+		}
+
+		if err := applyRoutedPorts(vrf, l.convRoutedPorts(conf.RoutedPorts)...); err != nil {
+			return fmt.Errorf("applying routed ports to management vrf %s: %w", name, err)
 		}
 	}
 
