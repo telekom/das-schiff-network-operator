@@ -98,12 +98,18 @@ func (s *Server) Add(ctx context.Context, req *pb.AddRequest) (*pb.AddResponse, 
 	}
 
 	entry := v1alpha1.RoutedPortEntry{
-		PodNamespace: req.GetPodNamespace(),
-		PodName:      req.GetPodName(),
-		ContainerID:  req.GetContainerId(),
-		VRF:          req.GetVrf(),
+		PodNamespace:        req.GetPodNamespace(),
+		PodName:             req.GetPodName(),
+		ContainerID:         req.GetContainerId(),
+		VRF:                 req.GetVrf(),
+		Layer2AttachmentRef: layer2AttachmentRefFromPB(req.GetLayer2AttachmentRef()),
 		RoutedPort: v1alpha1.RoutedPort{
-			Interface:  port.GetInterface(),
+			Interface: port.GetInterface(),
+			PortWiring: v1alpha1.PortWiring{
+				Transport:  portTransportFromPB(port.GetTransport()),
+				SocketPath: port.GetSocketPath(),
+				SocketMode: port.GetSocketMode(),
+			},
 			GatewayV4:  port.GetGatewayV4(),
 			GatewayV6:  port.GetGatewayV6(),
 			HostRoutes: port.GetHostRoutes(),
@@ -116,8 +122,37 @@ func (s *Server) Add(ctx context.Context, req *pb.AddRequest) (*pb.AddResponse, 
 	}); err != nil {
 		return nil, fmt.Errorf("recording routed port: %w", err)
 	}
-	s.log.Info("recorded routed port", "container", entry.ContainerID, "interface", entry.Interface, "vrf", entry.VRF)
+	s.log.Info("recorded routed port", "container", entry.ContainerID, "interface", entry.Interface,
+		"vrf", entry.VRF, "transport", entry.Transport, "l2a", layer2AttachmentRefLog(entry.Layer2AttachmentRef))
 	return &pb.AddResponse{}, nil
+}
+
+// portTransportFromPB maps the wire transport string to the API enum, defaulting
+// to veth when empty or unrecognized.
+func portTransportFromPB(t string) v1alpha1.PortTransport {
+	if t == string(v1alpha1.PortTransportVhostUser) {
+		return v1alpha1.PortTransportVhostUser
+	}
+	return v1alpha1.PortTransportVeth
+}
+
+// layer2AttachmentRefFromPB converts the wire l2a ref to the API type, or nil.
+func layer2AttachmentRefFromPB(ref *pb.Layer2AttachmentRef) *v1alpha1.Layer2AttachmentRef {
+	if ref == nil || ref.GetName() == "" {
+		return nil
+	}
+	return &v1alpha1.Layer2AttachmentRef{
+		Name:      ref.GetName(),
+		Namespace: ref.GetNamespace(),
+	}
+}
+
+// layer2AttachmentRefLog renders an l2a ref for structured logging.
+func layer2AttachmentRefLog(ref *v1alpha1.Layer2AttachmentRef) string {
+	if ref == nil {
+		return ""
+	}
+	return ref.Namespace + "/" + ref.Name
 }
 
 // Del removes a routed attachment (idempotent).

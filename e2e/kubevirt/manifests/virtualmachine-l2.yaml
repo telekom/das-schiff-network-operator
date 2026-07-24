@@ -1,0 +1,64 @@
+# Test VirtualMachine attached to an L2 (bridge) network instead of a routed one.
+#
+# - Uses the first-class KubeVirt "bridge" binding on the secondary Multus
+#   network, same as the routed VM: bridge binding builds the private per-pod
+#   2-port bridge k6t-<pod> connecting the qemu tap to our cni-routed veth end.
+#   The difference is entirely on the CRA side, where the moved port is enslaved
+#   to the shared L2 bridge (attachMode "l2") rather than routed.
+# - cloud-init sets the L2 subnet address + a normal default route via the L2
+#   subnet gateway (10.10.0.1 / fd00:10::1). No link-local on-link default.
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: l2-vm
+  namespace: default
+spec:
+  runStrategy: Always
+  template:
+    metadata:
+      labels:
+        kubevirt.io/vm: l2-vm
+    spec:
+      domain:
+        devices:
+          disks:
+            - name: containerdisk
+              disk:
+                bus: virtio
+            - name: cloudinitdisk
+              disk:
+                bus: virtio
+          interfaces:
+            - name: l2
+              bridge: {}
+        resources:
+          requests:
+            memory: 256Mi
+      networks:
+        - name: l2
+          multus:
+            networkName: default/l2-vm-net
+      volumes:
+        - name: containerdisk
+          containerDisk:
+            image: quay.io/kubevirt/fedora-cloud-container-disk-demo:latest
+        - name: cloudinitdisk
+          cloudInitNoCloud:
+            networkData: |
+              version: 2
+              ethernets:
+                eth0:
+                  addresses:
+                    - 10.10.0.10/24
+                    - fd00:10::10/64
+                  routes:
+                    - to: 0.0.0.0/0
+                      via: 10.10.0.1
+                    - to: "::/0"
+                      via: fd00:10::1
+            userData: |
+              #cloud-config
+              password: fedora
+              chpasswd: { expire: False }
+              runcmd:
+                - [ sh, -c, "nohup python3 -m http.server 8080 --bind :: >/var/log/http.log 2>&1 &" ]

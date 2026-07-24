@@ -1,0 +1,38 @@
+# NetworkAttachmentDefinition for an L2 (bridge) attach instead of routed.
+#
+# - attachMode "l2": the CRA-side port is NOT routed; it is enslaved to an
+#   existing L2 bridge on the node as a bridge slave (no VRF, no on-link gateway,
+#   no workload host routes). The bridge/L2VNI must already exist from the
+#   Layer2Attachment / Layer2NetworkConfiguration pipeline.
+# - layer2AttachmentRef: identifies the originating Layer2Attachment. The agent
+#   binds the port to the NNC Layer2 whose stamped attachmentRef matches, so no
+#   VLAN id or VNI is needed here.
+# - The guest address comes from the L2 subnet (static IPAM here, or DHCP on the
+#   L2 domain); the default gateway is the real subnet gateway, reached over the
+#   shared L2 (no link-local on-link default).
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: l2-vm-net
+  namespace: default
+spec:
+  config: |
+    {
+      "cniVersion": "1.0.0",
+      "name": "l2-vm-net",
+      "type": "cni-routed",
+      "craNetns": "auto",
+      "trunkInterface": "hbn",
+      "attachMode": "l2",
+      "layer2AttachmentRef": {
+        "name": "blue",
+        "namespace": "default"
+      },
+      "ipam": {
+        "type": "static",
+        "addresses": [
+          { "address": "10.10.0.10/24" },
+          { "address": "fd00:10::10/64" }
+        ]
+      }
+    }

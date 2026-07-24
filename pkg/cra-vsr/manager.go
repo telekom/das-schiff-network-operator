@@ -223,7 +223,7 @@ func (m *Manager) makeVRouter(nodeCfg *v1alpha1.NodeNetworkConfigSpec) (*VRouter
 		return nil, err
 	}
 
-	l2 := NewLayer2(nodeCfg, &ns, m)
+	l2 := NewLayer2(nodeCfg, &ns, vrouter, m)
 	if err := l2.setup(); err != nil {
 		return nil, err
 	}

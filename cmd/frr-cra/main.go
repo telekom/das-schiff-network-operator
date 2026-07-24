@@ -649,6 +649,12 @@ func reconcileNetlink(cfg *nl.NetlinkConfiguration) error {
 		return fmt.Errorf("failed to reconcile routed ports: %w", err)
 	}
 
+	// Enslave routed-CNI L2 attach ports to their Layer2 bridge. Additive and
+	// adopt-only, same as routed ports.
+	if err := nlManager.ReconcileL2AttachedPorts(cfg); err != nil {
+		return fmt.Errorf("failed to reconcile L2 attached ports: %w", err)
+	}
+
 	reconcileNeighborSync(cfg)
 	return nil
 }

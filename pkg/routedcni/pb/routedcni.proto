@@ -43,6 +43,20 @@ message RoutedPort {
   // host_routes are the workload host addresses (/32, /128) reachable via the
   // interface.
   repeated string host_routes = 4;
+  // transport selects the datapath wiring: "veth" (default) or "vhostuser".
+  // vhost-user is VSR-only (fpvhost fast-path virtual-port).
+  string transport = 5;
+  // socket_path is the vhost-user unix socket path (transport=vhostuser only).
+  string socket_path = 6;
+  // socket_mode is the pod-side vhost-user socket mode ("client"|"server").
+  // VSR renders the inverted mode (pod server => VSR client).
+  string socket_mode = 7;
+}
+
+// Layer2AttachmentRef identifies a Layer2Attachment for an L2 (bridge) attach.
+message Layer2AttachmentRef {
+  string name = 1;
+  string namespace = 2;
 }
 
 message AddRequest {
@@ -52,8 +66,13 @@ message AddRequest {
   // container_id is the CNI container ID (sandbox identity).
   string container_id = 3;
   // vrf is the target VRF; empty means the underlay/default table.
+  // Mutually exclusive with layer2_attachment_ref.
   string vrf = 4;
   RoutedPort port = 5;
+  // layer2_attachment_ref, when set, enslaves the moved interface into the L2
+  // bridge of the referenced Layer2Attachment instead of routing it. The
+  // routed fields (vrf, gateways, host_routes) must be empty in L2 mode.
+  Layer2AttachmentRef layer2_attachment_ref = 6;
 }
 
 message AddResponse {}

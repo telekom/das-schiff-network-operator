@@ -53,8 +53,45 @@ type VRouterState struct {
 }
 
 type VRouter struct {
+	System     *System        `xml:"system,omitempty"`
 	Namespaces []Namespace    `xml:"vrf,omitempty"`
 	Routing    *GlobalRouting `xml:"routing,omitempty"`
+}
+
+// System is the global (non-VRF) 6WIND vrouter system container. Only the
+// fast-path subtree is modelled: it hosts the fpvhost virtual-port declarations
+// that the vhost-user transport needs (socket-mode, profile). It is omitted
+// entirely unless at least one fpvhost port is present, so the common
+// veth/routed and L2 paths never touch the system subtree.
+type System struct {
+	XMLName  xml.Name  `xml:"urn:6wind:vrouter/system system"`
+	FastPath *FastPath `xml:"fast-path,omitempty"`
+}
+
+// FastPath is the 6WIND fast-path (DPDK) container. Only the virtual-port list
+// is modelled here.
+type FastPath struct {
+	XMLName     xml.Name     `xml:"urn:6wind:vrouter/fast-path fast-path"`
+	VirtualPort *VirtualPort `xml:"virtual-port,omitempty"`
+}
+
+// VirtualPort groups the fast-path virtual-port declarations by kind. Only the
+// fpvhost kind is modelled (the infrastructure kind is auto-created by VSR when
+// referenced by an interface).
+type VirtualPort struct {
+	Fpvhosts []FpvhostVirtualPort `xml:"fpvhost,omitempty"`
+}
+
+// FpvhostVirtualPort is a single fast-path fpvhost virtual-port declaration:
+//
+//	system fast-path virtual-port fpvhost <name> [profile <p>] socket-mode <mode>
+//
+// SocketMode is rendered from the VSR fast-path perspective (already inverted
+// from the workload's view by the caller).
+type FpvhostVirtualPort struct {
+	Name       string  `xml:"name"`
+	Profile    *string `xml:"profile,omitempty"`
+	SocketMode *string `xml:"socket-mode,omitempty"`
 }
 
 type GlobalRouting struct {
@@ -352,12 +389,27 @@ type Interfaces struct {
 	VXLANs    []VXLAN          `xml:"vxlan,omitempty"`
 	VLANs     []VLAN           `xml:"vlan,omitempty"`
 	Infras    []Infrastructure `xml:"infrastructure,omitempty"`
+	Fpvhosts  []Fpvhost        `xml:"fpvhost,omitempty"`
 	GREs      []GRE            `xml:"gre,omitempty"`
 	GRETaps   []GRETap         `xml:"gretap,omitempty"`
 	Loopbacks []Loopback       `xml:"loopback,omitempty"`
 }
 
 type Infrastructure struct {
+	Name string         `xml:"name"`
+	Port *string        `xml:"port,omitempty"`
+	IPv4 *IPAddressList `xml:"ipv4,omitempty"`
+	IPv6 *IPAddressList `xml:"ipv6,omitempty"`
+}
+
+// Fpvhost is a fast-path vhost-user (virtio-user) interface bound to a fpvhost
+// virtual-port:
+//
+//	vrf main interface fpvhost <name> port fpvhost-<name>
+//
+// It mirrors Infrastructure (a moved CRA-side port) but is backed by a DPDK
+// vhost socket instead of a veth. VSR-only.
+type Fpvhost struct {
 	Name string         `xml:"name"`
 	Port *string        `xml:"port,omitempty"`
 	IPv4 *IPAddressList `xml:"ipv4,omitempty"`

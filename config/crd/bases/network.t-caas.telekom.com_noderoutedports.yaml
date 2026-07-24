@@ -95,6 +95,23 @@ spec:
                         Interface is the interface name inside the CRA network namespace (the moved
                         veth end, e.g. "cra0123456789ab"). VSR references it as infra-<interface>.
                       type: string
+                    layer2AttachmentRef:
+                      description: |-
+                        Layer2AttachmentRef, when set, selects L2 attach mode: the port is added as
+                        a bridge slave of the Layer2 produced by the referenced Layer2Attachment,
+                        instead of being routed. It is mutually exclusive with VRF, GatewayV4,
+                        GatewayV6 and HostRoutes (which must be empty in L2 mode).
+                      properties:
+                        name:
+                          description: Name is the Layer2Attachment name.
+                          type: string
+                        namespace:
+                          description: Namespace is the Layer2Attachment namespace.
+                          type: string
+                      required:
+                      - name
+                      - namespace
+                      type: object
                     podName:
                       description: PodName is the name of the pod owning the attachment.
                       type: string
@@ -102,10 +119,31 @@ spec:
                       description: PodNamespace is the namespace of the pod owning
                         the attachment.
                       type: string
+                    socketMode:
+                      description: |-
+                        SocketMode is the vhost-user socket mode ("client" or "server") from the
+                        VSR fast-path perspective (already inverted from the workload's view).
+                        Only meaningful when Transport is "vhostuser".
+                      type: string
+                    socketPath:
+                      description: |-
+                        SocketPath is the vhost-user unix socket path shared with the workload.
+                        Only meaningful when Transport is "vhostuser".
+                      type: string
+                    transport:
+                      default: veth
+                      description: |-
+                        Transport selects the CRA-side wiring: "veth" (default, an infrastructure
+                        port) or "vhostuser" (a VSR fpvhost fast-path virtual-port, VSR-only).
+                      enum:
+                      - veth
+                      - vhostuser
+                      type: string
                     vrf:
                       description: |-
                         VRF is the target VRF the port is bound into. Empty (or "default"/"main")
-                        means the underlay/default table.
+                        means the underlay/default table. Ignored in L2 attach mode (see
+                        Layer2AttachmentRef).
                       type: string
                   required:
                   - containerID
@@ -113,6 +151,12 @@ spec:
                   - podName
                   - podNamespace
                   type: object
+                  x-kubernetes-validations:
+                  - message: layer2AttachmentRef (L2 attach mode) is mutually exclusive
+                      with vrf, gatewayV4, gatewayV6 and hostRoutes
+                    rule: '!has(self.layer2AttachmentRef) || (!has(self.vrf) && !has(self.gatewayV4)
+                      && !has(self.gatewayV6) && (!has(self.hostRoutes) || size(self.hostRoutes)
+                      == 0))'
                 type: array
             type: object
         type: object

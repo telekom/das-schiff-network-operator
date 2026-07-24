@@ -28,29 +28,33 @@ import (
 type Layer2 struct {
 	nodeCfg *v1alpha1.NodeNetworkConfigSpec
 	ns      *Namespace
+	vrouter *VRouter
 	mgr     *Manager
 	infos   []InfoL2
 }
 
 type InfoL2 struct {
-	vlanID int
-	mtu    int
-	vni    int
-	vrf    string
-	mac    string
-	ips    []string
-	acls   []v1alpha1.MirrorACL
+	vlanID        int
+	mtu           int
+	vni           int
+	vrf           string
+	mac           string
+	ips           []string
+	acls          []v1alpha1.MirrorACL
+	attachedPorts []v1alpha1.AttachedPort
 }
 
 func NewLayer2(
 	nodeCfg *v1alpha1.NodeNetworkConfigSpec,
 	ns *Namespace,
+	vrouter *VRouter,
 	mgr *Manager,
 ) *Layer2 {
 	return &Layer2{
 		nodeCfg: nodeCfg,
 		mgr:     mgr,
 		ns:      ns,
+		vrouter: vrouter,
 		infos:   []InfoL2{},
 	}
 }
@@ -58,10 +62,11 @@ func NewLayer2(
 func (l *Layer2) setupInformations() {
 	for _, l2 := range l.nodeCfg.Layer2s {
 		info := InfoL2{
-			vlanID: int(l2.VLAN),
-			mtu:    int(l2.MTU),
-			vni:    int(l2.VNI),
-			acls:   l2.MirrorACLs,
+			vlanID:        int(l2.VLAN),
+			mtu:           int(l2.MTU),
+			vni:           int(l2.VNI),
+			acls:          l2.MirrorACLs,
+			attachedPorts: l2.AttachedPorts,
 		}
 
 		if l2.IRB != nil {
@@ -154,6 +159,10 @@ func (l *Layer2) setup() error {
 		l.setupVXLAN(&info, br, l.ns.Interfaces)
 		vlan := l.mgr.createVLAN(info.vlanID, info.mtu, br, l.ns.Interfaces)
 
+		if err := l.attachPorts(&info, br, intfs); err != nil {
+			return err
+		}
+
 		// Mirror the Layer2 access port (vlan.<id>), not the bridge master, so
 		// port-to-port (east-west) traffic between the workload side and the L2VNI
 		// overlay is captured. The port faces the workload, so the workload-
@@ -165,5 +174,38 @@ func (l *Layer2) setup() error {
 		}
 	}
 
+	return nil
+}
+
+// attachPorts enslaves the routed-CNI L2-attached ports (moved into the CRA
+// netns) to the Layer2 bridge: each port becomes a bridge link-interface with no
+// L3 addressing. veth-transport ports render as infrastructure interfaces
+// (port infra-<ifname>); vhostuser-transport ports render as fpvhost interfaces
+// (port fpvhost-<ifname>) plus a global fast-path fpvhost virtual-port. The
+// interface entries are created alongside the bridge, in the same interface set.
+func (l *Layer2) attachPorts(info *InfoL2, br *Bridge, intfs *Interfaces) error {
+	for i := range info.attachedPorts {
+		p := info.attachedPorts[i]
+		if p.Interface == "" {
+			return fmt.Errorf("layer2 vni %d: attached port %d has no interface", info.vni, i)
+		}
+
+		if p.Transport == v1alpha1.PortTransportVhostUser {
+			intfs.Fpvhosts = append(intfs.Fpvhosts, Fpvhost{
+				Name: p.Interface,
+				Port: types.ToPtr(fpvhostPortPrefix + p.Interface),
+			})
+			registerFpvhostVirtualPorts(l.vrouter, []FpvhostVirtualPort{
+				newFpvhostVirtualPort(p.Interface, p.SocketMode),
+			})
+		} else {
+			intfs.Infras = append(intfs.Infras, Infrastructure{
+				Name: p.Interface,
+				Port: types.ToPtr(infraPortPrefix + p.Interface),
+			})
+		}
+
+		br.Slaves = append(br.Slaves, BridgeSlave{Name: p.Interface})
+	}
 	return nil
 }

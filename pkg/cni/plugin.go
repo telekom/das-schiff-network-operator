@@ -40,6 +40,13 @@ func CmdAdd(args *skel.CmdArgs) error {
 		return err
 	}
 
+	// vhost-user is a fast-path socket transport (VSR-only): no veth, no
+	// CRA-side netns port move. It is handled entirely by the agent, so it does
+	// not need the CRA netns resolved.
+	if conf.isVhostUser() {
+		return cmdAddVhostUser(conf, args)
+	}
+
 	craNetnsPath, err := resolveCRANetnsPath(conf)
 	if err != nil {
 		return err
@@ -117,6 +124,10 @@ func CmdDel(args *skel.CmdArgs) error {
 	conf, err := parseConfig(args.StdinData)
 	if err != nil {
 		return err
+	}
+
+	if conf.isVhostUser() {
+		return cmdDelVhostUser(conf, args)
 	}
 
 	// Release the IPAM allocation (best effort, but report a hard failure).
