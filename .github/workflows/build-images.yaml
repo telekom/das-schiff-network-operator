@@ -41,6 +41,7 @@ jobs:
           - das-schiff-nwop-agent-cra-vsr
           - das-schiff-nwop-agent-netplan
           - das-schiff-nwop-agent-hbn-l2
+          - das-schiff-nwop-cni-routed
           - das-schiff-network-sync
           - das-schiff-platform-coil
           - das-schiff-platform-metallb
@@ -149,6 +150,7 @@ jobs:
           - das-schiff-nwop-agent-cra-vsr
           - das-schiff-nwop-agent-netplan
           - das-schiff-nwop-agent-hbn-l2
+          - das-schiff-nwop-cni-routed
           - das-schiff-network-sync
           - das-schiff-platform-coil
           - das-schiff-platform-metallb
