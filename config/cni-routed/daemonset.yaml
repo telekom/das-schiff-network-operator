@@ -1,0 +1,66 @@
+# DaemonSet that installs the cni-routed plugin binary onto every node's CNI bin
+# directory. The per-network CNI config is delivered via the
+# NetworkAttachmentDefinition (Multus), so this only ships the binary; the agent
+# (agent-cra-frr / agent-cra-vsr) serves the routed-cni socket the plugin talks
+# to on CNI ADD/DEL.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: cni-routed-installer
+  namespace: system
+  labels:
+    app.kubernetes.io/component: cni-routed-installer
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: cni-routed-installer
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: cni-routed-installer
+    spec:
+      tolerations:
+        - effect: NoSchedule
+          key: node-role.kubernetes.io/control-plane
+          operator: Exists
+        - key: node.cloudprovider.kubernetes.io/uninitialized
+          value: "true"
+          effect: NoSchedule
+        - key: node.kubernetes.io/not-ready
+          effect: NoSchedule
+          operator: Exists
+      hostNetwork: true
+      containers:
+        - name: installer
+          image: ghcr.io/telekom/das-schiff-nwop-cni-routed:latest
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            privileged: true
+            runAsUser: 0
+          env:
+            - name: CNI_BIN_DIR
+              value: /host/opt/cni/bin
+            - name: CNI_CONF_DIR
+              value: /host/etc/cni/net.d
+          resources:
+            limits:
+              cpu: 100m
+              memory: 64Mi
+            requests:
+              cpu: 10m
+              memory: 16Mi
+          volumeMounts:
+            - name: cni-bin
+              mountPath: /host/opt/cni/bin
+            - name: cni-conf
+              mountPath: /host/etc/cni/net.d
+      terminationGracePeriodSeconds: 10
+      volumes:
+        - name: cni-bin
+          hostPath:
+            path: /opt/cni/bin
+            type: DirectoryOrCreate
+        - name: cni-conf
+          hostPath:
+            path: /etc/cni/net.d
+            type: DirectoryOrCreate
