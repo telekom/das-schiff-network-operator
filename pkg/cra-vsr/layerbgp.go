@@ -941,6 +941,9 @@ func (l *LayerBGP) setupManagementVRF() error {
 		for i, imprt := range conf.VRFImports {
 			l.setupVRFImport(vrf, i, imprt)
 		}
+		for i := range conf.BGPPeers {
+			l.setupNeighbor(bgp, &conf.BGPPeers[i])
+		}
 	}
 
 	return nil
