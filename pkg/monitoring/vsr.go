@@ -330,10 +330,11 @@ func (c *VSRCollector) updateBGPNeighborAFs(
 	}
 
 	if groupName != nil {
-		neighConfig := c.findBGPNeighborGroup(*groupName, bgp)
-		if neighConfig == nil {
+		group := c.findBGPNeighborGroup(*groupName, bgp)
+		if group == nil {
 			return
 		}
+		neighConfig = &group.BGPNeighbor
 	} else {
 		neighConfig = neighState
 	}
