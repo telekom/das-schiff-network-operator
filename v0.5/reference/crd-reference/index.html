@@ -3815,7 +3815,7 @@ Supports HBN mode (VXLAN + VRF) and non-HBN mode (physical interface).</p>
 </tr>
 <tr>
 <td><code>interfaceRef</code> <em>string</em></td>
-<td>InterfaceRef points to an existing host interface for non-HBN mode.<br />On bare metal: the agent creates a VLAN sub-interface on this NIC/bond.<br />On VMs: the hypervisor provides the NIC; the agent creates a VLAN sub-interface on it.<br />If nil (HBN mode), a VXLAN interface is created automatically.</td>
+<td>InterfaceRef points to an existing host interface for non-HBN mode. The<br />referenced Network must have no VNI (non-HBN / pure L2).<br />When that Network carries a VLAN, the agent creates a VLAN sub-interface<br />on this NIC or bond (the parent stays declared out-of-band).<br />When the Network has neither VNI nor VLAN (native/untagged mode), the<br />per-node addresses and routes are placed directly on this interface;<br />native mode is supported only for physical ethernet NICs, not<br />bonds/bridges — address a bond/bridge via a VLAN sub-interface instead.<br />(A Network with a VNI but no VLAN is rejected: HBN requires both.)<br />On VMs the hypervisor provides the NIC.<br />If nil (HBN mode), a VXLAN interface is created automatically.</td>
 <td></td>
 <td>Optional: {} <br /></td>
 </tr>

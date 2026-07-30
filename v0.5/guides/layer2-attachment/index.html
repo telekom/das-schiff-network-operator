@@ -692,6 +692,21 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="non-HBN mode (pure L2 / VLAN sub-interface)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#native-untagged-mode-address-the-interface-directly" class="md-nav__link">
+    <span class="md-ellipsis">
+      Native / untagged mode (address the interface directly)
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1232,6 +1247,21 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="non-HBN mode (pure L2 / VLAN sub-interface)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#native-untagged-mode-address-the-interface-directly" class="md-nav__link">
+    <span class="md-ellipsis">
+      Native / untagged mode (address the interface directly)
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1530,6 +1560,23 @@ selected node. If it does not, the attachment reports the
 <code>InterfaceNotFound</code> condition. On VMs the hypervisor provides the NIC; on
 bare metal it is a physical NIC or bond.</p>
 </div>
+<h3 id="native-untagged-mode-address-the-interface-directly">Native / untagged mode (address the interface directly)<a class="headerlink" href="#native-untagged-mode-address-the-interface-directly" title="Permanent link">&para;</a></h3>
+<p>If the referenced <code>Network</code> has <strong>no <code>vlan</code></strong> (and no <code>vni</code>), no VLAN
+sub-interface is created: the per-node addresses and routes are placed
+<strong>directly on <code>interfaceRef</code></strong>. This suits handing a whole physical NIC to a
+workload — e.g. a VMware vNIC — without tagging.</p>
+<div class="admonition warning">
+<p class="admonition-title">Native mode is ethernet-only</p>
+<p>Native/untagged addressing is written under netplan <code>ethernets:</code>, so
+<code>interfaceRef</code> must be a <strong>physical ethernet NIC</strong>. A bond or bridge cannot
+be addressed this way — netplan would reject redefining it under
+<code>ethernets:</code>. To put a segment on a bond/bridge, give the <code>Network</code> a <code>vlan</code>
+and use the VLAN sub-interface (the bond/bridge stays declared out-of-band).</p>
+</div>
+<p>The parent interface is <strong>not</strong> synthesized by the operator: for a tagged VLAN
+the parent (<code>eth1</code>/<code>bond0</code>) must already be declared out-of-band — via host
+netplan for a physical NIC, or an <code>InterfaceConfig</code> for a bond/bridge — the same
+way the HBN trunk is declared in a static <code>10-hbn.yaml</code>.</p>
 <h2 id="field-reference">Field reference<a class="headerlink" href="#field-reference" title="Permanent link">&para;</a></h2>
 <p>Key <code>spec</code> fields — see the
 <a href="../../reference/crd-reference/#layer2attachment">CRD Reference</a> for the complete,
