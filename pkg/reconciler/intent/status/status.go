@@ -238,6 +238,12 @@ func (u *Updater) updateInboundConditions(ctx context.Context, fetched *resolver
 			setCondition(&in.Status.Conditions, nc.ConditionTypeReady, readyStatus, readyReason, readyMsg, in.Generation)
 			in.Status.VRFs = vrfs
 			in.Status.ObservedGeneration = in.Generation
+			// Mirror explicit spec.addresses to status so consumers (e.g. kubectl wide
+			// columns, MetalLB controller) can read addresses from a single source.
+			// The IPAM path handles the count-based case separately.
+			if in.Spec.Addresses != nil {
+				in.Status.Addresses = in.Spec.Addresses
+			}
 		}); err != nil {
 			return fmt.Errorf("updating Inbound %q status: %w", inb.Name, err)
 		}
