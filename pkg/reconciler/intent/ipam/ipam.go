@@ -118,7 +118,10 @@ func (a *Allocator) reconcileInboundAllocations(ctx context.Context, fetched *re
 		if inb.Spec.Count == nil || inb.Spec.Addresses != nil {
 			continue
 		}
-		if inb.Status.Addresses != nil && len(inb.Status.Addresses.IPv4)+len(inb.Status.Addresses.IPv6) > 0 {
+		// Skip only when status contains a valid IPAM allocation: each non-empty
+		// family has the requested count of bare IPs. CIDRs indicate stale explicit
+		// addresses after an addresses→count mode switch and must be reallocated.
+		if inb.Status.Addresses != nil && ipamAllocatedCorrectly(inb.Status.Addresses, int(*inb.Spec.Count)) {
 			continue
 		}
 		addrs, err := a.allocate(inb.Spec.NetworkRef, int(*inb.Spec.Count), networks, pools, true, nil)
@@ -147,7 +150,8 @@ func (a *Allocator) reconcileOutboundAllocations(ctx context.Context, fetched *r
 		if outb.Spec.Count == nil || outb.Spec.Addresses != nil {
 			continue
 		}
-		if outb.Status.Addresses != nil && len(outb.Status.Addresses.IPv4)+len(outb.Status.Addresses.IPv6) > 0 {
+		// Same stale-address guard as for Inbounds.
+		if outb.Status.Addresses != nil && ipamAllocatedCorrectly(outb.Status.Addresses, int(*outb.Spec.Count)) {
 			continue
 		}
 		addrs, err := a.allocate(outb.Spec.NetworkRef, int(*outb.Spec.Count), networks, pools, true, nil)
@@ -168,6 +172,38 @@ func (a *Allocator) reconcileOutboundAllocations(ctx context.Context, fetched *r
 		a.logger.Info("allocated addresses for Outbound", "outbound", outb.Name, "addresses", addrs)
 	}
 	return nil
+}
+
+// ipamAllocatedCorrectly reports whether addrs looks like a correct IPAM
+// allocation for wantPerFamily IPs. Each non-empty family must have exactly
+// wantPerFamily bare IP addresses of the expected family. This distinguishes
+// IPAM output from stale explicit CIDRs left in status after switching from
+// addresses→count mode.
+func ipamAllocatedCorrectly(addrs *nc.AddressAllocation, wantPerFamily int) bool {
+	if addrs == nil {
+		return false
+	}
+	haveV4, haveV6 := len(addrs.IPv4), len(addrs.IPv6)
+	if haveV4+haveV6 == 0 {
+		return false
+	}
+	if (haveV4 != 0 && haveV4 != wantPerFamily) ||
+		(haveV6 != 0 && haveV6 != wantPerFamily) {
+		return false
+	}
+	for _, address := range addrs.IPv4 {
+		ip := net.ParseIP(address)
+		if ip == nil || ip.To4() == nil {
+			return false
+		}
+	}
+	for _, address := range addrs.IPv6 {
+		ip := net.ParseIP(address)
+		if ip == nil || ip.To4() != nil {
+			return false
+		}
+	}
+	return true
 }
 
 // seedExistingAllocations scans resources with existing status.addresses and
@@ -191,10 +227,22 @@ func (*Allocator) seedExistingAllocations(fetched *resolver.FetchedResources, po
 	// Seed L3 routing pools (Inbound/Outbound) first so a Network shared with an
 	// L2 attachment keeps routed semantics for its already-allocated addresses.
 	for i := range fetched.Inbounds {
-		collectAddresses(fetched.Inbounds[i].Spec.NetworkRef, fetched.Inbounds[i].Status.Addresses, true)
+		inb := &fetched.Inbounds[i]
+		// Skip seeding stale explicit addresses: if we're in count mode but
+		// status.addresses is not valid IPAM output (e.g. CIDRs after an
+		// addresses→count mode switch), it must not advance the pool cursor or
+		// the allocator may report CIDR exhausted when it tries to reallocate.
+		if inb.Spec.Count != nil && inb.Spec.Addresses == nil && !ipamAllocatedCorrectly(inb.Status.Addresses, int(*inb.Spec.Count)) {
+			continue
+		}
+		collectAddresses(inb.Spec.NetworkRef, inb.Status.Addresses, true)
 	}
 	for i := range fetched.Outbounds {
-		collectAddresses(fetched.Outbounds[i].Spec.NetworkRef, fetched.Outbounds[i].Status.Addresses, true)
+		outb := &fetched.Outbounds[i]
+		if outb.Spec.Count != nil && outb.Spec.Addresses == nil && !ipamAllocatedCorrectly(outb.Status.Addresses, int(*outb.Spec.Count)) {
+			continue
+		}
+		collectAddresses(outb.Spec.NetworkRef, outb.Status.Addresses, true)
 	}
 	// Seed from L2A per-node allocations (L2 subnet semantics).
 	for i := range fetched.Layer2Attachments {
