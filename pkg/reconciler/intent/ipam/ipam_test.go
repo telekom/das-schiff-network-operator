@@ -319,3 +319,139 @@ func TestAllocateDualStack(t *testing.T) {
 		assert.Nil(t, alloc)
 	})
 }
+
+func TestSeedExistingAllocationsSkipsStaleExplicitCIDRs(t *testing.T) {
+	count := int32(1)
+	stale := &nc.AddressAllocation{IPv4: []string{"10.0.0.0/32"}}
+	networks := map[string]*resolver.ResolvedNetwork{
+		"net": {
+			Name: "net",
+			Spec: nc.NetworkSpec{IPv4: &nc.IPNetwork{CIDR: "10.0.0.0/30"}},
+		},
+	}
+
+	tests := []struct {
+		name    string
+		fetched *resolver.FetchedResources
+	}{
+		{
+			name: "Inbound",
+			fetched: &resolver.FetchedResources{
+				Inbounds: []nc.Inbound{{
+					Spec:   nc.InboundSpec{NetworkRef: "net", Count: &count},
+					Status: nc.InboundStatus{Addresses: stale.DeepCopy()},
+				}},
+			},
+		},
+		{
+			name: "Outbound",
+			fetched: &resolver.FetchedResources{
+				Outbounds: []nc.Outbound{{
+					Spec:   nc.OutboundSpec{NetworkRef: "net", Count: &count},
+					Status: nc.OutboundStatus{Addresses: stale.DeepCopy()},
+				}},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pools := make(map[string]*networkPool)
+			allocator := &Allocator{}
+
+			allocator.seedExistingAllocations(tt.fetched, pools, networks)
+			assert.Empty(t, pools, "stale explicit CIDRs must not seed an IPAM pool")
+
+			allocated, err := allocator.allocate("net", int(count), networks, pools, true, nil)
+			require.NoError(t, err)
+			assert.Equal(t, []string{"10.0.0.0"}, allocated.IPv4)
+		})
+	}
+}
+
+func TestIPAMAllocatedCorrectly(t *testing.T) {
+	tests := []struct {
+		name          string
+		addrs         *nc.AddressAllocation
+		wantPerFamily int
+		expect        bool
+	}{
+		{
+			name:          "nil addrs",
+			addrs:         nil,
+			wantPerFamily: 2,
+			expect:        false,
+		},
+		{
+			name:          "empty both families",
+			addrs:         &nc.AddressAllocation{},
+			wantPerFamily: 2,
+			expect:        false,
+		},
+		{
+			name:          "IPv4-only correct count",
+			addrs:         &nc.AddressAllocation{IPv4: []string{"10.0.0.1", "10.0.0.2"}},
+			wantPerFamily: 2,
+			expect:        true,
+		},
+		{
+			name:          "dual-stack correct count",
+			addrs:         &nc.AddressAllocation{IPv4: []string{"10.0.0.1", "10.0.0.2"}, IPv6: []string{"fd00::1", "fd00::2"}},
+			wantPerFamily: 2,
+			expect:        true,
+		},
+		{
+			name:          "IPv4 count mismatch (stale explicit addresses)",
+			addrs:         &nc.AddressAllocation{IPv4: []string{"10.0.0.1", "10.0.0.2", "10.0.0.3"}},
+			wantPerFamily: 2,
+			expect:        false,
+		},
+		{
+			name:          "dual-stack IPv6 count mismatch",
+			addrs:         &nc.AddressAllocation{IPv4: []string{"10.0.0.1", "10.0.0.2"}, IPv6: []string{"fd00::1"}},
+			wantPerFamily: 2,
+			expect:        false,
+		},
+		{
+			name:          "explicit IPv4 CIDRs with matching count",
+			addrs:         &nc.AddressAllocation{IPv4: []string{"10.0.0.1/32", "10.0.0.2/32"}},
+			wantPerFamily: 2,
+			expect:        false,
+		},
+		{
+			name:          "explicit IPv6 CIDRs with matching count",
+			addrs:         &nc.AddressAllocation{IPv6: []string{"fd00::1/128", "fd00::2/128"}},
+			wantPerFamily: 2,
+			expect:        false,
+		},
+		{
+			name:          "invalid bare address",
+			addrs:         &nc.AddressAllocation{IPv4: []string{"not-an-ip"}},
+			wantPerFamily: 1,
+			expect:        false,
+		},
+		{
+			name:          "IPv6 address in IPv4 family",
+			addrs:         &nc.AddressAllocation{IPv4: []string{"fd00::1"}},
+			wantPerFamily: 1,
+			expect:        false,
+		},
+		{
+			name:          "IPv4 address in IPv6 family",
+			addrs:         &nc.AddressAllocation{IPv6: []string{"10.0.0.1"}},
+			wantPerFamily: 1,
+			expect:        false,
+		},
+		{
+			name:          "count=1 IPv4-only",
+			addrs:         &nc.AddressAllocation{IPv4: []string{"10.0.0.1"}},
+			wantPerFamily: 1,
+			expect:        true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expect, ipamAllocatedCorrectly(tt.addrs, tt.wantPerFamily))
+		})
+	}
+}
