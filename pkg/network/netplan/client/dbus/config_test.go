@@ -199,7 +199,6 @@ package dbus
 // 	g := NewGomegaWithT(t)
 // 	client, err := New()
 // 	g.Expect(err).NotTo(HaveOccurred())
-// 	g.Expect(err).NotTo(HaveOccurred())
 // 	state, err := netplan.NewState(`
 // network:
 //   version: 2
