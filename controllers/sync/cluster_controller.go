@@ -20,7 +20,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
-const secretRequeueInterval = 30 * time.Second
+const (
+	kubeconfigSecretSuffix   = "-kubeconfig" // #nosec G101 -- suffix for Secret object names, not a credential value.
+	kubeconfigSecretValueKey = "value"
+	secretRequeueInterval    = 30 * time.Second
+)
 
 var capiClusterGVK = schema.GroupVersionKind{
 	Group:   "cluster.x-k8s.io",
@@ -53,7 +57,7 @@ func (r *ClusterController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 
 	// Look up the kubeconfig Secret: <cluster-name>-kubeconfig
-	secretName := cluster.GetName() + "-kubeconfig"
+	secretName := cluster.GetName() + kubeconfigSecretSuffix
 	secret := &corev1.Secret{}
 	err = r.Client.Get(ctx, types.NamespacedName{
 		Namespace: req.Namespace,
@@ -70,7 +74,7 @@ func (r *ClusterController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, fmt.Errorf("fetching kubeconfig Secret %q: %w", secretName, err)
 	}
 
-	kubeconfig, ok := secret.Data["value"]
+	kubeconfig, ok := secret.Data[kubeconfigSecretValueKey]
 	if !ok {
 		log.Info("kubeconfig Secret missing 'value' key", "secret", secretName)
 		r.Remotes.Remove(req.NamespacedName)
@@ -107,11 +111,10 @@ func (r *ClusterController) SetupWithManager(mgr ctrl.Manager) error {
 			}
 			// Convention: <cluster-name>-kubeconfig
 			name := secret.GetName()
-			const suffix = "-kubeconfig"
-			if !strings.HasSuffix(name, suffix) {
+			if !strings.HasSuffix(name, kubeconfigSecretSuffix) {
 				return nil
 			}
-			clusterName := strings.TrimSuffix(name, suffix)
+			clusterName := strings.TrimSuffix(name, kubeconfigSecretSuffix)
 			if clusterName == "" {
 				// Defensive: a Secret literally named "-kubeconfig" would otherwise
 				// enqueue a reconcile for an empty Name and pollute logs/metrics.
@@ -128,7 +131,7 @@ func (r *ClusterController) SetupWithManager(mgr ctrl.Manager) error {
 
 	// Only watch Secrets whose name ends with -kubeconfig to reduce event volume.
 	kubeconfigPredicate := predicate.NewPredicateFuncs(func(obj client.Object) bool {
-		return strings.HasSuffix(obj.GetName(), "-kubeconfig")
+		return strings.HasSuffix(obj.GetName(), kubeconfigSecretSuffix)
 	})
 
 	if err := ctrl.NewControllerManagedBy(mgr).

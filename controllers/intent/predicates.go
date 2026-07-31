@@ -29,18 +29,62 @@ import (
 
 // intentCRDPredicate accepts only events that should trigger an intent
 // re-evaluation: creates, deletes, generic, and any update where either
-// the spec generation, labels, or annotations have changed.
+// the spec generation, labels, or non-ownership annotations have changed.
 //
 // This filters out status-only updates the controller writes back to its
 // own intent CRDs (e.g. Collector.status.nodeAddresses, BGPPeering
 // conditions), preventing self-trigger loops while still reacting to
-// label/annotation changes that affect selectors.
+// all label changes because selectors can bind on any label key.
 func intentCRDPredicate() predicate.Predicate {
-	return predicate.Or(
-		predicate.GenerationChangedPredicate{},
-		predicate.LabelChangedPredicate{},
-		predicate.AnnotationChangedPredicate{},
-	)
+	return predicate.Funcs{
+		CreateFunc:  func(event.CreateEvent) bool { return true },
+		DeleteFunc:  func(event.DeleteEvent) bool { return true },
+		GenericFunc: func(event.GenericEvent) bool { return true },
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			if e.ObjectOld == nil || e.ObjectNew == nil {
+				return true
+			}
+			if e.ObjectOld.GetGeneration() != e.ObjectNew.GetGeneration() {
+				return true
+			}
+			if !metadataEqualIgnoringKeys(e.ObjectOld.GetLabels(), e.ObjectNew.GetLabels(), nil) {
+				return true
+			}
+			return !metadataEqualIgnoringKeys(e.ObjectOld.GetAnnotations(), e.ObjectNew.GetAnnotations(), ownershipAnnotationKeys)
+		},
+	}
+}
+
+const (
+	helmReleaseNameAnnotation      = "meta.helm.sh/release-name"
+	helmReleaseNamespaceAnnotation = "meta.helm.sh/release-namespace"
+)
+
+var ownershipAnnotationKeys = map[string]struct{}{
+	helmReleaseNameAnnotation:      {},
+	helmReleaseNamespaceAnnotation: {},
+}
+
+func metadataEqualIgnoringKeys(oldMetadata, newMetadata map[string]string, ignoredKeys map[string]struct{}) bool {
+	return reflect.DeepEqual(filterMetadata(oldMetadata, ignoredKeys), filterMetadata(newMetadata, ignoredKeys))
+}
+
+func filterMetadata(metadata map[string]string, ignoredKeys map[string]struct{}) map[string]string {
+	if len(metadata) == 0 {
+		return nil
+	}
+
+	filtered := make(map[string]string, len(metadata))
+	for key, value := range metadata {
+		if _, ok := ignoredKeys[key]; ok {
+			continue
+		}
+		filtered[key] = value
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
+	return filtered
 }
 
 // nodePredicate filters Node events down to changes that can plausibly
