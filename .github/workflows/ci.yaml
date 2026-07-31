@@ -1,6 +1,12 @@
-name: pullrequests
+# SPDX-FileCopyrightText: 2025 Deutsche Telekom AG
+#
+# SPDX-License-Identifier: Apache-2.0
+
+name: CI
 
 on:
+  push:
+    branches: [main]
   pull_request:
     types: [opened, synchronize, reopened]
 
@@ -19,15 +25,36 @@ jobs:
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: go.mod
+      - name: Load tool versions
+        id: versions
+        run: |
+          if [ -f ./versions.env ]; then
+            . ./versions.env
+          fi
+          echo "golangci-lint=${GOLANGCI_LINT_VERSION:-v2.8.0}" >> $GITHUB_OUTPUT
       - name: Install packages
-        run: sudo apt-get update && sudo apt-get install -y llvm clang libbpf-dev gcc-multilib linux-headers-$(uname -r)
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/azure-cli.* /etc/apt/sources.list.d/microsoft-prod.* /etc/apt/sources.list.d/packages-microsoft-prod.*
+          sudo apt-get update
+          sudo apt-get install -y llvm clang libbpf-dev gcc-multilib linux-headers-$(uname -r)
       - name: run code generators
         run: make generate
       - name: golangci-lint
         uses: golangci/golangci-lint-action@82606bf257cbaff209d206a39f5134f0cfbfd2ee # v9.2.1
         with:
-          version: v2.8.0
+          version: ${{ steps.versions.outputs.golangci-lint }}
           args: --timeout=10m
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Check go mod tidy
+        run: |
+          go mod tidy
+          if ! git diff --exit-code go.mod go.sum; then
+            echo "ERROR: go.mod or go.sum is not tidy. Run 'go mod tidy' and commit changes."
+            exit 1
+          fi
 
   test:
     name: test
@@ -38,7 +65,10 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Install packages
-        run: sudo apt-get update && sudo apt-get install -y llvm clang libbpf-dev gcc-multilib linux-headers-$(uname -r)
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/azure-cli.* /etc/apt/sources.list.d/microsoft-prod.* /etc/apt/sources.list.d/packages-microsoft-prod.*
+          sudo apt-get update
+          sudo apt-get install -y llvm clang libbpf-dev gcc-multilib linux-headers-$(uname -r)
       - name: Run Tests
         run: make test
       - name: Upload coverage report
@@ -59,7 +89,10 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Install packages
-        run: sudo apt-get update && sudo apt-get install -y llvm clang libbpf-dev gcc-multilib linux-headers-$(uname -r)
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/azure-cli.* /etc/apt/sources.list.d/microsoft-prod.* /etc/apt/sources.list.d/packages-microsoft-prod.*
+          sudo apt-get update
+          sudo apt-get install -y llvm clang libbpf-dev gcc-multilib linux-headers-$(uname -r)
       - name: run code generators
         run: make generate
       - name: run manifest generators
@@ -77,12 +110,12 @@ jobs:
       id-token: write
     uses: ./.github/workflows/build-images.yaml
     with:
-      push: true
-      cache-write: true
+      push: false
+      cache-write: false
 
   build-images-fork:
     name: build container images (fork)
-    if: github.event.pull_request.head.repo.full_name != github.repository
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
     needs: [golangci, test, validate-generated]
     permissions:
       contents: read

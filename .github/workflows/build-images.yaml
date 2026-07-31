@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2025 Deutsche Telekom AG
+#
+# SPDX-License-Identifier: Apache-2.0
+
 name: Build and Release Container Images
 
 on:
@@ -59,7 +63,14 @@ jobs:
           go-version-file: go.mod
 
       - name: Create Licenses Report
-        run: make licenses-report
+        run: |
+          for attempt in 1 2 3; do
+            if make licenses-report; then
+              exit 0
+            fi
+            sleep 10
+          done
+          make licenses-report
 
       - name: Read Go version
         id: go-version
