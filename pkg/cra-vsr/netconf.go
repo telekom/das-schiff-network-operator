@@ -19,14 +19,18 @@ package cra
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
+	"net"
+	"sort"
 	"strings"
 	"time"
 
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/knownhosts"
 	"nemith.io/netconf"
 	"nemith.io/netconf/rpc"
 	ncssh "nemith.io/netconf/transport/ssh"
@@ -89,22 +93,129 @@ type Netconf struct {
 	urls      []string
 }
 
-func NewNetconf(urls []string, user, pwd string, timeout time.Duration) *Netconf {
+func NewNetconf(urls []string, user, pwd, knownHostsPath string, timeout time.Duration) (*Netconf, error) {
+	normalizedURLs := normalizeCRAURLs(urls)
+	knownHostsPath = strings.TrimSpace(knownHostsPath)
+	if err := validateKnownHostsEntries(knownHostsPath, normalizedURLs); err != nil {
+		return nil, err
+	}
+
+	hostKeyCallback, err := knownhosts.New(knownHostsPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load known hosts file %q: %w", knownHostsPath, err)
+	}
+
 	return &Netconf{
-		urls:    urls,
+		urls:    normalizedURLs,
 		timeout: timeout,
 		sshConfig: &ssh.ClientConfig{
 			User: user,
 			Auth: []ssh.AuthMethod{
 				ssh.Password(pwd),
 			},
-			// InsecureIgnoreHostKey is acceptable here because the NETCONF target is a
-			// locally managed network device reachable only within the cluster's trust
-			// boundary. Host-key verification would require pre-distributing known-hosts
-			// for each device and is not operationally feasible in this environment.
-			HostKeyCallback: ssh.InsecureIgnoreHostKey(), //nolint:gosec
+			HostKeyCallback: hostKeyCallback,
 		},
+	}, nil
+}
+
+func normalizeCRAURLs(urls []string) []string {
+	normalized := make([]string, 0, len(urls))
+	for _, rawURL := range urls {
+		url := strings.TrimSpace(rawURL)
+		if url == "" {
+			continue
+		}
+		normalized = append(normalized, url)
 	}
+	return normalized
+}
+
+func validateKnownHostsEntries(knownHostsPath string, urls []string) error {
+	knownHostsPath = strings.TrimSpace(knownHostsPath)
+	if knownHostsPath == "" {
+		return fmt.Errorf("known hosts file path is required")
+	}
+
+	normalizedURLs := normalizeCRAURLs(urls)
+	if len(normalizedURLs) == 0 {
+		return fmt.Errorf("no CRA URLs provided")
+	}
+
+	hostKeyCallback, err := knownhosts.New(knownHostsPath)
+	if err != nil {
+		return fmt.Errorf("failed to load known hosts file %q: %w", knownHostsPath, err)
+	}
+
+	validationKey, err := newKnownHostsValidationKey()
+	if err != nil {
+		return err
+	}
+
+	missing := []string{}
+	for _, url := range normalizedURLs {
+		if _, _, err := net.SplitHostPort(url); err != nil {
+			return fmt.Errorf("CRA URL %q must be in host:port form: %w", url, err)
+		}
+
+		hasEntry, err := knownHostsHasEntry(hostKeyCallback, url, validationKey)
+		if err != nil {
+			return fmt.Errorf("validate known hosts entry for CRA URL %q in file %q: %w", url, knownHostsPath, err)
+		}
+		if !hasEntry {
+			missing = append(missing, knownhosts.Normalize(url))
+		}
+	}
+	if len(missing) > 0 {
+		sort.Strings(missing)
+		return fmt.Errorf("known hosts file %q does not contain CRA URL entries: %s", knownHostsPath, strings.Join(missing, ", "))
+	}
+
+	return nil
+}
+
+func newKnownHostsValidationKey() (ssh.PublicKey, error) {
+	publicKey := make(ed25519.PublicKey, ed25519.PublicKeySize)
+	for i := range publicKey {
+		publicKey[i] = byte(i + 1)
+	}
+	sshKey, err := ssh.NewPublicKey(publicKey)
+	if err != nil {
+		return nil, fmt.Errorf("create validation SSH key: %w", err)
+	}
+	return sshKey, nil
+}
+
+func knownHostsHasEntry(hostKeyCallback ssh.HostKeyCallback, address string, validationKey ssh.PublicKey) (bool, error) {
+	const (
+		validationCallbackLoopback = "127.0.0.1"
+		validationCallbackPort     = 22
+	)
+
+	callbackAddress := knownHostsCallbackAddress(address)
+	err := hostKeyCallback(callbackAddress, &net.TCPAddr{IP: net.ParseIP(validationCallbackLoopback), Port: validationCallbackPort}, validationKey)
+	if err == nil {
+		return true, nil
+	}
+
+	var keyErr *knownhosts.KeyError
+	if errors.As(err, &keyErr) {
+		return len(keyErr.Want) > 0, nil
+	}
+
+	return false, err
+}
+
+func knownHostsCallbackAddress(address string) string {
+	if _, _, err := net.SplitHostPort(address); err == nil {
+		return address
+	}
+
+	normalized := knownhosts.Normalize(address)
+	if _, _, err := net.SplitHostPort(normalized); err == nil {
+		return normalized
+	}
+
+	return net.JoinHostPort(strings.Trim(normalized, "[]"), "22")
 }
 
 func (nc *Netconf) Open(ctx context.Context) error {

@@ -24,14 +24,27 @@ const (
 
 var procSysNetPath = "/proc/sys/net"
 
+// ValidateInterfaceName verifies that name is safe to use as a Linux interface name.
+func ValidateInterfaceName(name string) error {
+	switch {
+	case name == "", name == ".", name == "..":
+		return fmt.Errorf("invalid interface name: %q", name)
+	case len(name) >= unix.IFNAMSIZ:
+		return fmt.Errorf("interface name %q exceeds Linux limit", name)
+	case strings.ContainsAny(name, "/\\\x00"):
+		return fmt.Errorf("interface name %q contains path separators or NUL bytes", name)
+	default:
+		return nil
+	}
+}
+
 // sanitizeIntfName validates that an interface name is a single path component
 // with no directory traversal. Returns the sanitized name or an error.
 func sanitizeIntfName(name string) (string, error) {
-	s := filepath.Base(name)
-	if s == "." || s == ".." || strings.ContainsAny(s, "/\\") {
-		return "", fmt.Errorf("invalid interface name: %q", name)
+	if err := ValidateInterfaceName(name); err != nil {
+		return "", err
 	}
-	return s, nil
+	return filepath.Base(name), nil
 }
 
 var segmentationFeatureCandidates = [][]string{
