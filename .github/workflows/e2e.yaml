@@ -47,9 +47,14 @@ jobs:
         id: ldflags
         run: echo "value=$(bash hack/version.sh)" >> "$GITHUB_OUTPUT"
 
+      - name: Compute Go version
+        id: go-version
+        run: echo "value=$(awk '/^go / {print $2; exit}' go.mod)" >> "$GITHUB_OUTPUT"
+
       - name: Build cra-frr image
         run: |
           docker build \
+            --build-arg GO_VERSION="${{ steps.go-version.outputs.value }}" \
             --build-arg ldflags="${{ steps.ldflags.outputs.value }}" \
             -f das-schiff-cra-frr.Dockerfile \
             -t das-schiff-cra-frr:latest .
@@ -105,9 +110,14 @@ jobs:
         id: ldflags
         run: echo "value=$(bash hack/version.sh)" >> "$GITHUB_OUTPUT"
 
+      - name: Compute Go version
+        id: go-version
+        run: echo "value=$(awk '/^go / {print $2; exit}' go.mod)" >> "$GITHUB_OUTPUT"
+
       - name: Build image
         run: |
           docker build \
+            --build-arg GO_VERSION="${{ steps.go-version.outputs.value }}" \
             --build-arg ldflags="${{ steps.ldflags.outputs.value }}" \
             -f ${{ matrix.image }}.Dockerfile \
             -t ${{ env.IMG_BASE }}/${{ matrix.image }}:latest .
@@ -135,6 +145,10 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
+      - name: Compute Go version
+        id: go-version
+        run: echo "value=$(awk '/^go / {print $2; exit}' go.mod)" >> "$GITHUB_OUTPUT"
+
       - name: Build nat64 image
         run: |
           docker build \
@@ -145,6 +159,7 @@ jobs:
       - name: Build tester image
         run: |
           docker build \
+            --build-arg GO_VERSION="${{ steps.go-version.outputs.value }}" \
             -t ${{ env.IMG_BASE }}/das-schiff-e2e-tester:latest \
             -f e2e/images/tester/Dockerfile \
             e2e/images/tester/
@@ -182,6 +197,7 @@ jobs:
 
       - name: system-level-dependencies
         run: |
+          sudo rm -f /etc/apt/sources.list.d/azure-cli.* /etc/apt/sources.list.d/microsoft-prod.* /etc/apt/sources.list.d/packages-microsoft-prod.*
           sudo apt update
           sudo apt -y install linux-modules-extra-$(uname -r)
 
