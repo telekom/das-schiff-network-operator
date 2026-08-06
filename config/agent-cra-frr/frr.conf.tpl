@@ -411,6 +411,12 @@ router bgp {{ $.Config.LocalASN }} vrf {{ $.Config.ManagementVRF.Name }}
   bgp router-id {{ $.Config.VTEPLoopbackIP }}
   no bgp suppress-duplicates
   no bgp default ipv4-unicast
+  {{ if containsKey $.NodeConfig.FabricVRFs $.Config.ManagementVRF.Name }}
+  {{ $mgmtVRF := index $.NodeConfig.FabricVRFs $.Config.ManagementVRF.Name }}
+  {{ range $peer := $mgmtVRF.BGPPeers }}
+  {{ template "bgpNeighbor" $peer }}
+  {{ end }}
+  {{ end }}
 
   address-family ipv4 unicast
     redistribute connected

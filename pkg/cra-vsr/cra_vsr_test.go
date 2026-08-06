@@ -533,6 +533,52 @@ var _ = Describe("CRA-VSR", func() {
 
 		Expect(manager.baseConfig.MgmtInterface()).To(Equal(manager.baseConfig.TrunkInterfaceName))
 	})
+	It("Renders listen-range peers for the management VRF", func() {
+		listenRange := "192.168.100.0/24"
+		remoteASN := uint32(65099)
+		maxPfx := uint32(10)
+
+		nodeSpec := &v1alpha1.NodeNetworkConfigSpec{
+			FabricVRFs: map[string]v1alpha1.FabricVRF{
+				manager.baseConfig.ManagementVRF.Name: {
+					VNI: uint32(manager.baseConfig.ManagementVRF.VNI),
+					VRF: v1alpha1.VRF{
+						BGPPeers: []v1alpha1.BGPPeer{
+							{
+								ListenRange: &listenRange,
+								RemoteASN:   remoteASN,
+								IPv4: &v1alpha1.AddressFamily{
+									MaxPrefixes: &maxPfx,
+									ImportFilter: &v1alpha1.Filter{
+										DefaultAction: v1alpha1.Action{Type: v1alpha1.Reject},
+									},
+									ExportFilter: &v1alpha1.Filter{
+										DefaultAction: v1alpha1.Action{Type: v1alpha1.Accept},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		generated, err := manager.makeVRouter(nodeSpec)
+		Expect(err).ToNot(HaveOccurred())
+
+		ns := findNamespace(generated, manager.WorkNSName)
+		Expect(ns).ToNot(BeNil())
+
+		mgmtVRF := findVRFByName(ns, manager.baseConfig.ManagementVRF.Name)
+		Expect(mgmtVRF).ToNot(BeNil())
+		Expect(mgmtVRF.Routing).ToNot(BeNil())
+		Expect(mgmtVRF.Routing.BGP).ToNot(BeNil())
+
+		bgp := mgmtVRF.Routing.BGP
+		Expect(bgp.Listen).ToNot(BeNil(), "management VRF BGP should have a listen block")
+		Expect(bgp.Listen.Ranges).ToNot(BeEmpty(), "management VRF BGP should have a listen-range entry")
+		Expect(bgp.Listen.Ranges[0].Range).To(Equal(listenRange))
+	})
 })
 
 func findNamespace(v *VRouter, name string) *Namespace {
