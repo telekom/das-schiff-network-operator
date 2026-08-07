@@ -207,3 +207,15 @@ kubectl apply -k <overlay>       # an overlay that includes the cni-workload com
 
 The installer DaemonSet copies the binary to `/opt/cni/bin`. The per-network CNI
 config travels with the NAD, so no standalone conflist is required.
+
+`config/cni-workload` is an **opt-in kustomize component** and is *not* part of
+`config/default`; being a `kind: Component` it cannot be applied on its own. A
+deployment that wants workload attachments must therefore:
+
+1. add the component to its overlay (`components: [../cni-workload]`) so the
+   plugin binary lands on every node, and
+2. give the CRA agent DaemonSet the `/run/das-schiff` hostPath
+   (`type: DirectoryOrCreate`) that carries the agent socket — see
+   `config/agent-cra-frr/agent.yaml`. Downstream deployments that flatten the
+   manifests must copy this volume; without it the plugin fails on `ADD` with a
+   connection error to `/run/das-schiff/workload-cni.sock`.

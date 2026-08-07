@@ -1,0 +1,25 @@
+# Node-level settings of the cni-workload plugin: the trust anchors that decide
+# where the (root-run) plugin wires a port. They are deliberately NOT part of
+# the NetworkAttachmentDefinition — that object is tenant-writable — and the
+# plugin refuses them there. The installer DaemonSet copies this file to
+# /etc/cni/cni-workload/config.json on every node.
+#
+# All keys are optional (shown with their defaults):
+#   agentSocket     unix socket of the node-local CRA agent
+#   craNetns        "auto" (discover by trunkInterface), a named netns under
+#                   /var/run/netns/<name>, or an absolute netns path; a name or
+#                   path is only accepted if it owns the trunkInterface peer
+#   trunkInterface  interface identifying the CRA netns, mirrors
+#                   BaseConfig.trunkInterfaceName
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cni-workload-node-config
+  namespace: system
+data:
+  config.json: |
+    {
+      "agentSocket": "/run/das-schiff/workload-cni.sock",
+      "craNetns": "auto",
+      "trunkInterface": "hbn"
+    }
