@@ -3,6 +3,7 @@ package agent_cra_frr //nolint:revive
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/go-logr/logr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -10,8 +11,10 @@ import (
 	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/pkg/config"
 	cra "github.com/telekom/das-schiff-network-operator/pkg/cra-frr"
+	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/common"
+	"github.com/telekom/das-schiff-network-operator/pkg/workloadcni"
 )
 
 const (
@@ -44,6 +47,8 @@ func (a *CRAFRRConfigApplier) ApplyConfig(ctx context.Context, cfg *v1alpha1.Nod
 }
 
 func (a *CRAFRRConfigApplier) convertNodeConfigToNetlink(nodeCfg *v1alpha1.NodeNetworkConfig) (netlinkConfig nl.NetlinkConfiguration) {
+	netlinkConfig.WorkloadPorts = a.convertWorkloadPorts(nodeCfg)
+
 	for _, layer2 := range nodeCfg.Spec.Layer2s {
 		nlLayer2 := nl.Layer2Information{
 			VlanID:              int(layer2.VLAN),
@@ -95,6 +100,40 @@ func (a *CRAFRRConfigApplier) convertNodeConfigToNetlink(nodeCfg *v1alpha1.NodeN
 	}
 
 	return netlinkConfig
+}
+
+// convertWorkloadPorts flattens the workload CNI attachments merged into the config
+// (the node's default/underlay table, the cluster VRF, fabric VRFs and local
+// VRFs) into the netlink workload-port list the frr-cra server programs.
+func (a *CRAFRRConfigApplier) convertWorkloadPorts(nodeCfg *v1alpha1.NodeNetworkConfig) []nl.WorkloadPort {
+	var ports []nl.WorkloadPort
+	appendPorts := func(vrf string, rps []v1alpha1.WorkloadPort) {
+		for i := range rps {
+			ports = append(ports, nl.WorkloadPort{
+				Interface:  rps[i].Interface,
+				VRF:        vrf,
+				GatewayV4:  rps[i].GatewayV4,
+				GatewayV6:  rps[i].GatewayV6,
+				HostRoutes: rps[i].HostRoutes,
+			})
+		}
+	}
+
+	// Attachments requested without a target VRF stay in the CRA netns default
+	// (main) table so the underlay BGP session advertises their host routes.
+	appendPorts("", nodeCfg.Spec.GlobalWorkloadPorts)
+	if nodeCfg.Spec.ClusterVRF != nil {
+		appendPorts(a.baseConfig.ClusterVRF.Name, nodeCfg.Spec.ClusterVRF.WorkloadPorts)
+	}
+	for name := range nodeCfg.Spec.FabricVRFs {
+		fv := nodeCfg.Spec.FabricVRFs[name]
+		appendPorts(name, fv.WorkloadPorts)
+	}
+	for name := range nodeCfg.Spec.LocalVRFs {
+		lv := nodeCfg.Spec.LocalVRFs[name]
+		appendPorts(name, lv.WorkloadPorts)
+	}
+	return ports
 }
 
 // appendMirrorVRFConfig adds the GRE tunnels, loopbacks and mirror rules carried by
@@ -215,6 +254,11 @@ func NewNodeNetworkConfigReconciler(
 		common.ReconcilerOptions{
 			RestoreOnReconcileFailure: true, // FRR can partially apply invalid configs
 			LocalASN:                  baseConfig.LocalASN,
+			// Merge workload CNI attachments (recorded in the node's
+			// NodeWorkloadPorts object) into the config before rendering: the
+			// frr-cra server programs their on-link routes so FRR redistributes
+			// the VM /32 + /128 into BGP.
+			WorkloadPortsSource: workloadcni.NewNodeSource(clusterClient, os.Getenv(healthcheck.NodenameEnv)),
 		},
 	)
 	if err != nil {
