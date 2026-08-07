@@ -32,6 +32,11 @@ type NodeNetworkConfigSpec struct {
 	FabricVRFs map[string]FabricVRF `json:"fabricVRFs,omitempty"`
 	// LocalVRFs is a map of local VRF configurations.
 	LocalVRFs map[string]VRF `json:"localVRFs,omitempty"`
+	// GlobalWorkloadPorts is a list of workload CNI attachments requested without a
+	// target VRF. They are bound into the node's default (no-l3vrf) table rather
+	// than a tenant/cluster L3VRF, and their host routes are advertised into the
+	// underlay BGP via network statements.
+	GlobalWorkloadPorts []WorkloadPort `json:"globalWorkloadPorts,omitempty"`
 }
 
 // Layer2 represents a Layer 2 network configuration.
@@ -89,6 +94,36 @@ type VRF struct {
 	Redistribute *Redistribute `json:"redistribute,omitempty"`
 	// GREs is a map of GRE tunnel interfaces
 	GREs map[string]GRE `json:"gres,omitempty"`
+	// WorkloadPorts is a list of workload CNI attachments (interfaces moved into the
+	// CRA network namespace) bound into this VRF. The VSR flavor renders these as
+	// infrastructure interfaces plus interface-static routes via NETCONF, because
+	// the fast path owns the FIB and netlink cannot be used to program it.
+	WorkloadPorts []WorkloadPort `json:"workloadPorts,omitempty"`
+}
+
+// WorkloadPort describes a routed workload attachment whose CRA-side interface was
+// moved into the CRA network namespace by the workload CNI. On the VSR flavor the
+// on-link gateway addresses and the workload host routes are pushed via NETCONF.
+type WorkloadPort struct {
+	// Interface is the interface name inside the CRA network namespace (the moved
+	// veth end, e.g. "cra012345"). VSR references it as infra-<interface>, which
+	// must itself fit the kernel IFNAMSIZ-1 limit, hence the 9-character bound.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=9
+	Interface string `json:"interface"`
+	// GatewayV4 is the on-link IPv4 gateway address (with prefix length, e.g.
+	// "169.254.100.100/32") configured on the infrastructure interface.
+	// +kubebuilder:validation:Format=cidr
+	GatewayV4 string `json:"gatewayV4,omitempty"`
+	// GatewayV6 is the on-link IPv6 gateway address (with prefix length, e.g.
+	// "fd00:7:caa5:1::/128") configured on the infrastructure interface.
+	// +kubebuilder:validation:Format=cidr
+	GatewayV6 string `json:"gatewayV6,omitempty"`
+	// HostRoutes are the workload host addresses (e.g. "10.0.0.5/32",
+	// "fd00:200::5/128") installed as interface-static routes via Interface so
+	// VSR redistributes them into BGP.
+	// +kubebuilder:validation:items:Format=cidr
+	HostRoutes []string `json:"hostRoutes,omitempty"`
 }
 
 // Redistribute represents a BGP redistribution configuration.
@@ -333,6 +368,9 @@ type NextHop struct {
 	Address *string `json:"address,omitempty"`
 	// Vrf is the VRF of the next hop.
 	Vrf *string `json:"vrf,omitempty"`
+	// Interface is the egress interface for an interface (on-link) next hop, used
+	// for workload CNI host routes that point at the moved CRA-side interface.
+	Interface *string `json:"interface,omitempty"`
 }
 
 // NodeNetworkConfigStatus defines the observed state of NodeConfig.
