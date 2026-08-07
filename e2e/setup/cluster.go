@@ -22,7 +22,13 @@ type Cluster struct {
 	NAT64DNS      string
 	ExportCIDRv4  string
 	ExportCIDRv6  string
-	Nodes         []Node
+	// UnderlayVMv4/v6 is the pool from which routed KubeVirt/pod workloads draw
+	// their static IPs. The CRA-side FRR/VSR redistributes on-link host routes for
+	// these into the *underlay* BGP (not the EVPN overlay), so a leaf/DCGW can
+	// reach the VM directly via the fabric.
+	UnderlayVMv4 string
+	UnderlayVMv6 string
+	Nodes        []Node
 }
 
 // DefaultCluster returns the standard e2e cluster definition.
@@ -36,6 +42,8 @@ func DefaultCluster() *Cluster {
 		NAT64DNS:      "fda5:25c1:193e::1",
 		ExportCIDRv4:  "10.100.0.0/24",
 		ExportCIDRv6:  "fdcb:f93c:3a3e::/64",
+		UnderlayVMv4:  "10.201.0.0/24",
+		UnderlayVMv6:  "fd00:201::/64",
 		Nodes: []Node{
 			{
 				Name:          "nwop-control-plane",
@@ -104,6 +112,8 @@ func Cluster2() *Cluster {
 		VIP:           "10.100.1.10", // no kube-vip; VIP == node IP
 		ExportCIDRv4:  "10.100.1.0/24",
 		ExportCIDRv6:  "fdcb:f93c:3a3e:1::/64",
+		UnderlayVMv4:  "10.201.1.0/24",
+		UnderlayVMv6:  "fd00:201:1::/64",
 		Nodes: []Node{
 			{
 				Name:          "nwop2-worker",

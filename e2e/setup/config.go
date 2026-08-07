@@ -30,7 +30,7 @@ func GenerateNodeConfigs(repoRoot string, clusters ...*Cluster) error {
 		}
 
 		for _, node := range cluster.Nodes {
-			if err := generateNodeConfig(genDir, tplDir, node, clusterVNI, clusterRT, mgmtVNI, mgmtRT, cluster.ExportCIDRv4, cluster.ExportCIDRv6); err != nil {
+			if err := generateNodeConfig(genDir, tplDir, node, clusterVNI, clusterRT, mgmtVNI, mgmtRT, cluster.ExportCIDRv4, cluster.ExportCIDRv6, cluster.UnderlayVMv4, cluster.UnderlayVMv6); err != nil {
 				return err
 			}
 		}
@@ -40,7 +40,7 @@ func GenerateNodeConfigs(repoRoot string, clusters ...*Cluster) error {
 	return nil
 }
 
-func generateNodeConfig(genDir, tplDir string, node Node, clusterVNI int, clusterRT string, mgmtVNI int, mgmtRT string, exportCIDRv4, exportCIDRv6 string) error {
+func generateNodeConfig(genDir, tplDir string, node Node, clusterVNI int, clusterRT string, mgmtVNI int, mgmtRT string, exportCIDRv4, exportCIDRv6, underlayVMv4, underlayVMv6 string) error {
 	shortName := strings.TrimPrefix(node.Name, "clab-nwop-")
 	nodeDir := filepath.Join(genDir, shortName)
 
@@ -79,6 +79,13 @@ func generateNodeConfig(genDir, tplDir string, node Node, clusterVNI int, cluste
 		MgmtRT:        mgmtRT,
 		ExportCIDRv4:  exportCIDRv4,
 		ExportCIDRv6:  exportCIDRv6,
+		UnderlayVMv4:  underlayVMv4,
+		UnderlayVMv6:  underlayVMv6,
+		// Only the opt-in routed KubeVirt lab needs the CRA to export routed
+		// workload host routes into the (v4/v6) underlay. Enabling it for the
+		// default base/intent runs negotiates a fabric-facing IPv6 unicast AF on
+		// the EVPN VTEP that breaks the stretched tenant (m2m/c2m) datapath.
+		RoutedUnderlay: EnvOr("E2E_KUBEVIRT", "") != "",
 	}
 
 	// Render templates
@@ -168,6 +175,15 @@ type templateData struct {
 	MgmtRT        string
 	ExportCIDRv4  string
 	ExportCIDRv6  string
+	UnderlayVMv4  string
+	UnderlayVMv6  string
+	// RoutedUnderlay gates the routed-CNI underlay export on the CRA (the extra
+	// IPv6 unicast address-family and `redistribute kernel` of the routed VM/pod
+	// pool). It is only needed for the opt-in routed KubeVirt datapath lab; the
+	// default base/intent runs have no routed workloads and must NOT advertise
+	// (and thereby negotiate) that fabric-facing IPv6 unicast AF, which otherwise
+	// disturbs the stretched tenant EVPN datapath.
+	RoutedUnderlay bool
 }
 
 // renderTemplate renders a Go template file with {{ .Var }} placeholders.

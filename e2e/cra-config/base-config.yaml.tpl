@@ -15,6 +15,7 @@ underlayNeighbors:
     holdTime: 90
     bfdMinTimer: 333
     ipv4: true
+    ipv6: {{ if .RoutedUnderlay }}true{{ else }}false{{ end }}
     evpn: false
   - interface: eth2
     remoteASN: "65500"
@@ -23,6 +24,7 @@ underlayNeighbors:
     holdTime: 90
     bfdMinTimer: 333
     ipv4: true
+    ipv6: {{ if .RoutedUnderlay }}true{{ else }}false{{ end }}
     evpn: false
   - ip: "192.0.2.1"
     remoteASN: "64497"
