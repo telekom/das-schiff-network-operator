@@ -38,7 +38,10 @@ require (
 	sigs.k8s.io/yaml v1.6.0
 )
 
-require google.golang.org/genproto/googleapis/rpc v0.0.0-20260414002931-afd174a4e478 // indirect
+require (
+	github.com/coreos/go-iptables v0.7.0 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260414002931-afd174a4e478 // indirect
+)
 
 require (
 	github.com/Masterminds/semver/v3 v3.4.0 // indirect
