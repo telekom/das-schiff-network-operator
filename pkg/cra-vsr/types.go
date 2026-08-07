@@ -358,7 +358,11 @@ type Interfaces struct {
 }
 
 type Infrastructure struct {
-	Name string `xml:"name"`
+	XMLName xml.Name       `xml:"urn:6wind:vrouter/infrastructure infrastructure"`
+	Name    string         `xml:"name"`
+	Port    *string        `xml:"port,omitempty"`
+	IPv4    *IPAddressList `xml:"ipv4,omitempty"`
+	IPv6    *IPAddressList `xml:"ipv6,omitempty"`
 }
 
 type Physical struct {
