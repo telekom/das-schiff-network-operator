@@ -124,6 +124,7 @@ rules:
   - networkconfigrevisions
   - nodenetplanconfigs
   - nodenetworkconfigs
+  - nodeworkloadports
   - vrfrouteconfigurations
   verbs:
   - create
