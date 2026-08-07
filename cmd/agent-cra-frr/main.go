@@ -34,6 +34,7 @@ import (
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -43,10 +44,12 @@ import (
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	controllerfrr "github.com/telekom/das-schiff-network-operator/controllers/agent-cra-frr"
 	"github.com/telekom/das-schiff-network-operator/pkg/cra-frr"
+	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
 	"github.com/telekom/das-schiff-network-operator/pkg/monitoring"
 	reconcilerfrr "github.com/telekom/das-schiff-network-operator/pkg/reconciler/agent-cra-frr"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/common"
 	"github.com/telekom/das-schiff-network-operator/pkg/version"
+	"github.com/telekom/das-schiff-network-operator/pkg/workloadcni"
 )
 
 var (
@@ -141,8 +144,16 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := initComponents(mgr, nodeNetworkConfigPath, craManager); err != nil {
+	r, err := initComponents(mgr, nodeNetworkConfigPath, craManager)
+	if err != nil {
 		setupLog.Error(err, "unable to initialize components")
+		os.Exit(1)
+	}
+
+	// Start the node-local workload-cni gRPC server so the workload CNI plugin can
+	// hand attachments to this agent (which programs them via frr-cra netlink).
+	if err := startWorkloadCNIServer(mgr, r.ReservedVRFs()); err != nil {
+		setupLog.Error(err, "unable to start workload-cni server")
 		os.Exit(1)
 	}
 
@@ -151,6 +162,35 @@ func main() {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
+}
+
+// startWorkloadCNIServer registers the node-local workload-cni gRPC server as a
+// manager runnable so it shares the manager's lifecycle and client.
+func startWorkloadCNIServer(mgr manager.Manager, reservedVRFs []string) error {
+	nodeName := os.Getenv(healthcheck.NodenameEnv)
+	if nodeName == "" {
+		// Without it the server would write NodeWorkloadPorts objects with an empty
+		// name, failing every CNI ADD with an opaque API error.
+		return fmt.Errorf("%s must be set to run the workload-cni server", healthcheck.NodenameEnv)
+	}
+	socketPath := os.Getenv("ROUTED_CNI_SOCKET")
+	// The server mutates NodeWorkloadPorts read-modify-write on every CNI ADD/DEL,
+	// often back-to-back for the same pod (a compensating DEL after a failed ADD,
+	// the runtime's DEL right after it). The manager's client reads from the
+	// informer cache, which lags the write it just made, so a DEL could miss the
+	// entry the ADD recorded and leave it behind; use a direct client instead.
+	directClient, err := client.New(mgr.GetConfig(), client.Options{Scheme: mgr.GetScheme()})
+	if err != nil {
+		return fmt.Errorf("unable to create direct client for workload-cni server: %w", err)
+	}
+	srv := workloadcni.NewServer(directClient, nodeName, mgr.GetLogger(),
+		workloadcni.WithReservedVRFs(reservedVRFs...))
+	if err := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
+		return srv.Serve(ctx, socketPath)
+	})); err != nil {
+		return fmt.Errorf("unable to add workload-cni server to manager: %w", err)
+	}
+	return nil
 }
 
 func updateManagerOptions(options *manager.Options, craManager *cra.Manager) error {
@@ -168,27 +208,25 @@ func updateManagerOptions(options *manager.Options, craManager *cra.Manager) err
 	return nil
 }
 
-func initComponents(mgr manager.Manager, nodeConfigPath string, craManager *cra.Manager) error {
+func initComponents(mgr manager.Manager, nodeConfigPath string, craManager *cra.Manager) (*reconcilerfrr.NodeNetworkConfigReconciler, error) {
 	//+kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
-		return fmt.Errorf("unable to set up health check: %w", err)
+		return nil, fmt.Errorf("unable to set up health check: %w", err)
 	}
 	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
-		return fmt.Errorf("unable to set up ready check: %w", err)
+		return nil, fmt.Errorf("unable to set up ready check: %w", err)
 	}
 
 	r, err := setupReconcilers(mgr, nodeConfigPath, craManager)
 	if err != nil {
-		return fmt.Errorf("unable to setup reconcilers: %w", err)
+		return nil, fmt.Errorf("unable to setup reconcilers: %w", err)
 	}
 
 	// Trigger initial reconciliation.
-	if r != nil {
-		_, _ = r.Reconcile(context.Background())
-	}
+	_, _ = r.Reconcile(context.Background())
 
-	return nil
+	return r, nil
 }
 
 func setupReconcilers(mgr manager.Manager, nodeConfigPath string, craManager *cra.Manager) (*reconcilerfrr.NodeNetworkConfigReconciler, error) {
