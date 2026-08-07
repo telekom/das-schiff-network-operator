@@ -79,6 +79,11 @@ func generateNodeConfig(genDir, tplDir string, node Node, clusterVNI int, cluste
 		MgmtRT:        mgmtRT,
 		ExportCIDRv4:  exportCIDRv4,
 		ExportCIDRv6:  exportCIDRv6,
+		// Only the opt-in routed KubeVirt lab needs the CRA to export routed
+		// workload host routes into the (v4/v6) underlay. Enabling it for the
+		// default base/intent runs negotiates a fabric-facing IPv6 unicast AF on
+		// the EVPN VTEP that breaks the stretched tenant (m2m/c2m) datapath.
+		RoutedUnderlay: EnvOr("E2E_KUBEVIRT", "") != "",
 	}
 
 	// Render templates
@@ -168,6 +173,13 @@ type templateData struct {
 	MgmtRT        string
 	ExportCIDRv4  string
 	ExportCIDRv6  string
+	// RoutedUnderlay gates the routed-CNI underlay export on the CRA (the extra
+	// IPv6 unicast address-family and `redistribute kernel` of the routed VM/pod
+	// pool). It is only needed for the opt-in routed KubeVirt datapath lab; the
+	// default base/intent runs have no routed workloads and must NOT advertise
+	// (and thereby negotiate) that fabric-facing IPv6 unicast AF, which otherwise
+	// disturbs the stretched tenant EVPN datapath.
+	RoutedUnderlay bool
 }
 
 // renderTemplate renders a Go template file with {{ .Var }} placeholders.
