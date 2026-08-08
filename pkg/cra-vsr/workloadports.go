@@ -19,6 +19,7 @@ package cra
 import (
 	"fmt"
 
+	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/pkg/helpers/types"
 	"github.com/telekom/das-schiff-network-operator/pkg/workloadcni"
 )
@@ -30,6 +31,78 @@ import (
 // sets to the same value). Shared with pkg/cni via workloadcni so both agree.
 const infraPortPrefix = workloadcni.InfraPortPrefix
 
+// fpvhostPortPrefix is prepended to the interface name to derive the VSR
+// fast-path fpvhost virtual-port reference for a vhost-user attachment
+// (fpvhost-<ifname>), mirroring infraPortPrefix for the veth transport.
+const fpvhostPortPrefix = workloadcni.FpvhostPortPrefix
+
+// registerFpvhostVirtualPorts adds the given fast-path fpvhost virtual-port
+// declarations to the global system subtree of vrouter, creating the system /
+// fast-path / virtual-port containers on first use and de-duplicating by name.
+// The system subtree stays absent entirely when no fpvhost ports exist, so the
+// common veth and L2 paths never touch it.
+func registerFpvhostVirtualPorts(vrouter *VRouter, vports []FpvhostVirtualPort) {
+	if vrouter == nil || len(vports) == 0 {
+		return
+	}
+	if vrouter.System == nil {
+		vrouter.System = &System{}
+	}
+	if vrouter.System.FastPath == nil {
+		vrouter.System.FastPath = &FastPath{}
+	}
+	if vrouter.System.FastPath.VirtualPort == nil {
+		vrouter.System.FastPath.VirtualPort = &VirtualPort{}
+	}
+	existing := vrouter.System.FastPath.VirtualPort
+	for i := range vports {
+		if fpvhostVirtualPortExists(existing.Fpvhosts, vports[i].Name) {
+			continue
+		}
+		existing.Fpvhosts = append(existing.Fpvhosts, vports[i])
+	}
+}
+
+// fpvhostVirtualPortExists reports whether a fpvhost virtual-port with the given
+// name is already declared.
+func fpvhostVirtualPortExists(ports []FpvhostVirtualPort, name string) bool {
+	for i := range ports {
+		if ports[i].Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// newFpvhostVirtualPort builds the fast-path fpvhost virtual-port declaration
+// for an interface. SocketPath is the host-side socket the 6WIND device plugin
+// allocated (never the pod-side path, which lives in the pod mount namespace and
+// would leave VSR bound to a socket nothing connects to).
+//
+// The socket mode is inverted relative to the workload: the two ends of a
+// vhost-user socket must take opposite roles, so a pod running a server socket
+// pairs with a VSR client socket. An empty/unknown workload mode defaults to a
+// VSR server socket.
+func newFpvhostVirtualPort(ifName, socketPath, workloadSocketMode string) FpvhostVirtualPort {
+	vport := FpvhostVirtualPort{
+		Name:       fpvhostPortPrefix + ifName,
+		SocketMode: types.ToPtr(invertSocketMode(workloadSocketMode)),
+	}
+	if socketPath != "" {
+		vport.SocketPath = types.ToPtr(socketPath)
+	}
+	return vport
+}
+
+// invertSocketMode flips the vhost-user socket mode between the workload and the
+// VSR fast path: the two ends of a vhost-user socket must take opposite roles.
+func invertSocketMode(workloadMode string) string {
+	if workloadMode == v1alpha1.SocketModeServer {
+		return v1alpha1.SocketModeClient
+	}
+	return v1alpha1.SocketModeServer
+}
+
 // WorkloadPort describes a single routed workload attachment whose CRA-side
 // interface has been moved into the CRA network namespace by the workload CNI.
 // The VSR flavor cannot program the datapath via raw netlink (the fast path
@@ -37,8 +110,19 @@ const infraPortPrefix = workloadcni.InfraPortPrefix
 // are rendered as NETCONF and pushed instead.
 type WorkloadPort struct {
 	// IfName is the interface name inside the CRA network namespace (the moved
-	// veth end, e.g. "cra012345"). Referenced by VSR as infra-<IfName>.
+	// veth end, e.g. "cra012345"). Referenced by VSR as infra-<IfName> (veth
+	// transport) or fpvhost-<IfName> (vhostuser transport).
 	IfName string
+	// Transport selects the CRA-side wiring: veth (default, an infrastructure
+	// port) or vhostuser (a fast-path fpvhost virtual-port).
+	Transport v1alpha1.PortTransport
+	// SocketPath is the host-side vhost-user socket path allocated by the 6WIND
+	// device plugin. Only meaningful for the vhostuser transport.
+	SocketPath string
+	// SocketMode is the workload-side vhost-user socket mode ("client"/"server").
+	// It is inverted before being rendered onto the VSR fpvhost virtual-port.
+	// Only meaningful for the vhostuser transport.
+	SocketMode string
 	// GatewayV4 is the on-link IPv4 gateway address (with prefix length, e.g.
 	// "169.254.100.100/32") configured on the infrastructure interface.
 	GatewayV4 string
@@ -53,15 +137,18 @@ type WorkloadPort struct {
 
 // applyWorkloadPorts merges the given workload ports into an already-composed VRF:
 // each port adds an infrastructure interface (port infra-<ifname> + on-link
-// gateway addresses) and interface-static routes for the workload host routes.
+// gateway addresses) — or, for the vhostuser transport, a fpvhost interface
+// (port fpvhost-<ifname>) — and interface-static routes for the workload host
+// routes. For vhostuser ports it also returns the fast-path fpvhost virtual-port
+// declarations the caller must register on the global system subtree.
 //
 // It never creates a VRF. The VSR reconcile path looks up the existing
 // cluster/fabric/local L3VRF (LookupVRF) assembled from the NodeNetworkConfig
 // spec and layers the workload ports onto it, so a routed attachment is bound into
 // the VRF that already exists rather than a duplicate one.
-func applyWorkloadPorts(vrf *VRF, ports ...WorkloadPort) error {
+func applyWorkloadPorts(vrf *VRF, ports ...WorkloadPort) ([]FpvhostVirtualPort, error) {
 	if len(ports) == 0 {
-		return nil
+		return nil, nil
 	}
 	if vrf.Interfaces == nil {
 		vrf.Interfaces = &Interfaces{}
@@ -79,9 +166,9 @@ func applyWorkloadPorts(vrf *VRF, ports ...WorkloadPort) error {
 // Unlike an L3VRF (which redistributes static/connected into its own BGP), the
 // default table's BGP is the underlay session, so each host route is instead
 // advertised via an explicit BGP network statement (see advertiseHostRoutes).
-func applyGlobalWorkloadPorts(ns *Namespace, ports ...WorkloadPort) error {
+func applyGlobalWorkloadPorts(ns *Namespace, ports ...WorkloadPort) ([]FpvhostVirtualPort, error) {
 	if len(ports) == 0 {
-		return nil
+		return nil, nil
 	}
 	if ns.Interfaces == nil {
 		ns.Interfaces = &Interfaces{}
@@ -89,38 +176,58 @@ func applyGlobalWorkloadPorts(ns *Namespace, ports ...WorkloadPort) error {
 	if ns.Routing == nil {
 		ns.Routing = &Routing{}
 	}
-	if err := addWorkloadPorts(ns.Interfaces, ns.Routing, ports); err != nil {
-		return err
+	vports, err := addWorkloadPorts(ns.Interfaces, ns.Routing, ports)
+	if err != nil {
+		return nil, err
 	}
 	advertiseHostRoutes(ns.Routing.BGP, ports)
-	return nil
+	return vports, nil
 }
 
 // addWorkloadPorts renders each workload port as an infrastructure interface (port
-// infra-<ifname> + on-link gateway addresses) plus interface-static routes for
-// the workload host routes into the given interface and routing containers.
-func addWorkloadPorts(ifaces *Interfaces, routing *Routing, ports []WorkloadPort) error {
+// infra-<ifname> + on-link gateway addresses) — or, for the vhostuser transport,
+// as a fpvhost interface (port fpvhost-<ifname>) — plus interface-static routes
+// for the workload host routes into the given interface and routing containers.
+// It returns the fpvhost virtual-port declarations for the vhostuser ports.
+func addWorkloadPorts(ifaces *Interfaces, routing *Routing, ports []WorkloadPort) ([]FpvhostVirtualPort, error) {
 	if routing.Static == nil {
 		routing.Static = &StaticRouting{}
 	}
 
+	var vports []FpvhostVirtualPort
 	for i := range ports {
 		p := ports[i]
 		if p.IfName == "" {
-			return fmt.Errorf("workload port %d: ifname is required", i)
+			return nil, fmt.Errorf("workload port %d: ifname is required", i)
 		}
 
-		infra := Infrastructure{
-			Name: p.IfName,
-			Port: types.ToPtr(infraPortPrefix + p.IfName),
-		}
+		var v4, v6 *IPAddressList
 		if p.GatewayV4 != "" {
-			infra.IPv4 = &IPAddressList{IPAddresses: []IPAddress{{IP: p.GatewayV4}}}
+			v4 = &IPAddressList{IPAddresses: []IPAddress{{IP: p.GatewayV4}}}
 		}
 		if p.GatewayV6 != "" {
-			infra.IPv6 = &IPAddressList{IPAddresses: []IPAddress{{IP: p.GatewayV6}}}
+			v6 = &IPAddressList{IPAddresses: []IPAddress{{IP: p.GatewayV6}}}
 		}
-		ifaces.Infras = append(ifaces.Infras, infra)
+
+		if p.Transport == v1alpha1.PortTransportVhostUser {
+			if p.SocketPath == "" {
+				return nil, fmt.Errorf("workload port %d (%s): vhostuser transport requires a socket path", i, p.IfName)
+			}
+			ifaces.Fpvhosts = append(ifaces.Fpvhosts, Fpvhost{
+				Name: p.IfName,
+				Port: types.ToPtr(fpvhostPortPrefix + p.IfName),
+				IPv4: v4,
+				IPv6: v6,
+			})
+			vports = append(vports, newFpvhostVirtualPort(p.IfName, p.SocketPath, p.SocketMode))
+		} else {
+			ifaces.Infras = append(ifaces.Infras, Infrastructure{
+				Name: p.IfName,
+				Port: types.ToPtr(infraPortPrefix + p.IfName),
+				IPv4: v4,
+				IPv6: v6,
+			})
+		}
 
 		for _, dst := range p.HostRoutes {
 			route := StaticRoute{
@@ -134,7 +241,7 @@ func addWorkloadPorts(ifaces *Interfaces, routing *Routing, ports []WorkloadPort
 			}
 		}
 	}
-	return nil
+	return vports, nil
 }
 
 // advertiseHostRoutes adds a BGP network statement for each workload-port host
