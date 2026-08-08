@@ -45,10 +45,12 @@ import (
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	controllervsr "github.com/telekom/das-schiff-network-operator/controllers/agent-cra-vsr"
 	"github.com/telekom/das-schiff-network-operator/pkg/cra-vsr"
+	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
 	"github.com/telekom/das-schiff-network-operator/pkg/monitoring"
 	reconcilervsr "github.com/telekom/das-schiff-network-operator/pkg/reconciler/agent-cra-vsr"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/common"
 	"github.com/telekom/das-schiff-network-operator/pkg/version"
+	"github.com/telekom/das-schiff-network-operator/pkg/workloadcni"
 )
 
 var (
@@ -279,9 +281,35 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Start the node-local workload-cni gRPC server so the workload CNI plugin can
+	// hand VSR attachments to this agent (which renders them via NETCONF).
+	if err := startWorkloadCNIServer(mgr); err != nil {
+		setupLog.Error(err, "unable to start workload-cni server")
+		os.Exit(1)
+	}
+
 	setupLog.Info("starting manager")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
+}
+
+// startWorkloadCNIServer registers the node-local workload-cni gRPC server as a
+// manager runnable so it shares the manager's lifecycle and client.
+func startWorkloadCNIServer(mgr manager.Manager) error {
+	nodeName := os.Getenv(healthcheck.NodenameEnv)
+	if nodeName == "" {
+		// Without it the server would write NodeWorkloadPorts objects with an empty
+		// name, failing every CNI ADD with an opaque API error.
+		return fmt.Errorf("%s must be set to run the workload-cni server", healthcheck.NodenameEnv)
+	}
+	socketPath := os.Getenv("ROUTED_CNI_SOCKET")
+	srv := workloadcni.NewServer(mgr.GetClient(), nodeName, mgr.GetLogger())
+	if err := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
+		return srv.Serve(ctx, socketPath)
+	})); err != nil {
+		return fmt.Errorf("unable to add workload-cni server to manager: %w", err)
+	}
+	return nil
 }
