@@ -1,3 +1,5 @@
+//go:build linux
+
 /*
 Copyright 2024.
 
@@ -108,5 +110,70 @@ func TestGatewayOverride(t *testing.T) {
 	gw6, _ := c.gatewayV6()
 	if gw6.String() != "fe80::abcd" {
 		t.Errorf("gatewayV6() = %v, want fe80::abcd", gw6)
+	}
+}
+
+func TestParseConfigL2Mode(t *testing.T) {
+	// L2 mode needs a Layer2AttachmentRef and no VRF; gateways are not required.
+	conf := `{
+	  "cniVersion":"1.0.0","type":"cni-workload",
+	  "attachMode":"l2",
+	  "layer2AttachmentRef":{"name":"blue","namespace":"tenant-a"},
+	  "ipam":{"type":"host-local"}
+	}`
+	c, err := parseConfig([]byte(conf))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !c.isL2() {
+		t.Errorf("isL2() = false, want true")
+	}
+	if c.transport() != TransportVeth {
+		t.Errorf("transport() = %q, want %q", c.transport(), TransportVeth)
+	}
+	if c.Layer2AttachmentRef == nil || c.Layer2AttachmentRef.Name != "blue" {
+		t.Errorf("Layer2AttachmentRef = %+v, want name=blue", c.Layer2AttachmentRef)
+	}
+}
+
+func TestParseConfigModeErrors(t *testing.T) {
+	tests := map[string]string{
+		"invalid attach mode":  `{"cniVersion":"1.0.0","type":"cni-workload","attachMode":"bogus","ipam":{"type":"host-local"}}`,
+		"invalid transport":    `{"cniVersion":"1.0.0","type":"cni-workload","transport":"bogus","ipam":{"type":"host-local"}}`,
+		"l2 without ref":       `{"cniVersion":"1.0.0","type":"cni-workload","attachMode":"l2","ipam":{"type":"host-local"}}`,
+		"l2 with vrf":          `{"cniVersion":"1.0.0","type":"cni-workload","attachMode":"l2","vrf":"cluster","layer2AttachmentRef":{"name":"blue","namespace":"tenant-a"},"ipam":{"type":"host-local"}}`,
+		"l2 without namespace": `{"cniVersion":"1.0.0","type":"cni-workload","attachMode":"l2","layer2AttachmentRef":{"name":"blue"},"ipam":{"type":"host-local"}}`,
+		"vhostuser bad mode":   `{"cniVersion":"1.0.0","type":"cni-workload","transport":"vhostuser","socketMode":"bogus","ipam":{"type":"host-local"}}`,
+		"veth with socket":     `{"cniVersion":"1.0.0","type":"cni-workload","socketPath":"/run/vhost.sock","ipam":{"type":"host-local"}}`,
+	}
+	for name, conf := range tests {
+		t.Run(name, func(t *testing.T) {
+			if _, err := parseConfig([]byte(conf)); err == nil {
+				t.Errorf("expected error for %s, got nil", name)
+			}
+		})
+	}
+}
+
+func TestParseConfigVhostUser(t *testing.T) {
+	// Neither socketPath nor socketMode is required: both are derived from the
+	// device-plugin allocation.
+	conf := `{
+	  "cniVersion":"1.0.0","type":"cni-workload","vrf":"cluster",
+	  "transport":"vhostuser","deviceID":"3f9a2b1c7d",
+	  "ipam":{"type":"host-local"}
+	}`
+	c, err := parseConfig([]byte(conf))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !c.isVhostUser() {
+		t.Errorf("isVhostUser() = false, want true")
+	}
+	if c.deviceID() != "3f9a2b1c7d" {
+		t.Errorf("deviceID() = %q, want 3f9a2b1c7d", c.deviceID())
+	}
+	if c.socketMode() != SocketModeServer {
+		t.Errorf("socketMode() = %q, want %q", c.socketMode(), SocketModeServer)
 	}
 }

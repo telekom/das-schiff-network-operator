@@ -46,3 +46,25 @@ func TestPortNameDeterministicAndBounded(t *testing.T) {
 		t.Errorf("portName collision between distinct interfaces of one container")
 	}
 }
+
+// TestPortNamesFitVSRPortReferences guards the naming budget: the VSR port
+// reference derived from a CRA-side port name (infra-<name> for veth,
+// fpvhost-<name> for vhost-user) must stay within the kernel interface-name
+// limit, and the fpvhost- prefix is the longer of the two.
+func TestPortNamesFitVSRPortReferences(t *testing.T) {
+	const kernelIfNameLen = 15
+
+	if got := len("infra-") + len(portName("cid", "net1")); got > kernelIfNameLen {
+		t.Errorf("infra-<portName> is %d characters, want <= %d", got, kernelIfNameLen)
+	}
+	if got := len("fpvhost-") + len(vhostPortName("cid", "net1")); got > kernelIfNameLen {
+		t.Errorf("fpvhost-<vhostPortName> is %d characters, want <= %d", got, kernelIfNameLen)
+	}
+
+	if vhostPortName("cid", "net1") == vhostPortName("cid", "net2") {
+		t.Error("vhostPortName must differ per pod-side interface")
+	}
+	if vhostPortName("cid", "net1") == vhostPortName("other", "net1") {
+		t.Error("vhostPortName must differ per container")
+	}
+}

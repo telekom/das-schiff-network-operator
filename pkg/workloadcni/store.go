@@ -52,6 +52,17 @@ const DefaultSocketPath = "/run/das-schiff/workload-cni.sock"
 // its pod-side peer. The two sides therefore MUST use this same prefix.
 const InfraPortPrefix = "infra-"
 
+// FpvhostPortPrefix is prepended to a CRA-side interface name to form the 6WIND
+// VSR fast-path fpvhost virtual-port reference (fpvhost-<ifname>) used by the
+// vhost-user transport. Unlike InfraPortPrefix there is no netns-moved veth to
+// alias: the virtual-port is declared by the VSR renderer itself under
+// "system fast-path virtual-port fpvhost". The fast path does materialise it as
+// an interface, though, so the reference is bounded by the same kernel
+// interface-name limit and, being two characters longer than InfraPortPrefix,
+// leaves a vhost-user port name that much less room (see the CNI plugin's
+// vhostPortName and maxVhostInterfaceNameLen above).
+const FpvhostPortPrefix = "fpvhost-"
+
 // isDefaultVRF reports whether name denotes the underlay/default table (no
 // tenant VRF): empty, "default" or "main".
 func isDefaultVRF(name string) bool {
@@ -72,11 +83,11 @@ func UpsertEntry(spec *v1alpha1.NodeWorkloadPortsSpec, entry *v1alpha1.WorkloadP
 			if equality.Semantic.DeepEqual(&spec.Ports[i], entry) {
 				return false
 			}
-			spec.Ports[i] = *entry
+			spec.Ports[i] = *entry.DeepCopy()
 			return true
 		}
 	}
-	spec.Ports = append(spec.Ports, *entry)
+	spec.Ports = append(spec.Ports, *entry.DeepCopy())
 	return true
 }
 
@@ -109,18 +120,60 @@ func RemoveEntry(spec *v1alpha1.NodeWorkloadPortsSpec, containerID, ifname strin
 // workload-port targets: their names are only known to the CRA base config, not
 // here, so a workload port must never be addressed to them.
 //
+// L2 attach entries (those carrying a Layer2AttachmentRef) are instead enslaved
+// to the Layer2 whose AttachmentRef matches, as bridge slaves with no L3
+// addressing. An L2 entry whose referenced Layer2 is not (yet) present on the
+// node is skipped: the bridge is a precondition owned by the L2A pipeline.
+//
 // Any workload ports already present on cfg are dropped first, so merging is
 // idempotent and repeated merges onto the same object cannot accumulate
-// duplicates. It returns true if the config carries workload ports afterwards.
+// duplicates. It returns true if the config carries workload ports afterwards,
+// which is not the same as len(entries) > 0: an L2 entry whose Layer2 is absent
+// is dropped and does not count.
 func MergeIntoNodeNetworkConfig(cfg *v1alpha1.NodeNetworkConfig, entries []v1alpha1.WorkloadPortEntry) bool {
 	clearWorkloadPorts(&cfg.Spec)
+	applied := false
 	for i := range entries {
+		if entries[i].Layer2AttachmentRef != nil {
+			applied = applyEntryToLayer2(&cfg.Spec, &entries[i]) || applied
+			continue
+		}
 		applyEntryToVRF(&cfg.Spec, &entries[i])
+		applied = true
 	}
-	return len(entries) > 0
+	return applied
 }
 
-// clearWorkloadPorts drops every workload port previously merged into spec.
+// applyEntryToLayer2 enslaves an L2 attach entry to the Layer2 whose
+// AttachmentRef matches the entry's Layer2AttachmentRef, as a bridge slave. If
+// no such Layer2 is present on the node the entry is dropped (assume-exists)
+// and false is returned.
+func applyEntryToLayer2(spec *v1alpha1.NodeNetworkConfigSpec, e *v1alpha1.WorkloadPortEntry) bool {
+	for name, l2 := range spec.Layer2s {
+		if !layer2AttachmentRefEqual(l2.AttachmentRef, e.Layer2AttachmentRef) {
+			continue
+		}
+		l2.AttachedPorts = append(l2.AttachedPorts, v1alpha1.AttachedPort{
+			Interface:  e.Interface,
+			PortWiring: e.PortWiring,
+		})
+		spec.Layer2s[name] = l2
+		return true
+	}
+	return false
+}
+
+// layer2AttachmentRefEqual reports whether two Layer2AttachmentRefs denote the
+// same Layer2Attachment. Nil refs never match.
+func layer2AttachmentRefEqual(a, b *v1alpha1.Layer2AttachmentRef) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	return a.Name == b.Name && a.Namespace == b.Namespace
+}
+
+// clearWorkloadPorts drops every workload port previously merged into spec
+// (both routed VRF placements and L2 bridge-slave attachments).
 // It deliberately mirrors applyEntryToVRF: spec.ClusterVRF is not touched
 // because it is never a placement target, so it can never hold merged ports.
 func clearWorkloadPorts(spec *v1alpha1.NodeNetworkConfigSpec) {
@@ -135,16 +188,24 @@ func clearWorkloadPorts(spec *v1alpha1.NodeNetworkConfigSpec) {
 		lv.WorkloadPorts = nil
 		spec.LocalVRFs[name] = lv
 	}
+	for name := range spec.Layer2s {
+		l2 := spec.Layer2s[name]
+		l2.AttachedPorts = nil
+		spec.Layer2s[name] = l2
+	}
 }
 
 func applyEntryToVRF(spec *v1alpha1.NodeNetworkConfigSpec, e *v1alpha1.WorkloadPortEntry) {
+	// Deep-copy so the merged spec never aliases the caller's entry slices.
+	port := *e.WorkloadPort.DeepCopy()
+
 	if isDefaultVRF(e.VRF) {
-		spec.GlobalWorkloadPorts = append(spec.GlobalWorkloadPorts, e.WorkloadPort)
+		spec.GlobalWorkloadPorts = append(spec.GlobalWorkloadPorts, port)
 		return
 	}
 
 	if fv, ok := spec.FabricVRFs[e.VRF]; ok {
-		fv.WorkloadPorts = append(fv.WorkloadPorts, e.WorkloadPort)
+		fv.WorkloadPorts = append(fv.WorkloadPorts, port)
 		spec.FabricVRFs[e.VRF] = fv
 		return
 	}
@@ -153,7 +214,7 @@ func applyEntryToVRF(spec *v1alpha1.NodeNetworkConfigSpec, e *v1alpha1.WorkloadP
 		spec.LocalVRFs = map[string]v1alpha1.VRF{}
 	}
 	lv := spec.LocalVRFs[e.VRF]
-	lv.WorkloadPorts = append(lv.WorkloadPorts, e.WorkloadPort)
+	lv.WorkloadPorts = append(lv.WorkloadPorts, port)
 	spec.LocalVRFs[e.VRF] = lv
 }
 

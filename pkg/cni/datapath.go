@@ -47,6 +47,16 @@ const portNamePrefix = "cra"
 // len("cra") + portNameHexLen + len("infra-") = 3 + 6 + 6 = 15.
 const portNameHexLen = 6
 
+// vhostPortNamePrefix / vhostPortNameHexLen derive the CRA-side name of a
+// vhost-user port. The VSR fast path references it as fpvhost-<portName>, and
+// that reference is two characters longer than the infra-<portName> one, so the
+// name gets a shorter budget: len("v") + 6 + len("fpvhost-") = 15. There is no
+// pod-side netdev for this transport, so the shorter name is purely internal.
+const (
+	vhostPortNamePrefix = "v"
+	vhostPortNameHexLen = 6
+)
+
 // onLinkRouteMetric keeps the routed on-link default at a lower priority than the
 // pod's own primary default (on eth0) so the virt-launcher pod itself is
 // unaffected while the guest still learns the CRA gateway as its next hop.
@@ -62,6 +72,14 @@ const onLinkRouteMetric = 4096
 func portName(containerID, ifName string) string {
 	sum := sha256.Sum256([]byte(containerID + "/" + ifName))
 	return portNamePrefix + hex.EncodeToString(sum[:])[:portNameHexLen]
+}
+
+// vhostPortName derives the CRA-side port name of a vhost-user attachment. It
+// mirrors portName but stays within the tighter budget the fpvhost- reference
+// leaves (see vhostPortNamePrefix).
+func vhostPortName(containerID, ifName string) string {
+	sum := sha256.Sum256([]byte(containerID + "/" + ifName))
+	return vhostPortNamePrefix + hex.EncodeToString(sum[:])[:vhostPortNameHexLen]
 }
 
 // setupPodSide creates the veth pair inside the pod netns, configures the
@@ -121,13 +139,16 @@ func setupPodSide(conf *NetConf, args *skel.CmdArgs, craNetnsPath, portName stri
 			return fmt.Errorf("failed to set pod interface up: %w", uerr)
 		}
 
-		// KubeVirt bridge binding derives the guest gateway from a route on the
-		// pod interface (filterIPv4RoutesByInterface): it needs at least one
-		// route whose next-hop interface is this link and relays that next-hop
-		// to the guest as its gateway. Install on-link default routes via the
-		// CRA link-local gateways.
-		if rerr := installOnLinkDefaults(conf, podLink, result); rerr != nil {
-			return rerr
+		// In routed mode, KubeVirt bridge binding derives the guest gateway from
+		// a route on the pod interface (filterIPv4RoutesByInterface): it needs
+		// at least one route whose next-hop interface is this link and relays
+		// that next-hop to the guest as its gateway. Install on-link default
+		// routes via the CRA link-local gateways. In L2 mode the guest reaches
+		// its gateway over the shared L2 domain, so no on-link default is added.
+		if !conf.isL2() {
+			if rerr := installOnLinkDefaults(conf, podLink, result); rerr != nil {
+				return rerr
+			}
 		}
 
 		// Move the peer end into the CRA network namespace.

@@ -158,6 +158,106 @@ func TestMergeEmptyIsNoOp(t *testing.T) {
 	}
 }
 
+func l2Entry(containerID, iface, l2aName, l2aNamespace string) *v1alpha1.WorkloadPortEntry {
+	return &v1alpha1.WorkloadPortEntry{
+		PodNamespace: "ns",
+		PodName:      "pod",
+		ContainerID:  containerID,
+		Layer2AttachmentRef: &v1alpha1.Layer2AttachmentRef{
+			Name:      l2aName,
+			Namespace: l2aNamespace,
+		},
+		WorkloadPort: v1alpha1.WorkloadPort{Interface: iface},
+	}
+}
+
+func TestMergeL2AttachEnslavesMatchingLayer2(t *testing.T) {
+	cfg := &v1alpha1.NodeNetworkConfig{
+		Spec: v1alpha1.NodeNetworkConfigSpec{
+			Layer2s: map[string]v1alpha1.Layer2{
+				"l2.100": {
+					VNI:           100,
+					AttachmentRef: &v1alpha1.Layer2AttachmentRef{Name: "green", Namespace: "tenant-a"},
+				},
+				"l2.200": {
+					VNI:           200,
+					AttachmentRef: &v1alpha1.Layer2AttachmentRef{Name: "blue", Namespace: "tenant-b"},
+				},
+			},
+		},
+	}
+
+	entries := []v1alpha1.WorkloadPortEntry{
+		*l2Entry("c1", "cra-green", "green", "tenant-a"),
+	}
+
+	if !MergeIntoNodeNetworkConfig(cfg, entries) {
+		t.Fatal("expected merge to report a change")
+	}
+
+	green := cfg.Spec.Layer2s["l2.100"]
+	if len(green.AttachedPorts) != 1 || green.AttachedPorts[0].Interface != "cra-green" {
+		t.Fatalf("expected cra-green enslaved to l2.100, got %+v", green.AttachedPorts)
+	}
+	if blue := cfg.Spec.Layer2s["l2.200"]; len(blue.AttachedPorts) != 0 {
+		t.Fatalf("expected no ports on non-matching l2.200, got %+v", blue.AttachedPorts)
+	}
+}
+
+func TestMergeL2AttachDropsUnmatchedRef(t *testing.T) {
+	cfg := &v1alpha1.NodeNetworkConfig{
+		Spec: v1alpha1.NodeNetworkConfigSpec{
+			Layer2s: map[string]v1alpha1.Layer2{
+				"l2.100": {AttachmentRef: &v1alpha1.Layer2AttachmentRef{Name: "green", Namespace: "tenant-a"}},
+			},
+		},
+	}
+
+	// Ref that no Layer2 on the node carries: the port is dropped (the bridge
+	// is a precondition owned by the L2A pipeline).
+	entries := []v1alpha1.WorkloadPortEntry{
+		*l2Entry("c1", "cra-absent", "missing", "tenant-z"),
+	}
+
+	MergeIntoNodeNetworkConfig(cfg, entries)
+
+	if l2 := cfg.Spec.Layer2s["l2.100"]; len(l2.AttachedPorts) != 0 {
+		t.Fatalf("expected no ports enslaved for an unmatched ref, got %+v", l2.AttachedPorts)
+	}
+}
+
+func TestMergeReportsWhetherPortsWereApplied(t *testing.T) {
+	newCfg := func() *v1alpha1.NodeNetworkConfig {
+		return &v1alpha1.NodeNetworkConfig{
+			Spec: v1alpha1.NodeNetworkConfigSpec{
+				Layer2s: map[string]v1alpha1.Layer2{
+					"l2.100": {AttachmentRef: &v1alpha1.Layer2AttachmentRef{Name: "green", Namespace: "tenant-a"}},
+				},
+			},
+		}
+	}
+
+	// A dropped L2 entry leaves the config without workload ports, so the merge
+	// must not claim otherwise just because entries were supplied.
+	dropped := []v1alpha1.WorkloadPortEntry{*l2Entry("c1", "cra-absent", "missing", "tenant-z")}
+	if MergeIntoNodeNetworkConfig(newCfg(), dropped) {
+		t.Fatal("expected false when every L2 entry was dropped")
+	}
+
+	applied := []v1alpha1.WorkloadPortEntry{*l2Entry("c1", "cra-green", "green", "tenant-a")}
+	if !MergeIntoNodeNetworkConfig(newCfg(), applied) {
+		t.Fatal("expected true when an L2 entry was enslaved")
+	}
+
+	if !MergeIntoNodeNetworkConfig(newCfg(), []v1alpha1.WorkloadPortEntry{*entry("c1", "eth1", "tenant-a")}) {
+		t.Fatal("expected true for a routed entry")
+	}
+
+	if MergeIntoNodeNetworkConfig(newCfg(), nil) {
+		t.Fatal("expected false for no entries")
+	}
+}
+
 func TestHashEntriesStableAndSensitive(t *testing.T) {
 	a := []v1alpha1.WorkloadPortEntry{*entry("c1", "eth1", "")}
 	b := []v1alpha1.WorkloadPortEntry{*entry("c1", "eth1", "")}

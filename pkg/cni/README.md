@@ -8,7 +8,8 @@ on-link host routes to it via BGP.
 
 ## How it works
 
-Multus invokes the plugin for a secondary network. On `ADD` the plugin:
+Multus invokes the plugin for a secondary network. On `ADD` the plugin (for the
+default `veth` + `routed` path):
 
 1. Delegates to the configured **IPAM** (`static` or `host-local`) to obtain the
    workload's `/32` + `/128`.
@@ -30,6 +31,9 @@ The plugin is therefore **flavor-agnostic**: it only wires the veth. `DEL`
 reverses everything (removing the veth removes both ends) and tells the agent to
 drop the attachment.
 
+The `l2` attach mode and the `vhostuser` transport vary steps 2–4 — see *Attach
+modes and transports* below.
+
 ### VRF vs underlay
 
 - **`vrf` omitted / `default` / `main` → UNDERLAY.** The CRA-side port is left in
@@ -48,16 +52,94 @@ Delivered per secondary network via a `NetworkAttachmentDefinition`
 | field               | required | default | description |
 | ------------------- | -------- | ------- | ----------- |
 | `type`              | yes      | —       | must be `cni-workload` |
-| `ipam`              | yes      | —       | delegated IPAM block (`static` or `host-local`) |
-| `vrf`               | no       | *(underlay)* | CRA VRF device name; omit/`default`/`main` for the underlay/default table |
+| `ipam`              | for `veth` | —     | delegated IPAM block (`static` or `host-local`); optional for `vhostuser` (guest-side addressing) |
+| `attachMode`        | no       | `routed`| `routed` (VRF/underlay + on-link gateway + host routes) or `l2` (bridge-slave to an existing L2 domain) |
+| `transport`         | no       | `veth`  | `veth` (a veth pair moved into the CRA netns) or `vhostuser` (DPDK/virtio-user fast-path socket, **VSR-only**) |
+| `vrf`               | no       | *(underlay)* | CRA VRF device name; omit/`default`/`main` for the underlay/default table. Only for `attachMode: routed` (must be unset for `l2`) |
+| `layer2AttachmentRef` | for `l2` | —     | `{name, namespace}` of the originating `Layer2Attachment` (both required); the agent binds the port to the NNC `Layer2` whose stamped `attachmentRef` matches |
+| `socketPath`        | no       | *(derived)* | vhost-user socket path override; normally derived from the device-plugin `deviceID` (see *vhost-user and the 6WIND device plugin*) |
+| `socketMode`        | no       | *(from device info)* | `client` or `server` from the workload's perspective (VSR inverts it); normally taken from the staged device-info file |
+| `deviceResource`    | no       | `nc-k8s-plugin.6wind.com/virtio-user` | device-plugin resource the attachment was allocated from; selects which socket tree is host- vs pod-side (see *vhost-user and the 6WIND device plugin*) |
 | `agentSocket`       | no       | `/run/das-schiff/workload-cni.sock` | unix socket of the node-local CRA agent |
 | `craNetns`          | no       | `auto`  | `auto` (discover by trunk), a named netns under `/var/run/netns/<name>`, or an absolute path (e.g. `/proc/<pid>/ns/net`) |
 | `trunkInterface`    | no       | `hbn`   | interface that identifies the CRA netns during auto-discovery |
-| `linkLocalGateways` | no       | `169.254.1.1` / `fe80::1` | on-link next-hop addresses the agent configures on the CRA-side port |
+| `linkLocalGateways` | no       | `169.254.1.1` / `fe80::1` | on-link next-hop addresses the agent configures on the CRA-side port (`routed` only) |
 | `mtu`               | no       | `1500`  | veth MTU |
 
 Example (underlay, static IPAM) — see
-[`e2e/kubevirt/manifests/networkattachmentdefinition.yaml`](../../e2e/kubevirt/manifests/networkattachmentdefinition.yaml).
+[`e2e/kubevirt/manifests/networkattachmentdefinition.yaml`](../../e2e/kubevirt/manifests/networkattachmentdefinition.yaml),
+plus the L2-attach and vhost-user variants alongside it.
+
+## Attach modes and transports (two orthogonal axes)
+
+The attachment is described by two independent axes:
+
+- **transport** — how the CRA-side port is wired:
+  - `veth` (default): a veth pair whose CRA-side end is moved into the CRA netns.
+  - `vhostuser`: a DPDK/virtio-user vhost socket. **VSR-only** — there is no
+    veth and no netns port move; the VSR fast-path terminates the socket as an
+    `fpvhost` virtual-port. The FRR agent rejects it.
+- **attach mode** — what is done with that port:
+  - `routed` (default): VRF/underlay + on-link gateway + workload host routes.
+  - `l2`: the port is enslaved to an **existing** L2 bridge (referenced by
+    `layer2AttachmentRef`) as a bridge slave, with no L3 addressing. The
+    bridge/L2VNI is assumed to already exist on the node (from the
+    `Layer2Attachment` / `Layer2NetworkConfiguration` pipeline).
+
+All four combinations are valid except `vhostuser` + FRR. The `veth` + `routed`
+combination is the original behaviour and is unchanged.
+
+**L2 binding by attachment ref.** The intent builder stamps the originating
+`Layer2Attachment` identity (`AttachmentRef`) onto each NNC `Layer2`. An `l2`
+port entry carries a `layer2AttachmentRef`; the node-local agent matches it
+against the stamped `Layer2.AttachmentRef` and enslaves the port to that
+Layer2's bridge (FRR `l2.<vlanID>`, VSR `l2.<vlanID>` link-interface). No VNI or
+VLAN id is needed in the CNI config, and the node-local server does no extra API
+lookups.
+
+## vhost-user and the 6WIND device plugin
+
+`transport: vhostuser` is driven end-to-end by the 6WIND HNA device plugin
+(`nc-k8s-plugin.6wind.com/virtio-user`). See
+[`docs/proposals/03-vhost-user/DEVICE-PLUGIN.md`](../../docs/proposals/03-vhost-user/DEVICE-PLUGIN.md)
+for the full contract. Summary of what the plugin does for us:
+
+1. The pod requests the resource in `resources.limits`; kubelet calls the
+   plugin's `Allocate()`, which returns a randomly generated 10-character hex
+   **device id** per allocated device and bind-mounts the corresponding socket
+   directories into the container.
+2. Multus matches the NAD's `k8s.v1.cni.cncf.io/resourceName` annotation against
+   that allocation and injects `deviceID` into our CNI config — top-level, or in
+   `runtimeConfig.deviceID` when the `deviceID` capability is enabled. We accept
+   either, preferring whichever is non-empty.
+3. The socket paths are **derived from the device id**, not configured:
+
+   | side | path |
+   | ---- | ---- |
+   | host / CRA (VSR fast-path) | `/run/vsr-vhost-user/<deviceID>/socket` |
+   | pod / workload             | `/run/vsr-virtio-user/<index>/socket` |
+
+   The two trees are deliberately crossed and swap when the requested resource
+   is `.../vhost-user` instead of `.../virtio-user`. The pod-side `<index>` is a
+   per-`Allocate()` counter starting at `0`, which we cannot recompute, so we
+   default to `0` and let the plugin's own device-info file correct it.
+4. Multus best-effort copies the plugin's device-info file
+   (`/var/run/k8s.cni.cncf.io/devinfo/dp/<resource>-<deviceID>-device.json`) to
+   our `CNIDeviceInfoFile`. We read the staged copy, falling back to the `dp/`
+   path, and take the pod-side socket path and the socket **mode** from it when
+   present — the plugin is authoritative over anything the NAD claims. A missing
+   or malformed file is tolerated and the derived defaults are used.
+
+The plugin creates no network state: allocating a device only reserves an id and
+a socket directory. Creating the `fpvhost` virtual-port on the VSR side is done
+by this plugin plus the agent.
+
+**No device id, no attachment.** If the transport is `vhostuser` and no device
+id arrives by any of the above means, the ADD **fails**. Multus silently hands
+out an empty `deviceID` once a pod has more attachments to a resource than it
+requested devices, and a static socket path would silently produce a port that
+is wired to nothing. `socketPath` therefore only *overrides the host-side path*
+of an attachment that already has a device id; it can never substitute for one.
 
 ## netns discovery
 
@@ -79,25 +161,30 @@ agent records the attachment on `NodeWorkloadPorts` and merges it into the
 `NodeNetworkConfig` before rendering. Only the rendering differs.
 
 - **cra-frr:** the agent programs the CRA-FRR netns via netlink
-  (`pkg/nl/routed.go`): VRF enslavement, the on-link gateway addresses and the
-  scope-link host routes. FRR redistributes connected/kernel/static, so the
-  `/32` + `/128` are advertised. For the **underlay** path the FRR *default*
-  instance must redistribute connected/kernel toward the fabric neighbors (and
-  gain an IPv6 unicast address-family).
+  (`pkg/nl/workloadports.go`): VRF enslavement, the on-link gateway addresses and
+  the scope-link host routes; `l2` ports are enslaved to the `l2.<vlanID>`
+  bridge. FRR redistributes connected/kernel/static, so the `/32` + `/128` are
+  advertised. For the **underlay** path the FRR *default* instance must
+  redistribute connected/kernel toward the fabric neighbors (and gain an IPv6
+  unicast address-family). FRR **rejects** the `vhostuser` transport.
 - **cra-vsr:** the VSR fast path owns the FIB, so the moved port cannot be
   programmed via raw netlink. The agent renders it as NETCONF instead: an
   `interface infrastructure <ifname>` with `port infra-<ifname>` + the on-link
   gateway addresses, plus interface-static routes
-  (`ipv4-route/ipv6-route <ip> next-hop <ifname>`). Underlay (no-VRF) ports also
-  get an explicit BGP `network` statement, since the default table's session has
-  no VRF redistribution. See `pkg/cra-vsr/routed.go` (`applyWorkloadPorts` /
-  `applyGlobalWorkloadPorts`) and `pkg/workloadcni` (transport).
+  (`ipv4-route/ipv6-route <ip> next-hop <ifname>`); a bridge `link-interface` for
+  `l2`. Underlay (no-VRF) ports also get an explicit BGP `network` statement,
+  since the default table's session has no VRF redistribution. The `vhostuser`
+  transport renders an `fpvhost` fast-path virtual-port (`system fast-path
+  virtual-port fpvhost fpvhost-<ifname> sockpath <host socket> sockmode
+  <inverted>`) + `interface fpvhost <ifname> port fpvhost-<ifname>`. See
+  `pkg/cra-vsr/workloadports.go` / `layer2.go` and `pkg/workloadcni` (transport).
 
 ### Transport
 
 ```
 CNI ADD/DEL --gRPC(unix)--> agent --> NodeWorkloadPorts CR (durable)
-                                   \-> merge into NodeNetworkConfig --> NETCONF
+                                   \-> merge into NodeNetworkConfig
+                                       --> netlink (FRR) | NETCONF (VSR)
 ```
 
 The agent serves the socket at `/run/das-schiff/workload-cni.sock` (a hostPath

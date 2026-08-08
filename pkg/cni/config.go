@@ -1,3 +1,5 @@
+//go:build linux
+
 /*
 Copyright 2024.
 
@@ -39,6 +41,32 @@ const (
 	defaultLinkLocalV6 = "fe80::1"
 	// defaultMTU is used when the NetConf does not specify one.
 	defaultMTU = 1500
+
+	// AttachModeRouted is the default attach mode: the CRA-side port is routed
+	// (VRF/underlay + on-link gateway + workload host routes). This is the
+	// PR #343 behaviour.
+	AttachModeRouted = "routed"
+	// AttachModeL2 attaches the CRA-side port to an existing Layer2 bridge
+	// (referenced by Layer2AttachmentRef) as a bridge slave, with no L3
+	// addressing. The bridge/L2VNI is assumed to already exist on the node.
+	AttachModeL2 = "l2"
+
+	// TransportVeth is the default transport: a veth pair whose CRA-side end is
+	// moved into the CRA network namespace.
+	TransportVeth = "veth"
+	// TransportVhostUser is a DPDK/virtio-user vhost-user socket transport,
+	// rendered by VSR as an fpvhost fast-path virtual-port. It is VSR-only; the
+	// FRR agent rejects it.
+	TransportVhostUser = "vhostuser"
+
+	// SocketModeClient / SocketModeServer are the vhost-user socket modes from
+	// the workload's perspective. VSR inverts them when rendering fpvhost.
+	SocketModeClient = "client"
+	SocketModeServer = "server"
+	// defaultSocketMode is assumed when neither the config nor the device
+	// plugin's device-info file states a mode: the workload runs the server
+	// socket and vSR connects to it, matching the reference manifests.
+	defaultSocketMode = SocketModeServer
 )
 
 // NetConf is the CNI configuration for the cni-workload plugin.
@@ -49,8 +77,47 @@ type NetConf struct {
 	// port is enslaved to. Leave empty (or "default"/"main") to keep the port
 	// in the CRA netns default routing table so the on-link host routes are
 	// advertised by the UNDERLAY fabric BGP session (rather than exported as an
-	// EVPN type-5 route from a tenant L3VNI VRF).
+	// EVPN type-5 route from a tenant L3VNI VRF). Only meaningful in the
+	// "routed" attach mode.
 	VRF string `json:"vrf,omitempty"`
+
+	// AttachMode selects how the CRA-side port is attached:
+	//   - "routed" (default): routed attachment (VRF/underlay + on-link gateway
+	//     + workload host routes).
+	//   - "l2": bridge-slave attachment to an existing Layer2 domain referenced
+	//     by Layer2AttachmentRef; no L3 addressing.
+	AttachMode string `json:"attachMode,omitempty"`
+
+	// Transport selects the CRA-side wiring:
+	//   - "veth" (default): a veth pair whose CRA-side end is moved into the CRA
+	//     netns.
+	//   - "vhostuser": a DPDK/virtio-user vhost-user socket (VSR-only, rendered
+	//     as an fpvhost fast-path virtual-port).
+	Transport string `json:"transport,omitempty"`
+
+	// Layer2AttachmentRef identifies the Layer2Attachment whose bridge the port
+	// is enslaved to in the "l2" attach mode. Required when AttachMode is "l2",
+	// otherwise ignored.
+	Layer2AttachmentRef *Layer2AttachmentRef `json:"layer2AttachmentRef,omitempty"`
+
+	// SocketPath overrides the host-side vhost-user unix socket path that is
+	// otherwise derived from the device-plugin allocation. It never replaces the
+	// allocation itself: an attachment with no deviceID is rejected outright.
+	// Only meaningful for "vhostuser".
+	SocketPath string `json:"socketPath,omitempty"`
+
+	// SocketMode is the vhost-user socket mode from the workload's perspective
+	// ("client" or "server"). It is only a fallback: the device plugin's own
+	// device-info file states the mode it allocated and wins over this value.
+	// VSR inverts the resulting mode when rendering the fpvhost virtual-port.
+	SocketMode string `json:"socketMode,omitempty"`
+
+	// DeviceResource is the device-plugin resource the attachment is allocated
+	// from, i.e. the value of the NAD's k8s.v1.cni.cncf.io/resourceName
+	// annotation. It selects which of the two 6WIND socket trees holds the
+	// host-side and which the pod-side path; it does not allocate anything.
+	// Defaults to nc-k8s-plugin.6wind.com/virtio-user.
+	DeviceResource string `json:"deviceResource,omitempty"`
 
 	// AgentSocket overrides the unix socket the plugin uses to reach the
 	// node-local CRA agent (workloadcni.DefaultSocketPath when empty). The plugin
@@ -81,14 +148,69 @@ type NetConf struct {
 	// IPAM is the delegated IPAM configuration (e.g. host-local).
 	IPAM json.RawMessage `json:"ipam,omitempty"`
 
+	// DeviceID is the device-plugin-allocated device identifier, set directly by
+	// some runtimes (Multus also mirrors it into RuntimeConfig.DeviceID when the
+	// "deviceID" capability is enabled). Only meaningful for vhost-user.
+	DeviceID string `json:"deviceID,omitempty"`
+
+	// RuntimeConfig carries per-invocation values injected by the runtime when
+	// the matching capabilities are enabled in the NetworkAttachmentDefinition
+	// (deviceID, CNIDeviceInfoFile). Only meaningful for vhost-user.
+	RuntimeConfig RuntimeConfig `json:"runtimeConfig,omitempty"`
+
 	// PrevResult is populated by the runtime when chaining.
 	RawPrevResult map[string]interface{} `json:"prevResult,omitempty"`
+}
+
+// RuntimeConfig holds the runtime-injected capability values.
+type RuntimeConfig struct {
+	// DeviceID is the device-plugin-allocated device (from the "deviceID"
+	// capability).
+	DeviceID string `json:"deviceID,omitempty"`
+	// CNIDeviceInfoFile is the path the plugin writes the device info JSON to
+	// (from the "CNIDeviceInfoFile" capability), consumed downstream (e.g. the
+	// KubeVirt vhost-user hook sidecar).
+	CNIDeviceInfoFile string `json:"CNIDeviceInfoFile,omitempty"`
 }
 
 // LinkLocalGateways holds the on-link next-hop addresses for each family.
 type LinkLocalGateways struct {
 	IPv4 string `json:"ipv4,omitempty"`
 	IPv6 string `json:"ipv6,omitempty"`
+}
+
+// Layer2AttachmentRef identifies a Layer2Attachment by namespaced name. The
+// node-local agent binds the port to the NNC Layer2 whose stamped AttachmentRef
+// matches (see the intent builder), so no VNI or VLAN id is needed here.
+type Layer2AttachmentRef struct {
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
+}
+
+// attachMode returns the configured attach mode or the default ("routed").
+func (c *NetConf) attachMode() string {
+	if c.AttachMode == "" {
+		return AttachModeRouted
+	}
+	return c.AttachMode
+}
+
+// transport returns the configured transport or the default ("veth").
+func (c *NetConf) transport() string {
+	if c.Transport == "" {
+		return TransportVeth
+	}
+	return c.Transport
+}
+
+// isL2 reports whether the port is attached in L2 (bridge-slave) mode.
+func (c *NetConf) isL2() bool {
+	return c.attachMode() == AttachModeL2
+}
+
+// isVhostUser reports whether the CRA-side transport is vhost-user.
+func (c *NetConf) isVhostUser() bool {
+	return c.transport() == TransportVhostUser
 }
 
 // mtu returns the configured MTU or the default.
@@ -153,18 +275,84 @@ func parseConfig(stdin []byte) (*NetConf, error) {
 	if err := json.Unmarshal(stdin, conf); err != nil {
 		return nil, fmt.Errorf("failed to parse network configuration: %w", err)
 	}
+	// IPAM is required for the veth transport (the pod-side address is relayed
+	// to the guest). vhost-user addressing may be guest-side, so IPAM is
+	// optional there.
 	if len(conf.IPAM) == 0 {
-		return nil, fmt.Errorf("%q is required", "ipam")
-	}
-	if _, err := conf.ipamType(); err != nil {
+		if !conf.isVhostUser() {
+			return nil, fmt.Errorf("%q is required", "ipam")
+		}
+	} else if _, err := conf.ipamType(); err != nil {
 		return nil, err
 	}
-	// Validate gateway addresses eagerly so errors surface at ADD time.
-	if _, err := conf.gatewayV4(); err != nil {
+	if err := conf.validateModes(); err != nil {
 		return nil, err
 	}
-	if _, err := conf.gatewayV6(); err != nil {
-		return nil, err
+	// The on-link gateways are only used in the routed attach mode; validate
+	// them eagerly there so errors surface at ADD time.
+	if !conf.isL2() {
+		if _, err := conf.gatewayV4(); err != nil {
+			return nil, err
+		}
+		if _, err := conf.gatewayV6(); err != nil {
+			return nil, err
+		}
 	}
 	return conf, nil
+}
+
+// validateModes checks the transport and attach-mode axes and their
+// mode-specific required fields.
+func (c *NetConf) validateModes() error {
+	switch c.attachMode() {
+	case AttachModeRouted, AttachModeL2:
+	default:
+		return fmt.Errorf("invalid attachMode %q (want %q or %q)", c.AttachMode, AttachModeRouted, AttachModeL2)
+	}
+	switch c.transport() {
+	case TransportVeth, TransportVhostUser:
+	default:
+		return fmt.Errorf("invalid transport %q (want %q or %q)", c.Transport, TransportVeth, TransportVhostUser)
+	}
+
+	if c.isL2() {
+		if c.Layer2AttachmentRef == nil || c.Layer2AttachmentRef.Name == "" {
+			return fmt.Errorf("layer2AttachmentRef.name is required when attachMode is %q", AttachModeL2)
+		}
+		// The API type requires both halves: an unqualified ref could never
+		// match a stamped Layer2.AttachmentRef, so reject it here rather than
+		// silently attaching nothing.
+		if c.Layer2AttachmentRef.Namespace == "" {
+			return fmt.Errorf("layer2AttachmentRef.namespace is required when attachMode is %q", AttachModeL2)
+		}
+		if c.VRF != "" {
+			return fmt.Errorf("vrf must not be set when attachMode is %q (the port is bridged, not routed)", AttachModeL2)
+		}
+	}
+
+	if c.isVhostUser() && c.SocketMode != "" {
+		// socketPath and socketMode are both optional: they are normally derived
+		// from the device-plugin allocation (see deviceplugin.go). A stated mode
+		// must still be one of the two valid values.
+		switch c.SocketMode {
+		case SocketModeClient, SocketModeServer:
+		default:
+			return fmt.Errorf("socketMode must be %q or %q when transport is %q",
+				SocketModeClient, SocketModeServer, TransportVhostUser)
+		}
+	}
+	if !c.isVhostUser() && (c.SocketPath != "" || c.SocketMode != "" || c.DeviceResource != "") {
+		return fmt.Errorf("socketPath, socketMode and deviceResource are only valid when transport is %q",
+			TransportVhostUser)
+	}
+	return nil
+}
+
+// socketMode returns the configured workload-side vhost-user socket mode or the
+// default. The device plugin's device-info file overrides it when present.
+func (c *NetConf) socketMode() string {
+	if c.SocketMode != "" {
+		return c.SocketMode
+	}
+	return defaultSocketMode
 }

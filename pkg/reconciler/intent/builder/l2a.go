@@ -267,6 +267,12 @@ func (b *L2ABuilder) buildLayer2(l2a *nc.Layer2Attachment, net *resolver.Resolve
 		VLAN:        uint16(b.vlanID(net)),   //nolint:gosec // value validated by CRD schema (positive integer)
 		RouteTarget: rt,
 		MTU:         b.mtu(l2a),
+		// Stamp the originating Layer2Attachment identity so routed-CNI L2 port
+		// attachments can bind to this L2 domain by reference (rather than VNI).
+		AttachmentRef: &networkv1alpha1.Layer2AttachmentRef{
+			Name:      l2a.Name,
+			Namespace: l2a.Namespace,
+		},
 	}
 
 	// Build IRB if anycast is not disabled and we have a VRF.

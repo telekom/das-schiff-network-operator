@@ -48,10 +48,14 @@ const (
 	socketPerm = 0o600
 	// kernelIfNameLen is the kernel IFNAMSIZ-1 interface-name limit.
 	kernelIfNameLen = 15
-	// maxInterfaceNameLen bounds a routed CRA-side interface name. VSR references
+	// maxInterfaceNameLen bounds a veth CRA-side interface name. VSR references
 	// it as infra-<ifname>, and that reference must itself fit the kernel limit,
 	// so the name has that much less room. Mirrors the CRD's MaxLength.
 	maxInterfaceNameLen = kernelIfNameLen - len(InfraPortPrefix)
+	// maxVhostInterfaceNameLen bounds a vhost-user CRA-side interface name. Its
+	// VSR reference is fpvhost-<ifname>, which is longer than infra-<ifname>, so
+	// the name gets correspondingly less room.
+	maxVhostInterfaceNameLen = kernelIfNameLen - len(FpvhostPortPrefix)
 	// maxRecvMsgSize bounds a single request so a local client cannot exhaust the
 	// agent's memory. Routed-port requests are a few hundred bytes at most.
 	maxRecvMsgSize = 64 * 1024
@@ -138,7 +142,8 @@ func (s *Server) Add(ctx context.Context, req *pb.AddRequest) (*pb.AddResponse, 
 	}); err != nil {
 		return nil, fmt.Errorf("recording workload port: %w", err)
 	}
-	s.log.Info("recorded workload port", "container", entry.ContainerID, "interface", entry.Interface, "vrf", entry.VRF)
+	s.log.Info("recorded workload port", "container", entry.ContainerID, "interface", entry.Interface,
+		"vrf", entry.VRF, "transport", entry.Transport, "l2a", layer2AttachmentRefLog(entry.Layer2AttachmentRef))
 	return &pb.AddResponse{}, nil
 }
 
@@ -153,10 +158,6 @@ func entryFromRequest(req *pb.AddRequest) (*v1alpha1.WorkloadPortEntry, error) {
 	port := req.GetPort()
 	if port == nil || port.GetInterface() == "" {
 		return nil, status.Error(codes.InvalidArgument, "interface is required")
-	}
-	if len(port.GetInterface()) > maxInterfaceNameLen {
-		return nil, status.Errorf(codes.InvalidArgument,
-			"interface %q exceeds %d characters", port.GetInterface(), maxInterfaceNameLen)
 	}
 	if req.GetContainerId() == "" {
 		return nil, status.Error(codes.InvalidArgument, "container_id is required")
@@ -180,19 +181,132 @@ func entryFromRequest(req *pb.AddRequest) (*v1alpha1.WorkloadPortEntry, error) {
 			return nil, err
 		}
 	}
+	transport, err := validateWiring(port)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateInterfaceName(port.GetInterface(), transport); err != nil {
+		return nil, err
+	}
+	l2aRef := layer2AttachmentRefFromPB(req.GetLayer2AttachmentRef())
+	if err := validateL2Attach(req, l2aRef); err != nil {
+		return nil, err
+	}
 
 	return &v1alpha1.WorkloadPortEntry{
-		PodNamespace: req.GetPodNamespace(),
-		PodName:      req.GetPodName(),
-		ContainerID:  req.GetContainerId(),
-		VRF:          req.GetVrf(),
+		PodNamespace:        req.GetPodNamespace(),
+		PodName:             req.GetPodName(),
+		ContainerID:         req.GetContainerId(),
+		VRF:                 req.GetVrf(),
+		Layer2AttachmentRef: l2aRef,
 		WorkloadPort: v1alpha1.WorkloadPort{
-			Interface:  port.GetInterface(),
+			Interface: port.GetInterface(),
+			PortWiring: v1alpha1.PortWiring{
+				Transport:  transport,
+				SocketPath: port.GetSocketPath(),
+				SocketMode: port.GetSocketMode(),
+			},
 			GatewayV4:  port.GetGatewayV4(),
 			GatewayV6:  port.GetGatewayV6(),
 			HostRoutes: port.GetHostRoutes(),
 		},
 	}, nil
+}
+
+// validateL2Attach enforces the mutual exclusion between L2 attach mode and the
+// routed fields, mirroring the CEL rule on NodeWorkloadPorts so a bad request
+// fails with a clear InvalidArgument instead of an opaque CRD rejection.
+//
+//nolint:wrapcheck // gRPC status errors are the wire representation and must be returned verbatim.
+func validateL2Attach(req *pb.AddRequest, ref *v1alpha1.Layer2AttachmentRef) error {
+	if ref == nil {
+		return nil
+	}
+	if ref.Name == "" {
+		return status.Error(codes.InvalidArgument, "layer2_attachment_ref.name is required")
+	}
+	if ref.Namespace == "" {
+		return status.Error(codes.InvalidArgument, "layer2_attachment_ref.namespace is required")
+	}
+	port := req.GetPort()
+	if req.GetVrf() != "" || port.GetGatewayV4() != "" || port.GetGatewayV6() != "" || len(port.GetHostRoutes()) > 0 {
+		return status.Error(codes.InvalidArgument,
+			"layer2_attachment_ref is mutually exclusive with vrf, gateways and host routes")
+	}
+	return nil
+}
+
+// validateInterfaceName bounds the CRA-side interface name so that the VSR port
+// reference derived from it (infra-<ifname> or fpvhost-<ifname>) still fits the
+// kernel interface-name limit.
+//
+//nolint:wrapcheck // gRPC status errors are the wire representation and must be returned verbatim.
+func validateInterfaceName(ifName string, transport v1alpha1.PortTransport) error {
+	maxLen := maxInterfaceNameLen
+	if transport == v1alpha1.PortTransportVhostUser {
+		maxLen = maxVhostInterfaceNameLen
+	}
+	if len(ifName) > maxLen {
+		return status.Errorf(codes.InvalidArgument,
+			"interface %q exceeds %d characters for transport %q", ifName, maxLen, transport)
+	}
+	return nil
+}
+
+// validateWiring resolves the requested transport and enforces that the
+// vhost-user socket fields are present exactly when they are meaningful. An
+// unknown transport is rejected rather than silently downgraded to veth, which
+// would render a plain infrastructure port for a workload that is waiting on a
+// fast-path socket.
+//
+//nolint:wrapcheck // gRPC status errors are the wire representation and must be returned verbatim.
+func validateWiring(port *pb.WorkloadPort) (v1alpha1.PortTransport, error) {
+	transport := v1alpha1.PortTransport(port.GetTransport())
+	if port.GetTransport() == "" {
+		transport = v1alpha1.PortTransportVeth
+	}
+
+	switch transport {
+	case v1alpha1.PortTransportVeth:
+		if port.GetSocketPath() != "" || port.GetSocketMode() != "" {
+			return "", status.Errorf(codes.InvalidArgument,
+				"socket_path and socket_mode are only valid for transport %q", v1alpha1.PortTransportVhostUser)
+		}
+	case v1alpha1.PortTransportVhostUser:
+		if port.GetSocketPath() == "" {
+			return "", status.Errorf(codes.InvalidArgument,
+				"socket_path is required for transport %q", v1alpha1.PortTransportVhostUser)
+		}
+		if m := port.GetSocketMode(); m != v1alpha1.SocketModeClient && m != v1alpha1.SocketModeServer {
+			return "", status.Errorf(codes.InvalidArgument,
+				"invalid socket_mode %q (want %q or %q)", m, v1alpha1.SocketModeClient, v1alpha1.SocketModeServer)
+		}
+	default:
+		return "", status.Errorf(codes.InvalidArgument,
+			"invalid transport %q (want %q or %q)",
+			port.GetTransport(), v1alpha1.PortTransportVeth, v1alpha1.PortTransportVhostUser)
+	}
+
+	return transport, nil
+}
+
+// layer2AttachmentRefFromPB converts the wire l2a ref to the API type, or nil.
+func layer2AttachmentRefFromPB(ref *pb.Layer2AttachmentRef) *v1alpha1.Layer2AttachmentRef {
+	if ref == nil {
+		return nil
+	}
+	return &v1alpha1.Layer2AttachmentRef{
+		Name:      ref.GetName(),
+		Namespace: ref.GetNamespace(),
+	}
+}
+
+// layer2AttachmentRefLog renders an l2a ref for structured logging.
+func layer2AttachmentRefLog(ref *v1alpha1.Layer2AttachmentRef) string {
+	if ref == nil {
+		return ""
+	}
+	return ref.Namespace + "/" + ref.Name
 }
 
 // validateGateway checks an optional on-link gateway address: it must be a CIDR
