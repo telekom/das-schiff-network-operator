@@ -455,3 +455,55 @@ datapath:
 - **Never hardcode a socket path**, and never persist a `deviceID`.
 - **The plugin creates no network state at all** — the fpvhost port is ours to
   render, and the socket directories must be shared into the vSR container.
+
+## 12. Our own implementation of this contract
+
+Everything above documents 6WIND's proprietary `nc-k8s-plugin` as we reverse
+engineered it. We now also ship our own device plugin implementing the same
+contract, in `pkg/deviceplugin` with the entrypoint in
+`cmd/vhostuser-device-plugin` and the DaemonSet in
+`config/vhostuser-device-plugin`. It exists for three reasons:
+
+1. **grout has no vendor plugin.** The grout CRA needs the same socket
+   rendezvous the vSR gets, and there is nobody to ship it.
+2. **The 6WIND plugin hardcodes its paths.** `/run/vsr-vhost-user` and
+   `/run/vsr-virtio-user` are baked in, which makes it impossible to run a
+   second fast path on the same node, and impossible to run the whole thing
+   under a scratch directory in a test.
+3. **It is closed source**, so §2's confidence caveats never go away.
+
+The contract is kept deliberately, byte for byte, so a workload and a NAD do not
+care which plugin allocated the socket:
+
+| Contract element | Ours |
+| --- | --- |
+| Resource names | `<domain>/vhost-user`, `<domain>/virtio-user`, default domain `network.t-caas.telekom.com` |
+| Host path | `<hostTree>/<deviceID>/socket`, trees crossed per §5 |
+| Pod path | `<podTree>/<index>/socket`, index restarting at 0 per `Allocate` (§5.2) |
+| Device id | 10 hex chars, ephemeral, regenerated on restart (§5.1) |
+| Device-info file | `<resourceName with "/"→"-">-<deviceID>-device.json` in `--device-info-dir` (§8.2) |
+| Socket dir owner | `--socket-owner-uid/gid`, default 107 (qemu) |
+| Network state created | none (§6) |
+
+The difference is that every path is a flag:
+
+    --resource-domain     the domain the two resources are advertised under
+    --resources           which of the two to advertise
+    --vhost-user-dir      host tree in which the FAST PATH owns the socket
+    --virtio-user-dir     host tree in which the WORKLOAD owns the socket
+    --kubelet-socket-dir  kubelet's device-plugin directory
+    --device-info-dir     where the device-info files are written
+    --device-count        sockets advertised per resource
+    --socket-owner-uid/gid
+
+The CNI side follows: `NetConf` gained optional `vhostUserDir` and
+`virtioUserDir` fields which default to the 6WIND paths, and `deviceResource`
+was always domain-agnostic (only its last path segment selects which tree is
+which), so the same `vhostuser` NAD works against either plugin by setting
+`k8s.v1.cni.cncf.io/resourceName` and, if the paths were moved, the two dir
+fields.
+
+Note that the resource name states the socket mode **from the workload's
+perspective**, and the device-info file we write says the same: a pod holding
+`virtio-user` is the client and the CRA is the server. The CRA renderers invert
+it for the fast-path port, as they already did for the 6WIND plugin.

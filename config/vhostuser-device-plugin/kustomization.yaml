@@ -1,0 +1,18 @@
+# Opt-in kustomize component that runs the vhost-user device plugin on every
+# node. It is NOT part of the default install; consume it by adding this
+# directory to the `components:` list of an overlay, e.g.
+#
+#   components:
+#     - ../vhostuser-device-plugin
+#
+# Pair it with the ../cni-workload component: the device plugin only hands out
+# socket rendezvous points, the cni-workload plugin is what turns one into an
+# actual fast-path port.
+#
+# The socket tree paths are flags, so an overlay that runs a CRA with a
+# different layout patches the container args and the two hostPath volumes
+# together -- they must always agree.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+resources:
+- daemonset.yaml
