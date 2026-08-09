@@ -63,15 +63,22 @@ const (
 	// rendered by VSR as an fpvhost fast-path virtual-port. It is VSR-only; the
 	// FRR agent rejects it.
 	TransportVhostUser = "vhostuser"
+	// TransportGroutTap is the grout-flavor transport: the CRA fast path (grout)
+	// creates a net_tap in the CRA netns and the CNI waits for it to appear and
+	// moves it into the pod netns, instead of creating a veth pair. Grout cannot
+	// adopt a moved-in kernel veth, so the tap-move replaces the veth datapath.
+	TransportGroutTap = "grouttap"
 
 	// SocketModeClient / SocketModeServer are the vhost-user socket modes from
 	// the workload's perspective. VSR inverts them when rendering fpvhost.
 	SocketModeClient = "client"
 	SocketModeServer = "server"
-	// defaultSocketMode is assumed when neither the config nor the device
-	// plugin's device-info file states a mode: the workload runs the server
-	// socket and vSR connects to it, matching the reference manifests.
-	defaultSocketMode = SocketModeServer
+
+	// resourceVhostUser / resourceVirtioUser are the two device-plugin resource
+	// segments. They name the role of the WORKLOAD end, which is what fixes both
+	// which socket tree is the pod's and which mode the workload runs in.
+	resourceVhostUser  = "vhost-user"
+	resourceVirtioUser = "virtio-user"
 )
 
 // NetConf is the CNI configuration for the cni-workload plugin.
@@ -96,8 +103,11 @@ type NetConf struct {
 	// Transport selects the CRA-side wiring:
 	//   - "veth" (default): a veth pair whose CRA-side end is moved into the CRA
 	//     netns.
-	//   - "vhostuser": a DPDK/virtio-user vhost-user socket (VSR-only, rendered
-	//     as an fpvhost fast-path virtual-port).
+	//   - "vhostuser": a DPDK/virtio-user vhost-user socket (VSR/grout VM attach,
+	//     rendered as an fpvhost / net_vhost fast-path virtual-port).
+	//   - "grouttap": the grout fast path creates a net_tap in the CRA netns and
+	//     the CNI moves it into the pod netns (grout cannot adopt a moved-in
+	//     kernel veth).
 	Transport string `json:"transport,omitempty"`
 
 	// Layer2AttachmentRef identifies the Layer2Attachment whose bridge the port
@@ -127,10 +137,20 @@ type NetConf struct {
 
 	// DeviceResource is the device-plugin resource the attachment is allocated
 	// from, i.e. the value of the NAD's k8s.v1.cni.cncf.io/resourceName
-	// annotation. It selects which of the two 6WIND socket trees holds the
-	// host-side and which the pod-side path; it does not allocate anything.
-	// Defaults to nc-k8s-plugin.6wind.com/virtio-user.
+	// annotation. Only its last path segment matters here ("vhost-user" or
+	// "virtio-user"): it selects which of the two socket trees holds the
+	// host-side and which the pod-side path. It does not allocate anything, and
+	// it is domain-agnostic, so it names either the 6WIND HNA plugin's resource
+	// or our own vhostuser-device-plugin's. Defaults to
+	// nc-k8s-plugin.6wind.com/virtio-user.
 	DeviceResource string `json:"deviceResource,omitempty"`
+
+	// VhostUserDir / VirtioUserDir override the two host socket trees. They must
+	// match the device plugin's --vhost-user-dir / --virtio-user-dir, which our
+	// vhostuser-device-plugin makes configurable (the 6WIND plugin hardcodes
+	// them, hence the defaults). Only meaningful for "vhostuser".
+	VhostUserDir  string `json:"vhostUserDir,omitempty"`
+	VirtioUserDir string `json:"virtioUserDir,omitempty"`
 
 	// AgentSocket overrides the unix socket the plugin uses to reach the
 	// node-local CRA agent (workloadcni.DefaultSocketPath when empty). The plugin
@@ -239,6 +259,12 @@ func (c *NetConf) isVhostUser() bool {
 	return c.transport() == TransportVhostUser
 }
 
+// isGroutTap reports whether the CRA-side transport is the grout net_tap handoff
+// (the grout flavor moves a grout-created tap into the pod instead of a veth).
+func (c *NetConf) isGroutTap() bool {
+	return c.transport() == TransportGroutTap
+}
+
 // mtu returns the configured MTU or the default.
 func (c *NetConf) mtu() int {
 	if c.MTU > 0 {
@@ -279,6 +305,21 @@ func (c *NetConf) gatewayV6() (net.IP, error) {
 		return nil, fmt.Errorf("invalid IPv6 link-local gateway %q", s)
 	}
 	return ip, nil
+}
+
+// v4NextHopIsV6 reports whether the pod's IPv4 default route has to use the IPv6
+// link-local gateway as its next-hop instead of the IPv4 one.
+//
+// True for the grout transport only. grout is a DPDK fast path with a single
+// node-global IPv4 address table and no per-interface scope for link-local
+// space, so the second workload port to ask for the shared 169.254.1.1/32
+// gateway is rejected with EADDRINUSE, capping the node at one routed
+// attachment. IPv6 link-local is scoped per interface, so fe80::1/128 is
+// accepted on every port; carrying IPv4 over that next-hop means the IPv4
+// gateway address never has to be configured, and the conflict disappears.
+// The agent therefore also stops programming GatewayV4 on this transport.
+func (c *NetConf) v4NextHopIsV6() bool {
+	return c.Transport == TransportGroutTap
 }
 
 // ipamType extracts the delegated IPAM plugin type from the raw IPAM block.
@@ -352,9 +393,9 @@ func (c *NetConf) validateModes() error {
 		return fmt.Errorf("invalid attachMode %q (want %q or %q)", c.AttachMode, AttachModeRouted, AttachModeL2)
 	}
 	switch c.transport() {
-	case TransportVeth, TransportVhostUser:
+	case TransportVeth, TransportVhostUser, TransportGroutTap:
 	default:
-		return fmt.Errorf("invalid transport %q (want %q or %q)", c.Transport, TransportVeth, TransportVhostUser)
+		return fmt.Errorf("invalid transport %q (want %q, %q or %q)", c.Transport, TransportVeth, TransportVhostUser, TransportGroutTap)
 	}
 
 	if c.isL2() {
@@ -441,11 +482,21 @@ func validateTrunk(members []Layer2TrunkMember) error {
 	return nil
 }
 
-// socketMode returns the configured workload-side vhost-user socket mode or the
-// default. The device plugin's device-info file overrides it when present.
+// socketMode returns the workload-side vhost-user socket mode: the explicit NAD
+// value, or otherwise the one the requested resource implies. The device
+// plugin's device-info file overrides both when present.
+//
+// The fallback is derived from the resource rather than being a fixed constant
+// because the two must agree: the resource segment already decides which socket
+// tree is the pod's, and a mode that contradicts it puts two clients (or two
+// servers) on one socket. Nothing then connects, and nothing reports an error
+// either -- both ends sit waiting.
 func (c *NetConf) socketMode() string {
 	if c.SocketMode != "" {
 		return c.SocketMode
 	}
-	return defaultSocketMode
+	if c.deviceResourceSegment() == resourceVhostUser {
+		return SocketModeServer
+	}
+	return SocketModeClient
 }

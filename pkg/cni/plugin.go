@@ -41,11 +41,18 @@ func CmdAdd(args *skel.CmdArgs) error {
 		return err
 	}
 
-	// vhost-user is a fast-path socket transport (VSR-only): no veth, no
-	// CRA-side netns port move. It is handled entirely by the agent, so it does
-	// not need the CRA netns resolved.
+	// vhost-user is a fast-path socket transport (VSR/grout VM attach): no veth,
+	// no CRA-side netns port move. It is handled entirely by the agent, so it
+	// does not need the CRA netns resolved.
 	if conf.isVhostUser() {
 		return cmdAddVhostUser(conf, args)
+	}
+
+	// grout cannot adopt a moved-in kernel veth: the grout fast path creates a
+	// net_tap in the CRA netns, and the CNI waits for it and moves it into the
+	// pod netns instead of building a veth pair.
+	if conf.isGroutTap() {
+		return cmdAddGroutTap(conf, args)
 	}
 
 	craNetnsPath, err := resolveCRANetnsPath(conf)
@@ -105,7 +112,7 @@ func CmdAdd(args *skel.CmdArgs) error {
 	// Hand the attachment to the node-local CRA agent over gRPC. The agent
 	// programs the CRA-side datapath (netlink via frr-cra for FRR, NETCONF for
 	// VSR); the plugin itself is flavor-agnostic.
-	if err := notifyAgentAdd(conf, args, portName, gwV4, gwV6, result, nil); err != nil {
+	if _, err := notifyAgentAdd(conf, args, portName, gwV4, gwV6, result, nil); err != nil {
 		return err
 	}
 	defer func() {
@@ -144,6 +151,10 @@ func CmdDel(args *skel.CmdArgs) error {
 
 	if conf.isVhostUser() {
 		return cmdDelVhostUser(conf, args)
+	}
+
+	if conf.isGroutTap() {
+		return cmdDelGroutTap(conf, args)
 	}
 
 	portName := portName(args.ContainerID, args.IfName)

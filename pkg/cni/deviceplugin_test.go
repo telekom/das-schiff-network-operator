@@ -77,8 +77,9 @@ func TestResolveVhostUserDerivesPathsFromDeviceID(t *testing.T) {
 	if want := defaultPodSocket; att.PodPath != want {
 		t.Errorf("PodPath = %q, want %q", att.PodPath, want)
 	}
-	if att.Mode != SocketModeServer {
-		t.Errorf("Mode = %q, want the default %q", att.Mode, SocketModeServer)
+	// virtio-user => the workload connects, so it is the client.
+	if att.Mode != SocketModeClient {
+		t.Errorf("Mode = %q, want %q for the virtio-user resource", att.Mode, SocketModeClient)
 	}
 }
 
@@ -98,6 +99,10 @@ func TestResolveVhostUserSwapsTreesForVhostUserResource(t *testing.T) {
 	}
 	if want := "/run/vsr-vhost-user/0/socket"; att.PodPath != want {
 		t.Errorf("PodPath = %q, want %q", att.PodPath, want)
+	}
+	// vhost-user => the workload owns the socket, so it is the server.
+	if att.Mode != SocketModeServer {
+		t.Errorf("Mode = %q, want %q for the vhost-user resource", att.Mode, SocketModeServer)
 	}
 }
 
@@ -173,5 +178,16 @@ func TestResolveVhostUserSocketPathOverridesHostSideOnly(t *testing.T) {
 	}
 	if want := defaultPodSocket; att.PodPath != want {
 		t.Errorf("PodPath = %q, want %q (the override is host-side only)", att.PodPath, want)
+	}
+}
+
+func TestResolveVhostUserRejectsTraversingDeviceID(t *testing.T) {
+	// The deviceID names a directory under the socket tree; a traversing value
+	// would move the CRA's socket outside the tree the operator granted it.
+	for _, id := range []string{"../escape", "a/b", "..", ".", "/abs"} {
+		conf := &NetConf{Transport: TransportVhostUser, DeviceID: id}
+		if _, err := resolveVhostUser(conf); err == nil {
+			t.Errorf("resolveVhostUser with deviceID %q = nil error, want a rejection", id)
+		}
 	}
 }

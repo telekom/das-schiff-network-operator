@@ -62,6 +62,9 @@ const (
 // unaffected while the guest still learns the CRA gateway as its next hop.
 const onLinkRouteMetric = 4096
 
+// ipv4Bits is the width of an IPv4 address, used to build the default prefix.
+const ipv4Bits = 32
+
 // portName derives a deterministic, unique CRA-side port name from the CNI
 // container ID and the pod-side interface name. The interface name is part of
 // the key because the runtime (Multus) reuses one container ID for every
@@ -192,12 +195,22 @@ func installOnLinkDefaults(conf *NetConf, podLink netlink.Link, result *current.
 		return nil
 	}
 	if haveV4 {
-		gw, gerr := conf.gatewayV4()
-		if gerr != nil {
-			return gerr
-		}
-		if rerr := addOnLinkDefault(gw); rerr != nil {
-			return rerr
+		if conf.v4NextHopIsV6() {
+			gw, gerr := conf.gatewayV6()
+			if gerr != nil {
+				return gerr
+			}
+			if rerr := addV4DefaultViaV6(podLink, gw); rerr != nil {
+				return rerr
+			}
+		} else {
+			gw, gerr := conf.gatewayV4()
+			if gerr != nil {
+				return gerr
+			}
+			if rerr := addOnLinkDefault(gw); rerr != nil {
+				return rerr
+			}
 		}
 	}
 	if haveV6 {
@@ -208,6 +221,34 @@ func installOnLinkDefaults(conf *NetConf, podLink netlink.Link, result *current.
 		if rerr := addOnLinkDefault(gw); rerr != nil {
 			return rerr
 		}
+	}
+	return nil
+}
+
+// addV4DefaultViaV6 installs the IPv4 default route with an IPv6 next-hop
+// (RTA_VIA, the RFC 5549 forwarding case) instead of an IPv4 one.
+//
+// This exists for datapaths that cannot hold the same IPv4 link-local gateway
+// on more than one port. The routed workload-CNI design gives every port the
+// identical on-link gateway pair, and grout keeps a single node-global IPv4
+// address table with no per-interface scope for link-local space, so the second
+// port to ask for 169.254.1.1/32 is rejected with EADDRINUSE. IPv6 link-local
+// *is* scoped per interface, so fe80::1/128 is accepted on every port; routing
+// IPv4 over that next-hop removes the need for the IPv4 gateway address to
+// exist at all, and with it the conflict.
+//
+// No ONLINK flag: the next-hop is an IPv6 link-local address on this very link,
+// so it is on-link by construction, and the kernel rejects RTNH_F_ONLINK
+// together with RTA_VIA.
+func addV4DefaultViaV6(podLink netlink.Link, gw net.IP) error {
+	r := &netlink.Route{
+		LinkIndex: podLink.Attrs().Index,
+		Dst:       &net.IPNet{IP: net.IPv4zero, Mask: net.CIDRMask(0, ipv4Bits)},
+		Via:       &netlink.Via{AddrFamily: netlink.FAMILY_V6, Addr: gw},
+		Priority:  onLinkRouteMetric,
+	}
+	if err := netlink.RouteReplace(r); err != nil {
+		return fmt.Errorf("failed to add IPv4 default route via inet6 %s: %w", gw, err)
 	}
 	return nil
 }

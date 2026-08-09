@@ -69,8 +69,14 @@ func TestServerAddCreatesAndUpserts(t *testing.T) {
 			HostRoutes: []string{"10.201.0.10/32", "fd00:201::10/128"},
 		},
 	}
-	if _, err := s.Add(ctx, addReq); err != nil {
+	resp, err := s.Add(ctx, addReq)
+	if err != nil {
 		t.Fatalf("Add: %v", err)
+	}
+	// The reported tap is the DPDK netdev, which must NOT be the interface name
+	// itself -- that name belongs to grout's control plane representor.
+	if want := TapIfaceName("cra0cid1"); resp.GetTapName() != want {
+		t.Fatalf("Add returned TapName %q, want %q (the grout flavor waits for this tap)", resp.GetTapName(), want)
 	}
 
 	nrp := getNRP(t, c, "node-1")
@@ -446,5 +452,134 @@ func TestServerAddRejectsOutOfRangeMTU(t *testing.T) {
 		if status.Code(err) != codes.InvalidArgument {
 			t.Errorf("Add with mtu %d = %v, want InvalidArgument", mtu, err)
 		}
+	}
+}
+
+// TestPortTransportFromPB locks the wire-transport -> API-enum mapping the CRA
+// renderers depend on. In particular the grout flavor's "grouttap" transport
+// must map to the veth enum: on the CRA side a grout tap is wired exactly like
+// a veth port (routed interface, or enslaved to the L2VNI bridge). Only
+// "vhostuser" maps to the vhost-user enum, and an unknown value is passed
+// through verbatim so validateWiring can reject it.
+func TestPortTransportFromPB(t *testing.T) {
+	cases := []struct {
+		in   string
+		want v1alpha1.PortTransport
+	}{
+		{"grouttap", v1alpha1.PortTransportVeth},
+		{"veth", v1alpha1.PortTransportVeth},
+		{"", v1alpha1.PortTransportVeth},
+		{"vhostuser", v1alpha1.PortTransportVhostUser},
+		{"bogus", v1alpha1.PortTransport("bogus")},
+	}
+	for _, tc := range cases {
+		if got := portTransportFromPB(tc.in); got != tc.want {
+			t.Errorf("portTransportFromPB(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// TestServerAddGroutTapTransport checks the grout CNI's wire transport is
+// accepted and persisted as veth, and that no socket fields are required.
+func TestServerAddGroutTapTransport(t *testing.T) {
+	c := newFakeClient(t)
+	s := NewServer(c, "node-1", logr.Discard())
+	ctx := context.Background()
+
+	if _, err := s.Add(ctx, &pb.AddRequest{
+		PodNamespace: "ns",
+		PodName:      "pod",
+		ContainerId:  "cid-1",
+		Port:         &pb.WorkloadPort{Interface: "cra0cid1", Transport: "grouttap"},
+	}); err != nil {
+		t.Fatalf("Add with grouttap transport: %v", err)
+	}
+
+	nrp := getNRP(t, c, "node-1")
+	if len(nrp.Spec.Ports) != 1 {
+		t.Fatalf("expected 1 port, got %d", len(nrp.Spec.Ports))
+	}
+	if got := nrp.Spec.Ports[0].Transport; got != v1alpha1.PortTransportVeth {
+		t.Fatalf("grouttap persisted as %q, want %q", got, v1alpha1.PortTransportVeth)
+	}
+}
+
+// TestServerRequireGroutTapRejectsVeth covers the guard that keeps a
+// veth-transport attachment away from a fast path that cannot adopt a netdev
+// created outside it. Rendering such a port as a same-named tap makes grout
+// fail its control-plane tap creation (TUNSETIFF returns EINVAL for a name held
+// by a non-tun device) and crash, which would take the whole node's
+// configuration down rather than just the offending pod.
+func TestServerRequireGroutTapRejectsVeth(t *testing.T) {
+	ctx := context.Background()
+
+	for _, transport := range []string{"", "veth"} {
+		c := newFakeClient(t)
+		s := NewServer(c, "node-1", logr.Discard(), RequireGroutTap())
+		_, err := s.Add(ctx, &pb.AddRequest{
+			PodNamespace: "ns",
+			PodName:      "pod",
+			ContainerId:  "cid-1",
+			Port:         &pb.WorkloadPort{Interface: "cra0cid1", Transport: transport},
+		})
+		if err == nil {
+			t.Fatalf("Add with transport %q: expected rejection", transport)
+		}
+		if status.Code(err) != codes.InvalidArgument {
+			t.Fatalf("Add with transport %q: got code %v, want InvalidArgument", transport, status.Code(err))
+		}
+	}
+
+	// grouttap and vhostuser stay usable.
+	c := newFakeClient(t)
+	s := NewServer(c, "node-1", logr.Discard(), RequireGroutTap())
+	if _, err := s.Add(ctx, &pb.AddRequest{
+		PodNamespace: "ns",
+		PodName:      "pod",
+		ContainerId:  "cid-1",
+		Port:         &pb.WorkloadPort{Interface: "cra0cid1", Transport: "grouttap"},
+	}); err != nil {
+		t.Fatalf("Add with grouttap transport: %v", err)
+	}
+	if _, err := s.Add(ctx, &pb.AddRequest{
+		PodNamespace: "ns",
+		PodName:      "pod2",
+		ContainerId:  "cid-2",
+		Port: &pb.WorkloadPort{
+			Interface:  "cra0cd2",
+			Transport:  "vhostuser",
+			SocketPath: "/var/run/vhost/cra0cd2",
+			SocketMode: v1alpha1.SocketModeServer,
+		},
+	}); err != nil {
+		t.Fatalf("Add with vhostuser transport: %v", err)
+	}
+}
+
+func TestValidateSocketPathRejectsInjectableValues(t *testing.T) {
+	// The value ends up in a grcli command line that the CRA splits on
+	// whitespace and runs as root, so a path that is not a single plain token
+	// is a way to run grcli commands, not a cosmetic problem.
+	bad := map[string]string{
+		"empty":          "",
+		"relative":       "run/vhost/socket",
+		"unclean":        "/run/vhost/../vhost/socket",
+		"trailing slash": "/run/vhost/socket/",
+		"space":          "/run/vhost/socket interface del cra0123",
+		"newline":        "/run/vhost/socket\ninterface del cra0123",
+		"tab":            "/run/vhost/socket\tx",
+		"comma":          "/run/vhost/socket,client=0",
+		"control char":   "/run/vhost/soc\x00ket",
+	}
+	for name, path := range bad {
+		t.Run(name, func(t *testing.T) {
+			if err := validateSocketPath(path); err == nil {
+				t.Errorf("validateSocketPath(%q) = nil, want an error", path)
+			}
+		})
+	}
+
+	if err := validateSocketPath("/run/vhost-user/3f9a2b1c7d/socket"); err != nil {
+		t.Errorf("validateSocketPath on a plain path: %v", err)
 	}
 }

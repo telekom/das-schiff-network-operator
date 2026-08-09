@@ -245,7 +245,89 @@ func TestParseConfigVhostUser(t *testing.T) {
 	if c.deviceID() != "3f9a2b1c7d" {
 		t.Errorf("deviceID() = %q, want 3f9a2b1c7d", c.deviceID())
 	}
-	if c.socketMode() != SocketModeServer {
-		t.Errorf("socketMode() = %q, want %q", c.socketMode(), SocketModeServer)
+	// No socketMode in the config, and the default resource is virtio-user, so
+	// the workload is the CLIENT and the CRA serves the socket. The fallback
+	// must follow the resource: a mode contradicting it puts two clients on one
+	// socket, which hangs silently instead of erroring.
+	if c.socketMode() != SocketModeClient {
+		t.Errorf("socketMode() = %q, want %q", c.socketMode(), SocketModeClient)
+	}
+}
+
+func TestSocketModeFollowsDeviceResource(t *testing.T) {
+	cases := []struct {
+		resource string
+		want     string
+	}{
+		{"", SocketModeClient},
+		{"nc-k8s-plugin.6wind.com/virtio-user", SocketModeClient},
+		{"nc-k8s-plugin.6wind.com/vhost-user", SocketModeServer},
+		{"nc-k8s-plugin.6wind.com/vhost-user-all", SocketModeServer},
+		{"network.t-caas.telekom.com/virtio-user", SocketModeClient},
+		{"network.t-caas.telekom.com/vhost-user", SocketModeServer},
+	}
+	for _, tc := range cases {
+		c := &NetConf{Transport: TransportVhostUser, DeviceResource: tc.resource}
+		if got := c.socketMode(); got != tc.want {
+			t.Errorf("socketMode() for resource %q = %q, want %q", tc.resource, got, tc.want)
+		}
+	}
+
+	// An explicit mode still wins: it is the documented override.
+	c := &NetConf{Transport: TransportVhostUser, SocketMode: SocketModeServer}
+	if got := c.socketMode(); got != SocketModeServer {
+		t.Errorf("explicit socketMode was overridden: got %q", got)
+	}
+}
+
+func TestParseConfigGroutTap(t *testing.T) {
+	// The grout tap transport is a routed attachment programmed by the grout
+	// fast path: it needs no socket, and behaves like a routed veth attach.
+	conf := `{
+	  "cniVersion":"1.0.0","type":"cni-workload","vrf":"cluster",
+	  "transport":"grouttap",
+	  "ipam":{"type":"host-local"}
+	}`
+	c, err := parseConfig([]byte(conf))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !c.isGroutTap() {
+		t.Errorf("isGroutTap() = false, want true")
+	}
+	if c.isVhostUser() {
+		t.Errorf("isVhostUser() = true, want false")
+	}
+	if c.isL2() {
+		t.Errorf("isL2() = true, want false")
+	}
+}
+
+func TestParseConfigGroutTapL2(t *testing.T) {
+	// grouttap may also be used for an L2 (bridge-slave) attach.
+	conf := `{
+	  "cniVersion":"1.0.0","type":"cni-workload",
+	  "transport":"grouttap","attachMode":"l2",
+	  "layer2AttachmentRef":{"name":"blue","namespace":"tenant-a"},
+	  "ipam":{"type":"host-local"}
+	}`
+	c, err := parseConfig([]byte(conf))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !c.isGroutTap() || !c.isL2() {
+		t.Errorf("isGroutTap()=%v isL2()=%v, want both true", c.isGroutTap(), c.isL2())
+	}
+}
+
+func TestParseConfigInvalidTransport(t *testing.T) {
+	// An unknown transport must be rejected by validateModes at parse time.
+	conf := `{
+	  "cniVersion":"1.0.0","type":"cni-workload","vrf":"cluster",
+	  "transport":"memif",
+	  "ipam":{"type":"host-local"}
+	}`
+	if _, err := parseConfig([]byte(conf)); err == nil {
+		t.Fatalf("expected error for invalid transport, got nil")
 	}
 }

@@ -17,6 +17,7 @@ limitations under the License.
 package workloadcni
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/go-logr/logr"
@@ -519,5 +520,45 @@ func TestMergeRoutedIgnoresMTU(t *testing.T) {
 
 	if !MergeIntoNodeNetworkConfig(cfg, []v1alpha1.WorkloadPortEntry{*e}, logr.Discard()) {
 		t.Fatal("expected the routed entry to be merged")
+	}
+}
+
+// TestTapIfaceNameNeverEqualsInterface pins the invariant that a DPDK tap's
+// kernel netdev is never named after the datapath interface it belongs to.
+// grout names its control plane representor after the interface, so a clash
+// breaks that representor and eventually crashes the datapath.
+func TestTapIfaceNameNeverEqualsInterface(t *testing.T) {
+	names := []string{"cra0123", "v0abcde", "hbn", "uplink1", "a"}
+	seen := map[string]string{}
+	for _, name := range names {
+		tap := TapIfaceName(name)
+		if tap == name {
+			t.Errorf("TapIfaceName(%q) = %q, must differ from the interface name", name, tap)
+		}
+		// The tap is a real kernel netdev, so it is bound by IFNAMSIZ-1 too.
+		if len(tap) > kernelIfNameLen {
+			t.Errorf("TapIfaceName(%q) = %q is %d chars, over the %d kernel limit",
+				name, tap, len(tap), kernelIfNameLen)
+		}
+		// It must not collide with another port's name or another port's tap.
+		for _, other := range names {
+			if other != name && tap == other {
+				t.Errorf("TapIfaceName(%q) = %q collides with interface %q", name, tap, other)
+			}
+		}
+		if prev, ok := seen[tap]; ok {
+			t.Errorf("TapIfaceName(%q) and TapIfaceName(%q) both yield %q", prev, name, tap)
+		}
+		seen[tap] = name
+	}
+}
+
+// TestTapIfaceNameFitsLongestPortName guards the suffix against the longest
+// interface name the CNI is allowed to hand us.
+func TestTapIfaceNameFitsLongestPortName(t *testing.T) {
+	longest := strings.Repeat("c", maxInterfaceNameLen)
+	if got := TapIfaceName(longest); len(got) > kernelIfNameLen {
+		t.Errorf("TapIfaceName(%q) = %q is %d chars, over the %d kernel limit",
+			longest, got, len(got), kernelIfNameLen)
 	}
 }

@@ -69,6 +69,26 @@ const FpvhostPortPrefix = "fpvhost-"
 // on what an unset mtu means.
 const DefaultPortMTU = 1500
 
+// tapIfaceSuffix distinguishes a DPDK tap's kernel netdev from the datapath
+// interface it belongs to. CRA-side interface names are validated identifiers
+// that never contain an underscore, so this cannot collide with one.
+const tapIfaceSuffix = "_dp"
+
+// TapIfaceName returns the kernel netdev name of the DPDK tap backing a port,
+// as used by the grout renderer (pkg/cra-grout) and reported to the grout CNI
+// plugin so it knows which netdev to move into the workload netns.
+//
+// It must never equal the interface name itself. grout creates a control plane
+// representor tap named after the interface, so giving the DPDK tap that same
+// name makes the representor's TUNSETIFF fail with EINVAL. grout logs the
+// failure but keeps the port, then dereferences the unusable control plane fd
+// on the first punted packet and dies -- taking the node's whole datapath with
+// it. Names are bounded by maxInterfaceNameLen, which leaves room for the
+// suffix.
+func TapIfaceName(ifName string) string {
+	return ifName + tapIfaceSuffix
+}
+
 // isDefaultVRF reports whether name denotes the underlay/default table (no
 // tenant VRF): empty, "default" or "main".
 func isDefaultVRF(name string) bool {

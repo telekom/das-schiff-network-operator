@@ -27,6 +27,22 @@ default `veth` + `routed` path):
    and the **on-link host routes** (`<ip>/32`, `<ip>/128`) for the workload's
    addresses.
 
+### IPv4 over the IPv6 next-hop (`grouttap` only)
+
+Every routed port asks for the *same* on-link gateway pair, which the kernel and
+the VSR are both happy to hold on many interfaces at once. grout is not: it
+keeps one node-global IPv4 address table with no per-interface scope for
+link-local space, so `169.254.1.1/32` fits on exactly one port and the second
+routed attachment on a node is rejected with `EADDRINUSE`. IPv6 link-local *is*
+scoped per interface, so `fe80::1/128` is accepted on all of them.
+
+On the `grouttap` transport the plugin therefore never asks the agent to program
+an IPv4 gateway, and gives the pod an IPv4 default route whose next-hop is the
+IPv6 gateway instead (`RTA_VIA`, the RFC 5549 forwarding case — the equivalent
+of `ip -4 route add default via inet6 fe80::1 dev net1`). Nothing then needs an
+IPv4 address on the CRA side, and a node can carry as many routed attachments as
+any other flavour. The other transports are unchanged.
+
 The plugin is therefore **flavor-agnostic**: it only wires the veth. `DEL`
 reverses everything (removing the veth removes both ends) and tells the agent to
 drop the attachment.
@@ -54,7 +70,7 @@ Delivered per secondary network via a `NetworkAttachmentDefinition`
 | `type`              | yes      | —       | must be `cni-workload` |
 | `ipam`              | for routed `veth` | — | delegated IPAM block (`static` or `host-local`); optional for `vhostuser` (guest-side addressing) and for `attachMode: l2` (the workload is addressed inside the L2 domain). Always delegated and applied when present |
 | `attachMode`        | no       | `routed`| `routed` (VRF/underlay + on-link gateway + host routes) or `l2` (attachment to existing L2 domains) |
-| `transport`         | no       | `veth`  | `veth` (a veth pair moved into the CRA netns) or `vhostuser` (DPDK/virtio-user fast-path socket, **VSR-only**) |
+| `transport`         | no       | `veth`  | `veth` (a veth pair moved into the CRA netns), `vhostuser` (DPDK/virtio-user fast-path socket, **VSR/grout only**), or `grouttap` (grout creates a `net_tap` in the CRA netns and the CNI moves it into the pod, **grout only**) |
 | `vrf`               | no       | *(underlay)* | CRA VRF device name; omit/`default`/`main` for the underlay/default table. Only for `attachMode: routed` (must be unset for `l2`) |
 | `layer2AttachmentRef` | for `l2` | —     | `{name}` of the originating `Layer2Attachment`; the port becomes an **untagged access port** of it. Mutually exclusive with `layer2Trunk` |
 | `layer2Trunk`       | for `l2` | —       | list of `{name, vlan}` members carried on the port as an **802.1Q trunk**; `vlan` is optional and defaults to the domain's own VLAN id. Mutually exclusive with `layer2AttachmentRef` |
@@ -64,7 +80,7 @@ Delivered per secondary network via a `NetworkAttachmentDefinition`
 | `agentSocket`       | no       | `/run/das-schiff/workload-cni.sock` | unix socket of the node-local CRA agent |
 | `craNetns`          | no       | `auto`  | `auto` (discover by trunk), a named netns under `/var/run/netns/<name>`, or an absolute path (e.g. `/proc/<pid>/ns/net`) |
 | `trunkInterface`    | no       | `hbn`   | interface that identifies the CRA netns during auto-discovery |
-| `linkLocalGateways` | no       | `169.254.1.1` / `fe80::1` | on-link next-hop addresses the agent configures on the CRA-side port (`routed` only) |
+| `linkLocalGateways` | no       | `169.254.1.1` / `fe80::1` | on-link next-hop addresses the agent configures on the CRA-side port (`routed` only; on `grouttap` only the IPv6 one, see below) |
 | `mtu`               | no       | `1500`  | veth MTU; in L2 mode the domain must be able to carry it (see [L2 trunking](#l2-trunking)) |
 
 Example (underlay, static IPAM) — see
@@ -77,9 +93,14 @@ The attachment is described by two independent axes:
 
 - **transport** — how the CRA-side port is wired:
   - `veth` (default): a veth pair whose CRA-side end is moved into the CRA netns.
-  - `vhostuser`: a DPDK/virtio-user vhost socket. **VSR-only** — there is no
-    veth and no netns port move; the VSR fast-path terminates the socket as an
-    `fpvhost` virtual-port. The FRR agent rejects it.
+  - `vhostuser`: a DPDK/virtio-user vhost socket (VM attach). There is no veth
+    and no netns port move; the fast path (VSR `fpvhost` / grout `net_vhost`)
+    terminates the socket. **VSR/grout only** — the FRR agent rejects it.
+  - `grouttap`: the **grout** fast path creates a `net_tap` in the CRA netns and
+    the CNI moves it into the pod netns (grout cannot adopt a moved-in kernel
+    veth). The handoff is *inverted* relative to `veth`: the agent creates the
+    tap and the CNI polls the CRA netns for it, then moves/renames/addresses it.
+    **grout only.**
 - **attach mode** — what is done with that port:
   - `routed` (default): VRF/underlay + on-link gateway + workload host routes.
   - `l2`: the port is attached to one or more **existing** L2 bridges with no L3
@@ -90,6 +111,18 @@ The attachment is described by two independent axes:
 
 All four combinations are valid except `vhostuser` + FRR. The `veth` + `routed`
 combination is the original behaviour and is unchanged.
+
+**grout tap handoff (`grouttap`).** grout owns a DPDK fast path and cannot adopt
+a moved-in kernel veth, so a routed pod attach is inverted: the CNI hands the
+attachment to the agent (which persists it and triggers the grout reconcile so
+the grout-cra sidecar's `grcli` creates a `net_tap` named after the port in the
+CRA netns), then **polls the CRA netns until that tap appears**, moves it into
+the pod netns, renames it to the requested interface, addresses it from IPAM, and
+installs the on-link default (unless `l2`). This keeps the attach synchronous
+from the pod/KubeVirt point of view (`eth0` exists before `ADD` returns). The
+agent's `Add` reply carries the tap name for the CNI to wait on. grout keeps the
+tap's DPDK fd bound after the netdev leaves the CRA netns, so forwarding
+survives the move. VM attach with grout uses `vhostuser` (a `net_vhost` port).
 
 **L2 binding by attachment ref.** The intent builder stamps the originating
 `Layer2Attachment` identity (`AttachmentRef`) onto each NNC `Layer2`. An `l2`
@@ -239,6 +272,14 @@ agent records the attachment on `NodeWorkloadPorts` and merges it into the
   virtual-port fpvhost fpvhost-<ifname> sockpath <host socket> sockmode
   <inverted>`) + `interface fpvhost <ifname> port fpvhost-<ifname>`. See
   `pkg/cra-vsr/workloadports.go` / `layer2.go` and `pkg/workloadcni` (transport).
+- **cra-grout:** FRR (control plane) + the [grout](https://github.com/DPDK/grout)
+  DPDK graph router (fast path). The agent renders a `grcli` batch applied by the
+  `grout-cra` sidecar. A routed/L2 pod attach uses the `grouttap` transport
+  (grout creates a `net_tap` in the CRA netns and the CNI moves it into the pod);
+  a VM attach uses `vhostuser` (grout `net_vhost` port). The sidecar applies the
+  desired-state batch **line-by-line, tolerating "exists" errors**, so a second
+  pod's reconcile re-applying the first pod's ports is idempotent and still
+  creates the new tap. See `pkg/cra-grout/` and `cmd/grout-cra`.
 
 ### Transport
 

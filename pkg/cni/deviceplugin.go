@@ -24,6 +24,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
 )
 
 // This file implements the 6WIND HNA device-plugin contract for the vhost-user
@@ -114,15 +115,31 @@ func (c *NetConf) deviceResource() string {
 // after the role of the far end, so a workload requesting virtio-user finds its
 // socket in the tree where vSR is the vhost-user backend.
 func (c *NetConf) socketTrees() (hostTree, podTree string) {
+	vhostDir, virtioDir := vhostUserSocketDir, virtioUserSocketDir
+	if c.VhostUserDir != "" {
+		vhostDir = c.VhostUserDir
+	}
+	if c.VirtioUserDir != "" {
+		virtioDir = c.VirtioUserDir
+	}
+	if c.deviceResourceSegment() == resourceVhostUser {
+		return virtioDir, vhostDir
+	}
+	return vhostDir, virtioDir
+}
+
+// deviceResourceSegment returns the meaningful part of the device resource: the
+// last path segment, minus the "-all" suffix the 6WIND plugin uses for its
+// allocate-everything variant.
+//
+// Only this segment matters anywhere, which is what makes the same NAD work
+// against 6WIND's plugin and our own -- they differ only in the domain.
+func (c *NetConf) deviceResourceSegment() string {
 	resource := c.deviceResource()
 	if i := strings.LastIndex(resource, "/"); i >= 0 {
 		resource = resource[i+1:]
 	}
-	resource = strings.TrimSuffix(resource, "-all")
-	if resource == "vhost-user" {
-		return virtioUserSocketDir, vhostUserSocketDir
-	}
-	return vhostUserSocketDir, virtioUserSocketDir
+	return strings.TrimSuffix(resource, "-all")
 }
 
 // resolveVhostUser derives the socket wiring for a vhost-user attachment.
@@ -146,6 +163,15 @@ func resolveVhostUser(conf *NetConf) (*vhostUserAttachment, error) {
 				"NetworkAttachmentDefinition's k8s.v1.cni.cncf.io/resourceName annotation, and must "+
 				"request at least as many of them as it has attachments to that resource",
 			TransportVhostUser, conf.deviceResource())
+	}
+
+	// The deviceID names a directory under the socket tree, so it has to be a
+	// single path element: kubelet only ever hands back an ID this node's device
+	// plugin minted, but the value reaches us through the NAD's runtime config,
+	// and a "../.." there would move the CRA's socket outside the tree the
+	// operator granted it.
+	if err := validateDeviceIDSegment(deviceID); err != nil {
+		return nil, err
 	}
 
 	hostTree, podTree := conf.socketTrees()
@@ -207,6 +233,16 @@ func readDeviceInfo(paths []string) *vhostDeviceCfg {
 			continue
 		}
 		return info.VhostUser
+	}
+	return nil
+}
+
+// validateDeviceIDSegment rejects a device ID that is not a single, plain path
+// element.
+func validateDeviceIDSegment(deviceID string) error {
+	if deviceID != filepath.Base(deviceID) || deviceID == "." || deviceID == ".." ||
+		strings.ContainsAny(deviceID, `/\`) || strings.ContainsFunc(deviceID, unicode.IsControl) {
+		return fmt.Errorf("invalid deviceID %q: must be a single path element", deviceID)
 	}
 	return nil
 }

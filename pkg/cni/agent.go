@@ -37,18 +37,21 @@ import (
 const agentCallTimeout = 10 * time.Second
 
 // notifyAgentAdd hands the attachment to the node-local CRA agent so it can
-// render the CRA-side datapath (netlink via frr-cra for FRR, NETCONF for VSR).
-// The plugin is flavor-agnostic; the agent decides how to program it. Routed and
-// L2 attach modes differ in the request payload: routed carries VRF + on-link
-// gateways + host routes, while L2 carries only the Layer2 reference(s) — a
-// single untagged access ref or a tagged trunk list (the agent enslaves the port
-// or its VLAN sub-interfaces to the matching bridges).
+// render the CRA-side datapath (netlink via frr-cra for FRR, NETCONF for VSR,
+// grcli net_tap for grout). The plugin is flavor-agnostic; the agent decides how
+// to program it. Routed and L2 attach modes differ in the request payload:
+// routed carries VRF + on-link gateways + host routes, while L2 carries only the
+// Layer2 reference(s) — a single untagged access ref or a tagged trunk list (the
+// agent enslaves the port or its VLAN sub-interfaces to the matching bridges).
 //
 // att is non-nil only for the vhost-user transport, and carries the HOST-side
-// socket path: that is the namespace the CRA agent and vSR run in.
+// socket path: that is the namespace the CRA agent and the fast path run in.
+//
+// It returns the agent-reported tap name (the CRA-side netdev the grout flavor
+// waits for; echoed for veth flavors).
 func notifyAgentAdd(conf *NetConf, args *skel.CmdArgs, portName string, gwV4, gwV6 net.IP,
 	result *current.Result, att *vhostUserAttachment,
-) error {
+) (string, error) {
 	podNs, name := podIdentity(args.Args)
 	port := &pb.WorkloadPort{
 		Interface: portName,
@@ -84,17 +87,23 @@ func notifyAgentAdd(conf *NetConf, args *skel.CmdArgs, portName string, gwV4, gw
 		}
 	} else {
 		req.Vrf = conf.VRF
-		port.GatewayV4 = gwV4.String() + "/32"
+		// gwV4 is nil on transports that route IPv4 over the IPv6 next-hop
+		// instead (see NetConf.v4NextHopIsV6); they must not have the shared
+		// IPv4 link-local programmed on the CRA-side port at all.
+		if gwV4 != nil {
+			port.GatewayV4 = gwV4.String() + "/32"
+		}
 		port.GatewayV6 = gwV6.String() + "/128"
 		port.HostRoutes = hostRoutes(result)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), agentCallTimeout)
 	defer cancel()
-	if err := workloadcni.Add(ctx, conf.AgentSocket, req); err != nil {
-		return fmt.Errorf("notifying agent of attach add: %w", err)
+	resp, err := workloadcni.Add(ctx, conf.AgentSocket, req)
+	if err != nil {
+		return "", fmt.Errorf("notifying agent of attach add: %w", err)
 	}
-	return nil
+	return resp.GetTapName(), nil
 }
 
 // notifyAgentDel tells the node-local CRA agent to drop the routed attachment.
