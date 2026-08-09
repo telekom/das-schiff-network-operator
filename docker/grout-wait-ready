@@ -1,0 +1,26 @@
+#!/bin/sh
+# grout-wait-ready -- block until the grout control socket answers grcli, so the
+# grout-cra sidecar (Requires=grout.service) only starts once grout is live. It
+# also ensures the socket is FRR-readable: FRR's dplane_grout runs as the
+# unprivileged `frr` user and must reach /run/grout.sock, which older grout edge
+# images create root:root 0660 (grout is launched with `-m 666`, but chmod again
+# here belt-and-braces in case the build ignores the flag).
+set -eu
+
+GROUT_SOCK="${GROUT_SOCK:-/run/grout.sock}"
+
+# Poll generously: cold boot (image unpack + DPDK EAL init) under e2e CPU
+# contention can take well over a minute. This runs as grout.service
+# ExecStartPost, so it MUST NOT fail the unit on a slow-but-healthy grout (that
+# would tear grout.service down and cascade to grout-cra/frr). grout-cra already
+# retries the socket, so we only best-effort chmod and always exit 0.
+for _ in $(seq 1 120); do
+    if grcli interface show >/dev/null 2>&1; then
+        chmod 666 "$GROUT_SOCK" 2>/dev/null || true
+        exit 0
+    fi
+    sleep 1
+done
+chmod 666 "$GROUT_SOCK" 2>/dev/null || true
+echo "grout-wait-ready: grout not ready after 120s, continuing anyway" >&2
+exit 0

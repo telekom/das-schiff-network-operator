@@ -45,7 +45,7 @@ help: ## Display this help.
 .PHONY: manifests
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
 	$(CONTROLLER_GEN) crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
-	$(CONTROLLER_GEN) rbac:roleName=manager-role paths="./controllers/operator/..." paths="./controllers/intent/..." paths="./controllers/platform/..." paths="./controllers/agent-cra-frr/..." paths="./controllers/agent-cra-vsr/..." paths="./controllers/agent-hbn-l2/..." paths="./controllers/agent-netplan/..." paths="./pkg/monitoring/..."
+	$(CONTROLLER_GEN) rbac:roleName=manager-role paths="./controllers/operator/..." paths="./controllers/intent/..." paths="./controllers/platform/..." paths="./controllers/agent-cra-frr/..." paths="./controllers/agent-cra-vsr/..." paths="./controllers/agent-cra-grout/..." paths="./controllers/agent-hbn-l2/..." paths="./controllers/agent-netplan/..." paths="./pkg/monitoring/..."
 	$(CONTROLLER_GEN) rbac:roleName=network-sync-role paths="./controllers/sync/..." output:rbac:artifacts:config=config/network-sync
 
 .PHONY: generate
@@ -140,12 +140,15 @@ docker-build: #test ## Build docker image with the manager.
 	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-network-operator.Dockerfile -t ${IMG_BASE}/das-schiff-network-operator:latest .
 	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-nwop-agent-cra-frr.Dockerfile -t ${IMG_BASE}/das-schiff-nwop-agent-cra-frr:latest .
 	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-nwop-agent-cra-vsr.Dockerfile -t ${IMG_BASE}/das-schiff-nwop-agent-cra-vsr:latest .
+	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-cra-grout.Dockerfile -t ${IMG_BASE}/das-schiff-cra-grout:latest .
+	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-nwop-agent-cra-grout.Dockerfile -t ${IMG_BASE}/das-schiff-nwop-agent-cra-grout:latest .
 	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-nwop-agent-hbn-l2.Dockerfile -t ${IMG_BASE}/das-schiff-nwop-agent-hbn-l2:latest .
 	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-nwop-agent-netplan.Dockerfile -t ${IMG_BASE}/das-schiff-nwop-agent-netplan:latest .
 	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-platform-coil.Dockerfile -t ${IMG_BASE}/das-schiff-platform-coil:latest .
 	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-platform-metallb.Dockerfile -t ${IMG_BASE}/das-schiff-platform-metallb:latest .
 	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-network-sync.Dockerfile -t ${IMG_BASE}/das-schiff-network-sync:latest .
 	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-nwop-cni-workload.Dockerfile -t ${IMG_BASE}/das-schiff-nwop-cni-workload:latest .
+	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-nwop-vhostuser-device-plugin.Dockerfile -t ${IMG_BASE}/das-schiff-nwop-vhostuser-device-plugin:latest .
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
@@ -161,12 +164,15 @@ kind-load: docker-build ## Load docker image into kind cluster.
 	kind load docker-image ${IMG_BASE}/das-schiff-network-operator:latest
 	kind load docker-image ${IMG_BASE}/das-schiff-nwop-agent-cra-frr:latest
 	kind load docker-image ${IMG_BASE}/das-schiff-nwop-agent-cra-vsr:latest
+	kind load docker-image ${IMG_BASE}/das-schiff-cra-grout:latest
+	kind load docker-image ${IMG_BASE}/das-schiff-nwop-agent-cra-grout:latest
 	kind load docker-image ${IMG_BASE}/das-schiff-nwop-agent-hbn-l2:latest
 	kind load docker-image ${IMG_BASE}/das-schiff-nwop-agent-netplan:latest
 	kind load docker-image ${IMG_BASE}/das-schiff-platform-coil:latest
 	kind load docker-image ${IMG_BASE}/das-schiff-platform-metallb:latest
 	kind load docker-image ${IMG_BASE}/das-schiff-network-sync:latest
 	kind load docker-image ${IMG_BASE}/das-schiff-nwop-cni-workload:latest
+	kind load docker-image ${IMG_BASE}/das-schiff-nwop-vhostuser-device-plugin:latest
 
 ##@ Release
 
@@ -223,6 +229,10 @@ E2E_TESTER_IMAGE ?= $(IMG_BASE)/das-schiff-e2e-tester:latest
 e2e-build-cra-frr: ## Build the CRA-FRR image.
 	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-cra-frr.Dockerfile -t das-schiff-cra-frr:latest .
 
+.PHONY: e2e-build-cra-grout
+e2e-build-cra-grout: ## Build the CRA-GROUT image (grout + FRR + grout-cra).
+	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-cra-grout.Dockerfile -t das-schiff-cra-grout:latest .
+
 .PHONY: e2e-build-node-image
 e2e-build-node-image: e2e-build-cra-frr ## Build kind node image with CRA-FRR baked in.
 	docker save das-schiff-cra-frr:latest -o e2e/images/kind-node/cra-frr.tar
@@ -233,12 +243,23 @@ e2e-build-node-image: e2e-build-cra-frr ## Build kind node image with CRA-FRR ba
 	  e2e/images/kind-node/
 	rm -f e2e/images/kind-node/cra-frr.tar
 
+.PHONY: e2e-build-node-image-grout
+e2e-build-node-image-grout: e2e-build-cra-grout ## Build kind node image with CRA-GROUT baked in.
+	docker save das-schiff-cra-grout:latest -o e2e/images/kind-node-grout/cra-grout.tar
+	docker build \
+	  --build-arg KIND_NODE_VERSION=$(KIND_NODE_VERSION) \
+	  -t $(E2E_NODE_IMAGE) \
+	  -f e2e/images/kind-node-grout/Dockerfile \
+	  .
+	rm -f e2e/images/kind-node-grout/cra-grout.tar
+
 .PHONY: e2e-up
-e2e-up: ## Stand up the full E2E lab (containerlab + CRA + kubeadm + components).
+e2e-up: ## Stand up the full E2E lab (containerlab + CRA + kubeadm + components). Set E2E_CRA_FLAVOR=grout for the grout DPDK fast path.
 	cd e2e/setup && \
 	  E2E_NODE_IMAGE=$(E2E_NODE_IMAGE) \
 	  E2E_NAT64_IMAGE=$(E2E_NAT64_IMAGE) \
 	  E2E_TESTER_IMAGE=$(E2E_TESTER_IMAGE) \
+	  E2E_CRA_FLAVOR=$${E2E_CRA_FLAVOR:-frr} \
 	  E2E_SKIP_BUILD=$${E2E_SKIP_BUILD:-} \
 	  E2E_IMAGE_DIR=$${E2E_IMAGE_DIR:-} \
 	  go run ./cmd up
@@ -256,6 +277,11 @@ e2e-test: ## Run legacy E2E tests (includes legacy traffic mirror; excludes inte
 e2e-test-kubevirt: ## Run the routed KubeVirt VM datapath E2E test (requires E2E_KUBEVIRT lab).
 	docker exec clab-nwop-tester bash -c \
 	  'cd /repo && KUBECONFIG=/repo/e2etests/.kubeconfig E2E_KUBEVIRT=1 go test -v -count=1 -timeout=30m ./e2etests -ginkgo.label-filter="kubevirt"'
+
+.PHONY: e2e-test-kubevirt-vhostuser
+e2e-test-kubevirt-vhostuser: ## Run the grout vhost-user KubeVirt VM datapath E2E test.
+	docker exec clab-nwop-tester bash -c \
+	  'cd /repo && KUBECONFIG=/repo/e2etests/.kubeconfig E2E_KUBEVIRT=1 E2E_KUBEVIRT_VHOSTUSER=1 E2E_CRA_FLAVOR=grout go test -v -count=1 -timeout=45m ./e2etests -ginkgo.label-filter="vhostuser"'
 
 .PHONY: e2e-test-intent
 e2e-test-intent: ## Run E2E tests with intent reconciler enabled (replaces legacy pipeline).
