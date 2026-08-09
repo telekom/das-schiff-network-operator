@@ -99,4 +99,52 @@ var _ = Describe("Intent-Exclusive: L2 Connectivity", Label("intent-exclusive", 
 		}).WithTimeout(90*time.Second).WithPolling(5*time.Second).Should(BeTrue(),
 			"Intent-exclusive: L2 IPv6 ping should work via intent pipeline")
 	})
+
+	It("should attach grout tap pods to the L2VNI bridge and allow L2 ping", Label("grout"), func() {
+		if !f.IsGrout() {
+			Skip("grout-tap L2 attach requires E2E_CRA_FLAVOR=grout")
+		}
+		cfg := f.Config
+
+		By("Applying L2 NAD for grout-tap pods (VLAN 501)")
+		nadManifest, err := readTestdata("l2-connectivity/nad-grouttap.yaml")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(f.ApplyManifestInNamespace(ctx, nadManifest, ns)).To(Succeed())
+
+		By("Creating intent-excl-l2-01 on worker-1 (grout tap L2)")
+		Expect(f.CreateTestPod(ctx, ns, "intent-excl-l2-01", cfg.WorkerNode1, map[string]string{
+			"k8s.v1.cni.cncf.io/networks": fmt.Sprintf(
+				`[{"name": "grouttap-l2-vlan501", "ips": ["%s/24", "%s/64"]}]`,
+				cfg.Macvlan01IPv4, cfg.Macvlan01IPv6),
+		}, framework.WithNetAdmin())).To(Succeed())
+
+		By("Creating intent-excl-l2-02 on worker-2 (grout tap L2)")
+		Expect(f.CreateTestPod(ctx, ns, "intent-excl-l2-02", cfg.WorkerNode2, map[string]string{
+			"k8s.v1.cni.cncf.io/networks": fmt.Sprintf(
+				`[{"name": "grouttap-l2-vlan501", "ips": ["%s/24", "%s/64"]}]`,
+				cfg.Macvlan02IPv4, cfg.Macvlan02IPv6),
+		}, framework.WithNetAdmin())).To(Succeed())
+
+		By("Waiting for pods to be ready")
+		Expect(f.WaitForPodReady(ctx, ns, "intent-excl-l2-01", cfg.PodReadyTimeout)).To(Succeed())
+		Expect(f.WaitForPodReady(ctx, ns, "intent-excl-l2-02", cfg.PodReadyTimeout)).To(Succeed())
+
+		By("Disabling IPv6 DAD and re-adding addresses")
+		Expect(f.EnsureIPv6NoDad(ctx, ns, "intent-excl-l2-01", cfg.Macvlan01IPv6, "net1")).To(Succeed())
+		Expect(f.EnsureIPv6NoDad(ctx, ns, "intent-excl-l2-02", cfg.Macvlan02IPv6, "net1")).To(Succeed())
+
+		By("Verifying grout-tap L2 connectivity via IPv4 (cross-node)")
+		Eventually(func() bool {
+			r, _ := f.PingFromPod(ctx, ns, "intent-excl-l2-01", cfg.Macvlan02IPv4, 3)
+			return r != nil && r.Success
+		}).WithTimeout(60*time.Second).WithPolling(5*time.Second).Should(BeTrue(),
+			"Intent-exclusive: grout-tap L2 IPv4 ping should work via intent pipeline")
+
+		By("Verifying grout-tap L2 connectivity via IPv6 (cross-node)")
+		Eventually(func() bool {
+			r, _ := f.PingFromPod(ctx, ns, "intent-excl-l2-01", cfg.Macvlan02IPv6, 3)
+			return r != nil && r.Success
+		}).WithTimeout(90*time.Second).WithPolling(5*time.Second).Should(BeTrue(),
+			"Intent-exclusive: grout-tap L2 IPv6 ping should work via intent pipeline")
+	})
 })

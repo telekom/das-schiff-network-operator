@@ -55,6 +55,7 @@ spec:
 	BeforeEach(func() {
 		f = framework.Global
 		Expect(f).NotTo(BeNil())
+		f.SkipIfGrout("traffic mirroring")
 		ctx = context.Background()
 
 		By("Creating test namespace")

@@ -8,7 +8,7 @@ exportCIDRs:
 localASN: 64497
 trunkInterfaceName: "hbn"
 underlayNeighbors:
-  - interface: eth1
+  - interface: {{ .Uplink1 }}
     remoteASN: "65500"
     localASN: "65501"
     keepaliveTime: 30
@@ -17,7 +17,7 @@ underlayNeighbors:
     ipv4: true
     ipv6: {{ if .RoutedUnderlay }}true{{ else }}false{{ end }}
     evpn: false
-  - interface: eth2
+  - interface: {{ .Uplink2 }}
     remoteASN: "65500"
     localASN: "65501"
     keepaliveTime: 30
@@ -27,6 +27,7 @@ underlayNeighbors:
     ipv6: {{ if .RoutedUnderlay }}true{{ else }}false{{ end }}
     evpn: false
   - ip: "192.0.2.1"
+    updateSource: "{{ .EVPNSource }}"
     remoteASN: "64497"
     keepaliveTime: 30
     holdTime: 90
@@ -34,6 +35,7 @@ underlayNeighbors:
     ipv4: false
     evpn: true
   - ip: "192.0.2.2"
+    updateSource: "{{ .EVPNSource }}"
     remoteASN: "64497"
     keepaliveTime: 30
     holdTime: 90
@@ -57,7 +59,7 @@ clusterNeighbors:
     holdTime: 90
     bfdMinTimer: 333
     ipv6: true
-  - ip: "fd00:7:caa5::1"
+  - ip: "{{ .KubeVIPPeer }}"
     remoteASN: "65170"
     localASN: "65169"
     keepaliveTime: 30

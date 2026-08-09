@@ -5,6 +5,12 @@
 # The Layer2Attachments referenced here come from intent/base-configs.yaml and
 # are resolved by name in the agent's --intent-namespace ("default"), which is
 # also where the intent fixtures live.
+#
+# "transport" is the __TRANSPORT__ placeholder rather than a literal, because
+# which side creates the CRA-side netdev is a property of the datapath: the
+# kernel and VSR flavours take a veth the CNI moved in, while grout cannot adopt
+# one and has to create the net_tap itself. framework.ResolveTransport fills it
+# in for the flavour under test.
 ---
 # L2 access attach on VLAN 501: the CRA-side port is enslaved into the l2.501
 # bridge, so the pod shares the L2 domain with the macvlan pods on vlan.501.
@@ -23,6 +29,7 @@ spec:
       "type": "cni-workload",
       "craNetns": "auto",
       "trunkInterface": "hbn",
+      "transport": "__TRANSPORT__",
       "attachMode": "l2",
       "layer2AttachmentRef": {
         "name": "l2a-base-vlan501"
@@ -54,6 +61,7 @@ spec:
       "type": "cni-workload",
       "craNetns": "auto",
       "trunkInterface": "hbn",
+      "transport": "__TRANSPORT__",
       "attachMode": "l2",
       "mtu": 1500,
       "layer2Trunk": [
@@ -78,6 +86,7 @@ spec:
       "type": "cni-workload",
       "craNetns": "auto",
       "trunkInterface": "hbn",
+      "transport": "__TRANSPORT__",
       "linkLocalGateways": {
         "ipv4": "169.254.1.1",
         "ipv6": "fe80::1"

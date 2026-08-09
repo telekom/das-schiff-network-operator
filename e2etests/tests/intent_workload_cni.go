@@ -78,7 +78,7 @@ var _ = Describe("Intent: Workload CNI attachments", Label("intent", "workloadcn
 		By("Applying workload-CNI NADs")
 		wlNAD, err := readTestdata("workload-cni/nads.yaml")
 		Expect(err).NotTo(HaveOccurred())
-		Expect(f.ApplyManifestInNamespace(ctx, wlNAD, ns)).To(Succeed())
+		Expect(f.ApplyManifestInNamespace(ctx, f.ResolveTransport(wlNAD), ns)).To(Succeed())
 	})
 
 	AfterEach(func() {

@@ -61,6 +61,9 @@ func up(repoRoot string) error {
 	cluster2 := setup.Cluster2()
 
 	// Build images
+	if err := setup.PhaseHostPrereqs(); err != nil {
+		return fmt.Errorf("host prerequisites: %w", err)
+	}
 	if err := setup.PhaseBuildImages(repoRoot); err != nil {
 		return fmt.Errorf("build images: %w", err)
 	}
@@ -129,6 +132,14 @@ func up(repoRoot string) error {
 	if setup.EnvOr("E2E_KUBEVIRT", "") != "" {
 		if err := setup.PhaseKubeVirt(cluster, repoRoot); err != nil {
 			return fmt.Errorf("kubevirt: %w", err)
+		}
+		// Optional on top of that: the vhost-user VM datapath. Separate because
+		// it additionally needs hugepages on the host and a DPDK fast path, so
+		// it is grout-only.
+		if setup.EnvOr("E2E_KUBEVIRT_VHOSTUSER", "") != "" {
+			if err := setup.PhaseKubeVirtVhostUser(cluster, repoRoot); err != nil {
+				return fmt.Errorf("kubevirt vhost-user: %w", err)
+			}
 		}
 	}
 

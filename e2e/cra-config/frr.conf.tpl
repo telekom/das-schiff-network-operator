@@ -17,29 +17,29 @@ router bgp 64497
  no bgp default ipv4-unicast
  bgp bestpath as-path multipath-relax
  ! Underlay eBGP — per-interface BGP unnumbered
- neighbor eth1 interface remote-as 65500
- neighbor eth1 local-as 65501 no-prepend replace-as
- neighbor eth1 timers 30 90
- neighbor eth2 interface remote-as 65500
- neighbor eth2 local-as 65501 no-prepend replace-as
- neighbor eth2 timers 30 90
+ neighbor {{ .Uplink1 }} interface remote-as 65500
+ neighbor {{ .Uplink1 }} local-as 65501 no-prepend replace-as
+ neighbor {{ .Uplink1 }} timers 30 90
+ neighbor {{ .Uplink2 }} interface remote-as 65500
+ neighbor {{ .Uplink2 }} local-as 65501 no-prepend replace-as
+ neighbor {{ .Uplink2 }} timers 30 90
  ! EVPN iBGP to route reflectors
  neighbor 192.0.2.1 remote-as 64497
  neighbor 192.0.2.1 timers 30 90
- neighbor 192.0.2.1 update-source dum.underlay
+ neighbor 192.0.2.1 update-source {{ .EVPNSource }}
  neighbor 192.0.2.2 remote-as 64497
  neighbor 192.0.2.2 timers 30 90
- neighbor 192.0.2.2 update-source dum.underlay
+ neighbor 192.0.2.2 update-source {{ .EVPNSource }}
  !
  address-family ipv4 unicast
-  neighbor eth1 activate
-  neighbor eth1 allowas-in
-  neighbor eth1 route-map TAG-FABRIC-IN in
-  neighbor eth1 route-map DENY-TAG-FABRIC-OUT out
-  neighbor eth2 activate
-  neighbor eth2 allowas-in
-  neighbor eth2 route-map TAG-FABRIC-IN in
-  neighbor eth2 route-map DENY-TAG-FABRIC-OUT out
+  neighbor {{ .Uplink1 }} activate
+  neighbor {{ .Uplink1 }} allowas-in
+  neighbor {{ .Uplink1 }} route-map TAG-FABRIC-IN in
+  neighbor {{ .Uplink1 }} route-map DENY-TAG-FABRIC-OUT out
+  neighbor {{ .Uplink2 }} activate
+  neighbor {{ .Uplink2 }} allowas-in
+  neighbor {{ .Uplink2 }} route-map TAG-FABRIC-IN in
+  neighbor {{ .Uplink2 }} route-map DENY-TAG-FABRIC-OUT out
   network {{ .VtepIP }}/32
  exit-address-family
  !
@@ -58,9 +58,9 @@ router bgp 64497 vrf cluster
  no bgp suppress-duplicates
  no bgp default ipv4-unicast
  ! kube-vip neighbor via hbn veth
- neighbor fd00:7:caa5::1 remote-as 65170
- neighbor fd00:7:caa5::1 local-as 65169 no-prepend replace-as
- neighbor fd00:7:caa5::1 description kube-vip
+ neighbor {{ .KubeVIPPeer }} remote-as 65170
+ neighbor {{ .KubeVIPPeer }} local-as 65169 no-prepend replace-as
+ neighbor {{ .KubeVIPPeer }} description kube-vip
  ! Calico neighbors
  neighbor {{ .NodeIPv4 }} remote-as 65170
  neighbor {{ .NodeIPv4 }} local-as 65169 no-prepend replace-as
@@ -79,8 +79,8 @@ router bgp 64497 vrf cluster
   redistribute kernel
   import vrf mgmt
   import vrf route-map rm_cluster_import
-  neighbor fd00:7:caa5::1 activate
-  neighbor fd00:7:caa5::1 prefix-list ANY in
+  neighbor {{ .KubeVIPPeer }} activate
+  neighbor {{ .KubeVIPPeer }} prefix-list ANY in
   neighbor {{ .NodeIPv4 }} activate
   neighbor {{ .NodeIPv4 }} prefix-list ANY in
  exit-address-family
@@ -91,8 +91,8 @@ router bgp 64497 vrf cluster
   redistribute kernel
   import vrf mgmt
   import vrf route-map rm_cluster_import
-  neighbor fd00:7:caa5::1 activate
-  neighbor fd00:7:caa5::1 prefix-list ANY in
+  neighbor {{ .KubeVIPPeer }} activate
+  neighbor {{ .KubeVIPPeer }} prefix-list ANY in
   neighbor {{ .NodeIPv6 }} activate
   neighbor {{ .NodeIPv6 }} prefix-list ANY in
  exit-address-family

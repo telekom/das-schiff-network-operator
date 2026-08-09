@@ -31,8 +31,8 @@ var _ = BeforeSuite(func() {
 	By("Waiting for all nodes to be Ready")
 	Expect(f.WaitForNodesReady(cfg.NodeReadyTimeout)).To(Succeed())
 
-	By("Waiting for CRA-FRR agent pods to be Running")
-	Expect(f.WaitForDaemonSetReady("kube-system", "network-operator-agent-cra-frr", cfg.ComponentReadyTimeout)).To(Succeed())
+	By("Waiting for CRA agent pods to be Running")
+	Expect(f.WaitForDaemonSetReady("kube-system", "network-operator-agent-cra-"+cfg.CRAFlavor, cfg.ComponentReadyTimeout)).To(Succeed())
 
 	By("Waiting for agent-netplan pods to be Running")
 	Expect(f.WaitForDaemonSetReady("kube-system", "network-operator-agent-netplan", cfg.ComponentReadyTimeout)).To(Succeed())
@@ -75,10 +75,15 @@ var _ = BeforeSuite(func() {
 	// to toggle lightweight MirrorSelectors. Creating/deleting the mirror VRF and
 	// VLAN per test would cause EVPN reconvergence churn that destabilises other
 	// tests' IPv6 connectivity.
-	By("Applying traffic-mirror base config (mirror VRF + collector VLAN + MirrorTarget)")
-	mirrorBase, err := config.ReadManifest("mirror/manifests.yaml")
-	Expect(err).NotTo(HaveOccurred())
-	Expect(f.ApplyManifest(context.Background(), mirrorBase)).To(Succeed())
+	// The mirror base config is FRR-only: the grout CRA has no mirroring
+	// backend at all (see pkg/cra-grout/README.md), so applying a MirrorTarget
+	// would only produce reconcile errors.
+	if cfg.CRAFlavor == "frr" {
+		By("Applying traffic-mirror base config (mirror VRF + collector VLAN + MirrorTarget)")
+		mirrorBase, err := config.ReadManifest("mirror/manifests.yaml")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(f.ApplyManifest(context.Background(), mirrorBase)).To(Succeed())
+	}
 })
 
 var _ = AfterSuite(func() {
