@@ -24,9 +24,15 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
+)
+
+var (
+	_ func([]string, string, string, time.Duration) *Netconf          = NewNetconf
+	_ func([]string, string, string, time.Duration) (*Manager, error) = NewManager
 )
 
 func TestValidateKnownHostsEntries(t *testing.T) {
@@ -128,22 +134,51 @@ func TestNewNetconf_NormalizesCRAURLs(t *testing.T) {
 		t.Fatalf("write known_hosts: %v", err)
 	}
 
-	nc, err := NewNetconf([]string{" 169.254.33.1:830 ", ""}, "user", "password", path, 0)
+	nc, err := NewNetconfWithKnownHosts([]string{" 169.254.33.1:830 ", ""}, "user", "password", path, 0)
 	if err != nil {
-		t.Fatalf("NewNetconf returned error: %v", err)
+		t.Fatalf("NewNetconfWithKnownHosts returned error: %v", err)
 	}
 	if len(nc.urls) != 1 || nc.urls[0] != "169.254.33.1:830" {
 		t.Fatalf("urls = %#v, want normalized CRA URL", nc.urls)
 	}
 }
 
-func TestNewNetconf_RejectsMissingKnownHostsPath(t *testing.T) {
-	_, err := NewNetconf([]string{"169.254.33.1:830"}, "user", "password", " ", 0)
+func TestNewNetconfWithKnownHosts_RejectsMissingKnownHostsPath(t *testing.T) {
+	_, err := NewNetconfWithKnownHosts([]string{"169.254.33.1:830"}, "user", "password", " ", 0)
 	if err == nil {
-		t.Fatal("NewNetconf returned nil error, want missing known hosts path error")
+		t.Fatal("NewNetconfWithKnownHosts returned nil error, want missing known hosts path error")
 	}
 	if !strings.Contains(err.Error(), "known hosts file path is required") {
-		t.Fatalf("NewNetconf error = %q, want known hosts path context", err)
+		t.Fatalf("NewNetconfWithKnownHosts error = %q, want known hosts path context", err)
+	}
+}
+
+func TestNewNetconf_PreservesLegacyConstructor(t *testing.T) {
+	nc := NewNetconf([]string{" 169.254.33.1:830 ", ""}, "user", "password", 0)
+	if nc == nil {
+		t.Fatal("NewNetconf returned nil")
+	}
+	if len(nc.urls) != 1 || nc.urls[0] != "169.254.33.1:830" {
+		t.Fatalf("urls = %#v, want normalized CRA URL", nc.urls)
+	}
+	if nc.sshConfig == nil || nc.sshConfig.HostKeyCallback == nil {
+		t.Fatal("NewNetconf did not configure a host-key callback")
+	}
+}
+
+func TestNewManagerWithKnownHosts_ValidatesBeforeDeviceAccess(t *testing.T) {
+	_, err := NewManagerWithKnownHosts(
+		[]string{"169.254.33.1:830"},
+		"user",
+		"password",
+		" ",
+		time.Second,
+	)
+	if err == nil {
+		t.Fatal("NewManagerWithKnownHosts returned nil error, want known hosts validation error")
+	}
+	if !strings.Contains(err.Error(), "known hosts file path is required") {
+		t.Fatalf("NewManagerWithKnownHosts error = %q, want known hosts path context", err)
 	}
 }
 

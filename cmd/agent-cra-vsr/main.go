@@ -180,7 +180,7 @@ func createCraManager() (*cra.Manager, error) {
 		return nil, fmt.Errorf("no CRA known hosts file provided via CRA_KNOWN_HOSTS")
 	}
 
-	craManager, err := cra.NewManager(urls, user, pwd, knownHostsPath, timeout, ctrl.Log.WithName("setup"))
+	craManager, err := cra.NewManagerWithKnownHosts(urls, user, pwd, knownHostsPath, timeout, ctrl.Log.WithName("setup"))
 	if err != nil {
 		return nil, fmt.Errorf("error creating CRA manager: %w", err)
 	}
