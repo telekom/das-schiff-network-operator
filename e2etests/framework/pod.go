@@ -116,10 +116,10 @@ func (f *Framework) createPodWithStaticIPv6Retry(
 
 	for attempt := 1; attempt <= attempts; attempt++ {
 		if err := deletePod(ctx, namespace, name); err != nil {
-			return err
+			return fmt.Errorf("delete pod %s/%s before create attempt %d/%d: %w", namespace, name, attempt, attempts, err)
 		}
 		if err := f.Client.Create(ctx, newPod()); err != nil {
-			return err
+			return fmt.Errorf("create pod %s/%s on attempt %d/%d: %w", namespace, name, attempt, attempts, err)
 		}
 		if attempts == 1 {
 			return nil
@@ -127,19 +127,19 @@ func (f *Framework) createPodWithStaticIPv6Retry(
 
 		if err := f.WaitForPodReady(ctx, namespace, name, f.Config.PodReadyTimeout); err != nil {
 			_ = f.DeletePod(ctx, namespace, name)
-			return fmt.Errorf("wait for pod %s/%s to become ready before IPv6 DAD check: %w", namespace, name, err)
+			return fmt.Errorf("wait for pod %s/%s to become ready before IPv6 DAD check on attempt %d/%d: %w", namespace, name, attempt, attempts, err)
 		}
 
 		dadFailed, err := f.podHasIPv6DADFailure(ctx, namespace, name, testPodDADCheckTimeout)
 		if err != nil {
 			_ = f.DeletePod(ctx, namespace, name)
-			return fmt.Errorf("check IPv6 DAD state for pod %s/%s: %w", namespace, name, err)
+			return fmt.Errorf("check IPv6 DAD state for pod %s/%s on attempt %d/%d: %w", namespace, name, attempt, attempts, err)
 		}
 		if !dadFailed {
 			return nil
 		}
 		if err := f.DeletePod(ctx, namespace, name); err != nil {
-			return fmt.Errorf("delete pod %s/%s after IPv6 DAD failure: %w", namespace, name, err)
+			return fmt.Errorf("delete pod %s/%s after IPv6 DAD failure on attempt %d/%d: %w", namespace, name, attempt, attempts, err)
 		}
 	}
 
