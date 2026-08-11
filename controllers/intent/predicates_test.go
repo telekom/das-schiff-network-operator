@@ -260,6 +260,40 @@ func TestNodePredicate_ReadyTransitionAccepted(t *testing.T) {
 	}
 }
 
+func TestNodePredicate_InternalIPChangeAccepted(t *testing.T) {
+	p := nodePredicate()
+	old := makeNode("n1", nil, nil, corev1.ConditionTrue, time.Now())
+	old.Status.Addresses = []corev1.NodeAddress{
+		{Type: corev1.NodeInternalIP, Address: "10.0.0.1"},
+		{Type: corev1.NodeHostName, Address: "n1"},
+	}
+	updated := old.DeepCopy()
+	updated.Status.Addresses = []corev1.NodeAddress{
+		{Type: corev1.NodeInternalIP, Address: "10.0.0.2"},
+		{Type: corev1.NodeHostName, Address: "n1"},
+	}
+	if !p.Update(event.UpdateEvent{ObjectOld: old, ObjectNew: updated}) {
+		t.Fatalf("expected InternalIP-only update to be accepted")
+	}
+}
+
+func TestNodePredicate_NonInternalIPChangeIgnored(t *testing.T) {
+	p := nodePredicate()
+	old := makeNode("n1", nil, nil, corev1.ConditionTrue, time.Now())
+	old.Status.Addresses = []corev1.NodeAddress{
+		{Type: corev1.NodeInternalIP, Address: "10.0.0.1"},
+		{Type: corev1.NodeHostName, Address: "n1"},
+	}
+	updated := old.DeepCopy()
+	updated.Status.Addresses = []corev1.NodeAddress{
+		{Type: corev1.NodeInternalIP, Address: "10.0.0.1"},
+		{Type: corev1.NodeHostName, Address: "n1-renamed"},
+	}
+	if p.Update(event.UpdateEvent{ObjectOld: old, ObjectNew: updated}) {
+		t.Fatalf("expected non-InternalIP address update to be ignored")
+	}
+}
+
 func TestNodePredicate_CreateDeleteGenericAlwaysAccepted(t *testing.T) {
 	p := nodePredicate()
 	n := makeNode("n1", nil, nil, corev1.ConditionTrue, time.Now())

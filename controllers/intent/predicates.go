@@ -18,6 +18,7 @@ package intent
 
 import (
 	"reflect"
+	"sort"
 
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -89,9 +90,9 @@ func filterMetadata(metadata map[string]string, ignoredKeys map[string]struct{})
 
 // nodePredicate filters Node events down to changes that can plausibly
 // affect intent reconciliation: creates, deletes, label changes, taint
-// changes, and Ready-condition transitions. Frequent heartbeat-only
-// status updates (kubelet reports, allocatable/capacity churn) are
-// ignored, which prevents the intent controller from being re-triggered
+// changes, InternalIP changes, and Ready-condition transitions. Frequent
+// heartbeat-only status updates (kubelet reports, allocatable/capacity churn)
+// are ignored, which prevents the intent controller from being re-triggered
 // many times per minute by every Node in the cluster.
 func nodePredicate() predicate.Predicate {
 	return predicate.Funcs{
@@ -112,9 +113,31 @@ func nodePredicate() predicate.Predicate {
 			if !reflect.DeepEqual(oldNode.Spec.Taints, newNode.Spec.Taints) {
 				return true
 			}
+			if internalIPAddressesChanged(oldNode, newNode) {
+				return true
+			}
 			return readyConditionChanged(oldNode, newNode)
 		},
 	}
+}
+
+func internalIPAddressesChanged(oldNode, newNode *corev1.Node) bool {
+	return !reflect.DeepEqual(internalIPAddresses(oldNode), internalIPAddresses(newNode))
+}
+
+func internalIPAddresses(node *corev1.Node) []string {
+	addresses := make([]string, 0)
+	for i := range node.Status.Addresses {
+		address := node.Status.Addresses[i]
+		if address.Type == corev1.NodeInternalIP && address.Address != "" {
+			addresses = append(addresses, address.Address)
+		}
+	}
+	sort.Strings(addresses)
+	if len(addresses) == 0 {
+		return nil
+	}
+	return addresses
 }
 
 // readyConditionChanged reports whether the NodeReady condition's Status
