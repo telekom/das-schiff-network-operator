@@ -127,9 +127,18 @@ jobs:
             local name="$1"
             local color="$2"
             local description="$3"
-            if ! gh label view "$name" >/dev/null 2>&1; then
-              gh label create "$name" --color "$color" --description "$description" || gh label view "$name" >/dev/null
+            local encoded_name
+            if gh label list --limit 1000 --json name --jq '.[].name' |
+              grep -Fqx -- "$name"; then
+              return 0
             fi
+
+            if gh label create "$name" --color "$color" --description "$description"; then
+              return 0
+            fi
+
+            encoded_name=$(jq -rn --arg name "$name" '$name | @uri')
+            gh api "repos/$GH_REPO/labels/$encoded_name" >/dev/null
           }
 
           ensure_label "dependencies" "ededed" "Dependency changes"
