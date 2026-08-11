@@ -92,15 +92,8 @@ jobs:
     needs: [golangci, test, validate-generated]
     permissions:
       contents: read
-      # packages: write and id-token: write are required because GitHub statically
-      # validates reusable workflow job permissions even when those jobs are
-      # conditionally skipped. The build and manifest jobs in build-images.yaml
-      # declare these permissions for registry push and cosign signing, but neither
-      # runs for forks (inputs.push == false). For pull_request triggers from forks,
-      # the GITHUB_TOKEN is automatically scoped to read-only by GitHub regardless
-      # of what is declared here.
-      packages: write
-      id-token: write
+      packages: read
+      id-token: none
     uses: ./.github/workflows/build-images.yaml
     with:
       push: false
