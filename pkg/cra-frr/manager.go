@@ -71,6 +71,9 @@ func (m *Manager) postRequest(ctx context.Context, path string, body []byte) ([]
 			if res != nil && res.Body != nil {
 				_ = res.Body.Close()
 			}
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return nil, fmt.Errorf("request context canceled: %w", ctxErr)
+			}
 			// Continue to the next URL if there is a connection issue
 			continue
 		}

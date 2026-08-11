@@ -2,6 +2,7 @@ package cra
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -82,5 +83,25 @@ func assertRequestBody(t *testing.T, attempt string, bodies <-chan string, want 
 		}
 	case <-time.After(time.Second):
 		t.Fatalf("timed out waiting for %s body", attempt)
+	}
+}
+
+func TestPostRequestStopsRetryOnCancelledContext(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	manager := &Manager{
+		craURLs: []string{
+			"http://127.0.0.1:1",
+			"http://127.0.0.1:2",
+		},
+		client: http.Client{Timeout: time.Second},
+	}
+
+	_, err := manager.postRequest(ctx, "/frr/configuration", []byte(`{"frr":"router bgp 65000"}`))
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("postRequest() error = %v, want context canceled", err)
 	}
 }
