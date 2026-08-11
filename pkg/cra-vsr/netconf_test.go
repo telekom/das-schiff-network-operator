@@ -104,7 +104,7 @@ func TestValidateKnownHostsEntries(t *testing.T) {
 				t.Fatalf("write known_hosts: %v", err)
 			}
 
-			err := validateKnownHostsEntries(path, tt.urls)
+			_, err := validateKnownHostsEntries(path, tt.urls)
 			if tt.wantErrSub == "" {
 				if err != nil {
 					t.Fatalf("validateKnownHostsEntries returned error: %v", err)

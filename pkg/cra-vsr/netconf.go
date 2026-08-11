@@ -95,14 +95,9 @@ type Netconf struct {
 
 func NewNetconf(urls []string, user, pwd, knownHostsPath string, timeout time.Duration) (*Netconf, error) {
 	normalizedURLs := normalizeCRAURLs(urls)
-	knownHostsPath = strings.TrimSpace(knownHostsPath)
-	if err := validateKnownHostsEntries(knownHostsPath, normalizedURLs); err != nil {
-		return nil, err
-	}
-
-	hostKeyCallback, err := knownhosts.New(knownHostsPath)
+	hostKeyCallback, err := validateKnownHostsEntries(knownHostsPath, normalizedURLs)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load known hosts file %q: %w", knownHostsPath, err)
+		return nil, err
 	}
 
 	return &Netconf{
@@ -130,36 +125,36 @@ func normalizeCRAURLs(urls []string) []string {
 	return normalized
 }
 
-func validateKnownHostsEntries(knownHostsPath string, urls []string) error {
+func validateKnownHostsEntries(knownHostsPath string, urls []string) (ssh.HostKeyCallback, error) {
 	knownHostsPath = strings.TrimSpace(knownHostsPath)
 	if knownHostsPath == "" {
-		return fmt.Errorf("known hosts file path is required")
+		return nil, fmt.Errorf("known hosts file path is required")
 	}
 
 	normalizedURLs := normalizeCRAURLs(urls)
 	if len(normalizedURLs) == 0 {
-		return fmt.Errorf("no CRA URLs provided")
+		return nil, fmt.Errorf("no CRA URLs provided")
 	}
 
 	hostKeyCallback, err := knownhosts.New(knownHostsPath)
 	if err != nil {
-		return fmt.Errorf("failed to load known hosts file %q: %w", knownHostsPath, err)
+		return nil, fmt.Errorf("failed to load known hosts file %q: %w", knownHostsPath, err)
 	}
 
 	validationKey, err := newKnownHostsValidationKey()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	missing := []string{}
 	for _, url := range normalizedURLs {
 		if _, _, err := net.SplitHostPort(url); err != nil {
-			return fmt.Errorf("CRA URL %q must be in host:port form: %w", url, err)
+			return nil, fmt.Errorf("CRA URL %q must be in host:port form: %w", url, err)
 		}
 
 		hasEntry, err := knownHostsHasEntry(hostKeyCallback, url, validationKey)
 		if err != nil {
-			return fmt.Errorf("validate known hosts entry for CRA URL %q in file %q: %w", url, knownHostsPath, err)
+			return nil, fmt.Errorf("validate known hosts entry for CRA URL %q in file %q: %w", url, knownHostsPath, err)
 		}
 		if !hasEntry {
 			missing = append(missing, knownhosts.Normalize(url))
@@ -167,10 +162,10 @@ func validateKnownHostsEntries(knownHostsPath string, urls []string) error {
 	}
 	if len(missing) > 0 {
 		sort.Strings(missing)
-		return fmt.Errorf("known hosts file %q does not contain CRA URL entries: %s", knownHostsPath, strings.Join(missing, ", "))
+		return nil, fmt.Errorf("known hosts file %q does not contain CRA URL entries: %s", knownHostsPath, strings.Join(missing, ", "))
 	}
 
-	return nil
+	return hostKeyCallback, nil
 }
 
 func newKnownHostsValidationKey() (ssh.PublicKey, error) {
