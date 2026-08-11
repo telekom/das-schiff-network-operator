@@ -326,6 +326,12 @@ linters:
           - noctx
         text: 'os/exec.Command must not be called'
         path: pkg/network/netplan/client/direct/client\.go
+      # The standalone e2e/setup module owns its host-process lifecycle and
+      # intentionally uses exec.Command in its Docker command wrappers.
+      - linters:
+          - noctx
+        text: 'os/exec.Command must not be called'
+        path: '(^|e2e/setup/)(exec|phases)\.go$'
       # frr-cra: fmt.Sprintf("%s:%d", ip, port) is used as an os.NewFile descriptor
       # name (not a network address), so net.JoinHostPort is not semantically correct.
       - linters:
