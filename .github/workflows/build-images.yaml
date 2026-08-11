@@ -60,13 +60,17 @@ jobs:
 
       - name: Create Licenses Report
         run: |
+          max_attempts=3
           for attempt in 1 2 3; do
             if make licenses-report; then
               exit 0
             fi
-            sleep 10
+            if [ "$attempt" -lt "$max_attempts" ]; then
+              sleep 10
+            fi
           done
-          make licenses-report
+          echo "make licenses-report failed after ${max_attempts} attempts" >&2
+          exit 1
 
       - name: Read Go version
         id: go-version
