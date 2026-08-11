@@ -93,15 +93,28 @@ type Netconf struct {
 	urls      []string
 }
 
-func NewNetconf(urls []string, user, pwd, knownHostsPath string, timeout time.Duration) (*Netconf, error) {
+// NewNetconf creates a NETCONF client with the legacy host-key behavior.
+//
+// Deprecated: use NewNetconfWithKnownHosts for host-key verification.
+func NewNetconf(urls []string, user, pwd string, timeout time.Duration) *Netconf {
+	return buildNetconf(urls, user, pwd, timeout, ssh.InsecureIgnoreHostKey()) //nolint:gosec // preserve legacy API behavior
+}
+
+// NewNetconfWithKnownHosts creates a NETCONF client that verifies CRA host keys
+// against the supplied known_hosts file.
+func NewNetconfWithKnownHosts(urls []string, user, pwd, knownHostsPath string, timeout time.Duration) (*Netconf, error) {
 	normalizedURLs := normalizeCRAURLs(urls)
 	hostKeyCallback, err := validateKnownHostsEntries(knownHostsPath, normalizedURLs)
 	if err != nil {
 		return nil, err
 	}
 
+	return buildNetconf(normalizedURLs, user, pwd, timeout, hostKeyCallback), nil
+}
+
+func buildNetconf(urls []string, user, pwd string, timeout time.Duration, hostKeyCallback ssh.HostKeyCallback) *Netconf {
 	return &Netconf{
-		urls:    normalizedURLs,
+		urls:    normalizeCRAURLs(urls),
 		timeout: timeout,
 		sshConfig: &ssh.ClientConfig{
 			User: user,
@@ -110,7 +123,7 @@ func NewNetconf(urls []string, user, pwd, knownHostsPath string, timeout time.Du
 			},
 			HostKeyCallback: hostKeyCallback,
 		},
-	}, nil
+	}
 }
 
 func normalizeCRAURLs(urls []string) []string {
