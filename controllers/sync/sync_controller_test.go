@@ -98,6 +98,23 @@ func newFakeSyncController(mgmtObjs, remoteObjs []client.Object) (*Controller, c
 	}, remoteClient
 }
 
+func TestExtractItemsIteratesAllEntries(t *testing.T) {
+	list := &nc.VRFList{
+		Items: []nc.VRF{
+			{ObjectMeta: metav1.ObjectMeta{Name: "vrf-a"}},
+			{ObjectMeta: metav1.ObjectMeta{Name: "vrf-b"}},
+		},
+	}
+
+	items := extractItems(list)
+	if len(items) != 2 {
+		t.Fatalf("Expected 2 items, got %d", len(items))
+	}
+	if items[0].GetName() != "vrf-a" || items[1].GetName() != "vrf-b" {
+		t.Fatalf("Unexpected extracted items: %q, %q", items[0].GetName(), items[1].GetName())
+	}
+}
+
 // TestSyncCreatesRemoteObject verifies that a VRF in the mgmt namespace
 // gets created on the remote cluster.
 func TestSyncCreatesRemoteObject(t *testing.T) {
