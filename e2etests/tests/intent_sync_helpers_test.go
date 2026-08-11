@@ -20,6 +20,11 @@ type objectClientStub struct {
 }
 
 func (s *objectClientStub) Get(_ context.Context, _ client.ObjectKey, _ client.Object, _ ...client.GetOption) error {
+	// Once the object has been deleted, report it gone so the post-delete
+	// wait in deleteObject terminates.
+	if s.deleteHit {
+		return apierrors.NewNotFound(schema.GroupResource{Resource: "vrfs"}, "vrf-sync-m2m")
+	}
 	return s.getErr
 }
 
