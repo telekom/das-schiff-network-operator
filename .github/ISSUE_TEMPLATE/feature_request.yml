@@ -13,6 +13,7 @@ body:
         you formally submit one.
 
   - type: textarea
+    id: problem
     attributes:
       label: Is your feature request related to a problem?
       description: >
@@ -24,11 +25,13 @@ body:
       required: true
 
   - type: textarea
+    id: solution
     attributes:
       label: Describe the solution you would like
       description: A clear and concise description of what you want to include.
 
   - type: textarea
+    id: api-changes
     attributes:
       label: Proposed API changes (if applicable)
       description: |
@@ -36,17 +39,20 @@ body:
       render: yaml
 
   - type: textarea
+    id: alternatives
     attributes:
       label: Describe alternatives you have considered
       description: |
         A clear and concise description of any alternative solutions or features you have considered.
 
   - type: textarea
+    id: additional-context
     attributes:
       label: Additional context
       description: Add any other context or screenshots about the feature request here.
 
   - type: checkboxes
+    id: checklist
     attributes:
       label: Checklist
       options:

@@ -11,6 +11,7 @@ body:
         sure to take a few minutes to check the issue tracker for existing documentation issues.
 
   - type: dropdown
+    id: documentation-area
     attributes:
       label: To which part is the documentation issue related?
       description: The issue is either related to documentation within the code (docstrings) or external docs
@@ -22,6 +23,7 @@ body:
         - Other documentation
 
   - type: textarea
+    id: documentation-issue
     attributes:
       label: What is the issue with the documentation?
       description: |
@@ -31,12 +33,14 @@ body:
       required: true
 
   - type: textarea
+    id: documentation-fix
     attributes:
       label: What is a fix for the documentation issue?
       description: |
         Tell us how the documentation issue can be addressed.
 
   - type: checkboxes
+    id: checklist
     attributes:
       label: Checklist
       options:

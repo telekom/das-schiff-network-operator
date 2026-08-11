@@ -32,6 +32,7 @@ body:
       required: true
 
   - type: textarea
+    id: describe-bug
     attributes:
       label: Describe the bug
       description: Clear and concise description of what is broken
@@ -41,6 +42,7 @@ body:
       required: true
 
   - type: textarea
+    id: reproduction-steps
     attributes:
       label: Steps to reproduce
       description: Exact steps to reproduce the issue
@@ -48,6 +50,7 @@ body:
       required: true
 
   - type: textarea
+    id: expected-behavior
     attributes:
       label: Expected behavior
       description: What should happen instead?
@@ -55,6 +58,7 @@ body:
       required: true
 
   - type: textarea
+    id: error-logs
     attributes:
       label: Error logs or output
       description: |
@@ -66,6 +70,7 @@ body:
       render: shell
 
   - type: textarea
+    id: environment
     attributes:
       label: Environment
       description: |
@@ -80,11 +85,13 @@ body:
       required: true
 
   - type: textarea
+    id: additional-context
     attributes:
       label: Additional context
       description: Any other relevant information
 
   - type: checkboxes
+    id: checklist
     attributes:
       label: Checklist
       options:
