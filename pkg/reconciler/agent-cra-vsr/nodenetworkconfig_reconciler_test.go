@@ -299,14 +299,13 @@ func TestCRAVSR_Reconcile_NoRestoreOnFailure(t *testing.T) {
 	t.Setenv("NODE_NAME", "test-node")
 
 	nnc := newTestNNC("rev-2")
+	previous := newTestNNC("rev-1")
 	hc := &stubHealthChecker{taintsRemoved: true}
 	configPath := filepath.Join(t.TempDir(), "config.yaml")
 	applyErr := errors.New("netconf commit failed")
 
-	var trackedCalls int
 	trackingApplier := &trackingCRAManager{
-		err:      applyErr,
-		callsPtr: &trackedCalls,
+		err: applyErr,
 	}
 
 	r := newCRAVSRTestReconcilerWithApplier(
@@ -316,21 +315,29 @@ func TestCRAVSR_Reconcile_NoRestoreOnFailure(t *testing.T) {
 		configPath,
 		nnc,
 	)
+	r.NodeNetworkConfigReconciler.NodeNetworkConfig = previous
 
 	_, _ = r.Reconcile(context.Background())
 
-	if trackedCalls != 1 {
-		t.Errorf("expected exactly 1 ApplyConfiguration call (new config only, no restore), got %d", trackedCalls)
+	if len(trackingApplier.revisions) != 1 {
+		t.Fatalf("expected exactly 1 ApplyConfiguration call (new config only, no restore), got %d", len(trackingApplier.revisions))
+	}
+	if trackingApplier.revisions[0] != "rev-2" {
+		t.Fatalf("expected only new revision rev-2 to be applied, got %v", trackingApplier.revisions)
 	}
 }
 
 type trackingCRAManager struct {
-	err      error
-	callsPtr *int
+	err       error
+	revisions []string
 }
 
-func (m *trackingCRAManager) ApplyConfiguration(_ context.Context, _ *v1alpha1.NodeNetworkConfigSpec) error {
-	(*m.callsPtr)++
+func (m *trackingCRAManager) ApplyConfiguration(_ context.Context, spec *v1alpha1.NodeNetworkConfigSpec) error {
+	if spec == nil {
+		m.revisions = append(m.revisions, "<nil>")
+		return m.err
+	}
+	m.revisions = append(m.revisions, spec.Revision)
 	return m.err
 }
 
@@ -376,13 +383,12 @@ func TestCRAVSR_Reconcile_Idempotent(t *testing.T) {
 	hc := &stubHealthChecker{taintsRemoved: true}
 	configPath := filepath.Join(t.TempDir(), "config.yaml")
 
-	trackedCalls := 0
+	trackingApplier := &trackingCRAManager{
+		err: nil,
+	}
 	r := newCRAVSRTestReconcilerWithApplier(
 		t,
-		&CRAVSRConfigApplier{craManager: &trackingCRAManager{
-			err:      nil,
-			callsPtr: &trackedCalls,
-		}},
+		&CRAVSRConfigApplier{craManager: trackingApplier},
 		hc,
 		configPath,
 		nnc,
@@ -400,8 +406,8 @@ func TestCRAVSR_Reconcile_Idempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Reconcile returned unexpected error: %v", err)
 	}
-	if trackedCalls != 0 {
-		t.Errorf("expected 0 ApplyConfiguration calls for idempotent reconcile, got %d", trackedCalls)
+	if len(trackingApplier.revisions) != 0 {
+		t.Errorf("expected 0 ApplyConfiguration calls for idempotent reconcile, got %d", len(trackingApplier.revisions))
 	}
 }
 

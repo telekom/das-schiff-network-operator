@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"reflect"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -104,6 +105,9 @@ func NewNodeNetworkConfigReconciler(
 
 	var err error
 	if opts.HealthChecker != nil {
+		if isTypedNilHealthChecker(opts.HealthChecker) {
+			return nil, errors.New("provided health checker must not be a typed-nil interface value")
+		}
 		reconciler.healthChecker = opts.HealthChecker
 	} else {
 		var nc *healthcheck.NetHealthcheckConfig
@@ -128,6 +132,19 @@ func NewNodeNetworkConfigReconciler(
 	}
 
 	return reconciler, nil
+}
+
+func isTypedNilHealthChecker(hc healthcheck.HealthCheckerInterface) bool {
+	if hc == nil {
+		return false
+	}
+	v := reflect.ValueOf(hc)
+	switch v.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return v.IsNil()
+	default:
+		return false
+	}
 }
 
 // Reconcile performs the main reconciliation logic for NodeNetworkConfig.
