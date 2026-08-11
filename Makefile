@@ -149,6 +149,7 @@ docker-build: #test ## Build docker image with the manager.
 	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-network-sync.Dockerfile -t ${IMG_BASE}/das-schiff-network-sync:latest .
 	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-nwop-cni-workload.Dockerfile -t ${IMG_BASE}/das-schiff-nwop-cni-workload:latest .
 	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-nwop-vhostuser-device-plugin.Dockerfile -t ${IMG_BASE}/das-schiff-nwop-vhostuser-device-plugin:latest .
+	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-nwop-kubevirt-vhostuser-hook.Dockerfile -t ${IMG_BASE}/das-schiff-nwop-kubevirt-vhostuser-hook:latest .
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
@@ -173,6 +174,7 @@ kind-load: docker-build ## Load docker image into kind cluster.
 	kind load docker-image ${IMG_BASE}/das-schiff-network-sync:latest
 	kind load docker-image ${IMG_BASE}/das-schiff-nwop-cni-workload:latest
 	kind load docker-image ${IMG_BASE}/das-schiff-nwop-vhostuser-device-plugin:latest
+	kind load docker-image ${IMG_BASE}/das-schiff-nwop-kubevirt-vhostuser-hook:latest
 
 ##@ Release
 
