@@ -1,6 +1,7 @@
 package tests
 
 import (
+	"bytes"
 	"context"
 	"testing"
 
@@ -36,6 +37,22 @@ func TestFluxControllersReadyAcceptsAvailableReplicas(t *testing.T) {
 	}
 	if !ready {
 		t.Fatal("Expected Flux Deployments with available replicas to be ready")
+	}
+}
+
+func TestGetFluxInstallManifestUsesEmbeddedFixture(t *testing.T) {
+	manifest, err := getFluxInstallManifest(context.Background())
+	if err != nil {
+		t.Fatalf("getFluxInstallManifest returned error: %v", err)
+	}
+	if len(manifest) == 0 {
+		t.Fatal("Expected embedded Flux install manifest to be non-empty")
+	}
+	if !bytes.Contains(manifest, []byte("source-controller")) {
+		t.Fatal("Expected embedded manifest to contain source-controller resources")
+	}
+	if !bytes.Contains(manifest, []byte("helm-controller")) {
+		t.Fatal("Expected embedded manifest to contain helm-controller resources")
 	}
 }
 
