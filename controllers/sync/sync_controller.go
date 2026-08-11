@@ -316,19 +316,6 @@ func (r *Controller) remoteClusterExists(ctx context.Context, namespace string) 
 	return false, nil
 }
 
-func (r *Controller) requeueForMissingRemoteClient(ctx context.Context, log logr.Logger, namespace string) (ctrl.Result, error) {
-	clusterExists, err := r.remoteClusterExists(ctx, namespace)
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-	if !clusterExists {
-		if err := r.drainFinalizersForLostRemote(ctx, log, namespace); err != nil {
-			return ctrl.Result{}, err
-		}
-	}
-	return ctrl.Result{RequeueAfter: syncRequeueInterval}, nil
-}
-
 // drainFinalizersForLostRemote walks every intent CRD type in the namespace and
 // strips our finalizer from any object that is being deleted. Used when the
 // workload cluster's CAPI Cluster (and therefore the remote client) is gone:
@@ -427,7 +414,8 @@ func (r *Controller) patchFinalizer(ctx context.Context, obj client.Object, muta
 		return fmt.Errorf("DeepCopyObject did not return client.Object for %s/%s", obj.GetNamespace(), obj.GetName())
 	}
 	mutate()
-	if err := r.Client.Patch(ctx, obj, client.MergeFrom(before)); err != nil {
+	patch := client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{})
+	if err := r.Client.Patch(ctx, obj, patch); err != nil {
 		return fmt.Errorf("patching finalizer on %s/%s: %w", obj.GetNamespace(), obj.GetName(), err)
 	}
 	return nil
@@ -794,7 +782,7 @@ func (r *Controller) buildRemoteObject(src client.Object, sourceNamespace string
 
 func clearObjectStatus(obj client.Object) {
 	v := reflect.ValueOf(obj)
-	if v.Kind() != reflect.Pointer || v.IsNil() {
+	if v.Kind() != reflect.Ptr || v.IsNil() {
 		return
 	}
 	status := v.Elem().FieldByName("Status")
@@ -948,7 +936,7 @@ func (r *Controller) applyRemote(ctx context.Context, remoteClient client.Client
 	}, existing)
 
 	if apierrors.IsNotFound(err) {
-		return r.applyRemoteDesired(ctx, remoteClient, desired)
+		return r.applyRemoteDesired(ctx, remoteClient, desired, nil)
 	}
 	if err != nil {
 		return fmt.Errorf("getting remote object: %w", err)
@@ -972,7 +960,7 @@ func (r *Controller) applyRemote(ctx context.Context, remoteClient client.Client
 		}
 	}
 
-	return r.applyRemoteDesired(ctx, remoteClient, desired)
+	return r.applyRemoteDesired(ctx, remoteClient, desired, existing)
 }
 
 func needsLegacySSAAdoption(existing client.Object) bool {
@@ -993,8 +981,8 @@ func adoptLegacyRemoteObject(ctx context.Context, remoteClient client.Client, ex
 	return nil
 }
 
-func (r *Controller) applyRemoteDesired(ctx context.Context, remoteClient client.Client, desired client.Object) error {
-	unstructuredDesired, err := r.buildApplyObject(desired)
+func (r *Controller) applyRemoteDesired(ctx context.Context, remoteClient client.Client, desired, existing client.Object) error {
+	unstructuredDesired, err := r.buildApplyObjectWithExisting(desired, existing)
 	if err != nil {
 		return err
 	}
@@ -1006,6 +994,10 @@ func (r *Controller) applyRemoteDesired(ctx context.Context, remoteClient client
 }
 
 func (r *Controller) buildApplyObject(desired client.Object) (*unstructured.Unstructured, error) {
+	return r.buildApplyObjectWithExisting(desired, nil)
+}
+
+func (r *Controller) buildApplyObjectWithExisting(desired, existing client.Object) (*unstructured.Unstructured, error) {
 	if err := r.prepareApplyObject(desired); err != nil {
 		return nil, err
 	}
@@ -1013,6 +1005,14 @@ func (r *Controller) buildApplyObject(desired client.Object) (*unstructured.Unst
 	if err != nil {
 		return nil, fmt.Errorf("converting %s/%s to unstructured apply configuration: %w",
 			desired.GetNamespace(), desired.GetName(), err)
+	}
+	var existingMap map[string]interface{}
+	if existing != nil {
+		existingMap, err = runtime.DefaultUnstructuredConverter.ToUnstructured(existing)
+		if err != nil {
+			return nil, fmt.Errorf("converting existing %s/%s to unstructured apply configuration: %w",
+				desired.GetNamespace(), desired.GetName(), err)
+		}
 	}
 
 	gvk := desired.GetObjectKind().GroupVersionKind()
@@ -1033,9 +1033,10 @@ func (r *Controller) buildApplyObject(desired client.Object) (*unstructured.Unst
 		"metadata":   metadata,
 	}
 	if spec, ok := objMap["spec"]; ok {
+		spec = mergeRemovedFields(spec, existingMap["spec"])
 		applyMap["spec"] = spec
 	} else if _, isSecret := desired.(*corev1.Secret); !isSecret {
-		applyMap["spec"] = map[string]interface{}{}
+		applyMap["spec"] = mergeRemovedFields(map[string]interface{}{}, existingMap["spec"])
 	}
 	if _, ok := desired.(*corev1.Secret); ok {
 		if typ, ok := objMap["type"]; ok {
@@ -1051,6 +1052,28 @@ func (r *Controller) buildApplyObject(desired client.Object) (*unstructured.Unst
 	unstructuredDesired := &unstructured.Unstructured{Object: applyMap}
 	unstructuredDesired.SetGroupVersionKind(gvk)
 	return unstructuredDesired, nil
+}
+
+func mergeRemovedFields(desired, existing interface{}) interface{} {
+	desiredMap, desiredOK := desired.(map[string]interface{})
+	existingMap, existingOK := existing.(map[string]interface{})
+	if !desiredOK || !existingOK {
+		return desired
+	}
+
+	out := make(map[string]interface{}, len(desiredMap)+len(existingMap))
+	for key, value := range desiredMap {
+		out[key] = value
+	}
+	for key, existingValue := range existingMap {
+		desiredValue, hasDesired := desiredMap[key]
+		if !hasDesired {
+			out[key] = nil
+			continue
+		}
+		out[key] = mergeRemovedFields(desiredValue, existingValue)
+	}
+	return out
 }
 
 func stringMapToUnstructured(in map[string]string) map[string]interface{} {
@@ -1429,6 +1452,7 @@ func (r *Controller) enqueueForBGPSecret(ctx context.Context, obj client.Object)
 	if err := r.Client.List(ctx, bpList,
 		client.InNamespace(obj.GetNamespace()),
 		client.MatchingFields{bgpAuthSecretRefField: obj.GetName()},
+		client.Limit(1),
 	); err != nil {
 		r.Log.Error(err, "Listing BGPPeerings for auth Secret failed",
 			"namespace", obj.GetNamespace(), "secret", obj.GetName())

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -66,7 +67,6 @@ const (
 	testOwnershipHelmReleaseNS   = "meta.helm.sh/release-namespace"
 	testBGPPasswordKey           = "password"
 	testBGPExtraKey              = "extra"
-	testCAPIClusterFinalizer     = "cluster.x-k8s.io"
 )
 
 var testOwnershipLabelKeys = []string{
@@ -120,6 +120,53 @@ func TestExtractItemsIteratesAllEntries(t *testing.T) {
 	}
 	if items[0].GetName() != "vrf-a" || items[1].GetName() != "vrf-b" {
 		t.Fatalf("Unexpected extracted items: %q, %q", items[0].GetName(), items[1].GetName())
+	}
+}
+
+type listOptionCaptureClient struct {
+	client.Client
+	lastLimit int64
+}
+
+func (c *listOptionCaptureClient) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+	listOptions := &client.ListOptions{}
+	for _, opt := range opts {
+		opt.ApplyToList(listOptions)
+	}
+	c.lastLimit = listOptions.Limit
+	return c.Client.List(ctx, list, opts...)
+}
+
+func TestPatchFinalizerConflictsOnStaleObject(t *testing.T) {
+	vrf := &nc.VRF{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      testVRFName,
+			Namespace: testClusterNamespace,
+		},
+		Spec: nc.VRFSpec{VRF: testVRFValue},
+	}
+
+	sc, _ := newFakeSyncController([]client.Object{vrf}, nil)
+	ctx := context.Background()
+	key := types.NamespacedName{Namespace: testClusterNamespace, Name: testVRFName}
+
+	stale := &nc.VRF{}
+	if err := sc.Client.Get(ctx, key, stale); err != nil {
+		t.Fatalf("Get stale object: %v", err)
+	}
+
+	fresh := stale.DeepCopy()
+	fresh.SetLabels(map[string]string{"touch": "new-rv"})
+	if err := sc.Client.Update(ctx, fresh); err != nil {
+		t.Fatalf("Update fresh object: %v", err)
+	}
+
+	if err := sc.patchFinalizer(ctx, stale, func() {
+		stale.SetFinalizers([]string{finalizerName})
+	}); err == nil {
+		t.Fatal("Expected stale optimistic-lock patch to fail")
+	} else if !apierrors.IsConflict(err) {
+		t.Fatalf("Expected conflict error, got %v", err)
 	}
 }
 
@@ -457,6 +504,85 @@ func TestBuildApplyObjectIncludesEmptySpecForNonSecretObjects(t *testing.T) {
 	}
 	if len(spec) != 0 {
 		t.Fatalf("Expected empty spec map, got %v", spec)
+	}
+}
+
+func TestBuildApplyObjectIncludesEmptyDataForSecrets(t *testing.T) {
+	desired := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "empty-secret",
+			Namespace: testClusterNamespace,
+			Labels:    map[string]string{labelManagedBy: labelManagedByValue},
+			Annotations: map[string]string{
+				annotationSourceNS: testClusterNamespace,
+			},
+		},
+		Type: corev1.SecretTypeOpaque,
+	}
+
+	sc, _ := newFakeSyncController(nil, nil)
+	applyObj, err := sc.buildApplyObject(desired)
+	if err != nil {
+		t.Fatalf("buildApplyObject failed: %v", err)
+	}
+
+	data, ok := applyObj.Object["data"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("Apply payload should contain empty data map, got %T: %v", applyObj.Object["data"], applyObj.Object["data"])
+	}
+	if len(data) != 0 {
+		t.Fatalf("Expected empty data map, got %v", data)
+	}
+}
+
+func TestBuildApplyObjectClearsRemovedSSAFields(t *testing.T) {
+	sourceVRF := &nc.VRF{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      testVRFName,
+			Namespace: testClusterNamespace,
+		},
+		Spec: nc.VRFSpec{
+			VRF: testVRFValue,
+			VNI: ptrInt32(2002026),
+		},
+	}
+
+	existingRemoteVRF := &nc.VRF{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      testVRFName,
+			Namespace: testRemoteNamespace,
+			Labels: map[string]string{
+				labelManagedBy: labelManagedByValue,
+			},
+			Annotations: map[string]string{
+				annotationSourceNS:   testClusterNamespace,
+				annotationSSAAdopted: annotationSSAAdoptedValue,
+			},
+		},
+		Spec: nc.VRFSpec{
+			VRF:         testVRFValue,
+			VNI:         ptrInt32(2002026),
+			RouteTarget: ptrString("65188:stale"),
+		},
+	}
+
+	sc, _ := newFakeSyncController(nil, nil)
+	desired := sc.buildRemoteObject(sourceVRF, testClusterNamespace, nil)
+	applyObj, err := sc.buildApplyObjectWithExisting(desired, existingRemoteVRF)
+	if err != nil {
+		t.Fatalf("buildApplyObjectWithExisting failed: %v", err)
+	}
+
+	spec, ok := applyObj.Object["spec"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("Apply payload spec has unexpected type: %T", applyObj.Object["spec"])
+	}
+	val, found := spec["routeTarget"]
+	if !found {
+		t.Fatalf("Expected removed RouteTarget key to be present with null tombstone: %v", spec)
+	}
+	if val != nil {
+		t.Fatalf("Expected removed RouteTarget tombstone to be nil, got %#v", val)
 	}
 }
 
@@ -1038,28 +1164,6 @@ func TestRemoteClusterExistsIgnoresDeletingClusters(t *testing.T) {
 	}
 }
 
-func TestRemoteClusterExistsIgnoresDeletingClusters(t *testing.T) {
-	now := metav1.Now()
-	cluster := &unstructured.Unstructured{}
-	cluster.SetGroupVersionKind(capiClusterGVK)
-	cluster.SetName("workload")
-	cluster.SetNamespace(testPendingClusterNamespace)
-	cluster.SetDeletionTimestamp(&now)
-	cluster.SetFinalizers([]string{testCAPIClusterFinalizer})
-
-	s := testScheme()
-	mgmtClient := fake.NewClientBuilder().WithScheme(s).WithObjects(cluster).Build()
-	sc := &Controller{Client: mgmtClient}
-
-	exists, err := sc.remoteClusterExists(context.Background(), testPendingClusterNamespace)
-	if err != nil {
-		t.Fatalf("remoteClusterExists returned error: %v", err)
-	}
-	if exists {
-		t.Fatal("Expected deleting CAPI Cluster not to count as an active remote cluster")
-	}
-}
-
 func TestRemoteClusterExistsFindsActiveClusterAfterDeletingCluster(t *testing.T) {
 	now := metav1.Now()
 	deletingCluster := &unstructured.Unstructured{}
@@ -1592,6 +1696,48 @@ func TestEnqueueForBGPSecretUsesAuthSecretRefIndex(t *testing.T) {
 	})
 	if len(requests) != 0 {
 		t.Fatalf("Expected no reconcile requests for unreferenced Secret, got %v", requests)
+	}
+}
+
+func TestEnqueueForBGPSecretLimitsIndexedListToSingleObject(t *testing.T) {
+	matchingA := &nc.BGPPeering{
+		ObjectMeta: metav1.ObjectMeta{Name: "matching-a", Namespace: testClusterNamespace},
+		Spec: nc.BGPPeeringSpec{
+			Mode:          nc.BGPPeeringModeLoopbackPeer,
+			Ref:           nc.BGPPeeringRef{InboundRefs: []string{"x"}},
+			AuthSecretRef: &corev1.LocalObjectReference{Name: testBGPAuthSecretName},
+		},
+	}
+	matchingB := &nc.BGPPeering{
+		ObjectMeta: metav1.ObjectMeta{Name: "matching-b", Namespace: testClusterNamespace},
+		Spec: nc.BGPPeeringSpec{
+			Mode:          nc.BGPPeeringModeLoopbackPeer,
+			Ref:           nc.BGPPeeringRef{InboundRefs: []string{"x"}},
+			AuthSecretRef: &corev1.LocalObjectReference{Name: testBGPAuthSecretName},
+		},
+	}
+
+	s := testScheme()
+	baseClient := fake.NewClientBuilder().
+		WithScheme(s).
+		WithObjects(matchingA, matchingB).
+		WithIndex(&nc.BGPPeering{}, bgpAuthSecretRefField, indexBGPAuthSecretRef).
+		Build()
+	captureClient := &listOptionCaptureClient{Client: baseClient}
+	sc := &Controller{
+		Client: captureClient,
+		Scheme: s,
+		Log:    zap.New(zap.UseDevMode(true)),
+	}
+
+	requests := sc.enqueueForBGPSecret(context.Background(), &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: testBGPAuthSecretName, Namespace: testClusterNamespace},
+	})
+	if len(requests) != 1 {
+		t.Fatalf("Expected one reconcile request, got %d", len(requests))
+	}
+	if captureClient.lastLimit != 1 {
+		t.Fatalf("Expected BGPPeering lookup list limit 1, got %d", captureClient.lastLimit)
 	}
 }
 
