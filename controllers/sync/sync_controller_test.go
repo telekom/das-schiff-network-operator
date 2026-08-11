@@ -11,6 +11,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -137,6 +138,35 @@ func (c *listOptionCaptureClient) List(ctx context.Context, list client.ObjectLi
 	return c.Client.List(ctx, list, opts...)
 }
 
+type createRaceClient struct {
+	client.Client
+	firstGet    bool
+	applyCalled bool
+}
+
+func (c *createRaceClient) Get(ctx context.Context, obj client.ObjectKey, out client.Object, opts ...client.GetOption) error {
+	if c.firstGet {
+		c.firstGet = false
+		return apierrors.NewNotFound(schema.GroupResource{
+			Group:    "network-connector.sylvaproject.org",
+			Resource: "vrfs",
+		}, obj.Name)
+	}
+	return c.Client.Get(ctx, obj, out, opts...)
+}
+
+func (c *createRaceClient) Create(context.Context, client.Object, ...client.CreateOption) error {
+	return apierrors.NewAlreadyExists(schema.GroupResource{
+		Group:    "network-connector.sylvaproject.org",
+		Resource: "vrfs",
+	}, "vrf-race")
+}
+
+func (c *createRaceClient) Apply(ctx context.Context, obj runtime.ApplyConfiguration, opts ...client.ApplyOption) error {
+	c.applyCalled = true
+	return c.Client.Apply(ctx, obj, opts...)
+}
+
 func TestPatchFinalizerConflictsOnStaleObject(t *testing.T) {
 	vrf := &nc.VRF{
 		ObjectMeta: metav1.ObjectMeta{
@@ -167,6 +197,52 @@ func TestPatchFinalizerConflictsOnStaleObject(t *testing.T) {
 		t.Fatal("Expected stale optimistic-lock patch to fail")
 	} else if !apierrors.IsConflict(err) {
 		t.Fatalf("Expected conflict error, got %v", err)
+	}
+}
+
+func TestApplyRemoteRevalidatesOwnershipAfterCreateRace(t *testing.T) {
+	source := &nc.VRF{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "vrf-race",
+			Namespace: testClusterNamespace,
+		},
+		Spec: nc.VRFSpec{
+			VRF:         testVRFValue,
+			VNI:         ptrInt32(2002026),
+			RouteTarget: ptrString("65188:2026"),
+		},
+	}
+	unmanaged := &nc.VRF{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      source.Name,
+			Namespace: testRemoteNamespace,
+		},
+		Spec: nc.VRFSpec{
+			VRF:         testForeignVRFValue,
+			VNI:         ptrInt32(1),
+			RouteTarget: ptrString("1:1"),
+		},
+	}
+
+	sc, remoteClient := newFakeSyncController(nil, []client.Object{unmanaged})
+	raceClient := &createRaceClient{Client: remoteClient, firstGet: true}
+	desired := sc.buildRemoteObject(source, testClusterNamespace, nil)
+	if err := sc.applyRemote(context.Background(), raceClient, desired); err == nil {
+		t.Fatal("Expected ownership error after create race")
+	}
+	if raceClient.applyCalled {
+		t.Fatal("ForceOwnership apply must not run before ownership revalidation")
+	}
+
+	got := &nc.VRF{}
+	if err := remoteClient.Get(context.Background(), types.NamespacedName{
+		Namespace: testRemoteNamespace,
+		Name:      source.Name,
+	}, got); err != nil {
+		t.Fatalf("Get raced remote object: %v", err)
+	}
+	if got.Spec.VRF != testForeignVRFValue || got.Spec.VNI == nil || *got.Spec.VNI != 1 {
+		t.Fatalf("Raced unmanaged object was modified: %+v", got.Spec)
 	}
 }
 
@@ -2000,6 +2076,84 @@ func TestSyncBGPSecretsPreservesWorkloadLocalDataAfterSSAAdoption(t *testing.T) 
 	}
 	if string(got.Data[testBGPExtraKey]) != "workload-local" {
 		t.Errorf("Expected SSA to preserve workload-local data key, got %v", got.Data)
+	}
+}
+
+func TestSyncBGPSecretsPrunesPreviouslyManagedDataKey(t *testing.T) {
+	bp := &nc.BGPPeering{
+		ObjectMeta: metav1.ObjectMeta{Name: "lp", Namespace: testClusterNamespace},
+		Spec: nc.BGPPeeringSpec{
+			Mode:          nc.BGPPeeringModeLoopbackPeer,
+			Ref:           nc.BGPPeeringRef{InboundRefs: []string{"x"}},
+			AuthSecretRef: &corev1.LocalObjectReference{Name: testBGPAuthSecretName},
+		},
+	}
+	src := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: testBGPAuthSecretName, Namespace: testClusterNamespace},
+		Type:       corev1.SecretTypeOpaque,
+		Data: map[string][]byte{
+			testBGPPasswordKey: []byte("password"),
+			testBGPExtraKey:    []byte("revoked"),
+		},
+	}
+	legacyRemote := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      testBGPAuthSecretName,
+			Namespace: testRemoteNamespace,
+			Labels:    map[string]string{labelManagedBy: labelManagedByValue},
+			Annotations: map[string]string{
+				annotationSourceNS: testClusterNamespace,
+			},
+		},
+		Type: corev1.SecretTypeOpaque,
+		Data: map[string][]byte{
+			testBGPPasswordKey: []byte("old-password"),
+			testBGPExtraKey:    []byte("revoked"),
+		},
+	}
+
+	sc, remoteClient := newFakeSyncController([]client.Object{bp, src}, []client.Object{legacyRemote})
+	ctx := context.Background()
+	if _, err := sc.Reconcile(ctx, ctrl.Request{
+		NamespacedName: types.NamespacedName{Namespace: testClusterNamespace, Name: syncRequestName},
+	}); err != nil {
+		t.Fatalf("Initial reconcile failed: %v", err)
+	}
+
+	updated := &corev1.Secret{}
+	if err := sc.Client.Get(ctx, types.NamespacedName{
+		Namespace: testClusterNamespace,
+		Name:      testBGPAuthSecretName,
+	}, updated); err != nil {
+		t.Fatalf("Get source Secret: %v", err)
+	}
+	updated.Data = map[string][]byte{testBGPPasswordKey: []byte("password")}
+	if err := sc.Client.Update(ctx, updated); err != nil {
+		t.Fatalf("Update source Secret: %v", err)
+	}
+
+	if _, err := sc.Reconcile(ctx, ctrl.Request{
+		NamespacedName: types.NamespacedName{Namespace: testClusterNamespace, Name: syncRequestName},
+	}); err != nil {
+		t.Fatalf("Reconcile after data-key removal failed: %v", err)
+	}
+
+	got := &corev1.Secret{}
+	if err := remoteClient.Get(ctx, types.NamespacedName{
+		Namespace: testRemoteNamespace,
+		Name:      testBGPAuthSecretName,
+	}, got); err != nil {
+		t.Fatalf("Get remote Secret: %v", err)
+	}
+	if string(got.Data[testBGPPasswordKey]) != "password" {
+		t.Fatalf("Expected retained password key, got %v", got.Data)
+	}
+	if _, ok := got.Data[testBGPExtraKey]; ok {
+		t.Fatalf("Expected removed managed key %q to be pruned, got %v", testBGPExtraKey, got.Data)
+	}
+	if got.Annotations[annotationManagedData] != testBGPPasswordKey {
+		t.Fatalf("Managed data annotation = %q, want %q",
+			got.Annotations[annotationManagedData], testBGPPasswordKey)
 	}
 }
 

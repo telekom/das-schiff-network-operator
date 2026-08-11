@@ -1,6 +1,7 @@
 package sync
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -64,6 +65,7 @@ const (
 	// existing objects instead of accreting stale keys forever.
 	annotationManagedLabels      = "network-sync.telekom.com/managed-labels"
 	annotationManagedAnnotations = "network-sync.telekom.com/managed-annotations"
+	annotationManagedData        = "network-sync.telekom.com/managed-data"
 
 	ownershipManagedByLabel          = "app.kubernetes.io/managed-by"
 	ownershipFluxHelmNameLabel       = "helm.toolkit.fluxcd.io/name"
@@ -936,22 +938,45 @@ func (r *Controller) applyRemote(ctx context.Context, remoteClient client.Client
 	}, existing)
 
 	if apierrors.IsNotFound(err) {
-		return r.applyRemoteDesired(ctx, remoteClient, desired, nil)
+		if err := remoteClient.Create(ctx, desired); err == nil {
+			return nil
+		} else if !apierrors.IsAlreadyExists(err) {
+			return fmt.Errorf("creating remote object %s/%s: %w",
+				desired.GetNamespace(), desired.GetName(), err)
+		}
+
+		// The object appeared after the initial Get. Re-read it before any
+		// force-owned apply so a concurrent creator cannot be overwritten.
+		existing, ok = desired.DeepCopyObject().(client.Object)
+		if !ok {
+			return fmt.Errorf("DeepCopyObject did not return client.Object for %s/%s",
+				desired.GetNamespace(), desired.GetName())
+		}
+		if err := remoteClient.Get(ctx, types.NamespacedName{
+			Namespace: desired.GetNamespace(),
+			Name:      desired.GetName(),
+		}, existing); err != nil {
+			return fmt.Errorf("getting remote object after create race: %w", err)
+		}
+		err = nil
 	}
 	if err != nil {
 		return fmt.Errorf("getting remote object: %w", err)
 	}
 
-	if labels := existing.GetLabels(); labels[labelManagedBy] != labelManagedByValue {
-		return fmt.Errorf("remote object %s/%s exists but not managed by us", desired.GetNamespace(), desired.GetName())
+	if err := validateRemoteOwnership(existing, desiredSourceNamespace); err != nil {
+		return err
 	}
-	existingSourceNamespace, hasSourceNamespace := existing.GetAnnotations()[annotationSourceNS]
-	// Older network-sync managed objects did not have annotationSourceNS yet.
-	// Adopt only that absent legacy value; reject explicit empty or mismatched
-	// values because they break the source namespace ownership boundary.
-	if hasSourceNamespace && existingSourceNamespace != desiredSourceNamespace {
-		return fmt.Errorf("remote object %s/%s belongs to source namespace %q, not %q",
-			desired.GetNamespace(), desired.GetName(), existingSourceNamespace, desiredSourceNamespace)
+	beforeData, ok := existing.DeepCopyObject().(client.Object)
+	if !ok {
+		return fmt.Errorf("DeepCopyObject did not return client.Object for %s/%s",
+			desired.GetNamespace(), desired.GetName())
+	}
+	if reconcileManagedData(existing, desired) {
+		if err := remoteClient.Patch(ctx, existing, client.MergeFrom(beforeData)); err != nil {
+			return fmt.Errorf("pruning managed Secret data on remote object %s/%s: %w",
+				desired.GetNamespace(), desired.GetName(), err)
+		}
 	}
 
 	if needsLegacySSAAdoption(existing) {
@@ -961,6 +986,22 @@ func (r *Controller) applyRemote(ctx context.Context, remoteClient client.Client
 	}
 
 	return r.applyRemoteDesired(ctx, remoteClient, desired, existing)
+}
+
+func validateRemoteOwnership(existing client.Object, desiredSourceNamespace string) error {
+	if labels := existing.GetLabels(); labels[labelManagedBy] != labelManagedByValue {
+		return fmt.Errorf("remote object %s/%s exists but not managed by us",
+			existing.GetNamespace(), existing.GetName())
+	}
+	existingSourceNamespace, hasSourceNamespace := existing.GetAnnotations()[annotationSourceNS]
+	// Older network-sync managed objects did not have annotationSourceNS yet.
+	// Adopt only that absent legacy value; reject explicit empty or mismatched
+	// values because they break the source namespace ownership boundary.
+	if hasSourceNamespace && existingSourceNamespace != desiredSourceNamespace {
+		return fmt.Errorf("remote object %s/%s belongs to source namespace %q, not %q",
+			existing.GetNamespace(), existing.GetName(), existingSourceNamespace, desiredSourceNamespace)
+	}
+	return nil
 }
 
 func needsLegacySSAAdoption(existing client.Object) bool {
@@ -1043,6 +1084,10 @@ func (r *Controller) buildApplyObjectWithExisting(desired, existing client.Objec
 			applyMap["type"] = typ
 		}
 		if data, ok := objMap["data"]; ok {
+			if existing != nil {
+				data = mergeRemovedSecretData(data, existingMap["data"],
+					parseKeyList(existing.GetAnnotations()[annotationManagedData]))
+			}
 			applyMap["data"] = data
 		} else {
 			applyMap["data"] = map[string]interface{}{}
@@ -1072,6 +1117,28 @@ func mergeRemovedFields(desired, existing interface{}) interface{} {
 			continue
 		}
 		out[key] = mergeRemovedFields(desiredValue, existingValue)
+	}
+	return out
+}
+
+func mergeRemovedSecretData(desired, existing interface{}, previouslyManaged []string) interface{} {
+	desiredMap, desiredOK := desired.(map[string]interface{})
+	existingMap, existingOK := existing.(map[string]interface{})
+	if !desiredOK || !existingOK {
+		return desired
+	}
+
+	out := make(map[string]interface{}, len(desiredMap)+len(previouslyManaged))
+	for key, value := range desiredMap {
+		out[key] = value
+	}
+	for _, key := range previouslyManaged {
+		if _, hasDesired := desiredMap[key]; hasDesired {
+			continue
+		}
+		if _, exists := existingMap[key]; exists {
+			out[key] = nil
+		}
 	}
 	return out
 }
@@ -1162,6 +1229,40 @@ func reconcileManagedMetadata(dst, src client.Object) {
 	dst.SetAnnotations(mergeAndPrune(dst.GetAnnotations(), src.GetAnnotations(), prevAnnotationKeys, ownershipAnnotationKeys))
 }
 
+func reconcileManagedData(dst, src client.Object) bool {
+	dstSecret, dstOK := dst.(*corev1.Secret)
+	srcSecret, srcOK := src.(*corev1.Secret)
+	if !dstOK || !srcOK {
+		return false
+	}
+
+	previouslyManaged := parseKeyList(dst.GetAnnotations()[annotationManagedData])
+	desiredKeys := make(map[string]struct{}, len(srcSecret.Data))
+	for key := range srcSecret.Data {
+		desiredKeys[key] = struct{}{}
+	}
+	changed := false
+	for _, key := range previouslyManaged {
+		if _, keep := desiredKeys[key]; !keep {
+			if _, exists := dstSecret.Data[key]; exists {
+				delete(dstSecret.Data, key)
+				changed = true
+			}
+		}
+	}
+	if dstSecret.Data == nil && len(srcSecret.Data) > 0 {
+		dstSecret.Data = make(map[string][]byte, len(srcSecret.Data))
+	}
+	for key, value := range srcSecret.Data {
+		current, exists := dstSecret.Data[key]
+		if !exists || !bytes.Equal(current, value) {
+			dstSecret.Data[key] = append([]byte(nil), value...)
+			changed = true
+		}
+	}
+	return changed
+}
+
 // mergeAndPrune overlays the keys we manage now (desired) onto existing, removes
 // keys we managed on the previous sync (prevManaged) that are no longer desired,
 // and drops any GitOps/Flux-owned key except remote-side ownership keys that
@@ -1212,18 +1313,31 @@ func recordManagedKeys(obj client.Object) {
 	}
 	delete(annotations, annotationManagedLabels)
 	delete(annotations, annotationManagedAnnotations)
+	delete(annotations, annotationManagedData)
 
 	labelKeys := strings.Join(sortedKeys(obj.GetLabels()), ",")
 	annotationKeys := strings.Join(sortedKeys(annotations), ",")
 
 	annotations[annotationManagedLabels] = labelKeys
 	annotations[annotationManagedAnnotations] = annotationKeys
+	if secret, ok := obj.(*corev1.Secret); ok {
+		annotations[annotationManagedData] = strings.Join(sortedDataKeys(secret.Data), ",")
+	}
 	obj.SetAnnotations(annotations)
 }
 
 // sortedKeys returns the keys of m in deterministic order so the tracking
 // annotations are stable across syncs and never generate spurious patches.
 func sortedKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func sortedDataKeys(m map[string][]byte) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {
 		keys = append(keys, k)
