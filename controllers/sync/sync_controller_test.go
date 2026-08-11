@@ -8,6 +8,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -15,6 +16,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
@@ -47,6 +49,7 @@ const (
 	testRemoteClientNamespace    = "ns1"
 	testRemoteClientName         = "c1"
 	testBGPAuthSecretName        = "bgp-auth" // #nosec G101 -- test Secret object name, not a credential value.
+	testCAPIClusterFinalizer     = "cluster.x-k8s.io"
 	testScopeLabel               = "networking.telekom.com/scope"
 	testStorageScopeValue        = "storage"
 	testIntentAnnotation         = "networking.telekom.com/intent"
@@ -794,6 +797,76 @@ func TestSyncDrainsFinalizerWhenRemoteGone(t *testing.T) {
 		if len(got.Finalizers) != 0 {
 			t.Errorf("Expected finalizer to be drained, still present: %v", got.Finalizers)
 		}
+	}
+}
+
+func TestSyncKeepsFinalizerWhenClusterExistsButRemoteClientMissing(t *testing.T) {
+	now := metav1.Now()
+	vrf := &nc.VRF{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "vrf-waiting",
+			Namespace:         testPendingClusterNamespace,
+			Finalizers:        []string{finalizerName},
+			DeletionTimestamp: &now,
+		},
+		Spec: nc.VRFSpec{VRF: "waiting", VNI: ptrInt32(2002097), RouteTarget: ptrString("65188:97")},
+	}
+	cluster := &unstructured.Unstructured{}
+	cluster.SetGroupVersionKind(capiClusterGVK)
+	cluster.SetName("workload")
+	cluster.SetNamespace(testPendingClusterNamespace)
+
+	s := testScheme()
+	mgmtClient := fake.NewClientBuilder().WithScheme(s).WithObjects(vrf, cluster).Build()
+	remotes := NewRemoteClientManager(s, RemoteClientConfig{})
+	sc := &Controller{
+		Client:  mgmtClient,
+		Scheme:  s,
+		Log:     zap.New(zap.UseDevMode(true)),
+		Remotes: remotes,
+	}
+
+	result, err := sc.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Namespace: testPendingClusterNamespace, Name: syncRequestName},
+	})
+	if err != nil {
+		t.Fatalf("Reconcile returned error: %v", err)
+	}
+	if result.RequeueAfter == 0 {
+		t.Fatal("Expected requeue while Cluster exists but remote client is missing")
+	}
+
+	got := &nc.VRF{}
+	if err := mgmtClient.Get(context.Background(), types.NamespacedName{
+		Namespace: testPendingClusterNamespace,
+		Name:      "vrf-waiting",
+	}, got); err != nil {
+		t.Fatalf("VRF should still exist while remote client is missing: %v", err)
+	}
+	if !controllerutil.ContainsFinalizer(got, finalizerName) {
+		t.Fatalf("Expected finalizer to remain while Cluster exists but remote client is missing, got %v", got.Finalizers)
+	}
+}
+
+func TestRemoteClusterExistsIgnoresDeletingClusters(t *testing.T) {
+	now := metav1.Now()
+	cluster := &unstructured.Unstructured{}
+	cluster.SetGroupVersionKind(capiClusterGVK)
+	cluster.SetName("workload")
+	cluster.SetNamespace(testPendingClusterNamespace)
+	cluster.SetDeletionTimestamp(&now)
+	cluster.SetFinalizers([]string{testCAPIClusterFinalizer})
+
+	s := testScheme()
+	mgmtClient := fake.NewClientBuilder().WithScheme(s).WithObjects(cluster).Build()
+	sc := &Controller{Client: mgmtClient}
+
+	exists, err := sc.remoteClusterExists(context.Background(), testPendingClusterNamespace)
+	if err != nil {
+		t.Fatalf("remoteClusterExists returned error: %v", err)
+	}
+	if exists {
+		t.Fatal("Expected deleting CAPI Cluster not to count as an active remote cluster")
 	}
 }
 

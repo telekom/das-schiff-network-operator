@@ -16,6 +16,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/events"
@@ -218,15 +219,7 @@ func (r *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 	remoteClients := r.Remotes.GetByNamespace(req.Namespace)
 	if len(remoteClients) == 0 {
-		// No remote client — either the workload cluster's CAPI Cluster has been
-		// deleted (or never reached Ready). Drain our finalizer from any intent
-		// CRs that are mid-deletion; otherwise they would block forever waiting
-		// for a remote cluster that no longer exists.
-		if err := r.drainFinalizersForLostRemote(ctx, log, req.Namespace); err != nil {
-			return ctrl.Result{}, err
-		}
-		// ClusterController hasn't set up a client (yet) — wait and retry.
-		return ctrl.Result{RequeueAfter: syncRequeueInterval}, nil
+		return r.requeueForMissingRemoteClient(ctx, log, req.Namespace)
 	}
 	if len(remoteClients) > 1 {
 		// A namespace maps to exactly one workload cluster by design. More than
@@ -298,10 +291,36 @@ func (r *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	if err := r.syncBGPSecrets(ctx, log, remoteClient, req.Namespace); err != nil {
 		return ctrl.Result{}, err
 	}
-
 	// Requeue so workload status changes are pulled back periodically; the
 	// controller does not watch the workload clusters.
 	return ctrl.Result{RequeueAfter: statusPollInterval}, nil
+}
+
+func (r *Controller) remoteClusterExists(ctx context.Context, namespace string) (bool, error) {
+	clusterList := &unstructured.UnstructuredList{}
+	clusterList.SetGroupVersionKind(capiClusterGVK)
+	if err := r.Client.List(ctx, clusterList, client.InNamespace(namespace)); err != nil {
+		return false, fmt.Errorf("listing CAPI Clusters in namespace %s: %w", namespace, err)
+	}
+	for i := range clusterList.Items {
+		if clusterList.Items[i].GetDeletionTimestamp().IsZero() {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (r *Controller) requeueForMissingRemoteClient(ctx context.Context, log logr.Logger, namespace string) (ctrl.Result, error) {
+	clusterExists, err := r.remoteClusterExists(ctx, namespace)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if !clusterExists {
+		if err := r.drainFinalizersForLostRemote(ctx, log, namespace); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+	return ctrl.Result{RequeueAfter: syncRequeueInterval}, nil
 }
 
 // drainFinalizersForLostRemote walks every intent CRD type in the namespace and
