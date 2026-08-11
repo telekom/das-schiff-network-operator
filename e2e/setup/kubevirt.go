@@ -2,6 +2,8 @@ package setup
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -60,8 +62,15 @@ func PhaseKubeVirt(cluster *Cluster, repoRoot string) error {
 
 	// Enable software emulation (nested virt / emulation is enough for a tiny VM
 	// that just needs an IP) and wait for KubeVirt to converge.
+	//
+	// KubeVirt sizes the compute container's memory limit from the guest's
+	// memory plus a fixed overhead that assumes KVM. QEMU under TCG needs
+	// considerably more than that -- a hugepage-backed guest gets OOMKilled
+	// mid-boot -- so the overhead is doubled here. This is only needed because
+	// CI runners have no nested virtualisation.
 	kubectl("-n", "kubevirt", "patch", "kubevirt", "kubevirt", "--type=merge", //nolint:errcheck
-		`-p={"spec":{"configuration":{"developerConfiguration":{"useEmulation":true}}}}`)
+		`-p={"spec":{"configuration":{"developerConfiguration":{"useEmulation":true},`+
+			`"additionalGuestMemoryOverheadRatio":"2.0"}}}`)
 
 	Logf("Waiting for KubeVirt to be Deployed...")
 	if err := WaitFor("kubevirt deployed", 300*time.Second, 10*time.Second, func() (bool, error) {
@@ -80,7 +89,12 @@ func PhaseKubeVirt(cluster *Cluster, repoRoot string) error {
 		return err
 	}
 	Logf("Applying routed NAD + VirtualMachine...")
-	if err := kubectl("apply", "-f", "/repo/e2e/kubevirt/manifests/networkattachmentdefinition.yaml"); err != nil {
+	nadManifest, err := os.ReadFile(filepath.Join(repoRoot, "e2e", "kubevirt", "manifests", "networkattachmentdefinition.yaml"))
+	if err != nil {
+		return fmt.Errorf("reading routed NAD: %w", err)
+	}
+	if err := DockerExecInput(cp.Name, renderWorkloadNAD(string(nadManifest)),
+		"kubectl", "--kubeconfig="+kubeconfigPath, "apply", "-f", "-"); err != nil {
 		return fmt.Errorf("apply NAD: %w", err)
 	}
 	if err := kubectl("apply", "-f", "/repo/e2e/kubevirt/manifests/virtualmachine.yaml"); err != nil {

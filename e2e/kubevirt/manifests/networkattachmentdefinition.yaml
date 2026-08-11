@@ -1,6 +1,8 @@
 # NetworkAttachmentDefinition for the routed VM data NIC.
 #
 # - type "cni-workload": our routed, no-shared-L2 plugin.
+# - transport is substituted per CRA flavour (__TRANSPORT__): "grouttap" for
+#   grout, whose fast path cannot adopt a CNI-created veth, "veth" otherwise.
 # - vrf omitted => UNDERLAY: the CRA-side port is left in the CRA netns default
 #   table so the fabric BGP session advertises the VM /32 + /128 (not EVPN).
 #   Set "vrf": "<name>" to instead export via a tenant L3VNI VRF (EVPN type-5).
@@ -20,6 +22,7 @@ spec:
       "cniVersion": "1.0.0",
       "name": "routed-vm-net",
       "type": "cni-workload",
+      "transport": "__TRANSPORT__",
       "craNetns": "auto",
       "trunkInterface": "hbn",
       "linkLocalGateways": {

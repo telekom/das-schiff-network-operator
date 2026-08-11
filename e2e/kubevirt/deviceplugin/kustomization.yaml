@@ -1,0 +1,22 @@
+# e2e overlay for the vhost-user device plugin.
+#
+# Reuses the shipped component verbatim and only moves it into kube-system and
+# drops the resource limits: in the lab the plugin shares a node with grout's
+# DPDK poll-mode threads, and a CPU cap on a node-critical DaemonSet is a
+# reliable source of flaky, slow registrations.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: kube-system
+components:
+  - ../../../config/vhostuser-device-plugin
+patches:
+  - target:
+      kind: DaemonSet
+      name: vhostuser-device-plugin
+    patch: |
+      - op: remove
+        path: /spec/template/spec/containers/0/resources/limits
+      - op: add
+        path: /spec/template/spec/tolerations/-
+        value:
+          operator: Exists

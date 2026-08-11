@@ -1,0 +1,99 @@
+# Test VirtualMachine whose only data NIC is a grout vhost-user attach.
+#
+# GROUT FLAVOUR, exercised by the opt-in e2e phase setup.PhaseKubeVirtVhostUser
+# (E2E_KUBEVIRT_VHOSTUSER=1 with E2E_CRA_FLAVOR=grout).
+#
+# Three things make this different from the routed VM, and all three are
+# load-bearing:
+#
+#  1. The pod REQUESTS the device-plugin resource. That request is what makes
+#     kubelet call Allocate(); the NAD annotation alone allocates nothing. A
+#     mismatch yields an empty deviceID and a failed CNI ADD, not a fallback.
+#
+#  2. HUGEPAGES. vhost-user works by letting the CRA map the guest's virtio
+#     rings directly, which requires the guest memory to be shared. Hugepages
+#     are what make KubeVirt emit a <memoryBacking> at all; the sidecar then
+#     turns it into a shared one, because KubeVirt itself only does that for a
+#     virtiofs guest. Without shared memory the socket connects and no packet
+#     ever moves -- the worst kind of failure, because everything looks healthy.
+#
+#  3. A NETWORK BINDING PLUGIN, not one of KubeVirt's own bindings. KubeVirt
+#     has no vhost-user binding, and a vhost-user socket has no kernel netdev
+#     in the pod, so `bridge`/`masquerade` both abort the launcher with
+#     `pod link (podXXXX) is missing`. The plugin is registered with no
+#     domainAttachmentType, which makes KubeVirt skip pod-link discovery and
+#     emit no <interface> at all; its sidecar (our kubevirt-vhostuser-hook)
+#     writes the whole <interface type='vhostuser'> element instead.
+#
+#     Nothing here names the socket. The plugin is registered with
+#     `downwardAPI: device-info`, so KubeVirt projects the socket the device
+#     plugin allocated -- as the device plugin published it and Multus reported
+#     it -- into the sidecar, keyed by this interface's name.
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: grout-vhostuser-vm
+  namespace: default
+spec:
+  runStrategy: Always
+  template:
+    metadata:
+      labels:
+        kubevirt.io/vm: grout-vhostuser-vm
+    spec:
+      domain:
+        devices:
+          disks:
+            - name: containerdisk
+              disk:
+                bus: virtio
+            - name: cloudinitdisk
+              disk:
+                bus: virtio
+          interfaces:
+            # The socket is named by the device-info downward API the binding
+            # plugin requests, keyed by this name -- see the header comment.
+            - name: vhostuser
+              binding:
+                name: vhostuser
+        memory:
+          hugepages:
+            pageSize: "2Mi"
+        resources:
+          requests:
+            memory: 1024Mi
+            network.t-caas.telekom.com/virtio-user: "1"
+          limits:
+            memory: 1024Mi
+            network.t-caas.telekom.com/virtio-user: "1"
+      networks:
+        - name: vhostuser
+          multus:
+            networkName: default/grout-vhostuser-vm-net
+      volumes:
+        - name: containerdisk
+          containerDisk:
+            image: quay.io/kubevirt/fedora-cloud-container-disk-demo:latest
+            # Preloaded into every node's containerd by the e2e setup; without
+            # this the ":latest" tag defaults to Always and re-pulls during boot.
+            imagePullPolicy: IfNotPresent
+        - name: cloudinitdisk
+          cloudInitNoCloud:
+            networkData: |
+              version: 2
+              ethernets:
+                eth0:
+                  addresses:
+                    - 10.250.0.12/24
+                    - fd94:685b:30cf:501::12/64
+                  # gateway4/gateway6 rather than a routes list: the Fedora
+                  # container disk ships cloud-init 19.4, whose sysconfig
+                  # renderer raises KeyError: 'NETMASK1' on a mixed v4+v6
+                  # routes list and then discards the WHOLE network config,
+                  # leaving the guest with only a link-local address.
+                  gateway4: 10.250.0.1
+                  gateway6: fd94:685b:30cf:501::1
+            userData: |
+              #cloud-config
+              password: fedora
+              chpasswd: { expire: False }
