@@ -25,6 +25,7 @@ jobs:
       - name: Load versions.env
         id: versions
         run: |
+          set -o pipefail
           if [ ! -f versions.env ]; then
             echo "versions.env not found — skipping update check"
             echo "skip=true" >> "$GITHUB_OUTPUT"
@@ -98,7 +99,6 @@ jobs:
           check_github_release "golangci/golangci-lint" "${{ steps.versions.outputs.golangci_lint }}" "golangci-lint"
 
           if [ "$found_any" = "true" ]; then
-            echo "found=true" >> "$GITHUB_OUTPUT"
             # Write updates.md only when there are actual updates to report.
             {
               echo "## Tool Update Report"
@@ -111,6 +111,7 @@ jobs:
               echo "To update, edit \`versions.env\` and run \`make generate manifests\` to verify compatibility."
             } > updates.md
             cat updates.md
+            echo "found=true" >> "$GITHUB_OUTPUT"
           fi
           if [ "$check_failed" = "true" ]; then
             echo "check_failed=true" >> "$GITHUB_OUTPUT"
