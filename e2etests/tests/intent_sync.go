@@ -8,8 +8,10 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/telekom/das-schiff-network-operator/e2etests/framework"
 )
@@ -264,29 +266,50 @@ func objectExistsOnCluster2(ctx context.Context, f *framework.Framework, resourc
 }
 
 func deleteCluster2Object(ctx context.Context, f *framework.Framework, resource, name string) error {
-	obj := getCluster2Object(ctx, f, resource, name)
-	if obj == nil {
-		return nil
-	}
-	if err := f.Cluster2Client().Delete(ctx, obj); err != nil && !apierrors.IsNotFound(err) {
-		return err
-	}
-	return nil
+	return deleteObject(ctx, f.Cluster2Client(), resource, remoteNS, name)
 }
 
 // getCluster2Object fetches a network-connector CRD from cluster-2's default namespace.
 func getCluster2Object(ctx context.Context, f *framework.Framework, resource, name string) *unstructured.Unstructured {
+	return getObject(ctx, f.Cluster2Client(), resource, remoteNS, name)
+}
+
+func getObject(ctx context.Context, c client.Client, resource, namespace, name string) *unstructured.Unstructured {
+	obj, err := fetchObject(ctx, c, resource, namespace, name)
+	if err != nil {
+		if !apierrors.IsNotFound(err) && !meta.IsNoMatchError(err) {
+			GinkgoWriter.Printf("getting %s %s/%s failed: %v\n", resourceToKind(resource), namespace, name, err)
+		}
+		return nil
+	}
+	return obj
+}
+
+func fetchObject(ctx context.Context, c client.Client, resource, namespace, name string) (*unstructured.Unstructured, error) {
 	obj := &unstructured.Unstructured{}
 	obj.SetGroupVersionKind(schema.GroupVersionKind{
 		Group:   "network-connector.sylvaproject.org",
 		Version: "v1alpha1",
 		Kind:    resourceToKind(resource),
 	})
-	err := f.Cluster2Client().Get(ctx, framework.ObjectKey(remoteNS, name), obj)
-	if err != nil {
+	if err := c.Get(ctx, framework.ObjectKey(namespace, name), obj); err != nil {
+		return nil, err
+	}
+	return obj, nil
+}
+
+func deleteObject(ctx context.Context, c client.Client, resource, namespace, name string) error {
+	obj, err := fetchObject(ctx, c, resource, namespace, name)
+	if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
 		return nil
 	}
-	return obj
+	if err != nil {
+		return fmt.Errorf("getting %s %s/%s before delete: %w", resourceToKind(resource), namespace, name, err)
+	}
+	if err := client.IgnoreNotFound(c.Delete(ctx, obj)); err != nil {
+		return err
+	}
+	return nil
 }
 
 func resourceToKind(resource string) string {
