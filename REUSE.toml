@@ -82,12 +82,18 @@ SPDX-License-Identifier = "CC0-1.0"
 path = [
   "README.md",
   "CONTRIBUTING.md",
-  "CODE_OF_CONDUCT.md",
   "docs/**",
 ]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Deutsche Telekom AG"
 SPDX-License-Identifier = "CC0-1.0"
+
+# Code of Conduct - CC-BY-4.0
+[[annotations]]
+path = ["CODE_OF_CONDUCT.md"]
+precedence = "override"
+SPDX-FileCopyrightText = "2023 www.contributor-covenant.org"
+SPDX-License-Identifier = "CC-BY-4.0"
 
 # NOTICE file - Apache-2.0 (describes Apache-2.0 licensed project)
 [[annotations]]
