@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -25,6 +26,15 @@ import (
 
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 )
+
+type listErrorClient struct {
+	client.Client
+	err error
+}
+
+func (c listErrorClient) List(_ context.Context, _ client.ObjectList, _ ...client.ListOption) error {
+	return c.err
+}
 
 type listErrorClient struct {
 	client.Client
@@ -1065,6 +1075,33 @@ func TestRemoteClusterExistsPropagatesListError(t *testing.T) {
 	exists, err := sc.remoteClusterExists(context.Background(), testPendingClusterNamespace)
 	if exists || !errors.Is(err, want) {
 		t.Fatalf("expected propagated list error, got exists=%t err=%v", exists, err)
+	}
+}
+
+func TestRemoteClusterExistsFindsActiveClusterAfterDeletingCluster(t *testing.T) {
+	now := metav1.Now()
+	deletingCluster := &unstructured.Unstructured{}
+	deletingCluster.SetGroupVersionKind(capiClusterGVK)
+	deletingCluster.SetName("deleting-workload")
+	deletingCluster.SetNamespace(testPendingClusterNamespace)
+	deletingCluster.SetDeletionTimestamp(&now)
+	deletingCluster.SetFinalizers([]string{testCAPIClusterFinalizer})
+
+	activeCluster := &unstructured.Unstructured{}
+	activeCluster.SetGroupVersionKind(capiClusterGVK)
+	activeCluster.SetName("active-workload")
+	activeCluster.SetNamespace(testPendingClusterNamespace)
+
+	s := testScheme()
+	mgmtClient := fake.NewClientBuilder().WithScheme(s).WithObjects(deletingCluster, activeCluster).Build()
+	sc := &Controller{Client: mgmtClient}
+
+	exists, err := sc.remoteClusterExists(context.Background(), testPendingClusterNamespace)
+	if err != nil {
+		t.Fatalf("remoteClusterExists returned error: %v", err)
+	}
+	if !exists {
+		t.Fatal("Expected active CAPI Cluster to keep the remote cluster present")
 	}
 }
 
