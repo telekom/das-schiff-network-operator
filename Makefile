@@ -63,7 +63,7 @@ vet: ## Run go vet against code.
 
 .PHONY: test
 test: manifests generate fmt vet envtest ## Run tests.
-	KUBEBUILDER_ASSETS="$$( $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path )"; \
+	KUBEBUILDER_ASSETS="$$( "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) -p path )"; \
 	KUBEBUILDER_ASSETS="$$KUBEBUILDER_ASSETS" go test $$(go list ./... 2>/dev/null | grep -v -e '/e2etests$$' -e /e2etests/tests -e /e2etests/config -e /e2e/ || true) -coverprofile cover.out
 
 ##@ Documentation
@@ -100,11 +100,11 @@ docs-build: docs-api ## Build the documentation site (strict; fails on warnings/
 
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter.
-	$(GOLANGCI_LINT) run --timeout 10m
+	$(GOLANGCI_LINT) run ./... --timeout 10m
 
 .PHONY: lint-fix
 lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes.
-	$(GOLANGCI_LINT) run --fix --timeout 10m
+	$(GOLANGCI_LINT) run ./... --fix --timeout 10m
 
 .PHONY: lint-strict
 lint-strict: lint ## Alias for CI linting; golangci-lint already exits non-zero on issues.
@@ -278,7 +278,7 @@ e2e-test-sync: ## Run E2E sync controller tests.
 ## Location to install dependencies to
 LOCALBIN ?= $(shell pwd)/bin
 $(LOCALBIN):
-	mkdir -p $(LOCALBIN)
+	mkdir -p "$(LOCALBIN)"
 
 ## Tool Binaries
 CONTROLLER_GEN = $(LOCALBIN)/controller-gen
