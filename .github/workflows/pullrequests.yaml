@@ -21,7 +21,6 @@ jobs:
           go-version-file: go.mod
       - name: Install packages
         run: |
-          sudo rm -f /etc/apt/sources.list.d/azure-cli.* /etc/apt/sources.list.d/microsoft-prod.* /etc/apt/sources.list.d/packages-microsoft-prod.*
           sudo apt-get update
           sudo apt-get install -y llvm clang libbpf-dev gcc-multilib linux-headers-$(uname -r)
       - name: run code generators
@@ -42,7 +41,6 @@ jobs:
           go-version-file: go.mod
       - name: Install packages
         run: |
-          sudo rm -f /etc/apt/sources.list.d/azure-cli.* /etc/apt/sources.list.d/microsoft-prod.* /etc/apt/sources.list.d/packages-microsoft-prod.*
           sudo apt-get update
           sudo apt-get install -y llvm clang libbpf-dev gcc-multilib linux-headers-$(uname -r)
       - name: Run Tests
@@ -66,7 +64,6 @@ jobs:
           go-version-file: go.mod
       - name: Install packages
         run: |
-          sudo rm -f /etc/apt/sources.list.d/azure-cli.* /etc/apt/sources.list.d/microsoft-prod.* /etc/apt/sources.list.d/packages-microsoft-prod.*
           sudo apt-get update
           sudo apt-get install -y llvm clang libbpf-dev gcc-multilib linux-headers-$(uname -r)
       - name: run code generators
