@@ -238,6 +238,13 @@ func (u *Updater) updateInboundConditions(ctx context.Context, fetched *resolver
 			setCondition(&in.Status.Conditions, nc.ConditionTypeReady, readyStatus, readyReason, readyMsg, in.Generation)
 			in.Status.VRFs = vrfs
 			in.Status.ObservedGeneration = in.Generation
+			// Mirror explicit spec.addresses to status so consumers (e.g. kubectl wide
+			// columns, MetalLB controller) can read addresses from a single source.
+			// The IPAM path handles the count-based case separately.
+			// DeepCopy to avoid aliasing the spec and status pointers in-memory.
+			if in.Spec.Addresses != nil {
+				in.Status.Addresses = in.Spec.Addresses.DeepCopy()
+			}
 		}); err != nil {
 			return fmt.Errorf("updating Inbound %q status: %w", inb.Name, err)
 		}
@@ -266,6 +273,9 @@ func (u *Updater) updateOutboundConditions(ctx context.Context, fetched *resolve
 			setCondition(&o.Status.Conditions, nc.ConditionTypeReady, readyStatus, readyReason, readyMsg, o.Generation)
 			o.Status.VRFs = vrfs
 			o.Status.ObservedGeneration = o.Generation
+			if o.Spec.Addresses != nil {
+				o.Status.Addresses = o.Spec.Addresses.DeepCopy()
+			}
 		}); err != nil {
 			return fmt.Errorf("updating Outbound %q status: %w", outb.Name, err)
 		}
