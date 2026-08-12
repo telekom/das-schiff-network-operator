@@ -267,3 +267,18 @@ kubectl apply -k config/cni-workload                     # install plugin on nod
 
 The installer DaemonSet copies the binary to `/opt/cni/bin`. The per-network CNI
 config travels with the NAD, so no standalone conflist is required.
+
+## E2E coverage
+
+The lab installs the plugin on every node (`PhaseWorkloadCNI`), so the datapath
+is exercised from plain pods as well as from VMs:
+
+| Test | Label | Covers |
+| --- | --- | --- |
+| `e2etests/tests/intent_workload_cni.go` | `intent`, `workloadcni` | L2 access into VLAN 501, an 802.1Q trunk carrying VLAN 501 plus VLAN 502 translated to id 200, and host-local IPAM allocation/release |
+| `e2etests/tests/routed_kubevirt.go` | `kubevirt`, `routed` | routed mode end to end: the VM /32 and /128 in the underlay BGP and reachability from the fabric |
+
+The pod tests are intent-labelled because an L2 attachment resolves a
+`Layer2Attachment` by name: the domain it binds to only exists once the intent
+pipeline has stamped it onto the `NodeNetworkConfig`. Run them with
+`make e2e-test-intent` and the VM test with `make e2e-test-kubevirt`.

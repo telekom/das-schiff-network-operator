@@ -148,6 +148,17 @@ func phaseBuildAllImages(repoRoot string) error {
 		return fmt.Errorf("building network-sync: %w", err)
 	}
 
+	// The workload CNI plugin installer. Needed by every lab, not just the
+	// KubeVirt one: the intent suite attaches plain pods through it.
+	if err := RunCmd("docker", "build",
+		"--build-arg", "ldflags="+ldflags,
+		"-f", filepath.Join(repoRoot, "das-schiff-nwop-cni-workload.Dockerfile"),
+		"-t", imgBase+"/das-schiff-nwop-cni-workload:latest",
+		repoRoot,
+	); err != nil {
+		return fmt.Errorf("building cni-workload: %w", err)
+	}
+
 	// 4. Build NAT64 image
 	nat64Ctx := filepath.Join(repoRoot, "e2e", "images", "nat64")
 	Logf("  Building NAT64 image (%s)...", nat64Image)
