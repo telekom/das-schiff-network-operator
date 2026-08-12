@@ -162,8 +162,7 @@ func (c *createRaceClient) Get(ctx context.Context, obj client.ObjectKey, out cl
 	return nil
 }
 
-func (c *createRaceClient) Create(context.Context, client.Object, ...client.CreateOption) error {
-	_ = c
+func (*createRaceClient) Create(context.Context, client.Object, ...client.CreateOption) error {
 	return apierrors.NewAlreadyExists(schema.GroupResource{
 		Group:    "network-connector.sylvaproject.org",
 		Resource: "vrfs",
