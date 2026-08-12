@@ -33,7 +33,7 @@ func TestDeleteObjectPropagatesUnexpectedGetError(t *testing.T) {
 		getErr: errors.New("boom"),
 	}
 
-	err := deleteObject(context.Background(), stub, "vrfs", remoteNS, "vrf-sync-m2m")
+	err := deleteObject(context.Background(), stub, "vrfs", "vrf-sync-m2m")
 	if err == nil {
 		t.Fatal("Expected deleteObject to fail when Get fails unexpectedly")
 	}
@@ -68,7 +68,7 @@ func TestDeleteObjectIgnoresNotFoundAndNoMatch(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			stub := &objectClientStub{getErr: tc.getErr}
-			if err := deleteObject(context.Background(), stub, "vrfs", remoteNS, "vrf-sync-m2m"); err != nil {
+			if err := deleteObject(context.Background(), stub, "vrfs", "vrf-sync-m2m"); err != nil {
 				t.Fatalf("Expected nil, got %v", err)
 			}
 			if stub.deleteHit {
@@ -80,7 +80,7 @@ func TestDeleteObjectIgnoresNotFoundAndNoMatch(t *testing.T) {
 
 func TestDeleteObjectDeletesWhenObjectExists(t *testing.T) {
 	stub := &objectClientStub{}
-	if err := deleteObject(context.Background(), stub, "vrfs", remoteNS, "vrf-sync-m2m"); err != nil {
+	if err := deleteObject(context.Background(), stub, "vrfs", "vrf-sync-m2m"); err != nil {
 		t.Fatalf("Expected deleteObject to succeed, got %v", err)
 	}
 	if !stub.deleteHit {
