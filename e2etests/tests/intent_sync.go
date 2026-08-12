@@ -321,7 +321,7 @@ func objectExistsOnCluster2(ctx context.Context, f *framework.Framework, resourc
 }
 
 func deleteCluster2Object(ctx context.Context, f *framework.Framework, resource, name string) error {
-	return deleteObject(ctx, f.Cluster2Client(), resource, remoteNS, name)
+	return deleteObject(ctx, f.Cluster2Client(), resource, name)
 }
 
 // getCluster2Object fetches a network-connector CRD from cluster-2's default namespace.
@@ -353,13 +353,13 @@ func fetchObject(ctx context.Context, c client.Client, resource, namespace, name
 	return obj, nil
 }
 
-func deleteObject(ctx context.Context, c client.Client, resource, namespace, name string) error {
-	obj, err := fetchObject(ctx, c, resource, namespace, name)
+func deleteObject(ctx context.Context, c client.Client, resource, name string) error {
+	obj, err := fetchObject(ctx, c, resource, remoteNS, name)
 	if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("getting %s %s/%s before delete: %w", resourceToKind(resource), namespace, name, err)
+		return fmt.Errorf("getting %s %s/%s before delete: %w", resourceToKind(resource), remoteNS, name, err)
 	}
 	if err := client.IgnoreNotFound(c.Delete(ctx, obj)); err != nil {
 		return err
