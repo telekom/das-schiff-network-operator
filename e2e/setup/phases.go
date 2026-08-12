@@ -326,44 +326,242 @@ func PhaseUnderlay(cluster *Cluster) error {
 		if _, err := DockerExec(node.Name, "netplan", "apply"); err != nil {
 			return fmt.Errorf("netplan apply on %s: %w", node.Name, err)
 		}
+
+		// netplan apply returns once systemd-networkd has accepted the config,
+		// not once it has applied it, so the default route may not exist yet.
+		// Poll for it rather than reading it once.
+		var gw string
+		if err := WaitFor(fmt.Sprintf("default route on %s", node.Name),
+			60*time.Second, 2*time.Second, func() (bool, error) {
+				var err error
+				gw, err = defaultGateway(node.Name)
+				return err == nil, nil
+			}); err != nil {
+			return fmt.Errorf("finding default gateway on %s: %w", node.Name, err)
+		}
+
+		// The CRA installs its routes towards the node while cra.service starts,
+		// which is before the address those routes point at exists here. Both
+		// ends therefore begin by failing to resolve each other, and nothing
+		// re-drives it promptly. Ping the node's gateway until it answers so the
+		// link is proven -- and its neighbour entries populated -- before any
+		// later phase depends on it.
+		if err := WaitFor(fmt.Sprintf("CRA gateway %s from %s", gw, node.Name),
+			90*time.Second, 2*time.Second, func() (bool, error) {
+				_, err := DockerExec(node.Name, "ping6", "-c", "1", "-W", "2", gw)
+				return err == nil, nil
+			}); err != nil {
+			return err
+		}
 	}
 
-	// Wait for BGP convergence
+	// Wait for BGP convergence.
+	//
+	// This used to count established peers on leaf1 and compare against a fixed
+	// four. leaf1 peers with both DC gateways and with one CRA per node across
+	// both clusters, so the count could be reached while a node was still down,
+	// and the missing node only surfaced minutes later as an unexplained
+	// reachability timeout. Ask each node's own CRA instead: it has exactly two
+	// fabric uplinks, and the answer is about that node alone.
 	Logf("Waiting for BGP convergence...")
-	return WaitFor("BGP convergence", 120*time.Second, 5*time.Second, func() (bool, error) {
-		out, err := DockerExec("clab-nwop-leaf1", "vtysh", "-c", "show bgp summary json")
-		if err != nil {
-			return false, err
+	for _, node := range cluster.Nodes {
+		n := node
+		if err := WaitFor(fmt.Sprintf("BGP uplinks on %s", n.Name), 180*time.Second, 5*time.Second,
+			func() (bool, error) {
+				established, err := craEstablishedPeers(n.Name)
+				if err != nil {
+					return false, nil //nolint:nilerr // the CRA may not answer yet
+				}
+				Logf("  BGP: %d/2 uplinks established on %s", established, n.Name)
+				return established >= 2, nil
+			}); err != nil {
+			return err
 		}
-		// vtysh may print warnings before the JSON (e.g. "% Can't open vtysh.conf")
-		if idx := strings.Index(out, "{"); idx > 0 {
-			out = out[idx:]
+	}
+	return nil
+}
+
+// defaultGateway returns the IPv6 next hop the node uses for its default route,
+// i.e. the CRA's address on the trunk between them.
+func defaultGateway(node string) (string, error) {
+	out, err := DockerExec(node, "ip", "-6", "route", "show", "default")
+	if err != nil {
+		return "", err
+	}
+	// The default route can be multipath: the static next-hop netplan installs
+	// alongside one learned from the CRA's router advertisements. Prefer a
+	// global next-hop, and scope a link-local one to its device -- ping6 rejects
+	// an unscoped fe80:: address with "Invalid argument", so taking whichever
+	// next-hop happened to be listed first made this flaky.
+	fields := strings.Fields(out)
+	linkLocal := ""
+	for i, f := range fields {
+		if f != "via" || i+1 >= len(fields) {
+			continue
 		}
-		var summary map[string]interface{}
-		if err := json.Unmarshal([]byte(out), &summary); err != nil {
-			return false, err
+		gw := fields[i+1]
+		if !strings.HasPrefix(strings.ToLower(gw), "fe80:") {
+			return gw, nil
 		}
-		ipv4, ok := summary["ipv4Unicast"].(map[string]interface{})
-		if !ok {
-			return false, nil
-		}
-		peers, ok := ipv4["peers"].(map[string]interface{})
-		if !ok {
-			return false, nil
-		}
-		established := 0
-		for _, v := range peers {
-			peer, ok := v.(map[string]interface{})
-			if !ok {
-				continue
+		if linkLocal == "" {
+			dev := ""
+			for j := i + 2; j+1 < len(fields); j++ {
+				if fields[j] == "dev" {
+					dev = fields[j+1]
+					break
+				}
 			}
-			if peer["state"] == "Established" {
-				established++
+			if dev != "" {
+				gw += "%" + dev
 			}
+			linkLocal = gw
 		}
-		Logf("  BGP: %d/4 peers established on leaf1", established)
-		return established >= 4, nil
-	})
+	}
+	if linkLocal != "" {
+		return linkLocal, nil
+	}
+	return "", fmt.Errorf("no IPv6 default route on %s: %s", node, strings.TrimSpace(out))
+}
+
+// craEstablishedPeers counts the node CRA's established IPv4 unicast peers,
+// which on every flavour means its fabric uplinks.
+func craEstablishedPeers(node string) (int, error) {
+	craPID, err := getCRAPID(node)
+	if err != nil {
+		return 0, err
+	}
+	out, err := DockerExec(node, "nsenter", "-t", craPID, "-m", "-n", "--",
+		"vtysh", "-c", "show bgp summary json")
+	if err != nil {
+		return 0, err
+	}
+	// vtysh may print warnings before the JSON (e.g. "% Can't open vtysh.conf")
+	if idx := strings.Index(out, "{"); idx > 0 {
+		out = out[idx:]
+	}
+	var summary map[string]interface{}
+	if err := json.Unmarshal([]byte(out), &summary); err != nil {
+		return 0, fmt.Errorf("parsing bgp summary from %s: %w", node, err)
+	}
+	ipv4, ok := summary["ipv4Unicast"].(map[string]interface{})
+	if !ok {
+		return 0, nil
+	}
+	peers, ok := ipv4["peers"].(map[string]interface{})
+	if !ok {
+		return 0, nil
+	}
+	established := 0
+	for _, v := range peers {
+		peer, ok := v.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if peer["state"] == "Established" {
+			established++
+		}
+	}
+	return established, nil
+}
+
+// imageRegistryHost is the name kubeadm's own preflight image pull resolves; if
+// the lab can resolve it, kubeadm can start.
+const imageRegistryHost = "registry.k8s.io"
+
+// waitForNAT64 gets every node of a cluster to the point where it can actually
+// resolve names through the NAT64 resolver: the route has to reach each CRA's
+// cluster VRF over EVPN, the node's resolver has to point at it, and the path
+// between node and CRA has to work. Only the last of those is what kubeadm
+// needs, and it is the one a RIB check cannot tell you about.
+func waitForNAT64(cluster *Cluster) error {
+	Logf("Waiting for NAT64 route in cluster VRF...")
+	for _, node := range cluster.Nodes {
+		n := node
+		if err := WaitFor(fmt.Sprintf("NAT64 route on %s", n.Name), 120*time.Second, 5*time.Second,
+			func() (bool, error) {
+				craPID, err := getCRAPID(n.Name)
+				if err != nil {
+					return false, nil //nolint:nilerr // the CRA may not answer yet
+				}
+				out, _ := DockerExec(n.Name, "nsenter", "-t", craPID, "-m", "-n", "--",
+					"vtysh", "-c", fmt.Sprintf("show ipv6 route vrf cluster %s/128", cluster.NAT64DNS))
+				return strings.Contains(out, cluster.NAT64DNS), nil
+			}); err != nil {
+			return err
+		}
+	}
+
+	Logf("Configuring DNS → NAT64 (%s)...", cluster.NAT64DNS)
+	for _, node := range cluster.Nodes {
+		if _, err := DockerExecShell(node.Name,
+			fmt.Sprintf("printf 'nameserver %s\\n' > /etc/resolv.conf", cluster.NAT64DNS),
+		); err != nil {
+			return fmt.Errorf("setting DNS on %s: %w", node.Name, err)
+		}
+	}
+
+	// The route being in the CRA's RIB is not the same as the node being able to
+	// use it: the node reaches the fabric over the CRA, and that path only works
+	// once both ends have resolved each other. kubeadm was reaching preflight
+	// first, and every image pull then failed to resolve its registry.
+	//
+	// Resolve a name rather than ping the resolver, because resolving a name is
+	// what kubeadm needs; and require several in a row, because the path comes up
+	// shortly before it is stable. A single probe passed this gate while the very
+	// next query still timed out, and Linux answers a failed neighbour probe with
+	// a backoff long enough to outlast kubeadm's own retries.
+	Logf("Waiting for nodes to resolve names through NAT64 (%s)...", cluster.NAT64DNS)
+	const wantConsecutive = 3
+	for _, node := range cluster.Nodes {
+		n := node
+		start := time.Now()
+		streak := 0
+		if err := WaitFor(fmt.Sprintf("DNS from %s", n.Name), 10*time.Minute, 5*time.Second,
+			func() (bool, error) {
+				if _, err := DockerExec(n.Name, "getent", "hosts", imageRegistryHost); err != nil {
+					streak = 0
+					return false, nil //nolint:nilerr // keep waiting
+				}
+				streak++
+				return streak >= wantConsecutive, nil
+			}); err != nil {
+			dumpNodeReachability(n.Name)
+			return err
+		}
+		Logf("  %s resolves through NAT64 after %s", n.Name, time.Since(start).Round(time.Second))
+	}
+	return nil
+}
+
+// dumpNodeReachability prints what the node and its CRA think the path between
+// them looks like. A NAT64 timeout is otherwise indistinguishable from any
+// other "the lab is not up yet", and the run is gone by the time anyone looks.
+func dumpNodeReachability(node string) {
+	Logf("  --- reachability diagnostics for %s ---", node)
+	for _, c := range [][]string{
+		{"ip", "-6", "route", "show"},
+		{"ip", "-6", "neigh", "show", "dev", "hbn"},
+		{"ip", "-4", "neigh", "show", "dev", "hbn"},
+	} {
+		out, _ := DockerExec(node, c...)
+		Logf("  $ %s\n%s", strings.Join(c, " "), strings.TrimSpace(out))
+	}
+
+	craPID, err := getCRAPID(node)
+	if err != nil {
+		Logf("  CRA PID unavailable: %v", err)
+		Logf("  --- end diagnostics ---")
+		return
+	}
+	for _, c := range [][]string{
+		{"vtysh", "-c", "show bgp l2vpn evpn summary"},
+		{"vtysh", "-c", "show ipv6 route vrf cluster"},
+	} {
+		args := append([]string{"nsenter", "-t", craPID, "-m", "-n", "--"}, c...)
+		out, _ := DockerExec(node, args...)
+		Logf("  $ cra: %s\n%s", strings.Join(c, " "), strings.TrimSpace(out))
+	}
+	Logf("  --- end diagnostics ---")
 }
 
 // Phase 3: Configure NAT64/DNS64 and deploy kube-vip.
@@ -381,29 +579,8 @@ func PhasePreKubeadm(cluster *Cluster, repoRoot string) error {
 	}
 	Logf("NAT64 services running")
 
-	// Wait for NAT64 route to propagate via EVPN
-	Logf("Waiting for NAT64 route in cluster VRF...")
-	if err := WaitFor("NAT64 route", 120*time.Second, 5*time.Second, func() (bool, error) {
-		craPID, err := getCRAPID(cluster.Nodes[1].Name) // check on worker
-		if err != nil {
-			return false, err
-		}
-		out, _ := DockerExec(cluster.Nodes[1].Name,
-			"nsenter", "-t", craPID, "-m", "-n", "--",
-			"vtysh", "-c", fmt.Sprintf("show ipv6 route vrf cluster %s/128", cluster.NAT64DNS))
-		return strings.Contains(out, cluster.NAT64DNS), nil
-	}); err != nil {
+	if err := waitForNAT64(cluster); err != nil {
 		return err
-	}
-
-	// Configure DNS on all nodes → NAT64 unbound
-	Logf("Configuring DNS → NAT64 (%s)...", cluster.NAT64DNS)
-	for _, node := range cluster.Nodes {
-		if _, err := DockerExecShell(node.Name,
-			fmt.Sprintf("printf 'nameserver %s\\n' > /etc/resolv.conf", cluster.NAT64DNS),
-		); err != nil {
-			return fmt.Errorf("setting DNS on %s: %w", node.Name, err)
-		}
 	}
 
 	// Deploy kube-vip static pod manifest on control-plane
@@ -765,27 +942,10 @@ func PhaseCluster2(cluster2 *Cluster, repoRoot string) error {
 		return fmt.Errorf("cluster2 underlay: %w", err)
 	}
 
-	// Wait for NAT64 route to propagate via EVPN before kubeadm (needs to pull pause image)
-	Logf("Cluster-2: Waiting for NAT64 route in cluster VRF...")
-	if err := WaitFor("NAT64 route", 120*time.Second, 5*time.Second, func() (bool, error) {
-		craPID, err := getCRAPID(node.Name)
-		if err != nil {
-			return false, err
-		}
-		out, _ := DockerExec(node.Name,
-			"nsenter", "-t", craPID, "-m", "-n", "--",
-			"vtysh", "-c", fmt.Sprintf("show ipv6 route vrf cluster %s/128", cluster2.NAT64DNS))
-		return strings.Contains(out, cluster2.NAT64DNS), nil
-	}); err != nil {
-		return fmt.Errorf("cluster2 NAT64 route: %w", err)
-	}
-
-	// Configure DNS → NAT64 before kubeadm so image pulls work
-	Logf("Cluster-2: Configuring DNS → NAT64 (%s)...", cluster2.NAT64DNS)
-	if _, err := DockerExecShell(node.Name,
-		fmt.Sprintf("printf 'nameserver %s\\n' > /etc/resolv.conf", cluster2.NAT64DNS),
-	); err != nil {
-		return fmt.Errorf("setting DNS on %s: %w", node.Name, err)
+	// NAT64 must be reachable before kubeadm, which pulls the pause image.
+	Logf("Cluster-2: NAT64 setup...")
+	if err := waitForNAT64(cluster2); err != nil {
+		return fmt.Errorf("cluster2 NAT64: %w", err)
 	}
 
 	// Phase C2-2: kubeadm init (single-node, no VIP, untaint control-plane)
