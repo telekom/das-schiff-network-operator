@@ -2,6 +2,7 @@ package sync
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"strings"
 	"testing"
@@ -135,7 +136,10 @@ func (c *listOptionCaptureClient) List(ctx context.Context, list client.ObjectLi
 		opt.ApplyToList(listOptions)
 	}
 	c.lastLimit = listOptions.Limit
-	return c.Client.List(ctx, list, opts...)
+	if err := c.Client.List(ctx, list, opts...); err != nil {
+		return fmt.Errorf("list through capture client: %w", err)
+	}
+	return nil
 }
 
 type createRaceClient struct {
@@ -152,10 +156,13 @@ func (c *createRaceClient) Get(ctx context.Context, obj client.ObjectKey, out cl
 			Resource: "vrfs",
 		}, obj.Name)
 	}
-	return c.Client.Get(ctx, obj, out, opts...)
+	if err := c.Client.Get(ctx, obj, out, opts...); err != nil {
+		return fmt.Errorf("get through race client: %w", err)
+	}
+	return nil
 }
 
-func (c *createRaceClient) Create(context.Context, client.Object, ...client.CreateOption) error {
+func (_ *createRaceClient) Create(context.Context, client.Object, ...client.CreateOption) error {
 	return apierrors.NewAlreadyExists(schema.GroupResource{
 		Group:    "network-connector.sylvaproject.org",
 		Resource: "vrfs",
@@ -164,7 +171,10 @@ func (c *createRaceClient) Create(context.Context, client.Object, ...client.Crea
 
 func (c *createRaceClient) Apply(ctx context.Context, obj runtime.ApplyConfiguration, opts ...client.ApplyOption) error {
 	c.applyCalled = true
-	return c.Client.Apply(ctx, obj, opts...)
+	if err := c.Client.Apply(ctx, obj, opts...); err != nil {
+		return fmt.Errorf("apply through race client: %w", err)
+	}
+	return nil
 }
 
 func TestPatchFinalizerConflictsOnStaleObject(t *testing.T) {
