@@ -341,64 +341,183 @@ jobs:
         run: timeout --signal=INT --kill-after=1m 35m make e2e-test-intent
 
       - name: Collect grout debug logs
-        timeout-minutes: 8
+        timeout-minutes: 25
         if: failure() && matrix.flavor == 'grout'
         run: |
           mkdir -p /tmp/e2e-logs
-          for node in nwop-control-plane nwop-worker nwop-worker2; do
+          # A collector that overruns its step timeout is *cancelled*, which
+          # skips the upload below and loses every file it already gathered --
+          # the same evidence-loss this workflow is trying to fix. Per-command
+          # timeouts bound one hung call but not their sum, so the node loops
+          # also stop entering new iterations once the budget is spent and let
+          # the step finish normally with a partial set of logs.
+          COLLECT_DEADLINE=$((SECONDS + 480))
+          # Every collector call goes through this. It enforces a hard
+          # per-command bound -- SIGKILL after SIGTERM, so a command that
+          # ignores SIGTERM cannot stall the step either -- and the overall
+          # budget, returning success once that is spent so the remaining calls
+          # fall through instantly and the step still ends normally and uploads
+          # whatever it managed to gather.
+          dex() {
+            [ "$SECONDS" -ge "$COLLECT_DEADLINE" ] && return 0
+            timeout --kill-after=5s 30s docker "$@"
+          }
+          for node in nwop-control-plane nwop-worker nwop-worker2 nwop2-worker; do
+            if [ "$SECONDS" -ge "$COLLECT_DEADLINE" ]; then
+              echo "collection budget exhausted, skipping $node" >&2
+              break
+            fi
             # grout's datapath is invisible to ip/tcpdump on the node: the
             # interfaces, addresses and routes live in the DPDK process, so
             # grcli is the only view of what the CRA actually programmed.
             for cmd in "interface show" "address show" "route show" "nexthop show"; do
-              docker exec "$node" bash -c \
+              dex exec "$node" bash -c \
                 "PATH=/usr/local/bin:\$PATH nerdctl -n hbr exec cra-grout grcli $cmd" \
                 >> "/tmp/e2e-logs/${node}-grcli.log" 2>&1 || true
             done
-            docker exec "$node" bash -c \
-              'PATH=/usr/local/bin:$PATH nerdctl -n hbr logs cra-grout' \
+            # The FRR view. The generic collector reaches FRR by entering the
+            # cra.service netns, which finds nothing on grout: there cra.service
+            # only launches a nerdctl container, so every one of those files
+            # comes back empty. FRR itself is unchanged -- grout replaces the
+            # datapath, not the routing daemon -- so the same commands are worth
+            # collecting, just via nerdctl.
+            for vc in "show bgp l2vpn evpn" "show bgp summary" "show run"; do
+              dex exec "$node" bash -c \
+                "PATH=/usr/local/bin:\$PATH nerdctl -n hbr exec cra-grout vtysh -c '$vc'" \
+                >> "/tmp/e2e-logs/${node}-cra-frr.log" 2>&1 || true
+            done
+            # cra-grout runs systemd, so grout/frr log to the container's own
+            # journal and `nerdctl logs` only ever returns PID 1's empty stdout.
+            dex exec "$node" bash -c \
+              'PATH=/usr/local/bin:$PATH nerdctl -n hbr exec cra-grout \
+                 journalctl -u grout.service -u grout-cra.service -u frr.service \
+                 --no-pager --lines=all' \
               > "/tmp/e2e-logs/${node}-grout.log" 2>&1 || true
+            dex exec "$node" bash -c \
+              'PATH=/usr/local/bin:$PATH nerdctl -n hbr logs cra-grout' \
+              > "/tmp/e2e-logs/${node}-grout-stdout.log" 2>&1 || true
+            # `journalctl -u grout.service` only works while the container is
+            # still up. If grout took the container down with it -- an OOM kill
+            # is the usual way -- the unit journal is unreachable and the only
+            # remaining evidence is the container's exit status and the node's
+            # kernel ring buffer.
+            dex exec "$node" bash -c \
+              'export PATH=/usr/local/bin:$PATH; \
+               nerdctl -n hbr ps -a; \
+               echo "--- container state ---"; \
+               nerdctl -n hbr inspect cra-grout --format "{{json .State}}"; \
+               echo "--- cgroup memory ---"; \
+               pid=$(nerdctl -n hbr inspect cra-grout --format "{{.State.Pid}}"); \
+               cg=""; \
+               if [ -n "$pid" ] && [ -r "/proc/$pid/cgroup" ]; then \
+                 echo "== /proc/$pid/cgroup"; cat "/proc/$pid/cgroup"; \
+                 cg=/sys/fs/cgroup$(awk -F: "/^0::/{print \$3}" "/proc/$pid/cgroup"); \
+               fi; \
+               for d in "$cg" /sys/fs/cgroup/system.slice/cra.service; do \
+                 [ -n "$d" ] || continue; \
+                 for f in memory.current memory.peak memory.max memory.events; do \
+                   [ -e "$d/$f" ] && { echo "== $d/$f"; cat "$d/$f"; }; \
+                 done; \
+               done; \
+               echo "--- meminfo ---"; head -n 5 /proc/meminfo; \
+               echo "--- dmesg ---"; dmesg -T | tail -n 300' \
+              > "/tmp/e2e-logs/${node}-cra-state.log" 2>&1 || true
+            # Under grout the CRA netns is the named netns `cra`; the frr-only
+            # `cra.service` PID walk used elsewhere finds nothing here, which is
+            # why those dumps came back empty.
+            dex exec "$node" bash -c \
+              'ip netns exec cra ip -d link show; echo "--- addrs ---"; \
+               ip netns exec cra ip addr show; echo "--- neigh ---"; \
+               ip netns exec cra ip -6 neigh show' \
+              > "/tmp/e2e-logs/${node}-cra-netns.log" 2>&1 || true
+            # Pods stall in ContainerCreating because multus cannot reach the API
+            # service VIP, and the node IP itself lives on the grout-backed `hbn`.
+            # Probe that exact path from the node.
+            dex exec "$node" bash -c \
+              'echo "=== route to the API VIP and to every node IP ==="; \
+               ip -6 route get fd10:96::1 2>&1; \
+               for n in 10 11 12; do ip -6 route get "fdcb:f93c:3a3e::$n" 2>&1; done; \
+               echo "=== hbn neighbours and counters ==="; \
+               ip -6 neigh show dev hbn 2>&1; ip -s link show dev hbn 2>&1; \
+               echo "=== service NAT ruleset ==="; \
+               { nft list ruleset 2>/dev/null || ip6tables-save -t nat 2>&1; } \
+                 | head -200; \
+               echo "=== reachability ==="; \
+               for t in "[fd10:96::1]:443" "[fdcb:f93c:3a3e::10]:6443" \
+                        "[fdcb:f93c:3a3e::11]:10250" "[fdcb:f93c:3a3e::12]:10250"; do \
+                 echo "--- $t ---"; \
+                 curl -gsk -o /dev/null -w "connect=%{time_connect} http=%{http_code}\n" \
+                   --connect-timeout 5 --max-time 10 "https://$t/livez" 2>&1 || true; \
+               done; \
+               echo "=== large-payload probe (PMTUD blackhole check) ==="; \
+               for n in 1200 1400 1452 1500; do \
+                 printf "size %s: " "$n"; \
+                 ping -6 -c2 -W2 -M do -s "$n" fdcb:f93c:3a3e::10 2>&1 | tail -2; \
+               done' \
+              > "/tmp/e2e-logs/${node}-api-vip-path.log" 2>&1 || true
           done
 
       - name: Collect debug logs
-        timeout-minutes: 8
+        timeout-minutes: 25
         if: failure()
         run: |
           mkdir -p /tmp/e2e-logs
+          # A collector that overruns its step timeout is *cancelled*, which
+          # skips the upload below and loses every file it already gathered --
+          # the same evidence-loss this workflow is trying to fix. Per-command
+          # timeouts bound one hung call but not their sum, so the node loops
+          # also stop entering new iterations once the budget is spent and let
+          # the step finish normally with a partial set of logs.
+          COLLECT_DEADLINE=$((SECONDS + 480))
+          # Every collector call goes through this. It enforces a hard
+          # per-command bound -- SIGKILL after SIGTERM, so a command that
+          # ignores SIGTERM cannot stall the step either -- and the overall
+          # budget, returning success once that is spent so the remaining calls
+          # fall through instantly and the step still ends normally and uploads
+          # whatever it managed to gather.
+          dex() {
+            [ "$SECONDS" -ge "$COLLECT_DEADLINE" ] && return 0
+            timeout --kill-after=5s 30s docker "$@"
+          }
           for node in nwop-control-plane nwop-worker nwop-worker2 nwop2-worker; do
-            docker logs "$node" > "/tmp/e2e-logs/${node}-docker.log" 2>&1 || true
-            docker exec "$node" journalctl -u cra.service --no-pager \
+            if [ "$SECONDS" -ge "$COLLECT_DEADLINE" ]; then
+              echo "collection budget exhausted, skipping $node" >&2
+              break
+            fi
+            dex logs "$node" > "/tmp/e2e-logs/${node}-docker.log" 2>&1 || true
+            dex exec "$node" journalctl -u cra.service --no-pager \
               > "/tmp/e2e-logs/${node}-cra.log" 2>&1 || true
-            docker exec "$node" journalctl -u kubelet.service --no-pager \
+            dex exec "$node" journalctl -u kubelet.service --no-pager \
               > "/tmp/e2e-logs/${node}-kubelet.log" 2>&1 || true
             # Workload-CNI datapath: the ports live in the CRA netns, bridged
             # into the l2.<vlan> devices.
-            docker exec "$node" machinectl shell cra-frr /usr/bin/ip -d link show \
+            dex exec "$node" machinectl shell cra-frr /usr/bin/ip -d link show \
               > "/tmp/e2e-logs/${node}-cra-links.log" 2>&1 || true
           done
           # Workload CNI plugin installer
-          docker exec nwop-control-plane bash -c \
+          dex exec nwop-control-plane bash -c \
             'kubectl --kubeconfig=/etc/kubernetes/admin.conf -n kube-system logs \
               -l app=cni-workload-installer --tail=-1' \
             > /tmp/e2e-logs/cni-workload-installer.log 2>&1 || true
           # Cluster-1 state
-          docker exec nwop-control-plane kubectl \
+          dex exec nwop-control-plane kubectl \
             --kubeconfig=/etc/kubernetes/admin.conf get pods -A -o wide \
             > /tmp/e2e-logs/pods.log 2>&1 || true
-          docker exec nwop-control-plane kubectl \
+          dex exec nwop-control-plane kubectl \
             --kubeconfig=/etc/kubernetes/admin.conf get events -A \
             --sort-by='.lastTimestamp' > /tmp/e2e-logs/events.log 2>&1 || true
           # Per-node CRA agent logs. The agent is what renders the node's
           # NodeNetworkConfig into the datapath (grcli batches on grout, netlink
           # on frr), so a domain that never got programmed shows its error here
           # and nowhere else -- the CRA container's own log only covers startup.
-          docker exec nwop-control-plane bash -c \
+          dex exec nwop-control-plane bash -c \
             'kubectl --kubeconfig=/etc/kubernetes/admin.conf -n kube-system logs \
               -l "app.kubernetes.io/component in (agent-cra-frr,agent-cra-grout)" \
               --all-containers --prefix --tail=-1' \
             > /tmp/e2e-logs/agent-cra-logs.log 2>&1 || true
           # Fall back to the pod name as well, so this keeps working if the
           # component labels are ever renamed.
-          docker exec nwop-control-plane bash -c \
+          dex exec nwop-control-plane bash -c \
             'for POD in $(kubectl --kubeconfig=/etc/kubernetes/admin.conf -n kube-system \
                get pods -o name | grep agent-cra); do \
                echo "=== $POD ==="; \
@@ -410,26 +529,30 @@ jobs:
           # netplan builds on the host trunk, and those live in the node's own
           # netns rather than the CRA's.
           for node in nwop-control-plane nwop-worker nwop-worker2; do
-            docker exec "$node" bash -c \
+            if [ "$SECONDS" -ge "$COLLECT_DEADLINE" ]; then
+              echo "collection budget exhausted, skipping $node" >&2
+              break
+            fi
+            dex exec "$node" bash -c \
               'ip -d link show; echo "--- addrs ---"; ip addr show; \
                echo "--- netplan ---"; ls -R /etc/netplan 2>/dev/null; \
                cat /etc/netplan/*.yaml 2>/dev/null' \
               > "/tmp/e2e-logs/${node}-node-links.log" 2>&1 || true
           done
           # Cluster-1 operator logs (current + previous crashed container)
-          docker exec nwop-control-plane bash -c \
+          dex exec nwop-control-plane bash -c \
             'POD=$(kubectl --kubeconfig=/etc/kubernetes/admin.conf -n kube-system \
               get pods -l app.kubernetes.io/name=network-operator -o name | head -1); \
              [ -n "$POD" ] && kubectl --kubeconfig=/etc/kubernetes/admin.conf \
               -n kube-system logs "$POD" --all-containers' \
             > /tmp/e2e-logs/operator-logs.log 2>&1 || true
-          docker exec nwop-control-plane bash -c \
+          dex exec nwop-control-plane bash -c \
             'POD=$(kubectl --kubeconfig=/etc/kubernetes/admin.conf -n kube-system \
               get pods -l app.kubernetes.io/name=network-operator -o name | head -1); \
              [ -n "$POD" ] && kubectl --kubeconfig=/etc/kubernetes/admin.conf \
               -n kube-system logs "$POD" --all-containers --previous' \
             > /tmp/e2e-logs/operator-logs-previous.log 2>&1 || true
-          docker exec nwop-control-plane bash -c \
+          dex exec nwop-control-plane bash -c \
             'POD=$(kubectl --kubeconfig=/etc/kubernetes/admin.conf -n kube-system \
               get pods -l app.kubernetes.io/name=network-operator -o name | head -1); \
              [ -n "$POD" ] && kubectl --kubeconfig=/etc/kubernetes/admin.conf \
@@ -437,7 +560,7 @@ jobs:
             > /tmp/e2e-logs/operator-describe.log 2>&1 || true
           # Platform controller logs (cluster-1)
           for ctrl_label in platform-coil platform-metallb; do
-            docker exec nwop-control-plane bash -c \
+            dex exec nwop-control-plane bash -c \
               "POD=\$(kubectl --kubeconfig=/etc/kubernetes/admin.conf -n kube-system \
                 get pods -l app.kubernetes.io/name=${ctrl_label} -o name | head -1); \
                [ -n \"\$POD\" ] && kubectl --kubeconfig=/etc/kubernetes/admin.conf \
@@ -445,33 +568,33 @@ jobs:
               > "/tmp/e2e-logs/${ctrl_label}-logs.log" 2>&1 || true
           done
           # Network-sync controller logs (cluster-1)
-          docker exec nwop-control-plane bash -c \
+          dex exec nwop-control-plane bash -c \
             'POD=$(kubectl --kubeconfig=/etc/kubernetes/admin.conf -n kube-system \
               get pods -l app=network-sync -o name | head -1); \
              [ -n "$POD" ] && kubectl --kubeconfig=/etc/kubernetes/admin.conf \
               -n kube-system logs "$POD" --all-containers' \
             > /tmp/e2e-logs/network-sync-logs.log 2>&1 || true
           # Cluster-2 state
-          docker exec nwop2-worker kubectl \
+          dex exec nwop2-worker kubectl \
             --kubeconfig=/etc/kubernetes/admin.conf get pods -A -o wide \
             > /tmp/e2e-logs/cluster2-pods.log 2>&1 || true
-          docker exec nwop2-worker kubectl \
+          dex exec nwop2-worker kubectl \
             --kubeconfig=/etc/kubernetes/admin.conf get events -A \
             --sort-by='.lastTimestamp' > /tmp/e2e-logs/cluster2-events.log 2>&1 || true
           # Cluster-2 operator logs (current + previous crashed container)
-          docker exec nwop2-worker bash -c \
+          dex exec nwop2-worker bash -c \
             'POD=$(kubectl --kubeconfig=/etc/kubernetes/admin.conf -n kube-system \
               get pods -l app.kubernetes.io/name=network-operator -o name | head -1); \
              [ -n "$POD" ] && kubectl --kubeconfig=/etc/kubernetes/admin.conf \
               -n kube-system logs "$POD" --all-containers' \
             > /tmp/e2e-logs/cluster2-operator-logs.log 2>&1 || true
-          docker exec nwop2-worker bash -c \
+          dex exec nwop2-worker bash -c \
             'POD=$(kubectl --kubeconfig=/etc/kubernetes/admin.conf -n kube-system \
               get pods -l app.kubernetes.io/name=network-operator -o name | head -1); \
              [ -n "$POD" ] && kubectl --kubeconfig=/etc/kubernetes/admin.conf \
               -n kube-system logs "$POD" --all-containers --previous' \
             > /tmp/e2e-logs/cluster2-operator-logs-previous.log 2>&1 || true
-          docker exec nwop2-worker bash -c \
+          dex exec nwop2-worker bash -c \
             'POD=$(kubectl --kubeconfig=/etc/kubernetes/admin.conf -n kube-system \
               get pods -l app.kubernetes.io/name=network-operator -o name | head -1); \
              [ -n "$POD" ] && kubectl --kubeconfig=/etc/kubernetes/admin.conf \
@@ -482,72 +605,76 @@ jobs:
                      bgppeerings collectors trafficmirrors nodenetworkconfigs \
                      interfaceconfigs nodenetworkstatuses nodenetplanconfigs \
                      podnetworks announcementpolicies nodeworkloadports; do
-            docker exec nwop-control-plane kubectl \
+            dex exec nwop-control-plane kubectl \
               --kubeconfig=/etc/kubernetes/admin.conf get "$crd" -A -o yaml \
               > "/tmp/e2e-logs/intent-${crd}.yaml" 2>&1 || true
-            docker exec nwop2-worker kubectl \
+            dex exec nwop2-worker kubectl \
               --kubeconfig=/etc/kubernetes/admin.conf get "$crd" -A -o yaml \
               > "/tmp/e2e-logs/cluster2-intent-${crd}.yaml" 2>&1 || true
           done
           # Platform-managed resources (Coil Egress, Calico IPPool, NetworkPolicies)
-          docker exec nwop-control-plane kubectl \
+          dex exec nwop-control-plane kubectl \
             --kubeconfig=/etc/kubernetes/admin.conf get egresses.coil.cybozu.com -A -o yaml \
             > /tmp/e2e-logs/coil-egresses.yaml 2>&1 || true
-          docker exec nwop-control-plane kubectl \
+          dex exec nwop-control-plane kubectl \
             --kubeconfig=/etc/kubernetes/admin.conf get ippools.crd.projectcalico.org -o yaml \
             > /tmp/e2e-logs/calico-ippools.yaml 2>&1 || true
-          docker exec nwop-control-plane kubectl \
+          dex exec nwop-control-plane kubectl \
             --kubeconfig=/etc/kubernetes/admin.conf get networkpolicies -A -o yaml \
             > /tmp/e2e-logs/networkpolicies.yaml 2>&1 || true
           for rtr in leaf1 leaf2 dcgw1 dcgw2; do
-            docker exec "clab-nwop-${rtr}" vtysh -c 'show bgp summary' \
+            dex exec "clab-nwop-${rtr}" vtysh -c 'show bgp summary' \
               > "/tmp/e2e-logs/${rtr}-bgp.log" 2>&1 || true
           done
           for dcgw in dcgw1 dcgw2; do
-            docker exec "clab-nwop-${dcgw}" vtysh -c 'show bgp l2vpn evpn' \
+            dex exec "clab-nwop-${dcgw}" vtysh -c 'show bgp l2vpn evpn' \
               > "/tmp/e2e-logs/${dcgw}-evpn.log" 2>&1 || true
-            docker exec "clab-nwop-${dcgw}" vtysh -c 'show evpn vni' \
+            dex exec "clab-nwop-${dcgw}" vtysh -c 'show evpn vni' \
               > "/tmp/e2e-logs/${dcgw}-vni.log" 2>&1 || true
-            docker exec "clab-nwop-${dcgw}" ip route show table all \
+            dex exec "clab-nwop-${dcgw}" ip route show table all \
               > "/tmp/e2e-logs/${dcgw}-ip-routes.log" 2>&1 || true
-            docker exec "clab-nwop-${dcgw}" ip -6 route show table all \
+            dex exec "clab-nwop-${dcgw}" ip -6 route show table all \
               > "/tmp/e2e-logs/${dcgw}-ip6-routes.log" 2>&1 || true
           done
           # Enable BPF stats to see program run counts
-          docker exec nwop-control-plane sysctl -w kernel.bpf_stats_enabled=1 2>/dev/null || true
+          dex exec nwop-control-plane sysctl -w kernel.bpf_stats_enabled=1 2>/dev/null || true
           sleep 2
           for node in nwop-control-plane nwop-worker nwop-worker2 nwop2-worker; do
-            docker exec "$node" bash -c \
+            if [ "$SECONDS" -ge "$COLLECT_DEADLINE" ]; then
+              echo "collection budget exhausted, skipping $node" >&2
+              break
+            fi
+            dex exec "$node" bash -c \
               'P=$(systemctl show cra.service -p MainPID --value 2>/dev/null); \
                CRA_PID=$(cat /proc/$P/task/*/children 2>/dev/null | head -1 | tr -d " \n"); \
                [ -n "$CRA_PID" ] && nsenter -t $CRA_PID -m -n -- vtysh -c "show bgp l2vpn evpn"' \
               > "/tmp/e2e-logs/${node}-cra-evpn.log" 2>&1 || true
-            docker exec "$node" bash -c \
+            dex exec "$node" bash -c \
               'P=$(systemctl show cra.service -p MainPID --value 2>/dev/null); \
                CRA_PID=$(cat /proc/$P/task/*/children 2>/dev/null | head -1 | tr -d " \n"); \
                [ -n "$CRA_PID" ] && nsenter -t $CRA_PID -m -n -- ip -6 route show table all' \
               > "/tmp/e2e-logs/${node}-cra-ip6-routes.log" 2>&1 || true
-            docker exec "$node" bash -c \
+            dex exec "$node" bash -c \
               'P=$(systemctl show cra.service -p MainPID --value 2>/dev/null); \
                CRA_PID=$(cat /proc/$P/task/*/children 2>/dev/null | head -1 | tr -d " \n"); \
                [ -n "$CRA_PID" ] && nsenter -t $CRA_PID -m -- journalctl -u frr-cra.service --no-pager' \
               > "/tmp/e2e-logs/${node}-cra-frr-cra.log" 2>&1 || true
-            docker exec "$node" bash -c \
+            dex exec "$node" bash -c \
               'P=$(systemctl show cra.service -p MainPID --value 2>/dev/null); \
                CRA_PID=$(cat /proc/$P/task/*/children 2>/dev/null | head -1 | tr -d " \n"); \
                [ -n "$CRA_PID" ] && nsenter -t $CRA_PID -m -n -- ip link show' \
               > "/tmp/e2e-logs/${node}-cra-links.log" 2>&1 || true
-            docker exec "$node" bash -c \
+            dex exec "$node" bash -c \
               'P=$(systemctl show cra.service -p MainPID --value 2>/dev/null); \
                CRA_PID=$(cat /proc/$P/task/*/children 2>/dev/null | head -1 | tr -d " \n"); \
                [ -n "$CRA_PID" ] && nsenter -t $CRA_PID -m -n -- ip neigh show' \
               > "/tmp/e2e-logs/${node}-cra-neigh.log" 2>&1 || true
-            docker exec "$node" bash -c \
+            dex exec "$node" bash -c \
               'P=$(systemctl show cra.service -p MainPID --value 2>/dev/null); \
                CRA_PID=$(cat /proc/$P/task/*/children 2>/dev/null | head -1 | tr -d " \n"); \
                [ -n "$CRA_PID" ] && nsenter -t $CRA_PID -m -n -- bridge fdb show' \
               > "/tmp/e2e-logs/${node}-cra-fdb.log" 2>&1 || true
-            docker exec "$node" bash -c \
+            dex exec "$node" bash -c \
               'P=$(systemctl show cra.service -p MainPID --value 2>/dev/null); \
                CRA_PID=$(cat /proc/$P/task/*/children 2>/dev/null | head -1 | tr -d " \n"); \
                if [ -n "$CRA_PID" ]; then \
@@ -682,51 +809,170 @@ jobs:
         run: timeout --signal=INT --kill-after=1m 35m make e2e-test-kubevirt
 
       - name: Collect grout debug logs
-        timeout-minutes: 8
+        timeout-minutes: 25
         if: failure() && matrix.flavor == 'grout'
         run: |
           mkdir -p /tmp/e2e-logs
-          for node in nwop-control-plane nwop-worker nwop-worker2; do
+          # A collector that overruns its step timeout is *cancelled*, which
+          # skips the upload below and loses every file it already gathered --
+          # the same evidence-loss this workflow is trying to fix. Per-command
+          # timeouts bound one hung call but not their sum, so the node loops
+          # also stop entering new iterations once the budget is spent and let
+          # the step finish normally with a partial set of logs.
+          COLLECT_DEADLINE=$((SECONDS + 480))
+          # Every collector call goes through this. It enforces a hard
+          # per-command bound -- SIGKILL after SIGTERM, so a command that
+          # ignores SIGTERM cannot stall the step either -- and the overall
+          # budget, returning success once that is spent so the remaining calls
+          # fall through instantly and the step still ends normally and uploads
+          # whatever it managed to gather.
+          dex() {
+            [ "$SECONDS" -ge "$COLLECT_DEADLINE" ] && return 0
+            timeout --kill-after=5s 30s docker "$@"
+          }
+          for node in nwop-control-plane nwop-worker nwop-worker2 nwop2-worker; do
+            if [ "$SECONDS" -ge "$COLLECT_DEADLINE" ]; then
+              echo "collection budget exhausted, skipping $node" >&2
+              break
+            fi
             for cmd in "interface show" "address show" "route show" "nexthop show"; do
-              docker exec "$node" bash -c \
+              dex exec "$node" bash -c \
                 "PATH=/usr/local/bin:\$PATH nerdctl -n hbr exec cra-grout grcli $cmd" \
                 >> "/tmp/e2e-logs/${node}-grcli.log" 2>&1 || true
             done
-            docker exec "$node" bash -c \
-              'PATH=/usr/local/bin:$PATH nerdctl -n hbr logs cra-grout' \
+            # The FRR view. The generic collector reaches FRR by entering the
+            # cra.service netns, which finds nothing on grout: there cra.service
+            # only launches a nerdctl container, so every one of those files
+            # comes back empty. FRR itself is unchanged -- grout replaces the
+            # datapath, not the routing daemon -- so the same commands are worth
+            # collecting, just via nerdctl.
+            for vc in "show bgp l2vpn evpn" "show bgp summary" "show run"; do
+              dex exec "$node" bash -c \
+                "PATH=/usr/local/bin:\$PATH nerdctl -n hbr exec cra-grout vtysh -c '$vc'" \
+                >> "/tmp/e2e-logs/${node}-cra-frr.log" 2>&1 || true
+            done
+            # cra-grout runs systemd, so grout/frr log to the container's own
+            # journal and `nerdctl logs` only ever returns PID 1's empty stdout.
+            dex exec "$node" bash -c \
+              'PATH=/usr/local/bin:$PATH nerdctl -n hbr exec cra-grout \
+                 journalctl -u grout.service -u grout-cra.service -u frr.service \
+                 --no-pager --lines=all' \
               > "/tmp/e2e-logs/${node}-grout.log" 2>&1 || true
+            dex exec "$node" bash -c \
+              'PATH=/usr/local/bin:$PATH nerdctl -n hbr logs cra-grout' \
+              > "/tmp/e2e-logs/${node}-grout-stdout.log" 2>&1 || true
+            # `journalctl -u grout.service` only works while the container is
+            # still up. If grout took the container down with it -- an OOM kill
+            # is the usual way -- the unit journal is unreachable and the only
+            # remaining evidence is the container's exit status and the node's
+            # kernel ring buffer.
+            dex exec "$node" bash -c \
+              'export PATH=/usr/local/bin:$PATH; \
+               nerdctl -n hbr ps -a; \
+               echo "--- container state ---"; \
+               nerdctl -n hbr inspect cra-grout --format "{{json .State}}"; \
+               echo "--- cgroup memory ---"; \
+               pid=$(nerdctl -n hbr inspect cra-grout --format "{{.State.Pid}}"); \
+               cg=""; \
+               if [ -n "$pid" ] && [ -r "/proc/$pid/cgroup" ]; then \
+                 echo "== /proc/$pid/cgroup"; cat "/proc/$pid/cgroup"; \
+                 cg=/sys/fs/cgroup$(awk -F: "/^0::/{print \$3}" "/proc/$pid/cgroup"); \
+               fi; \
+               for d in "$cg" /sys/fs/cgroup/system.slice/cra.service; do \
+                 [ -n "$d" ] || continue; \
+                 for f in memory.current memory.peak memory.max memory.events; do \
+                   [ -e "$d/$f" ] && { echo "== $d/$f"; cat "$d/$f"; }; \
+                 done; \
+               done; \
+               echo "--- meminfo ---"; head -n 5 /proc/meminfo; \
+               echo "--- dmesg ---"; dmesg -T | tail -n 300' \
+              > "/tmp/e2e-logs/${node}-cra-state.log" 2>&1 || true
+            # Under grout the CRA netns is the named netns `cra`; the frr-only
+            # `cra.service` PID walk used elsewhere finds nothing here, which is
+            # why those dumps came back empty.
+            dex exec "$node" bash -c \
+              'ip netns exec cra ip -d link show; echo "--- addrs ---"; \
+               ip netns exec cra ip addr show; echo "--- neigh ---"; \
+               ip netns exec cra ip -6 neigh show' \
+              > "/tmp/e2e-logs/${node}-cra-netns.log" 2>&1 || true
+            # Pods stall in ContainerCreating because multus cannot reach the API
+            # service VIP, and the node IP itself lives on the grout-backed `hbn`.
+            # Probe that exact path from the node.
+            dex exec "$node" bash -c \
+              'echo "=== route to the API VIP and to every node IP ==="; \
+               ip -6 route get fd10:96::1 2>&1; \
+               for n in 10 11 12; do ip -6 route get "fdcb:f93c:3a3e::$n" 2>&1; done; \
+               echo "=== hbn neighbours and counters ==="; \
+               ip -6 neigh show dev hbn 2>&1; ip -s link show dev hbn 2>&1; \
+               echo "=== service NAT ruleset ==="; \
+               { nft list ruleset 2>/dev/null || ip6tables-save -t nat 2>&1; } \
+                 | head -200; \
+               echo "=== reachability ==="; \
+               for t in "[fd10:96::1]:443" "[fdcb:f93c:3a3e::10]:6443" \
+                        "[fdcb:f93c:3a3e::11]:10250" "[fdcb:f93c:3a3e::12]:10250"; do \
+                 echo "--- $t ---"; \
+                 curl -gsk -o /dev/null -w "connect=%{time_connect} http=%{http_code}\n" \
+                   --connect-timeout 5 --max-time 10 "https://$t/livez" 2>&1 || true; \
+               done; \
+               echo "=== large-payload probe (PMTUD blackhole check) ==="; \
+               for n in 1200 1400 1452 1500; do \
+                 printf "size %s: " "$n"; \
+                 ping -6 -c2 -W2 -M do -s "$n" fdcb:f93c:3a3e::10 2>&1 | tail -2; \
+               done' \
+              > "/tmp/e2e-logs/${node}-api-vip-path.log" 2>&1 || true
           done
 
       - name: Collect debug logs
-        timeout-minutes: 8
+        timeout-minutes: 25
         if: failure()
         run: |
           mkdir -p /tmp/e2e-logs
+          # A collector that overruns its step timeout is *cancelled*, which
+          # skips the upload below and loses every file it already gathered --
+          # the same evidence-loss this workflow is trying to fix. Per-command
+          # timeouts bound one hung call but not their sum, so the node loops
+          # also stop entering new iterations once the budget is spent and let
+          # the step finish normally with a partial set of logs.
+          COLLECT_DEADLINE=$((SECONDS + 480))
+          # Every collector call goes through this. It enforces a hard
+          # per-command bound -- SIGKILL after SIGTERM, so a command that
+          # ignores SIGTERM cannot stall the step either -- and the overall
+          # budget, returning success once that is spent so the remaining calls
+          # fall through instantly and the step still ends normally and uploads
+          # whatever it managed to gather.
+          dex() {
+            [ "$SECONDS" -ge "$COLLECT_DEADLINE" ] && return 0
+            timeout --kill-after=5s 30s docker "$@"
+          }
           for node in nwop-control-plane nwop-worker nwop-worker2; do
-            docker exec "$node" journalctl -u cra.service --no-pager \
+            if [ "$SECONDS" -ge "$COLLECT_DEADLINE" ]; then
+              echo "collection budget exhausted, skipping $node" >&2
+              break
+            fi
+            dex exec "$node" journalctl -u cra.service --no-pager \
               > "/tmp/e2e-logs/${node}-cra.log" 2>&1 || true
-            docker exec "$node" bash -c \
+            dex exec "$node" bash -c \
               'P=$(systemctl show cra.service -p MainPID --value 2>/dev/null); \
                CRA_PID=$(cat /proc/$P/task/*/children 2>/dev/null | head -1 | tr -d " \n"); \
                [ -n "$CRA_PID" ] && nsenter -t $CRA_PID -m -n -- ip -d link show' \
               > "/tmp/e2e-logs/${node}-cra-links.log" 2>&1 || true
-            docker exec "$node" bash -c \
+            dex exec "$node" bash -c \
               'P=$(systemctl show cra.service -p MainPID --value 2>/dev/null); \
                CRA_PID=$(cat /proc/$P/task/*/children 2>/dev/null | head -1 | tr -d " \n"); \
                [ -n "$CRA_PID" ] && nsenter -t $CRA_PID -n -- ip route show table all' \
               > "/tmp/e2e-logs/${node}-cra-routes.log" 2>&1 || true
-            docker exec "$node" bash -c \
+            dex exec "$node" bash -c \
               'P=$(systemctl show cra.service -p MainPID --value 2>/dev/null); \
                CRA_PID=$(cat /proc/$P/task/*/children 2>/dev/null | head -1 | tr -d " \n"); \
                [ -n "$CRA_PID" ] && nsenter -t $CRA_PID -n -- sh -c \
                  "ip neigh show; ip -6 neigh show; ip -d addr show"' \
               > "/tmp/e2e-logs/${node}-cra-neigh.log" 2>&1 || true
-            docker exec "$node" bash -c \
+            dex exec "$node" bash -c \
               'P=$(systemctl show cra.service -p MainPID --value 2>/dev/null); \
                CRA_PID=$(cat /proc/$P/task/*/children 2>/dev/null | head -1 | tr -d " \n"); \
                [ -n "$CRA_PID" ] && nsenter -t $CRA_PID -m -n -- vtysh -c "show bgp summary"' \
               > "/tmp/e2e-logs/${node}-cra-bgp.log" 2>&1 || true
-            docker exec "$node" bash -c \
+            dex exec "$node" bash -c \
               'P=$(systemctl show cra.service -p MainPID --value 2>/dev/null); \
                CRA_PID=$(cat /proc/$P/task/*/children 2>/dev/null | head -1 | tr -d " \n"); \
                [ -n "$CRA_PID" ] && nsenter -t $CRA_PID -m -n -- vtysh \
@@ -734,28 +980,28 @@ jobs:
                  -c "show bgp ipv4 unicast neighbors eth1 advertised-routes" \
                  -c "show bgp ipv6 unicast neighbors eth1 advertised-routes"' \
               > "/tmp/e2e-logs/${node}-cra-bgp-tables.log" 2>&1 || true
-            docker exec "$node" bash -c \
+            dex exec "$node" bash -c \
               'P=$(systemctl show cra.service -p MainPID --value 2>/dev/null); \
                CRA_PID=$(cat /proc/$P/task/*/children 2>/dev/null | head -1 | tr -d " \n"); \
                [ -n "$CRA_PID" ] && nsenter -t $CRA_PID -m -n -- vtysh -c "show running-config"' \
               > "/tmp/e2e-logs/${node}-cra-running-config.log" 2>&1 || true
           done
-          docker exec nwop-control-plane kubectl \
+          dex exec nwop-control-plane kubectl \
             --kubeconfig=/etc/kubernetes/admin.conf get pods -A -o wide \
             > /tmp/e2e-logs/pods.log 2>&1 || true
-          docker exec nwop-control-plane kubectl \
+          dex exec nwop-control-plane kubectl \
             --kubeconfig=/etc/kubernetes/admin.conf get events -A \
             --sort-by='.lastTimestamp' > /tmp/e2e-logs/events.log 2>&1 || true
           # Routed-CNI state: the per-node attachments and what they rendered to
-          docker exec nwop-control-plane kubectl \
+          dex exec nwop-control-plane kubectl \
             --kubeconfig=/etc/kubernetes/admin.conf get nodeworkloadports -o yaml \
             > /tmp/e2e-logs/nodeworkloadports.yaml 2>&1 || true
-          docker exec nwop-control-plane kubectl \
+          dex exec nwop-control-plane kubectl \
             --kubeconfig=/etc/kubernetes/admin.conf get nodenetworkconfigs -o yaml \
             > /tmp/e2e-logs/nodenetworkconfigs.yaml 2>&1 || true
           # KubeVirt state
           for res in virtualmachines virtualmachineinstances kubevirt; do
-            docker exec nwop-control-plane kubectl \
+            dex exec nwop-control-plane kubectl \
               --kubeconfig=/etc/kubernetes/admin.conf get "$res" -A -o yaml \
               > "/tmp/e2e-logs/kubevirt-${res}.yaml" 2>&1 || true
           done
@@ -763,19 +1009,19 @@ jobs:
           # launcher logs only show it waiting for a domain that virt-handler
           # was never told to define. The reason is only visible here.
           for comp in virt-controller virt-handler virt-api virt-operator; do
-            docker exec nwop-control-plane kubectl \
+            dex exec nwop-control-plane kubectl \
               --kubeconfig=/etc/kubernetes/admin.conf -n kubevirt logs \
               -l "kubevirt.io=${comp}" --tail=-1 --prefix \
               > "/tmp/e2e-logs/kubevirt-${comp}.log" 2>&1 || true
           done
           # kubevirt.io/schedulable and the virt-handler heartbeat live here.
-          docker exec nwop-control-plane kubectl \
+          dex exec nwop-control-plane kubectl \
             --kubeconfig=/etc/kubernetes/admin.conf get nodes -o yaml \
             > /tmp/e2e-logs/kubevirt-nodes.yaml 2>&1 || true
           # kubectl logs has no -A/--all-namespaces, so resolve the namespace
           # from the pod first. --previous is collected too: when the launcher
           # crashes, the current container has no useful output.
-          docker exec nwop-control-plane bash -c \
+          dex exec nwop-control-plane bash -c \
             'set -- $(kubectl --kubeconfig=/etc/kubernetes/admin.conf get pods -A \
                -l kubevirt.io=virt-launcher \
                -o jsonpath="{.items[0].metadata.namespace} {.items[0].metadata.name}"); \
@@ -787,7 +1033,7 @@ jobs:
              kubectl --kubeconfig=/etc/kubernetes/admin.conf -n "$1" logs \
                "$2" --all-containers --previous --tail=-1' \
             > /tmp/e2e-logs/virt-launcher-logs.log 2>&1 || true
-          docker exec nwop-control-plane bash -c \
+          dex exec nwop-control-plane bash -c \
             'set -- $(kubectl --kubeconfig=/etc/kubernetes/admin.conf get pods -A \
                -l kubevirt.io=virt-launcher \
                -o jsonpath="{.items[0].metadata.namespace} {.items[0].metadata.name}"); \
@@ -796,22 +1042,22 @@ jobs:
                "ip addr show; ip route show; ip neigh show; ip -6 neigh show"' \
             > /tmp/e2e-logs/virt-launcher-netns.log 2>&1 || true
           # Guest console: shows the addresses cloud-init actually configured.
-          docker exec nwop-control-plane bash -c \
+          dex exec nwop-control-plane bash -c \
             'set -- $(kubectl --kubeconfig=/etc/kubernetes/admin.conf get pods -A \
                -l kubevirt.io=virt-launcher \
                -o jsonpath="{.items[0].metadata.namespace} {.items[0].metadata.name}"); \
              [ -n "$2" ] && kubectl --kubeconfig=/etc/kubernetes/admin.conf \
                -n "$1" logs "$2" -c guest-console-log --tail=-1' \
             > /tmp/e2e-logs/virt-launcher-console.log 2>&1 || true
-          docker exec nwop-control-plane bash -c \
+          dex exec nwop-control-plane bash -c \
             'kubectl --kubeconfig=/etc/kubernetes/admin.conf -n kube-system logs \
               -l app=cni-workload-installer --tail=-1' \
             > /tmp/e2e-logs/cni-workload-installer.log 2>&1 || true
           # Fabric view of the routed host routes
           for rtr in leaf1 leaf2 dcgw1 dcgw2; do
-            docker exec "clab-nwop-${rtr}" vtysh -c 'show bgp summary' \
+            dex exec "clab-nwop-${rtr}" vtysh -c 'show bgp summary' \
               > "/tmp/e2e-logs/${rtr}-bgp.log" 2>&1 || true
-            docker exec "clab-nwop-${rtr}" ip route show table all \
+            dex exec "clab-nwop-${rtr}" ip route show table all \
               > "/tmp/e2e-logs/${rtr}-ip-routes.log" 2>&1 || true
           done
 
@@ -920,50 +1166,119 @@ jobs:
         run: timeout --signal=INT --kill-after=1m 50m make e2e-test-kubevirt-vhostuser
 
       - name: Collect debug logs
-        timeout-minutes: 8
+        timeout-minutes: 25
         if: failure()
         run: |
           mkdir -p /tmp/e2e-logs
+          # A collector that overruns its step timeout is *cancelled*, which
+          # skips the upload below and loses every file it already gathered --
+          # the same evidence-loss this workflow is trying to fix. Per-command
+          # timeouts bound one hung call but not their sum, so the node loops
+          # also stop entering new iterations once the budget is spent and let
+          # the step finish normally with a partial set of logs.
+          COLLECT_DEADLINE=$((SECONDS + 480))
+          # Every collector call goes through this. It enforces a hard
+          # per-command bound -- SIGKILL after SIGTERM, so a command that
+          # ignores SIGTERM cannot stall the step either -- and the overall
+          # budget, returning success once that is spent so the remaining calls
+          # fall through instantly and the step still ends normally and uploads
+          # whatever it managed to gather.
+          dex() {
+            [ "$SECONDS" -ge "$COLLECT_DEADLINE" ] && return 0
+            timeout --kill-after=5s 30s docker "$@"
+          }
           K="kubectl --kubeconfig=/etc/kubernetes/admin.conf"
-          for node in nwop-control-plane nwop-worker nwop-worker2; do
+          for node in nwop-control-plane nwop-worker nwop-worker2 nwop2-worker; do
+            if [ "$SECONDS" -ge "$COLLECT_DEADLINE" ]; then
+              echo "collection budget exhausted, skipping $node" >&2
+              break
+            fi
             # grout state: the CRA is a nerdctl container, and its datapath is
             # invisible to ip/tcpdump on the node, so grcli is the only view.
             for cmd in "interface show" "address show" "route show" "nexthop show"; do
-              docker exec "$node" bash -c \
+              dex exec "$node" bash -c \
                 "PATH=/usr/local/bin:\$PATH nerdctl -n hbr exec cra-grout grcli $cmd" \
                 >> "/tmp/e2e-logs/${node}-grcli.log" 2>&1 || true
             done
-            docker exec "$node" journalctl -u cra.service --no-pager \
+            dex exec "$node" journalctl -u cra.service --no-pager \
               > "/tmp/e2e-logs/${node}-cra.log" 2>&1 || true
-            docker exec "$node" ls -lR /run/vsr-vhost-user /run/vsr-virtio-user \
+            # The FRR view. The generic collector reaches FRR by entering the
+            # cra.service netns, which finds nothing on grout: there cra.service
+            # only launches a nerdctl container, so every one of those files
+            # comes back empty. FRR itself is unchanged -- grout replaces the
+            # datapath, not the routing daemon -- so the same commands are worth
+            # collecting, just via nerdctl.
+            for vc in "show bgp l2vpn evpn" "show bgp summary" "show run"; do
+              dex exec "$node" bash -c \
+                "PATH=/usr/local/bin:\$PATH nerdctl -n hbr exec cra-grout vtysh -c '$vc'" \
+                >> "/tmp/e2e-logs/${node}-cra-frr.log" 2>&1 || true
+            done
+            # cra-grout runs systemd, so grout/frr log to the container's own
+            # journal and `nerdctl logs` only ever returns PID 1's empty stdout.
+            dex exec "$node" bash -c \
+              'PATH=/usr/local/bin:$PATH nerdctl -n hbr exec cra-grout \
+                 journalctl -u grout.service -u grout-cra.service -u frr.service \
+                 --no-pager --lines=all' \
+              > "/tmp/e2e-logs/${node}-grout.log" 2>&1 || true
+            # `journalctl -u grout.service` only works while the container is
+            # still up. If grout took the container down with it -- an OOM kill
+            # is the usual way -- the unit journal is unreachable and the only
+            # remaining evidence is the container's exit status and the node's
+            # kernel ring buffer.
+            dex exec "$node" bash -c \
+              'export PATH=/usr/local/bin:$PATH; \
+               nerdctl -n hbr ps -a; \
+               echo "--- container state ---"; \
+               nerdctl -n hbr inspect cra-grout --format "{{json .State}}"; \
+               echo "--- cgroup memory ---"; \
+               pid=$(nerdctl -n hbr inspect cra-grout --format "{{.State.Pid}}"); \
+               cg=""; \
+               if [ -n "$pid" ] && [ -r "/proc/$pid/cgroup" ]; then \
+                 echo "== /proc/$pid/cgroup"; cat "/proc/$pid/cgroup"; \
+                 cg=/sys/fs/cgroup$(awk -F: "/^0::/{print \$3}" "/proc/$pid/cgroup"); \
+               fi; \
+               for d in "$cg" /sys/fs/cgroup/system.slice/cra.service; do \
+                 [ -n "$d" ] || continue; \
+                 for f in memory.current memory.peak memory.max memory.events; do \
+                   [ -e "$d/$f" ] && { echo "== $d/$f"; cat "$d/$f"; }; \
+                 done; \
+               done; \
+               echo "--- meminfo ---"; head -n 5 /proc/meminfo; \
+               echo "--- dmesg ---"; dmesg -T | tail -n 300' \
+              > "/tmp/e2e-logs/${node}-cra-state.log" 2>&1 || true
+            dex exec "$node" bash -c \
+              'ip netns exec cra ip -d link show; echo "--- addrs ---"; \
+               ip netns exec cra ip addr show' \
+              > "/tmp/e2e-logs/${node}-cra-netns.log" 2>&1 || true
+            dex exec "$node" ls -lR /run/vsr-vhost-user /run/vsr-virtio-user \
               > "/tmp/e2e-logs/${node}-sockets.log" 2>&1 || true
           done
-          docker exec nwop-control-plane bash -c \
+          dex exec nwop-control-plane bash -c \
             "$K get nodenetworkconfig -o yaml" \
             > /tmp/e2e-logs/nodenetworkconfigs.yaml 2>&1 || true
-          docker exec nwop-control-plane bash -c \
+          dex exec nwop-control-plane bash -c \
             "$K get nodeworkloadports -o yaml" \
             > /tmp/e2e-logs/nodeworkloadports.yaml 2>&1 || true
-          docker exec nwop-control-plane bash -c \
+          dex exec nwop-control-plane bash -c \
             "$K get layer2attachments,networks -A -o yaml" \
             > /tmp/e2e-logs/intent-configs.yaml 2>&1 || true
-          docker exec nwop-control-plane bash -c \
+          dex exec nwop-control-plane bash -c \
             "$K -n kube-system logs -l app=vhostuser-device-plugin --tail=-1" \
             > /tmp/e2e-logs/device-plugin.log 2>&1 || true
           # The hook runs as a sidecar in the launcher, so its log is the only
           # evidence of what the domain looked like before libvirt saw it.
-          docker exec nwop-control-plane bash -c \
+          dex exec nwop-control-plane bash -c \
             "$K -n default logs -l kubevirt.io/vm=grout-vhostuser-vm -c hook-sidecar-0 --tail=-1" \
             > /tmp/e2e-logs/vhostuser-hook.log 2>&1 || true
-          docker exec nwop-control-plane bash -c \
+          dex exec nwop-control-plane bash -c \
             "$K -n default logs -l kubevirt.io/vm=grout-vhostuser-vm -c guest-console-log --tail=-1" \
             > /tmp/e2e-logs/guest-console.log 2>&1 || true
-          docker exec nwop-control-plane bash -c \
+          dex exec nwop-control-plane bash -c \
             "$K -n default get vmi,pods -o yaml" \
             > /tmp/e2e-logs/vmi.yaml 2>&1 || true
           # The CRA agent renders the NodeNetworkConfig into grout; when a
           # domain is never programmed, its grcli error appears only here.
-          docker exec nwop-control-plane bash -c \
+          dex exec nwop-control-plane bash -c \
             "$K -n kube-system logs \
               -l 'app.kubernetes.io/component in (agent-cra-frr,agent-cra-grout)' \
               --all-containers --prefix --tail=-1" \
@@ -971,17 +1286,21 @@ jobs:
           # A VMI that never leaves Pending was never advanced by virt-controller,
           # so the launcher only ever shows itself waiting for a domain.
           for comp in virt-controller virt-handler virt-api virt-operator; do
-            docker exec nwop-control-plane bash -c \
+            dex exec nwop-control-plane bash -c \
               "$K -n kubevirt logs -l kubevirt.io=${comp} --tail=-1 --prefix" \
               > "/tmp/e2e-logs/kubevirt-${comp}.log" 2>&1 || true
           done
-          docker exec nwop-control-plane bash -c "$K get nodes -o yaml" \
+          dex exec nwop-control-plane bash -c "$K get nodes -o yaml" \
             > /tmp/e2e-logs/kubevirt-nodes.yaml 2>&1 || true
-          docker exec nwop-control-plane bash -c \
+          dex exec nwop-control-plane bash -c \
             "$K get events -A --sort-by=.lastTimestamp" \
             > /tmp/e2e-logs/events.log 2>&1 || true
           for node in nwop-control-plane nwop-worker nwop-worker2; do
-            docker exec "$node" bash -c \
+            if [ "$SECONDS" -ge "$COLLECT_DEADLINE" ]; then
+              echo "collection budget exhausted, skipping $node" >&2
+              break
+            fi
+            dex exec "$node" bash -c \
               'ip -d link show; echo "--- addrs ---"; ip addr show' \
               > "/tmp/e2e-logs/${node}-node-links.log" 2>&1 || true
           done

@@ -17,7 +17,7 @@ ARG DSN=e2e/images/kind-node
 RUN apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       skopeo umoci systemd-container iputils-ping mtr-tiny iproute2 \
-      bridge-utils bpftool tcpdump curl netplan.io && \
+      bridge-utils bpftool tcpdump curl ca-certificates nftables netplan.io && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Disable udevadm (not functional in containers; netplan apply calls
