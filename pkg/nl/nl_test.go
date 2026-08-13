@@ -13,6 +13,7 @@ import (
 	. "github.com/onsi/gomega"
 	mock_nl "github.com/telekom/das-schiff-network-operator/pkg/nltoolkit/mock"
 	"github.com/vishvananda/netlink"
+	"github.com/vishvananda/netlink/nl"
 	"go.uber.org/mock/gomock"
 	"golang.org/x/sys/unix"
 )
@@ -540,7 +541,7 @@ var _ = Describe("ReconcileL2()", func() {
 		}
 
 		netlinkMock.EXPECT().LinkSetMTU(gomock.Any(), gomock.Any()).Return(nil).Times(4)
-		netlinkMock.EXPECT().ExecuteNetlinkRequest(gomock.Any(), gomock.Any(), gomock.Any()).Return([][]byte{}, nil)
+		netlinkMock.EXPECT().ExecuteNetlinkRequest(gomock.Any(), gomock.Any(), gomock.Any()).Return([][]byte{}, nil).Times(2)
 		netlinkMock.EXPECT().AddrList(gomock.Any(), gomock.Any()).Return(nil, errors.New("error listing addresses"))
 
 		err := nm.ReconcileL2(current, desired)
@@ -562,7 +563,7 @@ var _ = Describe("ReconcileL2()", func() {
 		}
 
 		netlinkMock.EXPECT().LinkSetMTU(gomock.Any(), gomock.Any()).Return(nil).Times(4)
-		netlinkMock.EXPECT().ExecuteNetlinkRequest(gomock.Any(), gomock.Any(), gomock.Any()).Return([][]byte{}, nil)
+		netlinkMock.EXPECT().ExecuteNetlinkRequest(gomock.Any(), gomock.Any(), gomock.Any()).Return([][]byte{}, nil).Times(2)
 		netlinkMock.EXPECT().AddrList(gomock.Any(), gomock.Any()).Return([]netlink.Addr{{IPNet: netlink.NewIPNet(net.ParseIP("2001::"))}}, nil)
 
 		err := nm.ReconcileL2(current, desired)
@@ -584,7 +585,7 @@ var _ = Describe("ReconcileL2()", func() {
 		}
 
 		netlinkMock.EXPECT().LinkSetMTU(gomock.Any(), gomock.Any()).Return(nil).Times(4)
-		netlinkMock.EXPECT().ExecuteNetlinkRequest(gomock.Any(), gomock.Any(), gomock.Any()).Return([][]byte{}, nil)
+		netlinkMock.EXPECT().ExecuteNetlinkRequest(gomock.Any(), gomock.Any(), gomock.Any()).Return([][]byte{}, nil).Times(2)
 		netlinkMock.EXPECT().AddrList(gomock.Any(), gomock.Any()).Return([]netlink.Addr{{IPNet: netlink.NewIPNet(net.IPv4(0, 0, 0, 0))}}, nil)
 		netlinkMock.EXPECT().LinkSetDown(gomock.Any()).Return(errors.New("unable to set link down"))
 
@@ -607,7 +608,7 @@ var _ = Describe("ReconcileL2()", func() {
 		}
 
 		netlinkMock.EXPECT().LinkSetMTU(gomock.Any(), gomock.Any()).Return(nil).Times(4)
-		netlinkMock.EXPECT().ExecuteNetlinkRequest(gomock.Any(), gomock.Any(), gomock.Any()).Return([][]byte{}, nil)
+		netlinkMock.EXPECT().ExecuteNetlinkRequest(gomock.Any(), gomock.Any(), gomock.Any()).Return([][]byte{}, nil).Times(2)
 		netlinkMock.EXPECT().AddrList(gomock.Any(), gomock.Any()).Return([]netlink.Addr{{IPNet: netlink.NewIPNet(net.IPv4(0, 0, 0, 0))}}, nil)
 		netlinkMock.EXPECT().LinkSetDown(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetHardwareAddr(gomock.Any(), gomock.Any()).Return(errors.New("unable to change MAC address"))
@@ -631,7 +632,7 @@ var _ = Describe("ReconcileL2()", func() {
 		}
 
 		netlinkMock.EXPECT().LinkSetMTU(gomock.Any(), gomock.Any()).Return(nil).Times(4)
-		netlinkMock.EXPECT().ExecuteNetlinkRequest(gomock.Any(), gomock.Any(), gomock.Any()).Return([][]byte{}, nil)
+		netlinkMock.EXPECT().ExecuteNetlinkRequest(gomock.Any(), gomock.Any(), gomock.Any()).Return([][]byte{}, nil).Times(2)
 		netlinkMock.EXPECT().AddrList(gomock.Any(), gomock.Any()).Return([]netlink.Addr{{IPNet: netlink.NewIPNet(net.IPv4(0, 0, 0, 0))}}, nil)
 		netlinkMock.EXPECT().LinkSetDown(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetHardwareAddr(gomock.Any(), gomock.Any()).Return(nil)
@@ -656,7 +657,7 @@ var _ = Describe("ReconcileL2()", func() {
 		}
 
 		netlinkMock.EXPECT().LinkSetMTU(gomock.Any(), gomock.Any()).Return(nil).Times(4)
-		netlinkMock.EXPECT().ExecuteNetlinkRequest(gomock.Any(), gomock.Any(), gomock.Any()).Return([][]byte{}, nil)
+		netlinkMock.EXPECT().ExecuteNetlinkRequest(gomock.Any(), gomock.Any(), gomock.Any()).Return([][]byte{}, nil).Times(2)
 		netlinkMock.EXPECT().AddrList(gomock.Any(), gomock.Any()).Return([]netlink.Addr{{IPNet: netlink.NewIPNet(net.IPv4(0, 0, 0, 0))}}, nil)
 		netlinkMock.EXPECT().LinkSetDown(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetHardwareAddr(gomock.Any(), gomock.Any()).Return(nil)
@@ -684,7 +685,7 @@ var _ = Describe("ReconcileL2()", func() {
 		}
 
 		netlinkMock.EXPECT().LinkSetMTU(gomock.Any(), gomock.Any()).Return(nil).Times(4)
-		netlinkMock.EXPECT().ExecuteNetlinkRequest(gomock.Any(), gomock.Any(), gomock.Any()).Return([][]byte{}, nil)
+		netlinkMock.EXPECT().ExecuteNetlinkRequest(gomock.Any(), gomock.Any(), gomock.Any()).Return([][]byte{}, nil).Times(2)
 		netlinkMock.EXPECT().AddrList(gomock.Any(), gomock.Any()).Return([]netlink.Addr{{IPNet: netlink.NewIPNet(net.IPv4(0, 0, 0, 0))}}, nil)
 		netlinkMock.EXPECT().LinkSetDown(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetHardwareAddr(gomock.Any(), gomock.Any()).Return(nil)
@@ -713,7 +714,7 @@ var _ = Describe("ReconcileL2()", func() {
 		}
 
 		netlinkMock.EXPECT().LinkSetMTU(gomock.Any(), gomock.Any()).Return(nil).Times(4)
-		netlinkMock.EXPECT().ExecuteNetlinkRequest(gomock.Any(), gomock.Any(), gomock.Any()).Return([][]byte{}, nil)
+		netlinkMock.EXPECT().ExecuteNetlinkRequest(gomock.Any(), gomock.Any(), gomock.Any()).Return([][]byte{}, nil).Times(2)
 		netlinkMock.EXPECT().AddrList(gomock.Any(), gomock.Any()).Return([]netlink.Addr{{IPNet: netlink.NewIPNet(net.IPv4(0, 0, 0, 0))}}, nil)
 		netlinkMock.EXPECT().LinkSetDown(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetHardwareAddr(gomock.Any(), gomock.Any()).Return(nil)
@@ -746,7 +747,7 @@ var _ = Describe("ReconcileL2()", func() {
 		}
 
 		netlinkMock.EXPECT().LinkSetMTU(gomock.Any(), gomock.Any()).Return(nil).Times(4)
-		netlinkMock.EXPECT().ExecuteNetlinkRequest(gomock.Any(), gomock.Any(), gomock.Any()).Return([][]byte{}, nil)
+		netlinkMock.EXPECT().ExecuteNetlinkRequest(gomock.Any(), gomock.Any(), gomock.Any()).Return([][]byte{}, nil).Times(2)
 		netlinkMock.EXPECT().AddrList(gomock.Any(), gomock.Any()).Return([]netlink.Addr{{IPNet: netlink.NewIPNet(net.IPv4(0, 0, 0, 0))}}, nil)
 		netlinkMock.EXPECT().LinkSetDown(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetHardwareAddr(gomock.Any(), gomock.Any()).Return(nil)
@@ -775,7 +776,7 @@ var _ = Describe("ReconcileL2()", func() {
 		}
 
 		netlinkMock.EXPECT().LinkSetMTU(gomock.Any(), gomock.Any()).Return(nil).Times(4)
-		netlinkMock.EXPECT().ExecuteNetlinkRequest(gomock.Any(), gomock.Any(), gomock.Any()).Return([][]byte{}, nil)
+		netlinkMock.EXPECT().ExecuteNetlinkRequest(gomock.Any(), gomock.Any(), gomock.Any()).Return([][]byte{}, nil).Times(2)
 		netlinkMock.EXPECT().AddrList(gomock.Any(), gomock.Any()).Return([]netlink.Addr{{IPNet: netlink.NewIPNet(net.IPv4(0, 0, 0, 0))}}, nil)
 		netlinkMock.EXPECT().LinkSetDown(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetHardwareAddr(gomock.Any(), gomock.Any()).Return(nil)
@@ -805,7 +806,7 @@ var _ = Describe("ReconcileL2()", func() {
 		}
 
 		netlinkMock.EXPECT().LinkSetMTU(gomock.Any(), gomock.Any()).Return(nil).Times(4)
-		netlinkMock.EXPECT().ExecuteNetlinkRequest(gomock.Any(), gomock.Any(), gomock.Any()).Return([][]byte{}, nil)
+		netlinkMock.EXPECT().ExecuteNetlinkRequest(gomock.Any(), gomock.Any(), gomock.Any()).Return([][]byte{}, nil).Times(2)
 		netlinkMock.EXPECT().AddrList(gomock.Any(), gomock.Any()).Return([]netlink.Addr{{IPNet: netlink.NewIPNet(net.IPv4(0, 0, 0, 0))}}, nil)
 		netlinkMock.EXPECT().LinkSetDown(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetHardwareAddr(gomock.Any(), gomock.Any()).Return(nil)
@@ -836,7 +837,7 @@ var _ = Describe("ReconcileL2()", func() {
 		}
 
 		netlinkMock.EXPECT().LinkSetMTU(gomock.Any(), gomock.Any()).Return(nil).Times(4)
-		netlinkMock.EXPECT().ExecuteNetlinkRequest(gomock.Any(), gomock.Any(), gomock.Any()).Return([][]byte{}, nil)
+		netlinkMock.EXPECT().ExecuteNetlinkRequest(gomock.Any(), gomock.Any(), gomock.Any()).Return([][]byte{}, nil).Times(2)
 		netlinkMock.EXPECT().AddrList(gomock.Any(), gomock.Any()).Return([]netlink.Addr{{IPNet: netlink.NewIPNet(net.IPv4(0, 0, 0, 0))}}, nil)
 		netlinkMock.EXPECT().LinkSetDown(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetHardwareAddr(gomock.Any(), gomock.Any()).Return(nil)
@@ -868,7 +869,7 @@ var _ = Describe("ReconcileL2()", func() {
 		}
 
 		netlinkMock.EXPECT().LinkSetMTU(gomock.Any(), gomock.Any()).Return(nil).Times(4)
-		netlinkMock.EXPECT().ExecuteNetlinkRequest(gomock.Any(), gomock.Any(), gomock.Any()).Return([][]byte{}, nil)
+		netlinkMock.EXPECT().ExecuteNetlinkRequest(gomock.Any(), gomock.Any(), gomock.Any()).Return([][]byte{}, nil).Times(2)
 		netlinkMock.EXPECT().AddrList(gomock.Any(), gomock.Any()).Return([]netlink.Addr{{IPNet: netlink.NewIPNet(net.IPv4(0, 0, 0, 0))}}, nil)
 		netlinkMock.EXPECT().LinkSetDown(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetHardwareAddr(gomock.Any(), gomock.Any()).Return(nil)
@@ -901,7 +902,7 @@ var _ = Describe("ReconcileL2()", func() {
 		}
 
 		netlinkMock.EXPECT().LinkSetMTU(gomock.Any(), gomock.Any()).Return(nil).Times(4)
-		netlinkMock.EXPECT().ExecuteNetlinkRequest(gomock.Any(), gomock.Any(), gomock.Any()).Return([][]byte{}, nil)
+		netlinkMock.EXPECT().ExecuteNetlinkRequest(gomock.Any(), gomock.Any(), gomock.Any()).Return([][]byte{}, nil).Times(2)
 		netlinkMock.EXPECT().AddrList(gomock.Any(), gomock.Any()).Return([]netlink.Addr{{IPNet: netlink.NewIPNet(net.IPv4(0, 0, 0, 0))}}, nil)
 		netlinkMock.EXPECT().LinkSetDown(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetHardwareAddr(gomock.Any(), gomock.Any()).Return(nil)
@@ -935,7 +936,7 @@ var _ = Describe("ReconcileL2()", func() {
 		}
 
 		netlinkMock.EXPECT().LinkSetMTU(gomock.Any(), gomock.Any()).Return(nil).Times(4)
-		netlinkMock.EXPECT().ExecuteNetlinkRequest(gomock.Any(), gomock.Any(), gomock.Any()).Return([][]byte{}, nil)
+		netlinkMock.EXPECT().ExecuteNetlinkRequest(gomock.Any(), gomock.Any(), gomock.Any()).Return([][]byte{}, nil).Times(2)
 		netlinkMock.EXPECT().AddrList(gomock.Any(), gomock.Any()).Return([]netlink.Addr{{IPNet: netlink.NewIPNet(net.IPv4(0, 0, 0, 0))}}, nil)
 		netlinkMock.EXPECT().LinkSetDown(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetHardwareAddr(gomock.Any(), gomock.Any()).Return(nil)
@@ -1019,7 +1020,7 @@ var _ = Describe("ReconcileL2()", func() {
 		netlinkMock.EXPECT().LinkSetLearning(gomock.Any(), gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetUp(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkAdd(gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().ExecuteNetlinkRequest(gomock.Any(), gomock.Any(), gomock.Any()).Return([][]byte{}, nil)
+		netlinkMock.EXPECT().ExecuteNetlinkRequest(gomock.Any(), gomock.Any(), gomock.Any()).Return([][]byte{}, nil).Times(2)
 		netlinkMock.EXPECT().AddrAdd(gomock.Any(), gomock.Any()).Return(errors.New("cannot add address"))
 
 		vlanName := fmt.Sprintf("%s%d", layer2Prefix, current.VlanID)
@@ -1089,7 +1090,7 @@ var _ = Describe("ReconcileL2()", func() {
 		netlinkMock.EXPECT().LinkSetLearning(gomock.Any(), gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetUp(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkAdd(gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().ExecuteNetlinkRequest(gomock.Any(), gomock.Any(), gomock.Any()).Return([][]byte{}, nil)
+		netlinkMock.EXPECT().ExecuteNetlinkRequest(gomock.Any(), gomock.Any(), gomock.Any()).Return([][]byte{}, nil).Times(2)
 		netlinkMock.EXPECT().AddrAdd(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 		netlinkMock.EXPECT().AddrDel(gomock.Any(), gomock.Any()).Return(errors.New("cannot delete address"))
 
@@ -1152,7 +1153,7 @@ var _ = Describe("ReconcileL2()", func() {
 		netlinkMock.EXPECT().LinkSetLearning(gomock.Any(), gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkSetUp(gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().LinkAdd(gomock.Any()).Return(nil)
-		netlinkMock.EXPECT().ExecuteNetlinkRequest(gomock.Any(), gomock.Any(), gomock.Any()).Return([][]byte{}, nil)
+		netlinkMock.EXPECT().ExecuteNetlinkRequest(gomock.Any(), gomock.Any(), gomock.Any()).Return([][]byte{}, nil).Times(2)
 		netlinkMock.EXPECT().AddrAdd(gomock.Any(), gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().AddrDel(gomock.Any(), gomock.Any()).Return(nil)
 		netlinkMock.EXPECT().AddrList(gomock.Any(), gomock.Eq(unix.AF_INET6)).Return([]netlink.Addr{{IPNet: netlink.NewIPNet(net.ParseIP("2a01::1")), Flags: unix.IFA_F_DADFAILED}}, nil)
@@ -1189,6 +1190,51 @@ var _ = Describe("ReconcileL2()", func() {
 		Expect(err).ToNot(HaveOccurred())
 
 		procSysNetPath = oldProcSysNetPath
+	})
+})
+
+var _ = Describe("setMTU()", func() {
+	It("caps GRO/GSO on both the bridge and the bridge-side veth", func() {
+		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
+		nm := NewManager(netlinkMock)
+		current := &Layer2Information{
+			bridge:        &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{Index: 11}},
+			vxlan:         &netlink.Vxlan{LinkAttrs: netlink.LinkAttrs{Index: 12}},
+			macvlanBridge: &netlink.Veth{LinkAttrs: netlink.LinkAttrs{Index: 13}},
+			macvlanHost:   &netlink.Veth{LinkAttrs: netlink.LinkAttrs{Index: 14}},
+		}
+		desired := &Layer2Information{
+			MTU:                 1399,
+			DisableSegmentation: true,
+		}
+
+		cappedIndexes := []int32{}
+		netlinkMock.EXPECT().LinkSetMTU(gomock.Any(), gomock.Any()).Return(nil).Times(4)
+		netlinkMock.EXPECT().ExecuteNetlinkRequest(gomock.Any(), gomock.Any(), gomock.Any()).
+			DoAndReturn(func(req *nl.NetlinkRequest, _ int, _ uint16) ([][]byte, error) {
+				msg, ok := req.Data[0].(*nl.IfInfomsg)
+				Expect(ok).To(BeTrue())
+				cappedIndexes = append(cappedIndexes, msg.Index)
+				return [][]byte{}, nil
+			}).Times(2)
+
+		Expect(nm.setMTU(current, desired)).To(Succeed())
+		Expect(cappedIndexes).To(ConsistOf(int32(11), int32(13)))
+	})
+	It("only caps the bridge if no veth exists yet", func() {
+		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
+		nm := NewManager(netlinkMock)
+		current := &Layer2Information{
+			bridge: &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{Index: 11}},
+			vxlan:  &netlink.Vxlan{LinkAttrs: netlink.LinkAttrs{Index: 12}},
+		}
+		desired := &Layer2Information{MTU: 1399}
+
+		netlinkMock.EXPECT().LinkSetMTU(gomock.Any(), gomock.Any()).Return(nil).Times(2)
+		netlinkMock.EXPECT().ExecuteNetlinkRequest(gomock.Any(), gomock.Any(), gomock.Any()).
+			Return([][]byte{}, nil).Times(1)
+
+		Expect(nm.setMTU(current, desired)).To(Succeed())
 	})
 })
 
