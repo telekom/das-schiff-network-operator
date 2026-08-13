@@ -180,9 +180,17 @@ func waitForResource(cpName, kubeconfigPath, resource string) error {
 // device request, a hook sidecar that rejects the domain -- so the wait reports
 // what it last saw rather than just timing out.
 func waitForNamedVMIRunning(cpName, kubeconfigPath, name string) error {
+	// DockerExec merges stderr into its output, so a kubectl that failed would
+	// otherwise be reported as the value that was asked for -- and indexing an
+	// empty list is exactly such a failure, which is what the launcher query
+	// below does whenever no pod exists yet. Keep the error and report nothing
+	// rather than kubectl's complaint.
 	kget := func(args ...string) string {
 		full := append([]string{"kubectl", "--kubeconfig=" + kubeconfigPath, "-n", "default"}, args...)
-		out, _ := DockerExec(cpName, full...)
+		out, err := DockerExec(cpName, full...)
+		if err != nil {
+			return ""
+		}
 		return strings.TrimSpace(out)
 	}
 
@@ -197,7 +205,7 @@ func waitForNamedVMIRunning(cpName, kubeconfigPath, name string) error {
 			"jsonpath={.status.conditions[?(@.type=='Synchronized')].message}")
 		if lastReason == "" {
 			lastReason = kget("get", "pods", "-l", "kubevirt.io/vm="+name,
-				"-o", "jsonpath={.items[0].status.conditions[?(@.type=='PodScheduled')].message}")
+				"-o", "jsonpath={.items[*].status.conditions[?(@.type=='PodScheduled')].message}")
 		}
 		Logf("  %s: phase %q %s", name, lastPhase, lastReason)
 		return false, nil

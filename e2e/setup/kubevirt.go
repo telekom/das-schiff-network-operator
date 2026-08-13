@@ -114,66 +114,181 @@ func PhaseKubeVirt(cluster *Cluster, repoRoot string) error {
 	return nil
 }
 
-// vmiStartAttempts bounds how often a wedged VM start is retried before the
-// phase gives up. A healthy VMI reaches Running in one to two minutes, and the
-// wait already aborts early once the launcher pod reaches a terminal phase, so
-// the full budget is only ever burnt by a VMI that virt-controller never
-// advances -- a state that does not recover on its own. Keeping the ceiling at
-// two short attempts leaves the job enough time to collect debug artifacts.
+// vmiStartRestarts bounds how often a wedged VM start is restarted before the
+// phase gives up. A healthy VMI reaches Running in one to two minutes, and a
+// launcher that has reached a terminal phase is never going to bring the VMI
+// up, so the restarts are only ever spent on that -- two of them, because a
+// wedged launcher is detected in seconds and the overall deadline below is what
+// really bounds the wait.
+//
+// vmiStartTimeout is the budget for the whole wait rather than per attempt. The
+// guest boots under software emulation on a machine that is also running three
+// CRAs and a two-cluster lab, and a per-attempt slice ends up throwing away a
+// VMI that was merely slow: one had just got its containers started when its
+// five-minute slice ran out, and its replacement then had to start from
+// nothing. A restart only helps a launcher that is never going to come up, so
+// restart on exactly that and let a slow one keep going. The trade-off is that
+// a VMI stuck in Pending *without* a terminal launcher now burns the whole
+// budget instead of being kicked halfway through; that kick never once helped,
+// and the step it runs in allows 60 minutes.
 const (
-	vmiStartAttempts = 2
-	vmiStartTimeout  = 5 * time.Minute
+	vmiStartRestarts = 2
+	vmiStartTimeout  = 12 * time.Minute
 	vmiPollInterval  = 10 * time.Second
+	// Every kubectl call is bounded. Nothing here runs under a context, so an
+	// API server that stops answering would otherwise park the phase in a
+	// single `kubectl` for as long as the job is allowed to run, and the
+	// deadline below -- which is only consulted between calls -- would never be
+	// reached.
+	vmiKubectlTimeout = 30 * time.Second
+	vmiDeleteTimeout  = 2 * time.Minute
 )
+
+// vmLauncherSelector matches only the launcher pods of the routed VM.
+// `kubevirt.io/vm` is the label the VM template sets (see
+// e2e/kubevirt/manifests/virtualmachine.yaml); `kubevirt.io=virt-launcher` keeps
+// out anything else that might carry it.
+const vmLauncherSelector = "kubevirt.io/vm=routed-vm,kubevirt.io=virt-launcher"
 
 // waitForVMIRunning waits for the routed-vm VMI to reach Running, restarting it
 // if its launcher pod died before the domain was ever defined. It polls
-// directly rather than via WaitFor because it must abort a wedged attempt
-// early instead of burning the whole timeout.
+// directly rather than via WaitFor because it must abort a wedged start early
+// instead of burning the whole timeout.
 func waitForVMIRunning(cpName, kubeconfigPath string) error {
-	kget := func(args ...string) string {
-		full := append([]string{"kubectl", "--kubeconfig=" + kubeconfigPath, "-n", "default"}, args...)
-		out, _ := DockerExec(cpName, full...)
-		return strings.TrimSpace(out)
+	deadline := time.Now().Add(vmiStartTimeout)
+
+	// A single API call is bounded by the per-call ceiling *and* by what is left
+	// of the overall budget, so that a server which has stopped answering
+	// cannot push the phase past its deadline by one full call per query. The
+	// one-second floor keeps the argument valid once the budget is spent; the
+	// loop returns before issuing another call anyway.
+	kubectlTimeout := func() time.Duration {
+		left := time.Until(deadline)
+		if left >= vmiKubectlTimeout {
+			return vmiKubectlTimeout
+		}
+		if left < time.Second {
+			return time.Second
+		}
+		return left
+	}
+	// DockerExec folds stderr into its output, so a failed kubectl would hand
+	// back its error text as if it were the queried value. Every caller here
+	// compares that value against something meaningful, so the error is kept
+	// separate and the reading is only trusted when the call actually
+	// succeeded.
+	kget := func(args ...string) (string, error) {
+		full := append([]string{
+			"kubectl", "--kubeconfig=" + kubeconfigPath, "-n", "default",
+			"--request-timeout=" + kubectlTimeout().String(),
+		}, args...)
+		out, err := DockerExec(cpName, full...)
+		return strings.TrimSpace(out), err
+	}
+	// Launchers are selected by the VM they belong to, not by the generic
+	// `kubevirt.io=virt-launcher` role: the vhost-user job runs a second VM in
+	// the same namespace, and indexing into every launcher in the cluster picks
+	// an arbitrary one of them. Every matching pod's phase is reported rather
+	// than the first, because a restart legitimately overlaps two of them.
+	launcherPhases := func() string {
+		out, err := kget("get", "pods", "-l", vmLauncherSelector,
+			"-o", "jsonpath={.items[*].status.phase}")
+		if err != nil {
+			return ""
+		}
+		return out
+	}
+	// A launcher that reached Failed is never going to bring its VMI up. It is
+	// looked up by name so the restart can wait for that exact pod to go away:
+	// the VM has `runStrategy: Always`, so virt-controller may well have built
+	// the replacement before the kubelet has finished collecting its
+	// predecessor, and waiting for *no* launcher to exist would then reject a
+	// perfectly healthy one.
+	//
+	// The name is matched with `.items[*]` rather than `.items[0]`, because
+	// jsonpath treats indexing an empty list as an error -- and no launcher has
+	// failed for as long as the VM is healthy, which is the overwhelmingly
+	// common case. Any name is as good as any other: they are all failed, and
+	// the wait below simply follows whichever one was reported.
+	failedLauncher := func() string {
+		out, err := kget("get", "pods", "-l", vmLauncherSelector,
+			"--field-selector=status.phase=Failed",
+			"-o", "jsonpath={.items[*].metadata.name}")
+		if err != nil {
+			return ""
+		}
+		if names := strings.Fields(out); len(names) > 0 {
+			return names[0]
+		}
+		return ""
+	}
+	// A query that did not succeed says nothing about the pod, so it is not
+	// taken as proof that it is gone; the wait around this is bounded anyway.
+	podGone := func(name string) bool {
+		out, err := kget("get", "pod", name, "--ignore-not-found",
+			"-o", "jsonpath={.metadata.name}")
+		return err == nil && out == ""
 	}
 
-	var lastPhase string
-	for attempt := 1; attempt <= vmiStartAttempts; attempt++ {
-		Logf("Waiting for routed-vm VMI to be Running (attempt %d/%d)...", attempt, vmiStartAttempts)
+	restarts := 0
+	var lastPhase, launcher string
 
-		deadline := time.Now().Add(vmiStartTimeout)
-		wedged := false
-		for {
-			lastPhase = kget("get", "vmi", "routed-vm", "-o", "jsonpath={.status.phase}")
-			if lastPhase == "Running" {
-				return nil
-			}
-			// A launcher that reached a terminal phase can never bring the VMI
-			// up; retrying immediately is much cheaper than waiting it out.
-			launcher := kget("get", "pods", "-l", "kubevirt.io=virt-launcher",
-				"-o", "jsonpath={.items[0].status.phase}")
-			if launcher == "Failed" || launcher == "Succeeded" {
-				wedged = true
-				Logf("  launcher pod is %s while VMI is %q", launcher, lastPhase)
-				break
-			}
-			if time.Now().After(deadline) {
-				break
-			}
-			Logf("  waiting for routed-vm VMI... (phase %q, launcher %q)", lastPhase, launcher)
-			time.Sleep(vmiPollInterval)
+	// Neither the delete nor the wait that follows it may run past the overall
+	// budget: a restart that begins with seconds left would otherwise add
+	// minutes to a wait that is supposed to be bounded. Clamp each of them to
+	// what is actually left, recomputed at the point of use.
+	remaining := func() time.Duration {
+		left := time.Until(deadline)
+		if left > vmiDeleteTimeout {
+			return vmiDeleteTimeout
 		}
-
-		if attempt == vmiStartAttempts {
-			return fmt.Errorf("routed-vm VMI not Running after %d attempts (last phase %q, wedged=%t)",
-				vmiStartAttempts, lastPhase, wedged)
-		}
-		Logf("VM start did not complete (phase %q); restarting routed-vm...", lastPhase)
-		if _, err := DockerExec(cpName, "kubectl", "--kubeconfig="+kubeconfigPath,
-			"-n", "default", "delete", "vmi", "routed-vm",
-			"--ignore-not-found", "--wait=true"); err != nil {
-			return fmt.Errorf("restarting routed-vm after a wedged start: %w", err)
-		}
+		return left
 	}
-	return nil
+
+	for {
+		// Checked before any call rather than after, so an expired budget
+		// cannot buy another round of queries.
+		if time.Now().After(deadline) {
+			return fmt.Errorf(
+				"routed-vm VMI not Running after %s (last phase %q, launchers %q, %d restarts)",
+				vmiStartTimeout, lastPhase, launcher, restarts)
+		}
+		lastPhase, _ = kget("get", "vmi", "routed-vm", "-o", "jsonpath={.status.phase}")
+		if lastPhase == "Running" {
+			return nil
+		}
+		launcher = launcherPhases()
+
+		// An absent launcher is the normal state right after a restart and must
+		// not count as one, so only a pod that actually reached Failed does.
+		if failed := failedLauncher(); failed != "" &&
+			restarts < vmiStartRestarts && remaining() > 0 {
+			restarts++
+			Logf("  launcher %s is Failed while VMI is %q; restarting routed-vm (%d/%d)",
+				failed, lastPhase, restarts, vmiStartRestarts)
+			if _, err := DockerExec(cpName, "kubectl", "--kubeconfig="+kubeconfigPath,
+				"-n", "default", "delete", "vmi", "routed-vm",
+				"--ignore-not-found", "--wait=true",
+				"--timeout="+remaining().String(),
+				"--request-timeout="+remaining().String()); err != nil {
+				return fmt.Errorf("restarting routed-vm after a wedged start: %w", err)
+			}
+			// `delete vmi --wait` returns once the VMI is gone, but its launcher
+			// pod is removed by the garbage collector afterwards. Letting the
+			// loop run straight on would find that same dead pod and spend the
+			// remaining restarts on a VMI that no longer exists.
+			if left := remaining(); left > 0 {
+				if err := WaitFor("launcher "+failed+" to be collected",
+					left, vmiPollInterval, func() (bool, error) {
+						return podGone(failed), nil
+					}); err != nil {
+					return fmt.Errorf("restarting routed-vm: %w", err)
+				}
+			}
+			continue
+		}
+
+		Logf("  waiting for routed-vm VMI... (phase %q, launchers %q)", lastPhase, launcher)
+		time.Sleep(vmiPollInterval)
+	}
 }

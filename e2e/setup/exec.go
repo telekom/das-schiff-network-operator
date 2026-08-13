@@ -3,9 +3,11 @@ package setup
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -63,6 +65,40 @@ func RunCmdOutput(name string, args ...string) (string, error) {
 		return "", fmt.Errorf("%s %v: %w", name, args, err)
 	}
 	return strings.TrimSpace(out.String()), nil
+}
+
+// RunCmdCombined runs a host command, forwards its output so it still appears
+// inline in the job log, and returns stdout and stderr together on failure. Use
+// it where the command's own message is the diagnosis -- a registry error, say
+// -- and would otherwise be reduced to "exit status 1" by the time it reaches
+// the caller.
+func RunCmdCombined(name string, args ...string) (string, error) {
+	cmd := exec.Command(name, args...)
+	// os/exec writes the two streams from separate goroutines, so the shared
+	// buffer has to be synchronised.
+	out := &lockedBuffer{}
+	cmd.Stdout = io.MultiWriter(os.Stdout, out)
+	cmd.Stderr = io.MultiWriter(os.Stderr, out)
+	err := cmd.Run()
+	return strings.TrimSpace(out.String()), err
+}
+
+// lockedBuffer is a bytes.Buffer that is safe for concurrent writers.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
 
 // WaitFor polls fn every interval until it returns true or timeout expires.

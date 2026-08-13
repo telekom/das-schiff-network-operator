@@ -310,6 +310,30 @@ func PhaseContainerlab(repoRoot string) error {
 		"containerlab", "deploy", "--topo", "topology.clab.yml",
 	)
 
+	// `docker run` pulls the containerlab image on first use, and that pull is
+	// the one registry round-trip in the whole bring-up that nothing retries:
+	// a single `context deadline exceeded` against ghcr.io fails the job before
+	// a single container exists. Pull it separately, with retries, so a
+	// transient registry hiccup costs a few seconds instead of the run. The
+	// last pull's own output is kept and reported, so a reference that is not
+	// transiently but permanently unpullable still says why rather than
+	// reducing to "exit status 1" behind a generic timeout.
+	var pullOut string
+	var pullErr error
+	if err := WaitFor("containerlab image pull", 3*time.Minute, 10*time.Second,
+		func() (bool, error) {
+			if _, err := RunCmdOutput("docker", "image", "inspect", clabImage); err == nil {
+				return true, nil
+			}
+			pullOut, pullErr = RunCmdCombined("docker", "pull", clabImage)
+			return pullErr == nil, nil
+		}); err != nil {
+		if pullErr != nil {
+			return fmt.Errorf("pulling %s: %w: %s", clabImage, pullErr, pullOut)
+		}
+		return fmt.Errorf("pulling %s: %w", clabImage, err)
+	}
+
 	return RunCmd("docker", args...)
 }
 
