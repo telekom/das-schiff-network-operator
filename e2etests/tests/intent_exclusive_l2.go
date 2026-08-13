@@ -47,7 +47,7 @@ var _ = Describe("Intent-Exclusive: L2 Connectivity", Label("intent-exclusive", 
 		Expect(err).NotTo(HaveOccurred())
 		Expect(f.ApplyManifest(ctx, l2aManifest)).To(Succeed())
 		DeferCleanup(func() {
-			_ = f.DeleteManifest(context.Background(), l2aManifest)
+			releaseIntentManifest(context.Background(), f, l2aManifest)
 		})
 
 		By("Waiting for NNC to contain VRF m2m on both worker nodes")

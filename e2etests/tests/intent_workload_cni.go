@@ -70,6 +70,16 @@ var _ = Describe("Intent: Workload CNI attachments", Label("intent", "workloadcn
 		Expect(err).NotTo(HaveOccurred())
 		Expect(f.ApplyManifest(ctx, base)).To(Succeed())
 
+		// The workload-CNI NADs reference their Layer2Attachments by name, so
+		// the base attachments have to be the ones that actually own VLAN 501
+		// and 502 on the node. Other intent specs claim the same networks, and
+		// Ginkgo's per-seed ordering decides which of them is still around.
+		By("Evicting competing Layer2Attachments for VLAN 501 and 502")
+		Expect(f.ReleaseCompetingLayer2Attachments(ctx, "default",
+			[]string{"net-vlan501", "net-vlan502"},
+			[]string{"l2a-base-vlan501", "l2a-base-vlan502"},
+			2*time.Minute)).To(Succeed())
+
 		By("Applying macvlan NADs for the peer pods")
 		nad, err := readTestdata("l2-connectivity/nad.yaml")
 		Expect(err).NotTo(HaveOccurred())

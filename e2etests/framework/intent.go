@@ -512,3 +512,70 @@ func NNCFabricVRFImportHasPrefix(nnc *unstructured.Unstructured, vrfName, fromVR
 	}
 	return false
 }
+
+// ReleaseCompetingLayer2Attachments deletes every Layer2Attachment in ns that
+// claims one of the given networks, except those named in keep, and waits until
+// they are really gone.
+//
+// A VLAN has exactly one owning Layer2Attachment per node, and the intent
+// builder picks a single winner among the claimants. Around ten intent fixtures
+// claim net-vlan501 alone, and Ginkgo randomises the order of top-level
+// containers per seed, so a spec that references an attachment *by name* cannot
+// assume it won: it has to evict the other claimants first. Without this, the
+// suite passes or fails depending on the seed.
+func (f *Framework) ReleaseCompetingLayer2Attachments(
+	ctx context.Context, ns string, networks, keep []string, timeout time.Duration,
+) error {
+	gvk := schema.GroupVersionKind{Group: intentAPIGroup, Version: "v1alpha1", Kind: "Layer2AttachmentList"}
+
+	wanted := make(map[string]bool, len(networks))
+	for _, n := range networks {
+		wanted[n] = true
+	}
+	kept := make(map[string]bool, len(keep))
+	for _, n := range keep {
+		kept[n] = true
+	}
+
+	list := &unstructured.UnstructuredList{}
+	list.SetGroupVersionKind(gvk)
+	if err := f.Client.List(ctx, list, client.InNamespace(ns)); err != nil {
+		return fmt.Errorf("list Layer2Attachments: %w", err)
+	}
+
+	var evicted []*unstructured.Unstructured
+	for i := range list.Items {
+		item := &list.Items[i]
+		if kept[item.GetName()] {
+			continue
+		}
+		network, _, _ := unstructured.NestedString(item.Object, "spec", "networkRef")
+		if !wanted[network] {
+			continue
+		}
+		if err := client.IgnoreNotFound(f.Client.Delete(ctx, item)); err != nil {
+			return fmt.Errorf("delete Layer2Attachment %s: %w", item.GetName(), err)
+		}
+		evicted = append(evicted, item)
+	}
+
+	deadline := time.Now().Add(timeout)
+	for _, item := range evicted {
+		for {
+			probe := &unstructured.Unstructured{}
+			probe.SetGroupVersionKind(item.GroupVersionKind())
+			err := f.Client.Get(ctx, client.ObjectKeyFromObject(item), probe)
+			if apierrors.IsNotFound(err) {
+				break
+			}
+			if err != nil {
+				return fmt.Errorf("get Layer2Attachment %s: %w", item.GetName(), err)
+			}
+			if time.Now().After(deadline) {
+				return fmt.Errorf("timed out waiting for Layer2Attachment %s to be deleted", item.GetName())
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+	}
+	return nil
+}

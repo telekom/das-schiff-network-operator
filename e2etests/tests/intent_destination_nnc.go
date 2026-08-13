@@ -61,7 +61,7 @@ var _ = Describe("Intent: Destination NNC Validation", Label("intent", "destinat
 			Expect(framework.NNCHasLayer2(nnc, "501")).To(BeTrue(),
 				"NNC should have layer2 '501' for VLAN 501")
 
-			_ = f.DeleteManifest(ctx, manifest)
+			releaseIntentManifest(ctx, f, manifest)
 		})
 	})
 
@@ -81,7 +81,7 @@ var _ = Describe("Intent: Destination NNC Validation", Label("intent", "destinat
 			}).WithTimeout(60*time.Second).WithPolling(5*time.Second).Should(BeTrue(),
 				"NNC spec should contain fabricVRF 'm2m' with merged routes")
 
-			_ = f.DeleteManifest(ctx, manifest)
+			releaseIntentManifest(ctx, f, manifest)
 		})
 	})
 
@@ -162,7 +162,7 @@ var _ = Describe("Intent: Destination NNC Validation", Label("intent", "destinat
 			Expect(framework.NNCHasLayer2(nnc, "501")).To(BeTrue())
 			Expect(framework.NNCHasLayer2(nnc, "503")).To(BeTrue())
 
-			_ = f.DeleteManifest(ctx, manifest)
+			releaseIntentManifest(ctx, f, manifest)
 		})
 	})
 
@@ -201,7 +201,7 @@ var _ = Describe("Intent: Destination NNC Validation", Label("intent", "destinat
 			Expect(framework.NNCFabricVRFHasAggregateRoute(nnc, "c2m", "10.250.30.0/24")).To(BeTrue(),
 				"FabricVRF c2m should have aggregate route for net-vlan503 IPv4 CIDR")
 
-			_ = f.DeleteManifest(ctx, manifest)
+			releaseIntentManifest(ctx, f, manifest)
 		})
 	})
 })

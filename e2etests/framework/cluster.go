@@ -312,6 +312,62 @@ func (f *Framework) DeleteManifestInNamespace(ctx context.Context, yamlData []by
 	return nil
 }
 
+// DeleteManifestAndWaitForKinds deletes a YAML manifest and blocks until every
+// object of one of the given kinds is really gone. DeleteManifest only issues
+// the delete calls, so a following spec can race a still-terminating object.
+// That matters for resources which claim a shared scarce identifier -- a
+// Layer2Attachment owns a VLAN on a node exclusively, so a leftover attachment
+// silently keeps that ownership and makes the next spec assert against the
+// wrong owner.
+//
+// The wait is restricted to the kinds the caller actually depends on because
+// some objects legitimately outlive their manifest: an in-use finalizer keeps a
+// Network or Destination alive for as long as anything references it, and the
+// permanently applied base fixtures reference several of them by label, so
+// waiting on those would always hit the timeout.
+func (f *Framework) DeleteManifestAndWaitForKinds(
+	ctx context.Context, yamlData []byte, kinds []string, timeout time.Duration,
+) error {
+	if err := f.DeleteManifest(ctx, yamlData); err != nil {
+		return err
+	}
+
+	awaited := make(map[string]bool, len(kinds))
+	for _, k := range kinds {
+		awaited[k] = true
+	}
+
+	deadline := time.Now().Add(timeout)
+	for _, doc := range splitYAMLDocuments(yamlData) {
+		obj := &unstructured.Unstructured{}
+		dec := yaml.NewDecodingSerializer(unstructured.UnstructuredJSONScheme)
+		if _, _, err := dec.Decode(doc, nil, obj); err != nil {
+			return fmt.Errorf("decode manifest: %w", err)
+		}
+		if !awaited[obj.GetKind()] {
+			continue
+		}
+
+		key := client.ObjectKeyFromObject(obj)
+		for {
+			probe := &unstructured.Unstructured{}
+			probe.SetGroupVersionKind(obj.GroupVersionKind())
+			err := f.Client.Get(ctx, key, probe)
+			if apierrors.IsNotFound(err) {
+				break
+			}
+			if err != nil {
+				return fmt.Errorf("get %s %s: %w", obj.GetKind(), key, err)
+			}
+			if time.Now().After(deadline) {
+				return fmt.Errorf("timed out waiting for %s %s to be deleted", obj.GetKind(), key)
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+	}
+	return nil
+}
+
 // DynamicGet fetches an unstructured object by namespace and name.
 // The caller must set the GVK on obj before calling.
 func (f *Framework) DynamicGet(ctx context.Context, namespace, name string, obj *unstructured.Unstructured) error {

@@ -48,8 +48,7 @@ var _ = Describe("Intent-Exclusive: Gateway Connectivity", Label("intent-exclusi
 	AfterEach(func() {
 		gwManifest, _ := readTestdata("intent/gateway/manifests.yaml")
 		_ = f.DeleteManifest(ctx, gwManifest)
-		l2aManifest, _ := readTestdata("intent/l2/manifests.yaml")
-		_ = f.DeleteManifest(ctx, l2aManifest)
+		releaseIntentFixture(ctx, f, "intent/l2/manifests.yaml")
 	})
 
 	Context("m2m VRF gateway via Inbound CRD", func() {
