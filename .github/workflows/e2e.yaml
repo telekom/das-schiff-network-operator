@@ -376,6 +376,35 @@ jobs:
           docker exec nwop-control-plane kubectl \
             --kubeconfig=/etc/kubernetes/admin.conf get events -A \
             --sort-by='.lastTimestamp' > /tmp/e2e-logs/events.log 2>&1 || true
+          # Per-node CRA agent logs. The agent is what renders the node's
+          # NodeNetworkConfig into the datapath (grcli batches on grout, netlink
+          # on frr), so a domain that never got programmed shows its error here
+          # and nowhere else -- the CRA container's own log only covers startup.
+          docker exec nwop-control-plane bash -c \
+            'kubectl --kubeconfig=/etc/kubernetes/admin.conf -n kube-system logs \
+              -l "app.kubernetes.io/component in (agent-cra-frr,agent-cra-grout)" \
+              --all-containers --prefix --tail=-1' \
+            > /tmp/e2e-logs/agent-cra-logs.log 2>&1 || true
+          # Fall back to the pod name as well, so this keeps working if the
+          # component labels are ever renamed.
+          docker exec nwop-control-plane bash -c \
+            'for POD in $(kubectl --kubeconfig=/etc/kubernetes/admin.conf -n kube-system \
+               get pods -o name | grep agent-cra); do \
+               echo "=== $POD ==="; \
+               kubectl --kubeconfig=/etc/kubernetes/admin.conf -n kube-system \
+                 logs "$POD" --all-containers --tail=-1; \
+             done' \
+            > /tmp/e2e-logs/agent-cra-logs-bypod.log 2>&1 || true
+          # Node-side link state: the macvlan fixtures use vlan.<id> netdevs that
+          # netplan builds on the host trunk, and those live in the node's own
+          # netns rather than the CRA's.
+          for node in nwop-control-plane nwop-worker nwop-worker2; do
+            docker exec "$node" bash -c \
+              'ip -d link show; echo "--- addrs ---"; ip addr show; \
+               echo "--- netplan ---"; ls -R /etc/netplan 2>/dev/null; \
+               cat /etc/netplan/*.yaml 2>/dev/null' \
+              > "/tmp/e2e-logs/${node}-node-links.log" 2>&1 || true
+          done
           # Cluster-1 operator logs (current + previous crashed container)
           docker exec nwop-control-plane bash -c \
             'POD=$(kubectl --kubeconfig=/etc/kubernetes/admin.conf -n kube-system \
@@ -711,6 +740,19 @@ jobs:
               --kubeconfig=/etc/kubernetes/admin.conf get "$res" -A -o yaml \
               > "/tmp/e2e-logs/kubevirt-${res}.yaml" 2>&1 || true
           done
+          # KubeVirt control plane: when a VMI never leaves Pending, the
+          # launcher logs only show it waiting for a domain that virt-handler
+          # was never told to define. The reason is only visible here.
+          for comp in virt-controller virt-handler virt-api virt-operator; do
+            docker exec nwop-control-plane kubectl \
+              --kubeconfig=/etc/kubernetes/admin.conf -n kubevirt logs \
+              -l "kubevirt.io=${comp}" --tail=-1 --prefix \
+              > "/tmp/e2e-logs/kubevirt-${comp}.log" 2>&1 || true
+          done
+          # kubevirt.io/schedulable and the virt-handler heartbeat live here.
+          docker exec nwop-control-plane kubectl \
+            --kubeconfig=/etc/kubernetes/admin.conf get nodes -o yaml \
+            > /tmp/e2e-logs/kubevirt-nodes.yaml 2>&1 || true
           # kubectl logs has no -A/--all-namespaces, so resolve the namespace
           # from the pod first. --previous is collected too: when the launcher
           # crashes, the current container has no useful output.
@@ -893,6 +935,30 @@ jobs:
           docker exec nwop-control-plane bash -c \
             "$K -n default get vmi,pods -o yaml" \
             > /tmp/e2e-logs/vmi.yaml 2>&1 || true
+          # The CRA agent renders the NodeNetworkConfig into grout; when a
+          # domain is never programmed, its grcli error appears only here.
+          docker exec nwop-control-plane bash -c \
+            "$K -n kube-system logs \
+              -l 'app.kubernetes.io/component in (agent-cra-frr,agent-cra-grout)' \
+              --all-containers --prefix --tail=-1" \
+            > /tmp/e2e-logs/agent-cra-logs.log 2>&1 || true
+          # A VMI that never leaves Pending was never advanced by virt-controller,
+          # so the launcher only ever shows itself waiting for a domain.
+          for comp in virt-controller virt-handler virt-api virt-operator; do
+            docker exec nwop-control-plane bash -c \
+              "$K -n kubevirt logs -l kubevirt.io=${comp} --tail=-1 --prefix" \
+              > "/tmp/e2e-logs/kubevirt-${comp}.log" 2>&1 || true
+          done
+          docker exec nwop-control-plane bash -c "$K get nodes -o yaml" \
+            > /tmp/e2e-logs/kubevirt-nodes.yaml 2>&1 || true
+          docker exec nwop-control-plane bash -c \
+            "$K get events -A --sort-by=.lastTimestamp" \
+            > /tmp/e2e-logs/events.log 2>&1 || true
+          for node in nwop-control-plane nwop-worker nwop-worker2; do
+            docker exec "$node" bash -c \
+              'ip -d link show; echo "--- addrs ---"; ip addr show' \
+              > "/tmp/e2e-logs/${node}-node-links.log" 2>&1 || true
+          done
 
       - name: Upload debug logs
         if: failure()
