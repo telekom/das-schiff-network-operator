@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 )
@@ -670,6 +669,30 @@ func PhaseKubeadm(cluster *Cluster) error {
 
 // Phase 5: Install cluster components.
 // Calico, Coil, Multus, MetalLB, CNI plugins, operator + agents.
+// requiredCNIPlugins are the reference CNI plugins the e2e fixtures rely on
+// beyond the small set kindest/node ships for kindnet. They are baked into the
+// node images at build time (see e2e/images/kind-node*/Dockerfile).
+var requiredCNIPlugins = []string{"static", "macvlan", "tuning", "bandwidth", "host-local", "portmap"}
+
+// verifyCNIPlugins fails fast if the node image is missing a plugin an e2e
+// fixture needs. Without this, a missing plugin surfaces only as a pod that
+// never leaves ContainerCreating while the kubelet retries CNI ADD forever.
+//
+// The plugins used to be downloaded during bring-up instead, but the kind nodes
+// sit behind the containerlab fabric and reach the internet only through the
+// nat64 gateway, so that download was unreliable — and it swallowed every error,
+// turning a failed install into an endlessly retried CNI ADD rather than a
+// clear failure.
+func verifyCNIPlugins(node string) error {
+	for _, plugin := range requiredCNIPlugins {
+		if _, err := DockerExecShell(node, fmt.Sprintf("test -x /opt/cni/bin/%s", plugin)); err != nil {
+			return fmt.Errorf("CNI plugin %q missing from /opt/cni/bin on %s "+
+				"(it should be baked into the node image): %w", plugin, node, err)
+		}
+	}
+	return nil
+}
+
 func PhaseComponents(cluster *Cluster, repoRoot string) error {
 	Logf("Phase 5: Installing cluster components...")
 
@@ -710,21 +733,12 @@ func PhaseComponents(cluster *Cluster, repoRoot string) error {
 	// + default-ipv6-ippool natOutgoing: true). A static ip6tables masquerade rule
 	// would bypass Calico's ipset-based exclusion of egress pool CIDRs.
 
-	// Install CNI plugins
-	Logf("Installing CNI plugins...")
-	arch := runtime.GOARCH
-	cniVersion := EnvOr("CNI_PLUGINS_VERSION", "v1.9.0")
-	cniURL := fmt.Sprintf(
-		"https://github.com/containernetworking/plugins/releases/download/%s/cni-plugins-linux-%s-%s.tgz",
-		cniVersion, arch, cniVersion)
+	Logf("Verifying CNI plugins...")
 	for _, node := range cluster.Nodes {
-		// Install into both /opt/cni/bin (kubelet default) and /usr/lib/cni (Debian default)
-		// to ensure the correct version is used regardless of CNI path configuration.
-		if _, err := DockerExecShell(node.Name, fmt.Sprintf(
-			"curl -sSL '%s' | tar -xzf - -C /opt/cni/bin/ && cp /opt/cni/bin/macvlan /usr/lib/cni/macvlan 2>/dev/null; true", cniURL)); err != nil {
-			return fmt.Errorf("installing CNI plugins on %s: %w", node.Name, err)
+		if err := verifyCNIPlugins(node.Name); err != nil {
+			return err
 		}
-		Logf("  %s: CNI plugins installed", node.Name)
+		Logf("  %s: CNI plugins present", node.Name)
 	}
 
 	// Install Calico (paths inside container via /repo mount)
@@ -1086,15 +1100,9 @@ func PhaseCluster2Components(cluster *Cluster, repoRoot string) error {
 		}
 	}
 
-	// CNI plugins
-	arch := runtime.GOARCH
-	cniVersion := EnvOr("CNI_PLUGINS_VERSION", "v1.9.0")
-	cniURL := fmt.Sprintf(
-		"https://github.com/containernetworking/plugins/releases/download/%s/cni-plugins-linux-%s-%s.tgz",
-		cniVersion, arch, cniVersion)
-	if _, err := DockerExecShell(cp.Name, fmt.Sprintf(
-		"curl -sSL '%s' | tar -xzf - -C /opt/cni/bin/ && cp /opt/cni/bin/macvlan /usr/lib/cni/macvlan 2>/dev/null; true", cniURL)); err != nil {
-		return fmt.Errorf("installing CNI plugins: %w", err)
+	// CNI plugins (baked into the node image; see PhaseComponents)
+	if err := verifyCNIPlugins(cp.Name); err != nil {
+		return err
 	}
 
 	// Calico (cluster-2 overlay: no coil CNI chain, different autodetection CIDRs)
