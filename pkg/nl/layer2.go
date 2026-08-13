@@ -47,8 +47,11 @@ func sanitizeIntfName(name string) (string, error) {
 var segmentationFeatureCandidates = [][]string{
 	{"rx-gro"},
 	{"tx-generic-segmentation"},
-	// TSO is per-address-family; clearing only the IPv4 bit still lets IPv6
-	// TCP frames traverse the interface unsegmented.
+	// TSO is per-address-family: net_gso_ok() consults NETIF_F_TSO6 for IPv6
+	// TCP. Clearing only the IPv4 bit leaves netif_needs_gso() false for IPv6,
+	// so the stack hands the aggregate GSO skb on as-is. This path is 8021q
+	// over a veth, where no hardware segmentation can take over, so the pod
+	// ends up receiving one oversized frame.
 	{"tx-tcp-segmentation"},
 	{"tx-tcp6-segmentation"},
 }
