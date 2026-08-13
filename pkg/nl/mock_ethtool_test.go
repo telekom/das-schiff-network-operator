@@ -12,9 +12,10 @@ func (m *MockEthtool) Features(intf string) (map[string]bool, error) {
 		return m.FeaturesFunc(intf)
 	}
 	return map[string]bool{
-		"generic-receive-offload":      true,
-		"generic-segmentation-offload": true,
-		"tcp-segmentation-offload":     true,
+		"rx-gro":                  true,
+		"tx-generic-segmentation": true,
+		"tx-tcp-segmentation":     true,
+		"tx-tcp6-segmentation":    true,
 	}, nil
 }
 

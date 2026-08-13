@@ -1419,9 +1419,10 @@ var _ = Describe("setSegmentation()", func() {
 		mockEth := &MockEthtool{
 			FeaturesFunc: func(_ string) (map[string]bool, error) {
 				return map[string]bool{
-					"generic-receive-offload":      true,
-					"generic-segmentation-offload": true,
-					"tcp-segmentation-offload":     true,
+					"rx-gro":                  true,
+					"tx-generic-segmentation": true,
+					"tx-tcp-segmentation":     true,
+					"tx-tcp6-segmentation":    true,
 				}, nil
 			},
 			ChangeFunc: func(intf string, config map[string]bool) error {
@@ -1439,9 +1440,10 @@ var _ = Describe("setSegmentation()", func() {
 		Expect(err).ToNot(HaveOccurred())
 		Expect(capturedIntf).To(Equal("vlan100"))
 		Expect(capturedConfig).To(Equal(map[string]bool{
-			"generic-receive-offload":      false,
-			"generic-segmentation-offload": false,
-			"tcp-segmentation-offload":     false,
+			"rx-gro":                  false,
+			"tx-generic-segmentation": false,
+			"tx-tcp-segmentation":     false,
+			"tx-tcp6-segmentation":    false,
 		}))
 		Expect(mockEth.Closed).To(BeTrue())
 	})
@@ -1452,9 +1454,10 @@ var _ = Describe("setSegmentation()", func() {
 		mockEth := &MockEthtool{
 			FeaturesFunc: func(_ string) (map[string]bool, error) {
 				return map[string]bool{
-					"generic-receive-offload":      false,
-					"generic-segmentation-offload": false,
-					"tcp-segmentation-offload":     false,
+					"rx-gro":                  false,
+					"tx-generic-segmentation": false,
+					"tx-tcp-segmentation":     false,
+					"tx-tcp6-segmentation":    false,
 				}, nil
 			},
 			ChangeFunc: func(intf string, config map[string]bool) error {
@@ -1472,9 +1475,10 @@ var _ = Describe("setSegmentation()", func() {
 		Expect(err).ToNot(HaveOccurred())
 		Expect(capturedIntf).To(Equal("vlan200"))
 		Expect(capturedConfig).To(Equal(map[string]bool{
-			"generic-receive-offload":      true,
-			"generic-segmentation-offload": true,
-			"tcp-segmentation-offload":     true,
+			"rx-gro":                  true,
+			"tx-generic-segmentation": true,
+			"tx-tcp-segmentation":     true,
+			"tx-tcp6-segmentation":    true,
 		}))
 		Expect(mockEth.Closed).To(BeTrue())
 	})
@@ -1483,9 +1487,10 @@ var _ = Describe("setSegmentation()", func() {
 		mockEth := &MockEthtool{
 			FeaturesFunc: func(_ string) (map[string]bool, error) {
 				return map[string]bool{
-					"generic-receive-offload":      false,
-					"generic-segmentation-offload": false,
-					"tcp-segmentation-offload":     false,
+					"rx-gro":                  false,
+					"tx-generic-segmentation": false,
+					"tx-tcp-segmentation":     false,
+					"tx-tcp6-segmentation":    false,
 				}, nil
 			},
 		}

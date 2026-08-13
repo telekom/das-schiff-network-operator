@@ -34,10 +34,23 @@ func sanitizeIntfName(name string) (string, error) {
 	return s, nil
 }
 
+// segmentationFeatureCandidates lists the offload features to toggle, keyed by
+// the names the kernel exposes through ETH_SS_FEATURES. Those are the raw
+// netdev_features_strings[] entries, not the aliases ethtool(8) prints
+// ("gro", "generic-receive-offload", "tso", ...) - the aliases are a userspace
+// display convenience and never appear in the netlink/ioctl API, so matching on
+// them silently matched nothing.
+//
+// Each group is a fallback chain: segmentationSettings() takes the first name
+// that the interface actually reports, so distinct features must stay in
+// distinct groups.
 var segmentationFeatureCandidates = [][]string{
-	{"generic-receive-offload", "gro"},
-	{"generic-segmentation-offload", "gso"},
-	{"tcp-segmentation-offload", "tx-tcp-segmentation", "tso"},
+	{"rx-gro"},
+	{"tx-generic-segmentation"},
+	// TSO is per-address-family; clearing only the IPv4 bit still lets IPv6
+	// TCP frames traverse the interface unsegmented.
+	{"tx-tcp-segmentation"},
+	{"tx-tcp6-segmentation"},
 }
 
 type Layer2Information struct {
