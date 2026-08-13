@@ -5,8 +5,10 @@
 #   a private per-pod 2-port bridge k6t-<pod> connecting the qemu tap to our
 #   cni-workload veth end).
 # - cloud-init sets the SAME static /32 + /128 as the NAD's static IPAM, plus an
-#   on-link default route via the CRA-side link-local gateway (169.254.1.1 /
-#   fe80::1). No dynamic routing runs in the guest.
+#   on-link default route via the CRA-side link-local gateway. IPv4 is routed
+#   over the IPv6 next-hop (RFC 5549), because grout never carries the IPv4
+#   link-local gateway at all -- see the runcmd below. No dynamic routing runs
+#   in the guest.
 apiVersion: kubevirt.io/v1
 kind: VirtualMachine
 metadata:
@@ -56,9 +58,6 @@ spec:
                     - 10.201.0.10/32
                     - fd00:201::10/128
                   routes:
-                    - to: 0.0.0.0/0
-                      via: 169.254.1.1
-                      on-link: true
                     - to: "::/0"
                       via: fe80::1
                       on-link: true
@@ -75,9 +74,18 @@ spec:
                 # addresses are /32/128 host addresses with an off-subnet
                 # gateway. Apply both families explicitly so the guest can
                 # actually reply to off-link traffic.
+                #
+                # IPv4 leaves over the IPv6 next-hop (RFC 5549, `via inet6`)
+                # rather than over an IPv4 link-local gateway. grout keeps one
+                # node-global IPv4 address table with no per-interface scope for
+                # link-local space, so the single IPv4 link-local /32 every routed
+                # port would ask for can exist on exactly one of them; the CRA
+                # carries fe80::1 only, on every flavour, and there is no IPv4
+                # gateway address to send to. RTA_VIA takes no on-link flag: the
+                # next-hop is a link-local address on this very link, so it is
+                # on-link by construction and the kernel rejects the combination.
                 - [ sh, -c, "ip -4 addr replace 10.201.0.10/32 dev eth0" ]
-                - [ sh, -c, "ip -4 route replace 169.254.1.1/32 dev eth0 scope link" ]
-                - [ sh, -c, "ip -4 route replace default via 169.254.1.1 dev eth0 onlink" ]
                 - [ sh, -c, "ip -6 addr replace fd00:201::10/128 dev eth0" ]
                 - [ sh, -c, "ip -6 route replace default via fe80::1 dev eth0 onlink" ]
+                - [ sh, -c, "ip -4 route replace default via inet6 fe80::1 dev eth0" ]
                 - [ sh, -c, "nohup python3 -m http.server 8080 --bind :: >/var/log/http.log 2>&1 &" ]
