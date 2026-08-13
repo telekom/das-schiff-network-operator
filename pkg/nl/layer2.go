@@ -170,6 +170,14 @@ func (n *Manager) setupVXLAN(info *Layer2Information, bridge *netlink.Bridge) er
 		return err
 	}
 
+	// The veth is the bridge port, so it is the device the bridge sets as
+	// skb->dev when forwarding a frame towards the pods. Only its GSO limit
+	// governs whether frames coalesced by GRO on the underlay get
+	// re-segmented on the way in.
+	if err := n.setGroGsoMaxSize(link, info.GroGsoMaxSize()); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -329,8 +337,17 @@ func (n *Manager) setMTU(current, desired *Layer2Information) error {
 			return fmt.Errorf("error setting veth macvlan side MTU: %w", err)
 		}
 	}
+	// Kept on the bridge because br_dev_xmit() runs with skb->dev set to the
+	// bridge for locally routed traffic (anycast gateway / IRB egress).
 	if err := n.setGroGsoMaxSize(current.bridge, desired.GroGsoMaxSize()); err != nil {
 		return fmt.Errorf("error setting GRO/GSO max size: %w", err)
+	}
+	// Bridged traffic towards the pods leaves through the veth, never through
+	// the bridge itself, so the veth needs the same limit.
+	if current.macvlanBridge != nil {
+		if err := n.setGroGsoMaxSize(current.macvlanBridge, desired.GroGsoMaxSize()); err != nil {
+			return fmt.Errorf("error setting GRO/GSO max size on veth bridge side: %w", err)
+		}
 	}
 	return nil
 }
@@ -431,6 +448,9 @@ func (n *Manager) setupMACVLANinterface(current, desired *Layer2Information) err
 			return fmt.Errorf("error creating MACVLAN interface: %w", err)
 		}
 		current.macvlanBridge = veth
+		if err := n.setGroGsoMaxSize(veth, desired.GroGsoMaxSize()); err != nil {
+			return fmt.Errorf("error setting GRO/GSO max size on veth bridge side: %w", err)
+		}
 	}
 	return nil
 }
