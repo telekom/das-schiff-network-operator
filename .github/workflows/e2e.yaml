@@ -204,12 +204,10 @@ jobs:
           retention-days: 1
           compression-level: 0
 
-  # ── E2E setup + test (uses pre-built images) ────────────────────────
-  e2e:
-    name: E2E Tests
-    needs: [build-kind-node, build-e2e-images, build-infra-images]
+  build-e2e-test:
+    name: Build E2E test binary
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
@@ -219,17 +217,104 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Build linux/amd64 E2E test binary
+        run: |
+          mkdir -p bin
+          GOOS=linux GOARCH=amd64 go test -c -o bin/e2e.test ./e2etests
+
+      - name: Upload E2E test binary
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-test-binary
+          path: bin/e2e.test
+          retention-days: 1
+          compression-level: 0
+
+  # ── E2E setup + test (uses pre-built images) ────────────────────────
+  # ── Core lab: every CRA flavour x both reconciler pipelines ─────────
+  # One lab per leg rather than legacy-then-intent in a single job: the intent
+  # pipeline patches the operator to --enable-intent-reconciler, which disables
+  # the legacy ConfigReconciler and deletes the legacy configs the legacy specs
+  # need. Sharing a lab therefore forced a strict order and made a legacy
+  # failure hide the intent result. Separate labs also let the two flavours run
+  # concurrently instead of serialising behind one runner.
+  e2e:
+    name: E2E Tests (cra-${{ matrix.flavor }}, ${{ matrix.suite }})
+    needs: [build-kind-node, build-kind-node-grout, build-e2e-images, build-infra-images, build-e2e-test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        flavor: [frr, grout]
+        suite: [legacy, intent]
+    env:
+      E2E_CRA_FLAVOR: ${{ matrix.flavor }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Download E2E test binary
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: e2e-test-binary
+          path: bin
+
+      # download-artifact drops the executable bit, and E2E_TEST_BIN opts the
+      # make targets into the prebuilt binary instead of recompiling in-lab.
+      - name: Restore E2E test executable permission
+        run: |
+          chmod +x bin/e2e.test
+          echo "E2E_TEST_BIN=/repo/bin/e2e.test" >> "$GITHUB_ENV"
+
       - name: system-level-dependencies
         run: |
           sudo apt update
           sudo apt -y install linux-modules-extra-$(uname -r)
 
-      - name: Download all E2E images
+      # grout is a DPDK graph router: it allocates its mempools from hugepages
+      # and the CRA container bind-mounts /dev/hugepages, so the pool has to
+      # exist on the docker host (kind nodes share it) before the CRA starts.
+      - name: Reserve hugepages
+        if: matrix.flavor == 'grout'
+        run: |
+          sudo sysctl -w vm.nr_hugepages=2048
+          grep -i hugepages_total /proc/meminfo
+
+      # Deliberately not "e2e-image-*": that pattern matches both kind-node
+      # artifacts, and they carry the same tag, so whichever loaded last would
+      # decide which CRA the lab actually runs.
+      - name: Download component images
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: /tmp/e2e-images
-          pattern: e2e-image-*
+          pattern: e2e-image-das-schiff-*
           merge-multiple: true
+
+      - name: Download infra images
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: e2e-image-infra
+          path: /tmp/e2e-images
+
+      - name: Download kind-node image (cra-frr)
+        if: matrix.flavor == 'frr'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: e2e-image-kind-node
+          path: /tmp/e2e-images
+
+      - name: Download kind-node image (cra-grout)
+        if: matrix.flavor == 'grout'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: grout-image-kind-node
+          path: /tmp/e2e-images
 
       - name: Set up E2E lab
         env:
@@ -239,17 +324,30 @@ jobs:
         run: make e2e-up
 
       - name: Run E2E tests (legacy)
-        id: legacy
+        if: matrix.suite == 'legacy'
         run: make e2e-test
 
       - name: Run E2E tests (intent)
-        # Must run after the legacy step: this step patches the operator to
-        # --enable-intent-reconciler (disabling the legacy ConfigReconciler)
-        # and deletes legacy configs, which the legacy pipeline (incl. the
-        # MirrorSelector mirror specs in the legacy step) needs.
-        if: ${{ !cancelled() && steps.legacy.conclusion != 'skipped' }}
-        id: intent
+        if: matrix.suite == 'intent'
         run: make e2e-test-intent
+
+      - name: Collect grout debug logs
+        if: failure() && matrix.flavor == 'grout'
+        run: |
+          mkdir -p /tmp/e2e-logs
+          for node in nwop-control-plane nwop-worker nwop-worker2; do
+            # grout's datapath is invisible to ip/tcpdump on the node: the
+            # interfaces, addresses and routes live in the DPDK process, so
+            # grcli is the only view of what the CRA actually programmed.
+            for cmd in "interface show" "address show" "route show" "nexthop show"; do
+              docker exec "$node" bash -c \
+                "PATH=/usr/local/bin:\$PATH nerdctl -n hbr exec cra-grout grcli $cmd" \
+                >> "/tmp/e2e-logs/${node}-grcli.log" 2>&1 || true
+            done
+            docker exec "$node" bash -c \
+              'PATH=/usr/local/bin:$PATH nerdctl -n hbr logs cra-grout' \
+              > "/tmp/e2e-logs/${node}-grout.log" 2>&1 || true
+          done
 
       - name: Collect debug logs
         if: failure()
@@ -436,7 +534,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: e2e-debug-logs
+          name: e2e-debug-logs-${{ matrix.flavor }}-${{ matrix.suite }}
           path: /tmp/e2e-logs/
           retention-days: 7
 
@@ -444,19 +542,29 @@ jobs:
         if: always()
         run: make e2e-down
 
-  # ── Routed KubeVirt datapath lab ────────────────────────────────────
+  # ── Routed workload-CNI lab (KubeVirt VM datapath) ──────────────────
   # This lab needs its own bring-up: E2E_KUBEVIRT makes the CRA export routed
   # host routes into the underlay and installs KubeVirt + the cni-workload
   # plugin, so it cannot share the lab above.
+  #
+  # Run per flavour: the routed workload-CNI datapath is where the flavours
+  # differ most. cra-frr puts a veth in the pod and host routes in the kernel,
+  # while grout cannot adopt a moved-in veth and instead hands the CNI a net_tap
+  # it created itself, with the routes living in the DPDK process.
   e2e-kubevirt:
-    name: E2E Tests (routed KubeVirt)
-    needs: [build-kind-node, build-e2e-images, build-infra-images]
+    name: E2E Tests (cra-${{ matrix.flavor }}, routed CNI)
+    needs: [build-kind-node, build-kind-node-grout, build-e2e-images, build-infra-images, build-e2e-test]
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        flavor: [frr, grout]
     env:
       E2E_KUBEVIRT: "1"
+      E2E_CRA_FLAVOR: ${{ matrix.flavor }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -464,17 +572,58 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Download E2E test binary
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: e2e-test-binary
+          path: bin
+
+      # download-artifact drops the executable bit, and E2E_TEST_BIN opts the
+      # make targets into the prebuilt binary instead of recompiling in-lab.
+      - name: Restore E2E test executable permission
+        run: |
+          chmod +x bin/e2e.test
+          echo "E2E_TEST_BIN=/repo/bin/e2e.test" >> "$GITHUB_ENV"
+
       - name: system-level-dependencies
         run: |
           sudo apt update
           sudo apt -y install linux-modules-extra-$(uname -r)
 
-      - name: Download all E2E images
+      # See the core lab: grout allocates its mempools from hugepages, so the
+      # host pool has to exist before the CRA container starts.
+      - name: Reserve hugepages
+        if: matrix.flavor == 'grout'
+        run: |
+          sudo sysctl -w vm.nr_hugepages=2048
+          grep -i hugepages_total /proc/meminfo
+
+      - name: Download component images
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: /tmp/e2e-images
-          pattern: e2e-image-*
+          pattern: e2e-image-das-schiff-*
           merge-multiple: true
+
+      - name: Download infra images
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: e2e-image-infra
+          path: /tmp/e2e-images
+
+      - name: Download kind-node image (cra-frr)
+        if: matrix.flavor == 'frr'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: e2e-image-kind-node
+          path: /tmp/e2e-images
+
+      - name: Download kind-node image (cra-grout)
+        if: matrix.flavor == 'grout'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: grout-image-kind-node
+          path: /tmp/e2e-images
 
       - name: Set up E2E lab (with KubeVirt + cni-workload)
         env:
@@ -483,8 +632,23 @@ jobs:
           E2E_NODE_IMAGE: ${{ env.IMG_BASE }}/das-schiff-kind-node:${{ env.KIND_NODE_VERSION }}
         run: make e2e-up
 
-      - name: Run E2E tests (routed KubeVirt)
+      - name: Run E2E tests (routed CNI)
         run: make e2e-test-kubevirt
+
+      - name: Collect grout debug logs
+        if: failure() && matrix.flavor == 'grout'
+        run: |
+          mkdir -p /tmp/e2e-logs
+          for node in nwop-control-plane nwop-worker nwop-worker2; do
+            for cmd in "interface show" "address show" "route show" "nexthop show"; do
+              docker exec "$node" bash -c \
+                "PATH=/usr/local/bin:\$PATH nerdctl -n hbr exec cra-grout grcli $cmd" \
+                >> "/tmp/e2e-logs/${node}-grcli.log" 2>&1 || true
+            done
+            docker exec "$node" bash -c \
+              'PATH=/usr/local/bin:$PATH nerdctl -n hbr logs cra-grout' \
+              > "/tmp/e2e-logs/${node}-grout.log" 2>&1 || true
+          done
 
       - name: Collect debug logs
         if: failure()
@@ -594,7 +758,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: e2e-kubevirt-debug-logs
+          name: e2e-kubevirt-debug-logs-${{ matrix.flavor }}
           path: /tmp/e2e-logs/
           retention-days: 7
 
@@ -611,7 +775,7 @@ jobs:
   # attachmentRef, which only the intent builder stamps).
   e2e-kubevirt-vhostuser:
     name: E2E Tests (grout vhost-user KubeVirt)
-    needs: [build-kind-node-grout, build-e2e-images, build-infra-images]
+    needs: [build-kind-node-grout, build-e2e-images, build-infra-images, build-e2e-test]
     runs-on: ubuntu-latest
     timeout-minutes: 75
     permissions:
@@ -626,6 +790,19 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+
+      - name: Download E2E test binary
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: e2e-test-binary
+          path: bin
+
+      # download-artifact drops the executable bit, and E2E_TEST_BIN opts the
+      # make targets into the prebuilt binary instead of recompiling in-lab.
+      - name: Restore E2E test executable permission
+        run: |
+          chmod +x bin/e2e.test
+          echo "E2E_TEST_BIN=/repo/bin/e2e.test" >> "$GITHUB_ENV"
 
       - name: system-level-dependencies
         run: |
