@@ -242,7 +242,7 @@ jobs:
     name: E2E Tests (cra-${{ matrix.flavor }}, ${{ matrix.suite }})
     needs: [build-kind-node, build-kind-node-grout, build-e2e-images, build-infra-images, build-e2e-test]
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 115
     permissions:
       contents: read
     strategy:
@@ -317,21 +317,31 @@ jobs:
           path: /tmp/e2e-images
 
       - name: Set up E2E lab
+        timeout-minutes: 40
         env:
           E2E_SKIP_BUILD: "true"
           E2E_IMAGE_DIR: /tmp/e2e-images
           E2E_NODE_IMAGE: ${{ env.IMG_BASE }}/das-schiff-kind-node:${{ env.KIND_NODE_VERSION }}
-        run: make e2e-up
+        run: timeout --signal=INT --kill-after=1m 35m make e2e-up
 
+      # `timeout` rather than a bare `timeout-minutes`: a step killed by its own
+      # step timeout is reported as cancelled, not failed, so the `if: failure()`
+      # collection steps below are skipped and the run ends with no evidence at
+      # all -- which is exactly what happened to the grout intent suite. Letting
+      # the command time out makes the step fail like any other, and
+      # `timeout-minutes` stays a few minutes above it purely as a backstop.
       - name: Run E2E tests (legacy)
         if: matrix.suite == 'legacy'
-        run: make e2e-test
+        timeout-minutes: 40
+        run: timeout --signal=INT --kill-after=1m 35m make e2e-test
 
       - name: Run E2E tests (intent)
         if: matrix.suite == 'intent'
-        run: make e2e-test-intent
+        timeout-minutes: 40
+        run: timeout --signal=INT --kill-after=1m 35m make e2e-test-intent
 
       - name: Collect grout debug logs
+        timeout-minutes: 8
         if: failure() && matrix.flavor == 'grout'
         run: |
           mkdir -p /tmp/e2e-logs
@@ -350,6 +360,7 @@ jobs:
           done
 
       - name: Collect debug logs
+        timeout-minutes: 8
         if: failure()
         run: |
           mkdir -p /tmp/e2e-logs
@@ -560,6 +571,7 @@ jobs:
           done
 
       - name: Upload debug logs
+        timeout-minutes: 5
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -568,6 +580,7 @@ jobs:
           retention-days: 7
 
       - name: Tear down E2E lab
+        timeout-minutes: 8
         if: always()
         run: make e2e-down
 
@@ -584,7 +597,7 @@ jobs:
     name: E2E Tests (cra-${{ matrix.flavor }}, routed CNI)
     needs: [build-kind-node, build-kind-node-grout, build-e2e-images, build-infra-images, build-e2e-test]
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 125
     permissions:
       contents: read
     strategy:
@@ -655,16 +668,21 @@ jobs:
           path: /tmp/e2e-images
 
       - name: Set up E2E lab (with KubeVirt + cni-workload)
+        timeout-minutes: 50
         env:
           E2E_SKIP_BUILD: "true"
           E2E_IMAGE_DIR: /tmp/e2e-images
           E2E_NODE_IMAGE: ${{ env.IMG_BASE }}/das-schiff-kind-node:${{ env.KIND_NODE_VERSION }}
-        run: make e2e-up
+        run: timeout --signal=INT --kill-after=1m 45m make e2e-up
 
+      # See the note on the core suites: a step killed by `timeout-minutes` is
+      # cancelled rather than failed, and the collection below would be skipped.
       - name: Run E2E tests (routed CNI)
-        run: make e2e-test-kubevirt
+        timeout-minutes: 40
+        run: timeout --signal=INT --kill-after=1m 35m make e2e-test-kubevirt
 
       - name: Collect grout debug logs
+        timeout-minutes: 8
         if: failure() && matrix.flavor == 'grout'
         run: |
           mkdir -p /tmp/e2e-logs
@@ -680,6 +698,7 @@ jobs:
           done
 
       - name: Collect debug logs
+        timeout-minutes: 8
         if: failure()
         run: |
           mkdir -p /tmp/e2e-logs
@@ -797,6 +816,7 @@ jobs:
           done
 
       - name: Upload debug logs
+        timeout-minutes: 5
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -805,6 +825,7 @@ jobs:
           retention-days: 7
 
       - name: Tear down E2E lab
+        timeout-minutes: 8
         if: always()
         run: make e2e-down
 
@@ -819,7 +840,7 @@ jobs:
     name: E2E Tests (grout vhost-user KubeVirt)
     needs: [build-kind-node-grout, build-e2e-images, build-infra-images, build-e2e-test]
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 150
     permissions:
       contents: read
     env:
@@ -885,16 +906,21 @@ jobs:
           path: /tmp/e2e-images
 
       - name: Set up E2E lab (grout + KubeVirt + vhost-user)
+        timeout-minutes: 65
         env:
           E2E_SKIP_BUILD: "true"
           E2E_IMAGE_DIR: /tmp/e2e-images
           E2E_NODE_IMAGE: ${{ env.IMG_BASE }}/das-schiff-kind-node:${{ env.KIND_NODE_VERSION }}
-        run: make e2e-up
+        run: timeout --signal=INT --kill-after=1m 60m make e2e-up
 
+      # See the note on the core suites: a step killed by `timeout-minutes` is
+      # cancelled rather than failed, and the collection below would be skipped.
       - name: Run E2E tests (grout vhost-user KubeVirt)
-        run: make e2e-test-kubevirt-vhostuser
+        timeout-minutes: 55
+        run: timeout --signal=INT --kill-after=1m 50m make e2e-test-kubevirt-vhostuser
 
       - name: Collect debug logs
+        timeout-minutes: 8
         if: failure()
         run: |
           mkdir -p /tmp/e2e-logs
@@ -961,6 +987,7 @@ jobs:
           done
 
       - name: Upload debug logs
+        timeout-minutes: 5
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -969,5 +996,6 @@ jobs:
           retention-days: 7
 
       - name: Tear down E2E lab
+        timeout-minutes: 8
         if: always()
         run: make e2e-down

@@ -115,10 +115,14 @@ func PhaseKubeVirt(cluster *Cluster, repoRoot string) error {
 }
 
 // vmiStartAttempts bounds how often a wedged VM start is retried before the
-// phase gives up.
+// phase gives up. A healthy VMI reaches Running in one to two minutes, and the
+// wait already aborts early once the launcher pod reaches a terminal phase, so
+// the full budget is only ever burnt by a VMI that virt-controller never
+// advances -- a state that does not recover on its own. Keeping the ceiling at
+// two short attempts leaves the job enough time to collect debug artifacts.
 const (
-	vmiStartAttempts = 3
-	vmiStartTimeout  = 8 * time.Minute
+	vmiStartAttempts = 2
+	vmiStartTimeout  = 5 * time.Minute
 	vmiPollInterval  = 10 * time.Second
 )
 
