@@ -74,6 +74,10 @@ jobs:
           output: 'trivy-fs-results.sarif'
           severity: 'HIGH,CRITICAL'
           exit-code: '1'
+          # For SARIF output the action ignores `severity` unless this is set.
+          # Without it Trivy scans every severity, and `exit-code: 1` then fails
+          # the job on LOW, MEDIUM and UNKNOWN findings too.
+          limit-severities-for-sarif: 'true'
 
       - name: Upload Trivy scan results
         uses: github/codeql-action/upload-sarif@0d579ffd059c29b07949a3cce3983f0780820c98 # v4.32.6
