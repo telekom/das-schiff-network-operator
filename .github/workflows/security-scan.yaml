@@ -45,6 +45,19 @@ jobs:
         run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
 
       - name: Run govulncheck
+        # govulncheck reports vulnerabilities of the Go standard library that
+        # the toolchain ships. setup-go installs the version from the go
+        # directive in go.mod and sets GOTOOLCHAIN=local, which gives Go
+        # 1.25.12. That version has six known standard library
+        # vulnerabilities, all fixed in Go 1.25.13.
+        #
+        # 1.25.13 is not in the setup-go version manifest yet, so the scan
+        # pins the toolchain instead. Go downloads it. Step level env wins
+        # over the GOTOOLCHAIN=local that setup-go exports.
+        #
+        # Raise this pin when a later Go 1.25 patch fixes new findings.
+        env:
+          GOTOOLCHAIN: go1.25.13
         # govulncheck exits non-zero for both vulnerabilities and execution
         # errors; either case should fail the security job.
         run: govulncheck ./...
