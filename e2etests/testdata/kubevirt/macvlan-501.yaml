@@ -1,0 +1,41 @@
+# A plain macvlan attachment on the node's VLAN 501 sub-interface, used as the
+# in-cluster peer for the vhost-user VM datapath test.
+#
+# The VM is attached to VLAN 501 at layer 2, so it has no underlay /32 and is
+# only reachable from inside that broadcast domain. This NAD gives an ordinary
+# pod an address in the same subnet, which makes the ping traverse the real
+# fabric whenever the pod and the VM sit on different nodes.
+#
+# The tuning plugin disables IPv6 DAD at CNI-chain time: the anycast IRB and the
+# CNI race otherwise, and a dadfailed address makes the pod silently unusable.
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: macvlan-501
+  namespace: default
+spec:
+  config: |
+    {
+      "cniVersion": "0.4.0",
+      "name": "macvlan-501",
+      "plugins": [
+        {
+          "type": "macvlan",
+          "master": "vlan.501",
+          "mode": "bridge",
+          "ipam": {
+            "type": "static",
+            "routes": [
+              {"dst": "10.250.0.0/16", "gw": "10.250.0.1"},
+              {"dst": "fd94:685b:30cf::/48", "gw": "fd94:685b:30cf:501::1"}
+            ]
+          }
+        },
+        {
+          "type": "tuning",
+          "sysctl": {
+            "net.ipv6.conf.IFNAME.accept_dad": "0"
+          }
+        }
+      ]
+    }

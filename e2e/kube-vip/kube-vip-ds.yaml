@@ -96,13 +96,13 @@ spec:
             - name: bgp_peeras
               value: "65169"
             - name: bgp_peers
-              value: "[fd00:7:caa5::]:65169::false/mpbgp_nexthop=fixed"
+              value: "[__CRA_HBN_ADDR__]:65169::false/mpbgp_nexthop=fixed"
             - name: bgp_sourceip
-              value: "fd00:7:caa5::1"
+              value: "__NODE_HBN_ADDR__"
             - name: bgp_routerid
               value: "169.254.1.1"
             - name: mpbgp_ipv6
-              value: "fd00:7:caa5::"
+              value: "__CRA_HBN_ADDR__"
             - name: mpbgp_nexthop
               value: fixed
             - name: disable_service_updates

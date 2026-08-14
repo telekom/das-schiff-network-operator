@@ -643,6 +643,18 @@ func reconcileNetlink(cfg *nl.NetlinkConfiguration) error {
 		return fmt.Errorf("failed to reconcile Layer2 (create): %w", err)
 	}
 
+	// Program workload CNI attachments (on-link host routes for moved veths).
+	// Additive and adopt-only: the veths are created/removed by the CNI.
+	if err := nlManager.ReconcileWorkloadPorts(cfg); err != nil {
+		return fmt.Errorf("failed to reconcile workload ports: %w", err)
+	}
+
+	// Enslave workload-CNI L2 attach ports to their Layer2 bridge. Additive and
+	// adopt-only, same as workload ports.
+	if err := nlManager.ReconcileL2AttachedPorts(cfg); err != nil {
+		return fmt.Errorf("failed to reconcile L2 attached ports: %w", err)
+	}
+
 	reconcileNeighborSync(cfg)
 	return nil
 }

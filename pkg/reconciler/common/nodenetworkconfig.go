@@ -36,6 +36,7 @@ import (
 	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/operator"
+	"github.com/telekom/das-schiff-network-operator/pkg/workloadcni"
 )
 
 const (
@@ -54,6 +55,14 @@ type ConfigApplier interface {
 	ApplyConfig(ctx context.Context, cfg *v1alpha1.NodeNetworkConfig) error
 }
 
+// WorkloadPortsSource supplies the workload-port attachments recorded for this node
+// (via the workload CNI, over the node-local gRPC channel) so they can be merged
+// into the NodeNetworkConfig before it is rendered. Agents that do not serve the
+// workload CNI leave it nil.
+type WorkloadPortsSource interface {
+	WorkloadPorts(ctx context.Context) ([]v1alpha1.WorkloadPortEntry, error)
+}
+
 // ReconcilerOptions contains configuration options for the reconciler.
 type ReconcilerOptions struct {
 	// RestoreOnReconcileFailure controls whether to restore the previous config
@@ -67,6 +76,12 @@ type ReconcilerOptions struct {
 	// node's NodeNetworkConfig.status.asNumber so the operator can report the
 	// server ASN on BGPPeering status. Zero means unset (nothing is surfaced).
 	LocalASN int
+
+	// WorkloadPortsSource, when set, supplies workload-port attachments recorded for
+	// this node; they are merged into the NodeNetworkConfig before rendering.
+	// Both CRA flavors set it: the agent owns the CRA-side L3 programming
+	// (netlink via frr-cra for FRR, NETCONF for VSR). Leave nil to disable.
+	WorkloadPortsSource WorkloadPortsSource
 }
 
 // NodeNetworkConfigReconciler handles the common reconciliation logic for NodeNetworkConfig.
@@ -79,6 +94,9 @@ type NodeNetworkConfigReconciler struct {
 	NodeNetworkConfigPath     string
 	restoreOnReconcileFailure bool
 	localASN                  int64
+	workloadPortsSource       WorkloadPortsSource
+	lastWorkloadPortsHash     string
+	failedWorkloadPortsHash   string
 }
 
 // NewNodeNetworkConfigReconciler creates a new NodeNetworkConfigReconciler.
@@ -96,6 +114,7 @@ func NewNodeNetworkConfigReconciler(
 		NodeNetworkConfigPath:     nodeNetworkConfigPath,
 		restoreOnReconcileFailure: opts.RestoreOnReconcileFailure,
 		localASN:                  int64(opts.LocalASN),
+		workloadPortsSource:       opts.WorkloadPortsSource,
 	}
 
 	nc, err := healthcheck.LoadConfig(healthcheck.NetHealthcheckFile)
@@ -142,11 +161,22 @@ func (r *NodeNetworkConfigReconciler) Reconcile(ctx context.Context) (ctrl.Resul
 	asnNeedsWrite := cfg.Status.ASNumber != r.localASN
 	cfg.Status.ASNumber = r.localASN
 
-	if r.NodeNetworkConfig != nil && r.NodeNetworkConfig.Spec.Revision == cfg.Spec.Revision {
+	// Merge workload-port attachments recorded for this node (via the workload CNI)
+	// into the fetched config before rendering. These arrive out-of-band from the
+	// NodeNetworkConfig revision, so a change is tracked by a content hash that
+	// forces re-rendering even when the revision is unchanged.
+	workloadHash, err := r.mergeWorkloadPorts(ctx, cfg)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	if r.NodeNetworkConfig != nil && r.NodeNetworkConfig.Spec.Revision == cfg.Spec.Revision &&
+		r.lastWorkloadPortsHash == workloadHash {
 		// replace in-memory working NodeNetworkConfig and store it on the disk
 		if err := r.storeConfig(cfg, r.NodeNetworkConfigPath); err != nil {
 			return ctrl.Result{}, fmt.Errorf("error saving NodeNetworkConfig status: %w", err)
 		}
+		r.lastWorkloadPortsHash = workloadHash
 
 		// current in-memory config has the same revision as the fetched one
 		// this means that NodeNetworkConfig was already provisioned - skip
@@ -168,14 +198,18 @@ func (r *NodeNetworkConfigReconciler) Reconcile(ctx context.Context) (ctrl.Resul
 		return ctrl.Result{}, nil
 	}
 
-	// NodeNetworkConfig is invalid - discard
-	if cfg.Spec.Revision == cfg.Status.LastAppliedRevision && cfg.Status.ConfigStatus == operator.StatusInvalid {
+	// NodeNetworkConfig is invalid - discard, unless the workload ports changed
+	// since the failed attempt (they arrive out-of-band from the revision, so a
+	// corrected/removed attachment must be able to unblock the config).
+	if cfg.Spec.Revision == cfg.Status.LastAppliedRevision && cfg.Status.ConfigStatus == operator.StatusInvalid &&
+		r.failedWorkloadPortsHash == workloadHash {
 		r.logger.Info("skipping invalid NodeNetworkConfig", "name", cfg.Name)
 		return ctrl.Result{}, nil
 	}
 
 	result, err := r.processConfig(ctx, cfg)
 	if err != nil {
+		r.failedWorkloadPortsHash = workloadHash
 		return ctrl.Result{}, fmt.Errorf("error while processing NodeNetworkConfig: %w", err)
 	}
 
@@ -183,8 +217,27 @@ func (r *NodeNetworkConfigReconciler) Reconcile(ctx context.Context) (ctrl.Resul
 	if err := r.storeConfig(cfg, r.NodeNetworkConfigPath); err != nil {
 		return ctrl.Result{}, fmt.Errorf("error saving NodeNetworkConfig status: %w", err)
 	}
+	r.lastWorkloadPortsHash = workloadHash
 
 	return result, nil
+}
+
+// mergeWorkloadPorts merges workload-port attachments recorded for this node into
+// cfg and returns a content hash of the merged entries. When no source is
+// configured it is a no-op returning an empty hash.
+func (r *NodeNetworkConfigReconciler) mergeWorkloadPorts(
+	ctx context.Context,
+	cfg *v1alpha1.NodeNetworkConfig,
+) (string, error) {
+	if r.workloadPortsSource == nil {
+		return "", nil
+	}
+	entries, err := r.workloadPortsSource.WorkloadPorts(ctx)
+	if err != nil {
+		return "", fmt.Errorf("error fetching workload ports: %w", err)
+	}
+	workloadcni.MergeIntoNodeNetworkConfig(cfg, entries, r.logger)
+	return workloadcni.HashEntries(entries), nil
 }
 
 func (r *NodeNetworkConfigReconciler) storeConfig(
@@ -401,23 +454,33 @@ func SetStatusWithError(
 ) error {
 	logger.Info("setting NodeNetworkConfig status", "name", cfg.Name, "status", status)
 
-	cfg.Status.ConfigStatus = status
-	cfg.Status.LastUpdate = metav1.Now()
+	// Write the status subresource against a copy: client.Status().Update refreshes
+	// the passed object from the server, which would otherwise revert any in-memory
+	// additions to cfg.Spec (e.g. workload ports merged from NodeWorkloadPorts) back to
+	// the persisted, unmerged spec before the config is rendered/applied.
+	statusObj := cfg.DeepCopy()
+	statusObj.Status.ConfigStatus = status
+	statusObj.Status.LastUpdate = metav1.Now()
 
 	if status == operator.StatusProvisioned || status == operator.StatusInvalid {
-		cfg.Status.LastAppliedRevision = cfg.Spec.Revision
+		statusObj.Status.LastAppliedRevision = statusObj.Spec.Revision
 	}
 
 	// Set or clear error message based on status
 	if status == operator.StatusInvalid {
-		cfg.Status.ErrorMessage = errorMsg
+		statusObj.Status.ErrorMessage = errorMsg
 	} else {
-		cfg.Status.ErrorMessage = ""
+		statusObj.Status.ErrorMessage = ""
 	}
 
-	if err := c.Status().Update(ctx, cfg); err != nil {
+	if err := c.Status().Update(ctx, statusObj); err != nil {
 		return fmt.Errorf("error updating NodeNetworkConfig status: %w", err)
 	}
+
+	// Propagate the persisted status and resource version back onto cfg without
+	// clobbering cfg.Spec (which may carry merged workload ports).
+	cfg.Status = statusObj.Status
+	cfg.ResourceVersion = statusObj.ResourceVersion
 
 	return nil
 }

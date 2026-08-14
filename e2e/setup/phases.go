@@ -6,10 +6,28 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 )
+
+// PhaseHostPrereqs verifies the host kernel can provide what the lab needs.
+//
+// The CRA puts every tenant in its own VRF, so the lab is dead in the water
+// without the `vrf` netdev driver -- and the failure is otherwise invisible:
+// containerd/ip both report a bare "Error: Unknown device type." from inside a
+// node container, hundreds of lines into the run. Some cloud images (e.g. GCP's
+// Ubuntu, which ships CONFIG_NET_VRF=m but no linux-modules-extra) hit this.
+func PhaseHostPrereqs() error {
+	for _, mod := range []string{"vrf", "vxlan"} {
+		// modprobe is a no-op if the driver is built in or already loaded.
+		if out, err := RunCmdOutput("sudo", "modprobe", mod); err != nil {
+			return fmt.Errorf("the %q kernel module is required but could not be loaded "+
+				"(on Ubuntu cloud images install linux-modules-extra-$(uname -r)): %w: %s",
+				mod, err, out)
+		}
+	}
+	return nil
+}
 
 // PhaseBuildImages builds or loads all Docker images required for the E2E lab.
 //
@@ -61,36 +79,42 @@ func phaseBuildAllImages(repoRoot string) error {
 
 	ldflags := getLDFlags(repoRoot)
 
-	// 1. Build cra-frr image
-	Logf("  Building das-schiff-cra-frr...")
+	logFlavor()
+
+	// 1. Build the CRA image for the selected flavor (cra-frr or cra-grout).
+	craImage := craImageName()
+	Logf("  Building %s...", craImage)
 	if err := RunCmd("docker", "build",
 		"--build-arg", "ldflags="+ldflags,
-		"-f", filepath.Join(repoRoot, "das-schiff-cra-frr.Dockerfile"),
-		"-t", "das-schiff-cra-frr:latest",
+		"-f", filepath.Join(repoRoot, craDockerfile()),
+		"-t", craImage,
 		repoRoot,
 	); err != nil {
-		return fmt.Errorf("building cra-frr: %w", err)
+		return fmt.Errorf("building CRA image %s: %w", craImage, err)
 	}
 
-	// 2. Export cra-frr and build kind node image (with cra-frr baked in)
-	craFRRTar := filepath.Join(repoRoot, "e2e", "images", "kind-node", "cra-frr.tar")
-	Logf("  Exporting cra-frr tar...")
-	if err := RunCmd("docker", "save", "-o", craFRRTar, "das-schiff-cra-frr:latest"); err != nil {
-		return fmt.Errorf("saving cra-frr tar: %w", err)
+	// 2. Export the CRA image and build the kind node image (with the CRA image
+	// baked in).
+	kindNodeCtx, craTar := kindNodeContext(repoRoot)
+	Logf("  Exporting CRA image to %s...", filepath.Base(craTar))
+	if err := RunCmd("docker", "save", "-o", craTar, craImage); err != nil {
+		return fmt.Errorf("saving CRA image tar: %w", err)
 	}
 
 	Logf("  Building kind node image (%s)...", nodeImage)
-	kindNodeCtx := filepath.Join(repoRoot, "e2e", "images", "kind-node")
 	if err := RunCmd("docker", "build",
 		"--build-arg", "KIND_NODE_VERSION="+kindNodeVersion,
 		"-t", nodeImage,
-		"-f", filepath.Join(kindNodeCtx, "Dockerfile"),
-		kindNodeCtx,
+		"-f", kindNodeDockerfile(repoRoot),
+		// The grout node Dockerfile builds from the repo root (it COPYs the
+		// shared kind-node host tooling); the cra-frr node builds from its own
+		// context.
+		kindNodeBuildContext(repoRoot, kindNodeCtx),
 	); err != nil {
-		os.Remove(craFRRTar)
+		os.Remove(craTar)
 		return fmt.Errorf("building kind-node: %w", err)
 	}
-	os.Remove(craFRRTar)
+	os.Remove(craTar)
 
 	// 3. Build operator + agent + platform images
 	Logf("  Building operator + agent + platform images...")
@@ -105,11 +129,11 @@ func phaseBuildAllImages(repoRoot string) error {
 
 	if err := RunCmd("docker", "build",
 		"--build-arg", "ldflags="+ldflags,
-		"-f", filepath.Join(repoRoot, "das-schiff-nwop-agent-cra-frr.Dockerfile"),
-		"-t", imgBase+"/das-schiff-nwop-agent-cra-frr:latest",
+		"-f", filepath.Join(repoRoot, agentDockerfile()),
+		"-t", agentImage(imgBase),
 		repoRoot,
 	); err != nil {
-		return fmt.Errorf("building agent-cra-frr: %w", err)
+		return fmt.Errorf("building agent (%s): %w", craFlavor(), err)
 	}
 
 	if err := RunCmd("docker", "build",
@@ -146,6 +170,17 @@ func phaseBuildAllImages(repoRoot string) error {
 		repoRoot,
 	); err != nil {
 		return fmt.Errorf("building network-sync: %w", err)
+	}
+
+	// The workload CNI plugin installer. Needed by every lab, not just the
+	// KubeVirt one: the intent suite attaches plain pods through it.
+	if err := RunCmd("docker", "build",
+		"--build-arg", "ldflags="+ldflags,
+		"-f", filepath.Join(repoRoot, "das-schiff-nwop-cni-workload.Dockerfile"),
+		"-t", imgBase+"/das-schiff-nwop-cni-workload:latest",
+		repoRoot,
+	); err != nil {
+		return fmt.Errorf("building cni-workload: %w", err)
 	}
 
 	// 4. Build NAT64 image
@@ -217,6 +252,13 @@ func PhaseCreateNodes(cluster *Cluster, repoRoot string) error {
 			"--network", "none",
 			"--restart", "on-failure:1",
 			"-e", "container=docker",
+			// The node's only path off-box is the fabric and NAT64; it has no
+			// route to any corporate proxy. Containers inherit the docker
+			// daemon's environment, so on a host that needs a proxy to reach the
+			// internet the nodes come up with HTTP(S)_PROXY set and every image
+			// pull dies with "network is unreachable". Clear it explicitly.
+			"-e", "HTTP_PROXY=", "-e", "HTTPS_PROXY=", "-e", "NO_PROXY=",
+			"-e", "http_proxy=", "-e", "https_proxy=", "-e", "no_proxy=",
 			"-v", filepath.Join(genDir, shortName, "cra") + ":/etc/cra",
 			"-v", filepath.Join(genDir, shortName, "node-identity.env") + ":/etc/node-identity.env:ro",
 			"-v", filepath.Join(genDir, shortName, "netplan") + ":/etc/netplan",
@@ -268,6 +310,30 @@ func PhaseContainerlab(repoRoot string) error {
 		"containerlab", "deploy", "--topo", "topology.clab.yml",
 	)
 
+	// `docker run` pulls the containerlab image on first use, and that pull is
+	// the one registry round-trip in the whole bring-up that nothing retries:
+	// a single `context deadline exceeded` against ghcr.io fails the job before
+	// a single container exists. Pull it separately, with retries, so a
+	// transient registry hiccup costs a few seconds instead of the run. The
+	// last pull's own output is kept and reported, so a reference that is not
+	// transiently but permanently unpullable still says why rather than
+	// reducing to "exit status 1" behind a generic timeout.
+	var pullOut string
+	var pullErr error
+	if err := WaitFor("containerlab image pull", 3*time.Minute, 10*time.Second,
+		func() (bool, error) {
+			if _, err := RunCmdOutput("docker", "image", "inspect", clabImage); err == nil {
+				return true, nil
+			}
+			pullOut, pullErr = RunCmdCombined("docker", "pull", clabImage)
+			return pullErr == nil, nil
+		}); err != nil {
+		if pullErr != nil {
+			return fmt.Errorf("pulling %s: %w: %s", clabImage, pullErr, pullOut)
+		}
+		return fmt.Errorf("pulling %s: %w", clabImage, err)
+	}
+
 	return RunCmd("docker", args...)
 }
 
@@ -315,44 +381,211 @@ func PhaseUnderlay(cluster *Cluster) error {
 		if _, err := DockerExec(node.Name, "netplan", "apply"); err != nil {
 			return fmt.Errorf("netplan apply on %s: %w", node.Name, err)
 		}
+
+		// netplan apply returns once systemd-networkd has accepted the config,
+		// not once it has applied it, so the default route may not exist yet.
+		// Poll for it rather than reading it once.
+		var gw string
+		if err := WaitFor(fmt.Sprintf("default route on %s", node.Name),
+			60*time.Second, 2*time.Second, func() (bool, error) {
+				var err error
+				gw, err = defaultGateway(node.Name)
+				return err == nil, nil
+			}); err != nil {
+			return fmt.Errorf("finding default gateway on %s: %w", node.Name, err)
+		}
+
+		// The CRA installs its routes towards the node while cra.service starts,
+		// which is before the address those routes point at exists here. Both
+		// ends therefore begin by failing to resolve each other, and nothing
+		// re-drives it promptly. Ping the node's gateway until it answers so the
+		// link is proven -- and its neighbour entries populated -- before any
+		// later phase depends on it.
+		if err := WaitFor(fmt.Sprintf("CRA gateway %s from %s", gw, node.Name),
+			90*time.Second, 2*time.Second, func() (bool, error) {
+				_, err := DockerExec(node.Name, "ping6", "-c", "1", "-W", "2", gw)
+				return err == nil, nil
+			}); err != nil {
+			return err
+		}
 	}
 
-	// Wait for BGP convergence
+	// Wait for BGP convergence.
+	//
+	// This used to count established peers on leaf1 and compare against a fixed
+	// four. leaf1 peers with both DC gateways and with one CRA per node across
+	// both clusters, so the count could be reached while a node was still down,
+	// and the missing node only surfaced minutes later as an unexplained
+	// reachability timeout. Ask each node's own CRA instead: it has exactly two
+	// fabric uplinks, and the answer is about that node alone.
 	Logf("Waiting for BGP convergence...")
-	return WaitFor("BGP convergence", 120*time.Second, 5*time.Second, func() (bool, error) {
-		out, err := DockerExec("clab-nwop-leaf1", "vtysh", "-c", "show bgp summary json")
-		if err != nil {
-			return false, err
+	for _, node := range cluster.Nodes {
+		n := node
+		if err := WaitFor(fmt.Sprintf("BGP uplinks on %s", n.Name), 180*time.Second, 5*time.Second,
+			func() (bool, error) {
+				established, err := craEstablishedPeers(n.Name)
+				if err != nil {
+					return false, nil //nolint:nilerr // the CRA may not answer yet
+				}
+				Logf("  BGP: %d/2 uplinks established on %s", established, n.Name)
+				return established >= 2, nil
+			}); err != nil {
+			return err
 		}
-		// vtysh may print warnings before the JSON (e.g. "% Can't open vtysh.conf")
-		if idx := strings.Index(out, "{"); idx > 0 {
-			out = out[idx:]
+	}
+	return nil
+}
+
+// defaultGateway returns the IPv6 next hop the node uses for its default route,
+// i.e. the CRA's address on the trunk between them.
+func defaultGateway(node string) (string, error) {
+	out, err := DockerExec(node, "ip", "-6", "route", "show", "default")
+	if err != nil {
+		return "", err
+	}
+	// The default route can be multipath: the static next-hop netplan installs
+	// alongside one learned from the CRA's router advertisements. Prefer a
+	// global next-hop, and scope a link-local one to its device -- ping6 rejects
+	// an unscoped fe80:: address with "Invalid argument", so taking whichever
+	// next-hop happened to be listed first made this flaky.
+	fields := strings.Fields(out)
+	linkLocal := ""
+	for i, f := range fields {
+		if f != "via" || i+1 >= len(fields) {
+			continue
 		}
-		var summary map[string]interface{}
-		if err := json.Unmarshal([]byte(out), &summary); err != nil {
-			return false, err
+		gw := fields[i+1]
+		if !strings.HasPrefix(strings.ToLower(gw), "fe80:") {
+			return gw, nil
 		}
-		ipv4, ok := summary["ipv4Unicast"].(map[string]interface{})
-		if !ok {
-			return false, nil
-		}
-		peers, ok := ipv4["peers"].(map[string]interface{})
-		if !ok {
-			return false, nil
-		}
-		established := 0
-		for _, v := range peers {
-			peer, ok := v.(map[string]interface{})
-			if !ok {
-				continue
+		if linkLocal == "" {
+			dev := ""
+			for j := i + 2; j+1 < len(fields); j++ {
+				if fields[j] == "dev" {
+					dev = fields[j+1]
+					break
+				}
 			}
-			if peer["state"] == "Established" {
-				established++
+			if dev != "" {
+				gw += "%" + dev
 			}
+			linkLocal = gw
 		}
-		Logf("  BGP: %d/4 peers established on leaf1", established)
-		return established >= 4, nil
-	})
+	}
+	if linkLocal != "" {
+		return linkLocal, nil
+	}
+	return "", fmt.Errorf("no IPv6 default route on %s: %s", node, strings.TrimSpace(out))
+}
+
+// craEstablishedPeers counts the node CRA's established IPv4 unicast peers,
+// which on every flavour means its fabric uplinks.
+func craEstablishedPeers(node string) (int, error) {
+	craPID, err := getCRAPID(node)
+	if err != nil {
+		return 0, err
+	}
+	out, err := DockerExec(node, "nsenter", "-t", craPID, "-m", "-n", "--",
+		"vtysh", "-c", "show bgp summary json")
+	if err != nil {
+		return 0, err
+	}
+	// vtysh may print warnings before the JSON (e.g. "% Can't open vtysh.conf")
+	if idx := strings.Index(out, "{"); idx > 0 {
+		out = out[idx:]
+	}
+	var summary map[string]interface{}
+	if err := json.Unmarshal([]byte(out), &summary); err != nil {
+		return 0, fmt.Errorf("parsing bgp summary from %s: %w", node, err)
+	}
+	ipv4, ok := summary["ipv4Unicast"].(map[string]interface{})
+	if !ok {
+		return 0, nil
+	}
+	peers, ok := ipv4["peers"].(map[string]interface{})
+	if !ok {
+		return 0, nil
+	}
+	established := 0
+	for _, v := range peers {
+		peer, ok := v.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if peer["state"] == "Established" {
+			established++
+		}
+	}
+	return established, nil
+}
+
+// imageRegistryHost is the name kubeadm's own preflight image pull resolves; if
+// the lab can resolve it, kubeadm can start.
+const imageRegistryHost = "registry.k8s.io"
+
+// waitForNAT64 gets every node of a cluster to the point where it can actually
+// resolve names through the NAT64 resolver: the route has to reach each CRA's
+// cluster VRF over EVPN, the node's resolver has to point at it, and the path
+// between node and CRA has to work. Only the last of those is what kubeadm
+// needs, and it is the one a RIB check cannot tell you about.
+func waitForNAT64(cluster *Cluster) error {
+	Logf("Waiting for NAT64 route in cluster VRF...")
+	for _, node := range cluster.Nodes {
+		n := node
+		if err := WaitFor(fmt.Sprintf("NAT64 route on %s", n.Name), 120*time.Second, 5*time.Second,
+			func() (bool, error) {
+				craPID, err := getCRAPID(n.Name)
+				if err != nil {
+					return false, nil //nolint:nilerr // the CRA may not answer yet
+				}
+				out, _ := DockerExec(n.Name, "nsenter", "-t", craPID, "-m", "-n", "--",
+					"vtysh", "-c", fmt.Sprintf("show ipv6 route vrf cluster %s/128", cluster.NAT64DNS))
+				return strings.Contains(out, cluster.NAT64DNS), nil
+			}); err != nil {
+			return err
+		}
+	}
+
+	Logf("Configuring DNS → NAT64 (%s)...", cluster.NAT64DNS)
+	for _, node := range cluster.Nodes {
+		if _, err := DockerExecShell(node.Name,
+			fmt.Sprintf("printf 'nameserver %s\\n' > /etc/resolv.conf", cluster.NAT64DNS),
+		); err != nil {
+			return fmt.Errorf("setting DNS on %s: %w", node.Name, err)
+		}
+	}
+
+	// The route being in the CRA's RIB is not the same as the node being able to
+	// use it: the node reaches the fabric over the CRA, and that path only works
+	// once both ends have resolved each other. kubeadm was reaching preflight
+	// first, and every image pull then failed to resolve its registry.
+	//
+	// Resolve a name rather than ping the resolver, because resolving a name is
+	// what kubeadm needs; and require several in a row, because the path comes up
+	// shortly before it is stable. A single probe passed this gate while the very
+	// next query still timed out, and Linux answers a failed neighbour probe with
+	// a backoff long enough to outlast kubeadm's own retries.
+	Logf("Waiting for nodes to resolve names through NAT64 (%s)...", cluster.NAT64DNS)
+	const wantConsecutive = 3
+	for _, node := range cluster.Nodes {
+		n := node
+		start := time.Now()
+		streak := 0
+		if err := WaitFor(fmt.Sprintf("DNS from %s", n.Name), 10*time.Minute, 5*time.Second,
+			func() (bool, error) {
+				if _, err := DockerExec(n.Name, "getent", "hosts", imageRegistryHost); err != nil {
+					streak = 0
+					return false, nil //nolint:nilerr // keep waiting
+				}
+				streak++
+				return streak >= wantConsecutive, nil
+			}); err != nil {
+			dumpNodeReachability(n.Name)
+			return err
+		}
+		Logf("  %s resolves through NAT64 after %s", n.Name, time.Since(start).Round(time.Second))
+	}
+	return nil
 }
 
 // Phase 3: Configure NAT64/DNS64 and deploy kube-vip.
@@ -370,29 +603,8 @@ func PhasePreKubeadm(cluster *Cluster, repoRoot string) error {
 	}
 	Logf("NAT64 services running")
 
-	// Wait for NAT64 route to propagate via EVPN
-	Logf("Waiting for NAT64 route in cluster VRF...")
-	if err := WaitFor("NAT64 route", 120*time.Second, 5*time.Second, func() (bool, error) {
-		craPID, err := getCRAPID(cluster.Nodes[1].Name) // check on worker
-		if err != nil {
-			return false, err
-		}
-		out, _ := DockerExec(cluster.Nodes[1].Name,
-			"nsenter", "-t", craPID, "-m", "-n", "--",
-			"vtysh", "-c", fmt.Sprintf("show ipv6 route vrf cluster %s/128", cluster.NAT64DNS))
-		return strings.Contains(out, cluster.NAT64DNS), nil
-	}); err != nil {
+	if err := waitForNAT64(cluster); err != nil {
 		return err
-	}
-
-	// Configure DNS on all nodes → NAT64 unbound
-	Logf("Configuring DNS → NAT64 (%s)...", cluster.NAT64DNS)
-	for _, node := range cluster.Nodes {
-		if _, err := DockerExecShell(node.Name,
-			fmt.Sprintf("printf 'nameserver %s\\n' > /etc/resolv.conf", cluster.NAT64DNS),
-		); err != nil {
-			return fmt.Errorf("setting DNS on %s: %w", node.Name, err)
-		}
 	}
 
 	// Deploy kube-vip static pod manifest on control-plane
@@ -403,7 +615,7 @@ func PhasePreKubeadm(cluster *Cluster, repoRoot string) error {
 	if err != nil {
 		return fmt.Errorf("reading kube-vip template: %w", err)
 	}
-	manifest := strings.ReplaceAll(string(tplContent), "__VIP_ADDRESS__", cluster.VIP)
+	manifest := renderKubeVIP(strings.ReplaceAll(string(tplContent), "__VIP_ADDRESS__", cluster.VIP))
 	// kube-vip manifest goes to /etc/kube-vip/ for now;
 	// it will be moved to /etc/kubernetes/manifests/ after kubeadm init creates that dir
 	if err := DockerExecInput(cp.Name, manifest, "tee", "/etc/kube-vip/kube-vip.yaml"); err != nil {
@@ -481,6 +693,30 @@ func PhaseKubeadm(cluster *Cluster) error {
 
 // Phase 5: Install cluster components.
 // Calico, Coil, Multus, MetalLB, CNI plugins, operator + agents.
+// requiredCNIPlugins are the reference CNI plugins the e2e fixtures rely on
+// beyond the small set kindest/node ships for kindnet. They are baked into the
+// node images at build time (see e2e/images/kind-node*/Dockerfile).
+var requiredCNIPlugins = []string{"static", "macvlan", "tuning", "bandwidth", "host-local", "portmap"}
+
+// verifyCNIPlugins fails fast if the node image is missing a plugin an e2e
+// fixture needs. Without this, a missing plugin surfaces only as a pod that
+// never leaves ContainerCreating while the kubelet retries CNI ADD forever.
+//
+// The plugins used to be downloaded during bring-up instead, but the kind nodes
+// sit behind the containerlab fabric and reach the internet only through the
+// nat64 gateway, so that download was unreliable — and it swallowed every error,
+// turning a failed install into an endlessly retried CNI ADD rather than a
+// clear failure.
+func verifyCNIPlugins(node string) error {
+	for _, plugin := range requiredCNIPlugins {
+		if _, err := DockerExecShell(node, fmt.Sprintf("test -x /opt/cni/bin/%s", plugin)); err != nil {
+			return fmt.Errorf("CNI plugin %q missing from /opt/cni/bin on %s "+
+				"(it should be baked into the node image): %w", plugin, node, err)
+		}
+	}
+	return nil
+}
+
 func PhaseComponents(cluster *Cluster, repoRoot string) error {
 	Logf("Phase 5: Installing cluster components...")
 
@@ -501,7 +737,7 @@ func PhaseComponents(cluster *Cluster, repoRoot string) error {
 	imgBase := EnvOr("IMG_BASE", "ghcr.io/telekom")
 	images := []string{
 		imgBase + "/das-schiff-network-operator:latest",
-		imgBase + "/das-schiff-nwop-agent-cra-frr:latest",
+		agentImage(imgBase),
 		imgBase + "/das-schiff-nwop-agent-netplan:latest",
 		imgBase + "/das-schiff-platform-coil:latest",
 		imgBase + "/das-schiff-platform-metallb:latest",
@@ -521,21 +757,12 @@ func PhaseComponents(cluster *Cluster, repoRoot string) error {
 	// + default-ipv6-ippool natOutgoing: true). A static ip6tables masquerade rule
 	// would bypass Calico's ipset-based exclusion of egress pool CIDRs.
 
-	// Install CNI plugins
-	Logf("Installing CNI plugins...")
-	arch := runtime.GOARCH
-	cniVersion := EnvOr("CNI_PLUGINS_VERSION", "v1.9.0")
-	cniURL := fmt.Sprintf(
-		"https://github.com/containernetworking/plugins/releases/download/%s/cni-plugins-linux-%s-%s.tgz",
-		cniVersion, arch, cniVersion)
+	Logf("Verifying CNI plugins...")
 	for _, node := range cluster.Nodes {
-		// Install into both /opt/cni/bin (kubelet default) and /usr/lib/cni (Debian default)
-		// to ensure the correct version is used regardless of CNI path configuration.
-		if _, err := DockerExecShell(node.Name, fmt.Sprintf(
-			"curl -sSL '%s' | tar -xzf - -C /opt/cni/bin/ && cp /opt/cni/bin/macvlan /usr/lib/cni/macvlan 2>/dev/null; true", cniURL)); err != nil {
-			return fmt.Errorf("installing CNI plugins on %s: %w", node.Name, err)
+		if err := verifyCNIPlugins(node.Name); err != nil {
+			return err
 		}
-		Logf("  %s: CNI plugins installed", node.Name)
+		Logf("  %s: CNI plugins present", node.Name)
 	}
 
 	// Install Calico (paths inside container via /repo mount)
@@ -605,9 +832,15 @@ ports:
 	// Remove the webhook too — it targets the speaker which we don't run.
 	kubectl("delete", "validatingwebhookconfiguration", "metallb-webhook-configuration", "--ignore-not-found=true") //nolint:errcheck
 
-	// kube-vip DaemonSet
+	// kube-vip DaemonSet. Rendered rather than applied straight from the repo:
+	// its BGP peer is the CRA end of the node trunk, which differs per flavour.
 	Logf("Installing kube-vip DaemonSet...")
-	kubectl("apply", "-f", "/repo/e2e/kube-vip/kube-vip-ds.yaml") //nolint:errcheck
+	if dsContent, err := os.ReadFile(filepath.Join(repoRoot, "e2e", "kube-vip", "kube-vip-ds.yaml")); err == nil {
+		DockerExecInput(cp.Name, renderKubeVIP(string(dsContent)), //nolint:errcheck
+			"kubectl", "--kubeconfig="+kubeconfigPath, "apply", "-f", "-")
+	} else {
+		return fmt.Errorf("reading kube-vip daemonset: %w", err)
+	}
 
 	// Patch CoreDNS to forward to NAT64 unbound
 	Logf("Patching CoreDNS → NAT64 DNS...")
@@ -618,11 +851,16 @@ ports:
 		kubeconfigPath, cluster.NAT64DNS, kubeconfigPath)
 	DockerExecShell(cp.Name, coreDNSPatch) //nolint:errcheck
 
-	// Operator + agents
+	// Operator + agents.
+	// --load-restrictor=LoadRestrictionsNone: the grout overlay reuses the
+	// shared intent RBAC and webhook patch from ../operator rather than
+	// duplicating them, and kustomize refuses to load files from outside the
+	// kustomization directory by default.
 	Logf("Installing operator + agents...")
 	if _, err := DockerExecShell(cp.Name, fmt.Sprintf(
-		"kubectl --kubeconfig=%s kustomize /repo/e2e/operator | kubectl --kubeconfig=%s apply -f -",
-		kubeconfigPath, kubeconfigPath)); err != nil {
+		"kubectl --kubeconfig=%s kustomize --load-restrictor=LoadRestrictionsNone %s"+
+			" | kubectl --kubeconfig=%s apply -f -",
+		kubeconfigPath, operatorOverlay(), kubeconfigPath)); err != nil {
 		return fmt.Errorf("installing operator: %w", err)
 	}
 
@@ -674,7 +912,7 @@ func PhaseFinalize(cluster *Cluster, repoRoot string) error {
 	Logf("Waiting for agent DaemonSet...")
 	WaitFor("agent DaemonSet", 120*time.Second, 5*time.Second, func() (bool, error) { //nolint:errcheck
 		out, err := DockerExec(cp.Name, "kubectl", "--kubeconfig="+kubeconfigPath,
-			"get", "ds", "network-operator-agent-cra-frr", "-n", "kube-system",
+			"get", "ds", agentDaemonSet(), "-n", "kube-system",
 			"-o", "jsonpath={.status.desiredNumberScheduled},{.status.numberReady}")
 		if err != nil {
 			return false, err
@@ -706,14 +944,85 @@ func PhaseFinalize(cluster *Cluster, repoRoot string) error {
 	return nil
 }
 
-// getCRAPID returns the PID of the CRA nspawn process inside a node container.
+// getCRAPID returns the PID of the CRA's main process inside a node container,
+// for entering its mount/network namespaces with nsenter.
+//
+// The two flavours run the CRA very differently: the FRR CRA is an nspawn
+// container whose payload is a child of cra.service, while the grout CRA is a
+// nerdctl container that cra.service merely launches -- there cra.service is a
+// oneshot that has already exited, so MainPID is 0 and the nspawn lookup
+// silently returns an empty PID. Every caller then ran nsenter with an empty
+// target, which fails, and the checks built on it (the NAT64 route, for one)
+// could only ever time out.
+// craVlanExists reports whether the operator has created the VLAN sub-interface
+// for an L2 in the node's CRA. The two flavours keep it in different places: the
+// FRR CRA has a kernel netdev (`vlan.<id>`) in its netns, while on grout the
+// trunk VLAN is a grout interface (`<trunk>.<id>`) that never appears in the
+// kernel at all -- and the grout CRA image has no iproute2 to ask.
+func craVlanExists(container, craPID string, vlan int) error {
+	if isGrout() {
+		_, err := DockerExec(container, "nsenter", "-t", craPID, "-m", "-n", "--",
+			"grcli", "interface", "show", "name", fmt.Sprintf("%s.%d", craTrunkName, vlan))
+		return err
+	}
+	_, err := DockerExec(container, "nsenter", "-t", craPID, "-m", "-n", "--",
+		"ip", "link", "show", fmt.Sprintf("vlan.%d", vlan))
+	return err
+}
+
 func getCRAPID(container string) (string, error) {
-	out, err := DockerExecShell(container,
-		`P=$(systemctl show cra.service -p MainPID --value); cat /proc/$P/task/*/children | head -1 | tr -d " \n"`)
+	cmd := `P=$(systemctl show cra.service -p MainPID --value); cat /proc/$P/task/*/children | head -1 | tr -d " \n"`
+	if isGrout() {
+		cmd = `PATH=/usr/local/bin:$PATH nerdctl -n hbr inspect cra-grout --format '{{.State.Pid}}' | tr -d " \n"`
+	}
+	out, err := DockerExecShell(container, cmd)
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(out), nil
+	pid := strings.TrimSpace(out)
+	if pid == "" || pid == "0" {
+		return "", fmt.Errorf("no CRA process found in %s", container)
+	}
+	return pid, nil
+}
+
+// dumpNodeReachability prints the state a node needs in order to reach the
+// fabric through its CRA. It runs only when a reachability wait has already
+// timed out, so the run's log carries the evidence instead of requiring the
+// lab to be inspected by hand afterwards.
+func dumpNodeReachability(node string) {
+	Logf("  --- reachability diagnostics for %s ---", node)
+	for _, c := range [][]string{
+		{"ip", "-6", "route", "show"},
+		{"ip", "-6", "neigh", "show", "dev", "hbn"},
+		{"ip", "-4", "neigh", "show", "dev", "hbn"},
+	} {
+		out, _ := DockerExec(node, c...)
+		Logf("  $ %s\n%s", strings.Join(c, " "), strings.TrimSpace(out))
+	}
+
+	craPID, err := getCRAPID(node)
+	if err != nil {
+		Logf("  CRA PID unavailable: %v", err)
+		Logf("  --- end diagnostics ---")
+		return
+	}
+	craCmds := [][]string{
+		{"vtysh", "-c", "show bgp l2vpn evpn summary"},
+		{"vtysh", "-c", "show ipv6 route vrf cluster"},
+	}
+	if isGrout() {
+		craCmds = append(craCmds,
+			[]string{"grcli", "interface", "show"},
+			[]string{"grcli", "nexthop", "show"},
+		)
+	}
+	for _, c := range craCmds {
+		args := append([]string{"nsenter", "-t", craPID, "-m", "-n", "--"}, c...)
+		out, _ := DockerExec(node, args...)
+		Logf("  $ cra: %s\n%s", strings.Join(c, " "), strings.TrimSpace(out))
+	}
+	Logf("  --- end diagnostics ---")
 }
 
 // importImage imports a Docker image from the host Docker daemon into containerd inside a node.
@@ -754,27 +1063,10 @@ func PhaseCluster2(cluster2 *Cluster, repoRoot string) error {
 		return fmt.Errorf("cluster2 underlay: %w", err)
 	}
 
-	// Wait for NAT64 route to propagate via EVPN before kubeadm (needs to pull pause image)
-	Logf("Cluster-2: Waiting for NAT64 route in cluster VRF...")
-	if err := WaitFor("NAT64 route", 120*time.Second, 5*time.Second, func() (bool, error) {
-		craPID, err := getCRAPID(node.Name)
-		if err != nil {
-			return false, err
-		}
-		out, _ := DockerExec(node.Name,
-			"nsenter", "-t", craPID, "-m", "-n", "--",
-			"vtysh", "-c", fmt.Sprintf("show ipv6 route vrf cluster %s/128", cluster2.NAT64DNS))
-		return strings.Contains(out, cluster2.NAT64DNS), nil
-	}); err != nil {
-		return fmt.Errorf("cluster2 NAT64 route: %w", err)
-	}
-
-	// Configure DNS → NAT64 before kubeadm so image pulls work
-	Logf("Cluster-2: Configuring DNS → NAT64 (%s)...", cluster2.NAT64DNS)
-	if _, err := DockerExecShell(node.Name,
-		fmt.Sprintf("printf 'nameserver %s\\n' > /etc/resolv.conf", cluster2.NAT64DNS),
-	); err != nil {
-		return fmt.Errorf("setting DNS on %s: %w", node.Name, err)
+	// NAT64 must be reachable before kubeadm, which pulls the pause image.
+	Logf("Cluster-2: NAT64 setup...")
+	if err := waitForNAT64(cluster2); err != nil {
+		return fmt.Errorf("cluster2 NAT64: %w", err)
 	}
 
 	// Phase C2-2: kubeadm init (single-node, no VIP, untaint control-plane)
@@ -820,7 +1112,7 @@ func PhaseCluster2Components(cluster *Cluster, repoRoot string) error {
 	imgBase := EnvOr("IMG_BASE", "ghcr.io/telekom")
 	images := []string{
 		imgBase + "/das-schiff-network-operator:latest",
-		imgBase + "/das-schiff-nwop-agent-cra-frr:latest",
+		agentImage(imgBase),
 		imgBase + "/das-schiff-nwop-agent-netplan:latest",
 		imgBase + "/das-schiff-platform-coil:latest",
 		imgBase + "/das-schiff-platform-metallb:latest",
@@ -832,15 +1124,9 @@ func PhaseCluster2Components(cluster *Cluster, repoRoot string) error {
 		}
 	}
 
-	// CNI plugins
-	arch := runtime.GOARCH
-	cniVersion := EnvOr("CNI_PLUGINS_VERSION", "v1.9.0")
-	cniURL := fmt.Sprintf(
-		"https://github.com/containernetworking/plugins/releases/download/%s/cni-plugins-linux-%s-%s.tgz",
-		cniVersion, arch, cniVersion)
-	if _, err := DockerExecShell(cp.Name, fmt.Sprintf(
-		"curl -sSL '%s' | tar -xzf - -C /opt/cni/bin/ && cp /opt/cni/bin/macvlan /usr/lib/cni/macvlan 2>/dev/null; true", cniURL)); err != nil {
-		return fmt.Errorf("installing CNI plugins: %w", err)
+	// CNI plugins (baked into the node image; see PhaseComponents)
+	if err := verifyCNIPlugins(cp.Name); err != nil {
+		return err
 	}
 
 	// Calico (cluster-2 overlay: no coil CNI chain, different autodetection CIDRs)
@@ -865,8 +1151,9 @@ func PhaseCluster2Components(cluster *Cluster, repoRoot string) error {
 
 	// Operator + agents
 	if _, err := DockerExecShell(cp.Name, fmt.Sprintf(
-		"kubectl --kubeconfig=%s kustomize /repo/e2e/operator | kubectl --kubeconfig=%s apply -f -",
-		kubeconfigPath, kubeconfigPath)); err != nil {
+		"kubectl --kubeconfig=%s kustomize --load-restrictor=LoadRestrictionsNone %s"+
+			" | kubectl --kubeconfig=%s apply -f -",
+		kubeconfigPath, operatorOverlay(), kubeconfigPath)); err != nil {
 		return fmt.Errorf("installing operator: %w", err)
 	}
 
@@ -891,7 +1178,7 @@ func PhaseCluster2Components(cluster *Cluster, repoRoot string) error {
 	// Wait for agent DaemonSet
 	WaitFor("cluster2 agent DaemonSet", 120*time.Second, 5*time.Second, func() (bool, error) { //nolint:errcheck
 		out, err := DockerExec(cp.Name, "kubectl", "--kubeconfig="+kubeconfigPath,
-			"get", "ds", "network-operator-agent-cra-frr", "-n", "kube-system",
+			"get", "ds", agentDaemonSet(), "-n", "kube-system",
 			"-o", "jsonpath={.status.desiredNumberScheduled},{.status.numberReady}")
 		if err != nil {
 			return false, err
@@ -933,8 +1220,8 @@ func PhaseCluster2Gateway(cluster *Cluster, repoRoot string) error {
 			Logf("  cluster2 VLANs: CRA PID lookup failed: %v", err)
 			return false, nil
 		}
-		_, err601 := DockerExec(cp.Name, "nsenter", "-t", craPID, "-m", "-n", "--", "ip", "link", "show", "vlan.601")
-		_, err602 := DockerExec(cp.Name, "nsenter", "-t", craPID, "-m", "-n", "--", "ip", "link", "show", "vlan.602")
+		err601 := craVlanExists(cp.Name, craPID, 601)
+		err602 := craVlanExists(cp.Name, craPID, 602)
 		if err601 != nil || err602 != nil {
 			missing := ""
 			if err601 != nil {

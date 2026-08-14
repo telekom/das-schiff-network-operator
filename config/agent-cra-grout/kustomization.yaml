@@ -1,0 +1,19 @@
+resources:
+- agent.yaml
+- service.yaml
+
+generatorOptions:
+  disableNameSuffixHash: true
+
+# frr.conf.tpl MUST stay byte-identical to config/agent-cra-frr/frr.conf.tpl:
+# grout uses FRR as its control plane and renders it through the very same
+# template (only the fast path differs). It is a copy rather than a symlink or a
+# relative file source only because kustomize refuses both outside the overlay
+# directory. TestGroutFRRTemplateMatchesCRAFRR (pkg/cra-grout) fails on drift --
+# this copy silently fell behind cra-frr once already.
+configMapGenerator:
+- files:
+  - frr.conf.tpl
+  name: frr-template
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization

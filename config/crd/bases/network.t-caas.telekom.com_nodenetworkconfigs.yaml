@@ -782,6 +782,11 @@ spec:
                             address:
                               description: Address is the address of the next hop.
                               type: string
+                            interface:
+                              description: |-
+                                Interface is the egress interface for an interface (on-link) next hop, used
+                                for workload CNI host routes that point at the moved CRA-side interface.
+                              type: string
                             vrf:
                               description: Vrf is the VRF of the next hop.
                               type: string
@@ -1105,6 +1110,11 @@ spec:
                             address:
                               description: Address is the address of the next hop.
                               type: string
+                            interface:
+                              description: |-
+                                Interface is the egress interface for an interface (on-link) next hop, used
+                                for workload CNI host routes that point at the moved CRA-side interface.
+                              type: string
                             vrf:
                               description: Vrf is the VRF of the next hop.
                               type: string
@@ -1259,6 +1269,83 @@ spec:
                       required:
                       - filter
                       - fromVrf
+                      type: object
+                    type: array
+                  workloadPorts:
+                    description: |-
+                      WorkloadPorts is a list of workload CNI attachments (interfaces moved into the
+                      CRA network namespace) bound into this VRF. The VSR flavor renders these as
+                      infrastructure interfaces plus interface-static routes via NETCONF, because
+                      the fast path owns the FIB and netlink cannot be used to program it.
+                    items:
+                      description: |-
+                        WorkloadPort describes a routed workload attachment whose CRA-side interface was
+                        moved into the CRA network namespace by the workload CNI. On the VSR flavor the
+                        on-link gateway addresses and the workload host routes are pushed via NETCONF.
+                      properties:
+                        gatewayV4:
+                          description: |-
+                            GatewayV4 is the on-link IPv4 gateway address (with prefix length, e.g.
+                            "169.254.100.100/32") configured on the infrastructure interface.
+                          format: cidr
+                          type: string
+                        gatewayV6:
+                          description: |-
+                            GatewayV6 is the on-link IPv6 gateway address (with prefix length, e.g.
+                            "fd00:7:caa5:1::/128") configured on the infrastructure interface.
+                          format: cidr
+                          type: string
+                        hostRoutes:
+                          description: |-
+                            HostRoutes are the workload host addresses (e.g. "10.0.0.5/32",
+                            "fd00:200::5/128") installed as interface-static routes via Interface so
+                            VSR redistributes them into BGP.
+                          items:
+                            format: cidr
+                            type: string
+                          type: array
+                        interface:
+                          description: |-
+                            Interface is the interface name inside the CRA network namespace (the moved
+                            veth end, e.g. "cra012345"). VSR references it as infra-<interface>, which
+                            must itself fit the kernel IFNAMSIZ-1 limit, hence the 9-character bound.
+                          maxLength: 9
+                          minLength: 1
+                          type: string
+                        mtu:
+                          description: |-
+                            MTU is the MTU the attachment requested (the CNI configuration's mtu, which
+                            the plugin also applied to both ends of the veth). Zero means the default.
+                            In L2 attach mode it additionally has to fit the domain: an access port
+                            requires its Layer2 to carry at least this much, a trunk requires at least
+                            one of its members to. Routed attachments are not constrained by it.
+                          maximum: 9216
+                          minimum: 0
+                          type: integer
+                        socketMode:
+                          description: |-
+                            SocketMode is the vhost-user socket mode ("client" or "server") from the
+                            workload's perspective, as allocated by the device plugin. The CRA
+                            renderer inverts it for the fast path (workload server <-> VSR client),
+                            so callers must not pre-invert it.
+                            Only meaningful when Transport is "vhostuser".
+                          type: string
+                        socketPath:
+                          description: |-
+                            SocketPath is the vhost-user unix socket path shared with the workload.
+                            Only meaningful when Transport is "vhostuser".
+                          type: string
+                        transport:
+                          default: veth
+                          description: |-
+                            Transport selects the CRA-side wiring: "veth" (default, an infrastructure
+                            port) or "vhostuser" (a VSR fpvhost fast-path virtual-port, VSR-only).
+                          enum:
+                          - veth
+                          - vhostuser
+                          type: string
+                      required:
+                      - interface
                       type: object
                     type: array
                 type: object
@@ -2141,6 +2228,11 @@ spec:
                               address:
                                 description: Address is the address of the next hop.
                                 type: string
+                              interface:
+                                description: |-
+                                  Interface is the egress interface for an interface (on-link) next hop, used
+                                  for workload CNI host routes that point at the moved CRA-side interface.
+                                type: string
                               vrf:
                                 description: Vrf is the VRF of the next hop.
                                 type: string
@@ -2464,6 +2556,11 @@ spec:
                               address:
                                 description: Address is the address of the next hop.
                                 type: string
+                              interface:
+                                description: |-
+                                  Interface is the egress interface for an interface (on-link) next hop, used
+                                  for workload CNI host routes that point at the moved CRA-side interface.
+                                type: string
                               vrf:
                                 description: Vrf is the VRF of the next hop.
                                 type: string
@@ -2626,6 +2723,83 @@ spec:
                         - fromVrf
                         type: object
                       type: array
+                    workloadPorts:
+                      description: |-
+                        WorkloadPorts is a list of workload CNI attachments (interfaces moved into the
+                        CRA network namespace) bound into this VRF. The VSR flavor renders these as
+                        infrastructure interfaces plus interface-static routes via NETCONF, because
+                        the fast path owns the FIB and netlink cannot be used to program it.
+                      items:
+                        description: |-
+                          WorkloadPort describes a routed workload attachment whose CRA-side interface was
+                          moved into the CRA network namespace by the workload CNI. On the VSR flavor the
+                          on-link gateway addresses and the workload host routes are pushed via NETCONF.
+                        properties:
+                          gatewayV4:
+                            description: |-
+                              GatewayV4 is the on-link IPv4 gateway address (with prefix length, e.g.
+                              "169.254.100.100/32") configured on the infrastructure interface.
+                            format: cidr
+                            type: string
+                          gatewayV6:
+                            description: |-
+                              GatewayV6 is the on-link IPv6 gateway address (with prefix length, e.g.
+                              "fd00:7:caa5:1::/128") configured on the infrastructure interface.
+                            format: cidr
+                            type: string
+                          hostRoutes:
+                            description: |-
+                              HostRoutes are the workload host addresses (e.g. "10.0.0.5/32",
+                              "fd00:200::5/128") installed as interface-static routes via Interface so
+                              VSR redistributes them into BGP.
+                            items:
+                              format: cidr
+                              type: string
+                            type: array
+                          interface:
+                            description: |-
+                              Interface is the interface name inside the CRA network namespace (the moved
+                              veth end, e.g. "cra012345"). VSR references it as infra-<interface>, which
+                              must itself fit the kernel IFNAMSIZ-1 limit, hence the 9-character bound.
+                            maxLength: 9
+                            minLength: 1
+                            type: string
+                          mtu:
+                            description: |-
+                              MTU is the MTU the attachment requested (the CNI configuration's mtu, which
+                              the plugin also applied to both ends of the veth). Zero means the default.
+                              In L2 attach mode it additionally has to fit the domain: an access port
+                              requires its Layer2 to carry at least this much, a trunk requires at least
+                              one of its members to. Routed attachments are not constrained by it.
+                            maximum: 9216
+                            minimum: 0
+                            type: integer
+                          socketMode:
+                            description: |-
+                              SocketMode is the vhost-user socket mode ("client" or "server") from the
+                              workload's perspective, as allocated by the device plugin. The CRA
+                              renderer inverts it for the fast path (workload server <-> VSR client),
+                              so callers must not pre-invert it.
+                              Only meaningful when Transport is "vhostuser".
+                            type: string
+                          socketPath:
+                            description: |-
+                              SocketPath is the vhost-user unix socket path shared with the workload.
+                              Only meaningful when Transport is "vhostuser".
+                            type: string
+                          transport:
+                            default: veth
+                            description: |-
+                              Transport selects the CRA-side wiring: "veth" (default, an infrastructure
+                              port) or "vhostuser" (a VSR fpvhost fast-path virtual-port, VSR-only).
+                            enum:
+                            - veth
+                            - vhostuser
+                            type: string
+                        required:
+                        - interface
+                        type: object
+                      type: array
                   required:
                   - evpnExportFilter
                   - evpnExportRouteTargets
@@ -2634,10 +2808,166 @@ spec:
                   type: object
                 description: FabricVRFs is a map of fabric VRF configurations.
                 type: object
+              globalWorkloadPorts:
+                description: |-
+                  GlobalWorkloadPorts is a list of workload CNI attachments requested without a
+                  target VRF. They are bound into the node's default (no-l3vrf) table rather
+                  than a tenant/cluster L3VRF, and their host routes are advertised into the
+                  underlay BGP via network statements.
+                items:
+                  description: |-
+                    WorkloadPort describes a routed workload attachment whose CRA-side interface was
+                    moved into the CRA network namespace by the workload CNI. On the VSR flavor the
+                    on-link gateway addresses and the workload host routes are pushed via NETCONF.
+                  properties:
+                    gatewayV4:
+                      description: |-
+                        GatewayV4 is the on-link IPv4 gateway address (with prefix length, e.g.
+                        "169.254.100.100/32") configured on the infrastructure interface.
+                      format: cidr
+                      type: string
+                    gatewayV6:
+                      description: |-
+                        GatewayV6 is the on-link IPv6 gateway address (with prefix length, e.g.
+                        "fd00:7:caa5:1::/128") configured on the infrastructure interface.
+                      format: cidr
+                      type: string
+                    hostRoutes:
+                      description: |-
+                        HostRoutes are the workload host addresses (e.g. "10.0.0.5/32",
+                        "fd00:200::5/128") installed as interface-static routes via Interface so
+                        VSR redistributes them into BGP.
+                      items:
+                        format: cidr
+                        type: string
+                      type: array
+                    interface:
+                      description: |-
+                        Interface is the interface name inside the CRA network namespace (the moved
+                        veth end, e.g. "cra012345"). VSR references it as infra-<interface>, which
+                        must itself fit the kernel IFNAMSIZ-1 limit, hence the 9-character bound.
+                      maxLength: 9
+                      minLength: 1
+                      type: string
+                    mtu:
+                      description: |-
+                        MTU is the MTU the attachment requested (the CNI configuration's mtu, which
+                        the plugin also applied to both ends of the veth). Zero means the default.
+                        In L2 attach mode it additionally has to fit the domain: an access port
+                        requires its Layer2 to carry at least this much, a trunk requires at least
+                        one of its members to. Routed attachments are not constrained by it.
+                      maximum: 9216
+                      minimum: 0
+                      type: integer
+                    socketMode:
+                      description: |-
+                        SocketMode is the vhost-user socket mode ("client" or "server") from the
+                        workload's perspective, as allocated by the device plugin. The CRA
+                        renderer inverts it for the fast path (workload server <-> VSR client),
+                        so callers must not pre-invert it.
+                        Only meaningful when Transport is "vhostuser".
+                      type: string
+                    socketPath:
+                      description: |-
+                        SocketPath is the vhost-user unix socket path shared with the workload.
+                        Only meaningful when Transport is "vhostuser".
+                      type: string
+                    transport:
+                      default: veth
+                      description: |-
+                        Transport selects the CRA-side wiring: "veth" (default, an infrastructure
+                        port) or "vhostuser" (a VSR fpvhost fast-path virtual-port, VSR-only).
+                      enum:
+                      - veth
+                      - vhostuser
+                      type: string
+                  required:
+                  - interface
+                  type: object
+                type: array
               layer2s:
                 additionalProperties:
                   description: Layer2 represents a Layer 2 network configuration.
                   properties:
+                    attachedPorts:
+                      description: |-
+                        AttachedPorts are workload-CNI ports enslaved to this L2 bridge (moved into
+                        the CRA netns and added as bridge link-interfaces). They are rendered as
+                        bridge slaves (VSR link-interface, FRR master) with no L3 addressing.
+                      items:
+                        description: |-
+                          AttachedPort is a workload-CNI port bound to a Layer2 bridge (L2 attach mode).
+                          It carries no L3 addressing: the port is added as a bridge slave only.
+                        properties:
+                          interface:
+                            description: |-
+                              Interface is the interface name inside the CRA network namespace (the moved
+                              veth end for veth transport, or the fpvhost interface for vhostuser).
+                            type: string
+                          mtu:
+                            description: |-
+                              MTU is the MTU the attachment requested (the CNI configuration's mtu). The
+                              CRA sizes the interfaces it derives from the port with it; the port itself
+                              is set up by the CNI. Zero means the default.
+                            maximum: 9216
+                            minimum: 0
+                            type: integer
+                          socketMode:
+                            description: |-
+                              SocketMode is the vhost-user socket mode ("client" or "server") from the
+                              workload's perspective, as allocated by the device plugin. The CRA
+                              renderer inverts it for the fast path (workload server <-> VSR client),
+                              so callers must not pre-invert it.
+                              Only meaningful when Transport is "vhostuser".
+                            type: string
+                          socketPath:
+                            description: |-
+                              SocketPath is the vhost-user unix socket path shared with the workload.
+                              Only meaningful when Transport is "vhostuser".
+                            type: string
+                          transport:
+                            default: veth
+                            description: |-
+                              Transport selects the CRA-side wiring: "veth" (default, an infrastructure
+                              port) or "vhostuser" (a VSR fpvhost fast-path virtual-port, VSR-only).
+                            enum:
+                            - veth
+                            - vhostuser
+                            type: string
+                          vlan:
+                            description: |-
+                              VLAN is the 802.1Q VLAN id the port carries this L2 domain under on the
+                              workload side. Zero means the port is an untagged access port and is
+                              bridged in directly. A non-zero value makes it one member of a trunk: the
+                              CRA renders a VLAN sub-interface of the port for that id and bridges that
+                              instead, which also translates the tag whenever the id differs from the
+                              domain's own VLAN.
+                            maximum: 4094
+                            minimum: 0
+                            type: integer
+                        required:
+                        - interface
+                        type: object
+                      type: array
+                    attachmentRef:
+                      description: |-
+                        AttachmentRef identifies the Layer2Attachment that produced this Layer2.
+                        It lets workload-CNI L2 port attachments (see AttachedPorts) bind to the
+                        correct L2 domain by reference rather than by VNI. Empty for Layer2s built
+                        from the legacy Layer2NetworkConfiguration path.
+                      properties:
+                        name:
+                          description: Name is the Layer2Attachment name.
+                          minLength: 1
+                          type: string
+                        namespace:
+                          description: Namespace is the Layer2Attachment namespace.
+                          minLength: 1
+                          type: string
+                      required:
+                      - name
+                      - namespace
+                      type: object
                     disableSegmentation:
                       description: DisableSegmentation indicates whether to disable
                         segmentation for the Layer 2 network.
@@ -3472,6 +3802,11 @@ spec:
                               address:
                                 description: Address is the address of the next hop.
                                 type: string
+                              interface:
+                                description: |-
+                                  Interface is the egress interface for an interface (on-link) next hop, used
+                                  for workload CNI host routes that point at the moved CRA-side interface.
+                                type: string
                               vrf:
                                 description: Vrf is the VRF of the next hop.
                                 type: string
@@ -3795,6 +4130,11 @@ spec:
                               address:
                                 description: Address is the address of the next hop.
                                 type: string
+                              interface:
+                                description: |-
+                                  Interface is the egress interface for an interface (on-link) next hop, used
+                                  for workload CNI host routes that point at the moved CRA-side interface.
+                                type: string
                               vrf:
                                 description: Vrf is the VRF of the next hop.
                                 type: string
@@ -3951,6 +4291,83 @@ spec:
                         required:
                         - filter
                         - fromVrf
+                        type: object
+                      type: array
+                    workloadPorts:
+                      description: |-
+                        WorkloadPorts is a list of workload CNI attachments (interfaces moved into the
+                        CRA network namespace) bound into this VRF. The VSR flavor renders these as
+                        infrastructure interfaces plus interface-static routes via NETCONF, because
+                        the fast path owns the FIB and netlink cannot be used to program it.
+                      items:
+                        description: |-
+                          WorkloadPort describes a routed workload attachment whose CRA-side interface was
+                          moved into the CRA network namespace by the workload CNI. On the VSR flavor the
+                          on-link gateway addresses and the workload host routes are pushed via NETCONF.
+                        properties:
+                          gatewayV4:
+                            description: |-
+                              GatewayV4 is the on-link IPv4 gateway address (with prefix length, e.g.
+                              "169.254.100.100/32") configured on the infrastructure interface.
+                            format: cidr
+                            type: string
+                          gatewayV6:
+                            description: |-
+                              GatewayV6 is the on-link IPv6 gateway address (with prefix length, e.g.
+                              "fd00:7:caa5:1::/128") configured on the infrastructure interface.
+                            format: cidr
+                            type: string
+                          hostRoutes:
+                            description: |-
+                              HostRoutes are the workload host addresses (e.g. "10.0.0.5/32",
+                              "fd00:200::5/128") installed as interface-static routes via Interface so
+                              VSR redistributes them into BGP.
+                            items:
+                              format: cidr
+                              type: string
+                            type: array
+                          interface:
+                            description: |-
+                              Interface is the interface name inside the CRA network namespace (the moved
+                              veth end, e.g. "cra012345"). VSR references it as infra-<interface>, which
+                              must itself fit the kernel IFNAMSIZ-1 limit, hence the 9-character bound.
+                            maxLength: 9
+                            minLength: 1
+                            type: string
+                          mtu:
+                            description: |-
+                              MTU is the MTU the attachment requested (the CNI configuration's mtu, which
+                              the plugin also applied to both ends of the veth). Zero means the default.
+                              In L2 attach mode it additionally has to fit the domain: an access port
+                              requires its Layer2 to carry at least this much, a trunk requires at least
+                              one of its members to. Routed attachments are not constrained by it.
+                            maximum: 9216
+                            minimum: 0
+                            type: integer
+                          socketMode:
+                            description: |-
+                              SocketMode is the vhost-user socket mode ("client" or "server") from the
+                              workload's perspective, as allocated by the device plugin. The CRA
+                              renderer inverts it for the fast path (workload server <-> VSR client),
+                              so callers must not pre-invert it.
+                              Only meaningful when Transport is "vhostuser".
+                            type: string
+                          socketPath:
+                            description: |-
+                              SocketPath is the vhost-user unix socket path shared with the workload.
+                              Only meaningful when Transport is "vhostuser".
+                            type: string
+                          transport:
+                            default: veth
+                            description: |-
+                              Transport selects the CRA-side wiring: "veth" (default, an infrastructure
+                              port) or "vhostuser" (a VSR fpvhost fast-path virtual-port, VSR-only).
+                            enum:
+                            - veth
+                            - vhostuser
+                            type: string
+                        required:
+                        - interface
                         type: object
                       type: array
                   type: object

@@ -45,6 +45,8 @@ var _ = Describe("Intent: L3 Connectivity", Label("intent", "l3"), func() {
 	AfterEach(func() {
 		_ = f.DeletePod(ctx, ns, "intent-l3-01")
 		_ = f.DeletePod(ctx, ns, "intent-l3-03")
+
+		releaseIntentFixture(ctx, f, "intent/l3/manifests.yaml")
 	})
 
 	It("should allow ping between pods on different VLANs in the same VRF using intent CRDs", func() {

@@ -1,0 +1,59 @@
+# NetworkAttachmentDefinition for a grout vhost-user (virtio-user) VM attach.
+#
+# GROUT FLAVOUR. The counterpart of networkattachmentdefinition-vhostuser.yaml,
+# which targets the 6WIND vSR and its proprietary device plugin. The resource
+# name and the attach mode differ; everything else is identical, which is the
+# point: the contract in docs/proposals/03-vhost-user/DEVICE-PLUGIN.md is
+# implemented by both plugins, so a NAD does not care which fast path is behind
+# the socket.
+#
+# - resourceName annotation: our own vhostuser-device-plugin's virtio-user
+#   resource. The VM MUST request the same resource, otherwise Multus hands the
+#   CNI an empty deviceID and the ADD fails. "virtio-user" means the WORKLOAD
+#   connects and the CRA serves the socket.
+# - transport "vhostuser": cni-workload resolves the allocation into a host-side
+#   and a pod-side socket path, publishes the pod-side one in a CNIDeviceInfoFile
+#   (which KubeVirt projects into the binding-plugin sidecar as device-info,
+#   and cmd/kubevirt-vhostuser-hook turns into domain XML) and hands the
+#   host-side one to agent-cra-grout, which renders a grout net_vhost port.
+# - the socket path is deliberately NOT set: it is allocated by the device
+#   plugin. Because the plugin's paths are flags, this NAD would additionally
+#   set vhostUserDir/virtioUserDir if the lab moved the trees; here they are the
+#   defaults.
+# - attachMode "l2": the port is enslaved to the L2 bridge of the Layer2 whose
+#   stamped attachmentRef matches layer2AttachmentRef, so the VM lands in VLAN
+#   501 and reaches the fabric through that L2VNI and its IRB anycast gateway.
+#   Routed mode is deliberately NOT used here: grout keeps a single node-global
+#   IPv4 address table, so the shared on-link gateway 169.254.1.1/32 can only be
+#   programmed on one port per node (see pkg/cra-grout/README.md).
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: grout-vhostuser-vm-net
+  namespace: default
+  annotations:
+    k8s.v1.cni.cncf.io/resourceName: network.t-caas.telekom.com/virtio-user
+spec:
+  config: |
+    {
+      "cniVersion": "1.0.0",
+      "name": "grout-vhostuser-vm-net",
+      "type": "cni-workload",
+      "craNetns": "auto",
+      "trunkInterface": "hbn",
+      "transport": "vhostuser",
+      "deviceResource": "network.t-caas.telekom.com/virtio-user",
+      "capabilities": { "CNIDeviceInfoFile": true, "deviceID": true },
+      "attachMode": "l2",
+      "layer2AttachmentRef": {
+        "name": "l2a-base-vlan501",
+        "namespace": "default"
+      },
+      "ipam": {
+        "type": "static",
+        "addresses": [
+          { "address": "10.250.0.12/24" },
+          { "address": "fd94:685b:30cf:501::12/64" }
+        ]
+      }
+    }

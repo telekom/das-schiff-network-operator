@@ -62,10 +62,49 @@ type LoopbackConfig struct {
 	Addresses []string `json:"addresses"`
 }
 
+// WorkloadPort describes a workload CNI attachment whose CRA-side veth was moved
+// into this (CRA-FRR) network namespace by the workload CNI. The frr-cra server
+// programs its on-link datapath: enslave to the target VRF (or leave in the main
+// table for the underlay), bring it up, add the on-link gateway addresses and
+// install the workload host routes so FRR redistributes them into BGP.
+type WorkloadPort struct {
+	// Interface is the moved interface name inside the CRA netns.
+	Interface string `json:"interface"`
+	// Transport selects the CRA-side wiring: "veth" (default) or "vhostuser".
+	// The FRR flavor only supports veth; a vhostuser port is rejected.
+	Transport string `json:"transport,omitempty"`
+	// VRF is the target VRF device name; empty (or "default"/"main") keeps the
+	// port in the main table (the underlay).
+	VRF string `json:"vrf,omitempty"`
+	// GatewayV4 is the on-link IPv4 gateway address (CIDR, e.g. 169.254.1.1/32).
+	GatewayV4 string `json:"gatewayV4,omitempty"`
+	// GatewayV6 is the on-link IPv6 gateway address (CIDR, e.g. fe80::1/128).
+	GatewayV6 string `json:"gatewayV6,omitempty"`
+	// HostRoutes are the workload host addresses (CIDR /32, /128) installed as
+	// on-link routes via Interface.
+	HostRoutes []string `json:"hostRoutes,omitempty"`
+}
+
+// L2AttachedPort is a workload-CNI port attached to a Layer2 bridge (L2 attach
+// mode): the moved interface is added as a bridge slave with no L3 addressing.
+type L2AttachedPort struct {
+	// Interface is the moved interface name inside the CRA netns.
+	Interface string `json:"interface"`
+	// Transport selects the CRA-side wiring: "veth" (default) or "vhostuser".
+	// The FRR flavor only supports veth; a vhostuser port is rejected.
+	Transport string `json:"transport,omitempty"`
+	// VlanID is the workload-side 802.1Q id the domain is carried under on a
+	// trunk port. 0 means the port itself is an untagged bridge slave; a
+	// non-zero id means the domain is reached through an <Interface>.<VlanID>
+	// VLAN sub-interface, which is what is enslaved to the bridge instead.
+	VlanID uint16 `json:"vlanId,omitempty"`
+}
+
 type NetlinkConfiguration struct {
-	VRFs       []VRFInformation    `json:"vrf"`
-	Layer2s    []Layer2Information `json:"layer2"`
-	GRETunnels []GRETunnel         `json:"greTunnels,omitempty"`
-	Loopbacks  []LoopbackConfig    `json:"loopbacks,omitempty"`
-	Mirrors    []MirrorRule        `json:"mirrors,omitempty"`
+	VRFs          []VRFInformation    `json:"vrf"`
+	Layer2s       []Layer2Information `json:"layer2"`
+	GRETunnels    []GRETunnel         `json:"greTunnels,omitempty"`
+	Loopbacks     []LoopbackConfig    `json:"loopbacks,omitempty"`
+	Mirrors       []MirrorRule        `json:"mirrors,omitempty"`
+	WorkloadPorts []WorkloadPort      `json:"workloadPorts,omitempty"`
 }

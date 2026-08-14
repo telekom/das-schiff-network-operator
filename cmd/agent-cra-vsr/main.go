@@ -45,10 +45,12 @@ import (
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	controllervsr "github.com/telekom/das-schiff-network-operator/controllers/agent-cra-vsr"
 	"github.com/telekom/das-schiff-network-operator/pkg/cra-vsr"
+	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
 	"github.com/telekom/das-schiff-network-operator/pkg/monitoring"
 	reconcilervsr "github.com/telekom/das-schiff-network-operator/pkg/reconciler/agent-cra-vsr"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/common"
 	"github.com/telekom/das-schiff-network-operator/pkg/version"
+	"github.com/telekom/das-schiff-network-operator/pkg/workloadcni"
 )
 
 var (
@@ -232,6 +234,7 @@ func main() {
 	var nodeNetworkConfigPath string
 	var metricsAddr string
 	var healthAddr string
+	var intentNamespace string
 	var opts zap.Options
 
 	version.Get().Print(os.Args[0])
@@ -244,6 +247,8 @@ func main() {
 	flag.StringVar(&nodeNetworkConfigPath, "nodenetworkconfig-path",
 		common.DefaultNodeNetworkConfigPath,
 		"Path to store working node configuration.")
+	flag.StringVar(&intentNamespace, "intent-namespace", workloadcni.DefaultLayer2Namespace,
+		"namespace the intent CRDs live in; workload CNI Layer2Attachment references are resolved in it")
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
@@ -279,9 +284,43 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Start the node-local workload-cni gRPC server so the workload CNI plugin can
+	// hand VSR attachments to this agent (which renders them via NETCONF).
+	if err := startWorkloadCNIServer(mgr, intentNamespace); err != nil {
+		setupLog.Error(err, "unable to start workload-cni server")
+		os.Exit(1)
+	}
+
 	setupLog.Info("starting manager")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
+}
+
+// startWorkloadCNIServer registers the node-local workload-cni gRPC server as a
+// manager runnable so it shares the manager's lifecycle and client.
+func startWorkloadCNIServer(mgr manager.Manager, intentNamespace string) error {
+	nodeName := os.Getenv(healthcheck.NodenameEnv)
+	if nodeName == "" {
+		// Without it the server would write NodeWorkloadPorts objects with an empty
+		// name, failing every CNI ADD with an opaque API error.
+		return fmt.Errorf("%s must be set to run the workload-cni server", healthcheck.NodenameEnv)
+	}
+	// The operator reads "" as "all namespaces", but a bare Layer2Attachment name
+	// on the CNI wire is only unambiguous within one namespace: cluster-wide, two
+	// tenants could each own an attachment of that name and the agent would have
+	// to guess which domain to bridge the workload into.
+	if intentNamespace == "" {
+		return fmt.Errorf("--intent-namespace must name a single namespace to run the workload-cni server")
+	}
+	socketPath := os.Getenv("ROUTED_CNI_SOCKET")
+	srv := workloadcni.NewServer(mgr.GetClient(), nodeName, mgr.GetLogger(),
+		workloadcni.WithLayer2Namespace(intentNamespace))
+	if err := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
+		return srv.Serve(ctx, socketPath)
+	})); err != nil {
+		return fmt.Errorf("unable to add workload-cni server to manager: %w", err)
+	}
+	return nil
 }

@@ -437,3 +437,23 @@ func (f *Framework) GetGatewayMAC(ctx context.Context, namespace, podName, gwIP 
 	}
 	return "", fmt.Errorf("MAC not found in output: %s", stdout)
 }
+
+// KubectlGet runs `kubectl get` against the test cluster and returns stdout.
+//
+// The typed clients cover everything with a Go type, but KubeVirt VMIs and the
+// Multus network-status annotation are neither in our scheme nor worth adding
+// one for; a jsonpath query is both shorter and closer to what a human would
+// run while debugging the same fixture.
+func (f *Framework) KubectlGet(ctx context.Context, args ...string) (string, error) {
+	full := append([]string{"--kubeconfig=" + f.Config.Kubeconfig, "get"}, args...)
+	cmd := exec.CommandContext(ctx, "kubectl", full...)
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return stdout.String(), fmt.Errorf("kubectl get %s: %w (stderr: %s)",
+			strings.Join(args, " "), err, stderr.String())
+	}
+	return stdout.String(), nil
+}

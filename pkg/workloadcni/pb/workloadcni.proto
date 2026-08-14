@@ -1,0 +1,123 @@
+// Copyright 2025.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+syntax = "proto3";
+
+package workloadcni.v1;
+
+option go_package = "github.com/telekom/das-schiff-network-operator/pkg/workloadcni/pb";
+
+// WorkloadCNI is the node-local API the workload CNI plugin calls, over a unix
+// socket, to hand a routed attachment to the CRA agent. The agent persists the
+// attachment into the aggregate per-node NodeWorkloadPorts object and reconciles
+// it into the CRA (NETCONF for VSR, netlink for FRR).
+service WorkloadCNI {
+  // Add records a routed attachment (CNI ADD). It is idempotent: repeating an
+  // Add with the same identity upserts the entry.
+  rpc Add(AddRequest) returns (AddResponse);
+  // Del removes a routed attachment (CNI DEL). It is idempotent: removing an
+  // unknown attachment succeeds.
+  rpc Del(DelRequest) returns (DelResponse);
+}
+
+// WorkloadPort is the datapath payload for a routed attachment.
+message WorkloadPort {
+  // interface is the moved interface name inside the CRA network namespace.
+  // VSR references it as infra-<interface>.
+  string interface = 1;
+  // gateway_v4 is the on-link IPv4 gateway address (with prefix length).
+  string gateway_v4 = 2;
+  // gateway_v6 is the on-link IPv6 gateway address (with prefix length).
+  string gateway_v6 = 3;
+  // host_routes are the workload host addresses (/32, /128) reachable via the
+  // interface.
+  repeated string host_routes = 4;
+  // transport selects the datapath wiring: "veth" (default), "vhostuser", or
+  // "grouttap". vhost-user is VSR/grout VM attach (fpvhost / net_vhost).
+  // "grouttap" (grout flavor) means the fast path creates a net_tap in the CRA
+  // netns which the CNI moves into the pod netns instead of creating a veth; it
+  // is persisted as the veth/net_tap transport.
+  string transport = 5;
+  // socket_path is the vhost-user unix socket path (transport=vhostuser only).
+  string socket_path = 6;
+  // socket_mode is the pod-side vhost-user socket mode ("client"|"server").
+  // VSR renders the inverted mode (pod server => VSR client).
+  string socket_mode = 7;
+  // mtu is the MTU the attachment requested (the CNI config's mtu, which the
+  // plugin also applied to the workload-side interface). The CRA needs it to
+  // size the interfaces it derives from the port, and to reject a request the
+  // L2 domain cannot carry.
+  uint32 mtu = 8;
+}
+
+// Layer2AttachmentRef identifies a Layer2Attachment for an L2 (bridge) attach.
+// It is a bare name: Layer2Attachments are only ever read from one namespace
+// (the agent's --intent-namespace, mirroring the operator's), which the agent
+// stamps onto the recorded attachment.
+message Layer2AttachmentRef {
+  string name = 1;
+  reserved 2;
+  reserved "namespace";
+}
+
+// Layer2TrunkMember is one tagged member of an L2 trunk attachment.
+message Layer2TrunkMember {
+  // ref identifies the Layer2Attachment whose L2 domain the member is bridged
+  // into.
+  Layer2AttachmentRef ref = 1;
+  // vlan is the 802.1Q VLAN id the member is tagged with on the workload side.
+  // 0 means the L2 domain's own VLAN id, which the agent only learns once the
+  // referenced Layer2 is present on the node, so it is resolved there.
+  uint32 vlan = 2;
+}
+
+message AddRequest {
+  // pod_namespace / pod_name identify the owning pod.
+  string pod_namespace = 1;
+  string pod_name = 2;
+  // container_id is the CNI container ID (sandbox identity).
+  string container_id = 3;
+  // vrf is the target VRF; empty means the underlay/default table.
+  // Mutually exclusive with layer2_attachment_ref and layer2_trunk.
+  string vrf = 4;
+  WorkloadPort port = 5;
+  // layer2_attachment_ref, when set, enslaves the moved interface into the L2
+  // bridge of the referenced Layer2Attachment as an untagged access port
+  // instead of routing it. The routed fields (vrf, gateways, host_routes) must
+  // be empty in L2 mode.
+  Layer2AttachmentRef layer2_attachment_ref = 6;
+  // layer2_trunk, when non-empty, makes the moved interface an 802.1Q trunk
+  // carrying one tagged member per entry. The interface itself is not bridged,
+  // so untagged and unmapped-VLAN frames go nowhere. Mutually exclusive with
+  // layer2_attachment_ref and with the routed fields.
+  repeated Layer2TrunkMember layer2_trunk = 7;
+}
+
+message AddResponse {
+  // tap_name is the kernel netdev name of the CRA-side port for this attachment
+  // (derived from WorkloadPort.interface, see workloadcni.TapIfaceName). For the
+  // grout flavor the fast path creates a net_tap with this name in the CRA
+  // netns; the CNI waits for it to appear and moves it into the pod netns (the
+  // grout-tap handoff). For veth flavors the CNI already created the port, so
+  // this is purely informational.
+  string tap_name = 1;
+}
+
+message DelRequest {
+  string container_id = 1;
+  // interface is optional; when set, only the matching attachment is removed.
+  string interface = 2;
+}
+
+message DelResponse {}

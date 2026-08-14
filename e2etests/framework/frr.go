@@ -39,14 +39,32 @@ func (f *Framework) VtyshExec(ctx context.Context, container, command string) (s
 	return stdout, nil
 }
 
-// VtyshExecOnKindNode executes a vtysh command on a CRA-FRR instance inside a kind node.
+// VtyshExecOnKindNode executes a vtysh command on the CRA inside a kind node.
+//
+// Both flavours run FRR -- grout replaces the datapath, not the routing daemon
+// -- but they run it in entirely different containers: the FRR CRA is an nspawn
+// machine reachable through machinectl, while the grout CRA is a nerdctl
+// container in containerd namespace `hbr`. Asking machinectl for it on a grout
+// node fails, so every caller silently saw an empty RIB rather than the real
+// one.
 func (f *Framework) VtyshExecOnKindNode(ctx context.Context, kindNode, command string) (string, error) {
-	stdout, stderr, err := f.DockerExec(ctx, kindNode,
-		[]string{"machinectl", "shell", "cra-frr", "/usr/bin/vtysh", "-c", command})
+	cmd := []string{"machinectl", "shell", "cra-frr", "/usr/bin/vtysh", "-c", command}
+	if f.IsGrout() {
+		cmd = []string{"sh", "-c", "PATH=/usr/local/bin:$PATH nerdctl -n hbr exec cra-grout vtysh -c " +
+			shellQuote(command)}
+	}
+	stdout, stderr, err := f.DockerExec(ctx, kindNode, cmd)
 	if err != nil {
 		return "", fmt.Errorf("vtysh on %s failed: stdout=%s stderr=%s err=%w", kindNode, stdout, stderr, err)
 	}
 	return stdout, nil
+}
+
+// shellQuote wraps s so a shell passes it through as a single word, whatever it
+// contains. vtysh commands carry spaces and the odd bracket, and one of them
+// reaching `sh -c` unquoted would be split into several arguments.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // GetBGPSummary retrieves the BGP summary from a containerlab FRR node as JSON.

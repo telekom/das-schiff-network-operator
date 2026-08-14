@@ -1,0 +1,241 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.0
+  name: nodeworkloadports.network.t-caas.telekom.com
+spec:
+  group: network.t-caas.telekom.com
+  names:
+    kind: NodeWorkloadPorts
+    listKind: NodeWorkloadPortsList
+    plural: nodeworkloadports
+    shortNames:
+    - nrp
+    singular: nodeworkloadports
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.ports[*].interface
+      name: Ports
+      priority: 1
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          NodeWorkloadPorts is the Schema for the per-node workload CNI attachments.
+          Name of the object is the name of the node.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              NodeWorkloadPortsSpec is the desired set of workload CNI attachments that are
+              currently live on a node. It is written by the node-local workload-cni agent in
+              response to CNI ADD/DEL (delivered over the node's gRPC socket), and consumed
+              by the CRA agent, which merges the entries into the NodeNetworkConfig before
+              rendering (NETCONF for VSR, netlink for FRR). Storing the state in this
+              aggregate per-node object makes it durable across agent restarts and directly
+              observable, without a round-trip through the central intent pipeline.
+            properties:
+              ports:
+                description: Ports is the list of routed attachments currently live
+                  on the node.
+                items:
+                  description: |-
+                    WorkloadPortEntry is a single workload CNI attachment recorded on a node. The
+                    identity fields (PodNamespace/PodName/ContainerID/Interface) key the entry so
+                    CNI ADD upserts and CNI DEL removes exactly one attachment.
+                  properties:
+                    containerID:
+                      description: |-
+                        ContainerID is the CNI container ID of the attachment (uniquely identifies
+                        the sandbox, so an attachment survives a pod name reuse).
+                      type: string
+                    gatewayV4:
+                      description: |-
+                        GatewayV4 is the on-link IPv4 gateway address (with prefix length, e.g.
+                        "169.254.100.100/32") configured on the infrastructure interface.
+                      format: cidr
+                      type: string
+                    gatewayV6:
+                      description: |-
+                        GatewayV6 is the on-link IPv6 gateway address (with prefix length, e.g.
+                        "fd00:7:caa5:1::/128") configured on the infrastructure interface.
+                      format: cidr
+                      type: string
+                    hostRoutes:
+                      description: |-
+                        HostRoutes are the workload host addresses (e.g. "10.0.0.5/32",
+                        "fd00:200::5/128") installed as interface-static routes via Interface so
+                        VSR redistributes them into BGP.
+                      items:
+                        format: cidr
+                        type: string
+                      type: array
+                    interface:
+                      description: |-
+                        Interface is the interface name inside the CRA network namespace (the moved
+                        veth end, e.g. "cra012345"). VSR references it as infra-<interface>, which
+                        must itself fit the kernel IFNAMSIZ-1 limit, hence the 9-character bound.
+                      maxLength: 9
+                      minLength: 1
+                      type: string
+                    layer2AttachmentRef:
+                      description: |-
+                        Layer2AttachmentRef, when set, selects L2 attach mode as an untagged access
+                        port: the port is added as a bridge slave of the Layer2 produced by the
+                        referenced Layer2Attachment, instead of being routed. It is mutually
+                        exclusive with VRF, GatewayV4, GatewayV6 and HostRoutes (which must be
+                        empty in L2 mode), and with Layer2Trunk.
+                      properties:
+                        name:
+                          description: Name is the Layer2Attachment name.
+                          minLength: 1
+                          type: string
+                        namespace:
+                          description: Namespace is the Layer2Attachment namespace.
+                          minLength: 1
+                          type: string
+                      required:
+                      - name
+                      - namespace
+                      type: object
+                    layer2Trunk:
+                      description: |-
+                        Layer2Trunk, when non-empty, selects L2 attach mode as an 802.1Q trunk: the
+                        port carries one tagged member per entry, each bridged into the Layer2
+                        produced by the referenced Layer2Attachment. The port itself is never a
+                        bridge slave in this mode, so untagged frames and frames carrying an
+                        unmapped VLAN id are not forwarded anywhere. It is mutually exclusive with
+                        VRF, GatewayV4, GatewayV6, HostRoutes and Layer2AttachmentRef.
+                        Members are keyed by the referenced attachment's name, so one Layer2 can
+                        only be carried once: two tags for the same domain would flood every frame
+                        straight back out of the port it came in on. Distinct workload-side VLAN
+                        ids are not expressible here — a member can inherit its id from the Layer2
+                        it resolves to — so collisions are caught when the entry is merged.
+                      items:
+                        description: |-
+                          Layer2TrunkMember is a single tagged member of an L2 trunk attachment: the
+                          port carries the member's VLAN tag on the workload side, and the frames are
+                          bridged into the L2 domain of the referenced Layer2Attachment (which may use
+                          a different VLAN id on the fabric — the tag is translated).
+                        properties:
+                          name:
+                            description: Name is the Layer2Attachment name.
+                            minLength: 1
+                            type: string
+                          namespace:
+                            description: Namespace is the Layer2Attachment namespace.
+                            minLength: 1
+                            type: string
+                          vlan:
+                            description: |-
+                              VLAN is the 802.1Q VLAN id the member is tagged with on the workload side.
+                              Unset means the L2 domain's own VLAN id, which is only known once the
+                              referenced Layer2 is present on the node, so it is resolved when the entry
+                              is merged into the NodeNetworkConfig rather than when it is recorded.
+                            maximum: 4094
+                            minimum: 1
+                            type: integer
+                        required:
+                        - name
+                        - namespace
+                        type: object
+                      maxItems: 64
+                      type: array
+                      x-kubernetes-list-map-keys:
+                      - name
+                      x-kubernetes-list-type: map
+                    mtu:
+                      description: |-
+                        MTU is the MTU the attachment requested (the CNI configuration's mtu, which
+                        the plugin also applied to both ends of the veth). Zero means the default.
+                        In L2 attach mode it additionally has to fit the domain: an access port
+                        requires its Layer2 to carry at least this much, a trunk requires at least
+                        one of its members to. Routed attachments are not constrained by it.
+                      maximum: 9216
+                      minimum: 0
+                      type: integer
+                    podName:
+                      description: PodName is the name of the pod owning the attachment.
+                      type: string
+                    podNamespace:
+                      description: PodNamespace is the namespace of the pod owning
+                        the attachment.
+                      type: string
+                    socketMode:
+                      description: |-
+                        SocketMode is the vhost-user socket mode ("client" or "server") from the
+                        workload's perspective, as allocated by the device plugin. The CRA
+                        renderer inverts it for the fast path (workload server <-> VSR client),
+                        so callers must not pre-invert it.
+                        Only meaningful when Transport is "vhostuser".
+                      type: string
+                    socketPath:
+                      description: |-
+                        SocketPath is the vhost-user unix socket path shared with the workload.
+                        Only meaningful when Transport is "vhostuser".
+                      type: string
+                    transport:
+                      default: veth
+                      description: |-
+                        Transport selects the CRA-side wiring: "veth" (default, an infrastructure
+                        port) or "vhostuser" (a VSR fpvhost fast-path virtual-port, VSR-only).
+                      enum:
+                      - veth
+                      - vhostuser
+                      type: string
+                    vrf:
+                      description: |-
+                        VRF is the target VRF the port is bound into. Empty (or "default"/"main")
+                        means the underlay/default table. Ignored in L2 attach mode (see
+                        Layer2AttachmentRef).
+                      type: string
+                  required:
+                  - containerID
+                  - interface
+                  - podName
+                  - podNamespace
+                  type: object
+                  x-kubernetes-validations:
+                  - message: layer2AttachmentRef (L2 attach mode) is mutually exclusive
+                      with vrf, gatewayV4, gatewayV6 and hostRoutes
+                    rule: '!has(self.layer2AttachmentRef) || (!has(self.vrf) && !has(self.gatewayV4)
+                      && !has(self.gatewayV6) && (!has(self.hostRoutes) || size(self.hostRoutes)
+                      == 0))'
+                  - message: layer2Trunk (L2 attach mode) is mutually exclusive with
+                      vrf, gatewayV4, gatewayV6 and hostRoutes
+                    rule: '!has(self.layer2Trunk) || size(self.layer2Trunk) == 0 ||
+                      (!has(self.vrf) && !has(self.gatewayV4) && !has(self.gatewayV6)
+                      && (!has(self.hostRoutes) || size(self.hostRoutes) == 0))'
+                  - message: layer2AttachmentRef (untagged access port) and layer2Trunk
+                      (tagged trunk) are mutually exclusive
+                    rule: '!has(self.layer2AttachmentRef) || !has(self.layer2Trunk)
+                      || size(self.layer2Trunk) == 0'
+                type: array
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources: {}

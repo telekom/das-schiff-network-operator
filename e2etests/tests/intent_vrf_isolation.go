@@ -48,6 +48,8 @@ var _ = Describe("Intent: VRF Isolation", Label("intent", "vrf"), func() {
 	AfterEach(func() {
 		_ = f.DeletePod(ctx, ns, "intent-vrf-01")
 		_ = f.DeletePod(ctx, ns, "intent-vrf-04")
+
+		releaseIntentFixture(ctx, f, "intent/vrf/manifests.yaml")
 	})
 
 	It("should block connectivity between different VRFs using intent CRDs", func() {

@@ -1,0 +1,38 @@
+// Copied verbatim from kubevirt/kubevirt v1.4.0, pkg/hooks/info/api_info.proto
+// (Apache License 2.0), with only a go_package option added. The proto package
+// name is part of the gRPC wire contract with virt-launcher and must not be
+// changed.
+//
+// Regenerate with:
+//   protoc --go_out=. --go_opt=paths=source_relative \
+//          --go-grpc_out=. --go-grpc_opt=paths=source_relative \
+//          pkg/kubevirthook/pb/*.proto
+
+syntax = "proto3";
+
+package kubevirt.hooks.info;
+
+option go_package = "github.com/telekom/das-schiff-network-operator/pkg/kubevirthook/pb";
+
+service Info {
+    rpc Info (InfoParams) returns (InfoResult);
+}
+
+message InfoParams {
+}
+
+message InfoResult {
+    // name of the hook used by virt-launcher to compare it with requested hooks
+    string name = 1;
+    // hookPoints is a list of subscribed hook points
+    repeated HookPoint hookPoints = 3;
+    // versions is a list of implemented hook Callbacks service versions
+    repeated string versions = 4;
+}
+
+message HookPoint {
+    // name represents name of the subscribed hook point
+    string name = 1;
+    // priority is used to sort hooks prior to their execution (second key is the name)
+    int32 priority = 2;
+}

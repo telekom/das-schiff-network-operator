@@ -48,7 +48,7 @@ var _ = Describe("Intent-Exclusive: VRF Isolation", Label("intent-exclusive", "v
 		Expect(err).NotTo(HaveOccurred())
 		Expect(f.ApplyManifest(ctx, vrf)).To(Succeed())
 		DeferCleanup(func() {
-			_ = f.DeleteManifest(context.Background(), vrf)
+			releaseIntentManifest(context.Background(), f, vrf)
 		})
 
 		By("Waiting for NNC to contain both VRFs on worker nodes")

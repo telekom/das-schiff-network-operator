@@ -61,6 +61,9 @@ func up(repoRoot string) error {
 	cluster2 := setup.Cluster2()
 
 	// Build images
+	if err := setup.PhaseHostPrereqs(); err != nil {
+		return fmt.Errorf("host prerequisites: %w", err)
+	}
 	if err := setup.PhaseBuildImages(repoRoot); err != nil {
 		return fmt.Errorf("build images: %w", err)
 	}
@@ -109,6 +112,12 @@ func up(repoRoot string) error {
 		return fmt.Errorf("finalize: %w", err)
 	}
 
+	// Phase 6a: Workload CNI plugin (used by the intent pod tests and, when
+	// enabled, by the KubeVirt VM fixture).
+	if err := setup.PhaseWorkloadCNI(cluster); err != nil {
+		return fmt.Errorf("workload cni: %w", err)
+	}
+
 	// Phase 7: Cluster-2 (gateway cluster)
 	if err := setup.PhaseCluster2(cluster2, repoRoot); err != nil {
 		return fmt.Errorf("cluster2: %w", err)
@@ -117,6 +126,21 @@ func up(repoRoot string) error {
 	// Phase 8: Configure sync controller (create namespace + kubeconfig Secret + CAPI Cluster on cluster-1)
 	if err := setup.PhaseSyncSetup(cluster, cluster2, repoRoot); err != nil {
 		return fmt.Errorf("sync setup: %w", err)
+	}
+
+	// Optional: KubeVirt + routed VM datapath fixture (opt-in via E2E_KUBEVIRT).
+	if setup.EnvOr("E2E_KUBEVIRT", "") != "" {
+		if err := setup.PhaseKubeVirt(cluster, repoRoot); err != nil {
+			return fmt.Errorf("kubevirt: %w", err)
+		}
+		// Optional on top of that: the vhost-user VM datapath. Separate because
+		// it additionally needs hugepages on the host and a DPDK fast path, so
+		// it is grout-only.
+		if setup.EnvOr("E2E_KUBEVIRT_VHOSTUSER", "") != "" {
+			if err := setup.PhaseKubeVirtVhostUser(cluster, repoRoot); err != nil {
+				return fmt.Errorf("kubevirt vhost-user: %w", err)
+			}
+		}
 	}
 
 	setup.Logf("E2E lab ready in %v", time.Since(start).Round(time.Second))

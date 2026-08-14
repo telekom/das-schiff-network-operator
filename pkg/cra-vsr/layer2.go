@@ -23,34 +23,44 @@ import (
 
 	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/pkg/helpers/types"
+	"github.com/telekom/das-schiff-network-operator/pkg/workloadcni"
 )
+
+// maxVSRInterfaceNameLen is the Linux interface-name limit (IFNAMSIZ-1) the
+// fast path materialises VSR interfaces under, which bounds the
+// <port>.<vlan> name of a trunk member.
+const maxVSRInterfaceNameLen = 15
 
 type Layer2 struct {
 	nodeCfg *v1alpha1.NodeNetworkConfigSpec
 	ns      *Namespace
+	vrouter *VRouter
 	mgr     *Manager
 	infos   []InfoL2
 }
 
 type InfoL2 struct {
-	vlanID int
-	mtu    int
-	vni    int
-	vrf    string
-	mac    string
-	ips    []string
-	acls   []v1alpha1.MirrorACL
+	vlanID        int
+	mtu           int
+	vni           int
+	vrf           string
+	mac           string
+	ips           []string
+	acls          []v1alpha1.MirrorACL
+	attachedPorts []v1alpha1.AttachedPort
 }
 
 func NewLayer2(
 	nodeCfg *v1alpha1.NodeNetworkConfigSpec,
 	ns *Namespace,
+	vrouter *VRouter,
 	mgr *Manager,
 ) *Layer2 {
 	return &Layer2{
 		nodeCfg: nodeCfg,
 		mgr:     mgr,
 		ns:      ns,
+		vrouter: vrouter,
 		infos:   []InfoL2{},
 	}
 }
@@ -58,10 +68,11 @@ func NewLayer2(
 func (l *Layer2) setupInformations() {
 	for _, l2 := range l.nodeCfg.Layer2s {
 		info := InfoL2{
-			vlanID: int(l2.VLAN),
-			mtu:    int(l2.MTU),
-			vni:    int(l2.VNI),
-			acls:   l2.MirrorACLs,
+			vlanID:        int(l2.VLAN),
+			mtu:           int(l2.MTU),
+			vni:           int(l2.VNI),
+			acls:          l2.MirrorACLs,
+			attachedPorts: l2.AttachedPorts,
 		}
 
 		if l2.IRB != nil {
@@ -154,6 +165,10 @@ func (l *Layer2) setup() error {
 		l.setupVXLAN(&info, br, l.ns.Interfaces)
 		vlan := l.mgr.createVLAN(info.vlanID, info.mtu, br, l.ns.Interfaces)
 
+		if err := l.attachPorts(&info, br, intfs); err != nil {
+			return err
+		}
+
 		// Mirror the Layer2 access port (vlan.<id>), not the bridge master, so
 		// port-to-port (east-west) traffic between the workload side and the L2VNI
 		// overlay is captured. The port faces the workload, so the workload-
@@ -166,4 +181,119 @@ func (l *Layer2) setup() error {
 	}
 
 	return nil
+}
+
+// attachPorts attaches the workload-CNI L2-attached ports (moved into the CRA
+// netns) to the Layer2 bridge: each port becomes a bridge link-interface with no
+// L3 addressing. veth-transport ports render as infrastructure interfaces
+// (port infra-<ifname>); vhostuser-transport ports render as fpvhost interfaces
+// (port fpvhost-<ifname>) plus a global fast-path fpvhost virtual-port.
+//
+// An access port (VLAN 0) is slaved directly and is therefore an untagged
+// member of exactly one domain; its interface entry is created alongside the
+// bridge, in the same interface set. A trunk member (VLAN set) is reached
+// through a `vlan <ifname>.<vlan>` interface which is slaved in its place, so
+// one port can carry several domains and the workload-side id may differ from
+// the domain's fabric-side VLAN id. Those interfaces are declared in the
+// namespace's own interface set — like the vxlan and fabric vlan interfaces —
+// because a trunked port is shared by Layer2s that may live in different IRB
+// VRFs and so must be declared exactly once.
+func (l *Layer2) attachPorts(info *InfoL2, br *Bridge, intfs *Interfaces) error {
+	for i := range info.attachedPorts {
+		p := &info.attachedPorts[i]
+		if p.Interface == "" {
+			return fmt.Errorf("layer2 vni %d: attached port %d has no interface", info.vni, i)
+		}
+
+		slave := p.Interface
+		portIntfs := intfs
+		if p.VLAN != 0 {
+			slave = fmt.Sprintf("%s.%d", p.Interface, p.VLAN)
+			if len(slave) > maxVSRInterfaceNameLen {
+				return fmt.Errorf("layer2 vni %d: trunk sub-interface %q exceeds %d characters",
+					info.vni, slave, maxVSRInterfaceNameLen)
+			}
+			portIntfs = l.ns.Interfaces
+		}
+
+		if err := l.declarePort(portIntfs, p, info.vni); err != nil {
+			return err
+		}
+		if p.VLAN != 0 {
+			l.declareTrunkVLAN(l.ns.Interfaces, slave, p)
+		}
+
+		br.Slaves = append(br.Slaves, BridgeSlave{Name: slave})
+	}
+	return nil
+}
+
+// declarePort declares the workload port itself (the moved veth or the
+// vhost-user virtual-port). It is idempotent: a trunked port is attached to
+// several Layer2s but must only be declared once.
+func (l *Layer2) declarePort(intfs *Interfaces, p *v1alpha1.AttachedPort, vni int) error {
+	if p.Transport == v1alpha1.PortTransportVhostUser {
+		if p.SocketPath == "" {
+			return fmt.Errorf("layer2 vni %d: attached port %s: vhostuser transport requires a socket path",
+				vni, p.Interface)
+		}
+		for i := range intfs.Fpvhosts {
+			if intfs.Fpvhosts[i].Name == p.Interface {
+				return nil
+			}
+		}
+		intfs.Fpvhosts = append(intfs.Fpvhosts, Fpvhost{
+			Name: p.Interface,
+			Port: types.ToPtr(fpvhostPortPrefix + p.Interface),
+		})
+		registerFpvhostVirtualPorts(l.vrouter, []FpvhostVirtualPort{
+			newFpvhostVirtualPort(p.Interface, p.SocketPath, p.SocketMode),
+		})
+		return nil
+	}
+
+	for i := range intfs.Infras {
+		if intfs.Infras[i].Name == p.Interface {
+			return nil
+		}
+	}
+	intfs.Infras = append(intfs.Infras, Infrastructure{
+		Name: p.Interface,
+		Port: types.ToPtr(infraPortPrefix + p.Interface),
+	})
+	return nil
+}
+
+// declareTrunkVLAN declares the `vlan` interface carrying one tagged member of a
+// trunk port. Its vlan-id is the workload-side id, so pairing it with the
+// bridge of the domain whose fabric-side id differs is what implements VLAN
+// translation. Its name matches the netdev the FRR flavor creates for the same
+// member, so both flavors expose the same datapath naming.
+//
+// Its mtu is the one the attachment requested (the CNI configuration's), which
+// the plugin also applied to the port itself, so the sub-interface is sized like
+// its link-interface rather than left at the platform default. The 4 bytes the
+// tag adds on the wire are the workload's to account for; the merge already
+// refused the attachment if no member domain could carry the requested size.
+func (*Layer2) declareTrunkVLAN(intfs *Interfaces, name string, p *v1alpha1.AttachedPort) {
+	for i := range intfs.VLANs {
+		if intfs.VLANs[i].Name == name {
+			return
+		}
+	}
+	mtu := int(p.MTU)
+	if mtu == 0 {
+		mtu = workloadcni.DefaultPortMTU
+	}
+	intfs.VLANs = append(intfs.VLANs, VLAN{
+		Name:          name,
+		VlanID:        int(p.VLAN),
+		MTU:           &mtu,
+		LinkInterface: p.Interface,
+		NetworkStack: &NetworkStack{
+			IPv6: &NetworkStackV6{
+				AddrGenMode: types.ToPtr(NoLinkLocal),
+			},
+		},
+	})
 }

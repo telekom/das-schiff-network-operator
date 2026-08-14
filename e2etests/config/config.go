@@ -69,6 +69,10 @@ type Config struct {
 	// Intent mode: when true, operator uses intent reconciler instead of legacy.
 	IntentMode bool
 
+	// CRAFlavor selects which CRA datapath the lab was brought up with. It
+	// decides which agent DaemonSet the suite waits for ("frr" or "grout").
+	CRAFlavor string
+
 	// Timeouts
 	NodeReadyTimeout      time.Duration
 	ComponentReadyTimeout time.Duration
@@ -137,6 +141,9 @@ func LoadFromEnv() *Config {
 
 		// Intent mode
 		IntentMode: os.Getenv("E2E_INTENT_MODE") == "true",
+
+		// CRA flavour
+		CRAFlavor: envOr("E2E_CRA_FLAVOR", "frr"),
 
 		// Timeouts
 		NodeReadyTimeout:      5 * time.Minute,

@@ -1,0 +1,109 @@
+# DaemonSet running the vhost-user device plugin on every node.
+#
+# The plugin advertises <domain>/vhost-user and <domain>/virtio-user and, on
+# Allocate, creates one socket directory per allocated device and bind-mounts it
+# into the workload under the OTHER socket tree. It creates no network state:
+# turning the socket into a fast-path port is cni-workload's and the CRA agent's
+# job.
+#
+# The two socket trees are shared with the CRA container (agent-cra-vsr /
+# agent-cra-grout), which is why they are hostPaths and why the --vhost-user-dir
+# and --virtio-user-dir flags must match the CRA's own mounts.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: vhostuser-device-plugin
+  namespace: system
+  labels:
+    app.kubernetes.io/component: vhostuser-device-plugin
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: vhostuser-device-plugin
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: vhostuser-device-plugin
+    spec:
+      tolerations:
+        - effect: NoSchedule
+          key: node-role.kubernetes.io/control-plane
+          operator: Exists
+        - key: node.cloudprovider.kubernetes.io/uninitialized
+          value: "true"
+          effect: NoSchedule
+        - key: node.kubernetes.io/not-ready
+          effect: NoSchedule
+          operator: Exists
+      # The plugin talks to kubelet over a host unix socket and shares the
+      # socket trees with the CRA, so it lives in the host's network and mount
+      # world rather than a pod sandbox.
+      hostNetwork: true
+      priorityClassName: system-node-critical
+      containers:
+        - name: device-plugin
+          image: ghcr.io/telekom/das-schiff-nwop-vhostuser-device-plugin:latest
+          imagePullPolicy: IfNotPresent
+          args:
+            - --resource-domain=network.t-caas.telekom.com
+            - --vhost-user-dir=/run/vsr-vhost-user
+            - --virtio-user-dir=/run/vsr-virtio-user
+            - --kubelet-socket-dir=/var/lib/kubelet/device-plugins
+            - --device-info-dir=/var/run/k8s.cni.cncf.io/devinfo/dp
+            # 107 is qemu in the KubeVirt launcher image; the VM must be able to
+            # open its end of the socket.
+            - --socket-owner-uid=107
+            - --socket-owner-gid=107
+          securityContext:
+            # Root is needed to chown the per-device directories to qemu and to
+            # write into the kubelet device-plugin directory, but nothing more:
+            # the plugin never touches netlink or a network namespace.
+            privileged: false
+            runAsUser: 0
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+              add:
+                - CHOWN
+                - DAC_OVERRIDE
+                - FOWNER
+          resources:
+            limits:
+              cpu: 100m
+              memory: 64Mi
+            requests:
+              cpu: 10m
+              memory: 16Mi
+          volumeMounts:
+            - name: kubelet-device-plugins
+              mountPath: /var/lib/kubelet/device-plugins
+            # No mountPropagation: both trees are plain host directories on
+            # the same filesystem, so a directory the plugin creates is visible
+            # to the CRA immediately. Bidirectional would additionally require
+            # the container to be privileged, which it must not be.
+            - name: vhost-user-sockets
+              mountPath: /run/vsr-vhost-user
+            - name: virtio-user-sockets
+              mountPath: /run/vsr-virtio-user
+            - name: device-info
+              mountPath: /var/run/k8s.cni.cncf.io/devinfo/dp
+      terminationGracePeriodSeconds: 10
+      volumes:
+        - name: kubelet-device-plugins
+          hostPath:
+            path: /var/lib/kubelet/device-plugins
+            type: Directory
+        - name: vhost-user-sockets
+          hostPath:
+            path: /run/vsr-vhost-user
+            type: DirectoryOrCreate
+        - name: virtio-user-sockets
+          hostPath:
+            path: /run/vsr-virtio-user
+            type: DirectoryOrCreate
+        - name: device-info
+          hostPath:
+            path: /var/run/k8s.cni.cncf.io/devinfo/dp
+            type: DirectoryOrCreate
