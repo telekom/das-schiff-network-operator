@@ -197,7 +197,22 @@ jobs:
           E2E_SKIP_BUILD: "true"
           E2E_IMAGE_DIR: /tmp/e2e-images
           E2E_NODE_IMAGE: ${{ env.IMG_BASE }}/das-schiff-kind-node:${{ env.KIND_NODE_VERSION }}
-        run: make e2e-up
+        # "kubeadm init" pulls registry.k8s.io/pause on every node. That pull
+        # fails from time to time and takes the whole job down. Tear the lab
+        # down and try once more before failing.
+        run: |
+          for attempt in 1 2; do
+            if make e2e-up; then
+              exit 0
+            fi
+            echo "::warning::E2E lab setup failed on attempt ${attempt}"
+            if [ "$attempt" -eq 2 ]; then
+              break
+            fi
+            make e2e-down || true
+            sleep 30
+          done
+          exit 1
 
       - name: Run E2E tests (legacy)
         id: legacy
