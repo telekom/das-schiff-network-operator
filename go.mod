@@ -3,7 +3,7 @@ module github.com/telekom/das-schiff-network-operator
 go 1.25.0
 
 require (
-	github.com/cilium/ebpf v0.21.0
+	github.com/cilium/ebpf v0.22.0
 	github.com/cnf/structhash v0.0.0-20250313080605-df4c6cc74a9a
 	github.com/coreos/go-systemd/v22 v22.7.0
 	github.com/go-logr/logr v1.4.3
