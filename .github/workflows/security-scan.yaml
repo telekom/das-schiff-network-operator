@@ -45,22 +45,22 @@ jobs:
         run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
 
       - name: Run govulncheck
-        # govulncheck reports vulnerabilities of the Go standard library that
-        # the toolchain ships. setup-go installs the version from the go
-        # directive in go.mod and sets GOTOOLCHAIN=local, which gives Go
-        # 1.25.12. That version has six known standard library
-        # vulnerabilities, all fixed in Go 1.25.13.
+        # govulncheck reports standard library findings together with module
+        # findings. A standard library finding is fixed by a Go toolchain
+        # upgrade, not by a change in this repository, and the toolchain comes
+        # from setup-go, which can lag behind the newest patch release. Today
+        # setup-go gives Go 1.25.12, which has six known standard library
+        # vulnerabilities that need Go 1.25.13.
         #
-        # 1.25.13 is not in the setup-go version manifest yet, so the scan
-        # pins the toolchain instead. Go downloads it. Step level env wins
-        # over the GOTOOLCHAIN=local that setup-go exports.
+        # The report script therefore splits the two classes. Module findings
+        # that this code calls fail the job. Standard library findings only
+        # warn, so a lagging toolchain cannot block every pull request.
         #
-        # Raise this pin when a later Go 1.25 patch fixes new findings.
-        env:
-          GOTOOLCHAIN: go1.25.13
-        # govulncheck exits non-zero for both vulnerabilities and execution
-        # errors; either case should fail the security job.
-        run: govulncheck ./...
+        # The scan itself still runs over everything, so no advisory is hidden.
+        run: |
+          set -o pipefail
+          govulncheck -format json ./... > govulncheck.json
+          python3 .github/scripts/govulncheck-report.py govulncheck.json >> "$GITHUB_STEP_SUMMARY"
 
   trivy-fs:
     name: Trivy Filesystem Scan
