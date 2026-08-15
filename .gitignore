@@ -31,7 +31,6 @@ go.work
 *.swp
 *.swo
 *~
-**/.DS_Store
 .DS_Store
 
 # BPF compiled objects (generated at build time)

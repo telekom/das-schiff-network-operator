@@ -10,6 +10,8 @@ config/
 docs/
 hack/
 *.md
+# LICENSE and NOTICE are intentionally not ignored, so the images keep
+# the top-level licence files.
 CODEOWNERS
 PROJECT
 Makefile
@@ -20,5 +22,3 @@ Makefile
 .vscode/
 *.Dockerfile
 REUSE.toml
-
-# Keep the top-level license files in the build context
