@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-logr/logr"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	"github.com/vishvananda/netlink"
@@ -272,6 +273,37 @@ var _ = Describe("RemoveTaints()", func() {
 		Expect(hc.TaintsRemoved()).To(BeFalse())
 	})
 })
+var _ = Describe("ReportUnready()", func() {
+	It("publishes ConditionFalse with the given reason and message", func() {
+		ctrl := gomock.NewController(GinkgoT())
+		defer ctrl.Finish()
+		hc := mock_healthcheck.NewMockHealthCheckerInterface(ctrl)
+		ctx := context.Background()
+		hc.EXPECT().
+			UpdateReadinessCondition(ctx, corev1.ConditionFalse, "SomeReason", "some message").
+			Return(nil).
+			Times(1)
+
+		ReportUnready(ctx, hc, logr.Discard(), "SomeReason", "some message")
+	})
+	It("does not panic when the condition cannot be published", func() {
+		// The callers are already returning the underlying failure, so a failure to
+		// publish the condition must be logged and must not change control flow.
+		ctrl := gomock.NewController(GinkgoT())
+		defer ctrl.Finish()
+		hc := mock_healthcheck.NewMockHealthCheckerInterface(ctrl)
+		ctx := context.Background()
+		hc.EXPECT().
+			UpdateReadinessCondition(ctx, corev1.ConditionFalse, "SomeReason", "some message").
+			Return(errors.New("api server unreachable")).
+			Times(1)
+
+		Expect(func() {
+			ReportUnready(ctx, hc, logr.Discard(), "SomeReason", "some message")
+		}).ToNot(Panic())
+	})
+})
+
 var _ = Describe("UpdateReadinessCondition()", func() {
 	It("creates readiness condition when absent", func() {
 		node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: testHostname}}
