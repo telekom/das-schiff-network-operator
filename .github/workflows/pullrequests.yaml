@@ -83,8 +83,8 @@ jobs:
       id-token: write
     uses: ./.github/workflows/build-images.yaml
     with:
-      push: false
-      cache-write: false
+      push: true
+      cache-write: true
 
   build-images-fork:
     name: build container images (fork)
