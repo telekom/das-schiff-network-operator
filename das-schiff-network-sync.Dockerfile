@@ -14,7 +14,7 @@ COPY pkg/ pkg/
 
 RUN CGO_ENABLED=0 GOOS=linux go build -a -o network-sync main.go
 
-FROM alpine:3.21
+FROM alpine:3.24
 
 WORKDIR /
 COPY --from=builder /workspace/network-sync .

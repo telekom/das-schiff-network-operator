@@ -15,7 +15,7 @@ COPY pkg/ pkg/
 ARG ldflags
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags "${ldflags}" -a -o platform-coil main.go
 
-FROM alpine:3.21
+FROM alpine:3.24
 
 WORKDIR /
 COPY --from=builder /workspace/platform-coil .
