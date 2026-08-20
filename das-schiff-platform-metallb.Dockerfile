@@ -15,7 +15,7 @@ COPY pkg/ pkg/
 ARG ldflags
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags "${ldflags}" -a -o platform-metallb ./cmd/platform-metallb
 
-FROM alpine:3.21
+FROM alpine:3.24
 
 WORKDIR /
 COPY --from=builder /workspace/platform-metallb .
