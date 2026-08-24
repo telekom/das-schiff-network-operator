@@ -215,7 +215,7 @@ E2E_TESTER_IMAGE ?= $(IMG_BASE)/das-schiff-e2e-tester:latest
 
 .PHONY: e2e-build-cra-frr
 e2e-build-cra-frr: ## Build the CRA-FRR image.
-	docker build --build-arg ldflags="$(LDFLAGS)" -f das-schiff-cra-frr.Dockerfile -t das-schiff-cra-frr:latest .
+	docker build --build-arg GO_VERSION="$(shell awk '/^go / { print $$2 }' go.mod)" --build-arg ldflags="$(LDFLAGS)" -f das-schiff-cra-frr.Dockerfile -t das-schiff-cra-frr:latest .
 
 .PHONY: e2e-build-node-image
 e2e-build-node-image: e2e-build-cra-frr ## Build kind node image with CRA-FRR baked in.
