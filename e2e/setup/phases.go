@@ -60,10 +60,12 @@ func phaseBuildAllImages(repoRoot string) error {
 	testerImage := EnvOr("E2E_TESTER_IMAGE", imgBase+"/das-schiff-e2e-tester:latest")
 
 	ldflags := getLDFlags(repoRoot)
+	goVersion := getGoVersion(repoRoot)
 
 	// 1. Build cra-frr image
 	Logf("  Building das-schiff-cra-frr...")
 	if err := RunCmd("docker", "build",
+		"--build-arg", "GO_VERSION="+goVersion,
 		"--build-arg", "ldflags="+ldflags,
 		"-f", filepath.Join(repoRoot, "das-schiff-cra-frr.Dockerfile"),
 		"-t", "das-schiff-cra-frr:latest",
@@ -163,6 +165,7 @@ func phaseBuildAllImages(repoRoot string) error {
 	testerCtx := filepath.Join(repoRoot, "e2e", "images", "tester")
 	Logf("  Building tester image (%s)...", testerImage)
 	if err := RunCmd("docker", "build",
+		"--build-arg", "GO_VERSION="+goVersion,
 		"-t", testerImage,
 		"-f", filepath.Join(testerCtx, "Dockerfile"),
 		testerCtx,
@@ -172,6 +175,30 @@ func phaseBuildAllImages(repoRoot string) error {
 
 	Logf("All images built successfully.")
 	return nil
+}
+
+// getGoVersion returns the major.minor Go version declared by go.mod.
+// Docker image tags are intentionally kept at major.minor so patch releases
+// can be selected by the upstream image without changing the build wiring.
+func getGoVersion(repoRoot string) string {
+	data, err := os.ReadFile(filepath.Join(repoRoot, "go.mod"))
+	if err != nil {
+		return "1.25"
+	}
+
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 || fields[0] != "go" {
+			continue
+		}
+		parts := strings.Split(fields[1], ".")
+		if len(parts) >= 2 {
+			return parts[0] + "." + parts[1]
+		}
+		return fields[1]
+	}
+
+	return "1.25"
 }
 
 // getLDFlags runs hack/version.sh and returns the ldflags string.
