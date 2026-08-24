@@ -12,6 +12,14 @@ import (
 	"github.com/cilium/ebpf"
 )
 
+// Names of all BPF objects in the ELF.
+//
+// Used for safe lookups in a Collection or CollectionSpec.
+const (
+	nwopbpfMapNeighborRingbuf        = "neighbor_ringbuf"
+	nwopbpfProgHandleNeighborReplyTc = "handle_neighbor_reply_tc"
+)
+
 // loadNwopbpf returns the embedded CollectionSpec for nwopbpf.
 func loadNwopbpf() (*ebpf.CollectionSpec, error) {
 	reader := bytes.NewReader(_NwopbpfBytes)
@@ -32,7 +40,7 @@ func loadNwopbpf() (*ebpf.CollectionSpec, error) {
 //	*nwopbpfMaps
 //
 // See ebpf.CollectionSpec.LoadAndAssign documentation for details.
-func loadNwopbpfObjects(obj interface{}, opts *ebpf.CollectionOptions) error {
+func loadNwopbpfObjects(obj any, opts *ebpf.CollectionOptions) error {
 	spec, err := loadNwopbpf()
 	if err != nil {
 		return err
