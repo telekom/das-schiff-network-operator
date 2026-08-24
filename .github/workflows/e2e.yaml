@@ -50,6 +50,7 @@ jobs:
       - name: Build cra-frr image
         run: |
           docker build \
+            --build-arg GO_VERSION="$(awk '/^go / { print $2 }' go.mod | cut -d. -f1,2)" \
             --build-arg ldflags="${{ steps.ldflags.outputs.value }}" \
             -f das-schiff-cra-frr.Dockerfile \
             -t das-schiff-cra-frr:latest .
@@ -145,6 +146,7 @@ jobs:
       - name: Build tester image
         run: |
           docker build \
+            --build-arg GO_VERSION="$(awk '/^go / { print $2 }' go.mod | cut -d. -f1,2)" \
             -t ${{ env.IMG_BASE }}/das-schiff-e2e-tester:latest \
             -f e2e/images/tester/Dockerfile \
             e2e/images/tester/
