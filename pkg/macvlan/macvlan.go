@@ -2,7 +2,6 @@ package macvlan
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -14,67 +13,23 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
-const checkInterval = 5 * time.Second
+const checkInterval = 1 * time.Second
 
-var trackedBridges []int
-
-func checkTrackedInterfaces(logger logr.Logger) {
-	for _, intfIdx := range trackedBridges {
-		intf, err := netlink.LinkByIndex(intfIdx)
-		if err != nil {
-			logger.Error(err, "couldn't load interface", "index", intfIdx)
-		}
-
-		syncInterface(intf.(*netlink.Bridge), logger)
-	}
+// trackedVLAN maps a vlan.XXXX interface to its corresponding bridge port.
+type trackedVLAN struct {
+	vlanName       string
+	vlanIdx        int
+	bridgePortName string
+	bridgePortIdx  int
+	bridgeName     string
+	bridgeIdx      int
+	previousMACs   map[string]struct{}
 }
 
-func ensureMACDummyIntf(intf *netlink.Bridge, logger logr.Logger) (netlink.Link, error) {
-	name := fmt.Sprintf("mvd.%s", intf.Attrs().Name)
-	macDummy, err := netlink.LinkByName(name)
-	if err != nil {
-		var linkNotFoundErr *netlink.LinkNotFoundError
-		if !errors.As(err, &linkNotFoundErr) {
-			return nil, fmt.Errorf("error getting link by name: %w", err)
-		}
-
-		macDummy = &netlink.Dummy{
-			LinkAttrs: netlink.NewLinkAttrs(),
-		}
-		macDummy.Attrs().Name = name
-		macDummy.Attrs().MasterIndex = intf.Attrs().Index
-		macDummy.Attrs().MTU = intf.Attrs().MTU
-		err = netlink.LinkAdd(macDummy)
-		if err != nil {
-			return nil, fmt.Errorf("error adding link %s: %w", macDummy.Attrs().Name, err)
-		}
-		err = netlink.LinkSetDown(macDummy)
-		if err != nil {
-			return nil, fmt.Errorf("error setting link %s down: %w", macDummy.Attrs().Name, err)
-		}
-	}
-	if macDummy.Attrs().OperState != netlink.OperDown {
-		logger.Info("Interface not down, setting down - otherwise it would route traffic", "interface", name)
-		err = netlink.LinkSetDown(macDummy)
-		if err != nil {
-			return nil, fmt.Errorf("error setting link %s down: %w", macDummy.Attrs().Name, err)
-		}
-	}
-	return macDummy, nil
-}
-
-func createNeighborEntry(mac net.HardwareAddr, intf, master int) *netlink.Neigh {
-	return &netlink.Neigh{
-		State:        netlink.NUD_NOARP,
-		Family:       unix.AF_BRIDGE,
-		HardwareAddr: mac,
-		LinkIndex:    intf,
-		MasterIndex:  master,
-	}
-}
+var trackedVLANs []*trackedVLAN
 
 func isUnicastMac(mac net.HardwareAddr) bool {
-	return mac[0]&0x01 == 0
+	return len(mac) >= 1 && mac[0]&0x01 == 0
 }
 
 func containsMACAddress(list []net.HardwareAddr, mac net.HardwareAddr) bool {
@@ -86,75 +41,62 @@ func containsMACAddress(list []net.HardwareAddr, mac net.HardwareAddr) bool {
 	return false
 }
 
-func syncInterface(intf *netlink.Bridge, logger logr.Logger) {
-	// First ensure that we have a dummy interface
-	dummy, err := ensureMACDummyIntf(intf, logger)
+// readSelfPermanentMACs reads the FDB of a vlan.* interface and returns all
+// unicast MACs with NTF_SELF flag (these are macvlan slave MACs).
+func readSelfPermanentMACs(linkIdx int) map[string]struct{} {
+	result := make(map[string]struct{})
+	neighs, err := netlink.NeighList(linkIdx, unix.AF_BRIDGE)
 	if err != nil {
-		logger.Error(err, "error syncing interface", "interface", intf.Attrs().Name)
-		return
+		return result
 	}
-
-	configureNeighbors(intf, dummy, logger)
-}
-
-func configureNeighbors(intf *netlink.Bridge, dummy netlink.Link, logger logr.Logger) {
-	// Get neighbors of bridge
-	bridgeNeighbors, err := netlink.NeighList(intf.Attrs().Index, unix.AF_BRIDGE)
-	if err != nil {
-		logger.Error(err, "error getting neighbors", "interface", intf.Attrs().Name)
-		return
-	}
-	requiredMACAddresses := []net.HardwareAddr{}
-	for i := range bridgeNeighbors {
-		neigh := &bridgeNeighbors[i]
-		// Look for unicast neighbor entries like "02:03:04:05:06:07 dev <bridge> self permanent"
-		if neigh.MasterIndex == 0 && neigh.Flags == netlink.NTF_SELF && neigh.State == netlink.NUD_PERMANENT && isUnicastMac(neigh.HardwareAddr) {
-			requiredMACAddresses = append(requiredMACAddresses, neigh.HardwareAddr)
+	for i := range neighs {
+		n := &neighs[i]
+		if n.MasterIndex == 0 && n.Flags&netlink.NTF_SELF != 0 && isUnicastMac(n.HardwareAddr) {
+			result[n.HardwareAddr.String()] = struct{}{}
 		}
 	}
-
-	// Get neighbors of dummy
-	dummyNeighbors, err := netlink.NeighList(dummy.Attrs().Index, unix.AF_BRIDGE)
-	if err != nil {
-		logger.Error(err, "error getting neighbors", "interface", intf.Attrs().Name)
-		return
-	}
-
-	alreadyExisting := getAlreadyExistingNeighbors(dummyNeighbors, requiredMACAddresses, dummy.Attrs().Name, intf.Attrs().Name, logger)
-
-	// Add required MAC addresses when they are not yet existing (aka in alreadyExisting slice)
-	for _, neigh := range requiredMACAddresses {
-		if !containsMACAddress(alreadyExisting, neigh) {
-			logger.Info("adding MAC address on dummy interface of bridge", "address", neigh, "interface", dummy.Attrs().Name, "bridge", intf.Attrs().Name)
-			err = netlink.NeighSet(createNeighborEntry(neigh, dummy.Attrs().Index, intf.Attrs().Index))
-			if err != nil {
-				logger.Error(err, "error adding neighbor to interface", "neighbor", neigh, "interface", dummy.Attrs().Name, "bridge", intf.Attrs().Name)
-			}
-		}
-	}
+	return result
 }
 
-func getAlreadyExistingNeighbors(dummyNeighbors []netlink.Neigh, requiredMACAddresses []net.HardwareAddr, dummyName, intfName string, logger logr.Logger) []net.HardwareAddr {
-	alreadyExisting := []net.HardwareAddr{}
-	for i := range dummyNeighbors {
-		neigh := &dummyNeighbors[i]
-		// Look for unicast neighbor entries with no flags, no vlan, NUD_NOARP (static) fdb entries
-		if neigh.Vlan == 0 && neigh.Flags == 0 && neigh.State == netlink.NUD_NOARP && isUnicastMac(neigh.HardwareAddr) {
-			if !containsMACAddress(requiredMACAddresses, neigh.HardwareAddr) {
-				// If MAC Address is not in required MAC addresses, delete neighbor
-				if err := netlink.NeighDel(neigh); err != nil {
-					logger.Error(err, "error deleting neighbor", "neighbor", neigh)
+// pollVLANInterfaces checks each tracked vlan.* interface for disappeared
+// MACs and immediately removes the stale bridge-learned FDB entry from the
+// corresponding l2v.* bridge port.
+func pollVLANInterfaces(logger logr.Logger) {
+	for _, tv := range trackedVLANs {
+		currentMACs := readSelfPermanentMACs(tv.vlanIdx)
+
+		for macStr := range tv.previousMACs {
+			if _, exists := currentMACs[macStr]; !exists {
+				mac, err := net.ParseMAC(macStr)
+				if err != nil {
+					continue
 				}
-				logger.Info("removed MAC address", "address", neigh.HardwareAddr.String(), "interface", dummyName, "bridge", intfName)
-			} else {
-				// Add MAC address to alreadyExisting table
-				alreadyExisting = append(alreadyExisting, neigh.HardwareAddr)
+				logger.Info("MAC disappeared from vlan interface, cleaning bridge port FDB",
+					"mac", macStr, "vlan", tv.vlanName, "bridgePort", tv.bridgePortName)
+
+				if err := netlink.NeighDel(&netlink.Neigh{
+					LinkIndex:    tv.bridgePortIdx,
+					Family:       unix.AF_BRIDGE,
+					HardwareAddr: mac,
+					MasterIndex:  tv.bridgeIdx,
+				}); err != nil {
+					logger.Error(err, "failed to delete stale FDB entry (may already be gone)",
+						"mac", macStr, "bridgePort", tv.bridgePortName)
+				} else {
+					logger.Info("successfully removed stale FDB entry",
+						"mac", macStr, "bridgePort", tv.bridgePortName)
+				}
 			}
 		}
+
+		tv.previousMACs = currentMACs
 	}
-	return alreadyExisting
 }
 
+// RunMACSync starts the MAC synchronization loop. The interfacePrefix
+// parameter selects which vlan.* interfaces to track (e.g. "vlan.").
+// For each tracked vlan.XXXX, the corresponding l2v.XXXX bridge port and
+// l2.XXXX bridge are discovered automatically.
 func RunMACSync(interfacePrefix string) {
 	logger := ctrl.Log.WithName("macvlan")
 	links, err := netlink.LinkList()
@@ -162,19 +104,68 @@ func RunMACSync(interfacePrefix string) {
 		logger.Error(err, "error loading interfaces")
 		return
 	}
-	for _, link := range links {
-		if strings.HasPrefix(link.Attrs().Name, interfacePrefix) && link.Type() == "bridge" {
-			logger.Info("tracking interface", "interface", link.Attrs().Name, "prefix", interfacePrefix)
-			trackedBridges = append(trackedBridges, link.Attrs().Index)
-		}
+
+	// Index links by name for quick lookup.
+	byName := make(map[string]netlink.Link, len(links))
+	for _, l := range links {
+		byName[l.Attrs().Name] = l
 	}
 
-	if len(trackedBridges) > 0 {
+	for _, link := range links {
+		name := link.Attrs().Name
+		if !strings.HasPrefix(name, interfacePrefix) {
+			continue
+		}
+
+		// Extract suffix: vlan.1007 → 1007
+		suffix := strings.TrimPrefix(name, interfacePrefix)
+
+		// Find bridge port l2v.XXXX
+		bpName := fmt.Sprintf("l2v.%s", suffix)
+		bp, ok := byName[bpName]
+		if !ok {
+			logger.Info("no bridge port found, skipping", "vlan", name, "expected", bpName)
+			continue
+		}
+
+		// Find bridge (master of bridge port)
+		masterIdx := bp.Attrs().MasterIndex
+		if masterIdx == 0 {
+			logger.Info("bridge port has no master, skipping", "bridgePort", bpName)
+			continue
+		}
+		master, err := netlink.LinkByIndex(masterIdx)
+		if err != nil {
+			logger.Error(err, "failed to get bridge for bridge port", "bridgePort", bpName)
+			continue
+		}
+
+		tv := &trackedVLAN{
+			vlanName:       name,
+			vlanIdx:        link.Attrs().Index,
+			bridgePortName: bpName,
+			bridgePortIdx:  bp.Attrs().Index,
+			bridgeName:     master.Attrs().Name,
+			bridgeIdx:      masterIdx,
+			previousMACs:   readSelfPermanentMACs(link.Attrs().Index),
+		}
+		trackedVLANs = append(trackedVLANs, tv)
+		logger.Info("tracking vlan interface",
+			"vlan", name, "vlanIdx", tv.vlanIdx,
+			"bridgePort", bpName, "bridgePortIdx", tv.bridgePortIdx,
+			"bridge", master.Attrs().Name, "bridgeIdx", masterIdx,
+			"initialMACs", len(tv.previousMACs))
+	}
+
+	if len(trackedVLANs) > 0 {
+		logger.Info("starting FDB poll loop", "interval", checkInterval, "trackedInterfaces", len(trackedVLANs))
 		go func() {
 			for {
-				checkTrackedInterfaces(logger)
 				time.Sleep(checkInterval)
+				pollVLANInterfaces(logger)
 			}
 		}()
+	} else {
+		logger.Info("no vlan interfaces found matching prefix, MAC sync inactive", "prefix", interfacePrefix)
 	}
 }
