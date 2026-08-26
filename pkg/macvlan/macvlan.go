@@ -59,37 +59,71 @@ func readSelfPermanentMACs(linkIdx int) map[string]struct{} {
 }
 
 // pollVLANInterfaces checks each tracked vlan.* interface for disappeared
-// MACs and immediately removes the stale bridge-learned FDB entry from the
-// corresponding l2v.* bridge port.
+// MACs and removes stale bridge-learned FDB entries from the corresponding
+// l2v.* bridge port. Two checks are performed:
+//  1. Diff check: MACs that disappeared since last poll
+//  2. Consistency check: bridge-port entries without matching self-permanent
 func pollVLANInterfaces(logger logr.Logger) {
 	for _, tv := range trackedVLANs {
 		currentMACs := readSelfPermanentMACs(tv.vlanIdx)
 
+		// Diff check: find MACs that disappeared since last poll.
 		for macStr := range tv.previousMACs {
 			if _, exists := currentMACs[macStr]; !exists {
-				mac, err := net.ParseMAC(macStr)
-				if err != nil {
-					continue
-				}
-				logger.Info("MAC disappeared from vlan interface, cleaning bridge port FDB",
-					"mac", macStr, "vlan", tv.vlanName, "bridgePort", tv.bridgePortName)
-
-				if err := netlink.NeighDel(&netlink.Neigh{
-					LinkIndex:    tv.bridgePortIdx,
-					Family:       unix.AF_BRIDGE,
-					HardwareAddr: mac,
-					MasterIndex:  tv.bridgeIdx,
-				}); err != nil {
-					logger.Error(err, "failed to delete stale FDB entry (may already be gone)",
-						"mac", macStr, "bridgePort", tv.bridgePortName)
-				} else {
-					logger.Info("successfully removed stale FDB entry",
-						"mac", macStr, "bridgePort", tv.bridgePortName)
-				}
+				deleteBridgePortFDB(tv, macStr, "disappeared from "+tv.vlanName, logger)
 			}
 		}
 
+		// Consistency check: remove bridge-port entries without a
+		// matching self-permanent on the vlan interface.
+		cleanStaleBridgePortEntries(tv, currentMACs, logger)
+
 		tv.previousMACs = currentMACs
+	}
+}
+
+// cleanStaleBridgePortEntries reads the bridge-port FDB and deletes any
+// unicast entry that has no corresponding self-permanent MAC on the vlan
+// interface.
+func cleanStaleBridgePortEntries(tv *trackedVLAN, validMACs map[string]struct{}, logger logr.Logger) {
+	neighs, err := netlink.NeighList(tv.bridgePortIdx, unix.AF_BRIDGE)
+	if err != nil {
+		return
+	}
+	for i := range neighs {
+		n := &neighs[i]
+		if n.MasterIndex == 0 || !isUnicastMac(n.HardwareAddr) {
+			continue
+		}
+		if n.Flags&netlink.NTF_SELF != 0 {
+			continue
+		}
+		macStr := n.HardwareAddr.String()
+		if _, valid := validMACs[macStr]; !valid {
+			deleteBridgePortFDB(tv, macStr, "stale on bridge port "+tv.bridgePortName, logger)
+		}
+	}
+}
+
+// deleteBridgePortFDB deletes a single MAC from a bridge port's FDB.
+func deleteBridgePortFDB(tv *trackedVLAN, macStr, reason string, logger logr.Logger) {
+	mac, err := net.ParseMAC(macStr)
+	if err != nil {
+		return
+	}
+	logger.Info("cleaning stale FDB entry", "mac", macStr, "reason", reason, "bridgePort", tv.bridgePortName)
+
+	if err := netlink.NeighDel(&netlink.Neigh{
+		LinkIndex:    tv.bridgePortIdx,
+		Family:       unix.AF_BRIDGE,
+		HardwareAddr: mac,
+		MasterIndex:  tv.bridgeIdx,
+	}); err != nil {
+		logger.Error(err, "failed to delete stale FDB entry (may already be gone)",
+			"mac", macStr, "bridgePort", tv.bridgePortName)
+	} else {
+		logger.Info("successfully removed stale FDB entry",
+			"mac", macStr, "bridgePort", tv.bridgePortName)
 	}
 }
 
@@ -158,6 +192,10 @@ func RunMACSync(interfacePrefix string) {
 	}
 
 	if len(trackedVLANs) > 0 {
+		// Initial consistency cleanup: remove any pre-existing stale entries.
+		for _, tv := range trackedVLANs {
+			cleanStaleBridgePortEntries(tv, tv.previousMACs, logger)
+		}
 		logger.Info("starting FDB poll loop", "interval", checkInterval, "trackedInterfaces", len(trackedVLANs))
 		go func() {
 			for {
