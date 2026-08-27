@@ -205,6 +205,7 @@ Whether a node is considered ready is signalled separately through the
 
 ## Related
 
+- [Network debugging runbooks](network-runbooks.md) — HBN, routing, netplan, CNI/policy, and bounded packet evidence.
 - [Metrics](../reference/metrics.md) — operator and rollout metrics.
 - [CRD Reference](../reference/crd-reference.md) — full field reference.
 - [Legacy API](legacy-api.md) — the low-level `network.t-caas.telekom.com` CRDs.
