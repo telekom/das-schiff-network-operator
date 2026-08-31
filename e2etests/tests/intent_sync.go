@@ -175,7 +175,7 @@ spec:
 			recordCleanup("source HelmRelease", deleteFluxHelmRelease(ctx, f.Client, sourceRelease))
 			recordCleanup("workload HelmRelease", deleteFluxHelmRelease(ctx, f.Cluster2Client(), workloadRelease))
 
-			recordCleanup("source VRF", deleteObject(ctx, f.Client, "vrfs", syncNamespace, vrfName))
+			recordCleanup("source VRF", deleteObject(ctx, f.Client, "vrfs", vrfName))
 			recordCleanup("workload VRF", deleteCluster2Object(ctx, f, "vrfs", vrfName))
 
 			By("Cleaning up Flux chart repositories")
