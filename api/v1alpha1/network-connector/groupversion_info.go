@@ -26,7 +26,7 @@ var (
 	GroupVersion = schema.GroupVersion{Group: "network-connector.sylvaproject.org", Version: "v1alpha1"}
 
 	// SchemeBuilder is used to add go types to the GroupVersionKind scheme.
-	SchemeBuilder = &scheme.Builder{GroupVersion: GroupVersion}
+	SchemeBuilder = &scheme.Builder{GroupVersion: GroupVersion} //nolint:staticcheck // controller-runtime's scheme builder is the API registration pattern used here
 
 	// AddToScheme adds the types in this group-version to the given scheme.
 	AddToScheme = SchemeBuilder.AddToScheme
