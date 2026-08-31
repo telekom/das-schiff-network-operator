@@ -1,3 +1,4 @@
+include versions.env
 
 # Image URL to use all building/pushing image targets
 IMG_BASE ?= ghcr.io/telekom
@@ -40,27 +41,21 @@ all: build
 help: ## Display this help.
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
-##@ DevelopmentLDFLAGS := $(shell hack/version.sh)
+##@ Development
 
 .PHONY: manifests
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
-	$(CONTROLLER_GEN) crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
-	$(CONTROLLER_GEN) rbac:roleName=manager-role paths="./controllers/operator/..." paths="./controllers/intent/..." paths="./controllers/platform/..." paths="./controllers/agent-cra-frr/..." paths="./controllers/agent-cra-vsr/..." paths="./controllers/agent-hbn-l2/..." paths="./controllers/agent-netplan/..." paths="./pkg/monitoring/..."
-	$(CONTROLLER_GEN) rbac:roleName=network-sync-role paths="./controllers/sync/..." output:rbac:artifacts:config=config/network-sync
+	"$(CONTROLLER_GEN)" crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
+	"$(CONTROLLER_GEN)" rbac:roleName=manager-role paths="./controllers/operator/..." paths="./controllers/intent/..." paths="./controllers/platform/..." paths="./controllers/agent-cra-frr/..." paths="./controllers/agent-cra-vsr/..." paths="./controllers/agent-hbn-l2/..." paths="./controllers/agent-netplan/..." paths="./pkg/monitoring/..."
+	"$(CONTROLLER_GEN)" rbac:roleName=network-sync-role paths="./controllers/sync/..." output:rbac:artifacts:config=config/network-sync
 
 .PHONY: generate
 generate: controller-gen bpf-generate ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
-	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./..."
+	"$(CONTROLLER_GEN)" object:headerFile="hack/boilerplate.go.txt" paths="./..."
 
 .PHONY: fmt
 fmt: ## Run go fmt against code.
 	go fmt ./...
-
-GOLANGCI_LINT ?= golangci-lint
-
-.PHONY: lint
-lint: ## Run golangci-lint.
-	$(GOLANGCI_LINT) run ./...
 
 .PHONY: vet
 vet: ## Run go vet against code.
@@ -68,13 +63,14 @@ vet: ## Run go vet against code.
 
 .PHONY: test
 test: manifests generate fmt vet envtest ## Run tests.
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" go test $(shell go list ./... 2>/dev/null | grep -v -e '/e2etests$$' -e /e2etests/tests -e /e2etests/config -e /e2e/ || true) -coverprofile cover.out
+	KUBEBUILDER_ASSETS="$$( "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) -p path )"; \
+	KUBEBUILDER_ASSETS="$$KUBEBUILDER_ASSETS" go test $$(go list ./... 2>/dev/null | grep -v -e '/e2etests$$' -e /e2etests/tests -e /e2etests/config -e /e2e/ || true) -coverprofile cover.out
 
 ##@ Documentation
 
 .PHONY: docs-api
 docs-api: crd-ref-docs ## Generate the CRD field reference (docs/reference/crd-reference.md) from Go types.
-	$(CRD_REF_DOCS) \
+	"$(CRD_REF_DOCS)" \
 		--source-path=./api/v1alpha1/network-connector \
 		--config=.crd-ref-docs.yaml \
 		--renderer=markdown \
@@ -99,6 +95,27 @@ docs-serve: ## Serve the documentation site locally with live reload (requires m
 .PHONY: docs-build
 docs-build: docs-api ## Build the documentation site (strict; fails on warnings/broken links).
 	mkdocs build --strict
+
+##@ Linting
+
+.PHONY: lint
+lint: golangci-lint ## Run golangci-lint linter.
+	"$(GOLANGCI_LINT)" run ./... --timeout 10m
+
+.PHONY: lint-fix
+lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes.
+	"$(GOLANGCI_LINT)" run ./... --fix --timeout 10m
+
+.PHONY: lint-strict
+lint-strict: lint ## Alias for CI linting; golangci-lint already exits non-zero on issues.
+
+.PHONY: vulncheck
+vulncheck: govulncheck ## Run govulncheck to check for known vulnerabilities.
+	"$(GOVULNCHECK)" ./...
+
+.PHONY: verify
+verify: lint-strict test vulncheck ## Run all verification checks (lint, vet, test, vulncheck).
+	@echo "All verification checks passed!"
 
 ##@ Build
 
@@ -171,8 +188,8 @@ $(RELEASE_DIR):
 
 licenses-report: go-licenses
 	rm -rf $(RELEASE_DIR)/licenses
-	$(GO_LICENSES) save --save_path $(RELEASE_DIR)/licenses ./...
-	$(GO_LICENSES) report --template hack/licenses.md.tpl ./... > $(RELEASE_DIR)/licenses/licenses.md
+	"$(GO_LICENSES)" save --save_path $(RELEASE_DIR)/licenses ./...
+	"$(GO_LICENSES)" report --template hack/licenses.md.tpl ./... > $(RELEASE_DIR)/licenses/licenses.md
 	(cd out/licenses && tar -czf ../licenses.tar.gz *)
 
 ##@ Deployment
@@ -183,28 +200,28 @@ endif
 
 .PHONY: install
 install: manifests kustomize ## Install CRDs into the K8s cluster specified in ~/.kube/config.
-	$(KUSTOMIZE) build config/crd | kubectl apply -f -
+	"$(KUSTOMIZE)" build config/crd | kubectl apply -f -
 
 .PHONY: install-certs
 install-certs: manifests kustomize ## Install certs
-	$(KUSTOMIZE) build config/certmanager | kubectl apply -f -
+	"$(KUSTOMIZE)" build config/certmanager | kubectl apply -f -
 
 .PHONY: uninstall
 uninstall: manifests kustomize ## Uninstall CRDs from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
-	$(KUSTOMIZE) build config/crd | kubectl delete --ignore-not-found=$(ignore-not-found) -f -
+	"$(KUSTOMIZE)" build config/crd | kubectl delete --ignore-not-found=$(ignore-not-found) -f -
 
 .PHONY: uninstall-certs
 uninstall-certs: manifests kustomize ## Uninstall certs
-	$(KUSTOMIZE) build config/certmanager | kubectl delete --ignore-not-found=$(ignore-not-found) -f -
+	"$(KUSTOMIZE)" build config/certmanager | kubectl delete --ignore-not-found=$(ignore-not-found) -f -
 
 .PHONY: deploy
 deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
-	cd config/operator && $(KUSTOMIZE) edit set image operator=${IMG}
-	$(KUSTOMIZE) build config/default | kubectl apply -f -
+	cd config/operator && "$(KUSTOMIZE)" edit set image operator=${IMG}
+	"$(KUSTOMIZE)" build config/default | kubectl apply -f -
 
 .PHONY: undeploy
 undeploy: ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
-	$(KUSTOMIZE) build config/default | kubectl delete --ignore-not-found=$(ignore-not-found) -f -
+	"$(KUSTOMIZE)" build config/default | kubectl delete --ignore-not-found=$(ignore-not-found) -f -
 
 ##@ E2E Testing
 
@@ -256,27 +273,57 @@ e2e-test-sync: ## Run E2E sync controller tests.
 	docker exec clab-nwop-tester bash -c \
 	  'cd /repo && KUBECONFIG=/repo/e2etests/.kubeconfig E2E_INTENT_MODE=true go test -v -count=1 -timeout=30m ./e2etests -ginkgo.label-filter="sync"'
 
-##@ Build Dependencies
+##@ Dependencies
 
-CONTROLLER_GEN = $(shell pwd)/bin/controller-gen
+## Location to install dependencies to
+LOCALBIN ?= $(shell pwd)/bin
+empty :=
+space := $(empty) $(empty)
+escape-space = $(subst $(space),\ ,$(1))
+
+LOCALBIN_TARGET := $(call escape-space,$(LOCALBIN))
+$(LOCALBIN_TARGET):
+	mkdir -p "$(LOCALBIN)"
+
+## Tool Binaries
+CONTROLLER_GEN = $(LOCALBIN)/controller-gen
+KUSTOMIZE = $(LOCALBIN)/kustomize
+ENVTEST = $(LOCALBIN)/setup-envtest
+GOLANGCI_LINT = $(LOCALBIN)/golangci-lint
+GO_LICENSES = $(LOCALBIN)/go-licenses
+GOVULNCHECK = $(LOCALBIN)/govulncheck
+
+CONTROLLER_GEN_TARGET := $(call escape-space,$(CONTROLLER_GEN))
+KUSTOMIZE_TARGET := $(call escape-space,$(KUSTOMIZE))
+ENVTEST_TARGET := $(call escape-space,$(ENVTEST))
+GOLANGCI_LINT_TARGET := $(call escape-space,$(GOLANGCI_LINT))
+GO_LICENSES_TARGET := $(call escape-space,$(GO_LICENSES))
+GOVULNCHECK_TARGET := $(call escape-space,$(GOVULNCHECK))
+
 .PHONY: controller-gen
-controller-gen: ## Download controller-gen locally if necessary.
-	$(call go-get-tool,$(CONTROLLER_GEN),sigs.k8s.io/controller-tools/cmd/controller-gen@v0.20.0)
+controller-gen: $(CONTROLLER_GEN_TARGET) ## Download controller-gen locally if necessary.
+$(CONTROLLER_GEN_TARGET): $(LOCALBIN_TARGET) versions.env
+	$(call go-install-tool,$(CONTROLLER_GEN),sigs.k8s.io/controller-tools/cmd/controller-gen,$(CONTROLLER_TOOLS_VERSION))
 
-KUSTOMIZE = $(shell pwd)/bin/kustomize
 .PHONY: kustomize
-kustomize: ## Download kustomize locally if necessary.
-	$(call go-get-tool,$(KUSTOMIZE),sigs.k8s.io/kustomize/kustomize/v5@v5.0.3)
+kustomize: $(KUSTOMIZE_TARGET) ## Download kustomize locally if necessary.
+$(KUSTOMIZE_TARGET): $(LOCALBIN_TARGET) versions.env
+	$(call go-install-tool,$(KUSTOMIZE),sigs.k8s.io/kustomize/kustomize/v5,$(KUSTOMIZE_VERSION))
 
-ENVTEST = $(shell pwd)/bin/setup-envtest
 .PHONY: envtest
-envtest: ## Download setup-envtest locally if necessary.
-	$(call go-get-tool,$(ENVTEST),sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.0.0-20260305142021-f9589b9f2b9d)
+envtest: $(ENVTEST_TARGET) ## Download setup-envtest locally if necessary.
+$(ENVTEST_TARGET): $(LOCALBIN_TARGET) versions.env
+	$(call go-install-tool,$(ENVTEST),sigs.k8s.io/controller-runtime/tools/setup-envtest,$(ENVTEST_VERSION))
 
-GO_LICENSES = $(shell pwd)/bin/go-licenses
+.PHONY: golangci-lint
+golangci-lint: $(GOLANGCI_LINT_TARGET) ## Download golangci-lint locally if necessary.
+$(GOLANGCI_LINT_TARGET): $(LOCALBIN_TARGET) versions.env
+	$(call go-install-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/v2/cmd/golangci-lint,$(GOLANGCI_LINT_VERSION))
+
 .PHONY: go-licenses
-go-licenses: ## Download go-licenses locally if necessary.
-	$(call go-get-tool,$(GO_LICENSES),github.com/google/go-licenses@latest)
+go-licenses: $(GO_LICENSES_TARGET) ## Download go-licenses locally if necessary.
+$(GO_LICENSES_TARGET): $(LOCALBIN_TARGET) versions.env
+	$(call go-install-tool,$(GO_LICENSES),github.com/google/go-licenses,$(GO_LICENSES_VERSION))
 
 CRD_REF_DOCS = $(shell pwd)/bin/crd-ref-docs
 .PHONY: crd-ref-docs
@@ -286,13 +333,37 @@ crd-ref-docs: ## Download crd-ref-docs locally if necessary.
 # go-get-tool will 'go get' any package $2 and install it to $1.
 PROJECT_DIR := $(shell dirname $(abspath $(lastword $(MAKEFILE_LIST))))
 define go-get-tool
-@[ -f $(1) ] || { \
+@[ -f "$(1)" ] || { \
 set -e ;\
 TMP_DIR=$$(mktemp -d) ;\
 cd $$TMP_DIR ;\
 go mod init tmp ;\
 echo "Downloading $(2)" ;\
-GOBIN=$(PROJECT_DIR)/bin go install $(2) ;\
+GOBIN="$(PROJECT_DIR)/bin" go install $(2) ;\
 rm -rf $$TMP_DIR ;\
 }
+endef
+
+.PHONY: govulncheck
+govulncheck: $(GOVULNCHECK_TARGET) ## Download govulncheck locally if necessary.
+$(GOVULNCHECK_TARGET): $(LOCALBIN_TARGET) versions.env
+	$(call go-install-tool,$(GOVULNCHECK),golang.org/x/vuln/cmd/govulncheck,$(GOVULNCHECK_VERSION))
+
+# go-install-tool will 'go install' any package with custom target and name of binary
+# $1 - target path with name of binary
+# $2 - package url which can be installed
+# $3 - specific version of package
+define go-install-tool
+@[ -f "$(1)-$(3)" ] || { \
+package=$(2)@$(3) ;\
+echo "Downloading $${package}" ;\
+tmpdir=$$(mktemp -d) ;\
+trap 'rm -rf "$$tmpdir"' EXIT ;\
+GOBIN=$$tmpdir go install $${package} ;\
+tmpbin="$$tmpdir/$$(basename "$(1)")" ;\
+[ -f "$$tmpbin" ] ;\
+mv "$$tmpbin" "$(1)-$(3)" ;\
+} ;\
+ link_dir="$$(dirname "$(1)")" ;\
+ ln -sf "$$(basename "$(1)-$(3)")" "$$link_dir/$$(basename "$(1)")"
 endef
