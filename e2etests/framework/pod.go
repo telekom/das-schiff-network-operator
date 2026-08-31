@@ -92,6 +92,18 @@ func (f *Framework) CreateTestPod(ctx context.Context, namespace, name, nodeName
 		opt(&pod.Spec)
 	}
 
+	return f.createPodWithStaticIPv6Retry(ctx, namespace, name, annotations, func() *corev1.Pod {
+		return pod.DeepCopy()
+	})
+}
+
+func (f *Framework) createPodWithStaticIPv6Retry(
+	ctx context.Context,
+	namespace string,
+	name string,
+	annotations map[string]string,
+	newPod func() *corev1.Pod,
+) error {
 	attempts := 1
 	if hasStaticIPv6MultusNetwork(annotations) {
 		attempts = testPodCreateAttempts
@@ -104,28 +116,30 @@ func (f *Framework) CreateTestPod(ctx context.Context, namespace, name, nodeName
 
 	for attempt := 1; attempt <= attempts; attempt++ {
 		if err := deletePod(ctx, namespace, name); err != nil {
-			return err
+			return fmt.Errorf("delete pod %s/%s before create attempt %d/%d: %w", namespace, name, attempt, attempts, err)
 		}
-		if err := f.Client.Create(ctx, pod.DeepCopy()); err != nil {
-			return err
+		if err := f.Client.Create(ctx, newPod()); err != nil {
+			return fmt.Errorf("create pod %s/%s on attempt %d/%d: %w", namespace, name, attempt, attempts, err)
 		}
 		if attempts == 1 {
 			return nil
 		}
 
 		if err := f.WaitForPodReady(ctx, namespace, name, f.Config.PodReadyTimeout); err != nil {
-			return fmt.Errorf("wait for pod %s/%s to become ready before IPv6 DAD check: %w", namespace, name, err)
+			_ = f.DeletePod(ctx, namespace, name)
+			return fmt.Errorf("wait for pod %s/%s to become ready before IPv6 DAD check on attempt %d/%d: %w", namespace, name, attempt, attempts, err)
 		}
 
 		dadFailed, err := f.podHasIPv6DADFailure(ctx, namespace, name, testPodDADCheckTimeout)
 		if err != nil {
-			return fmt.Errorf("check IPv6 DAD state for pod %s/%s: %w", namespace, name, err)
+			_ = f.DeletePod(ctx, namespace, name)
+			return fmt.Errorf("check IPv6 DAD state for pod %s/%s on attempt %d/%d: %w", namespace, name, attempt, attempts, err)
 		}
 		if !dadFailed {
 			return nil
 		}
 		if err := f.DeletePod(ctx, namespace, name); err != nil {
-			return fmt.Errorf("delete pod %s/%s after IPv6 DAD failure: %w", namespace, name, err)
+			return fmt.Errorf("delete pod %s/%s after IPv6 DAD failure on attempt %d/%d: %w", namespace, name, attempt, attempts, err)
 		}
 	}
 
@@ -134,13 +148,6 @@ func (f *Framework) CreateTestPod(ctx context.Context, namespace, name, nodeName
 
 // CreateBirdPod creates a Bird BGP speaker pod with init container for loopback IPs.
 func (f *Framework) CreateBirdPod(ctx context.Context, namespace, name, nodeName string, annotations map[string]string) error {
-	_ = f.KubeClient.CoreV1().Pods(namespace).Delete(ctx, name, metav1.DeleteOptions{})
-	waitCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
-	defer cancel()
-	_ = Poll(waitCtx, 2*time.Second, func() (bool, error) {
-		_, err := f.KubeClient.CoreV1().Pods(namespace).Get(waitCtx, name, metav1.GetOptions{})
-		return apierrors.IsNotFound(err), nil
-	})
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        name,
@@ -199,7 +206,13 @@ func (f *Framework) CreateBirdPod(ctx context.Context, namespace, name, nodeName
 			},
 		},
 	}
-	return f.Client.Create(ctx, pod)
+	if err := f.DeletePod(ctx, namespace, name); err != nil {
+		return fmt.Errorf("delete existing bird pod %s/%s: %w", namespace, name, err)
+	}
+
+	return f.createPodWithStaticIPv6Retry(ctx, namespace, name, annotations, func() *corev1.Pod {
+		return pod.DeepCopy()
+	})
 }
 
 // WaitForPodReady waits for a pod to be in Running phase with all containers ready.
@@ -231,16 +244,25 @@ func (f *Framework) podHasIPv6DADFailure(ctx context.Context, namespace, name st
 		if err != nil {
 			return false, fmt.Errorf("inspect IPv6 addresses in pod %s/%s failed (stderr=%s): %w", namespace, name, stderr, err)
 		}
-		if strings.Contains(stdout, "dadfailed") {
+		if ipv6AddressOutputHasState(stdout, "dadfailed") {
 			dadFailed = true
 			return true, nil
 		}
-		if strings.Contains(stdout, " tentative") {
+		if ipv6AddressOutputHasState(stdout, "tentative") {
 			return false, nil
 		}
 		return true, nil
 	})
 	return dadFailed, err
+}
+
+func ipv6AddressOutputHasState(output, state string) bool {
+	for _, field := range strings.Fields(output) {
+		if field == state {
+			return true
+		}
+	}
+	return false
 }
 
 func podIsReady(pod *corev1.Pod) bool {
