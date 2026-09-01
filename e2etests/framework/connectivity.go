@@ -3,6 +3,7 @@ package framework
 import (
 	"context"
 	"fmt"
+	"net"
 	"strings"
 	"time"
 )
@@ -13,11 +14,18 @@ type PingResult struct {
 	Output  string
 }
 
+// isIPv6Target reports whether target is a pure IPv6 address (not IPv4 or
+// IPv4-mapped). It is used to select between ping and ping6.
+func isIPv6Target(target string) bool {
+	ip := net.ParseIP(target)
+	return ip != nil && ip.To4() == nil
+}
+
 // PingFromPod executes a ping from a pod to a target address.
-// Uses IPv6 if target contains ':', otherwise IPv4.
+// Uses ping6 when target parses as an IPv6 address, otherwise ping (IPv4).
 func (f *Framework) PingFromPod(ctx context.Context, namespace, podName, target string, count int) (*PingResult, error) {
 	cmd := "ping"
-	if strings.Contains(target, ":") {
+	if isIPv6Target(target) {
 		cmd = "ping6"
 	}
 
@@ -72,7 +80,7 @@ func (f *Framework) AssertNoConnectivity(ctx context.Context, namespace, podName
 // PingFromCluster2Pod executes a ping from a pod on cluster-2.
 func (f *Framework) PingFromCluster2Pod(ctx context.Context, namespace, podName, target string, count int) (*PingResult, error) {
 	cmd := "ping"
-	if strings.Contains(target, ":") {
+	if isIPv6Target(target) {
 		cmd = "ping6"
 	}
 	args := []string{cmd, "-c", fmt.Sprintf("%d", count), "-W", "3", target}
@@ -84,41 +92,6 @@ func (f *Framework) PingFromCluster2Pod(ctx context.Context, namespace, podName,
 		}, nil
 	}
 	return &PingResult{Success: true, Output: stdout}, nil
-}
-
-// WaitForIPv6DADComplete waits until the IPv6 address on the given interface
-// is no longer in "tentative" state inside the pod. In containerlab/Kind
-// environments, DAD (Duplicate Address Detection) can fail because CRA bridge
-// agents on other nodes respond to DAD probes, causing the address to enter
-// "dadfailed" state. This function detects that and resets the address.
-func (f *Framework) WaitForIPv6DADComplete(ctx context.Context, namespace, podName, ipv6Addr, iface string, timeout time.Duration) error {
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	return Poll(ctx, 3*time.Second, func() (bool, error) {
-		stdout, _, err := f.ExecInPod(ctx, namespace, podName, "", []string{"ip", "-6", "addr", "show", "dev", iface})
-		if err != nil {
-			return false, nil
-		}
-
-		for _, line := range strings.Split(stdout, "\n") {
-			if !strings.Contains(line, ipv6Addr) {
-				continue
-			}
-			if strings.Contains(line, "dadfailed") {
-				// DAD failed — reset address to re-trigger DAD.
-				_, _, _ = f.ExecInPod(ctx, namespace, podName, "", []string{"ip", "addr", "del", ipv6Addr + "/64", "dev", iface})
-				time.Sleep(500 * time.Millisecond)
-				_, _, _ = f.ExecInPod(ctx, namespace, podName, "", []string{"ip", "addr", "add", ipv6Addr + "/64", "dev", iface})
-				return false, nil
-			}
-			if strings.Contains(line, "tentative") {
-				return false, nil
-			}
-			return true, nil
-		}
-		return false, nil
-	})
 }
 
 // CurlFromCluster2Pod executes a curl command from a pod on cluster-2.
