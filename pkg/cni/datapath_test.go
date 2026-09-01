@@ -63,3 +63,61 @@ func TestPortNameDeterministicAndBounded(t *testing.T) {
 		})
 	}
 }
+
+func TestVhostPortNameDeterministicAndBounded(t *testing.T) {
+	const kernelIfNameLen = 15
+
+	for _, tc := range []struct {
+		name    string
+		isTrunk bool
+		wantLen int
+	}{
+		{name: "routed or access", wantLen: kernelIfNameLen},
+		{name: "trunk", isTrunk: true, wantLen: kernelIfNameLen - len(maxTrunkVLANNameSuffix)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			name := vhostPortName("cid", "net1", tc.isTrunk)
+			if len(name) != tc.wantLen {
+				t.Errorf("vhostPortName %q length %d, want %d", name, len(name), tc.wantLen)
+			}
+			if tc.isTrunk && len(name+maxTrunkVLANNameSuffix) != kernelIfNameLen {
+				t.Errorf("trunk sub-interface %q length %d, want %d",
+					name+maxTrunkVLANNameSuffix, len(name+maxTrunkVLANNameSuffix), kernelIfNameLen)
+			}
+			if name != vhostPortName("cid", "net1", tc.isTrunk) {
+				t.Errorf("vhostPortName is not deterministic for %q", tc.name)
+			}
+			if name == vhostPortName("cid", "net2", tc.isTrunk) {
+				t.Error("vhostPortName must differ per pod-side interface")
+			}
+			if name == vhostPortName("other", "net1", tc.isTrunk) {
+				t.Error("vhostPortName must differ per container")
+			}
+		})
+	}
+}
+
+// TestVhostMAC pins the properties consumers rely on: the address is unicast,
+// locally administered, a pure function of the attachment identity and
+// distinct per interface of one sandbox.
+func TestVhostMAC(t *testing.T) {
+	a := vhostMAC("cid-1", "net1")
+	if len(a) != 6 {
+		t.Fatalf("len = %d, want 6", len(a))
+	}
+	if a[0]&0x01 != 0 {
+		t.Errorf("%s is a multicast address", a)
+	}
+	if a[0]&0x02 == 0 {
+		t.Errorf("%s is not locally administered", a)
+	}
+	if b := vhostMAC("cid-1", "net1"); b.String() != a.String() {
+		t.Errorf("not deterministic: %s vs %s", a, b)
+	}
+	if c := vhostMAC("cid-1", "net2"); c.String() == a.String() {
+		t.Errorf("net1 and net2 of one sandbox share %s", a)
+	}
+	if d := vhostMAC("cid-2", "net1"); d.String() == a.String() {
+		t.Errorf("two sandboxes share %s", a)
+	}
+}

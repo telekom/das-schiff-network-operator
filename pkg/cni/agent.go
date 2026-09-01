@@ -43,14 +43,22 @@ const agentCallTimeout = 10 * time.Second
 // gateways + host routes, while L2 carries only the Layer2 reference(s) — a
 // single untagged access ref or a tagged trunk list (the agent enslaves the port
 // or its VLAN sub-interfaces to the matching bridges).
+//
+// att is non-nil only for the vhost-user transport, and carries the HOST-side
+// socket path: that is the namespace the CRA agent and vSR run in.
 func notifyAgentAdd(conf *NetConf, args *skel.CmdArgs, portName string, gwV4, gwV6 net.IP,
-	result *current.Result,
+	result *current.Result, att *vhostUserAttachment,
 ) error {
 	podNs, name := podIdentity(args.Args)
 	port := &pb.WorkloadPort{
 		Interface: portName,
+		Transport: conf.transport(),
 		//nolint:gosec // validateModes bounds mtu to MinPortMTU..MaxPortMTU
 		Mtu: uint32(conf.mtu()),
+	}
+	if att != nil {
+		port.SocketPath = att.HostPath
+		port.SocketMode = att.Mode
 	}
 	req := &pb.AddRequest{
 		PodNamespace: podNs,
