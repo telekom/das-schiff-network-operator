@@ -38,6 +38,10 @@ spec:
         - "--health-addr=[$(HOST_IP)]:7085"
         - "--metrics-addr=[$(HOST_IP)]:7084"
         - "--webhook-addr=[$(HOST_IP)]:7443"
+        # Keep in sync with the agent-cra-frr DaemonSet (config/agent-cra-frr/
+        # agent.yaml), which resolves workload-CNI Layer2 references in the
+        # same namespace.
+        - "--intent-namespace=default"
         command:
         - /manager
         env:

@@ -252,7 +252,7 @@ func (r *NodeNetworkConfigReconciler) mergeWorkloadPorts(
 		return "", fmt.Errorf("error fetching workload ports: %w", err)
 	}
 	entries = workloadcni.DropInvalidEntries(entries, r.reservedVRFs, r.logger)
-	workloadcni.MergeIntoNodeNetworkConfig(cfg, entries)
+	workloadcni.MergeIntoNodeNetworkConfig(cfg, entries, r.logger)
 	return workloadcni.HashEntries(entries), nil
 }
 
