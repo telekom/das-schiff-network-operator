@@ -98,7 +98,10 @@ func TestAssemble_KeepsMirrorMergedWithBase(t *testing.T) {
 	// A base L2A entry (VLAN>0) plus a mirror-only entry on the same key must
 	// merge and be kept, regardless of contribution order.
 	base := builder.NewNodeContribution()
-	base.Layer2s["700"] = networkv1alpha1.Layer2{VNI: 10700, VLAN: 700, MTU: 1500}
+	base.Layer2s["700"] = networkv1alpha1.Layer2{
+		VNI: 10700, VLAN: 700, MTU: 1500,
+		AttachmentRef: &networkv1alpha1.Layer2AttachmentRef{Namespace: "tenant", Name: "green"},
+	}
 	mirror := builder.NewNodeContribution()
 	mirror.Layer2s["700"] = networkv1alpha1.Layer2{
 		MirrorACLs: []networkv1alpha1.MirrorACL{{Direction: networkv1alpha1.MirrorDirectionIngress}},
@@ -118,6 +121,11 @@ func TestAssemble_KeepsMirrorMergedWithBase(t *testing.T) {
 		}
 		if len(l2.MirrorACLs) != 1 {
 			t.Errorf("expected 1 MirrorACL merged, got %d", len(l2.MirrorACLs))
+		}
+		// The attachment identity is what workload-CNI L2 ports bind to; a
+		// mirror contribution applied on top must not erase it.
+		if l2.AttachmentRef == nil || l2.AttachmentRef.Name != "green" || l2.AttachmentRef.Namespace != "tenant" {
+			t.Errorf("expected base AttachmentRef preserved, got %+v", l2.AttachmentRef)
 		}
 	}
 }
