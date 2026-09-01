@@ -125,10 +125,18 @@ spec:
                       && has(self.portRange))
                 type: array
               prefixes:
-                description: Subnets reachable via this destination (CIDR notation).
+                description: |-
+                  Subnets reachable via this destination. Each entry must use CIDR notation
+                  (e.g. "198.51.100.0/24" or "2001:db8::/32").
                 items:
+                  maxLength: 43
                   type: string
+                maxItems: 1000
                 type: array
+                x-kubernetes-validations:
+                - message: each prefix must be a valid CIDR notation (e.g. 198.51.100.0/24
+                    or 2001:db8::/32)
+                  rule: self.all(prefix, isCIDR(prefix))
               vrfRef:
                 description: References a VRF resource by name. Mutually exclusive
                   with nextHop.

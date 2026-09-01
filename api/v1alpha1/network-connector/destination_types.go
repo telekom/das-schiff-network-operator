@@ -27,7 +27,11 @@ type DestinationSpec struct {
 	// References a VRF resource by name. Mutually exclusive with nextHop.
 	VRFRef *string `json:"vrfRef,omitempty"`
 
-	// Subnets reachable via this destination (CIDR notation).
+	// Subnets reachable via this destination. Each entry must use CIDR notation
+	// (e.g. "198.51.100.0/24" or "2001:db8::/32").
+	// +kubebuilder:validation:MaxItems=1000
+	// +kubebuilder:validation:items:MaxLength=43
+	// +kubebuilder:validation:XValidation:rule="self.all(prefix, isCIDR(prefix))",message="each prefix must be a valid CIDR notation (e.g. 198.51.100.0/24 or 2001:db8::/32)"
 	Prefixes []string `json:"prefixes,omitempty"`
 
 	// Next-hop addresses for static routing. Mutually exclusive with vrfRef.
