@@ -8,7 +8,8 @@ on-link host routes to it via BGP.
 
 ## How it works
 
-Multus invokes the plugin for a secondary network. On `ADD` the plugin:
+Multus invokes the plugin for a secondary network. On `ADD` the plugin (for the
+default `veth` + `routed` path):
 
 1. Delegates to the configured **IPAM** (`static`, `host-local` or `whereabouts`) to obtain the
    workload's `/32` + `/128`.
@@ -47,10 +48,12 @@ this should size the IPAM pool so that freed addresses are not immediately
 re-used (`host-local` hands out the lowest free address, so this mostly
 matters for very small pools).
 
-Every address in the IPAM result is narrowed to a host prefix (`/32`, `/128`)
+In routed mode every address in the IPAM result is narrowed to a host prefix (`/32`, `/128`)
 before it is assigned to the pod interface and returned to the runtime: the
 attachment is routed through the on-link gateway, and a pool-sized prefix would
 install a connected route on the isolated veth instead.
+
+The `l2` attach mode varies steps 2–4 — see *L2 attach mode* below.
 
 ### VRF vs underlay
 
@@ -77,13 +80,127 @@ Delivered per secondary network via a `NetworkAttachmentDefinition`
 | field               | required | default | description |
 | ------------------- | -------- | ------- | ----------- |
 | `type`              | yes      | —       | must be `cni-workload` |
-| `ipam`              | yes      | —       | delegated IPAM block; `type` must be one of `static`, `host-local`, `whereabouts` (the plugin executes that binary as root, so other chained plugins are refused, and node-level IPAM options — `host-local` `dataDir`/`resolvConf`, `whereabouts` `configuration_path`/`log_file`/`kubernetes`/`datastore`/`etcd_*` — are refused too, see [Who may author a NetworkAttachmentDefinition](#who-may-author-a-networkattachmentdefinition)) |
-| `vrf`               | no       | *(underlay)* | CRA VRF device name; omit/`default`/`main` for the underlay/default table; management/cluster VRF names are rejected |
-| `linkLocalGateways` | no       | `169.254.1.1` / `fe80::1` | on-link next-hop addresses the agent configures on the CRA-side port; must be link-local unicast (`169.254.0.0/16`, `fe80::/10`) — the plugin and the agent both reject anything else |
-| `mtu`               | no       | `1500`  | veth MTU |
+| `ipam`              | for routed attachments | — | delegated IPAM block whose `type` must be one of `static`, `host-local`, `whereabouts` (the plugin executes that binary as root, so other chained plugins are refused, and node-level IPAM options — `host-local` `dataDir`/`resolvConf`, `whereabouts` `configuration_path`/`log_file`/`kubernetes`/`datastore`/`etcd_*` — are refused too, see [Who may author a NetworkAttachmentDefinition](#who-may-author-a-networkattachmentdefinition)); optional for an `l2` access port (the workload is addressed inside the L2 domain) and rejected for `layer2Trunk` (the untagged port carries nothing; the workload addresses its VLAN sub-interfaces). Always delegated and applied when present. IPAM `routes` are applied to the pod interface in `l2` mode only; `routed` installs its own on-link defaults |
+| `attachMode`        | no       | `routed`| `routed` (VRF/underlay + on-link gateway + host routes) or `l2` (attachment to existing L2 domains) |
+| `vrf`               | no       | *(underlay)* | CRA VRF device name; omit/`default`/`main` for the underlay/default table; management/cluster VRF names are rejected. Only for `attachMode: routed` (must be unset for `l2`) |
+| `layer2AttachmentRef` | for `l2` | —     | `{name}` of the originating `Layer2Attachment`; the port becomes an **untagged access port** of it. Mutually exclusive with `layer2Trunk` |
+| `layer2Trunk`       | for `l2` | —       | list of `{name, vlan}` members carried on the port as an **802.1Q trunk**; `vlan` is optional and defaults to the domain's own VLAN id. Mutually exclusive with `layer2AttachmentRef` |
+| `linkLocalGateways` | no       | `169.254.1.1` / `fe80::1` | on-link next-hop addresses the agent configures on the CRA-side port (`routed` only); must be link-local unicast (`169.254.0.0/16`, `fe80::/10`) — the plugin and the agent both reject anything else |
+| `mtu`               | no       | `1500`  | veth MTU; in L2 mode every attached domain must be able to carry it (see [L2 trunking](#l2-trunking)) |
 
 Example (underlay, static IPAM) — see
-[`e2e/kubevirt/manifests/networkattachmentdefinition.yaml`](../../e2e/kubevirt/manifests/networkattachmentdefinition.yaml).
+[`e2e/kubevirt/manifests/networkattachmentdefinition.yaml`](../../e2e/kubevirt/manifests/networkattachmentdefinition.yaml),
+plus the L2-attach variants alongside it
+([`networkattachmentdefinition-l2.yaml`](../../e2e/kubevirt/manifests/networkattachmentdefinition-l2.yaml),
+[`networkattachmentdefinition-l2-trunk.yaml`](../../e2e/kubevirt/manifests/networkattachmentdefinition-l2-trunk.yaml))
+with their VMs.
+
+## L2 attach mode
+
+The `attachMode` selects what is done with the CRA-side veth:
+
+- `routed` (default): VRF/underlay + on-link gateway + workload host routes.
+- `l2`: the port is attached to one or more **existing** L2 bridges with no L3
+  addressing — either as an untagged access port (`layer2AttachmentRef`) or as
+  an 802.1Q trunk (`layer2Trunk`). The bridge/L2VNI is assumed to already exist
+  on the node (from the `Layer2Attachment` pipeline).
+
+> **Prerequisite: the intent reconciler.** `attachMode: l2` binds to a Layer2 by
+> the `Layer2Attachment` that produced it. Only the intent pipeline
+> (`--enable-intent-reconciler` on the operator) stamps that identity onto the
+> `NodeNetworkConfig`; Layer2s coming from the legacy
+> `Layer2NetworkConfiguration` path carry no `attachmentRef` and can never be
+> targeted. On such a cluster every `l2` ADD fails with `FailedPrecondition`.
+
+**L2 binding by attachment ref.** The intent builder stamps the originating
+`Layer2Attachment` identity (`AttachmentRef`) onto each NNC `Layer2`. An `l2`
+port entry carries the name(s) of the `Layer2Attachment`(s) it wants; the
+node-local agent matches them against the stamped `Layer2.AttachmentRef` and
+attaches the port to those Layer2s' bridges (FRR `l2.<vlanID>`; the cra-vsr
+rendering as a `link-interface` of the same bridge is part of the follow-up
+#356, see [CRA flavor notes](#cra-flavor-notes)). No VNI or VLAN id is needed in the CNI config; the
+node-local server only reads the node's own `NodeNetworkConfig` to check the
+references resolve.
+
+**References are name-only.** `Layer2Attachment` is namespaced, but the whole
+intent pipeline is already scoped to one namespace by the operator's
+`--intent-namespace` flag, so repeating it in every NAD is pure boilerplate. The
+CRA agents take the same `--intent-namespace` flag (default `default`) and stamp
+it onto every reference they record, so `NodeWorkloadPorts` and
+`NodeNetworkConfig` stay fully qualified.
+
+**Missing domains fail the ADD.** The node-local agent refuses an `l2` ADD with
+`FailedPrecondition` (the message names the reference and hints at the intent
+reconciler) when any referenced `Layer2Attachment` is not stamped on the node's
+`NodeNetworkConfig`, so the pod does not start with a dead port; the runtime
+retries the sandbox until the L2A pipeline has created the domain. Should a
+domain disappear *after* an attachment was recorded, the merge skips the *whole*
+entry and logs it rather than half-wiring a trunk, and re-applies it once the
+bridge is back.
+
+### L2 trunking
+
+`layer2Trunk` carries several L2 domains on one port. Every member is **tagged**:
+
+```jsonc
+{
+  "attachMode": "l2",
+  "layer2Trunk": [
+    { "name": "green" },             // pod-side tag == the domain's own VLAN id
+    { "name": "red", "vlan": 200 }   // translated to pod-side VLAN 200
+  ]
+}
+```
+
+A member without `vlan` is carried under the domain's own VLAN id, which the
+agent resolves from the `NodeNetworkConfig` (the plugin never reads
+`Layer2Attachment`s). A member *with* `vlan` translates: the port-side id is the
+one configured here, the fabric-side one stays the domain's. Ids must be
+1..4094, and no two members may reference the same domain or land on the same
+port-side id — including after inheritance, which only the agent can check.
+
+Each member is realised as a VLAN sub-interface `<port>.<podVlan>` enslaved to
+its domain's bridge — a netlink `vlan` link on FRR (the cra-vsr follow-up will
+render an identically named `interface vlan`).
+
+Generated veth port names are deterministic hashes of the container ID and
+pod-side interface name: `cra` plus 7 base36 characters (10 characters total)
+for every attach mode, reserving room for `.4094`. Every generated
+`<port>.<podVlan>` for VLAN 1..4094 therefore fits the 15-character interface
+limit without truncation, and the name does not depend on the attach mode, so
+a `DEL` still finds the port (and the recorded attachment) after the
+NetworkAttachmentDefinition was switched between routed/access and trunk. The
+IPAM release on `DEL`, by contrast, is driven by the configuration the runtime
+hands the plugin. The CNI spec states that the network configuration should
+not change between `ADD` and `DEL`, and libcni/Multus implement that by
+caching the per-container delegate configuration and replaying it on `DEL`,
+so under normal operation an edited NAD does not decide whether an allocation
+is released. If that cache is lost (e.g. the runtime state directory is wiped),
+the allocation is orphaned like with any other IPAM-delegating plugin and has
+to be reclaimed out of band from the IPAM plugin's store.
+
+**Access and trunk are mutually exclusive.** A native (untagged) member would
+require the raw port itself to be a bridge slave while sub-interfaces demux the
+tagged members off the same port. Linux happens to allow that, but any VLAN id
+*without* a member then falls through to the raw port and floods the untagged
+domain — tag and all. Only VLAN-aware bridging can filter that, and the VSR 3.11
+`interface bridge` model has no VLAN filtering (nor any VLAN match in its
+firewall), so there is no VSR counterpart to a Linux `tc` guard. Forbidding the
+mix gives identical, leak-free semantics on both flavors, at the cost that
+**untagged frames and frames with an unlisted VLAN id on a trunk port are not
+forwarded anywhere**.
+
+**MTU.** `mtu` is what the attachment requests, and the CRA sizes the
+sub-interfaces with it, so the workload sees the same MTU on every member. It
+has to fit the domain, or frames would be black-holed above the bridge's own
+MTU: an **access** port requires its Layer2 to carry at least the requested MTU,
+a **trunk** requires *every* member to — all sub-interfaces inherit the port
+MTU, so one large domain does not make the trunk safe for a smaller one; size
+the port for the smallest member (or use separate ports). Routed attachments are
+not constrained this way. An attachment that asks for more than its domains can
+carry is refused like any other unresolvable one — the whole entry is dropped
+and the reason logged. A tag costs 4 bytes on the wire on top of this, which the
+fabric has to carry.
 
 ### Who may author a NetworkAttachmentDefinition
 
@@ -167,26 +284,31 @@ rendering) lands in the follow-up #356 — until then an attachment recorded on 
 cra-vsr node is not programmed into the datapath.
 
 - **cra-frr:** the agent programs the CRA-FRR netns via netlink
-  (`pkg/nl/workloadports.go`): VRF enslavement, the on-link gateway addresses and the
-  scope-link host routes. FRR redistributes connected/kernel/static, so the
-  `/32` + `/128` are advertised. For the **underlay** path the FRR *default*
-  instance must redistribute connected/kernel toward the fabric neighbors (and
-  gain an IPv6 unicast address-family).
+  (`pkg/nl/workloadports.go`): VRF enslavement, the on-link gateway addresses and
+  the scope-link host routes; `l2` ports are enslaved to the `l2.<vlanID>`
+  bridge (trunk members through their `<port>.<vlan>` sub-interfaces). FRR
+  redistributes connected/kernel/static, so the `/32` + `/128` are advertised.
+  For the **underlay** path the FRR *default* instance must redistribute
+  connected/kernel toward the fabric neighbors (and gain an IPv6 unicast
+  address-family).
 - **cra-vsr (follow-up #356):** the VSR fast path owns the FIB, so the moved
   port cannot be programmed via raw netlink. The agent will render it as NETCONF
   instead: an `interface infrastructure <ifname>` with `port infra-<ifname>` +
   the on-link gateway addresses, plus interface-static routes
-  (`ipv4-route/ipv6-route <ip> next-hop <ifname>`). Underlay (no-VRF) ports also
+  (`ipv4-route/ipv6-route <ip> next-hop <ifname>`); a bridge `link-interface`
+  (and `interface vlan` per trunk member) for `l2`. Underlay (no-VRF) ports also
   get an explicit BGP `network` statement, since the default table's session has
   no VRF redistribution. What this PR already does for it is the flavor-agnostic
-  groundwork: the `infra-<ifname>` alias on the moved port (see below) and the
-  `pkg/workloadcni` transport.
+  groundwork: the `infra-<ifname>` alias on the moved port (see below), the
+  `pkg/workloadcni` transport and the L2 attachment resolution against the
+  node's `NodeNetworkConfig`.
 
 ### Transport
 
 ```
 CNI ADD/DEL --gRPC(unix)--> agent --> NodeWorkloadPorts CR (durable)
-                                   \-> merge into NodeNetworkConfig --> NETCONF
+                                   \-> merge into NodeNetworkConfig
+                                       --> netlink (FRR) | NETCONF (VSR)
 ```
 
 The agent serves the socket at `/run/das-schiff/workload-cni.sock` (a hostPath
@@ -220,3 +342,24 @@ deployment that wants workload attachments must therefore:
    `config/agent-cra-frr/agent.yaml`. Downstream deployments that flatten the
    manifests must copy this volume; without it the plugin fails on `ADD` with a
    connection error to `/run/das-schiff/workload-cni.sock`.
+
+## E2E coverage
+
+The lab installs the plugin on every node (`PhaseWorkloadCNI`), so the datapath
+is exercised from plain pods as well as from VMs:
+
+| Test | Label | Covers |
+| --- | --- | --- |
+| `e2etests/tests/intent_workload_cni.go` | `intent`, `workloadcni` | L2 access into VLAN 501, an 802.1Q trunk carrying VLAN 501 plus VLAN 502 translated to id 200, and host-local IPAM allocation/release |
+| `e2etests/tests/routed_kubevirt.go` | `kubevirt`, `routed` | routed mode end to end: the VM /32 and /128 in the underlay BGP and reachability from the fabric |
+
+The pod tests are intent-labelled because an L2 attachment resolves a
+`Layer2Attachment` by name: the domain it binds to only exists once the intent
+pipeline has stamped it onto the `NodeNetworkConfig`. Run them with
+`make e2e-test-intent` and the VM test with `make e2e-test-kubevirt`.
+
+The KubeVirt lab only boots the routed VM. The L2 access and trunk VM manifests
+next to it (`e2e/kubevirt/manifests/*-l2.yaml`, `*-l2-trunk.yaml`) are worked
+examples of the same attach modes for a VM — the KubeVirt bridge binding relays
+the pod interface to the guest unchanged — and are not applied by the lab; the
+L2 datapath is covered from pods.
