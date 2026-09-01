@@ -38,12 +38,20 @@ import (
 // portNamePrefix prefixes the CRA-side veth name.
 const portNamePrefix = "cra"
 
-// portNameHexLen is the number of hash hex characters appended after
-// portNamePrefix. The generated value is a real veth device name and must fit
-// the 15-character kernel IFNAMSIZ-1 limit: len("cra") + 12 = 15. The VSR
-// resolves infra-<portName> through the veth's ifalias, so that reference does
-// not constrain the device name.
-const portNameHexLen = 12
+const (
+	// portNameHexLen is the number of hash hex characters appended after
+	// portNamePrefix for routed and access attachments. The generated value is a
+	// real veth device name and must fit the 15-character kernel IFNAMSIZ-1
+	// limit: len("cra") + 12 = 15. The VSR resolves infra-<portName> through the
+	// veth's ifalias, so that reference does not constrain the device name.
+	portNameHexLen = 12
+	// maxTrunkVLANNameSuffix is reserved by trunk ports for their largest
+	// possible VLAN sub-interface suffix.
+	maxTrunkVLANNameSuffix = ".4094"
+	// trunkPortNameHexLen keeps a generated trunk port and the longest VLAN
+	// suffix within the kernel name limit: len("cra") + 7 + len(".4094") = 15.
+	trunkPortNameHexLen = portNameHexLen - len(maxTrunkVLANNameSuffix)
+)
 
 // onLinkRouteMetric keeps the routed on-link default at a lower priority than the
 // pod's own primary default (on eth0) so the virt-launcher pod itself is
@@ -54,11 +62,17 @@ const onLinkRouteMetric = 4096
 // container ID and the pod-side interface name. The interface name is part of
 // the key because the runtime (Multus) reuses one container ID for every
 // attachment of a pod, so hashing the container ID alone would collide between
-// two routed networks on the same pod. The generated real veth device name is
-// bounded to 15 characters, the kernel IFNAMSIZ-1 limit.
-func portName(containerID, ifName string) string {
+// two routed networks on the same pod. Routed and access ports use the full
+// 15-character kernel IFNAMSIZ-1 budget. A trunk reserves enough of that
+// budget for ".4094", so every generated <port>.<podVlan> remains valid
+// without truncating its deterministic hash.
+func portName(containerID, ifName string, isTrunk bool) string {
 	sum := sha256.Sum256([]byte(containerID + "/" + ifName))
-	return portNamePrefix + hex.EncodeToString(sum[:])[:portNameHexLen]
+	hashLen := portNameHexLen
+	if isTrunk {
+		hashLen = trunkPortNameHexLen
+	}
+	return portNamePrefix + hex.EncodeToString(sum[:])[:hashLen]
 }
 
 // setupPodSide creates the veth pair inside the pod netns, configures the
@@ -118,13 +132,16 @@ func setupPodSide(conf *NetConf, args *skel.CmdArgs, craNetnsPath, portName stri
 			return fmt.Errorf("failed to set pod interface up: %w", uerr)
 		}
 
-		// KubeVirt bridge binding derives the guest gateway from a route on the
-		// pod interface (filterIPv4RoutesByInterface): it needs at least one
-		// route whose next-hop interface is this link and relays that next-hop
-		// to the guest as its gateway. Install on-link default routes via the
-		// CRA link-local gateways.
-		if rerr := installOnLinkDefaults(conf, podLink, result); rerr != nil {
-			return rerr
+		// In routed mode, KubeVirt bridge binding derives the guest gateway from
+		// a route on the pod interface (filterIPv4RoutesByInterface): it needs
+		// at least one route whose next-hop interface is this link and relays
+		// that next-hop to the guest as its gateway. Install on-link default
+		// routes via the CRA link-local gateways. In L2 mode the guest reaches
+		// its gateway over the shared L2 domain, so no on-link default is added.
+		if !conf.isL2() {
+			if rerr := installOnLinkDefaults(conf, podLink, result); rerr != nil {
+				return rerr
+			}
 		}
 
 		// Move the peer end into the CRA network namespace.

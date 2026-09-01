@@ -28,6 +28,8 @@ import (
 	"net"
 
 	"github.com/containernetworking/cni/pkg/types"
+
+	"github.com/telekom/das-schiff-network-operator/pkg/workloadcni"
 )
 
 const (
@@ -37,8 +39,20 @@ const (
 	// defaultLinkLocalV6 is the IPv6 link-local gateway address configured on
 	// the CRA-side port and used by the workload as its on-link next-hop.
 	defaultLinkLocalV6 = "fe80::1"
-	// defaultMTU is used when the NetConf does not specify one.
-	defaultMTU = 1500
+	// defaultMTU is used when the NetConf does not specify one. It is shared with
+	// the agent, which applies the same default to a request that carries none.
+	defaultMTU = workloadcni.DefaultPortMTU
+	// maxVLANID is the highest assignable 802.1Q VLAN id (4095 is reserved).
+	maxVLANID = 4094
+
+	// AttachModeRouted is the default attach mode: the CRA-side port is routed
+	// (VRF/underlay + on-link gateway + workload host routes). This is the
+	// PR #343 behaviour.
+	AttachModeRouted = "routed"
+	// AttachModeL2 attaches the CRA-side port to an existing Layer2 bridge
+	// (referenced by Layer2AttachmentRef) as a bridge slave, with no L3
+	// addressing. The bridge/L2VNI is assumed to already exist on the node.
+	AttachModeL2 = "l2"
 )
 
 // NetConf is the CNI configuration for the cni-workload plugin.
@@ -49,8 +63,29 @@ type NetConf struct {
 	// port is enslaved to. Leave empty (or "default"/"main") to keep the port
 	// in the CRA netns default routing table so the on-link host routes are
 	// advertised by the UNDERLAY fabric BGP session (rather than exported as an
-	// EVPN type-5 route from a tenant L3VNI VRF).
+	// EVPN type-5 route from a tenant L3VNI VRF). Only meaningful in the
+	// "routed" attach mode.
 	VRF string `json:"vrf,omitempty"`
+
+	// AttachMode selects how the CRA-side port is attached:
+	//   - "routed" (default): routed attachment (VRF/underlay + on-link gateway
+	//     + workload host routes).
+	//   - "l2": bridge-slave attachment to an existing Layer2 domain referenced
+	//     by Layer2AttachmentRef; no L3 addressing.
+	AttachMode string `json:"attachMode,omitempty"`
+
+	// Layer2AttachmentRef identifies the Layer2Attachment whose bridge the port
+	// is enslaved to as an untagged access port in the "l2" attach mode.
+	// Mutually exclusive with Layer2Trunk; exactly one of the two is required
+	// when AttachMode is "l2", otherwise both are ignored.
+	Layer2AttachmentRef *Layer2AttachmentRef `json:"layer2AttachmentRef,omitempty"`
+
+	// Layer2Trunk carries several Layer2 domains on the port as an 802.1Q
+	// trunk. Every member is tagged: the port itself is never an untagged
+	// member, so untagged frames and frames with an unlisted VLAN id are not
+	// forwarded. Mutually exclusive with Layer2AttachmentRef and only valid
+	// when AttachMode is "l2".
+	Layer2Trunk []Layer2TrunkMember `json:"layer2Trunk,omitempty"`
 
 	// AgentSocket overrides the unix socket the plugin uses to reach the
 	// node-local CRA agent (workloadcni.DefaultSocketPath when empty). The plugin
@@ -89,6 +124,40 @@ type NetConf struct {
 type LinkLocalGateways struct {
 	IPv4 string `json:"ipv4,omitempty"`
 	IPv6 string `json:"ipv6,omitempty"`
+}
+
+// Layer2AttachmentRef identifies a Layer2Attachment by name. The node agent
+// resolves the name in the namespace it was configured with
+// (--intent-namespace, the same namespace the operator's intent pipeline is
+// scoped to) and binds the port to the NNC Layer2 whose stamped AttachmentRef
+// matches (see the intent builder), so no namespace, VNI or VLAN id is needed
+// here.
+type Layer2AttachmentRef struct {
+	Name string `json:"name"`
+}
+
+// Layer2TrunkMember is one tagged member of a trunk attachment.
+type Layer2TrunkMember struct {
+	Layer2AttachmentRef `json:",inline"`
+
+	// VLAN is the workload-side 802.1Q id the domain is carried under. When
+	// unset the domain's own VLAN id is used, which the node agent resolves
+	// from the NodeNetworkConfig; setting it translates between the
+	// workload-side id and the fabric-side id of the domain.
+	VLAN *uint16 `json:"vlan,omitempty"`
+}
+
+// attachMode returns the configured attach mode or the default ("routed").
+func (c *NetConf) attachMode() string {
+	if c.AttachMode == "" {
+		return AttachModeRouted
+	}
+	return c.AttachMode
+}
+
+// isL2 reports whether the port is attached in L2 (bridge-slave) mode.
+func (c *NetConf) isL2() bool {
+	return c.attachMode() == AttachModeL2
 }
 
 // mtu returns the configured MTU or the default.
@@ -153,18 +222,119 @@ func parseConfig(stdin []byte) (*NetConf, error) {
 	if err := json.Unmarshal(stdin, conf); err != nil {
 		return nil, fmt.Errorf("failed to parse network configuration: %w", err)
 	}
+	// IPAM is required for routed attachments (the pod-side address is relayed
+	// to the guest). It is optional in L2 attach mode, where the workload is
+	// addressed inside the shared L2 domain. When configured it is always
+	// delegated and applied.
 	if len(conf.IPAM) == 0 {
-		return nil, fmt.Errorf("%q is required", "ipam")
-	}
-	if _, err := conf.ipamType(); err != nil {
+		if !conf.isL2() {
+			return nil, fmt.Errorf("%q is required", "ipam")
+		}
+	} else if _, err := conf.ipamType(); err != nil {
 		return nil, err
 	}
-	// Validate gateway addresses eagerly so errors surface at ADD time.
-	if _, err := conf.gatewayV4(); err != nil {
+	if err := conf.validateModes(); err != nil {
 		return nil, err
 	}
-	if _, err := conf.gatewayV6(); err != nil {
-		return nil, err
+	// The on-link gateways are only used in the routed attach mode; validate
+	// them eagerly there so errors surface at ADD time.
+	if !conf.isL2() {
+		if _, err := conf.gatewayV4(); err != nil {
+			return nil, err
+		}
+		if _, err := conf.gatewayV6(); err != nil {
+			return nil, err
+		}
 	}
 	return conf, nil
+}
+
+// validateModes checks the attach mode and its mode-specific required fields.
+// validateMTU bounds the requested MTU so the value handed to the agent (and
+// from there to the datapath) is always one an interface can be configured
+// with. Whether the L2 domain can carry it is only knowable on the node, so the
+// agent checks that when it merges the attachment.
+func (c *NetConf) validateMTU() error {
+	if c.MTU != 0 && (c.MTU < workloadcni.MinPortMTU || c.MTU > workloadcni.MaxPortMTU) {
+		return fmt.Errorf("mtu %d is out of range (%d-%d)", c.MTU, workloadcni.MinPortMTU, workloadcni.MaxPortMTU)
+	}
+	return nil
+}
+
+func (c *NetConf) validateModes() error {
+	if err := c.validateMTU(); err != nil {
+		return err
+	}
+	switch c.attachMode() {
+	case AttachModeRouted, AttachModeL2:
+	default:
+		return fmt.Errorf("invalid attachMode %q (want %q or %q)", c.AttachMode, AttachModeRouted, AttachModeL2)
+	}
+	if c.isL2() {
+		if err := c.validateL2Attach(); err != nil {
+			return err
+		}
+	} else if len(c.Layer2Trunk) > 0 || c.Layer2AttachmentRef != nil {
+		return fmt.Errorf("layer2AttachmentRef and layer2Trunk are only valid when attachMode is %q", AttachModeL2)
+	}
+
+	return nil
+}
+
+// validateL2Attach checks the L2 attach mode's own fields: it is either an
+// untagged access port on a single Layer2 domain, or an all-tagged trunk over
+// several of them, never both. Mixing the two would leave the port an untagged
+// bridge slave while tagged sub-interfaces demux the rest, so every VLAN id
+// without a member would leak into the untagged domain — and VSR bridges have
+// no VLAN filtering to guard against that.
+func (c *NetConf) validateL2Attach() error {
+	hasRef := c.Layer2AttachmentRef != nil
+	hasTrunk := len(c.Layer2Trunk) > 0
+	switch {
+	case hasRef && hasTrunk:
+		return fmt.Errorf("layer2AttachmentRef (untagged access port) and layer2Trunk (tagged trunk) are mutually exclusive")
+	case !hasRef && !hasTrunk:
+		return fmt.Errorf("layer2AttachmentRef or layer2Trunk is required when attachMode is %q", AttachModeL2)
+	case hasRef && c.Layer2AttachmentRef.Name == "":
+		return fmt.Errorf("layer2AttachmentRef.name is required when attachMode is %q", AttachModeL2)
+	}
+	if c.VRF != "" {
+		return fmt.Errorf("vrf must not be set when attachMode is %q (the port is bridged, not routed)", AttachModeL2)
+	}
+	if err := validateTrunk(c.Layer2Trunk); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateTrunk rejects duplicate members and out-of-range or colliding
+// workload-side VLAN ids. Members that inherit their id (vlan unset) can only
+// be checked for collisions once their Layer2 is known, which the node agent
+// does at merge time.
+func validateTrunk(members []Layer2TrunkMember) error {
+	seenRefs := make(map[string]struct{}, len(members))
+	seenVLANs := make(map[uint16]struct{}, len(members))
+	for i := range members {
+		name := members[i].Name
+		if name == "" {
+			return fmt.Errorf("layer2Trunk[%d].name is required", i)
+		}
+		if _, dup := seenRefs[name]; dup {
+			return fmt.Errorf("layer2Trunk references %q more than once", name)
+		}
+		seenRefs[name] = struct{}{}
+
+		vlan := members[i].VLAN
+		if vlan == nil {
+			continue
+		}
+		if *vlan == 0 || *vlan > maxVLANID {
+			return fmt.Errorf("layer2Trunk[%d].vlan %d is out of range (want 1-%d)", i, *vlan, maxVLANID)
+		}
+		if _, dup := seenVLANs[*vlan]; dup {
+			return fmt.Errorf("layer2Trunk uses vlan %d more than once", *vlan)
+		}
+		seenVLANs[*vlan] = struct{}{}
+	}
+	return nil
 }
