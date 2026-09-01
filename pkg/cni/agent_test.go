@@ -104,3 +104,41 @@ func TestAddRequestCarriesOnlyPresentGatewayFamilies(t *testing.T) {
 		})
 	}
 }
+
+func TestAddRequestL2ModeCarriesOnlyLayer2References(t *testing.T) {
+	args := &skel.CmdArgs{ContainerID: "cid", Args: "K8S_POD_NAMESPACE=demo;K8S_POD_NAME=vm"}
+	vlan := uint16(200)
+	conf := &NetConf{
+		AttachMode: AttachModeL2,
+		Layer2Trunk: []Layer2TrunkMember{
+			{Layer2AttachmentRef: Layer2AttachmentRef{Name: "green"}},
+			{Layer2AttachmentRef: Layer2AttachmentRef{Name: "red"}, VLAN: &vlan},
+		},
+		MTU: 9000,
+	}
+
+	// In L2 mode the caller passes no gateways; the result may carry IPAM
+	// addresses (optional) that must not turn into routed payload.
+	result := &current.Result{IPs: []*current.IPConfig{
+		{Address: net.IPNet{IP: net.ParseIP("10.201.0.10"), Mask: net.CIDRMask(24, 32)}},
+	}}
+	req := addRequest(conf, args, "cra0cid", nil, nil, result)
+
+	port := req.GetPort()
+	if req.GetVrf() != "" || port.GetGatewayV4() != "" || port.GetGatewayV6() != "" || len(port.GetHostRoutes()) != 0 {
+		t.Fatalf("L2 request unexpectedly carries routed payload: %+v", req)
+	}
+	if port.GetMtu() != 9000 {
+		t.Errorf("mtu = %d, want 9000", port.GetMtu())
+	}
+	if req.GetLayer2AttachmentRef() != nil {
+		t.Errorf("unexpected access ref %+v on a trunk", req.GetLayer2AttachmentRef())
+	}
+	members := req.GetLayer2Trunk()
+	if len(members) != 2 || members[0].GetRef().GetName() != "green" || members[1].GetRef().GetName() != "red" {
+		t.Fatalf("unexpected trunk members %+v", members)
+	}
+	if members[0].GetVlan() != 0 || members[1].GetVlan() != 200 {
+		t.Errorf("vlans = %d/%d, want 0 (inherit)/200", members[0].GetVlan(), members[1].GetVlan())
+	}
+}

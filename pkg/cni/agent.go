@@ -36,29 +36,66 @@ import (
 // the CNI ADD/DEL past the runtime's own deadline.
 const agentCallTimeout = 10 * time.Second
 
-// notifyAgentAdd hands the routed attachment to the node-local CRA agent so it
-// can render the CRA-side datapath (netlink via frr-cra for FRR, NETCONF for
-// VSR). The plugin is flavor-agnostic; the agent decides how to program it.
-func notifyAgentAdd(conf *NetConf, args *skel.CmdArgs, portName string, gwV4, gwV6 net.IP, result *current.Result) error {
+// notifyAgentAdd hands the attachment to the node-local CRA agent so it can
+// render the CRA-side datapath (netlink via frr-cra for FRR, NETCONF for VSR).
+// The plugin is flavor-agnostic; the agent decides how to program it.
+func notifyAgentAdd(conf *NetConf, args *skel.CmdArgs, portName string, gwV4, gwV6 net.IP,
+	result *current.Result,
+) error {
 	ctx, cancel := context.WithTimeout(context.Background(), agentCallTimeout)
 	defer cancel()
 	if err := workloadcni.Add(ctx, conf.AgentSocket, addRequest(conf, args, portName, gwV4, gwV6, result)); err != nil {
-		return fmt.Errorf("notifying agent of routed add: %w", err)
+		return fmt.Errorf("notifying agent of attach add: %w", err)
 	}
 	return nil
 }
 
-// addRequest builds the ADD request for the agent. A gateway is only carried
-// for an address family the workload actually got an address in: the agent
-// configures each gateway as an address on the CRA-side port, and an IPv6
-// gateway on an IPv4-only attachment would fail on nodes with IPv6 disabled
-// (and make IPv6 implicit rather than opt-in).
-func addRequest(conf *NetConf, args *skel.CmdArgs, portName string, gwV4, gwV6 net.IP, result *current.Result) *pb.AddRequest {
-	ns, name := podIdentity(args.Args)
+// addRequest builds the ADD request for the agent. Routed and L2 attach modes
+// differ in the payload: routed carries VRF + on-link gateways + host routes,
+// while L2 carries only the Layer2 reference(s) — a single untagged access ref
+// or a tagged trunk list (the agent enslaves the port or its VLAN
+// sub-interfaces to the matching bridges).
+//
+// A routed gateway is only carried for an address family the workload actually
+// got an address in: the agent configures each gateway as an address on the
+// CRA-side port, and an IPv6 gateway on an IPv4-only attachment would fail on
+// nodes with IPv6 disabled (and make IPv6 implicit rather than opt-in).
+func addRequest(conf *NetConf, args *skel.CmdArgs, portName string, gwV4, gwV6 net.IP,
+	result *current.Result,
+) *pb.AddRequest {
+	podNs, name := podIdentity(args.Args)
 	port := &pb.WorkloadPort{
-		Interface:  portName,
-		HostRoutes: hostRoutes(result),
+		Interface: portName,
+		//nolint:gosec // validateModes bounds mtu to MinPortMTU..MaxPortMTU
+		Mtu: uint32(conf.mtu()),
 	}
+	req := &pb.AddRequest{
+		PodNamespace: podNs,
+		PodName:      name,
+		ContainerId:  args.ContainerID,
+		Port:         port,
+	}
+
+	if conf.isL2() {
+		if conf.Layer2AttachmentRef != nil {
+			req.Layer2AttachmentRef = &pb.Layer2AttachmentRef{Name: conf.Layer2AttachmentRef.Name}
+		}
+		for i := range conf.Layer2Trunk {
+			member := &pb.Layer2TrunkMember{
+				Ref: &pb.Layer2AttachmentRef{Name: conf.Layer2Trunk[i].Name},
+			}
+			// vlan 0 on the wire means "inherit the domain's own VLAN id"; the
+			// plugin never resolves Layer2Attachments, so the agent does it.
+			if vlan := conf.Layer2Trunk[i].VLAN; vlan != nil {
+				member.Vlan = uint32(*vlan)
+			}
+			req.Layer2Trunk = append(req.Layer2Trunk, member)
+		}
+		return req
+	}
+
+	req.Vrf = conf.VRF
+	port.HostRoutes = hostRoutes(result)
 	haveV4, haveV6 := addressFamilies(result)
 	if haveV4 {
 		port.GatewayV4 = gwV4.String() + "/32"
@@ -66,13 +103,7 @@ func addRequest(conf *NetConf, args *skel.CmdArgs, portName string, gwV4, gwV6 n
 	if haveV6 {
 		port.GatewayV6 = gwV6.String() + "/128"
 	}
-	return &pb.AddRequest{
-		PodNamespace: ns,
-		PodName:      name,
-		ContainerId:  args.ContainerID,
-		Vrf:          conf.VRF,
-		Port:         port,
-	}
+	return req
 }
 
 // addressFamilies reports which address families the IPAM result contains.
