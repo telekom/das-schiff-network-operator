@@ -1306,10 +1306,11 @@ spec:
                           type: array
                         interface:
                           description: |-
-                            Interface is the CRA-side interface name (the moved veth end for veth
-                            transport, e.g. "cra012345"). VSR resolves a veth through its
-                            infra-<interface> ifalias; that reference is not a kernel interface name.
-                            The bare interface must fit the kernel IFNAMSIZ-1 limit.
+                            Interface is the bare CRA-side VSR interface name (the moved veth end for
+                            veth transport, or the fpvhost interface for vhostuser transport, e.g.
+                            "cra012345"). VSR resolves a veth through its infra-<interface> ifalias;
+                            that reference is not a kernel interface name. The bare interface must fit
+                            the kernel IFNAMSIZ-1 limit.
                           maxLength: 15
                           minLength: 1
                           type: string
@@ -1323,6 +1324,28 @@ spec:
                           maximum: 9216
                           minimum: 0
                           type: integer
+                        socketMode:
+                          description: |-
+                            SocketMode is the vhost-user socket mode ("client" or "server") from the
+                            workload's perspective, as allocated by the device plugin. The CRA
+                            renderer inverts it for the fast path (workload server <-> VSR client),
+                            so callers must not pre-invert it.
+                            Only meaningful when Transport is "vhostuser".
+                          type: string
+                        socketPath:
+                          description: |-
+                            SocketPath is the vhost-user unix socket path shared with the workload.
+                            Only meaningful when Transport is "vhostuser".
+                          type: string
+                        transport:
+                          default: veth
+                          description: |-
+                            Transport selects the CRA-side wiring: "veth" (default, an infrastructure
+                            port) or "vhostuser" (a VSR fpvhost fast-path virtual-port, VSR-only).
+                          enum:
+                          - veth
+                          - vhostuser
+                          type: string
                       required:
                       - interface
                       type: object
@@ -2737,10 +2760,11 @@ spec:
                             type: array
                           interface:
                             description: |-
-                              Interface is the CRA-side interface name (the moved veth end for veth
-                              transport, e.g. "cra012345"). VSR resolves a veth through its
-                              infra-<interface> ifalias; that reference is not a kernel interface name.
-                              The bare interface must fit the kernel IFNAMSIZ-1 limit.
+                              Interface is the bare CRA-side VSR interface name (the moved veth end for
+                              veth transport, or the fpvhost interface for vhostuser transport, e.g.
+                              "cra012345"). VSR resolves a veth through its infra-<interface> ifalias;
+                              that reference is not a kernel interface name. The bare interface must fit
+                              the kernel IFNAMSIZ-1 limit.
                             maxLength: 15
                             minLength: 1
                             type: string
@@ -2754,6 +2778,28 @@ spec:
                             maximum: 9216
                             minimum: 0
                             type: integer
+                          socketMode:
+                            description: |-
+                              SocketMode is the vhost-user socket mode ("client" or "server") from the
+                              workload's perspective, as allocated by the device plugin. The CRA
+                              renderer inverts it for the fast path (workload server <-> VSR client),
+                              so callers must not pre-invert it.
+                              Only meaningful when Transport is "vhostuser".
+                            type: string
+                          socketPath:
+                            description: |-
+                              SocketPath is the vhost-user unix socket path shared with the workload.
+                              Only meaningful when Transport is "vhostuser".
+                            type: string
+                          transport:
+                            default: veth
+                            description: |-
+                              Transport selects the CRA-side wiring: "veth" (default, an infrastructure
+                              port) or "vhostuser" (a VSR fpvhost fast-path virtual-port, VSR-only).
+                            enum:
+                            - veth
+                            - vhostuser
+                            type: string
                         required:
                         - interface
                         type: object
@@ -2801,10 +2847,11 @@ spec:
                       type: array
                     interface:
                       description: |-
-                        Interface is the CRA-side interface name (the moved veth end for veth
-                        transport, e.g. "cra012345"). VSR resolves a veth through its
-                        infra-<interface> ifalias; that reference is not a kernel interface name.
-                        The bare interface must fit the kernel IFNAMSIZ-1 limit.
+                        Interface is the bare CRA-side VSR interface name (the moved veth end for
+                        veth transport, or the fpvhost interface for vhostuser transport, e.g.
+                        "cra012345"). VSR resolves a veth through its infra-<interface> ifalias;
+                        that reference is not a kernel interface name. The bare interface must fit
+                        the kernel IFNAMSIZ-1 limit.
                       maxLength: 15
                       minLength: 1
                       type: string
@@ -2818,6 +2865,28 @@ spec:
                       maximum: 9216
                       minimum: 0
                       type: integer
+                    socketMode:
+                      description: |-
+                        SocketMode is the vhost-user socket mode ("client" or "server") from the
+                        workload's perspective, as allocated by the device plugin. The CRA
+                        renderer inverts it for the fast path (workload server <-> VSR client),
+                        so callers must not pre-invert it.
+                        Only meaningful when Transport is "vhostuser".
+                      type: string
+                    socketPath:
+                      description: |-
+                        SocketPath is the vhost-user unix socket path shared with the workload.
+                        Only meaningful when Transport is "vhostuser".
+                      type: string
+                    transport:
+                      default: veth
+                      description: |-
+                        Transport selects the CRA-side wiring: "veth" (default, an infrastructure
+                        port) or "vhostuser" (a VSR fpvhost fast-path virtual-port, VSR-only).
+                      enum:
+                      - veth
+                      - vhostuser
+                      type: string
                   required:
                   - interface
                   type: object
@@ -2837,8 +2906,9 @@ spec:
                           It carries no L3 addressing: the port is added as a bridge slave only.
                         properties:
                           interface:
-                            description: Interface is the moved veth end inside the
-                              CRA network namespace.
+                            description: |-
+                              Interface is the interface name inside the CRA network namespace (the moved
+                              veth end for veth transport, or the fpvhost interface for vhostuser).
                             type: string
                           mtu:
                             description: |-
@@ -2848,6 +2918,28 @@ spec:
                             maximum: 9216
                             minimum: 0
                             type: integer
+                          socketMode:
+                            description: |-
+                              SocketMode is the vhost-user socket mode ("client" or "server") from the
+                              workload's perspective, as allocated by the device plugin. The CRA
+                              renderer inverts it for the fast path (workload server <-> VSR client),
+                              so callers must not pre-invert it.
+                              Only meaningful when Transport is "vhostuser".
+                            type: string
+                          socketPath:
+                            description: |-
+                              SocketPath is the vhost-user unix socket path shared with the workload.
+                              Only meaningful when Transport is "vhostuser".
+                            type: string
+                          transport:
+                            default: veth
+                            description: |-
+                              Transport selects the CRA-side wiring: "veth" (default, an infrastructure
+                              port) or "vhostuser" (a VSR fpvhost fast-path virtual-port, VSR-only).
+                            enum:
+                            - veth
+                            - vhostuser
+                            type: string
                           vlan:
                             description: |-
                               VLAN is the 802.1Q VLAN id the port carries this L2 domain under on the
@@ -4242,10 +4334,11 @@ spec:
                             type: array
                           interface:
                             description: |-
-                              Interface is the CRA-side interface name (the moved veth end for veth
-                              transport, e.g. "cra012345"). VSR resolves a veth through its
-                              infra-<interface> ifalias; that reference is not a kernel interface name.
-                              The bare interface must fit the kernel IFNAMSIZ-1 limit.
+                              Interface is the bare CRA-side VSR interface name (the moved veth end for
+                              veth transport, or the fpvhost interface for vhostuser transport, e.g.
+                              "cra012345"). VSR resolves a veth through its infra-<interface> ifalias;
+                              that reference is not a kernel interface name. The bare interface must fit
+                              the kernel IFNAMSIZ-1 limit.
                             maxLength: 15
                             minLength: 1
                             type: string
@@ -4259,6 +4352,28 @@ spec:
                             maximum: 9216
                             minimum: 0
                             type: integer
+                          socketMode:
+                            description: |-
+                              SocketMode is the vhost-user socket mode ("client" or "server") from the
+                              workload's perspective, as allocated by the device plugin. The CRA
+                              renderer inverts it for the fast path (workload server <-> VSR client),
+                              so callers must not pre-invert it.
+                              Only meaningful when Transport is "vhostuser".
+                            type: string
+                          socketPath:
+                            description: |-
+                              SocketPath is the vhost-user unix socket path shared with the workload.
+                              Only meaningful when Transport is "vhostuser".
+                            type: string
+                          transport:
+                            default: veth
+                            description: |-
+                              Transport selects the CRA-side wiring: "veth" (default, an infrastructure
+                              port) or "vhostuser" (a VSR fpvhost fast-path virtual-port, VSR-only).
+                            enum:
+                            - veth
+                            - vhostuser
+                            type: string
                         required:
                         - interface
                         type: object

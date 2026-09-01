@@ -85,11 +85,57 @@ type Layer2AttachmentRef struct {
 	Namespace string `json:"namespace"`
 }
 
+// PortTransport selects how an attached CRA-side port is wired.
+// +kubebuilder:validation:Enum=veth;vhostuser
+type PortTransport string
+
+const (
+	// PortTransportVeth is the default transport: a veth pair whose CRA-side end
+	// is moved into the CRA network namespace and referenced by VSR as
+	// infra-<ifname>. Supported by both the FRR and VSR flavors.
+	PortTransportVeth PortTransport = "veth"
+	// PortTransportVhostUser is a DPDK/virtio-user vhost-user socket, rendered by
+	// VSR as an fpvhost fast-path virtual-port. VSR-only; unsupported on FRR.
+	PortTransportVhostUser PortTransport = "vhostuser"
+)
+
+const (
+	// SocketModeServer / SocketModeClient are the two vhost-user socket modes.
+	// PortWiring.SocketMode states the workload's side; the CRA renderer inverts
+	// it for the fast path.
+	SocketModeServer = "server"
+	SocketModeClient = "client"
+)
+
+// PortWiring describes how a CRA-side attached port is wired. It is shared by
+// routed ports (WorkloadPort) and L2-attached ports (AttachedPort).
+type PortWiring struct {
+	// Transport selects the CRA-side wiring: "veth" (default, an infrastructure
+	// port) or "vhostuser" (a VSR fpvhost fast-path virtual-port, VSR-only).
+	// +optional
+	// +kubebuilder:default=veth
+	Transport PortTransport `json:"transport,omitempty"`
+	// SocketPath is the vhost-user unix socket path shared with the workload.
+	// Only meaningful when Transport is "vhostuser".
+	// +optional
+	SocketPath string `json:"socketPath,omitempty"`
+	// SocketMode is the vhost-user socket mode ("client" or "server") from the
+	// workload's perspective, as allocated by the device plugin. The CRA
+	// renderer inverts it for the fast path (workload server <-> VSR client),
+	// so callers must not pre-invert it.
+	// Only meaningful when Transport is "vhostuser".
+	// +optional
+	SocketMode string `json:"socketMode,omitempty"`
+}
+
 // AttachedPort is a workload-CNI port bound to a Layer2 bridge (L2 attach mode).
 // It carries no L3 addressing: the port is added as a bridge slave only.
 type AttachedPort struct {
-	// Interface is the moved veth end inside the CRA network namespace.
+	// Interface is the interface name inside the CRA network namespace (the moved
+	// veth end for veth transport, or the fpvhost interface for vhostuser).
 	Interface string `json:"interface"`
+	// PortWiring selects the CRA-side transport (veth default, or vhostuser).
+	PortWiring `json:",inline"`
 	// VLAN is the 802.1Q VLAN id the port carries this L2 domain under on the
 	// workload side. Zero means the port is an untagged access port and is
 	// bridged in directly. A non-zero value makes it one member of a trunk: the
@@ -150,13 +196,17 @@ type VRF struct {
 // moved into the CRA network namespace by the workload CNI. On the VSR flavor the
 // on-link gateway addresses and the workload host routes are pushed via NETCONF.
 type WorkloadPort struct {
-	// Interface is the CRA-side interface name (the moved veth end for veth
-	// transport, e.g. "cra012345"). VSR resolves a veth through its
-	// infra-<interface> ifalias; that reference is not a kernel interface name.
-	// The bare interface must fit the kernel IFNAMSIZ-1 limit.
+	// Interface is the bare CRA-side VSR interface name (the moved veth end for
+	// veth transport, or the fpvhost interface for vhostuser transport, e.g.
+	// "cra012345"). VSR resolves a veth through its infra-<interface> ifalias;
+	// that reference is not a kernel interface name. The bare interface must fit
+	// the kernel IFNAMSIZ-1 limit.
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=15
 	Interface string `json:"interface"`
+	// PortWiring selects the CRA-side transport (veth default, or vhostuser for
+	// the VSR fpvhost fast-path virtual-port).
+	PortWiring `json:",inline"`
 	// MTU is the MTU the attachment requested (the CNI configuration's mtu, which
 	// the plugin also applied to both ends of the veth). Zero means the default.
 	// In L2 attach mode it additionally has to fit the domain: an access port

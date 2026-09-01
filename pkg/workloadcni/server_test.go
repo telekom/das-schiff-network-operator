@@ -196,6 +196,12 @@ func TestServerDelRemoves(t *testing.T) {
 	}
 }
 
+const (
+	testTransportVhostUser = "vhostuser"
+	testVhostSocketPath    = "/run/vsr-vhost-user/abc/socket"
+	testSocketModeServer   = "server"
+)
+
 // clearRouted strips the routed-mode fields from a request so it can carry an
 // L2 attachment, which is mutually exclusive with them.
 func clearRouted(r *pb.AddRequest) {
@@ -238,6 +244,28 @@ func TestServerAddValidatesInput(t *testing.T) {
 		"v6 subnet host route": func(r *pb.AddRequest) { r.Port.HostRoutes = []string{"fd00:201::/64"} },
 		"subnet gateway v4":    func(r *pb.AddRequest) { r.Port.GatewayV4 = "169.254.1.1/24" },
 		"subnet gateway v6":    func(r *pb.AddRequest) { r.Port.GatewayV6 = "fe80::1/64" },
+		"unknown transport": func(r *pb.AddRequest) {
+			r.Port.Transport = "sriov"
+		},
+		"socket path on veth": func(r *pb.AddRequest) {
+			r.Port.SocketPath = testVhostSocketPath
+		},
+		"socket mode on veth": func(r *pb.AddRequest) {
+			r.Port.SocketMode = testSocketModeServer
+		},
+		"vhostuser without socket path": func(r *pb.AddRequest) {
+			r.Port.Transport = testTransportVhostUser
+			r.Port.SocketMode = testSocketModeServer
+		},
+		"vhostuser without socket mode": func(r *pb.AddRequest) {
+			r.Port.Transport = testTransportVhostUser
+			r.Port.SocketPath = testVhostSocketPath
+		},
+		"vhostuser bad socket mode": func(r *pb.AddRequest) {
+			r.Port.Transport = testTransportVhostUser
+			r.Port.SocketPath = testVhostSocketPath
+			r.Port.SocketMode = "bogus"
+		},
 		"l2 ref without name": func(r *pb.AddRequest) {
 			clearRouted(r)
 			r.Layer2AttachmentRef = &pb.Layer2AttachmentRef{}
@@ -298,6 +326,17 @@ func TestServerAddValidatesInput(t *testing.T) {
 				t.Fatalf("expected InvalidArgument, got %v", status.Code(err))
 			}
 		})
+	}
+
+	// A well-formed vhost-user request accepts the full bare interface budget.
+	vhost := valid()
+	vhost.ContainerId = "cid-vhost"
+	vhost.Port.Interface = "vho012345678901"
+	vhost.Port.Transport = testTransportVhostUser
+	vhost.Port.SocketPath = testVhostSocketPath
+	vhost.Port.SocketMode = testSocketModeServer
+	if _, err := s.Add(ctx, vhost); err != nil {
+		t.Fatalf("valid 15-character vhost-user interface rejected: %v", err)
 	}
 
 	// A well-formed dual-stack request is accepted.

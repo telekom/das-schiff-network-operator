@@ -165,7 +165,7 @@ func (s *Server) Add(ctx context.Context, req *pb.AddRequest) (*pb.AddResponse, 
 		return nil, fmt.Errorf("recording workload port: %w", err)
 	}
 	s.log.Info("recorded workload port", "container", entry.ContainerID, "interface", entry.Interface,
-		"vrf", entry.VRF, "l2a", layer2AttachmentRefLog(entry.Layer2AttachmentRef),
+		"vrf", entry.VRF, "transport", entry.Transport, "l2a", layer2AttachmentRefLog(entry.Layer2AttachmentRef),
 		"l2Trunk", layer2TrunkLog(entry.Layer2Trunk))
 	return &pb.AddResponse{}, nil
 }
@@ -204,6 +204,10 @@ func (s *Server) entryFromRequest(req *pb.AddRequest) (*v1alpha1.WorkloadPortEnt
 			return nil, err
 		}
 	}
+	transport, err := validateWiring(port)
+	if err != nil {
+		return nil, err
+	}
 	if err := validateInterfaceName(port.GetInterface()); err != nil {
 		return nil, err
 	}
@@ -231,7 +235,12 @@ func (s *Server) entryFromRequest(req *pb.AddRequest) (*v1alpha1.WorkloadPortEnt
 		Layer2AttachmentRef: l2aRef,
 		Layer2Trunk:         trunk,
 		WorkloadPort: v1alpha1.WorkloadPort{
-			Interface:  port.GetInterface(),
+			Interface: port.GetInterface(),
+			PortWiring: v1alpha1.PortWiring{
+				Transport:  transport,
+				SocketPath: port.GetSocketPath(),
+				SocketMode: port.GetSocketMode(),
+			},
 			MTU:        mtu,
 			GatewayV4:  port.GetGatewayV4(),
 			GatewayV6:  port.GetGatewayV6(),
@@ -350,8 +359,8 @@ func validateTrunkSubinterfaceNames(ifName string, members []v1alpha1.Layer2Trun
 	return nil
 }
 
-// validateInterfaceName bounds the bare CRA-side interface name. Its
-// infra-<ifname> reference does not consume this budget.
+// validateInterfaceName bounds the bare CRA-side VSR interface name. Its
+// infra-<ifname> and fpvhost-<ifname> references do not consume this budget.
 //
 //nolint:wrapcheck // gRPC status errors are the wire representation and must be returned verbatim.
 func validateInterfaceName(ifName string) error {
@@ -360,6 +369,40 @@ func validateInterfaceName(ifName string) error {
 			"interface %q exceeds %d characters", ifName, maxInterfaceNameLen)
 	}
 	return nil
+}
+
+// validateWiring resolves the requested transport and enforces that the
+// vhost-user socket fields are present exactly when they are meaningful.
+//
+//nolint:wrapcheck // gRPC status errors are the wire representation and must be returned verbatim.
+func validateWiring(port *pb.WorkloadPort) (v1alpha1.PortTransport, error) {
+	transport := v1alpha1.PortTransport(port.GetTransport())
+	if port.GetTransport() == "" {
+		transport = v1alpha1.PortTransportVeth
+	}
+
+	switch transport {
+	case v1alpha1.PortTransportVeth:
+		if port.GetSocketPath() != "" || port.GetSocketMode() != "" {
+			return "", status.Errorf(codes.InvalidArgument,
+				"socket_path and socket_mode are only valid for transport %q", v1alpha1.PortTransportVhostUser)
+		}
+	case v1alpha1.PortTransportVhostUser:
+		if port.GetSocketPath() == "" {
+			return "", status.Errorf(codes.InvalidArgument,
+				"socket_path is required for transport %q", v1alpha1.PortTransportVhostUser)
+		}
+		if m := port.GetSocketMode(); m != v1alpha1.SocketModeClient && m != v1alpha1.SocketModeServer {
+			return "", status.Errorf(codes.InvalidArgument,
+				"invalid socket_mode %q (want %q or %q)", m, v1alpha1.SocketModeClient, v1alpha1.SocketModeServer)
+		}
+	default:
+		return "", status.Errorf(codes.InvalidArgument,
+			"invalid transport %q (want %q or %q)",
+			port.GetTransport(), v1alpha1.PortTransportVeth, v1alpha1.PortTransportVhostUser)
+	}
+
+	return transport, nil
 }
 
 // layer2AttachmentRefFromPB converts the wire L2 reference to the API type.

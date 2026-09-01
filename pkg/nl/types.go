@@ -70,6 +70,9 @@ type LoopbackConfig struct {
 type WorkloadPort struct {
 	// Interface is the moved interface name inside the CRA netns.
 	Interface string `json:"interface"`
+	// Transport selects the CRA-side wiring: "veth" (default) or "vhostuser".
+	// The FRR flavor only supports veth; a vhostuser port is rejected.
+	Transport string `json:"transport,omitempty"`
 	// VRF is the target VRF device name; empty (or "default"/"main") keeps the
 	// port in the main table (the underlay).
 	VRF string `json:"vrf,omitempty"`
@@ -87,6 +90,9 @@ type WorkloadPort struct {
 type L2AttachedPort struct {
 	// Interface is the moved interface name inside the CRA netns.
 	Interface string `json:"interface"`
+	// Transport selects the CRA-side wiring: "veth" (default) or "vhostuser".
+	// The FRR flavor only supports veth; a vhostuser port is rejected.
+	Transport string `json:"transport,omitempty"`
 	// VlanID is the workload-side 802.1Q id the domain is carried under on a
 	// trunk port. 0 means the port itself is an untagged bridge slave; a
 	// non-zero id means the domain is reached through an <Interface>.<VlanID>
