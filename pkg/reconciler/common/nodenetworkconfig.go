@@ -236,7 +236,7 @@ func (r *NodeNetworkConfigReconciler) mergeWorkloadPorts(
 	if err != nil {
 		return "", fmt.Errorf("error fetching workload ports: %w", err)
 	}
-	workloadcni.MergeIntoNodeNetworkConfig(cfg, entries)
+	workloadcni.MergeIntoNodeNetworkConfig(cfg, entries, r.logger)
 	return workloadcni.HashEntries(entries), nil
 }
 
