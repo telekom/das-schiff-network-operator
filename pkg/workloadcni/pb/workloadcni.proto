@@ -33,8 +33,9 @@ service WorkloadCNI {
 
 // WorkloadPort is the datapath payload for a routed attachment.
 message WorkloadPort {
-  // interface is the moved interface name inside the CRA network namespace.
-  // VSR references it as infra-<interface>.
+  // interface is the bare CRA-side VSR interface name. VSR resolves a veth
+  // through infra-<interface> via its ifalias; vhostuser uses
+  // fpvhost-<interface> for matching fpvhost and virtual-port references.
   string interface = 1;
   // gateway_v4 is the on-link IPv4 gateway address (with prefix length).
   string gateway_v4 = 2;
@@ -43,6 +44,14 @@ message WorkloadPort {
   // host_routes are the workload host addresses (/32, /128) reachable via the
   // interface.
   repeated string host_routes = 4;
+  // transport selects the datapath wiring: "veth" (default) or "vhostuser".
+  // vhost-user is VSR-only (fpvhost fast-path virtual-port).
+  string transport = 5;
+  // socket_path is the vhost-user unix socket path (transport=vhostuser only).
+  string socket_path = 6;
+  // socket_mode is the pod-side vhost-user socket mode ("client"|"server").
+  // VSR renders the inverted mode (pod server => VSR client).
+  string socket_mode = 7;
   // mtu is the MTU the attachment requested (the CNI config's mtu, which the
   // plugin also applied to the workload-side interface). The CRA needs it to
   // size the interfaces it derives from the port, and to reject a request the

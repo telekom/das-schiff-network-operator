@@ -68,6 +68,7 @@ func (a *CRAFRRConfigApplier) convertNodeConfigToNetlink(nodeCfg *v1alpha1.NodeN
 			ap := &layer2.AttachedPorts[j]
 			nlLayer2.AttachedPorts = append(nlLayer2.AttachedPorts, nl.L2AttachedPort{
 				Interface: ap.Interface,
+				Transport: string(ap.Transport),
 				VlanID:    ap.VLAN,
 			})
 		}
@@ -120,6 +121,7 @@ func (a *CRAFRRConfigApplier) convertWorkloadPorts(nodeCfg *v1alpha1.NodeNetwork
 			ports = append(ports, nl.WorkloadPort{
 				Interface:  rps[i].Interface,
 				VRF:        vrf,
+				Transport:  string(rps[i].Transport),
 				GatewayV4:  rps[i].GatewayV4,
 				GatewayV6:  rps[i].GatewayV6,
 				HostRoutes: rps[i].HostRoutes,

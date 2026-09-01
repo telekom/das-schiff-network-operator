@@ -297,6 +297,30 @@ func TestReconcileL2AttachedPortsAdoptOnly(t *testing.T) {
 	}
 }
 
+// TestReconcileVhostUserRejectedOnFRR ensures the FRR flavor rejects the
+// VSR-only vhost-user transport for both workload and L2 attach ports. The guard
+// fires before any netlink call, so no root/netns is required.
+func TestReconcileVhostUserRejectedOnFRR(t *testing.T) {
+	mgr := NewManager(&Toolkit{}, nil)
+
+	workloadCfg := &NetlinkConfiguration{
+		WorkloadPorts: []WorkloadPort{{Interface: "cravhost01", Transport: "vhostuser"}},
+	}
+	if err := mgr.ReconcileWorkloadPorts(workloadCfg); err == nil {
+		t.Error("expected error for vhost-user workload port on FRR, got nil")
+	}
+
+	l2Cfg := &NetlinkConfiguration{
+		Layer2s: []Layer2Information{{
+			VlanID:        300,
+			AttachedPorts: []L2AttachedPort{{Interface: "cravhostl2", Transport: "vhostuser"}},
+		}},
+	}
+	if err := mgr.ReconcileL2AttachedPorts(l2Cfg); err == nil {
+		t.Error("expected error for vhost-user L2 attach port on FRR, got nil")
+	}
+}
+
 func assertHostRoutes(t *testing.T, table int, wantV4, wantV6 string) {
 	t.Helper()
 	routes, _ := netlink.RouteListFiltered(netlink.FAMILY_ALL,

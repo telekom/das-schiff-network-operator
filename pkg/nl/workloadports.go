@@ -11,6 +11,11 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// transportVhostUser is the vhost-user transport value. It is VSR-only: the FRR
+// flavor programs the datapath with raw netlink and cannot back a DPDK vhost
+// socket, so a port declaring it is rejected.
+const transportVhostUser = "vhostuser"
+
 // maxVLANID is the highest assignable 802.1Q VLAN id (4095 is reserved).
 const maxVLANID = 4094
 
@@ -70,6 +75,10 @@ func (n *Manager) ReconcileL2AttachedPorts(cfg *NetlinkConfiguration) error {
 }
 
 func (n *Manager) reconcileL2AttachedPort(l2 *Layer2Information, p *L2AttachedPort) error {
+	if p.Transport == transportVhostUser {
+		return fmt.Errorf("L2 attached port %q uses vhost-user transport, which is unsupported on the FRR flavor (VSR-only)", p.Interface)
+	}
+
 	link, err := n.toolkit.LinkByName(p.Interface)
 	if err != nil {
 		// Adopt-only: the port is created/removed by the CNI.
@@ -223,6 +232,11 @@ func (n *Manager) cleanupL2TrunkSubinterfaces(desired map[string]map[uint16]bool
 }
 
 func (n *Manager) reconcileWorkloadPort(p *WorkloadPort) error {
+	// The FRR flavor programs the datapath with raw netlink and cannot back a
+	// DPDK vhost-user socket; that transport is VSR-only.
+	if p.Transport == transportVhostUser {
+		return fmt.Errorf("workload port %q uses vhost-user transport, which is unsupported on the FRR flavor (VSR-only)", p.Interface)
+	}
 	link, err := n.toolkit.LinkByName(p.Interface)
 	if err != nil {
 		// The port is created/removed by the CNI; if it is not present (yet, or
