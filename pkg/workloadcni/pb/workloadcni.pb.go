@@ -47,7 +47,12 @@ type WorkloadPort struct {
 	GatewayV6 string `protobuf:"bytes,3,opt,name=gateway_v6,json=gatewayV6,proto3" json:"gateway_v6,omitempty"`
 	// host_routes are the workload host addresses (/32, /128) reachable via the
 	// interface.
-	HostRoutes    []string `protobuf:"bytes,4,rep,name=host_routes,json=hostRoutes,proto3" json:"host_routes,omitempty"`
+	HostRoutes []string `protobuf:"bytes,4,rep,name=host_routes,json=hostRoutes,proto3" json:"host_routes,omitempty"`
+	// mtu is the MTU the attachment requested (the CNI config's mtu, which the
+	// plugin also applied to the workload-side interface). The CRA needs it to
+	// size the interfaces it derives from the port, and to reject a request the
+	// L2 domain cannot carry.
+	Mtu           uint32 `protobuf:"varint,8,opt,name=mtu,proto3" json:"mtu,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -110,6 +115,119 @@ func (x *WorkloadPort) GetHostRoutes() []string {
 	return nil
 }
 
+func (x *WorkloadPort) GetMtu() uint32 {
+	if x != nil {
+		return x.Mtu
+	}
+	return 0
+}
+
+// Layer2AttachmentRef identifies a Layer2Attachment for an L2 (bridge) attach.
+// It is a bare name: Layer2Attachments are only ever read from one namespace
+// (the agent's --intent-namespace, mirroring the operator's), which the agent
+// stamps onto the recorded attachment.
+type Layer2AttachmentRef struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Layer2AttachmentRef) Reset() {
+	*x = Layer2AttachmentRef{}
+	mi := &file_workloadcni_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Layer2AttachmentRef) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Layer2AttachmentRef) ProtoMessage() {}
+
+func (x *Layer2AttachmentRef) ProtoReflect() protoreflect.Message {
+	mi := &file_workloadcni_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Layer2AttachmentRef.ProtoReflect.Descriptor instead.
+func (*Layer2AttachmentRef) Descriptor() ([]byte, []int) {
+	return file_workloadcni_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *Layer2AttachmentRef) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+// Layer2TrunkMember is one tagged member of an L2 trunk attachment.
+type Layer2TrunkMember struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// ref identifies the Layer2Attachment whose L2 domain the member is bridged
+	// into.
+	Ref *Layer2AttachmentRef `protobuf:"bytes,1,opt,name=ref,proto3" json:"ref,omitempty"`
+	// vlan is the 802.1Q VLAN id the member is tagged with on the workload side.
+	// 0 means the L2 domain's own VLAN id, which the agent only learns once the
+	// referenced Layer2 is present on the node, so it is resolved there.
+	Vlan          uint32 `protobuf:"varint,2,opt,name=vlan,proto3" json:"vlan,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Layer2TrunkMember) Reset() {
+	*x = Layer2TrunkMember{}
+	mi := &file_workloadcni_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Layer2TrunkMember) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Layer2TrunkMember) ProtoMessage() {}
+
+func (x *Layer2TrunkMember) ProtoReflect() protoreflect.Message {
+	mi := &file_workloadcni_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Layer2TrunkMember.ProtoReflect.Descriptor instead.
+func (*Layer2TrunkMember) Descriptor() ([]byte, []int) {
+	return file_workloadcni_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *Layer2TrunkMember) GetRef() *Layer2AttachmentRef {
+	if x != nil {
+		return x.Ref
+	}
+	return nil
+}
+
+func (x *Layer2TrunkMember) GetVlan() uint32 {
+	if x != nil {
+		return x.Vlan
+	}
+	return 0
+}
+
 type AddRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// pod_namespace / pod_name identify the owning pod.
@@ -118,15 +236,26 @@ type AddRequest struct {
 	// container_id is the CNI container ID (sandbox identity).
 	ContainerId string `protobuf:"bytes,3,opt,name=container_id,json=containerId,proto3" json:"container_id,omitempty"`
 	// vrf is the target VRF; empty means the underlay/default table.
-	Vrf           string        `protobuf:"bytes,4,opt,name=vrf,proto3" json:"vrf,omitempty"`
-	Port          *WorkloadPort `protobuf:"bytes,5,opt,name=port,proto3" json:"port,omitempty"`
+	// Mutually exclusive with layer2_attachment_ref and layer2_trunk.
+	Vrf  string        `protobuf:"bytes,4,opt,name=vrf,proto3" json:"vrf,omitempty"`
+	Port *WorkloadPort `protobuf:"bytes,5,opt,name=port,proto3" json:"port,omitempty"`
+	// layer2_attachment_ref, when set, enslaves the moved interface into the L2
+	// bridge of the referenced Layer2Attachment as an untagged access port
+	// instead of routing it. The routed fields (vrf, gateways, host_routes) must
+	// be empty in L2 mode.
+	Layer2AttachmentRef *Layer2AttachmentRef `protobuf:"bytes,6,opt,name=layer2_attachment_ref,json=layer2AttachmentRef,proto3" json:"layer2_attachment_ref,omitempty"`
+	// layer2_trunk, when non-empty, makes the moved interface an 802.1Q trunk
+	// carrying one tagged member per entry. The interface itself is not bridged,
+	// so untagged and unmapped-VLAN frames go nowhere. Mutually exclusive with
+	// layer2_attachment_ref and with the routed fields.
+	Layer2Trunk   []*Layer2TrunkMember `protobuf:"bytes,7,rep,name=layer2_trunk,json=layer2Trunk,proto3" json:"layer2_trunk,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *AddRequest) Reset() {
 	*x = AddRequest{}
-	mi := &file_workloadcni_proto_msgTypes[1]
+	mi := &file_workloadcni_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -138,7 +267,7 @@ func (x *AddRequest) String() string {
 func (*AddRequest) ProtoMessage() {}
 
 func (x *AddRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_workloadcni_proto_msgTypes[1]
+	mi := &file_workloadcni_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -151,7 +280,7 @@ func (x *AddRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AddRequest.ProtoReflect.Descriptor instead.
 func (*AddRequest) Descriptor() ([]byte, []int) {
-	return file_workloadcni_proto_rawDescGZIP(), []int{1}
+	return file_workloadcni_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *AddRequest) GetPodNamespace() string {
@@ -189,6 +318,20 @@ func (x *AddRequest) GetPort() *WorkloadPort {
 	return nil
 }
 
+func (x *AddRequest) GetLayer2AttachmentRef() *Layer2AttachmentRef {
+	if x != nil {
+		return x.Layer2AttachmentRef
+	}
+	return nil
+}
+
+func (x *AddRequest) GetLayer2Trunk() []*Layer2TrunkMember {
+	if x != nil {
+		return x.Layer2Trunk
+	}
+	return nil
+}
+
 type AddResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -197,7 +340,7 @@ type AddResponse struct {
 
 func (x *AddResponse) Reset() {
 	*x = AddResponse{}
-	mi := &file_workloadcni_proto_msgTypes[2]
+	mi := &file_workloadcni_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -209,7 +352,7 @@ func (x *AddResponse) String() string {
 func (*AddResponse) ProtoMessage() {}
 
 func (x *AddResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_workloadcni_proto_msgTypes[2]
+	mi := &file_workloadcni_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -222,7 +365,7 @@ func (x *AddResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AddResponse.ProtoReflect.Descriptor instead.
 func (*AddResponse) Descriptor() ([]byte, []int) {
-	return file_workloadcni_proto_rawDescGZIP(), []int{2}
+	return file_workloadcni_proto_rawDescGZIP(), []int{4}
 }
 
 type DelRequest struct {
@@ -236,7 +379,7 @@ type DelRequest struct {
 
 func (x *DelRequest) Reset() {
 	*x = DelRequest{}
-	mi := &file_workloadcni_proto_msgTypes[3]
+	mi := &file_workloadcni_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -248,7 +391,7 @@ func (x *DelRequest) String() string {
 func (*DelRequest) ProtoMessage() {}
 
 func (x *DelRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_workloadcni_proto_msgTypes[3]
+	mi := &file_workloadcni_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -261,7 +404,7 @@ func (x *DelRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DelRequest.ProtoReflect.Descriptor instead.
 func (*DelRequest) Descriptor() ([]byte, []int) {
-	return file_workloadcni_proto_rawDescGZIP(), []int{3}
+	return file_workloadcni_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *DelRequest) GetContainerId() string {
@@ -286,7 +429,7 @@ type DelResponse struct {
 
 func (x *DelResponse) Reset() {
 	*x = DelResponse{}
-	mi := &file_workloadcni_proto_msgTypes[4]
+	mi := &file_workloadcni_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -298,7 +441,7 @@ func (x *DelResponse) String() string {
 func (*DelResponse) ProtoMessage() {}
 
 func (x *DelResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_workloadcni_proto_msgTypes[4]
+	mi := &file_workloadcni_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -311,14 +454,14 @@ func (x *DelResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DelResponse.ProtoReflect.Descriptor instead.
 func (*DelResponse) Descriptor() ([]byte, []int) {
-	return file_workloadcni_proto_rawDescGZIP(), []int{4}
+	return file_workloadcni_proto_rawDescGZIP(), []int{6}
 }
 
 var File_workloadcni_proto protoreflect.FileDescriptor
 
 const file_workloadcni_proto_rawDesc = "" +
 	"\n" +
-	"\x11workloadcni.proto\x12\x0eworkloadcni.v1\"\x8b\x01\n" +
+	"\x11workloadcni.proto\x12\x0eworkloadcni.v1\"\x9d\x01\n" +
 	"\fWorkloadPort\x12\x1c\n" +
 	"\tinterface\x18\x01 \x01(\tR\tinterface\x12\x1d\n" +
 	"\n" +
@@ -326,14 +469,22 @@ const file_workloadcni_proto_rawDesc = "" +
 	"\n" +
 	"gateway_v6\x18\x03 \x01(\tR\tgatewayV6\x12\x1f\n" +
 	"\vhost_routes\x18\x04 \x03(\tR\n" +
-	"hostRoutes\"\xb3\x01\n" +
+	"hostRoutes\x12\x10\n" +
+	"\x03mtu\x18\b \x01(\rR\x03mtu\":\n" +
+	"\x13Layer2AttachmentRef\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04nameJ\x04\b\x02\x10\x03R\tnamespace\"^\n" +
+	"\x11Layer2TrunkMember\x125\n" +
+	"\x03ref\x18\x01 \x01(\v2#.workloadcni.v1.Layer2AttachmentRefR\x03ref\x12\x12\n" +
+	"\x04vlan\x18\x02 \x01(\rR\x04vlan\"\xd2\x02\n" +
 	"\n" +
 	"AddRequest\x12#\n" +
 	"\rpod_namespace\x18\x01 \x01(\tR\fpodNamespace\x12\x19\n" +
 	"\bpod_name\x18\x02 \x01(\tR\apodName\x12!\n" +
 	"\fcontainer_id\x18\x03 \x01(\tR\vcontainerId\x12\x10\n" +
 	"\x03vrf\x18\x04 \x01(\tR\x03vrf\x120\n" +
-	"\x04port\x18\x05 \x01(\v2\x1c.workloadcni.v1.WorkloadPortR\x04port\"\r\n" +
+	"\x04port\x18\x05 \x01(\v2\x1c.workloadcni.v1.WorkloadPortR\x04port\x12W\n" +
+	"\x15layer2_attachment_ref\x18\x06 \x01(\v2#.workloadcni.v1.Layer2AttachmentRefR\x13layer2AttachmentRef\x12D\n" +
+	"\flayer2_trunk\x18\a \x03(\v2!.workloadcni.v1.Layer2TrunkMemberR\vlayer2Trunk\"\r\n" +
 	"\vAddResponse\"M\n" +
 	"\n" +
 	"DelRequest\x12!\n" +
@@ -356,25 +507,30 @@ func file_workloadcni_proto_rawDescGZIP() []byte {
 	return file_workloadcni_proto_rawDescData
 }
 
-var file_workloadcni_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_workloadcni_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_workloadcni_proto_goTypes = []any{
-	(*WorkloadPort)(nil), // 0: workloadcni.v1.WorkloadPort
-	(*AddRequest)(nil),   // 1: workloadcni.v1.AddRequest
-	(*AddResponse)(nil),  // 2: workloadcni.v1.AddResponse
-	(*DelRequest)(nil),   // 3: workloadcni.v1.DelRequest
-	(*DelResponse)(nil),  // 4: workloadcni.v1.DelResponse
+	(*WorkloadPort)(nil),        // 0: workloadcni.v1.WorkloadPort
+	(*Layer2AttachmentRef)(nil), // 1: workloadcni.v1.Layer2AttachmentRef
+	(*Layer2TrunkMember)(nil),   // 2: workloadcni.v1.Layer2TrunkMember
+	(*AddRequest)(nil),          // 3: workloadcni.v1.AddRequest
+	(*AddResponse)(nil),         // 4: workloadcni.v1.AddResponse
+	(*DelRequest)(nil),          // 5: workloadcni.v1.DelRequest
+	(*DelResponse)(nil),         // 6: workloadcni.v1.DelResponse
 }
 var file_workloadcni_proto_depIdxs = []int32{
-	0, // 0: workloadcni.v1.AddRequest.port:type_name -> workloadcni.v1.WorkloadPort
-	1, // 1: workloadcni.v1.WorkloadCNI.Add:input_type -> workloadcni.v1.AddRequest
-	3, // 2: workloadcni.v1.WorkloadCNI.Del:input_type -> workloadcni.v1.DelRequest
-	2, // 3: workloadcni.v1.WorkloadCNI.Add:output_type -> workloadcni.v1.AddResponse
-	4, // 4: workloadcni.v1.WorkloadCNI.Del:output_type -> workloadcni.v1.DelResponse
-	3, // [3:5] is the sub-list for method output_type
-	1, // [1:3] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	1, // 0: workloadcni.v1.Layer2TrunkMember.ref:type_name -> workloadcni.v1.Layer2AttachmentRef
+	0, // 1: workloadcni.v1.AddRequest.port:type_name -> workloadcni.v1.WorkloadPort
+	1, // 2: workloadcni.v1.AddRequest.layer2_attachment_ref:type_name -> workloadcni.v1.Layer2AttachmentRef
+	2, // 3: workloadcni.v1.AddRequest.layer2_trunk:type_name -> workloadcni.v1.Layer2TrunkMember
+	3, // 4: workloadcni.v1.WorkloadCNI.Add:input_type -> workloadcni.v1.AddRequest
+	5, // 5: workloadcni.v1.WorkloadCNI.Del:input_type -> workloadcni.v1.DelRequest
+	4, // 6: workloadcni.v1.WorkloadCNI.Add:output_type -> workloadcni.v1.AddResponse
+	6, // 7: workloadcni.v1.WorkloadCNI.Del:output_type -> workloadcni.v1.DelResponse
+	6, // [6:8] is the sub-list for method output_type
+	4, // [4:6] is the sub-list for method input_type
+	4, // [4:4] is the sub-list for extension type_name
+	4, // [4:4] is the sub-list for extension extendee
+	0, // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_workloadcni_proto_init() }
@@ -388,7 +544,7 @@ func file_workloadcni_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_workloadcni_proto_rawDesc), len(file_workloadcni_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   5,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
