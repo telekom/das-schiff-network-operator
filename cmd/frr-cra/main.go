@@ -649,6 +649,14 @@ func reconcileNetlink(cfg *nl.NetlinkConfiguration) error {
 		return fmt.Errorf("failed to reconcile workload ports: %w", err)
 	}
 
+	// Enslave workload-CNI L2 attach ports to their Layer2 bridge. Additive and
+	// adopt-only, same as workload ports. The order between the two passes does
+	// not matter for a port switching modes: IFLA_MASTER detaches a port from
+	// its current bridge/VRF master before the new one adopts it.
+	if err := nlManager.ReconcileL2AttachedPorts(cfg); err != nil {
+		return fmt.Errorf("failed to reconcile L2 attached ports: %w", err)
+	}
+
 	reconcileNeighborSync(cfg)
 	return nil
 }

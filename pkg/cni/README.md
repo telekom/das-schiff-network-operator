@@ -1,10 +1,12 @@
-# cni-workload — routed, no-shared-L2 CNI for KubeVirt VMs (and routed pods)
+# cni-workload — routed or L2 CNI for KubeVirt VMs (and pods)
 
-`cni-workload` gives a workload (a KubeVirt VM, or later a routed pod) a **fully
-routed** secondary interface with **no shared L2**: the workload gets a real
-routable IPv4 `/32` + IPv6 `/128`, and the CRA-side veth end is moved into the
-CRA network namespace where the routing daemon (FRR / 6WIND VSR) advertises
-on-link host routes to it via BGP.
+`cni-workload` gives a workload (a KubeVirt VM, or a pod) a secondary interface
+whose CRA-side veth end is moved into the CRA network namespace. In the default
+**routed** mode there is **no shared L2**: the workload gets a real routable
+IPv4 `/32` + IPv6 `/128` and the routing daemon (FRR / 6WIND VSR) advertises
+on-link host routes to it via BGP. In **L2 attach mode** the port instead joins
+one or more existing Layer2 bridges as an access or 802.1Q trunk port (see
+[L2 attach mode](#l2-attach-mode)).
 
 ## How it works
 
@@ -17,8 +19,9 @@ Multus invokes the plugin for a secondary network. On `ADD` the plugin:
    enslaves it to a private, per-pod 2-port bridge together with the qemu tap —
    this is the only L2 and it is **not** a shared broadcast domain).
 3. Moves the **peer end** into the CRA network namespace (see *netns discovery*),
-   names it `cra<sha256(containerID + "/" + ifName)[:12]>` (12 hex characters,
-   filling the 15-character kernel limit), sets its ifalias to
+   names it `cra<hash>` — 7 base36 characters derived from
+   `sha256(containerID + "/" + ifName)`, leaving room for a `.<vlan>` suffix
+   within the 15-character kernel limit — sets its ifalias to
    `infra-<portname>` (required by VSR, ignored by FRR) and brings it up.
 4. Hands the attachment to the **node-local CRA agent** over the gRPC unix
    socket. The agent records it in the node's `NodeWorkloadPorts` object and does
