@@ -112,6 +112,7 @@ nav:
       - Node Readiness: reference/node-readiness.md
   - Advanced:
       - Debugging: advanced/debugging.md
+      - Network debugging runbooks: advanced/network-runbooks.md
       - Legacy API: advanced/legacy-api.md
   - Design:
       - Intent-Based Config: design/intent-based-config.md
