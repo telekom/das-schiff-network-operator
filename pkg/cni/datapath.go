@@ -53,6 +53,15 @@ const (
 	trunkPortNameHexLen = portNameHexLen - len(maxTrunkVLANNameSuffix)
 )
 
+// vhostPortNamePrefix / vhostPortNameHexLen derive a deterministic bare VSR
+// interface name for a vhost-user port. The fpvhost-<portName> reference is a
+// VSR virtual-port name, so it does not constrain this 15-character name.
+const (
+	vhostPortNamePrefix      = "vho"
+	vhostPortNameHexLen      = 12
+	vhostTrunkPortNameHexLen = vhostPortNameHexLen - len(maxTrunkVLANNameSuffix)
+)
+
 // onLinkRouteMetric keeps the routed on-link default at a lower priority than the
 // pod's own primary default (on eth0) so the virt-launcher pod itself is
 // unaffected while the guest still learns the CRA gateway as its next hop.
@@ -73,6 +82,19 @@ func portName(containerID, ifName string, isTrunk bool) string {
 		hashLen = trunkPortNameHexLen
 	}
 	return portNamePrefix + hex.EncodeToString(sum[:])[:hashLen]
+}
+
+// vhostPortName derives a collision-resistant bare VSR interface name for a
+// vhost-user attachment. It uses a distinct prefix from a real veth device but
+// the same 15-character interface-name budget. Trunks reserve space for their
+// longest VLAN sub-interface without truncating the deterministic hash.
+func vhostPortName(containerID, ifName string, isTrunk bool) string {
+	sum := sha256.Sum256([]byte(containerID + "/" + ifName))
+	hashLen := vhostPortNameHexLen
+	if isTrunk {
+		hashLen = vhostTrunkPortNameHexLen
+	}
+	return vhostPortNamePrefix + hex.EncodeToString(sum[:])[:hashLen]
 }
 
 // setupPodSide creates the veth pair inside the pod netns, configures the

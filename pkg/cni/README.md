@@ -31,7 +31,8 @@ The plugin is therefore **flavor-agnostic**: it only wires the veth. `DEL`
 reverses everything (removing the veth removes both ends) and tells the agent to
 drop the attachment.
 
-The `l2` attach mode varies steps 2–4 — see *L2 attach mode* below.
+The `l2` attach mode and the `vhostuser` transport vary steps 2–4 — see *Attach
+modes and transports* below.
 
 ### VRF vs underlay
 
@@ -51,11 +52,15 @@ Delivered per secondary network via a `NetworkAttachmentDefinition`
 | field               | required | default | description |
 | ------------------- | -------- | ------- | ----------- |
 | `type`              | yes      | —       | must be `cni-workload` |
-| `ipam`              | for routed attachments | — | delegated IPAM block (`static` or `host-local`); optional for `attachMode: l2` (the workload is addressed inside the L2 domain). Always delegated and applied when present |
+| `ipam`              | for routed `veth` | — | delegated IPAM block (`static` or `host-local`); optional for `vhostuser` (guest-side addressing) and for `attachMode: l2` (the workload is addressed inside the L2 domain). Always delegated and applied when present |
 | `attachMode`        | no       | `routed`| `routed` (VRF/underlay + on-link gateway + host routes) or `l2` (attachment to existing L2 domains) |
+| `transport`         | no       | `veth`  | `veth` (a veth pair moved into the CRA netns) or `vhostuser` (DPDK/virtio-user fast-path socket, **VSR-only**) |
 | `vrf`               | no       | *(underlay)* | CRA VRF device name; omit/`default`/`main` for the underlay/default table. Only for `attachMode: routed` (must be unset for `l2`) |
 | `layer2AttachmentRef` | for `l2` | —     | `{name}` of the originating `Layer2Attachment`; the port becomes an **untagged access port** of it. Mutually exclusive with `layer2Trunk` |
 | `layer2Trunk`       | for `l2` | —       | list of `{name, vlan}` members carried on the port as an **802.1Q trunk**; `vlan` is optional and defaults to the domain's own VLAN id. Mutually exclusive with `layer2AttachmentRef` |
+| `socketPath`        | no       | *(derived)* | vhost-user socket path override; normally derived from the device-plugin `deviceID` (see *vhost-user and the 6WIND device plugin*) |
+| `socket_mode`       | for `vhostuser` | — | `client` or `server` from the workload's perspective (VSR inverts it); selected from NAD userdata because current 6WIND device-info always reports `server` |
+| `deviceResource`    | no       | `nc-k8s-plugin.6wind.com/virtio-user` | device-plugin resource the attachment was allocated from; selects which socket tree is host- vs pod-side (see *vhost-user and the 6WIND device plugin*) |
 | `agentSocket`       | no       | `/run/das-schiff/workload-cni.sock` | unix socket of the node-local CRA agent |
 | `craNetns`          | no       | `auto`  | `auto` (discover by trunk), a named netns under `/var/run/netns/<name>`, or an absolute path (e.g. `/proc/<pid>/ns/net`) |
 | `trunkInterface`    | no       | `hbn`   | interface that identifies the CRA netns during auto-discovery |
@@ -64,18 +69,27 @@ Delivered per secondary network via a `NetworkAttachmentDefinition`
 
 Example (underlay, static IPAM) — see
 [`e2e/kubevirt/manifests/networkattachmentdefinition.yaml`](../../e2e/kubevirt/manifests/networkattachmentdefinition.yaml),
-plus the L2-attach variants alongside it.
+plus the L2-attach and vhost-user variants alongside it.
 
-## L2 attach mode
+## Attach modes and transports (two orthogonal axes)
 
-The `attachMode` selects what is done with the CRA-side veth:
+The attachment is described by two independent axes:
 
-- `routed` (default): VRF/underlay + on-link gateway + workload host routes.
-- `l2`: the port is attached to one or more **existing** L2 bridges with no L3
-  addressing — either as an untagged access port (`layer2AttachmentRef`) or as
-  an 802.1Q trunk (`layer2Trunk`). The bridge/L2VNI is assumed to already exist
-  on the node (from the `Layer2Attachment` / `Layer2NetworkConfiguration`
-  pipeline).
+- **transport** — how the CRA-side port is wired:
+  - `veth` (default): a veth pair whose CRA-side end is moved into the CRA netns.
+  - `vhostuser`: a DPDK/virtio-user vhost socket. **VSR-only** — there is no
+    veth and no netns port move; the VSR fast-path terminates the socket as an
+    `fpvhost` virtual-port. The FRR agent rejects it.
+- **attach mode** — what is done with that port:
+  - `routed` (default): VRF/underlay + on-link gateway + workload host routes.
+  - `l2`: the port is attached to one or more **existing** L2 bridges with no L3
+    addressing — either as an untagged access port (`layer2AttachmentRef`) or as
+    an 802.1Q trunk (`layer2Trunk`). The bridge/L2VNI is assumed to already exist
+    on the node (from the `Layer2Attachment` / `Layer2NetworkConfiguration`
+    pipeline).
+
+All four combinations are valid except `vhostuser` + FRR. The `veth` + `routed`
+combination is the original behaviour and is unchanged.
 
 **L2 binding by attachment ref.** The intent builder stamps the originating
 `Layer2Attachment` identity (`AttachmentRef`) onto each NNC `Layer2`. An `l2`
@@ -127,7 +141,8 @@ pod-side interface name. Routed and access ports use `cra` plus 12 hex
 characters (15 characters total). Trunk ports use `cra` plus 7 hex characters
 (10 characters total), reserving room for `.4094`; every generated
 `<port>.<podVlan>` for VLAN 1..4094 therefore fits the 15-character interface
-limit without truncation and is stable across CNI ADD and DEL.
+limit without truncation and is stable across CNI ADD and DEL. Vhost-user ports
+use the same lengths and rules with the `vho` prefix.
 
 **Access and trunk are mutually exclusive.** A native (untagged) member would
 require the raw port itself to be a bridge slave while sub-interfaces demux the
@@ -150,6 +165,51 @@ not constrained this way. An attachment that asks for more than its domains can
 carry is refused like any other unresolvable one — the whole entry is dropped
 and the reason logged. A tag costs 4 bytes on the wire on top of this, which the
 fabric has to carry.
+
+## vhost-user and the 6WIND device plugin
+
+`transport: vhostuser` is driven end-to-end by the 6WIND HNA device plugin
+(`nc-k8s-plugin.6wind.com/virtio-user`). See
+[`docs/proposals/03-vhost-user/DEVICE-PLUGIN.md`](../../docs/proposals/03-vhost-user/DEVICE-PLUGIN.md)
+for the full contract. Summary of what the plugin does for us:
+
+1. The pod requests the resource in `resources.limits`; kubelet calls the
+   plugin's `Allocate()`, which returns a randomly generated 10-character hex
+   **device id** per allocated device and bind-mounts the corresponding socket
+   directories into the container.
+2. Multus matches the NAD's `k8s.v1.cni.cncf.io/resourceName` annotation against
+   that allocation and injects `deviceID` into our CNI config — top-level, or in
+   `runtimeConfig.deviceID` when the `deviceID` capability is enabled. We accept
+   either, preferring whichever is non-empty.
+3. The socket paths are **derived from the device id**, not configured:
+
+   | side | path |
+   | ---- | ---- |
+   | host / CRA (VSR fast-path) | `/run/vsr-vhost-user/<deviceID>/socket` |
+   | pod / workload             | `/run/vsr-virtio-user/<index>/socket` |
+
+   The two trees are deliberately crossed and swap when the requested resource
+   is `.../vhost-user` instead of `.../virtio-user`. The pod-side `<index>` is a
+   per-`Allocate()` counter starting at `0`, which we cannot recompute, so we
+   default to `0` and let the plugin's own device-info file correct it.
+4. Multus best-effort copies the plugin's device-info file
+   (`/var/run/k8s.cni.cncf.io/devinfo/dp/<resource>-<deviceID>-device.json`) to
+   our `CNIDeviceInfoFile`. We read the staged copy, falling back to the `dp/`
+   path, for the pod-side socket path. Current 6WIND device-plugin versions
+   always report `server` as the device-info mode, so the required NAD userdata
+   `socket_mode` selects the workload-side mode instead. A missing or malformed
+   file is tolerated and the derived path is used.
+
+The plugin creates no network state: allocating a device only reserves an id and
+a socket directory. Creating the `fpvhost` virtual-port on the VSR side is done
+by this plugin plus the agent.
+
+**No device id, no attachment.** If the transport is `vhostuser` and no device
+id arrives by any of the above means, the ADD **fails**. Multus silently hands
+out an empty `deviceID` once a pod has more attachments to a resource than it
+requested devices, and a static socket path would silently produce a port that
+is wired to nothing. `socketPath` therefore only *overrides the host-side path*
+of an attachment that already has a device id; it can never substitute for one.
 
 ## netns discovery
 
@@ -176,15 +236,18 @@ agent records the attachment on `NodeWorkloadPorts` and merges it into the
   bridge. FRR redistributes connected/kernel/static, so the `/32` + `/128` are
   advertised. For the **underlay** path the FRR *default* instance must
   redistribute connected/kernel toward the fabric neighbors (and gain an IPv6
-  unicast address-family).
+  unicast address-family). FRR **rejects** the `vhostuser` transport.
 - **cra-vsr:** the VSR fast path owns the FIB, so the moved port cannot be
   programmed via raw netlink. The agent renders it as NETCONF instead: an
   `interface infrastructure <ifname>` with `port infra-<ifname>` + the on-link
   gateway addresses, plus interface-static routes
   (`ipv4-route/ipv6-route <ip> next-hop <ifname>`); a bridge `link-interface` for
   `l2`. Underlay (no-VRF) ports also get an explicit BGP `network` statement,
-  since the default table's session has no VRF redistribution. See
-  `pkg/cra-vsr/workloadports.go` / `layer2.go` and `pkg/workloadcni`.
+  since the default table's session has no VRF redistribution. The `vhostuser`
+  transport renders an `fpvhost` fast-path virtual-port (`system fast-path
+  virtual-port fpvhost fpvhost-<ifname> sockpath <host socket> sockmode
+  <inverted>`) + `interface fpvhost <ifname> port fpvhost-<ifname>`. See
+  `pkg/cra-vsr/workloadports.go` / `layer2.go` and `pkg/workloadcni` (transport).
 
 ### Transport
 
