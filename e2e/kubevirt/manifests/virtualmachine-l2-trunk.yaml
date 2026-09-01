@@ -1,0 +1,78 @@
+# Test VirtualMachine attached to an L2 trunk: one port carrying two L2 domains
+# as tagged VLANs (see networkattachmentdefinition-l2-trunk.yaml).
+#
+# - The datapath is the same as the access-port L2 VM (KubeVirt "bridge" binding
+#   onto our cni-workload veth end); the difference is on the CRA side, where the
+#   moved port is not enslaved itself: one <port>.<vlan> sub-interface per member
+#   is enslaved to that member's L2 bridge.
+# - The guest therefore sees an 802.1Q trunk and creates its own VLAN
+#   interfaces: eth0.100 for the "blue" domain (carried under its own VLAN id)
+#   and eth0.200 for "green" (translated to 200 by the trunk member's "vlan").
+# - Untagged traffic on eth0 goes nowhere by design, so eth0 itself gets no
+#   address and there is no untagged default route.
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: l2-trunk-vm
+  namespace: default
+spec:
+  runStrategy: Always
+  template:
+    metadata:
+      labels:
+        kubevirt.io/vm: l2-trunk-vm
+    spec:
+      domain:
+        devices:
+          disks:
+            - name: containerdisk
+              disk:
+                bus: virtio
+            - name: cloudinitdisk
+              disk:
+                bus: virtio
+          interfaces:
+            - name: l2trunk
+              bridge: {}
+        resources:
+          requests:
+            memory: 256Mi
+      networks:
+        - name: l2trunk
+          multus:
+            networkName: default/l2-trunk-vm-net
+      volumes:
+        - name: containerdisk
+          containerDisk:
+            image: quay.io/kubevirt/fedora-cloud-container-disk-demo:latest
+        - name: cloudinitdisk
+          cloudInitNoCloud:
+            networkData: |
+              version: 2
+              ethernets:
+                eth0:
+                  dhcp4: false
+                  dhcp6: false
+              vlans:
+                eth0.100:
+                  id: 100
+                  link: eth0
+                  addresses:
+                    - 10.10.0.10/24
+                    - fd00:10::10/64
+                  routes:
+                    - to: 0.0.0.0/0
+                      via: 10.10.0.1
+                    - to: "::/0"
+                      via: fd00:10::1
+                eth0.200:
+                  id: 200
+                  link: eth0
+                  addresses:
+                    - 10.20.0.10/24
+            userData: |
+              #cloud-config
+              password: fedora
+              chpasswd: { expire: False }
+              runcmd:
+                - [ sh, -c, "nohup python3 -m http.server 8080 --bind :: >/var/log/http.log 2>&1 &" ]
