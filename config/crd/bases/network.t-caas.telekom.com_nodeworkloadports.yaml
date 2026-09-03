@@ -102,6 +102,82 @@ spec:
                       maxLength: 15
                       minLength: 1
                       type: string
+                    layer2AttachmentRef:
+                      description: |-
+                        Layer2AttachmentRef, when set, selects L2 attach mode as an untagged access
+                        port: the port is added as a bridge slave of the Layer2 produced by the
+                        referenced Layer2Attachment, instead of being routed. It is mutually
+                        exclusive with VRF, GatewayV4, GatewayV6 and HostRoutes (which must be
+                        empty in L2 mode), and with Layer2Trunk.
+                      properties:
+                        name:
+                          description: Name is the Layer2Attachment name.
+                          minLength: 1
+                          type: string
+                        namespace:
+                          description: Namespace is the Layer2Attachment namespace.
+                          minLength: 1
+                          type: string
+                      required:
+                      - name
+                      - namespace
+                      type: object
+                    layer2Trunk:
+                      description: |-
+                        Layer2Trunk, when non-empty, selects L2 attach mode as an 802.1Q trunk: the
+                        port carries one tagged member per entry, each bridged into the Layer2
+                        produced by the referenced Layer2Attachment. The port itself is never a
+                        bridge slave in this mode, so untagged frames and frames carrying an
+                        unmapped VLAN id are not forwarded anywhere. It is mutually exclusive with
+                        VRF, GatewayV4, GatewayV6, HostRoutes and Layer2AttachmentRef.
+                        Members are keyed by the referenced attachment's name, so one Layer2 can
+                        only be carried once: two tags for the same domain would flood every frame
+                        straight back out of the port it came in on. Distinct workload-side VLAN
+                        ids are not expressible here — a member can inherit its id from the Layer2
+                        it resolves to — so collisions are caught when the entry is merged.
+                      items:
+                        description: |-
+                          Layer2TrunkMember is a single tagged member of an L2 trunk attachment: the
+                          port carries the member's VLAN tag on the workload side, and the frames are
+                          bridged into the L2 domain of the referenced Layer2Attachment (which may use
+                          a different VLAN id on the fabric — the tag is translated).
+                        properties:
+                          name:
+                            description: Name is the Layer2Attachment name.
+                            minLength: 1
+                            type: string
+                          namespace:
+                            description: Namespace is the Layer2Attachment namespace.
+                            minLength: 1
+                            type: string
+                          vlan:
+                            description: |-
+                              VLAN is the 802.1Q VLAN id the member is tagged with on the workload side.
+                              Unset means the L2 domain's own VLAN id, which is only known once the
+                              referenced Layer2 is present on the node, so it is resolved when the entry
+                              is merged into the NodeNetworkConfig rather than when it is recorded.
+                            maximum: 4094
+                            minimum: 1
+                            type: integer
+                        required:
+                        - name
+                        - namespace
+                        type: object
+                      maxItems: 64
+                      type: array
+                      x-kubernetes-list-map-keys:
+                      - name
+                      x-kubernetes-list-type: map
+                    mtu:
+                      description: |-
+                        MTU is the MTU the attachment requested (the CNI configuration's mtu, which
+                        the plugin also applied to both ends of the veth). Zero means the default.
+                        In L2 attach mode it additionally has to fit the domain: an access port
+                        requires its Layer2 to carry at least this much, a trunk requires at least
+                        one of its members to. Routed attachments are not constrained by it.
+                      maximum: 9216
+                      minimum: 0
+                      type: integer
                     podName:
                       description: PodName is the name of the pod owning the attachment.
                       type: string
@@ -112,7 +188,8 @@ spec:
                     vrf:
                       description: |-
                         VRF is the target VRF the port is bound into. Empty (or "default"/"main")
-                        means the underlay/default table.
+                        means the underlay/default table. Ignored in L2 attach mode (see
+                        Layer2AttachmentRef).
                       type: string
                   required:
                   - containerID
@@ -120,6 +197,21 @@ spec:
                   - podName
                   - podNamespace
                   type: object
+                  x-kubernetes-validations:
+                  - message: layer2AttachmentRef (L2 attach mode) is mutually exclusive
+                      with vrf, gatewayV4, gatewayV6 and hostRoutes
+                    rule: '!has(self.layer2AttachmentRef) || (!has(self.vrf) && !has(self.gatewayV4)
+                      && !has(self.gatewayV6) && (!has(self.hostRoutes) || size(self.hostRoutes)
+                      == 0))'
+                  - message: layer2Trunk (L2 attach mode) is mutually exclusive with
+                      vrf, gatewayV4, gatewayV6 and hostRoutes
+                    rule: '!has(self.layer2Trunk) || size(self.layer2Trunk) == 0 ||
+                      (!has(self.vrf) && !has(self.gatewayV4) && !has(self.gatewayV6)
+                      && (!has(self.hostRoutes) || size(self.hostRoutes) == 0))'
+                  - message: layer2AttachmentRef (untagged access port) and layer2Trunk
+                      (tagged trunk) are mutually exclusive
+                    rule: '!has(self.layer2AttachmentRef) || !has(self.layer2Trunk)
+                      || size(self.layer2Trunk) == 0'
                 type: array
             type: object
         type: object

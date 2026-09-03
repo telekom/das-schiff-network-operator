@@ -254,18 +254,35 @@ func isWebhookTransient(err error) bool {
 	return false
 }
 
-// splitYAMLDocuments splits multi-document YAML into individual documents.
+// splitYAMLDocuments splits multi-document YAML into individual documents,
+// dropping any that carry no object.
 func splitYAMLDocuments(data []byte) [][]byte {
 	docs := bytes.Split(data, []byte("\n---"))
 	var result [][]byte
 	for _, doc := range docs {
 		trimmed := bytes.TrimSpace(doc)
-		if len(trimmed) == 0 || string(trimmed) == "---" {
+		if !hasYAMLObject(trimmed) {
 			continue
 		}
 		result = append(result, trimmed)
 	}
 	return result
+}
+
+// hasYAMLObject reports whether a document carries anything but comments,
+// blank lines and separators. A file that opens with a header comment above its
+// first "---" splits into a comment-only document, which is legal YAML but
+// decodes to null — and the object decoder then rejects the whole manifest with
+// "Object 'Kind' is missing in 'null'".
+func hasYAMLObject(doc []byte) bool {
+	for _, line := range bytes.Split(doc, []byte("\n")) {
+		trimmed := bytes.TrimSpace(line)
+		if len(trimmed) == 0 || trimmed[0] == '#' || bytes.Equal(trimmed, []byte("---")) {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 // DeleteManifest deletes a YAML manifest (supports multi-document) from the cluster.

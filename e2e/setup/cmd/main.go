@@ -109,6 +109,12 @@ func up(repoRoot string) error {
 		return fmt.Errorf("finalize: %w", err)
 	}
 
+	// Phase 6a: Workload CNI plugin (used by the intent pod tests and, when
+	// enabled, by the KubeVirt VM fixture).
+	if err := setup.PhaseWorkloadCNI(cluster); err != nil {
+		return fmt.Errorf("workload cni: %w", err)
+	}
+
 	// Phase 7: Cluster-2 (gateway cluster)
 	if err := setup.PhaseCluster2(cluster2, repoRoot); err != nil {
 		return fmt.Errorf("cluster2: %w", err)

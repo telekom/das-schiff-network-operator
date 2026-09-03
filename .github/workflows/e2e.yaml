@@ -238,7 +238,16 @@ jobs:
               > "/tmp/e2e-logs/${node}-cra.log" 2>&1 || true
             docker exec "$node" journalctl -u kubelet.service --no-pager \
               > "/tmp/e2e-logs/${node}-kubelet.log" 2>&1 || true
+            # Workload-CNI datapath: the ports live in the CRA netns, bridged
+            # into the l2.<vlan> devices.
+            docker exec "$node" machinectl shell cra-frr /usr/bin/ip -d link show \
+              > "/tmp/e2e-logs/${node}-cra-links.log" 2>&1 || true
           done
+          # Workload CNI plugin installer
+          docker exec nwop-control-plane bash -c \
+            'kubectl --kubeconfig=/etc/kubernetes/admin.conf -n kube-system logs \
+              -l app=cni-workload-installer --tail=-1' \
+            > /tmp/e2e-logs/cni-workload-installer.log 2>&1 || true
           # Cluster-1 state
           docker exec nwop-control-plane kubectl \
             --kubeconfig=/etc/kubernetes/admin.conf get pods -A -o wide \
@@ -311,7 +320,7 @@ jobs:
           for crd in vrfs networks destinations layer2attachments inbounds outbounds \
                      bgppeerings collectors trafficmirrors nodenetworkconfigs \
                      interfaceconfigs nodenetworkstatuses nodenetplanconfigs \
-                     podnetworks announcementpolicies; do
+                     podnetworks announcementpolicies nodeworkloadports; do
             docker exec nwop-control-plane kubectl \
               --kubeconfig=/etc/kubernetes/admin.conf get "$crd" -A -o yaml \
               > "/tmp/e2e-logs/intent-${crd}.yaml" 2>&1 || true
@@ -548,7 +557,7 @@ jobs:
             > /tmp/e2e-logs/virt-launcher-console.log 2>&1 || true
           docker exec nwop-control-plane bash -c \
             'kubectl --kubeconfig=/etc/kubernetes/admin.conf -n kube-system logs \
-              -l app.kubernetes.io/component=cni-workload-installer --tail=-1' \
+              -l app=cni-workload-installer --tail=-1' \
             > /tmp/e2e-logs/cni-workload-installer.log 2>&1 || true
           # Fabric view of the routed host routes
           for rtr in leaf1 leaf2 dcgw1 dcgw2; do

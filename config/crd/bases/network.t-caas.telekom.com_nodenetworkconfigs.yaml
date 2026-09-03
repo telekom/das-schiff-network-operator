@@ -1313,6 +1313,16 @@ spec:
                           maxLength: 15
                           minLength: 1
                           type: string
+                        mtu:
+                          description: |-
+                            MTU is the MTU the attachment requested (the CNI configuration's mtu, which
+                            the plugin also applied to both ends of the veth). Zero means the default.
+                            In L2 attach mode it additionally has to fit the domain: an access port
+                            requires its Layer2 to carry at least this much, a trunk requires at least
+                            one of its members to. Routed attachments are not constrained by it.
+                          maximum: 9216
+                          minimum: 0
+                          type: integer
                       required:
                       - interface
                       type: object
@@ -2734,6 +2744,16 @@ spec:
                             maxLength: 15
                             minLength: 1
                             type: string
+                          mtu:
+                            description: |-
+                              MTU is the MTU the attachment requested (the CNI configuration's mtu, which
+                              the plugin also applied to both ends of the veth). Zero means the default.
+                              In L2 attach mode it additionally has to fit the domain: an access port
+                              requires its Layer2 to carry at least this much, a trunk requires at least
+                              one of its members to. Routed attachments are not constrained by it.
+                            maximum: 9216
+                            minimum: 0
+                            type: integer
                         required:
                         - interface
                         type: object
@@ -2788,6 +2808,16 @@ spec:
                       maxLength: 15
                       minLength: 1
                       type: string
+                    mtu:
+                      description: |-
+                        MTU is the MTU the attachment requested (the CNI configuration's mtu, which
+                        the plugin also applied to both ends of the veth). Zero means the default.
+                        In L2 attach mode it additionally has to fit the domain: an access port
+                        requires its Layer2 to carry at least this much, a trunk requires at least
+                        one of its members to. Routed attachments are not constrained by it.
+                      maximum: 9216
+                      minimum: 0
+                      type: integer
                   required:
                   - interface
                   type: object
@@ -2796,6 +2826,62 @@ spec:
                 additionalProperties:
                   description: Layer2 represents a Layer 2 network configuration.
                   properties:
+                    attachedPorts:
+                      description: |-
+                        AttachedPorts are workload-CNI ports enslaved to this L2 bridge (moved into
+                        the CRA netns and added as bridge link-interfaces). They are rendered as
+                        bridge slaves (VSR link-interface, FRR master) with no L3 addressing.
+                      items:
+                        description: |-
+                          AttachedPort is a workload-CNI port bound to a Layer2 bridge (L2 attach mode).
+                          It carries no L3 addressing: the port is added as a bridge slave only.
+                        properties:
+                          interface:
+                            description: Interface is the moved veth end inside the
+                              CRA network namespace.
+                            type: string
+                          mtu:
+                            description: |-
+                              MTU is the MTU the attachment requested (the CNI configuration's mtu). The
+                              CRA sizes the interfaces it derives from the port with it; the port itself
+                              is set up by the CNI. Zero means the default.
+                            maximum: 9216
+                            minimum: 0
+                            type: integer
+                          vlan:
+                            description: |-
+                              VLAN is the 802.1Q VLAN id the port carries this L2 domain under on the
+                              workload side. Zero means the port is an untagged access port and is
+                              bridged in directly. A non-zero value makes it one member of a trunk: the
+                              CRA renders a VLAN sub-interface of the port for that id and bridges that
+                              instead, which also translates the tag whenever the id differs from the
+                              domain's own VLAN.
+                            maximum: 4094
+                            minimum: 0
+                            type: integer
+                        required:
+                        - interface
+                        type: object
+                      type: array
+                    attachmentRef:
+                      description: |-
+                        AttachmentRef identifies the Layer2Attachment that produced this Layer2.
+                        It lets workload-CNI L2 port attachments (see AttachedPorts) bind to the
+                        correct L2 domain by reference rather than by VNI. Empty for Layer2s built
+                        from the legacy Layer2NetworkConfiguration path.
+                      properties:
+                        name:
+                          description: Name is the Layer2Attachment name.
+                          minLength: 1
+                          type: string
+                        namespace:
+                          description: Namespace is the Layer2Attachment namespace.
+                          minLength: 1
+                          type: string
+                      required:
+                      - name
+                      - namespace
+                      type: object
                     disableSegmentation:
                       description: DisableSegmentation indicates whether to disable
                         segmentation for the Layer 2 network.
@@ -4163,6 +4249,16 @@ spec:
                             maxLength: 15
                             minLength: 1
                             type: string
+                          mtu:
+                            description: |-
+                              MTU is the MTU the attachment requested (the CNI configuration's mtu, which
+                              the plugin also applied to both ends of the veth). Zero means the default.
+                              In L2 attach mode it additionally has to fit the domain: an access port
+                              requires its Layer2 to carry at least this much, a trunk requires at least
+                              one of its members to. Routed attachments are not constrained by it.
+                            maximum: 9216
+                            minimum: 0
+                            type: integer
                         required:
                         - interface
                         type: object

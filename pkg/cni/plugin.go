@@ -46,8 +46,10 @@ func CmdAdd(args *skel.CmdArgs) error {
 		return err
 	}
 
-	// Delegate address allocation to the configured IPAM plugin.
-	ipamResult, err := runIPAM(conf, args)
+	// Delegate address allocation to the configured IPAM plugin. IPAM is
+	// optional in the L2 attach mode, where the workload is addressed inside
+	// the shared L2 domain rather than by this plugin.
+	result, releaseIPAM, err := runOptionalIPAM(conf, args)
 	if err != nil {
 		return err
 	}
@@ -55,15 +57,11 @@ func CmdAdd(args *skel.CmdArgs) error {
 	success := false
 	defer func() {
 		if !success {
-			_ = ipam.ExecDel(ipamTypeOrEmpty(conf), args.StdinData)
+			releaseIPAM()
 		}
 	}()
 
-	result, err := current.NewResultFromResult(ipamResult)
-	if err != nil {
-		return fmt.Errorf("failed to convert IPAM result: %w", err)
-	}
-	if len(result.IPs) == 0 {
+	if len(result.IPs) == 0 && !conf.isL2() {
 		return fmt.Errorf("IPAM plugin returned no addresses")
 	}
 
@@ -76,7 +74,7 @@ func CmdAdd(args *skel.CmdArgs) error {
 		return err
 	}
 
-	portName := portName(args.ContainerID, args.IfName)
+	portName := portName(args.ContainerID, args.IfName, len(conf.Layer2Trunk) > 0)
 
 	// Create the veth pair in the pod netns; the peer is the CRA-side port.
 	podIface, err := setupPodSide(conf, args, craNetnsPath, portName, result)
@@ -137,12 +135,14 @@ func CmdDel(args *skel.CmdArgs) error {
 		return err
 	}
 
-	portName := portName(args.ContainerID, args.IfName)
+	portName := portName(args.ContainerID, args.IfName, len(conf.Layer2Trunk) > 0)
 	var errs []error
 
-	// Release the IPAM allocation.
-	if err := ipam.ExecDel(ipamTypeOrEmpty(conf), args.StdinData); err != nil {
-		errs = append(errs, fmt.Errorf("failed to release IPAM allocation: %w", err))
+	// Release the IPAM allocation, if one was requested.
+	if len(conf.IPAM) != 0 {
+		if err := ipam.ExecDel(ipamTypeOrEmpty(conf), args.StdinData); err != nil {
+			errs = append(errs, fmt.Errorf("failed to release IPAM allocation: %w", err))
+		}
 	}
 
 	// Tell the node-local agent to drop the attachment. A stale NodeWorkloadPorts
@@ -171,7 +171,8 @@ func CmdDel(args *skel.CmdArgs) error {
 
 // CmdCheck implements the CNI CHECK command.
 func CmdCheck(args *skel.CmdArgs) error {
-	if _, err := parseConfig(args.StdinData); err != nil {
+	_, err := parseConfig(args.StdinData)
+	if err != nil {
 		return err
 	}
 	if args.Netns == "" {
@@ -208,6 +209,26 @@ func runIPAM(conf *NetConf, args *skel.CmdArgs) (types.Result, error) {
 		return nil, fmt.Errorf("failed to run IPAM plugin: %w", err)
 	}
 	return res, nil
+}
+
+// runOptionalIPAM runs the delegated IPAM plugin if one is configured,
+// returning the CNI result and a cleanup function that releases the allocation.
+// L2 attachments can run without IPAM, so a missing IPAM block yields an empty
+// result and a no-op cleanup.
+func runOptionalIPAM(conf *NetConf, args *skel.CmdArgs) (*current.Result, func(), error) {
+	if len(conf.IPAM) == 0 {
+		return &current.Result{}, func() {}, nil
+	}
+	ipamResult, err := runIPAM(conf, args)
+	if err != nil {
+		return nil, nil, err
+	}
+	result, err := current.NewResultFromResult(ipamResult)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to convert IPAM result: %w", err)
+	}
+	cleanup := func() { _ = ipam.ExecDel(ipamTypeOrEmpty(conf), args.StdinData) }
+	return result, cleanup, nil
 }
 
 // ipamTypeOrEmpty returns the delegated IPAM plugin type, or "" if it cannot be
