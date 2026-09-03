@@ -1038,6 +1038,27 @@
   
   
     <li class="md-nav__item">
+      <a href="../../advanced/network-runbooks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Network debugging runbooks
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../advanced/legacy-api/" class="md-nav__link">
         
   
@@ -1610,7 +1631,7 @@ condition types are:</p>
 </tbody>
 </table>
 <p>Check readiness with:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>kubectl<span class="w"> </span>get<span class="w"> </span>inbound<span class="w"> </span>my-ingress<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.conditions}&#39;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>kubectl<span class="w"> </span>get<span class="w"> </span>inbound<span class="w"> </span>my-ingress<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">'{.status.conditions}'</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq
 </code></pre></div>
 <h2 id="lifecycle-and-deletion-order">Lifecycle and deletion order<a class="headerlink" href="#lifecycle-and-deletion-order" title="Permanent link">&para;</a></h2>
 <p>The operator protects referenced resources with <strong>finalizers</strong> so you cannot

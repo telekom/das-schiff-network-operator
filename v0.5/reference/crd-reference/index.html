@@ -1569,6 +1569,27 @@
   
   
     <li class="md-nav__item">
+      <a href="../../advanced/network-runbooks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Network debugging runbooks
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../advanced/legacy-api/" class="md-nav__link">
         
   
@@ -3329,9 +3350,9 @@ Exactly one of Port or PortRange must be set per entry.</p>
 </tr>
 <tr>
 <td><code>prefixes</code> <em>string array</em></td>
-<td>Subnets reachable via this destination (CIDR notation).</td>
+<td>Subnets reachable via this destination. Each entry must use CIDR notation<br />(e.g. "198.51.100.0/24" or "2001:db8::/32").</td>
 <td></td>
-<td></td>
+<td>MaxItems: 1000 <br />items:MaxLength: 43 <br /></td>
 </tr>
 <tr>
 <td><code>nextHop</code> <em><a href="#nexthopconfig">NextHopConfig</a></em></td>

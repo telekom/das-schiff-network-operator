@@ -16,7 +16,7 @@
         <link rel="prev" href="../../reference/node-readiness/">
       
       
-        <link rel="next" href="../legacy-api/">
+        <link rel="next" href="../network-runbooks/">
       
       
       <link rel="icon" href="../../assets/images/favicon.png">
@@ -1005,6 +1005,27 @@
   
   
     <li class="md-nav__item">
+      <a href="../network-runbooks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Network debugging runbooks
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../legacy-api/" class="md-nav__link">
         
   
@@ -1339,7 +1360,7 @@ named after the node (except <code>NetworkConfigRevision</code>, which is named 
 failures usually surface as <code>InterfaceNotFound</code> or <code>DuplicateVRF</code>.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>kubectl<span class="w"> </span>describe<span class="w"> </span>layer2attachment<span class="w"> </span>&lt;name&gt;
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>kubectl<span class="w"> </span>get<span class="w"> </span>layer2attachment<span class="w"> </span>&lt;name&gt;<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{range .status.conditions[*]}{.type}={.status} {.reason}: {.message}{&quot;\n&quot;}{end}&#39;</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">'{range .status.conditions[*]}{.type}={.status} {.reason}: {.message}{"\n"}{end}'</span>
 </code></pre></div>
 <p>See <a href="#common-conditions">Common conditions</a> for what each type means.</p>
 <h3 id="2-find-the-revision-and-its-rollout-status">2. Find the revision and its rollout status<a class="headerlink" href="#2-find-the-revision-and-its-rollout-status" title="Permanent link">&para;</a></h3>
@@ -1351,7 +1372,7 @@ counters tell you how far the revision has progressed across the cluster.</p>
 (at higher verbosity) <code>FailedNode</code>:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>kubectl<span class="w"> </span>get<span class="w"> </span>ncr<span class="w"> </span>-o<span class="w"> </span>wide
 <a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>kubectl<span class="w"> </span>get<span class="w"> </span>ncr<span class="w"> </span>&lt;revision&gt;<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;ready={.status.ready} ongoing={.status.ongoing} queued={.status.queued} total={.status.total}{&quot;\n&quot;}&#39;</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">'ready={.status.ready} ongoing={.status.ongoing} queued={.status.queued} total={.status.total}{"\n"}'</span>
 </code></pre></div>
 <ul>
 <li><code>ready</code> — nodes already provisioned with this revision.</li>
@@ -1365,13 +1386,13 @@ counters tell you how far the revision has progressed across the cluster.</p>
 <p>The <code>NodeNetworkConfig</code> is named after the node. Its <code>status.configStatus</code> is one
 of <code>provisioning</code>, <code>provisioned</code> or <code>invalid</code>.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>kubectl<span class="w"> </span>get<span class="w"> </span>nnc<span class="w"> </span>&lt;node-name&gt;
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>kubectl<span class="w"> </span>get<span class="w"> </span>nnc<span class="w"> </span>&lt;node-name&gt;<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.configStatus}{&quot;\n&quot;}&#39;</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>kubectl<span class="w"> </span>get<span class="w"> </span>nnc<span class="w"> </span>&lt;node-name&gt;<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">'{.status.configStatus}{"\n"}'</span>
 <a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
 <a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="c1"># Compare the config the node was built from against the last one it applied.</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>kubectl<span class="w"> </span>get<span class="w"> </span>nnc<span class="w"> </span>&lt;node-name&gt;<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;spec.revision={.spec.revision}{&quot;\n&quot;}lastApplied={.status.lastAppliedRevision}{&quot;\n&quot;}&#39;</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>kubectl<span class="w"> </span>get<span class="w"> </span>nnc<span class="w"> </span>&lt;node-name&gt;<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">'spec.revision={.spec.revision}{"\n"}lastApplied={.status.lastAppliedRevision}{"\n"}'</span>
 <a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="c1"># When configStatus is &quot;invalid&quot;, the reason is here:</span>
-<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>kubectl<span class="w"> </span>get<span class="w"> </span>nnc<span class="w"> </span>&lt;node-name&gt;<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.errorMessage}{&quot;\n&quot;}&#39;</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="c1"># When configStatus is "invalid", the reason is here:</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>kubectl<span class="w"> </span>get<span class="w"> </span>nnc<span class="w"> </span>&lt;node-name&gt;<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">'{.status.errorMessage}{"\n"}'</span>
 </code></pre></div>
 <p><code>kubectl describe nnc &lt;node-name&gt;</code> shows the full resolved spec —
 <code>layer2s</code>, <code>clusterVRF</code>, <code>fabricVRFs</code> and <code>localVRFs</code> — so you can confirm the
@@ -1383,8 +1404,8 @@ AS number the node agent is configured with.</p>
 observed interface and route inventory. Use it to confirm whether the desired
 config actually landed on the host.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>kubectl<span class="w"> </span>get<span class="w"> </span>nns<span class="w"> </span>&lt;node-name&gt;
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>kubectl<span class="w"> </span>get<span class="w"> </span>nns<span class="w"> </span>&lt;node-name&gt;<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{range .status.interfaces[*]}{.name} {.state} {.addresses}{&quot;\n&quot;}{end}&#39;</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>kubectl<span class="w"> </span>get<span class="w"> </span>nns<span class="w"> </span>&lt;node-name&gt;<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{range .status.routes[*]}{.destination} via {.gateway} dev {.interface} table {.table}{&quot;\n&quot;}{end}&#39;</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>kubectl<span class="w"> </span>get<span class="w"> </span>nns<span class="w"> </span>&lt;node-name&gt;<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">'{range .status.interfaces[*]}{.name} {.state} {.addresses}{"\n"}{end}'</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>kubectl<span class="w"> </span>get<span class="w"> </span>nns<span class="w"> </span>&lt;node-name&gt;<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">'{range .status.routes[*]}{.destination} via {.gateway} dev {.interface} table {.table}{"\n"}{end}'</span>
 </code></pre></div>
 <p>Each interface entry reports <code>name</code>, <code>state</code> (<code>up</code>/<code>down</code>/<code>unknown</code>), <code>type</code>,
 <code>mtu</code>, <code>mac</code>, <code>addresses</code>, and (where relevant) <code>parent</code>, <code>vlanID</code> or <code>members</code>.</p>
@@ -1433,7 +1454,7 @@ failing node stalls the rollout for the whole revision.</p>
   revision is marked invalid and records the culprit:</li>
 </ul>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>kubectl<span class="w"> </span>get<span class="w"> </span>ncr<span class="w"> </span>&lt;revision&gt;<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">  </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;invalid={.status.isInvalid} node={.status.failedNode}{&quot;\n&quot;}{.status.failedMessage}{&quot;\n&quot;}&#39;</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">  </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">'invalid={.status.isInvalid} node={.status.failedNode}{"\n"}{.status.failedMessage}{"\n"}'</span>
 </code></pre></div>
 <p><code>status.failedAt</code> records when the failure happened. Inspect that node's
   <code>nnc</code> <code>status.errorMessage</code> for the underlying cause.</p>
@@ -1492,6 +1513,7 @@ failure down through the revision and <code>nnc</code> as described above.</p>
 <a href="../../reference/node-readiness/">Node Readiness</a>.</p>
 <h2 id="related">Related<a class="headerlink" href="#related" title="Permanent link">&para;</a></h2>
 <ul>
+<li><a href="../network-runbooks/">Network debugging runbooks</a> — HBN, routing, netplan, CNI/policy, and bounded packet evidence.</li>
 <li><a href="../../reference/metrics/">Metrics</a> — operator and rollout metrics.</li>
 <li><a href="../../reference/crd-reference/">CRD Reference</a> — full field reference.</li>
 <li><a href="../legacy-api/">Legacy API</a> — the low-level <code>network.t-caas.telekom.com</code> CRDs.</li>
@@ -1551,13 +1573,13 @@ failure down through the revision and <code>nnc</code> as described above.</p>
         
         
           
-          <a href="../legacy-api/" class="md-footer__link md-footer__link--next" aria-label="Next: Legacy API">
+          <a href="../network-runbooks/" class="md-footer__link md-footer__link--next" aria-label="Next: Network debugging runbooks">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                Legacy API
+                Network debugging runbooks
               </div>
             </div>
             <div class="md-footer__button md-icon">
