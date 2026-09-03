@@ -487,7 +487,7 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `vrfRef` _string_ | References a VRF resource by name. Mutually exclusive with nextHop. |  |  |
-| `prefixes` _string array_ | Subnets reachable via this destination (CIDR notation). |  |  |
+| `prefixes` _string array_ | Subnets reachable via this destination. Each entry must use CIDR notation<br />(e.g. "198.51.100.0/24" or "2001:db8::/32"). |  | MaxItems: 1000 <br />items:MaxLength: 43 <br /> |
 | `nextHop` _[NextHopConfig](#nexthopconfig)_ | Next-hop addresses for static routing. Mutually exclusive with vrfRef. |  |  |
 | `ports` _[DestinationPort](#destinationport) array_ | Port restrictions for egress NetworkPolicy. |  |  |
 
