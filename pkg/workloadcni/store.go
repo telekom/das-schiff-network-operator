@@ -53,6 +53,16 @@ const DefaultSocketPath = "/run/das-schiff/workload-cni.sock"
 // its pod-side peer. The two sides therefore MUST use this same prefix.
 const InfraPortPrefix = "infra-"
 
+// FpvhostPortPrefix is prepended to a CRA-side interface name to form the 6WIND
+// VSR fast-path fpvhost virtual-port reference (fpvhost-<ifname>) used by the
+// vhost-user transport. Unlike InfraPortPrefix there is no netns-moved veth to
+// alias: the virtual-port is declared by the VSR renderer itself under
+// "system fast-path virtual-port fpvhost". The renderer must use this same name
+// for the fpvhost interface's port and the fast-path virtual-port; it is a VSR
+// reference, not a kernel interface name, and does not reduce the bare
+// interface-name budget.
+const FpvhostPortPrefix = "fpvhost-"
+
 // DefaultPortMTU is the MTU an attachment gets when its CNI configuration does
 // not request one. It is shared with the plugin so both ends of the wire agree
 // on what an unset mtu means.
@@ -179,9 +189,10 @@ func applyEntryToLayer2(spec *v1alpha1.NodeNetworkConfigSpec, e *v1alpha1.Worklo
 	for _, m := range members {
 		l2 := spec.Layer2s[m.layer2]
 		l2.AttachedPorts = append(l2.AttachedPorts, v1alpha1.AttachedPort{
-			Interface: e.Interface,
-			VLAN:      m.vlan,
-			MTU:       e.MTU,
+			Interface:  e.Interface,
+			PortWiring: *e.PortWiring.DeepCopy(),
+			VLAN:       m.vlan,
+			MTU:        e.MTU,
 		})
 		spec.Layer2s[m.layer2] = l2
 	}

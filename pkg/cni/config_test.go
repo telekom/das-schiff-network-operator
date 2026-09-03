@@ -130,6 +130,9 @@ func TestParseConfigL2Mode(t *testing.T) {
 	if !c.isL2() {
 		t.Errorf("isL2() = false, want true")
 	}
+	if c.transport() != TransportVeth {
+		t.Errorf("transport() = %q, want %q", c.transport(), TransportVeth)
+	}
 	if c.Layer2AttachmentRef == nil || c.Layer2AttachmentRef.Name != "blue" {
 		t.Errorf("Layer2AttachmentRef = %+v, want name=blue", c.Layer2AttachmentRef)
 	}
@@ -177,21 +180,25 @@ func TestParseConfigIPAMRequirement(t *testing.T) {
 
 func TestParseConfigModeErrors(t *testing.T) {
 	tests := map[string]string{
-		"invalid attach mode":  `{"cniVersion":"1.0.0","type":"cni-workload","attachMode":"bogus","ipam":{"type":"host-local"}}`,
-		"l2 without ref":       `{"cniVersion":"1.0.0","type":"cni-workload","attachMode":"l2","ipam":{"type":"host-local"}}`,
-		"l2 with vrf":          `{"cniVersion":"1.0.0","type":"cni-workload","attachMode":"l2","vrf":"cluster","layer2AttachmentRef":{"name":"blue"},"ipam":{"type":"host-local"}}`,
-		"l2 ref without name":  `{"cniVersion":"1.0.0","type":"cni-workload","attachMode":"l2","layer2AttachmentRef":{},"ipam":{"type":"host-local"}}`,
-		"ref and trunk":        `{"cniVersion":"1.0.0","type":"cni-workload","attachMode":"l2","layer2AttachmentRef":{"name":"blue"},"layer2Trunk":[{"name":"green"}]}`,
-		"trunk without l2":     `{"cniVersion":"1.0.0","type":"cni-workload","layer2Trunk":[{"name":"green"}],"ipam":{"type":"host-local"}}`,
-		"ref without l2":       `{"cniVersion":"1.0.0","type":"cni-workload","layer2AttachmentRef":{"name":"blue"},"ipam":{"type":"host-local"}}`,
-		"trunk with vrf":       `{"cniVersion":"1.0.0","type":"cni-workload","attachMode":"l2","vrf":"cluster","layer2Trunk":[{"name":"green"}]}`,
-		"trunk member no name": `{"cniVersion":"1.0.0","type":"cni-workload","attachMode":"l2","layer2Trunk":[{"vlan":100}]}`,
-		"trunk vlan zero":      `{"cniVersion":"1.0.0","type":"cni-workload","attachMode":"l2","layer2Trunk":[{"name":"green","vlan":0}]}`,
-		"trunk vlan too high":  `{"cniVersion":"1.0.0","type":"cni-workload","attachMode":"l2","layer2Trunk":[{"name":"green","vlan":4095}]}`,
-		"trunk duplicate ref":  `{"cniVersion":"1.0.0","type":"cni-workload","attachMode":"l2","layer2Trunk":[{"name":"green"},{"name":"green","vlan":100}]}`,
-		"trunk duplicate vlan": `{"cniVersion":"1.0.0","type":"cni-workload","attachMode":"l2","layer2Trunk":[{"name":"green","vlan":100},{"name":"red","vlan":100}]}`,
-		"mtu too small":        `{"cniVersion":"1.0.0","type":"cni-workload","mtu":68,"ipam":{"type":"host-local"}}`,
-		"mtu too large":        `{"cniVersion":"1.0.0","type":"cni-workload","mtu":9217,"ipam":{"type":"host-local"}}`,
+		"invalid attach mode":    `{"cniVersion":"1.0.0","type":"cni-workload","attachMode":"bogus","ipam":{"type":"host-local"}}`,
+		"invalid transport":      `{"cniVersion":"1.0.0","type":"cni-workload","transport":"bogus","ipam":{"type":"host-local"}}`,
+		"l2 without ref":         `{"cniVersion":"1.0.0","type":"cni-workload","attachMode":"l2","ipam":{"type":"host-local"}}`,
+		"l2 with vrf":            `{"cniVersion":"1.0.0","type":"cni-workload","attachMode":"l2","vrf":"cluster","layer2AttachmentRef":{"name":"blue"},"ipam":{"type":"host-local"}}`,
+		"l2 ref without name":    `{"cniVersion":"1.0.0","type":"cni-workload","attachMode":"l2","layer2AttachmentRef":{},"ipam":{"type":"host-local"}}`,
+		"ref and trunk":          `{"cniVersion":"1.0.0","type":"cni-workload","attachMode":"l2","layer2AttachmentRef":{"name":"blue"},"layer2Trunk":[{"name":"green"}]}`,
+		"trunk without l2":       `{"cniVersion":"1.0.0","type":"cni-workload","layer2Trunk":[{"name":"green"}],"ipam":{"type":"host-local"}}`,
+		"ref without l2":         `{"cniVersion":"1.0.0","type":"cni-workload","layer2AttachmentRef":{"name":"blue"},"ipam":{"type":"host-local"}}`,
+		"trunk with vrf":         `{"cniVersion":"1.0.0","type":"cni-workload","attachMode":"l2","vrf":"cluster","layer2Trunk":[{"name":"green"}]}`,
+		"trunk member no name":   `{"cniVersion":"1.0.0","type":"cni-workload","attachMode":"l2","layer2Trunk":[{"vlan":100}]}`,
+		"trunk vlan zero":        `{"cniVersion":"1.0.0","type":"cni-workload","attachMode":"l2","layer2Trunk":[{"name":"green","vlan":0}]}`,
+		"trunk vlan too high":    `{"cniVersion":"1.0.0","type":"cni-workload","attachMode":"l2","layer2Trunk":[{"name":"green","vlan":4095}]}`,
+		"trunk duplicate ref":    `{"cniVersion":"1.0.0","type":"cni-workload","attachMode":"l2","layer2Trunk":[{"name":"green"},{"name":"green","vlan":100}]}`,
+		"trunk duplicate vlan":   `{"cniVersion":"1.0.0","type":"cni-workload","attachMode":"l2","layer2Trunk":[{"name":"green","vlan":100},{"name":"red","vlan":100}]}`,
+		"mtu too small":          `{"cniVersion":"1.0.0","type":"cni-workload","mtu":68,"ipam":{"type":"host-local"}}`,
+		"mtu too large":          `{"cniVersion":"1.0.0","type":"cni-workload","mtu":9217,"ipam":{"type":"host-local"}}`,
+		"vhostuser missing mode": `{"cniVersion":"1.0.0","type":"cni-workload","transport":"vhostuser","ipam":{"type":"host-local"}}`,
+		"vhostuser bad mode":     `{"cniVersion":"1.0.0","type":"cni-workload","transport":"vhostuser","socket_mode":"bogus","ipam":{"type":"host-local"}}`,
+		"veth with socket":       `{"cniVersion":"1.0.0","type":"cni-workload","socketPath":"/run/vhost.sock","ipam":{"type":"host-local"}}`,
 	}
 	for name, conf := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -216,5 +223,28 @@ func TestParseConfigMTU(t *testing.T) {
 	}
 	if defaultMTU != workloadcni.DefaultPortMTU {
 		t.Errorf("defaultMTU = %d, want the agent's %d", defaultMTU, workloadcni.DefaultPortMTU)
+	}
+}
+
+func TestParseConfigVhostUser(t *testing.T) {
+	// socket_mode comes from NAD userdata. The device plugin's device-info mode
+	// is not authoritative because current 6WIND versions always report server.
+	conf := `{
+	  "cniVersion":"1.0.0","type":"cni-workload","vrf":"cluster",
+	  "transport":"vhostuser","deviceID":"3f9a2b1c7d","socket_mode":"client",
+	  "ipam":{"type":"host-local"}
+	}`
+	c, err := parseConfig([]byte(conf))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !c.isVhostUser() {
+		t.Errorf("isVhostUser() = false, want true")
+	}
+	if c.DeviceID != "3f9a2b1c7d" {
+		t.Errorf("DeviceID = %q, want 3f9a2b1c7d", c.DeviceID)
+	}
+	if c.socketMode() != SocketModeClient {
+		t.Errorf("socketMode() = %q, want %q", c.socketMode(), SocketModeClient)
 	}
 }

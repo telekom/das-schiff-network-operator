@@ -63,3 +63,36 @@ func TestPortNameDeterministicAndBounded(t *testing.T) {
 		})
 	}
 }
+
+func TestVhostPortNameDeterministicAndBounded(t *testing.T) {
+	const kernelIfNameLen = 15
+
+	for _, tc := range []struct {
+		name    string
+		isTrunk bool
+		wantLen int
+	}{
+		{name: "routed or access", wantLen: kernelIfNameLen},
+		{name: "trunk", isTrunk: true, wantLen: kernelIfNameLen - len(maxTrunkVLANNameSuffix)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			name := vhostPortName("cid", "net1", tc.isTrunk)
+			if len(name) != tc.wantLen {
+				t.Errorf("vhostPortName %q length %d, want %d", name, len(name), tc.wantLen)
+			}
+			if tc.isTrunk && len(name+maxTrunkVLANNameSuffix) != kernelIfNameLen {
+				t.Errorf("trunk sub-interface %q length %d, want %d",
+					name+maxTrunkVLANNameSuffix, len(name+maxTrunkVLANNameSuffix), kernelIfNameLen)
+			}
+			if name != vhostPortName("cid", "net1", tc.isTrunk) {
+				t.Errorf("vhostPortName is not deterministic for %q", tc.name)
+			}
+			if name == vhostPortName("cid", "net2", tc.isTrunk) {
+				t.Error("vhostPortName must differ per pod-side interface")
+			}
+			if name == vhostPortName("other", "net1", tc.isTrunk) {
+				t.Error("vhostPortName must differ per container")
+			}
+		})
+	}
+}
