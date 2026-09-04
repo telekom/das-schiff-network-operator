@@ -30,7 +30,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags "${ldflags}" -a -o frr-cra main.g
 
 FROM docker.io/library/ubuntu:26.04
 
-ENV FRRVER="frr-10.6"
+ENV FRRVER="frr-10.7"
 ARG DEBIAN_FRONTEND=noninteractive
 
 # Install: dependencies, clean: apt cache, remove dir: cache, man, doc, change mod time of cache dir.
@@ -50,7 +50,7 @@ RUN apt-get update \
     && touch -d "2 hours ago" /var/lib/apt/lists
 
 RUN curl -fsSL https://deb.frrouting.org/frr/keys.asc | gpg --dearmor > /etc/apt/trusted.gpg.d/frr.gpg && \
-    echo "deb https://deb.frrouting.org/frr noble $FRRVER" | tee -a /etc/apt/sources.list.d/frr.list
+    echo "deb https://deb.frrouting.org/frr resolute $FRRVER" | tee -a /etc/apt/sources.list.d/frr.list
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
