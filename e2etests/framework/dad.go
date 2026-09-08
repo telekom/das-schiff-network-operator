@@ -42,7 +42,7 @@ func (f *Framework) awaitIPv6DADCompletion(ctx context.Context, namespace, podNa
 			"ip", "-6", "addr", "show", "dev", ifName,
 		})
 		if err != nil {
-			if strings.Contains(stderr, fmt.Sprintf(`Device "%s" does not exist`, ifName)) ||
+			if strings.Contains(stderr, fmt.Sprintf("Device %q does not exist", ifName)) ||
 				strings.Contains(stderr, "Cannot find device") || strings.Contains(stderr, "No such device") {
 				return false, nil
 			}
