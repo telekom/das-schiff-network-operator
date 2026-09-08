@@ -55,9 +55,16 @@ jobs:
         #
         # The scan itself still runs over everything, so no advisory is hidden.
         run: |
-          set -o pipefail
+          set +e
           govulncheck -format json ./... > govulncheck.json
-          python3 .github/scripts/govulncheck-report.py govulncheck.json >> "$GITHUB_STEP_SUMMARY"
+          scan_status=$?
+          set -e
+          if [ -s govulncheck.json ]; then
+            python3 .github/scripts/govulncheck-report.py govulncheck.json >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "govulncheck produced no JSON report" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit "$scan_status"
 
   trivy-fs:
     name: Trivy Filesystem Scan
