@@ -300,7 +300,7 @@ func (r *Controller) remoteClusterExists(ctx context.Context, namespace string) 
 	clusterList := &unstructured.UnstructuredList{}
 	clusterList.SetGroupVersionKind(capiClusterGVK)
 	if err := r.Client.List(ctx, clusterList, client.InNamespace(namespace)); err != nil {
-		if apierrors.IsNotFound(err) || apierrors.IsNoMatchError(err) {
+		if apierrors.IsNotFound(err) || apimeta.IsNoMatchError(err) {
 			return false, nil
 		}
 		return false, fmt.Errorf("listing CAPI Clusters in namespace %s: %w", namespace, err)
