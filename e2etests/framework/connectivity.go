@@ -127,12 +127,20 @@ func (f *Framework) EnsureIPv6NoDad(ctx context.Context, namespace, podName, ipv
 
 	// Re-add the address — sysctl accept_dad=0 already prevents DAD,
 	// so we don't need the nodad flag (which older iproute2 versions lack).
-	_, stderr, err := f.ExecInPod(ctx, namespace, podName, "", []string{
-		"ip", "addr", "add", ipv6Addr + "/64", "dev", iface,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to re-add IPv6 address: %s: %w", stderr, err)
+	var stderr string
+	for attempt := 0; attempt < 3; attempt++ {
+		_, stderr, err := f.ExecInPod(ctx, namespace, podName, "", []string{
+			"ip", "addr", "add", ipv6Addr + "/64", "dev", iface,
+		})
+		if err == nil {
+			return nil
+		}
+		if !strings.Contains(stderr, "Cannot find device") && !strings.Contains(stderr, "No such device") {
+			return fmt.Errorf("failed to re-add IPv6 address: %s: %w", stderr, err)
+		}
+		if attempt < 2 {
+			time.Sleep(500 * time.Millisecond)
+		}
 	}
-
-	return nil
+	return fmt.Errorf("failed to re-add IPv6 address after interface retry: %s", stderr)
 }
