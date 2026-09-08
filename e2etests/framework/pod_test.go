@@ -2,6 +2,7 @@ package framework
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -144,9 +145,44 @@ func TestCreateTestPodDeletesStaticIPv6PodWhenReadinessFails(t *testing.T) {
 	}
 }
 
+func TestCreateTestPodDeletesStaticIPv6PodWhenDADInspectionFails(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := corev1.AddToScheme(scheme); err != nil {
+		t.Fatalf("add corev1 to scheme: %v", err)
+	}
+
+	kubeClient := kubefake.NewClientset()
+	f := &Framework{
+		Config:     &config.Config{PodReadyTimeout: time.Second},
+		KubeClient: kubeClient,
+		Client: &mirroringCreateClient{
+			Client:     clientfake.NewClientBuilder().WithScheme(scheme).Build(),
+			kubeClient: kubeClient,
+		},
+		execInPodFn: func(context.Context, string, string, string, []string) (string, string, error) {
+			return "", "inspection failed", errors.New("exec failed")
+		},
+	}
+	f.Client = &mirroringCreateClient{
+		Client:        clientfake.NewClientBuilder().WithScheme(scheme).Build(),
+		kubeClient:    kubeClient,
+		readyOnCreate: true,
+	}
+	err := f.CreateTestPod(context.Background(), "default", "static-ipv6", "worker-1", map[string]string{
+		"k8s.v1.cni.cncf.io/networks": `[{"name":"macvlan-vlan501","ips":["fda5:25c1:193c::1/64"]}]`,
+	})
+	if err == nil || !strings.Contains(err.Error(), "inspection failed") {
+		t.Fatalf("CreateTestPod() error = %v, want inspection failure", err)
+	}
+	if _, err := kubeClient.CoreV1().Pods("default").Get(context.Background(), "static-ipv6", metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+		t.Fatalf("pod still exists after inspection cleanup: %v", err)
+	}
+}
+
 type mirroringCreateClient struct {
 	client.Client
-	kubeClient *kubefake.Clientset
+	kubeClient    *kubefake.Clientset
+	readyOnCreate bool
 }
 
 func (c *mirroringCreateClient) Create(ctx context.Context, obj client.Object, opts ...client.CreateOption) error {
@@ -158,6 +194,11 @@ func (c *mirroringCreateClient) Create(ctx context.Context, obj client.Object, o
 	if !ok {
 		return nil
 	}
-	_, err := c.kubeClient.CoreV1().Pods(pod.Namespace).Create(ctx, pod.DeepCopy(), metav1.CreateOptions{})
+	mirror := pod.DeepCopy()
+	if c.readyOnCreate {
+		mirror.Status.Phase = corev1.PodRunning
+		mirror.Status.ContainerStatuses = []corev1.ContainerStatus{{Ready: true}}
+	}
+	_, err := c.kubeClient.CoreV1().Pods(pod.Namespace).Create(ctx, mirror, metav1.CreateOptions{})
 	return err
 }
