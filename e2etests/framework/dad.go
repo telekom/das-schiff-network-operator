@@ -26,6 +26,7 @@ func (f *Framework) WaitForIPv6DADComplete(ctx context.Context, namespace, podNa
 
 type execInPodFunc func(context.Context, string, string, string, []string) (string, string, error)
 
+// exec replaces only the address probe; repairs still use the framework's pod executor.
 func (f *Framework) awaitIPv6DADCompletion(ctx context.Context, namespace, podName, ipv6Addr, ifName string, timeout time.Duration, exec execInPodFunc) error {
 	target, err := parseIPv6Target(ipv6Addr)
 	if err != nil {
