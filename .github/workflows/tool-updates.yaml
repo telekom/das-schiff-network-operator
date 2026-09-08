@@ -167,6 +167,8 @@ jobs:
               echo "Tool update check was skipped (versions.env not found)."
             elif [ -f updates.md ]; then
               cat updates.md
+            elif [ "${{ steps.check.outputs.check_failed }}" = "true" ]; then
+              echo "Tool update results are incomplete."
             else
               echo "All tools are up to date!"
             fi
