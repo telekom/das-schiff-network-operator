@@ -238,7 +238,7 @@ func (f *Framework) podHasIPv6DADFailure(ctx context.Context, namespace, name st
 			return false, nil
 		}
 
-		stdout, stderr, err := f.ExecInPod(ctx, namespace, name, "", []string{"ip", "-6", "addr", "show"})
+		stdout, stderr, err := f.execInPod(ctx, namespace, name, "", []string{"ip", "-6", "addr", "show"})
 		if err != nil {
 			return false, fmt.Errorf("inspect IPv6 addresses in pod %s/%s failed (stderr=%s): %w", namespace, name, stderr, err)
 		}
@@ -252,6 +252,13 @@ func (f *Framework) podHasIPv6DADFailure(ctx context.Context, namespace, name st
 		return true, nil
 	})
 	return dadFailed, err
+}
+
+func (f *Framework) execInPod(ctx context.Context, namespace, podName, containerName string, command []string) (string, string, error) {
+	if f.execInPodFn != nil {
+		return f.execInPodFn(ctx, namespace, podName, containerName, command)
+	}
+	return f.ExecInPod(ctx, namespace, podName, containerName, command)
 }
 
 func podIsReady(pod *corev1.Pod) bool {
