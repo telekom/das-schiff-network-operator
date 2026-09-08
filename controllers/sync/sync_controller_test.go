@@ -30,7 +30,7 @@ type listErrorClient struct {
 	err error
 }
 
-func (c listErrorClient) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+func (c listErrorClient) List(_ context.Context, _ client.ObjectList, _ ...client.ListOption) error {
 	return c.err
 }
 
