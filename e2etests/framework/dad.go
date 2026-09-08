@@ -21,12 +21,12 @@ const (
 // If DAD has failed, the helper temporarily disables DAD for the interface and
 // re-adds the address once.
 func (f *Framework) WaitForIPv6DADComplete(ctx context.Context, namespace, podName, ipv6Addr, ifName string, timeout time.Duration) error {
-	return f.waitForIPv6DADComplete(ctx, namespace, podName, ipv6Addr, ifName, timeout, f.ExecInPod)
+	return f.awaitIPv6DADCompletion(ctx, namespace, podName, ipv6Addr, ifName, timeout, f.ExecInPod)
 }
 
 type execInPodFunc func(context.Context, string, string, string, []string) (string, string, error)
 
-func (f *Framework) waitForIPv6DADComplete(ctx context.Context, namespace, podName, ipv6Addr, ifName string, timeout time.Duration, exec execInPodFunc) error {
+func (f *Framework) awaitIPv6DADCompletion(ctx context.Context, namespace, podName, ipv6Addr, ifName string, timeout time.Duration, exec execInPodFunc) error {
 	target, err := parseIPv6Target(ipv6Addr)
 	if err != nil {
 		return err
