@@ -72,7 +72,7 @@ func (m *Manager) postRequest(ctx context.Context, path string, body []byte) ([]
 				_ = res.Body.Close()
 			}
 			if ctxErr := ctx.Err(); ctxErr != nil {
-				return nil, fmt.Errorf("request context canceled: %w", ctxErr)
+				return nil, fmt.Errorf("request to %s ended: %w", url, ctxErr)
 			}
 			// Continue to the next URL if there is a connection issue
 			continue
