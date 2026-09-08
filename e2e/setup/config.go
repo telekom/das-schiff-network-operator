@@ -65,6 +65,9 @@ func generateNodeConfig(genDir, tplDir string, node Node, clusterVNI int, cluste
 	if err := os.WriteFile(filepath.Join(nodeDir, "cra/flavour"), []byte("frr\n"), 0o644); err != nil {
 		return err
 	}
+	if err := os.WriteFile(filepath.Join(nodeDir, "cra/known_hosts"), nil, 0o644); err != nil {
+		return err
+	}
 
 	data := templateData{
 		VtepIP:        node.VtepIP,

@@ -1,6 +1,7 @@
 package nl
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -131,7 +132,9 @@ func (*Manager) setEUIAutogeneration(intfName string, generateEUI bool) error {
 		value = "0"
 	}
 	if _, err := fmt.Fprintf(file, "%s\n", value); err != nil {
-		file.Close()
+		if closeErr := file.Close(); closeErr != nil {
+			err = errors.Join(err, closeErr)
+		}
 		return fmt.Errorf("error writing to file: %w", err)
 	}
 	if err := file.Close(); err != nil {
