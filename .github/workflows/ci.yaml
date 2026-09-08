@@ -102,12 +102,10 @@ jobs:
 
   build-images:
     name: build container images
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
     needs: [golangci, test, validate-generated]
     permissions:
       contents: read
-      packages: write
-      id-token: write
     uses: ./.github/workflows/build-images.yaml
     with:
       push: false
