@@ -10,8 +10,8 @@ import sys
 # A finding whose first trace entry names a function is one that govulncheck
 # considers reachable from this code. Only those decide the exit code.
 #
-# This report only classifies findings. The workflow preserves govulncheck's
-# raw exit status, so both module and standard-library findings fail the job.
+# The workflow propagates scanner failures; report-generation errors also
+# fail the step. Reachable module and standard-library findings fail the job.
 
 path = sys.argv[1]
 decoder = json.JSONDecoder()
