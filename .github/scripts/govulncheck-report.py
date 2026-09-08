@@ -33,7 +33,8 @@ called_std = {}
 called_mod = {}
 not_called = set()
 for finding in findings:
-    trace = finding["trace"][0]
+    trace_entries = finding.get("trace") or []
+    trace = trace_entries[0] if trace_entries else {}
     module = trace.get("module", "unknown")
     osv = finding["osv"]
     if not trace.get("function"):

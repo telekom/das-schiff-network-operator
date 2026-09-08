@@ -61,13 +61,15 @@ jobs:
       - name: Create Licenses Report
         run: |
           max_attempts=3
-          for attempt in 1 2 3; do
+          attempt=1
+          while [ "$attempt" -le "$max_attempts" ]; do
             if make licenses-report; then
               exit 0
             fi
             if [ "$attempt" -lt "$max_attempts" ]; then
               sleep 10
             fi
+            attempt=$((attempt + 1))
           done
           echo "make licenses-report failed after ${max_attempts} attempts" >&2
           exit 1
