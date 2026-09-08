@@ -294,10 +294,10 @@ jobs:
             --kubeconfig=/etc/kubernetes/admin.conf get events -A \
             --sort-by='.lastTimestamp' > /tmp/e2e-logs/cluster2-events.log 2>&1 || true
           docker exec nwop-control-plane kubectl \
-            --kubeconfig=/etc/kubernetes/admin.conf get nodes -o yaml \
+            --kubeconfig=/etc/kubernetes/admin.conf --request-timeout=15s get nodes -o yaml \
             > /tmp/e2e-logs/cluster1-nodes.yaml 2>&1 || true
           docker exec nwop2-worker kubectl \
-            --kubeconfig=/etc/kubernetes/admin.conf get nodes -o yaml \
+            --kubeconfig=/etc/kubernetes/admin.conf --request-timeout=15s get nodes -o yaml \
             > /tmp/e2e-logs/cluster2-nodes.yaml 2>&1 || true
           # Cluster-2 operator logs (current + previous crashed container)
           docker exec nwop2-worker bash -c \
@@ -381,7 +381,7 @@ jobs:
             docker exec "$node" bash -c \
               'P=$(systemctl show cra.service -p MainPID --value 2>/dev/null); \
                CRA_PID=$(cat /proc/$P/task/*/children 2>/dev/null | head -1 | tr -d " \\n"); \
-               [ -n "$CRA_PID" ] && nsenter -t $CRA_PID -n -- vtysh -c "show ip route vrf all"' \
+               [ -n "$CRA_PID" ] && nsenter -t $CRA_PID -m -n -- vtysh -c "show ip route vrf all"' \
               > "/tmp/e2e-logs/${node}-cra-ip4-vrf-routes.log" 2>&1 || true
             docker exec "$node" bash -c \
               'P=$(systemctl show cra.service -p MainPID --value 2>/dev/null); \
