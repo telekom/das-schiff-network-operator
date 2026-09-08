@@ -170,7 +170,7 @@ func (f *Framework) readdIPv6AddressWithExec(ctx context.Context, namespace, pod
 	return f.addIPv6AddressWithExec(ctx, namespace, podName, cidr, ifName, []string{"dev", ifName}, exec)
 }
 
-func (f *Framework) addIPv6AddressWithExec(ctx context.Context, namespace, podName, cidr, ifName string, options []string, exec execInPodFunc) error {
+func (_ *Framework) addIPv6AddressWithExec(ctx context.Context, namespace, podName, cidr, ifName string, options []string, exec execInPodFunc) error {
 	args := append([]string{"ip", "-6", "addr", "add", cidr}, options...)
 	_, stderr, err := exec(ctx, namespace, podName, "", args)
 	if err != nil {
