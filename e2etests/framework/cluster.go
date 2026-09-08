@@ -11,6 +11,7 @@ import (
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -178,16 +179,31 @@ func (f *Framework) ApplyManifest(ctx context.Context, yamlData []byte) error {
 // If ns is non-empty, it overrides metadata.namespace on each object.
 // Supports multi-document YAML (separated by ---).
 func (f *Framework) ApplyManifestInNamespace(ctx context.Context, yamlData []byte, ns string) error {
+	return f.ApplyManifestWithClient(ctx, f.Client, yamlData, ns)
+}
+
+// ApplyManifestToCluster2 applies a YAML manifest to cluster-2.
+func (f *Framework) ApplyManifestToCluster2(ctx context.Context, yamlData []byte) error {
+	return f.ApplyManifestInNamespaceToCluster2(ctx, yamlData, "")
+}
+
+// ApplyManifestInNamespaceToCluster2 applies a YAML manifest to cluster-2 with a namespace override.
+func (f *Framework) ApplyManifestInNamespaceToCluster2(ctx context.Context, yamlData []byte, ns string) error {
+	return f.ApplyManifestWithClient(ctx, f.cluster2Client, yamlData, ns)
+}
+
+// ApplyManifestWithClient applies a YAML manifest using the provided Kubernetes client.
+func (f *Framework) ApplyManifestWithClient(ctx context.Context, c client.Client, yamlData []byte, ns string) error {
 	docs := splitYAMLDocuments(yamlData)
 	for _, doc := range docs {
-		if err := f.applySingleObject(ctx, doc, ns); err != nil {
+		if err := f.applySingleObject(ctx, c, doc, ns); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (f *Framework) applySingleObject(ctx context.Context, yamlData []byte, ns string) error {
+func (*Framework) applySingleObject(ctx context.Context, c client.Client, yamlData []byte, ns string) error {
 	obj := &unstructured.Unstructured{}
 	dec := yaml.NewDecodingSerializer(unstructured.UnstructuredJSONScheme)
 	_, _, err := dec.Decode(yamlData, nil, obj)
@@ -208,23 +224,28 @@ func (f *Framework) applySingleObject(ctx context.Context, yamlData []byte, ns s
 	// and on transient webhook failures (connection reset after operator restart).
 	for attempt := 0; attempt < 10; attempt++ {
 		existing := obj.DeepCopy()
-		if err := f.Client.Get(ctx, key, existing); err == nil {
+		if err := c.Get(ctx, key, existing); err == nil {
 			obj.SetResourceVersion(existing.GetResourceVersion())
-			err = f.Client.Update(ctx, obj)
+			if _, finalizersSet, err := unstructured.NestedStringSlice(obj.Object, "metadata", "finalizers"); err != nil {
+				return fmt.Errorf("decode finalizers for %s/%s: %w", obj.GetKind(), obj.GetName(), err)
+			} else if !finalizersSet {
+				obj.SetFinalizers(existing.GetFinalizers())
+			}
+			err = c.Update(ctx, obj)
 			if apierrors.IsConflict(err) || isWebhookTransient(err) {
 				time.Sleep(time.Duration(attempt+1) * 500 * time.Millisecond)
 				continue
 			}
 			return err
 		} else if !apierrors.IsNotFound(err) {
-			if isWebhookTransient(err) {
+			if meta.IsNoMatchError(err) || isWebhookTransient(err) {
 				time.Sleep(time.Duration(attempt+1) * 500 * time.Millisecond)
 				continue
 			}
 			return fmt.Errorf("get %s/%s: %w", obj.GetKind(), obj.GetName(), err)
 		}
-		err = f.Client.Create(ctx, obj)
-		if isWebhookTransient(err) {
+		err = c.Create(ctx, obj)
+		if meta.IsNoMatchError(err) || isWebhookTransient(err) {
 			time.Sleep(time.Duration(attempt+1) * 500 * time.Millisecond)
 			continue
 		}
