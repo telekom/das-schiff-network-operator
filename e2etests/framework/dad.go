@@ -145,30 +145,34 @@ func (f *Framework) writeIPv6AcceptDAD(ctx context.Context, namespace, podName, 
 }
 
 func (f *Framework) readdIPv6Address(ctx context.Context, namespace, podName, cidr, ifName string, noDAD bool) error {
-	_, stderr, err := f.ExecInPod(ctx, namespace, podName, "", []string{
+	return f.readdIPv6AddressWithExec(ctx, namespace, podName, cidr, ifName, noDAD, f.ExecInPod)
+}
+
+func (f *Framework) readdIPv6AddressWithExec(ctx context.Context, namespace, podName, cidr, ifName string, noDAD bool, exec execInPodFunc) error {
+	_, stderr, err := exec(ctx, namespace, podName, "", []string{
 		"ip", "-6", "addr", "del", cidr, "dev", ifName,
 	})
-	if err != nil {
+	if err != nil && !strings.Contains(stderr, "Cannot assign requested address") {
 		return fmt.Errorf("remove tentative IPv6 address %s from %s failed (stderr=%s): %w", cidr, ifName, stderr, err)
 	}
 
 	if noDAD {
 		// iproute2 and BusyBox differ on nodad support and argument ordering.
 		// Prefer disabling DAD, but keep E2E setup usable with minimal pod images.
-		if err := f.addIPv6Address(ctx, namespace, podName, cidr, ifName, []string{"dev", ifName, "nodad"}); err == nil {
+		if err := f.addIPv6AddressWithExec(ctx, namespace, podName, cidr, ifName, []string{"dev", ifName, "nodad"}, exec); err == nil {
 			return nil
 		}
-		if err := f.addIPv6Address(ctx, namespace, podName, cidr, ifName, []string{"nodad", "dev", ifName}); err == nil {
+		if err := f.addIPv6AddressWithExec(ctx, namespace, podName, cidr, ifName, []string{"nodad", "dev", ifName}, exec); err == nil {
 			return nil
 		}
 	}
 
-	return f.addIPv6Address(ctx, namespace, podName, cidr, ifName, []string{"dev", ifName})
+	return f.addIPv6AddressWithExec(ctx, namespace, podName, cidr, ifName, []string{"dev", ifName}, exec)
 }
 
-func (f *Framework) addIPv6Address(ctx context.Context, namespace, podName, cidr, ifName string, options []string) error {
+func (f *Framework) addIPv6AddressWithExec(ctx context.Context, namespace, podName, cidr, ifName string, options []string, exec execInPodFunc) error {
 	args := append([]string{"ip", "-6", "addr", "add", cidr}, options...)
-	_, stderr, err := f.ExecInPod(ctx, namespace, podName, "", args)
+	_, stderr, err := exec(ctx, namespace, podName, "", args)
 	if err != nil {
 		return fmt.Errorf("re-add IPv6 address %s to %s failed (stderr=%s): %w", cidr, ifName, stderr, err)
 	}
