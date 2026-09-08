@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+#
+# SPDX-License-Identifier: CC0-1.0
+
 site_name: Das Schiff Network Operator
 site_description: >-
   User documentation for the Das Schiff network-operator — declarative
