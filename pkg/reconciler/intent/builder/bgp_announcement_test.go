@@ -458,6 +458,55 @@ func TestBGPPeeringBuilder_LoopbackPeer(t *testing.T) {
 	}
 }
 
+// TestBGPPeeringBuilder_LargeFourByteASN is a regression test for a bug where
+// BGPPeer.RemoteASN was declared uint32, which controller-gen maps to the
+// OpenAPI "int32" format (signed, max 2147483647). Kubernetes enforces that
+// format strictly, so 4-byte ASNs above the signed int32 limit (legitimate
+// values up to 4294967295 per RFC 6996) were rejected at apply time even
+// though workloadAS itself validated fine. RemoteASN must now be int64 and
+// must round-trip such values without truncation or overflow.
+func TestBGPPeeringBuilder_LargeFourByteASN(t *testing.T) {
+	b := NewBGPPeeringBuilder()
+
+	const largeASN = int64(4200011028) // > math.MaxInt32 (2147483647)
+
+	data := &resolver.ResolvedData{
+		Nodes: []corev1.Node{
+			{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
+		},
+		BGPPeerings: []nc.BGPPeering{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "loopback-peer-large-asn"},
+				Spec: nc.BGPPeeringSpec{
+					Mode: nc.BGPPeeringModeLoopbackPeer,
+					Ref: nc.BGPPeeringRef{
+						InboundRefs: []string{"my-inbound"},
+					},
+					WorkloadAS: ptr(largeASN),
+				},
+			},
+		},
+	}
+
+	result, err := b.Build(context.Background(), data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	contrib, ok := result["node-1"]
+	if !ok {
+		t.Fatalf("expected contribution for node-1")
+	}
+	if contrib.ClusterVRF == nil || len(contrib.ClusterVRF.BGPPeers) != 1 {
+		t.Fatalf("expected 1 BGPPeer on ClusterVRF for node-1")
+	}
+
+	peer := contrib.ClusterVRF.BGPPeers[0]
+	if peer.RemoteASN != largeASN {
+		t.Errorf("expected RemoteASN %d, got %d (possible truncation/overflow)", largeASN, peer.RemoteASN)
+	}
+}
+
 // TestBGPPeeringBuilder_PasswordInjection verifies that buildBasePeer inlines
 // the resolved password from ResolvedData.BGPPasswords into every BGPPeer
 // produced for a BGPPeering with AuthSecretRef.

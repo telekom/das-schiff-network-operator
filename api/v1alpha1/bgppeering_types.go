@@ -40,8 +40,15 @@ type BGPPeeringSpec struct {
 	// Loopback is the loopback interface used for the BGP peering
 	LoopbackPeer *BGPPeeringLoopback `json:"loopbackPeer,omitempty"`
 
-	// RemoteASN is the ASN of the remote BGP peer
-	RemoteASN uint32 `json:"remoteASN"`
+	// RemoteASN is the ASN of the remote BGP peer. Uses asplain notation;
+	// 4-byte ASNs (up to 4294967295) are common and exceed the signed int32
+	// range, so this is int64 (format: int64) rather than uint32/int32 —
+	// controller-gen maps uint32 to the OpenAPI "int32" format, whose CEL
+	// format-check enforces the *signed* int32 range (max 2147483647) and
+	// would reject legitimate large 4-byte ASNs.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=4294967295
+	RemoteASN int64 `json:"remoteASN"`
 	// EnableBFD is the flag to enable BFD for the BGP peering
 	EnableBFD bool `json:"enableBFD"`
 

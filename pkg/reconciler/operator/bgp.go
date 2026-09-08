@@ -204,7 +204,8 @@ func buildNodeBgpPeers(node *corev1.Node, revision *v1alpha1.NetworkConfigRevisi
 
 func buildNetplanDummies(node *corev1.Node, revision *v1alpha1.NetworkConfigRevision) (map[string]netplan.Device, error) {
 	dummies := make(map[string]netplan.Device)
-	for _, bgp := range revision.Spec.BGP {
+	for i := range revision.Spec.BGP {
+		bgp := &revision.Spec.BGP[i]
 		if !matchSelector(node, bgp.NodeSelector) {
 			continue
 		}
