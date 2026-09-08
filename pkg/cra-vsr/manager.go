@@ -63,6 +63,9 @@ type Manager struct {
 // LocalASN returns the local (platform-side) BGP autonomous system number from
 // the manager's base config.
 func (m *Manager) LocalASN() int {
+	if m == nil || m.baseConfig == nil {
+		return 0
+	}
 	return m.baseConfig.LocalASN
 }
 
