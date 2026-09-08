@@ -158,10 +158,19 @@ func (f *Framework) readdIPv6Address(ctx context.Context, namespace, podName, ci
 
 func (f *Framework) addIPv6Address(ctx context.Context, namespace, podName, cidr, ifName string, options []string) error {
 	args := append([]string{"ip", "-6", "addr", "add", cidr}, options...)
-	_, stderr, err := f.ExecInPod(ctx, namespace, podName, "", args)
-	if err != nil {
-		return fmt.Errorf("re-add IPv6 address %s to %s failed (stderr=%s): %w", cidr, ifName, stderr, err)
+	var stderr string
+	var err error
+	for attempt := 0; attempt < 3; attempt++ {
+		_, stderr, err = f.ExecInPod(ctx, namespace, podName, "", args)
+		if err == nil {
+			return nil
+		}
+		if !strings.Contains(stderr, "Cannot find device") && !strings.Contains(stderr, "No such device") {
+			return fmt.Errorf("re-add IPv6 address %s to %s failed (stderr=%s): %w", cidr, ifName, stderr, err)
+		}
+		if attempt < 2 {
+			time.Sleep(500 * time.Millisecond)
+		}
 	}
-
-	return nil
+	return fmt.Errorf("re-add IPv6 address %s to %s failed after interface retry (stderr=%s): %w", cidr, ifName, stderr, err)
 }
