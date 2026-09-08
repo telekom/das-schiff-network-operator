@@ -46,12 +46,9 @@ jobs:
 
       - name: Run govulncheck
         # govulncheck reports standard library findings together with module
-        # findings. Standard library findings need a Go toolchain upgrade,
-        # while reachable module findings fail this job.
-        #
-        # The report script therefore splits the two classes. Module findings
-        # that this code calls fail the job. Standard library findings only
-        # warn, so a lagging toolchain cannot block every pull request.
+        # findings. The report script splits the two classes and explains the
+        # required remediation, while this step preserves govulncheck's raw
+        # exit status so every finding remains a strict security failure.
         #
         # The scan itself still runs over everything, so no advisory is hidden.
         run: |
