@@ -47,8 +47,8 @@ jobs:
       - name: Run govulncheck
         # govulncheck reports standard library findings together with module
         # findings. The report script splits the two classes and explains the
-        # required remediation, while this step preserves govulncheck's raw
-        # exit status so every finding remains a strict security failure.
+        # required remediation, while this step keeps every scanner failure
+        # fatal. A report-generation failure also fails the step.
         #
         # The scan itself still runs over everything, so no advisory is hidden.
         run: |
