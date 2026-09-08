@@ -2,6 +2,8 @@ module github.com/telekom/das-schiff-network-operator
 
 go 1.25.0
 
+toolchain go1.25.12
+
 require (
 	github.com/cilium/ebpf v0.22.0
 	github.com/cnf/structhash v0.0.0-20250313080605-df4c6cc74a9a
@@ -33,7 +35,7 @@ require (
 	k8s.io/apimachinery v0.35.4
 	k8s.io/client-go v0.35.4
 	nemith.io/netconf v0.0.4
-	sigs.k8s.io/cluster-api v1.13.3
+	sigs.k8s.io/cluster-api v1.13.5
 	sigs.k8s.io/controller-runtime v0.23.3
 	sigs.k8s.io/yaml v1.6.0
 )
