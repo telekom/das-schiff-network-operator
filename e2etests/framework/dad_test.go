@@ -1,9 +1,38 @@
 package framework
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestWaitForIPv6DADCompleteRetriesMissingInterface(t *testing.T) {
+	calls := 0
+	err := (&Framework{}).waitForIPv6DADComplete(context.Background(), "ns", "pod", "fd94:685b:30cf:501::10", "net1", 5*time.Second,
+		func(context.Context, string, string, string, []string) (string, string, error) {
+			calls++
+			if calls == 1 {
+				return "", `Device "net1" does not exist`, errors.New("exit status 1")
+			}
+			return `inet6 fd94:685b:30cf:501::10/64 scope global`, "", nil
+		})
+	if err != nil || calls != 2 {
+		t.Fatalf("waitForIPv6DADComplete() = err %v, calls %d; want nil, 2", err, calls)
+	}
+}
+
+func TestWaitForIPv6DADCompleteFailsOrdinaryProbeError(t *testing.T) {
+	want := errors.New("probe failed")
+	err := (&Framework{}).waitForIPv6DADComplete(context.Background(), "ns", "pod", "fd94:685b:30cf:501::10", "net1", time.Second,
+		func(context.Context, string, string, string, []string) (string, string, error) {
+			return "", "permission denied", want
+		})
+	if err == nil || !strings.Contains(err.Error(), want.Error()) {
+		t.Fatalf("waitForIPv6DADComplete() error = %v, want %q", err, want)
+	}
+}
 
 func TestParseIPv6Target(t *testing.T) {
 	tests := []struct {
