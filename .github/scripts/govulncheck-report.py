@@ -10,9 +10,8 @@ import sys
 # A finding whose first trace entry names a function is one that govulncheck
 # considers reachable from this code. Only those decide the exit code.
 #
-# Module findings fail the job. Standard library findings only warn, because
-# the fix is a Go toolchain upgrade, and the toolchain comes from setup-go,
-# which can lag behind the newest patch release.
+# This report only classifies findings. The workflow preserves govulncheck's
+# raw exit status, so both module and standard-library findings fail the job.
 
 path = sys.argv[1]
 decoder = json.JSONDecoder()
@@ -51,7 +50,7 @@ if called_mod:
         out.append(f"- **{osv}** (fixed in {called_mod[osv] or 'unknown'})")
     out.append("")
 if called_std:
-    out.append("### govulncheck: standard library vulnerabilities (warning)")
+    out.append("### govulncheck: standard library vulnerabilities found")
     out.append("")
     out.append("These need a Go toolchain upgrade, not a dependency change.")
     out.append("")
