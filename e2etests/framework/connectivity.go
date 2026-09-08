@@ -3,6 +3,7 @@ package framework
 import (
 	"context"
 	"fmt"
+	"net/netip"
 	"strings"
 	"time"
 )
@@ -86,41 +87,6 @@ func (f *Framework) PingFromCluster2Pod(ctx context.Context, namespace, podName,
 	return &PingResult{Success: true, Output: stdout}, nil
 }
 
-// WaitForIPv6DADComplete waits until the IPv6 address on the given interface
-// is no longer in "tentative" state inside the pod. In containerlab/Kind
-// environments, DAD (Duplicate Address Detection) can fail because CRA bridge
-// agents on other nodes respond to DAD probes, causing the address to enter
-// "dadfailed" state. This function detects that and resets the address.
-func (f *Framework) WaitForIPv6DADComplete(ctx context.Context, namespace, podName, ipv6Addr, iface string, timeout time.Duration) error {
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	return Poll(ctx, 3*time.Second, func() (bool, error) {
-		stdout, _, err := f.ExecInPod(ctx, namespace, podName, "", []string{"ip", "-6", "addr", "show", "dev", iface})
-		if err != nil {
-			return false, nil
-		}
-
-		for _, line := range strings.Split(stdout, "\n") {
-			if !strings.Contains(line, ipv6Addr) {
-				continue
-			}
-			if strings.Contains(line, "dadfailed") {
-				// DAD failed — reset address to re-trigger DAD.
-				_, _, _ = f.ExecInPod(ctx, namespace, podName, "", []string{"ip", "addr", "del", ipv6Addr + "/64", "dev", iface})
-				time.Sleep(500 * time.Millisecond)
-				_, _, _ = f.ExecInPod(ctx, namespace, podName, "", []string{"ip", "addr", "add", ipv6Addr + "/64", "dev", iface})
-				return false, nil
-			}
-			if strings.Contains(line, "tentative") {
-				return false, nil
-			}
-			return true, nil
-		}
-		return false, nil
-	})
-}
-
 // CurlFromCluster2Pod executes a curl command from a pod on cluster-2.
 func (f *Framework) CurlFromCluster2Pod(ctx context.Context, namespace, podName, url string) (string, error) {
 	args := []string{"wget", "-q", "-O", "/dev/null", "-S", "--timeout=10", url}
@@ -140,6 +106,18 @@ func (f *Framework) CurlFromCluster2Pod(ctx context.Context, namespace, podName,
 // respond to DAD probes causing addresses to permanently enter "dadfailed" state.
 // Disabling DAD entirely is the correct approach for these synthetic test environments.
 func (f *Framework) EnsureIPv6NoDad(ctx context.Context, namespace, podName, ipv6Addr, iface string) error {
+	stdout, stderr, err := f.ExecInPod(ctx, namespace, podName, "", []string{
+		"ip", "-6", "-o", "addr", "show", "dev", iface,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to inspect IPv6 address on %s: %s: %w", iface, stderr, err)
+	}
+
+	addrWithPrefix, err := findIPv6AddressWithPrefix(stdout, ipv6Addr)
+	if err != nil {
+		return fmt.Errorf("failed to find IPv6 address on %s: %w", iface, err)
+	}
+
 	// Disable DAD on the interface via sysctl (best-effort, ignore errors).
 	//nolint:dogsled // ExecInPod returns stdout, stderr, err — none needed for best-effort sysctl
 	_, _, _ = f.ExecInPod(ctx, namespace, podName, "", []string{
@@ -149,17 +127,114 @@ func (f *Framework) EnsureIPv6NoDad(ctx context.Context, namespace, podName, ipv
 	// Remove the existing address (which may be in dadfailed/tentative state).
 	//nolint:dogsled // ExecInPod returns stdout, stderr, err — none needed for best-effort addr del
 	_, _, _ = f.ExecInPod(ctx, namespace, podName, "", []string{
-		"ip", "addr", "del", ipv6Addr + "/64", "dev", iface,
+		"ip", "addr", "del", addrWithPrefix, "dev", iface,
 	})
 
 	// Re-add the address — sysctl accept_dad=0 already prevents DAD,
 	// so we don't need the nodad flag (which older iproute2 versions lack).
-	_, stderr, err := f.ExecInPod(ctx, namespace, podName, "", []string{
-		"ip", "addr", "add", ipv6Addr + "/64", "dev", iface,
+	_, stderr, err = f.ExecInPod(ctx, namespace, podName, "", []string{
+		"ip", "addr", "add", addrWithPrefix, "dev", iface,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to re-add IPv6 address: %s: %w", stderr, err)
 	}
 
 	return nil
+}
+
+func findIPv6AddressWithPrefix(output, ipv6Addr string) (string, error) {
+	target, err := parseCanonicalIPv6(ipv6Addr)
+	if err != nil {
+		return "", fmt.Errorf("invalid ipv6Addr %q: %w", ipv6Addr, err)
+	}
+
+	for _, line := range strings.Split(output, "\n") {
+		for _, field := range strings.Fields(line) {
+			if !strings.Contains(field, "/") {
+				continue
+			}
+			prefix, parseErr := netip.ParsePrefix(field)
+			if parseErr != nil || !prefix.Addr().Is6() || prefix.Addr().Is4In6() {
+				continue
+			}
+			if prefix.Addr() == target {
+				return prefix.String(), nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("IPv6 address %s not found", ipv6Addr)
+}
+
+// WaitForIPv6DADComplete polls `ip -6 -o addr show dev <iface>` inside a pod until
+// the given IPv6 address appears without the "tentative" flag, indicating that
+// Duplicate Address Detection (DAD) has completed.
+//
+// ipv6Addr must be a bare address (no prefix length), e.g. "fd94:685b:30cf:501::10".
+// The address is compared using canonical netip.Addr equality so that textually
+// different but equivalent representations (e.g. compressed vs expanded) are treated as the same.
+//
+// Errors from ExecInPod are propagated so that permanent failures (e.g. wrong interface
+// name, missing `ip` binary, permission issues) surface immediately instead of silently
+// looping until the context deadline.
+func (f *Framework) WaitForIPv6DADComplete(ctx context.Context, namespace, podName, ipv6Addr, iface string, timeout time.Duration) error {
+	canonical, err := parseCanonicalIPv6(ipv6Addr)
+	if err != nil {
+		return fmt.Errorf("invalid ipv6Addr %q: %w", ipv6Addr, err)
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	return Poll(ctx, 2*time.Second, func() (bool, error) {
+		stdout, stderr, execErr := f.ExecInPod(ctx, namespace, podName, "", []string{
+			"ip", "-6", "-o", "addr", "show", "dev", iface,
+		})
+		if execErr != nil {
+			return false, fmt.Errorf("ip addr show failed (stderr=%s): %w", stderr, execErr)
+		}
+
+		for _, line := range strings.Split(stdout, "\n") {
+			matchesTarget := false
+			for _, field := range strings.Fields(line) {
+				addrPart := field
+				if slash := strings.IndexByte(addrPart, '/'); slash >= 0 {
+					addrPart = addrPart[:slash]
+				}
+				lineAddr, parseErr := parseCanonicalIPv6(addrPart)
+				if parseErr != nil {
+					continue
+				}
+				if lineAddr == canonical {
+					matchesTarget = true
+					break
+				}
+			}
+			if !matchesTarget {
+				continue
+			}
+			if strings.Contains(line, "dadfailed") {
+				return false, fmt.Errorf("IPv6 DAD failed for %s on %s: %s", ipv6Addr, iface, strings.TrimSpace(line))
+			}
+			if strings.Contains(line, "tentative") {
+				continue
+			}
+			return true, nil
+		}
+		return false, nil
+	})
+}
+
+func parseCanonicalIPv6(s string) (netip.Addr, error) {
+	addr, err := netip.ParseAddr(s)
+	if err != nil {
+		return netip.Addr{}, err
+	}
+	if !addr.Is6() {
+		return netip.Addr{}, fmt.Errorf("%q is not an IPv6 address", s)
+	}
+	if addr.Is4In6() {
+		return netip.Addr{}, fmt.Errorf("%q is an IPv4-mapped IPv6 address, not a pure IPv6 address", s)
+	}
+	return addr, nil
 }
