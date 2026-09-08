@@ -2,14 +2,17 @@ package sync
 
 import (
 	"context"
+	"errors"
 	"net"
 	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -21,6 +24,15 @@ import (
 
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 )
+
+type listErrorClient struct {
+	client.Client
+	err error
+}
+
+func (c listErrorClient) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+	return c.err
+}
 
 func testScheme() *runtime.Scheme {
 	s := runtime.NewScheme()
@@ -867,6 +879,25 @@ func TestRemoteClusterExistsIgnoresDeletingClusters(t *testing.T) {
 	}
 	if exists {
 		t.Fatal("Expected deleting CAPI Cluster not to count as an active remote cluster")
+	}
+}
+
+func TestRemoteClusterExistsNoMatchIsNotAnError(t *testing.T) {
+	sc := &Controller{Client: listErrorClient{err: &apimeta.NoKindMatchError{GroupKind: schema.GroupKind{Group: "cluster.x-k8s.io", Kind: "Cluster"}}}}
+
+	exists, err := sc.remoteClusterExists(context.Background(), testPendingClusterNamespace)
+	if err != nil || exists {
+		t.Fatalf("expected no cluster and no error, got exists=%t err=%v", exists, err)
+	}
+}
+
+func TestRemoteClusterExistsPropagatesListError(t *testing.T) {
+	want := errors.New("list failed")
+	sc := &Controller{Client: listErrorClient{err: want}}
+
+	exists, err := sc.remoteClusterExists(context.Background(), testPendingClusterNamespace)
+	if exists || !errors.Is(err, want) {
+		t.Fatalf("expected propagated list error, got exists=%t err=%v", exists, err)
 	}
 }
 
