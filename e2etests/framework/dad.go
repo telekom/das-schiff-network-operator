@@ -36,6 +36,10 @@ func (f *Framework) WaitForIPv6DADComplete(ctx context.Context, namespace, podNa
 			"ip", "-6", "addr", "show", "dev", ifName,
 		})
 		if err != nil {
+			if strings.Contains(stderr, fmt.Sprintf(`Device "%s" does not exist`, ifName)) ||
+				strings.Contains(stderr, "Cannot find device") || strings.Contains(stderr, "No such device") {
+				return false, nil
+			}
 			return false, fmt.Errorf("ip addr show failed (stderr=%s): %w", stderr, err)
 		}
 
@@ -158,19 +162,10 @@ func (f *Framework) readdIPv6Address(ctx context.Context, namespace, podName, ci
 
 func (f *Framework) addIPv6Address(ctx context.Context, namespace, podName, cidr, ifName string, options []string) error {
 	args := append([]string{"ip", "-6", "addr", "add", cidr}, options...)
-	var stderr string
-	var err error
-	for attempt := 0; attempt < 3; attempt++ {
-		_, stderr, err = f.ExecInPod(ctx, namespace, podName, "", args)
-		if err == nil {
-			return nil
-		}
-		if !strings.Contains(stderr, "Cannot find device") && !strings.Contains(stderr, "No such device") {
-			return fmt.Errorf("re-add IPv6 address %s to %s failed (stderr=%s): %w", cidr, ifName, stderr, err)
-		}
-		if attempt < 2 {
-			time.Sleep(500 * time.Millisecond)
-		}
+	_, stderr, err := f.ExecInPod(ctx, namespace, podName, "", args)
+	if err != nil {
+		return fmt.Errorf("re-add IPv6 address %s to %s failed (stderr=%s): %w", cidr, ifName, stderr, err)
 	}
-	return fmt.Errorf("re-add IPv6 address %s to %s failed after interface retry (stderr=%s): %w", cidr, ifName, stderr, err)
+
+	return nil
 }
