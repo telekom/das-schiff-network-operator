@@ -45,7 +45,7 @@ func phaseLoadPrebuiltImages() error {
 		}
 		if os.Getenv("E2E_DELETE_LOADED_TARBALLS") == "true" {
 			if err := os.Remove(tarPath); err != nil {
-				return fmt.Errorf("removing loaded image tarball %s: %w", entry.Name(), err)
+				return fmt.Errorf("removing loaded image tarball %s: %w", tarPath, err)
 			}
 		}
 	}
