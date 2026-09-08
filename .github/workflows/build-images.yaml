@@ -59,7 +59,18 @@ jobs:
           go-version-file: go.mod
 
       - name: Create Licenses Report
-        run: make licenses-report
+        run: |
+          max_attempts=3
+          for attempt in 1 2 3; do
+            if make licenses-report; then
+              exit 0
+            fi
+            if [ "$attempt" -lt "$max_attempts" ]; then
+              sleep 10
+            fi
+          done
+          echo "make licenses-report failed after ${max_attempts} attempts" >&2
+          exit 1
 
       - name: Read Go version
         id: go-version
