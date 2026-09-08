@@ -334,7 +334,6 @@ crd-ref-docs: ## Download crd-ref-docs locally if necessary.
 PROJECT_DIR := $(shell dirname $(abspath $(lastword $(MAKEFILE_LIST))))
 define go-get-tool
 @[ -f "$(1)" ] || { \
-set -e ;\
 TMP_DIR=$$(mktemp -d) ;\
 cd $$TMP_DIR ;\
 go mod init tmp ;\
