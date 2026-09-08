@@ -34,6 +34,38 @@ func TestWaitForIPv6DADCompleteFailsOrdinaryProbeError(t *testing.T) {
 	}
 }
 
+func TestReaddIPv6AddressToleratesAddressDisappearing(t *testing.T) {
+	calls := 0
+	err := (&Framework{}).readdIPv6AddressWithExec(context.Background(), "ns", "pod", "fd94::10/64", "net1", true,
+		func(_ context.Context, _, _, _ string, command []string) (string, string, error) {
+			calls++
+			if len(command) > 3 && command[3] == "del" {
+				return "", "RTNETLINK answers: Cannot assign requested address", errors.New("exit status 2")
+			}
+			if strings.Join(command, " ") != "ip -6 addr add fd94::10/64 dev net1 nodad" {
+				t.Fatalf("repair lost nodad option: %v", command)
+			}
+			return "", "", nil
+		})
+	if err != nil || calls != 2 {
+		t.Fatalf("readdIPv6Address() = err %v, calls %d; want nil, 2", err, calls)
+	}
+}
+
+func TestReaddIPv6AddressRejectsDeleteFailure(t *testing.T) {
+	want := errors.New("permission denied")
+	err := (&Framework{}).readdIPv6AddressWithExec(context.Background(), "ns", "pod", "fd94::10/64", "net1", false,
+		func(_ context.Context, _, _, _ string, command []string) (string, string, error) {
+			if len(command) > 3 && command[3] == "del" {
+				return "", "Operation not permitted", want
+			}
+			return "", "", nil
+		})
+	if err == nil || !strings.Contains(err.Error(), want.Error()) {
+		t.Fatalf("readdIPv6Address() error = %v, want %q", err, want)
+	}
+}
+
 func TestParseIPv6Target(t *testing.T) {
 	tests := []struct {
 		name    string
