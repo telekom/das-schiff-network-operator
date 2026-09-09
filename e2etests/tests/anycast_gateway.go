@@ -3,6 +3,7 @@ package tests
 import (
 	"context"
 	"fmt"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -69,35 +70,21 @@ var _ = Describe("Anycast Gateway", Label("l2", "intent"), func() {
 			gwIPv4 := "10.250.0.1"
 			gwIPv6 := "fd94:685b:30cf:501::1"
 
-			By("Pinging gateway from both pods to populate ARP/NDP")
-			_, _ = f.PingFromPod(ctx, ns, "macvlan-01", gwIPv4, 3)
-			_, _ = f.PingFromPod(ctx, ns, "macvlan-02", gwIPv4, 3)
-			_, _ = f.PingFromPod(ctx, ns, "macvlan-01", gwIPv6, 3)
-			_, _ = f.PingFromPod(ctx, ns, "macvlan-02", gwIPv6, 3)
+			By("Resolving gateway MAC from macvlan-01 (IPv4)")
+			mac1 := resolveGatewayMAC(ctx, f, ns, "macvlan-01", gwIPv4)
 
-			By("Getting gateway MAC from macvlan-01 (IPv4)")
-			mac1, err := f.GetGatewayMAC(ctx, ns, "macvlan-01", gwIPv4)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(mac1).NotTo(BeEmpty())
-
-			By("Getting gateway MAC from macvlan-02 (IPv4)")
-			mac2, err := f.GetGatewayMAC(ctx, ns, "macvlan-02", gwIPv4)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(mac2).NotTo(BeEmpty())
+			By("Resolving gateway MAC from macvlan-02 (IPv4)")
+			mac2 := resolveGatewayMAC(ctx, f, ns, "macvlan-02", gwIPv4)
 
 			By(fmt.Sprintf("Verifying both see the same anycast MAC via ARP (expected: %s)", cfg.AnycastMAC))
 			Expect(mac1).To(Equal(mac2), "Gateway MACs differ between nodes (IPv4)")
 			Expect(mac1).To(Equal(cfg.AnycastMAC), "Gateway MAC does not match configured anycast MAC (IPv4)")
 
-			By("Getting gateway MAC from macvlan-01 (IPv6)")
-			mac1v6, err := f.GetGatewayMAC(ctx, ns, "macvlan-01", gwIPv6)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(mac1v6).NotTo(BeEmpty())
+			By("Resolving gateway MAC from macvlan-01 (IPv6)")
+			mac1v6 := resolveGatewayMAC(ctx, f, ns, "macvlan-01", gwIPv6)
 
-			By("Getting gateway MAC from macvlan-02 (IPv6)")
-			mac2v6, err := f.GetGatewayMAC(ctx, ns, "macvlan-02", gwIPv6)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(mac2v6).NotTo(BeEmpty())
+			By("Resolving gateway MAC from macvlan-02 (IPv6)")
+			mac2v6 := resolveGatewayMAC(ctx, f, ns, "macvlan-02", gwIPv6)
 
 			By(fmt.Sprintf("Verifying both see the same anycast MAC via NDP (expected: %s)", cfg.AnycastMAC))
 			Expect(mac1v6).To(Equal(mac2v6), "Gateway MACs differ between nodes (IPv6)")
@@ -130,35 +117,21 @@ var _ = Describe("Anycast Gateway", Label("l2", "intent"), func() {
 			gwIPv4 := "10.250.1.1"
 			gwIPv6 := "fd94:685b:30cf:502::1"
 
-			By("Pinging VLAN 502 gateway from both pods to populate ARP/NDP")
-			_, _ = f.PingFromPod(ctx, ns, "macvlan-v502-01", gwIPv4, 3)
-			_, _ = f.PingFromPod(ctx, ns, "macvlan-v502-02", gwIPv4, 3)
-			_, _ = f.PingFromPod(ctx, ns, "macvlan-v502-01", gwIPv6, 3)
-			_, _ = f.PingFromPod(ctx, ns, "macvlan-v502-02", gwIPv6, 3)
+			By("Resolving VLAN 502 gateway MAC from macvlan-v502-01 (IPv4)")
+			mac1 := resolveGatewayMAC(ctx, f, ns, "macvlan-v502-01", gwIPv4)
 
-			By("Getting VLAN 502 gateway MAC from macvlan-v502-01 (IPv4)")
-			mac1, err := f.GetGatewayMAC(ctx, ns, "macvlan-v502-01", gwIPv4)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(mac1).NotTo(BeEmpty())
-
-			By("Getting VLAN 502 gateway MAC from macvlan-v502-02 (IPv4)")
-			mac2, err := f.GetGatewayMAC(ctx, ns, "macvlan-v502-02", gwIPv4)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(mac2).NotTo(BeEmpty())
+			By("Resolving VLAN 502 gateway MAC from macvlan-v502-02 (IPv4)")
+			mac2 := resolveGatewayMAC(ctx, f, ns, "macvlan-v502-02", gwIPv4)
 
 			By(fmt.Sprintf("Verifying both see the same VLAN 502 anycast MAC (expected: %s)", cfg.AnycastMACVlan502))
 			Expect(mac1).To(Equal(mac2), "VLAN 502 gateway MACs differ between nodes (IPv4)")
 			Expect(mac1).To(Equal(cfg.AnycastMACVlan502), "VLAN 502 gateway MAC does not match configured anycast MAC (IPv4)")
 
-			By("Getting VLAN 502 gateway MAC from macvlan-v502-01 (IPv6)")
-			mac1v6, err := f.GetGatewayMAC(ctx, ns, "macvlan-v502-01", gwIPv6)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(mac1v6).NotTo(BeEmpty())
+			By("Resolving VLAN 502 gateway MAC from macvlan-v502-01 (IPv6)")
+			mac1v6 := resolveGatewayMAC(ctx, f, ns, "macvlan-v502-01", gwIPv6)
 
-			By("Getting VLAN 502 gateway MAC from macvlan-v502-02 (IPv6)")
-			mac2v6, err := f.GetGatewayMAC(ctx, ns, "macvlan-v502-02", gwIPv6)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(mac2v6).NotTo(BeEmpty())
+			By("Resolving VLAN 502 gateway MAC from macvlan-v502-02 (IPv6)")
+			mac2v6 := resolveGatewayMAC(ctx, f, ns, "macvlan-v502-02", gwIPv6)
 
 			By(fmt.Sprintf("Verifying both see the same VLAN 502 anycast MAC via NDP (expected: %s)", cfg.AnycastMACVlan502))
 			Expect(mac1v6).To(Equal(mac2v6), "VLAN 502 gateway MACs differ between nodes (IPv6)")
@@ -191,35 +164,21 @@ var _ = Describe("Anycast Gateway", Label("l2", "intent"), func() {
 			gwIPv4 := "10.250.30.1"
 			gwIPv6 := "fd94:685b:30cf:503::1"
 
-			By("Pinging VLAN 503 gateway from both pods to populate ARP/NDP")
-			_, _ = f.PingFromPod(ctx, ns, "macvlan-v503-01", gwIPv4, 3)
-			_, _ = f.PingFromPod(ctx, ns, "macvlan-v503-02", gwIPv4, 3)
-			_, _ = f.PingFromPod(ctx, ns, "macvlan-v503-01", gwIPv6, 3)
-			_, _ = f.PingFromPod(ctx, ns, "macvlan-v503-02", gwIPv6, 3)
+			By("Resolving VLAN 503 gateway MAC from macvlan-v503-01 (IPv4)")
+			mac1 := resolveGatewayMAC(ctx, f, ns, "macvlan-v503-01", gwIPv4)
 
-			By("Getting VLAN 503 gateway MAC from macvlan-v503-01 (IPv4)")
-			mac1, err := f.GetGatewayMAC(ctx, ns, "macvlan-v503-01", gwIPv4)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(mac1).NotTo(BeEmpty())
-
-			By("Getting VLAN 503 gateway MAC from macvlan-v503-02 (IPv4)")
-			mac2, err := f.GetGatewayMAC(ctx, ns, "macvlan-v503-02", gwIPv4)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(mac2).NotTo(BeEmpty())
+			By("Resolving VLAN 503 gateway MAC from macvlan-v503-02 (IPv4)")
+			mac2 := resolveGatewayMAC(ctx, f, ns, "macvlan-v503-02", gwIPv4)
 
 			By(fmt.Sprintf("Verifying both see the same VLAN 503 anycast MAC (expected: %s)", cfg.AnycastMAC))
 			Expect(mac1).To(Equal(mac2), "VLAN 503 gateway MACs differ between nodes (IPv4)")
 			Expect(mac1).To(Equal(cfg.AnycastMAC), "VLAN 503 gateway MAC does not match configured anycast MAC (IPv4)")
 
-			By("Getting VLAN 503 gateway MAC from macvlan-v503-01 (IPv6)")
-			mac1v6, err := f.GetGatewayMAC(ctx, ns, "macvlan-v503-01", gwIPv6)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(mac1v6).NotTo(BeEmpty())
+			By("Resolving VLAN 503 gateway MAC from macvlan-v503-01 (IPv6)")
+			mac1v6 := resolveGatewayMAC(ctx, f, ns, "macvlan-v503-01", gwIPv6)
 
-			By("Getting VLAN 503 gateway MAC from macvlan-v503-02 (IPv6)")
-			mac2v6, err := f.GetGatewayMAC(ctx, ns, "macvlan-v503-02", gwIPv6)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(mac2v6).NotTo(BeEmpty())
+			By("Resolving VLAN 503 gateway MAC from macvlan-v503-02 (IPv6)")
+			mac2v6 := resolveGatewayMAC(ctx, f, ns, "macvlan-v503-02", gwIPv6)
 
 			By(fmt.Sprintf("Verifying both see the same VLAN 503 anycast MAC via NDP (expected: %s)", cfg.AnycastMAC))
 			Expect(mac1v6).To(Equal(mac2v6), "VLAN 503 gateway MACs differ between nodes (IPv6)")
@@ -227,3 +186,20 @@ var _ = Describe("Anycast Gateway", Label("l2", "intent"), func() {
 		})
 	})
 })
+
+// resolveGatewayMAC pings the gateway and reads its neighbour entry until the
+// MAC is resolved. The first L2 spec may run before the CRA has finished
+// programming the VLAN, so a single-shot lookup is racy.
+func resolveGatewayMAC(ctx context.Context, f *framework.Framework, ns, pod, gwIP string) string {
+	var mac string
+	Eventually(func() error {
+		if result, err := f.PingFromPod(ctx, ns, pod, gwIP, 1); err != nil || result == nil || !result.Success {
+			GinkgoWriter.Printf("%s: ping %s not yet successful (err=%v)\n", pod, gwIP, err)
+		}
+		var err error
+		mac, err = f.GetGatewayMAC(ctx, ns, pod, gwIP)
+		return err
+	}).WithTimeout(60*time.Second).WithPolling(3*time.Second).Should(Succeed(),
+		"gateway %s not resolvable from %s", gwIP, pod)
+	return mac
+}
