@@ -133,8 +133,15 @@ type BGPPeer struct {
 	Address *string `json:"address,omitempty"`
 	// ListenRange is the listen range for the BGP peer.
 	ListenRange *string `json:"listenRange,omitempty"`
-	// RemoteASN is the remote Autonomous System Number.
-	RemoteASN uint32 `json:"remoteAsn"`
+	// RemoteASN is the remote Autonomous System Number. Uses asplain notation;
+	// 4-byte ASNs (up to 4294967295) are common and exceed the signed int32
+	// range, so this is int64 (format: int64) rather than uint32/int32 —
+	// controller-gen maps uint32 to the OpenAPI "int32" format, whose CEL
+	// format-check enforces the *signed* int32 range (max 2147483647) and
+	// would reject legitimate large 4-byte ASNs.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=4294967295
+	RemoteASN int64 `json:"remoteAsn"`
 	// IPv4 is the IPv4 address family configuration.
 	IPv4 *AddressFamily `json:"ipv4,omitempty"`
 	// IPv6 is the IPv6 address family configuration.

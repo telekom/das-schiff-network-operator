@@ -535,7 +535,7 @@ var _ = Describe("CRA-VSR", func() {
 	})
 	It("Renders listen-range peers for the management VRF", func() {
 		listenRange := "192.168.100.0/24"
-		remoteASN := uint32(65099)
+		remoteASN := int64(65099)
 		maxPfx := uint32(10)
 
 		nodeSpec := &v1alpha1.NodeNetworkConfigSpec{

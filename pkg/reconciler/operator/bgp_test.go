@@ -102,7 +102,7 @@ var _ = Describe("BGP building", func() {
 			Expect(bgpPeer.Address).To(Equal(&loopbackIP))
 			Expect(bgpPeer.Multihop).ToNot(BeNil())
 			Expect(*bgpPeer.Multihop).To(Equal(bgpMultihop))
-			Expect(bgpPeer.RemoteASN).To(Equal(uint32(65000)))
+			Expect(bgpPeer.RemoteASN).To(Equal(int64(65000)))
 			Expect(bgpPeer.IPv4).ToNot(BeNil())
 			Expect(bgpPeer.IPv6).To(BeNil())
 		})

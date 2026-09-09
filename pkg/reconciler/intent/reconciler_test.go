@@ -644,7 +644,7 @@ func TestBGPPeeringListenRange(t *testing.T) {
 	for _, peer := range fvrf.BGPPeers {
 		if peer.ListenRange != nil {
 			hasListenRange = true
-			assert.Equal(t, uint32(65100), peer.RemoteASN, "expected WorkloadAS as RemoteASN")
+			assert.Equal(t, int64(65100), peer.RemoteASN, "expected WorkloadAS as RemoteASN")
 		}
 	}
 	assert.True(t, hasListenRange, "expected at least one BGPPeer with ListenRange")
@@ -681,11 +681,59 @@ func TestBGPPeeringLoopbackPeer(t *testing.T) {
 	require.NotEmpty(t, nnc.Spec.ClusterVRF.BGPPeers, "expected BGPPeers on ClusterVRF")
 
 	peer := nnc.Spec.ClusterVRF.BGPPeers[0]
-	assert.Equal(t, uint32(65200), peer.RemoteASN, "expected WorkloadAS as RemoteASN")
+	assert.Equal(t, int64(65200), peer.RemoteASN, "expected WorkloadAS as RemoteASN")
 
 	// Dual-stack address families should be set
 	assert.NotNil(t, peer.IPv4, "expected IPv4 address family")
 	assert.NotNil(t, peer.IPv6, "expected IPv6 address family")
+}
+
+// TestBGPPeeringLoopbackPeerLargeFourByteASN is a regression test for a bug
+// where NodeNetworkConfig.spec.*.bgpPeers[].remoteAsn was declared uint32,
+// which controller-gen maps to the CRD's OpenAPI "int32" format (signed, max
+// 2147483647). The API server enforces that format strictly, so applying a
+// NodeNetworkConfig for a BGPPeering with a legitimate 4-byte ASN above the
+// signed int32 limit (up to 4294967295 per RFC 6996) was rejected with:
+//
+//	Checked value must be of type integer with format int32
+//
+// even though BGPPeering.spec.workloadAS itself validated fine (int64).
+// remoteAsn must now be int64 so the envtest API server accepts the create.
+func TestBGPPeeringLoopbackPeerLargeFourByteASN(t *testing.T) {
+	ctx := context.Background()
+	nodeName := "node-bgp-lb-large-asn"
+
+	const largeASN = int64(4200011028) // > math.MaxInt32 (2147483647)
+
+	createNode(t, ctx, nodeName, nil)
+	createObj(t, ctx, makeVRF("vrf-bgp-lb-large", "bgplblg", 2002092, "65188:2092"))
+	createObj(t, ctx, makeNetwork("net-bgp-lb-large", 562, 4600003, "10.250.62.0/24", ""))
+	createObj(t, ctx, makeDestination("dest-bgp-lb-large", "vrf-bgp-lb-large", map[string]string{"type": "bgp-lb-large"}, []string{"10.102.0.0/16"}))
+	createObj(t, ctx, makeInbound("ib-bgp-lb-large", "net-bgp-lb-large", destSelector("bgp-lb-large"), []string{"10.250.62.10/32"}))
+
+	bgpPeering := &nc.BGPPeering{
+		ObjectMeta: metav1.ObjectMeta{Name: "bgpp-loopback-large-asn", Namespace: testNamespace},
+		Spec: nc.BGPPeeringSpec{
+			Mode: nc.BGPPeeringModeLoopbackPeer,
+			Ref: nc.BGPPeeringRef{
+				InboundRefs: []string{"ib-bgp-lb-large"},
+			},
+			WorkloadAS:      ptr(largeASN),
+			AddressFamilies: []nc.BGPAddressFamily{nc.BGPAddressFamilyIPv4Unicast, nc.BGPAddressFamilyIPv6Unicast},
+		},
+	}
+	createObj(t, ctx, bgpPeering)
+
+	// reconcileAndGetNNC creates the NodeNetworkConfig against the envtest API
+	// server, which is where the original bug surfaced: the server rejected
+	// the create/update due to the (then-)signed int32 format check.
+	nnc := reconcileAndGetNNC(t, ctx, nodeName)
+
+	require.NotNil(t, nnc.Spec.ClusterVRF, "expected ClusterVRF for loopbackPeer BGPPeering")
+	require.NotEmpty(t, nnc.Spec.ClusterVRF.BGPPeers, "expected BGPPeers on ClusterVRF")
+
+	peer := nnc.Spec.ClusterVRF.BGPPeers[0]
+	assert.Equal(t, largeASN, peer.RemoteASN, "expected large 4-byte WorkloadAS as RemoteASN without truncation")
 }
 
 // --- TrafficMirror Tests ---
