@@ -91,7 +91,10 @@ topology:
       exec:
         - ip addr add fddf:64ff:9b00:1::1/127 dev eth1
         - ip addr add fddf:64ff:9b00:2::1/127 dev eth2
-        - "ip -6 route add default src fda5:25c1:193e::1 nexthop via fddf:64ff:9b00:1:: dev eth1 weight 1 nexthop via fddf:64ff:9b00:2:: dev eth2 weight 1"
+        # start-nat64.sh assigns the src address to the tun asynchronously; wait
+        # for it, otherwise the route add fails with "Invalid source address"
+        # and the kind nodes never get DNS.
+        - "bash -c 'for i in $(seq 1 60); do ip -6 addr show dev nat64 2>/dev/null | grep -q fda5:25c1:193e::1 && break; sleep 1; done; ip -6 route add default src fda5:25c1:193e::1 nexthop via fddf:64ff:9b00:1:: dev eth1 weight 1 nexthop via fddf:64ff:9b00:2:: dev eth2 weight 1'"
 
     # ── Test runner ──
     tester:
