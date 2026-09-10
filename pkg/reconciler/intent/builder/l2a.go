@@ -86,6 +86,10 @@ func (b *L2ABuilder) buildWithPlacements(
 	ifOwner := make(map[string]string)
 	routeOwner := make(map[string]staticRouteOwner)
 
+	// Ownership is first-come-first-served, so the iteration order decides which
+	// of two colliding L2As wins. The list comes from the informer cache in
+	// unspecified order; without a stable sort the winner — and therefore the
+	// NNC's attachmentRef — flaps between reconciles.
 	layer2Attachments := sortedLayer2Attachments(data.Layer2Attachments)
 	for i := range layer2Attachments {
 		l2a := &layer2Attachments[i]
@@ -136,10 +140,20 @@ func (b *L2ABuilder) buildWithPlacements(
 	return result, placements, placementErrors
 }
 
+// sortedLayer2Attachments returns a copy of items sorted so that ownership
+// conflicts resolve deterministically: the oldest L2A keeps its slot (a newly
+// created conflicting L2A must not displace a working one), ties are broken by
+// namespace/name.
 func sortedLayer2Attachments(items []nc.Layer2Attachment) []nc.Layer2Attachment {
 	sorted := slices.Clone(items)
-	slices.SortFunc(sorted, func(a, b nc.Layer2Attachment) int {
-		return strings.Compare(a.Namespace+"\x00"+a.Name, b.Namespace+"\x00"+b.Name)
+	slices.SortStableFunc(sorted, func(a, b nc.Layer2Attachment) int {
+		if ta, tb := a.CreationTimestamp, b.CreationTimestamp; !ta.Equal(&tb) {
+			if ta.Before(&tb) {
+				return -1
+			}
+			return 1
+		}
+		return strings.Compare(layer2AttachmentKey(a.Namespace, a.Name), layer2AttachmentKey(b.Namespace, b.Name))
 	})
 	return sorted
 }
