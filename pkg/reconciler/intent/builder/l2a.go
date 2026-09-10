@@ -58,8 +58,14 @@ func (b *L2ABuilder) Build(ctx context.Context, data *resolver.ResolvedData) (ma
 	// "<node>\x00dev\x00<deviceName>"; value is the owning L2A name.
 	ifOwner := make(map[string]string)
 
-	for i := range data.Layer2Attachments {
-		l2a := &data.Layer2Attachments[i]
+	// Ownership is first-come-first-served, so the iteration order decides which
+	// of two colliding L2As wins. The list comes from the informer cache in
+	// unspecified order; without a stable sort the winner — and therefore the
+	// NNC's attachmentRef — flaps between reconciles.
+	l2as := orderedLayer2Attachments(data.Layer2Attachments)
+
+	for i := range l2as {
+		l2a := &l2as[i]
 
 		// Resolve the referenced Network — skip L2As with dangling refs.
 		net, ok := data.Networks[l2a.Spec.NetworkRef]
@@ -91,6 +97,26 @@ func (b *L2ABuilder) Build(ctx context.Context, data *resolver.ResolvedData) (ma
 	}
 
 	return result, nil
+}
+
+// orderedLayer2Attachments returns a copy of l2as sorted so that ownership
+// conflicts resolve deterministically: the oldest L2A keeps its slot (a newly
+// created conflicting L2A must not displace a working one), ties are broken by
+// namespace/name.
+func orderedLayer2Attachments(l2as []nc.Layer2Attachment) []nc.Layer2Attachment {
+	out := make([]nc.Layer2Attachment, len(l2as))
+	copy(out, l2as)
+	sort.SliceStable(out, func(i, j int) bool {
+		ti, tj := out[i].CreationTimestamp, out[j].CreationTimestamp
+		if !ti.Equal(&tj) {
+			return ti.Before(&tj)
+		}
+		if out[i].Namespace != out[j].Namespace {
+			return out[i].Namespace < out[j].Namespace
+		}
+		return out[i].Name < out[j].Name
+	})
+	return out
 }
 
 // applyL2AToNodes fans out a single L2A to every matching node.
