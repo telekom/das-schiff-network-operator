@@ -33,6 +33,8 @@ import (
 )
 
 const (
+	clusterVRFName = "cluster"
+
 	// mirrorProtocolL2GRE is the Collector GRE encapsulation type for Layer 2 (GRE TAP).
 	mirrorProtocolL2GRE = "l2gre"
 )
@@ -41,7 +43,7 @@ const (
 // for a Collector. The same name is referenced by the MirrorACL.MirrorDestination
 // emitted by the MirrorBuilder, so both builders must derive it identically.
 func mirrorGREName(col *nc.Collector) string {
-	sum := sha256.Sum256([]byte(col.Name))
+	sum := sha256.Sum256([]byte(layer2AttachmentDisplayName(col.Namespace, col.Name)))
 	h := hex.EncodeToString(sum[:])[:8]
 	if col.Spec.Protocol == mirrorProtocolL2GRE {
 		return "gtap-" + h
@@ -84,7 +86,7 @@ func buildFabricVRF(vrfSpec *nc.VRFSpec) networkv1alpha1.FabricVRF {
 		VRF: networkv1alpha1.VRF{
 			VRFImports: []networkv1alpha1.VRFImport{
 				{
-					FromVRF: "cluster",
+					FromVRF: clusterVRFName,
 					Filter: networkv1alpha1.Filter{
 						DefaultAction: networkv1alpha1.Action{Type: networkv1alpha1.Reject},
 					},
@@ -108,13 +110,21 @@ func buildFabricVRF(vrfSpec *nc.VRFSpec) networkv1alpha1.FabricVRF {
 // findMatchingAP resolves the single AnnouncementPolicy that applies to a usage CRD.
 // It matches by VRF backbone name AND the AP's label selector against the usage CRD's labels.
 // Returns nil,nil if no AP matches. Returns an error if more than one matches.
-func findMatchingAP(usageCRDLabels map[string]string, vrfName string, data *resolver.ResolvedData) (*nc.AnnouncementPolicy, error) {
+func findMatchingAP(
+	namespace string,
+	usageCRDLabels map[string]string,
+	vrfName string,
+	data *resolver.ResolvedData,
+) (*nc.AnnouncementPolicy, error) {
 	var matches []*nc.AnnouncementPolicy
 
 	for i := range data.AnnouncementPolicies {
 		ap := &data.AnnouncementPolicies[i]
+		if ap.Namespace != namespace {
+			continue
+		}
 
-		resolved, ok := data.VRFs[ap.Spec.VRFRef]
+		resolved, ok := data.VRF(namespace, ap.Spec.VRFRef)
 		if !ok || resolved.Spec.VRF != vrfName {
 			continue
 		}
@@ -151,9 +161,23 @@ func findMatchingAP(usageCRDLabels map[string]string, vrfName string, data *reso
 // host-route/aggregate splitting on the EVPN export side. The cluster VRFImport
 // always uses plain (community-free) filter items.
 func addNetworkToFabricVRF(fvrf *networkv1alpha1.FabricVRF, net *resolver.ResolvedNetwork, ap *nc.AnnouncementPolicy) networkv1alpha1.FabricVRF {
+	addNetworkToEVPNExport(fvrf, net, ap)
+
+	// Add to cluster VRFImport filter (plain, no AP communities).
+	plainItems := networkCIDRFilterItems(net, nil)
+	if len(fvrf.VRFImports) > 0 {
+		fvrf.VRFImports[0].Filter.Items = append(fvrf.VRFImports[0].Filter.Items, plainItems...)
+	}
+
+	return *fvrf
+}
+
+// addNetworkToEVPNExport allows a Network's routes to be advertised from a
+// FabricVRF without assuming where those routes originate.
+func addNetworkToEVPNExport(fvrf *networkv1alpha1.FabricVRF, net *resolver.ResolvedNetwork, ap *nc.AnnouncementPolicy) {
 	evpnItems := networkCIDRFilterItems(net, ap)
 	if len(evpnItems) == 0 {
-		return *fvrf
+		return
 	}
 
 	// Add to EVPN export filter (with AP communities).
@@ -163,14 +187,6 @@ func addNetworkToFabricVRF(fvrf *networkv1alpha1.FabricVRF, net *resolver.Resolv
 		}
 	}
 	fvrf.EVPNExportFilter.Items = append(fvrf.EVPNExportFilter.Items, evpnItems...)
-
-	// Add to cluster VRFImport filter (plain, no AP communities).
-	plainItems := networkCIDRFilterItems(net, nil)
-	if len(fvrf.VRFImports) > 0 {
-		fvrf.VRFImports[0].Filter.Items = append(fvrf.VRFImports[0].Filter.Items, plainItems...)
-	}
-
-	return *fvrf
 }
 
 // networkCIDRFilterItems creates FilterItems for a Network's IPv4 and IPv6 CIDRs.
@@ -309,6 +325,23 @@ func matchNodes(nodes []corev1.Node, selector *metav1.LabelSelector) ([]corev1.N
 // By default, the covering prefix is always added so the fabric can export it via EVPN.
 // When an AP is provided its aggregate config controls prefix length and suppression.
 func addAggregateRoutes(fvrf *networkv1alpha1.FabricVRF, net *resolver.ResolvedNetwork, ap *nc.AnnouncementPolicy) {
+	addAggregateRoutesWithNextHop(fvrf, net, ap, nil)
+}
+
+// addAggregateRoutesViaVRF adds aggregate routes that forward through another
+// VRF instead of blackholing locally. Multi-VRF L2 attachments use this so a
+// more-specific aggregate cannot override the return route to their combo VRF.
+func addAggregateRoutesViaVRF(fvrf *networkv1alpha1.FabricVRF, net *resolver.ResolvedNetwork, ap *nc.AnnouncementPolicy, vrfName string) {
+	nextVRF := vrfName
+	addAggregateRoutesWithNextHop(fvrf, net, ap, &networkv1alpha1.NextHop{Vrf: &nextVRF})
+}
+
+func addAggregateRoutesWithNextHop(
+	fvrf *networkv1alpha1.FabricVRF,
+	net *resolver.ResolvedNetwork,
+	ap *nc.AnnouncementPolicy,
+	nextHop *networkv1alpha1.NextHop,
+) {
 	if ap != nil && ap.Spec.Aggregate != nil && ap.Spec.Aggregate.Enabled != nil && !*ap.Spec.Aggregate.Enabled {
 		return
 	}
@@ -334,7 +367,8 @@ func addAggregateRoutes(fvrf *networkv1alpha1.FabricVRF, net *resolver.ResolvedN
 		}
 		prefix := computeAggregatePrefix(net.Spec.IPv4.CIDR, overrideLen)
 		fvrf.StaticRoutes = appendUniqueStaticRoute(fvrf.StaticRoutes, networkv1alpha1.StaticRoute{
-			Prefix: prefix,
+			Prefix:  prefix,
+			NextHop: nextHop,
 		})
 		if fvrf.EVPNExportFilter != nil {
 			fvrf.EVPNExportFilter.Items = appendUniqueFilterItem(fvrf.EVPNExportFilter.Items, networkv1alpha1.FilterItem{
@@ -350,7 +384,8 @@ func addAggregateRoutes(fvrf *networkv1alpha1.FabricVRF, net *resolver.ResolvedN
 		}
 		prefix := computeAggregatePrefix(net.Spec.IPv6.CIDR, overrideLen)
 		fvrf.StaticRoutes = appendUniqueStaticRoute(fvrf.StaticRoutes, networkv1alpha1.StaticRoute{
-			Prefix: prefix,
+			Prefix:  prefix,
+			NextHop: nextHop,
 		})
 		if fvrf.EVPNExportFilter != nil {
 			fvrf.EVPNExportFilter.Items = appendUniqueFilterItem(fvrf.EVPNExportFilter.Items, networkv1alpha1.FilterItem{
@@ -403,20 +438,49 @@ func computeAggregatePrefix(cidr string, overrideLen *int32) string {
 	return fmt.Sprintf("%s/%d", masked.String(), newLen)
 }
 
-// appendUniqueStaticRoute appends a static route only if no route with the same prefix exists.
+// appendUniqueStaticRoute deduplicates identical routes and prefers an explicit
+// next hop over a blackhole for the same prefix. Conflicting explicit routes
+// remain visible for downstream validation instead of being silently discarded.
 func appendUniqueStaticRoute(routes []networkv1alpha1.StaticRoute, route networkv1alpha1.StaticRoute) []networkv1alpha1.StaticRoute {
-	for _, r := range routes {
-		if r.Prefix == route.Prefix {
+	for i := range routes {
+		if routes[i].Prefix != route.Prefix {
+			continue
+		}
+		switch {
+		case sameBuilderStaticRoute(routes[i], route):
+			return routes
+		case routes[i].NextHop == nil && route.NextHop != nil:
+			routes[i] = route
+			return routes
+		case routes[i].NextHop != nil && route.NextHop == nil:
 			return routes
 		}
 	}
 	return append(routes, route)
 }
 
+func sameBuilderStaticRoute(a, b networkv1alpha1.StaticRoute) bool {
+	if a.Prefix != b.Prefix {
+		return false
+	}
+	if a.NextHop == nil || b.NextHop == nil {
+		return a.NextHop == nil && b.NextHop == nil
+	}
+	return equalBuilderStringPtr(a.NextHop.Address, b.NextHop.Address) &&
+		equalBuilderStringPtr(a.NextHop.Vrf, b.NextHop.Vrf)
+}
+
+func equalBuilderStringPtr(a, b *string) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
+}
+
 // resolveSelectorVRFs returns ALL VRFs (name → spec) matched by a Destination
 // LabelSelector. Used by consumers (Inbound, Outbound, Layer2Attachment) that
 // must fan out to every matched VRF rather than picking the first match.
-func resolveSelectorVRFs(sel *metav1.LabelSelector, data *resolver.ResolvedData) map[string]*nc.VRFSpec {
+func resolveSelectorVRFs(namespace string, sel *metav1.LabelSelector, data *resolver.ResolvedData) map[string]*nc.VRFSpec {
 	if sel == nil {
 		return nil
 	}
@@ -427,13 +491,13 @@ func resolveSelectorVRFs(sel *metav1.LabelSelector, data *resolver.ResolvedData)
 	out := map[string]*nc.VRFSpec{}
 	for i := range data.RawDestinations {
 		rawDest := &data.RawDestinations[i]
-		if !selector.Matches(labels.Set(rawDest.Labels)) {
+		if rawDest.Namespace != namespace || !selector.Matches(labels.Set(rawDest.Labels)) {
 			continue
 		}
 		if rawDest.Spec.VRFRef == nil {
 			continue
 		}
-		resolved, ok := data.Destinations[rawDest.Name]
+		resolved, ok := data.Destination(namespace, rawDest.Name)
 		if !ok || resolved.VRFSpec == nil {
 			continue
 		}
@@ -445,7 +509,7 @@ func resolveSelectorVRFs(sel *metav1.LabelSelector, data *resolver.ResolvedData)
 // groupDestinationsByVRF resolves a label selector against raw destinations and
 // groups ALL matching destinations by their vrfRef. Destinations without vrfRef
 // (using nextHop instead) are skipped.
-func groupDestinationsByVRF(sel *metav1.LabelSelector, data *resolver.ResolvedData) map[string][]nc.Destination {
+func groupDestinationsByVRF(namespace string, sel *metav1.LabelSelector, data *resolver.ResolvedData) map[string][]nc.Destination {
 	selector, err := metav1.LabelSelectorAsSelector(sel)
 	if err != nil {
 		return nil
@@ -454,7 +518,7 @@ func groupDestinationsByVRF(sel *metav1.LabelSelector, data *resolver.ResolvedDa
 	grouped := make(map[string][]nc.Destination)
 	for i := range data.RawDestinations {
 		rawDest := &data.RawDestinations[i]
-		if !selector.Matches(labels.Set(rawDest.Labels)) {
+		if rawDest.Namespace != namespace || !selector.Matches(labels.Set(rawDest.Labels)) {
 			continue
 		}
 		if rawDest.Spec.VRFRef == nil {
@@ -462,7 +526,7 @@ func groupDestinationsByVRF(sel *metav1.LabelSelector, data *resolver.ResolvedDa
 		}
 		// Resolve VRFRef → backbone VRF name (spec.vrf) to match the FabricVRF
 		// map key convention used by all builders.
-		resolved, ok := data.Destinations[rawDest.Name]
+		resolved, ok := data.Destination(namespace, rawDest.Name)
 		if !ok || resolved.VRFSpec == nil {
 			continue
 		}

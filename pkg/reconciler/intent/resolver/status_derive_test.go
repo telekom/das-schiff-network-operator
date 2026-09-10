@@ -76,13 +76,13 @@ func testData() *ResolvedData {
 
 func TestNetworkCIDRs(t *testing.T) {
 	d := testData()
-	if v4, v6 := d.NetworkCIDRs("net-a"); v4 != "10.0.0.0/24" || v6 != "2001:db8::/64" {
+	if v4, v6 := d.NetworkCIDRs("", "net-a"); v4 != "10.0.0.0/24" || v6 != "2001:db8::/64" {
 		t.Errorf("net-a = %q,%q", v4, v6)
 	}
-	if v4, v6 := d.NetworkCIDRs("net-v4only"); v4 != "10.1.0.0/24" || v6 != "" {
+	if v4, v6 := d.NetworkCIDRs("", "net-v4only"); v4 != "10.1.0.0/24" || v6 != "" {
 		t.Errorf("net-v4only = %q,%q; want v6 empty", v4, v6)
 	}
-	if v4, v6 := d.NetworkCIDRs("missing"); v4 != "" || v6 != "" {
+	if v4, v6 := d.NetworkCIDRs("", "missing"); v4 != "" || v6 != "" {
 		t.Errorf("missing = %q,%q; want empty", v4, v6)
 	}
 }
@@ -90,12 +90,12 @@ func TestNetworkCIDRs(t *testing.T) {
 func TestSelectorVRFRefs(t *testing.T) {
 	d := testData()
 	sel := &metav1.LabelSelector{MatchLabels: map[string]string{"type": "gw"}}
-	got := d.SelectorVRFRefs(sel)
+	got := d.SelectorVRFRefs("", sel)
 	want := []string{"vrf-c2m", "vrf-m2m"} // sorted, de-duplicated, nextHop skipped
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("SelectorVRFRefs = %v, want %v", got, want)
 	}
-	if got := d.SelectorVRFRefs(nil); got != nil {
+	if got := d.SelectorVRFRefs("", nil); got != nil {
 		t.Errorf("nil selector = %v, want nil", got)
 	}
 }
@@ -199,5 +199,63 @@ func TestBGPPeeringNodes(t *testing.T) {
 	}}
 	if got := d.BGPPeeringNodes(none); got != nil {
 		t.Errorf("unknown attachment nodes = %v, want nil", got)
+	}
+}
+
+func TestAttachmentFabricVRFCountUsesResolvedUniqueVRFs(t *testing.T) {
+	const (
+		namespace     = "tenant-a"
+		refA          = "vrf-a"
+		refB          = "vrf-b"
+		missing       = "missing"
+		groupKey      = "group"
+		selectedGroup = "selected"
+	)
+	sharedSpec := nc.VRFSpec{VRF: "shared-fabric"}
+	data := &ResolvedData{
+		RawDestinations: []nc.Destination{
+			{ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: "a", Labels: map[string]string{groupKey: selectedGroup}}, Spec: nc.DestinationSpec{VRFRef: ptrStr(refA)}},
+			{ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: "b", Labels: map[string]string{groupKey: selectedGroup}}, Spec: nc.DestinationSpec{VRFRef: ptrStr(refB)}},
+			{ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: "unresolved", Labels: map[string]string{groupKey: selectedGroup}}, Spec: nc.DestinationSpec{VRFRef: ptrStr(missing)}},
+		},
+		DestinationsByKey: map[string]*ResolvedDestination{
+			NamespacedKey(namespace, "a"): {Namespace: namespace, Name: "a", VRFSpec: &sharedSpec},
+			NamespacedKey(namespace, "b"): {Namespace: namespace, Name: "b", VRFSpec: &sharedSpec},
+		},
+	}
+	l2a := &nc.Layer2Attachment{
+		ObjectMeta: metav1.ObjectMeta{Namespace: namespace},
+		Spec: nc.Layer2AttachmentSpec{
+			Destinations: &metav1.LabelSelector{MatchLabels: map[string]string{groupKey: selectedGroup}},
+		},
+	}
+
+	if got := data.attachmentFabricVRFCount(l2a); got != 1 {
+		t.Fatalf("attachmentFabricVRFCount() = %d, want one resolved effective FabricVRF", got)
+	}
+}
+
+func TestBGPPeeringAttachmentRefUsesNamespace(t *testing.T) {
+	d := testData()
+	d.Layer2Attachments = append([]nc.Layer2Attachment{{
+		ObjectMeta: metav1.ObjectMeta{Name: "l2a-sel", Namespace: "other"},
+		Spec: nc.Layer2AttachmentSpec{
+			NetworkRef:   "net-a",
+			Destinations: &metav1.LabelSelector{MatchLabels: map[string]string{"type": "x"}},
+			NodeSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"rack": "b"}},
+		},
+	}}, d.Layer2Attachments...)
+
+	bp := &nc.BGPPeering{
+		Spec: nc.BGPPeeringSpec{
+			Mode: nc.BGPPeeringModeListenRange,
+			Ref:  nc.BGPPeeringRef{AttachmentRef: ptrStr("l2a-sel")},
+		},
+	}
+	if got, want := d.BGPPeeringNodes(bp), []string{"node-a1", "node-a2"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("BGPPeeringNodes() = %v, want same-namespace attachment nodes %v", got, want)
+	}
+	if got, want := d.BGPPeeringVRFRefs(bp), []string{"vrf-c2m", "vrf-m2m"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("BGPPeeringVRFRefs() = %v, want same-namespace attachment VRFs %v", got, want)
 	}
 }

@@ -19,8 +19,8 @@ package builder
 import (
 	"context"
 	"fmt"
-	"sort"
 
+	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -46,13 +46,14 @@ func (*BGPPeeringBuilder) Name() string {
 func (b *BGPPeeringBuilder) Build(ctx context.Context, data *resolver.ResolvedData) (map[string]*NodeContribution, error) {
 	logger := log.FromContext(ctx).WithName("bgppeering-builder")
 	result := make(map[string]*NodeContribution)
+	_, l2aPlacements, l2aPlacementErrors := NewL2ABuilder().buildWithPlacements(ctx, data, false)
 
 	for i := range data.BGPPeerings {
 		bp := &data.BGPPeerings[i]
 
 		switch bp.Spec.Mode {
 		case nc.BGPPeeringModeListenRange:
-			if err := b.buildListenRange(bp, data, result); err != nil {
+			if err := b.buildListenRange(bp, data, l2aPlacements, l2aPlacementErrors, result); err != nil {
 				logger.Info("skipping BGPPeering with unresolvable listenRange",
 					"bgppeering", bp.Name, "error", err.Error())
 				reportSkip(ctx, "BGPPeering", bp.Namespace, bp.Name, "ListenRangeUnresolved", err.Error())
@@ -73,7 +74,13 @@ func (b *BGPPeeringBuilder) Build(ctx context.Context, data *resolver.ResolvedDa
 }
 
 // buildListenRange creates BGPPeer entries with ListenRange on the IRB VRF.
-func (b *BGPPeeringBuilder) buildListenRange(bp *nc.BGPPeering, data *resolver.ResolvedData, result map[string]*NodeContribution) error {
+func (b *BGPPeeringBuilder) buildListenRange(
+	bp *nc.BGPPeering,
+	data *resolver.ResolvedData,
+	l2aPlacements map[string][]string,
+	l2aPlacementErrors map[string]error,
+	result map[string]*NodeContribution,
+) error {
 	if bp.Spec.Ref.AttachmentRef == nil {
 		return fmt.Errorf("listenRange mode requires attachmentRef")
 	}
@@ -81,7 +88,8 @@ func (b *BGPPeeringBuilder) buildListenRange(bp *nc.BGPPeering, data *resolver.R
 	// Look up the L2A by name.
 	var l2a *nc.Layer2Attachment
 	for j := range data.Layer2Attachments {
-		if data.Layer2Attachments[j].Name == *bp.Spec.Ref.AttachmentRef {
+		if data.Layer2Attachments[j].Namespace == bp.Namespace &&
+			data.Layer2Attachments[j].Name == *bp.Spec.Ref.AttachmentRef {
 			l2a = &data.Layer2Attachments[j]
 			break
 		}
@@ -91,19 +99,20 @@ func (b *BGPPeeringBuilder) buildListenRange(bp *nc.BGPPeering, data *resolver.R
 	}
 
 	// Resolve the L2A's Network to get the CIDR for listen range.
-	net, ok := data.Networks[l2a.Spec.NetworkRef]
+	net, ok := data.Network(l2a.Namespace, l2a.Spec.NetworkRef)
 	if !ok {
 		return fmt.Errorf("Layer2Attachment %q references unknown Network %q", l2a.Name, l2a.Spec.NetworkRef)
 	}
 
-	// Resolve the L2A's destination VRFs for the IRB. The Destinations
-	// LabelSelector may match multiple Destinations across multiple VRFs; the
-	// listen-range peer + EVPN export must be installed on every matched VRF.
-	vrfs := b.resolveL2AVRFs(l2a, data)
-	if len(vrfs) == 0 {
+	// Resolve the same IRB topology as the L2A builder. A multi-VRF attachment
+	// owns its IRB in a combo LocalVRF, so the listener must terminate there.
+	routing, err := NewL2ABuilder().resolveDestinationVRFs(l2a, data)
+	if err != nil {
+		return fmt.Errorf("Layer2Attachment %q destinations cannot be resolved: %w", l2a.Name, err)
+	}
+	if len(routing.vrfSpecs) == 0 {
 		return fmt.Errorf("Layer2Attachment %q has no VRF for IRB", l2a.Name)
 	}
-
 	// Resolve networkRefs to get the CIDRs L2 clients may announce. These
 	// form the import allow-list and the EVPN export set. The listen-range
 	// CIDR itself comes from the L2A's Network (net), not from here.
@@ -114,41 +123,68 @@ func (b *BGPPeeringBuilder) buildListenRange(bp *nc.BGPPeering, data *resolver.R
 	peers := b.buildListenRangePeers(bp, net, allowIPv4, allowIPv6, data)
 	evpnExportItems := b.evpnExportItems(allowIPv4, allowIPv6, bp.Spec.Export)
 
-	// Sorted iteration for deterministic output.
-	vrfNames := make([]string, 0, len(vrfs))
-	for n := range vrfs {
-		vrfNames = append(vrfNames, n)
-	}
-	sort.Strings(vrfNames)
+	vrfNames := sortedVRFNames(routing.vrfSpecs)
 
-	// Apply to all nodes (no nodeSelector on BGPPeering).
-	for i := range data.Nodes {
-		node := &data.Nodes[i]
-		contrib, ok := result[node.Name]
+	nodeNames := allNodeNames(data.Nodes)
+	if len(vrfNames) > 1 {
+		var placed bool
+		key := layer2AttachmentKey(l2a.Namespace, l2a.Name)
+		nodeNames, placed = l2aPlacements[key]
+		if !placed {
+			if err := l2aPlacementErrors[key]; err != nil {
+				return fmt.Errorf("Layer2Attachment %q was not successfully placed: %w", l2a.Name, err)
+			}
+			return fmt.Errorf("Layer2Attachment %q was not successfully placed", l2a.Name)
+		}
+	}
+	for _, nodeName := range nodeNames {
+		contrib, ok := result[nodeName]
 		if !ok {
 			contrib = NewNodeContribution()
-			result[node.Name] = contrib
+			result[nodeName] = contrib
 		}
 
-		for _, vrfName := range vrfNames {
+		if len(vrfNames) == 1 {
+			vrfName := vrfNames[0]
 			fvrf, exists := contrib.FabricVRFs[vrfName]
 			if !exists {
-				fvrf = buildFabricVRF(vrfs[vrfName])
+				fvrf = buildFabricVRF(routing.vrfSpecs[vrfName])
 			}
 
 			fvrf.BGPPeers = append(fvrf.BGPPeers, peers...)
-			// Add Inbound addresses to EVPN export so the fabric distributes them.
-			if fvrf.EVPNExportFilter == nil {
-				fvrf.EVPNExportFilter = &networkv1alpha1.Filter{
-					DefaultAction: networkv1alpha1.Action{Type: networkv1alpha1.Reject},
-				}
+			appendEVPNExportItems(&fvrf, evpnExportItems)
+			contrib.FabricVRFs[vrfName] = fvrf
+			continue
+		}
+
+		combo := contrib.LocalVRFs[routing.irbVRF]
+		combo.BGPPeers = append(combo.BGPPeers, peers...)
+		contrib.LocalVRFs[routing.irbVRF] = combo
+
+		importFilter := networkv1alpha1.Filter{
+			DefaultAction: networkv1alpha1.Action{Type: networkv1alpha1.Reject},
+			Items:         b.evpnExportItems(allowIPv4, allowIPv6, nil),
+		}
+		for _, vrfName := range vrfNames {
+			fvrf, exists := contrib.FabricVRFs[vrfName]
+			if !exists {
+				fvrf = buildFabricVRF(routing.vrfSpecs[vrfName])
 			}
-			fvrf.EVPNExportFilter.Items = append(fvrf.EVPNExportFilter.Items, evpnExportItems...)
+			fvrf.VRFImports = appendVRFImport(fvrf.VRFImports, routing.irbVRF, importFilter.Items)
+			appendEVPNExportItems(&fvrf, evpnExportItems)
 			contrib.FabricVRFs[vrfName] = fvrf
 		}
 	}
 
 	return nil
+}
+
+func allNodeNames(nodes []corev1.Node) []string {
+	names := make([]string, 0, len(nodes))
+	for i := range nodes {
+		names = append(names, nodes[i].Name)
+	}
+	return names
 }
 
 // buildLoopbackPeer creates BGPPeer entries with Address on the ClusterVRF.
@@ -175,15 +211,13 @@ func (b *BGPPeeringBuilder) buildLoopbackPeer(bp *nc.BGPPeering, data *resolver.
 	}
 }
 
-// resolveL2AVRFs returns ALL VRFs (name → spec) matched by the
-// Layer2Attachment's Destinations selector. Returning a multi-VRF map lets the
-// caller fan out the listen-range peer and EVPN export items across every
-// matched VRF.
-func (*BGPPeeringBuilder) resolveL2AVRFs(l2a *nc.Layer2Attachment, data *resolver.ResolvedData) map[string]*nc.VRFSpec {
-	if l2a.Spec.Destinations == nil {
-		return nil
+func appendEVPNExportItems(fvrf *networkv1alpha1.FabricVRF, items []networkv1alpha1.FilterItem) {
+	if fvrf.EVPNExportFilter == nil {
+		fvrf.EVPNExportFilter = &networkv1alpha1.Filter{
+			DefaultAction: networkv1alpha1.Action{Type: networkv1alpha1.Reject},
+		}
 	}
-	return resolveSelectorVRFs(l2a.Spec.Destinations, data)
+	fvrf.EVPNExportFilter.Items = append(fvrf.EVPNExportFilter.Items, items...)
 }
 
 // buildListenRangePeers creates BGPPeer entries with ListenRange from the L2A
@@ -218,7 +252,7 @@ func (b *BGPPeeringBuilder) buildListenRangePeers(bp *nc.BGPPeering, net *resolv
 // EVPN export set.
 func (*BGPPeeringBuilder) resolveNetworkCIDRs(bp *nc.BGPPeering, data *resolver.ResolvedData) (ipv4, ipv6 []string) {
 	for _, ref := range bp.Spec.Ref.NetworkRefs {
-		net, ok := data.Networks[ref]
+		net, ok := data.Network(bp.Namespace, ref)
 		if !ok {
 			continue
 		}

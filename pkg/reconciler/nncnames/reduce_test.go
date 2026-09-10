@@ -117,6 +117,40 @@ func TestReduce_CollisionIsError(t *testing.T) {
 	}
 }
 
+func TestReduce_CrossMapCollisionIsError(t *testing.T) {
+	localName := "s-123456789bcdf"
+	fabricName := "s-1a23456789bcdf"
+	if vrfname.Reduce(fabricName) != localName {
+		t.Fatalf("test names do not collide under current rule (%q vs %q)", vrfname.Reduce(fabricName), localName)
+	}
+	spec := &v1alpha1.NodeNetworkConfigSpec{
+		FabricVRFs: map[string]v1alpha1.FabricVRF{fabricName: {VNI: 1}},
+		LocalVRFs:  map[string]v1alpha1.VRF{localName: {}},
+	}
+
+	err := Reduce(spec)
+	if err == nil {
+		t.Fatal("expected cross-map collision error, got nil")
+	}
+	if !strings.Contains(err.Error(), `both reduce to "s-123456789bcdf"`) {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func TestReduce_ReservedFabricVRFNameIsError(t *testing.T) {
+	spec := &v1alpha1.NodeNetworkConfigSpec{
+		FabricVRFs: map[string]v1alpha1.FabricVRF{"cluster": {VNI: 1}},
+	}
+
+	err := Reduce(spec)
+	if err == nil {
+		t.Fatal("expected reserved FabricVRF name error")
+	}
+	if !strings.Contains(err.Error(), `reserved cluster VRF "cluster"`) {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
 func TestReduce_IrreducibleKeyIsError(t *testing.T) {
 	// A long incompressible name (no removable vowels, no underscores) cannot be
 	// reduced to fit and must be reported rather than silently passed through.

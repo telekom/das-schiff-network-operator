@@ -121,6 +121,21 @@ spec:
       type: gateway
 ```
 
+### One attachment in multiple VRFs
+
+When a `destinations` selector matches Destinations in multiple VRFs, the
+operator places the attachment's IRB in a deterministic local combo VRF. The
+combo VRF routes each selected Destination prefix through its Fabric VRF, and
+each Fabric VRF routes the attached Network back through the combo VRF for EVPN
+export. Because the L2 segment is directly attached to the combo VRF, this does
+not require source-based policy routes in the cluster VRF.
+
+Multi-VRF attachments require HBN mode with the anycast gateway enabled. A
+pure-L2 Network or `disableAnycast: true` cannot attach the segment to the combo
+VRF and is therefore rejected. A `listenRange` BGPPeering referencing a
+multi-VRF attachment terminates in the combo VRF; accepted routes are imported
+into every selected Fabric VRF for EVPN export.
+
 !!! tip "Anycast gateway"
     In HBN mode the operator provisions an anycast gateway for the segment; its
     MAC and gateway addresses are surfaced in `status.anycast`. Disable it with

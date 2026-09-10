@@ -1,0 +1,47 @@
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Destination
+metadata:
+  name: multi-vrf-destination-a
+  namespace: default
+  labels:
+    scenario: l2a-multi-vrf
+spec:
+  vrfRef: "vrf-m2m"
+  prefixes:
+    - "198.51.100.0/24"
+---
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Destination
+metadata:
+  name: multi-vrf-destination-b
+  namespace: default
+  labels:
+    scenario: l2a-multi-vrf
+spec:
+  vrfRef: "vrf-c2m"
+  prefixes:
+    - "203.0.113.0/24"
+---
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Network
+metadata:
+  name: net-multi-vrf
+  namespace: default
+spec:
+  vlan: 591
+  vni: 4000091
+  ipv4:
+    cidr: "192.0.2.128/27"
+  ipv6:
+    cidr: "2001:db8:590::/64"
+---
+apiVersion: network-connector.sylvaproject.org/v1alpha1
+kind: Layer2Attachment
+metadata:
+  name: l2a-multi-vrf
+  namespace: default
+spec:
+  networkRef: "net-multi-vrf"
+  destinations:
+    matchLabels:
+      scenario: l2a-multi-vrf

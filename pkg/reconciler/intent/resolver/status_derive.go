@@ -30,8 +30,8 @@ import (
 // name. Each is empty when the Network is unresolved or lacks that family.
 // Used to surface the pool CIDRs on consumer resource status (e.g.
 // Layer2Attachment.status.networkIPv4/networkIPv6).
-func (d *ResolvedData) NetworkCIDRs(networkRef string) (ipv4, ipv6 string) {
-	net, ok := d.Networks[networkRef]
+func (d *ResolvedData) NetworkCIDRs(namespace, networkRef string) (ipv4, ipv6 string) {
+	net, ok := d.Network(namespace, networkRef)
 	if !ok {
 		return "", ""
 	}
@@ -48,7 +48,7 @@ func (d *ResolvedData) NetworkCIDRs(networkRef string) (ipv4, ipv6 string) {
 // Destination matched by sel that carries a vrfRef. This is the VRF list a
 // consumer with a destinations selector (Layer2Attachment, Inbound, Outbound)
 // is plumbed into. Destinations that use nextHop (no vrfRef) are skipped.
-func (d *ResolvedData) SelectorVRFRefs(sel *metav1.LabelSelector) []string {
+func (d *ResolvedData) SelectorVRFRefs(namespace string, sel *metav1.LabelSelector) []string {
 	if sel == nil {
 		return nil
 	}
@@ -59,7 +59,7 @@ func (d *ResolvedData) SelectorVRFRefs(sel *metav1.LabelSelector) []string {
 	set := map[string]struct{}{}
 	for i := range d.RawDestinations {
 		rd := &d.RawDestinations[i]
-		if !selector.Matches(labels.Set(rd.Labels)) {
+		if rd.Namespace != namespace || !selector.Matches(labels.Set(rd.Labels)) {
 			continue
 		}
 		if rd.Spec.VRFRef == nil || *rd.Spec.VRFRef == "" {
@@ -73,23 +73,50 @@ func (d *ResolvedData) SelectorVRFRefs(sel *metav1.LabelSelector) []string {
 // attachmentVRFRefs returns the VRF names reachable via the referenced
 // Layer2Attachment's destinations. Used for BGPPeering listenRange mode, where
 // the VRFs come from the referenced L2A (the transfer network segment).
-func (d *ResolvedData) attachmentVRFRefs(attachmentRef string) []string {
+func (d *ResolvedData) attachmentVRFRefs(namespace, attachmentRef string) []string {
 	for i := range d.Layer2Attachments {
 		l2a := &d.Layer2Attachments[i]
-		if l2a.Name == attachmentRef {
-			return d.SelectorVRFRefs(l2a.Spec.Destinations)
+		if l2a.Namespace == namespace && l2a.Name == attachmentRef {
+			return d.SelectorVRFRefs(namespace, l2a.Spec.Destinations)
 		}
 	}
 	return nil
 }
 
+func (d *ResolvedData) attachmentFabricVRFCount(l2a *nc.Layer2Attachment) int {
+	if l2a.Spec.Destinations == nil {
+		return 0
+	}
+	selector, err := metav1.LabelSelectorAsSelector(l2a.Spec.Destinations)
+	if err != nil {
+		return 0
+	}
+	vrfs := make(map[string]struct{})
+	legacy := d.DestinationsByKey == nil && d.Destinations == nil
+	for i := range d.RawDestinations {
+		destination := &d.RawDestinations[i]
+		if destination.Namespace != l2a.Namespace || !selector.Matches(labels.Set(destination.Labels)) {
+			continue
+		}
+		resolved, ok := d.Destination(l2a.Namespace, destination.Name)
+		if !ok || resolved.VRFSpec == nil {
+			if legacy && destination.Spec.VRFRef != nil {
+				vrfs[*destination.Spec.VRFRef] = struct{}{}
+			}
+			continue
+		}
+		vrfs[resolved.VRFSpec.VRF] = struct{}{}
+	}
+	return len(vrfs)
+}
+
 // inboundVRFRefs returns the VRF names reachable via the referenced Inbound's
 // destinations. Used for BGPPeering loopbackPeer mode.
-func (d *ResolvedData) inboundVRFRefs(inboundRef string) []string {
+func (d *ResolvedData) inboundVRFRefs(namespace, inboundRef string) []string {
 	for i := range d.Inbounds {
 		ib := &d.Inbounds[i]
-		if ib.Name == inboundRef {
-			return d.SelectorVRFRefs(ib.Spec.Destinations)
+		if ib.Namespace == namespace && ib.Name == inboundRef {
+			return d.SelectorVRFRefs(namespace, ib.Spec.Destinations)
 		}
 	}
 	return nil
@@ -102,12 +129,12 @@ func (d *ResolvedData) inboundVRFRefs(inboundRef string) []string {
 func (d *ResolvedData) BGPPeeringVRFRefs(bp *nc.BGPPeering) []string {
 	set := map[string]struct{}{}
 	if bp.Spec.Ref.AttachmentRef != nil {
-		for _, v := range d.attachmentVRFRefs(*bp.Spec.Ref.AttachmentRef) {
+		for _, v := range d.attachmentVRFRefs(bp.Namespace, *bp.Spec.Ref.AttachmentRef) {
 			set[v] = struct{}{}
 		}
 	}
 	for _, ref := range bp.Spec.Ref.InboundRefs {
-		for _, v := range d.inboundVRFRefs(ref) {
+		for _, v := range d.inboundVRFRefs(bp.Namespace, ref) {
 			set[v] = struct{}{}
 		}
 	}
@@ -128,7 +155,8 @@ func (d *ResolvedData) BGPPeeringLocalIPs(bp *nc.BGPPeering) []string {
 
 	var l2a *nc.Layer2Attachment
 	for i := range d.Layer2Attachments {
-		if d.Layer2Attachments[i].Name == *bp.Spec.Ref.AttachmentRef {
+		if d.Layer2Attachments[i].Namespace == bp.Namespace &&
+			d.Layer2Attachments[i].Name == *bp.Spec.Ref.AttachmentRef {
 			l2a = &d.Layer2Attachments[i]
 			break
 		}
@@ -137,7 +165,7 @@ func (d *ResolvedData) BGPPeeringLocalIPs(bp *nc.BGPPeering) []string {
 		return nil
 	}
 
-	net, ok := d.Networks[l2a.Spec.NetworkRef]
+	net, ok := d.Network(bp.Namespace, l2a.Spec.NetworkRef)
 	if !ok {
 		return nil
 	}
@@ -169,7 +197,8 @@ func (d *ResolvedData) BGPPeeringNodes(bp *nc.BGPPeering) []string {
 		}
 		var l2a *nc.Layer2Attachment
 		for i := range d.Layer2Attachments {
-			if d.Layer2Attachments[i].Name == *bp.Spec.Ref.AttachmentRef {
+			if d.Layer2Attachments[i].Namespace == bp.Namespace &&
+				d.Layer2Attachments[i].Name == *bp.Spec.Ref.AttachmentRef {
 				l2a = &d.Layer2Attachments[i]
 				break
 			}
@@ -177,7 +206,9 @@ func (d *ResolvedData) BGPPeeringNodes(bp *nc.BGPPeering) []string {
 		if l2a == nil {
 			return nil
 		}
-		selector = l2a.Spec.NodeSelector
+		if d.attachmentFabricVRFCount(l2a) > 1 {
+			selector = l2a.Spec.NodeSelector
+		}
 	}
 	// loopbackPeer (and listenRange with a nil NodeSelector) applies to all nodes.
 	return d.matchNodeNames(selector)

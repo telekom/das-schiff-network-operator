@@ -24,29 +24,35 @@ import (
 
 // ResolvedVRF is a VRF with its spec data accessible by name.
 type ResolvedVRF struct {
-	Name string
-	Spec nc.VRFSpec
+	Namespace string
+	Name      string
+	Spec      nc.VRFSpec
 }
 
 // ResolvedNetwork is a Network with its spec data accessible by name.
 type ResolvedNetwork struct {
-	Name string
-	Spec nc.NetworkSpec
+	Namespace string
+	Name      string
+	Spec      nc.NetworkSpec
 }
 
 // ResolvedDestination is a Destination with its VRF resolved.
 type ResolvedDestination struct {
-	Name    string
-	Spec    nc.DestinationSpec
-	VRFSpec *nc.VRFSpec
+	Namespace string
+	Name      string
+	Spec      nc.DestinationSpec
+	VRFSpec   *nc.VRFSpec
 }
 
 // ResolvedData is the pre-resolved reference graph passed to all builders.
 type ResolvedData struct {
-	Nodes        []corev1.Node
-	VRFs         map[string]*ResolvedVRF
-	Networks     map[string]*ResolvedNetwork
-	Destinations map[string]*ResolvedDestination
+	Nodes             []corev1.Node
+	VRFs              map[string]*ResolvedVRF
+	Networks          map[string]*ResolvedNetwork
+	Destinations      map[string]*ResolvedDestination
+	VRFsByKey         map[string]*ResolvedVRF
+	NetworksByKey     map[string]*ResolvedNetwork
+	DestinationsByKey map[string]*ResolvedDestination
 
 	// RawDestinations preserves the original Destination objects for label matching.
 	RawDestinations []nc.Destination
@@ -65,4 +71,40 @@ type ResolvedData struct {
 	// BGPPasswords holds resolved BGP session passwords keyed by
 	// "<namespace>/<name>" of the BGPPeering.
 	BGPPasswords map[string]string
+}
+
+// NamespacedKey returns the stable key used for namespaced intent references.
+func NamespacedKey(namespace, name string) string {
+	return namespace + "\x00" + name
+}
+
+// VRF returns a same-namespace VRF. The name-only map fallback keeps direct
+// unit-test fixtures compatible when no namespaced index is populated.
+func (d *ResolvedData) VRF(namespace, name string) (*ResolvedVRF, bool) {
+	if d.VRFsByKey != nil {
+		vrf, ok := d.VRFsByKey[NamespacedKey(namespace, name)]
+		return vrf, ok
+	}
+	vrf, ok := d.VRFs[name]
+	return vrf, ok
+}
+
+// Network returns a same-namespace Network.
+func (d *ResolvedData) Network(namespace, name string) (*ResolvedNetwork, bool) {
+	if d.NetworksByKey != nil {
+		network, ok := d.NetworksByKey[NamespacedKey(namespace, name)]
+		return network, ok
+	}
+	network, ok := d.Networks[name]
+	return network, ok
+}
+
+// Destination returns a same-namespace Destination.
+func (d *ResolvedData) Destination(namespace, name string) (*ResolvedDestination, bool) {
+	if d.DestinationsByKey != nil {
+		destination, ok := d.DestinationsByKey[NamespacedKey(namespace, name)]
+		return destination, ok
+	}
+	destination, ok := d.Destinations[name]
+	return destination, ok
 }

@@ -9,6 +9,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/telekom/das-schiff-network-operator/e2etests/framework"
+	"github.com/telekom/das-schiff-network-operator/pkg/vrfname"
 )
 
 // Intent Destination NNC Validation — checks that Destinations produce correct
@@ -202,6 +203,37 @@ var _ = Describe("Intent: Destination NNC Validation", Label("intent", "destinat
 				"FabricVRF c2m should have aggregate route for net-vlan503 IPv4 CIDR")
 
 			_ = f.DeleteManifest(ctx, manifest)
+		})
+	})
+
+	Context("one Layer2Attachment targeting multiple VRFs", func() {
+		It("should attach the IRB to a combo VRF without policy routing", func() {
+			cfg := f.Config
+
+			manifest, err := readTestdata("intent/l2a-multi-vrf/manifests.yaml")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(f.ApplyManifest(ctx, manifest)).To(Succeed())
+			DeferCleanup(func() {
+				_ = f.DeleteManifest(context.Background(), manifest)
+			})
+
+			comboName := vrfname.L2AName("default/multi-vrf-destination-a+default/multi-vrf-destination-b")
+			var nnc *unstructured.Unstructured
+			Eventually(func() bool {
+				var getErr error
+				nnc, getErr = f.GetNNC(ctx, cfg.WorkerNode1)
+				return getErr == nil &&
+					framework.NNCLayer2IRBVRF(nnc, "591") == comboName &&
+					framework.NNCHasLocalVRF(nnc, comboName)
+			}).WithTimeout(60*time.Second).WithPolling(5*time.Second).Should(BeTrue(),
+				"NNC should attach the multi-VRF Layer2 IRB to a combo LocalVRF")
+
+			Expect(framework.NNCLocalVRFStaticRouteTarget(nnc, comboName, "198.51.100.0/24", "m2m")).To(BeTrue())
+			Expect(framework.NNCLocalVRFStaticRouteTarget(nnc, comboName, "203.0.113.0/24", "c2m")).To(BeTrue())
+			Expect(framework.NNCFabricVRFStaticRouteTarget(nnc, "m2m", "192.0.2.128/27", comboName)).To(BeTrue())
+			Expect(framework.NNCFabricVRFStaticRouteTarget(nnc, "c2m", "192.0.2.128/27", comboName)).To(BeTrue())
+			Expect(framework.NNCClusterVRFHasPolicyRouteTarget(nnc, comboName)).To(BeFalse(),
+				"directly attached combo VRF should not require cluster policy routing")
 		})
 	})
 })
