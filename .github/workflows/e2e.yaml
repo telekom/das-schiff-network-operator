@@ -47,10 +47,15 @@ jobs:
         id: ldflags
         run: echo "value=$(bash hack/version.sh)" >> "$GITHUB_OUTPUT"
 
+      - name: Read Go version
+        id: go-version
+        run: echo "version=$(awk '/^go / { print $2 }' go.mod)" >> $GITHUB_OUTPUT
+
       - name: Build cra-frr image
         run: |
           docker build \
             --build-arg ldflags="${{ steps.ldflags.outputs.value }}" \
+            --build-arg GO_VERSION=${{ steps.go-version.outputs.version }} \
             -f das-schiff-cra-frr.Dockerfile \
             -t das-schiff-cra-frr:latest .
 
@@ -105,10 +110,15 @@ jobs:
         id: ldflags
         run: echo "value=$(bash hack/version.sh)" >> "$GITHUB_OUTPUT"
 
+      - name: Read Go version
+        id: go-version
+        run: echo "version=$(awk '/^go / { print $2 }' go.mod)" >> $GITHUB_OUTPUT
+
       - name: Build image
         run: |
           docker build \
             --build-arg ldflags="${{ steps.ldflags.outputs.value }}" \
+            --build-arg GO_VERSION=${{ steps.go-version.outputs.version }} \
             -f ${{ matrix.image }}.Dockerfile \
             -t ${{ env.IMG_BASE }}/${{ matrix.image }}:latest .
 
@@ -142,9 +152,14 @@ jobs:
             -f e2e/images/nat64/Dockerfile \
             e2e/images/nat64/
 
+      - name: Read Go version
+        id: go-version
+        run: echo "version=$(awk '/^go / { print $2 }' go.mod)" >> $GITHUB_OUTPUT
+
       - name: Build tester image
         run: |
           docker build \
+            --build-arg GO_VERSION=${{ steps.go-version.outputs.version }} \
             -t ${{ env.IMG_BASE }}/das-schiff-e2e-tester:latest \
             -f e2e/images/tester/Dockerfile \
             e2e/images/tester/
