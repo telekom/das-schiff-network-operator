@@ -58,6 +58,12 @@ func (tpl FRRTemplate) TemplateFRR(cfg *config.BaseConfig, nodeConfig *v1alpha1.
 			}
 			return parsedIP.To4() != nil
 		},
+		"list": func(items ...string) []string {
+			return items
+		},
+		"append": func(items []string, item string) []string {
+			return append(items, item)
+		},
 		"containsKey": func(mm reflect.Value, key string) bool {
 			if mm.Kind() != reflect.Map {
 				return false

@@ -19,6 +19,7 @@ package builder
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -560,6 +561,58 @@ func TestL2ABuilder_DuplicateInterfaceNameOnSameNode(t *testing.T) {
 	}
 	if _, ok := contrib.Layer2s["502"]; ok {
 		t.Error("expected conflicting L2A (VLAN 502) to be skipped")
+	}
+}
+
+func TestL2ABuilder_SlotConflictWinnerIsDeterministic(t *testing.T) {
+	vlan := int32(501)
+	vni := int32(10501)
+	older := metav1.NewTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+	newer := metav1.NewTime(older.Add(time.Hour))
+
+	// Each L2A carries a distinct MTU so the winner is identifiable in the output.
+	mtus := map[string]int32{"l2a-old": 1400, "l2a-new": 1401, "l2a-a": 1402, "l2a-b": 1403}
+	mk := func(name string, ts metav1.Time) nc.Layer2Attachment {
+		return nc.Layer2Attachment{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default", CreationTimestamp: ts},
+			Spec:       nc.Layer2AttachmentSpec{NetworkRef: "net-vlan501", MTU: ptr(mtus[name])},
+		}
+	}
+	build := func(l2as ...nc.Layer2Attachment) string {
+		data := &resolver.ResolvedData{
+			Nodes: []corev1.Node{{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}}},
+			Networks: map[string]*resolver.ResolvedNetwork{
+				"net-vlan501": {Name: "net-vlan501", Spec: nc.NetworkSpec{VLAN: &vlan, VNI: &vni, IPv4: &nc.IPNetwork{CIDR: "10.0.1.1/24"}}},
+			},
+			Layer2Attachments: l2as,
+		}
+		result, err := NewL2ABuilder().Build(context.Background(), data)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		l2, ok := result["node-1"].Layer2s["501"]
+		if !ok {
+			t.Fatalf("expected VLAN 501 to be configured, got %+v", result["node-1"].Layer2s)
+		}
+		for name, mtu := range mtus {
+			if int32(l2.MTU) == mtu {
+				return name
+			}
+		}
+		t.Fatalf("unexpected MTU %d in VLAN 501 config", l2.MTU)
+		return ""
+	}
+
+	// The input order (informer cache order) must not decide the winner.
+	if got := build(mk("l2a-new", newer), mk("l2a-old", older)); got != "l2a-old" {
+		t.Errorf("expected the older L2A to keep the slot, got %q", got)
+	}
+	if got := build(mk("l2a-old", older), mk("l2a-new", newer)); got != "l2a-old" {
+		t.Errorf("expected the older L2A to keep the slot, got %q", got)
+	}
+	// Equal timestamps fall back to the name.
+	if got := build(mk("l2a-b", older), mk("l2a-a", older)); got != "l2a-a" {
+		t.Errorf("expected name tie-break to pick l2a-a, got %q", got)
 	}
 }
 

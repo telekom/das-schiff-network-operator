@@ -199,6 +199,7 @@ exit-address-family
 {{ if $peer.IPv6 }}
 address-family ipv6 unicast
 neighbor {{ $peerIdentifier }} activate
+neighbor {{ $peerIdentifier }} allowas-in
 {{ if $isUnderlay }}
 neighbor {{ $peerIdentifier }} route-map TAG-FABRIC-IN in
 neighbor {{ $peerIdentifier }} route-map DENY-TAG-FABRIC-OUT out
@@ -332,10 +333,35 @@ router bgp {{ $.Config.LocalASN }}
   {{ template "bgpBaseNeighbor" dict "Peer" $peer "IsUnderlay" true }}
   {{ end }}
 
+  {{- $globalHostRoutes := list }}
+  {{- range $port := $.NodeConfig.GlobalWorkloadPorts }}
+  {{- range $hostRoute := $port.HostRoutes }}
+  {{- $globalHostRoutes = append $globalHostRoutes $hostRoute }}
+  {{- end }}
+  {{- end }}
+  {{- $hasV4HostRoute := false }}
+  {{- $hasV6HostRoute := false }}
+  {{- range $hostRoute := $globalHostRoutes }}
+  {{- if isIPv4 $hostRoute }}{{ $hasV4HostRoute = true }}{{ else }}{{ $hasV6HostRoute = true }}{{ end }}
+  {{- end }}
   address-family ipv4 unicast
     network {{ $.Config.VTEPLoopbackIP }}/32
+    {{- if $hasV4HostRoute }}
+    redistribute kernel route-map rm_workload_export
+    {{- end }}
   exit-address-family
   !
+  {{- if $hasV6HostRoute }}
+  {{- /* Only emitted when an IPv6 workload host route exists: negotiating a
+         fabric-facing IPv6 unicast AF on the EVPN VTEP unconditionally would
+         change the session capabilities of every existing deployment. The
+         underlay neighbors themselves are activated by bgpBaseNeighbor when the
+         base config marks them ipv6. */}}
+  address-family ipv6 unicast
+    redistribute kernel route-map rm_workload_export
+  exit-address-family
+  !
+  {{- end }}
   address-family l2vpn evpn
     advertise-all-vni
     {{ range $layer2 := $.NodeConfig.Layer2s }}
@@ -518,6 +544,35 @@ exit
 !
 bgp community-list standard cm-received-fabric permit 65169:200
 !
+{{- if $globalHostRoutes }}
+! Workload ports without a VRF are programmed into the CRA netns main table as
+! kernel routes. Redistribute exactly those host routes into the underlay so the
+! fabric can reach the workload; matching an explicit prefix list keeps node,
+! link-local and any other kernel route out of the fabric.
+{{- range $hostRoute := $globalHostRoutes }}
+{{- if isIPv4 $hostRoute }}
+ip prefix-list pl_workload_export permit {{ $hostRoute }}
+{{- else }}
+ipv6 prefix-list pl_workload_export permit {{ $hostRoute }}
+{{- end }}
+{{- end }}
+!
+{{- if $hasV4HostRoute }}
+route-map rm_workload_export permit 10
+  match ip address prefix-list pl_workload_export
+exit
+!
+{{- end }}
+{{- if $hasV6HostRoute }}
+route-map rm_workload_export permit 11
+  match ipv6 address prefix-list pl_workload_export
+exit
+!
+{{- end }}
+route-map rm_workload_export deny 65535
+exit
+!
+{{- end }}
 route-map DENY-TAG-FABRIC-OUT deny 10
   match community cm-received-fabric
 exit

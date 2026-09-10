@@ -1,0 +1,14 @@
+# Opt-in kustomize component that installs the cni-workload plugin binary onto
+# every node via a DaemonSet. It is NOT part of the default install; consume it
+# by adding this directory to the `components:` list of an overlay, e.g.
+#
+#   components:
+#     - ../cni-workload
+#
+# The component inherits the parent overlay's namespace, namePrefix and common
+# labels (so under config/default it becomes network-operator-cni-workload-installer
+# in kube-system).
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+resources:
+- daemonset.yaml
