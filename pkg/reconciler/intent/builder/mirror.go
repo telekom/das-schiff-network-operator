@@ -63,7 +63,7 @@ func (b *MirrorBuilder) Build(ctx context.Context, data *resolver.ResolvedData) 
 		tm := &data.TrafficMirrors[i]
 
 		// Resolve collector.
-		col, err := b.resolveCollector(tm.Spec.Collector, data)
+		col, err := b.resolveCollector(tm.Namespace, tm.Spec.Collector, data)
 		if err != nil {
 			logger.Info("skipping TrafficMirror with unresolvable collector",
 				"trafficmirror", tm.Name, "error", err.Error())
@@ -140,20 +140,20 @@ func mirrorDirections(direction string) []networkv1alpha1.MirrorDirection {
 func (b *MirrorBuilder) attachToSource(tm *nc.TrafficMirror, acl *networkv1alpha1.MirrorACL, data *resolver.ResolvedData, result map[string]*NodeContribution) error {
 	switch tm.Spec.Source.Kind {
 	case mirrorSourceLayer2Attachment:
-		return b.addToLayer2(tm.Spec.Source.Name, acl, data, result)
+		return b.addToLayer2(tm.Namespace, tm.Spec.Source.Name, acl, data, result)
 	case mirrorSourceInbound:
-		return b.addToInboundVRF(tm.Spec.Source.Name, acl, data, result)
+		return b.addToInboundVRF(tm.Namespace, tm.Spec.Source.Name, acl, data, result)
 	case mirrorSourceOutbound:
-		return b.addToOutboundVRF(tm.Spec.Source.Name, acl, data, result)
+		return b.addToOutboundVRF(tm.Namespace, tm.Spec.Source.Name, acl, data, result)
 	default:
 		return fmt.Errorf("unknown source kind %q", tm.Spec.Source.Kind)
 	}
 }
 
 // resolveCollector finds a Collector by name.
-func (*MirrorBuilder) resolveCollector(name string, data *resolver.ResolvedData) (*nc.Collector, error) {
+func (*MirrorBuilder) resolveCollector(namespace, name string, data *resolver.ResolvedData) (*nc.Collector, error) {
 	for i := range data.Collectors {
-		if data.Collectors[i].Name == name {
+		if data.Collectors[i].Namespace == namespace && data.Collectors[i].Name == name {
 			return &data.Collectors[i], nil
 		}
 	}
@@ -183,11 +183,17 @@ func (*MirrorBuilder) convertTrafficMatch(tm *nc.TrafficMatch) networkv1alpha1.T
 }
 
 // addToLayer2 adds MirrorACL to a Layer2 entry identified by L2A name on all nodes.
-func (*MirrorBuilder) addToLayer2(l2aName string, acl *networkv1alpha1.MirrorACL, data *resolver.ResolvedData, result map[string]*NodeContribution) error {
+func (*MirrorBuilder) addToLayer2(
+	namespace,
+	l2aName string,
+	acl *networkv1alpha1.MirrorACL,
+	data *resolver.ResolvedData,
+	result map[string]*NodeContribution,
+) error {
 	// Find the L2A.
 	var l2a *nc.Layer2Attachment
 	for j := range data.Layer2Attachments {
-		if data.Layer2Attachments[j].Name == l2aName {
+		if data.Layer2Attachments[j].Namespace == namespace && data.Layer2Attachments[j].Name == l2aName {
 			l2a = &data.Layer2Attachments[j]
 			break
 		}
@@ -197,7 +203,7 @@ func (*MirrorBuilder) addToLayer2(l2aName string, acl *networkv1alpha1.MirrorACL
 	}
 
 	// Resolve Network to get the VLAN for the map key.
-	net, ok := data.Networks[l2a.Spec.NetworkRef]
+	net, ok := data.Network(namespace, l2a.Spec.NetworkRef)
 	if !ok {
 		return fmt.Errorf("Layer2Attachment %q references unknown Network %q", l2a.Name, l2a.Spec.NetworkRef)
 	}
@@ -238,8 +244,8 @@ func (*MirrorBuilder) addToLayer2(l2aName string, acl *networkv1alpha1.MirrorACL
 // addToInboundVRF adds MirrorACL to every VRF associated with an Inbound's
 // Destinations selector, on all nodes. When the selector matches multiple
 // Destinations across different VRFs, the ACL is fanned out to each VRF.
-func (b *MirrorBuilder) addToInboundVRF(ibName string, acl *networkv1alpha1.MirrorACL, data *resolver.ResolvedData, result map[string]*NodeContribution) error {
-	vrfs, err := b.resolveInboundVRFs(ibName, data)
+func (b *MirrorBuilder) addToInboundVRF(namespace, ibName string, acl *networkv1alpha1.MirrorACL, data *resolver.ResolvedData, result map[string]*NodeContribution) error {
+	vrfs, err := b.resolveInboundVRFs(namespace, ibName, data)
 	if err != nil {
 		return err
 	}
@@ -252,8 +258,8 @@ func (b *MirrorBuilder) addToInboundVRF(ibName string, acl *networkv1alpha1.Mirr
 
 // addToOutboundVRF adds MirrorACL to every VRF associated with an Outbound's
 // Destinations selector, on all nodes.
-func (b *MirrorBuilder) addToOutboundVRF(obName string, acl *networkv1alpha1.MirrorACL, data *resolver.ResolvedData, result map[string]*NodeContribution) error {
-	vrfs, err := b.resolveOutboundVRFs(obName, data)
+func (b *MirrorBuilder) addToOutboundVRF(namespace, obName string, acl *networkv1alpha1.MirrorACL, data *resolver.ResolvedData, result map[string]*NodeContribution) error {
+	vrfs, err := b.resolveOutboundVRFs(namespace, obName, data)
 	if err != nil {
 		return err
 	}
@@ -295,32 +301,32 @@ func (*MirrorBuilder) applyMirrorACLToVRFs(vrfs map[string]*nc.VRFSpec, acl *net
 // resolveInboundVRFs returns every VRF (name → spec) matched by the Inbound's
 // Destinations selector. An empty map means the Inbound has no Destinations,
 // which is valid (consumer is purely informational).
-func (*MirrorBuilder) resolveInboundVRFs(name string, data *resolver.ResolvedData) (map[string]*nc.VRFSpec, error) {
+func (*MirrorBuilder) resolveInboundVRFs(namespace, name string, data *resolver.ResolvedData) (map[string]*nc.VRFSpec, error) {
 	for i := range data.Inbounds {
-		if data.Inbounds[i].Name != name {
+		if data.Inbounds[i].Namespace != namespace || data.Inbounds[i].Name != name {
 			continue
 		}
 		ib := &data.Inbounds[i]
 		if ib.Spec.Destinations == nil {
 			return nil, nil
 		}
-		return resolveSelectorVRFs(ib.Spec.Destinations, data), nil
+		return resolveSelectorVRFs(namespace, ib.Spec.Destinations, data), nil
 	}
 	return nil, fmt.Errorf("inbound %q not found", name)
 }
 
 // resolveOutboundVRFs returns every VRF (name → spec) matched by the Outbound's
 // Destinations selector.
-func (*MirrorBuilder) resolveOutboundVRFs(name string, data *resolver.ResolvedData) (map[string]*nc.VRFSpec, error) {
+func (*MirrorBuilder) resolveOutboundVRFs(namespace, name string, data *resolver.ResolvedData) (map[string]*nc.VRFSpec, error) {
 	for i := range data.Outbounds {
-		if data.Outbounds[i].Name != name {
+		if data.Outbounds[i].Namespace != namespace || data.Outbounds[i].Name != name {
 			continue
 		}
 		ob := &data.Outbounds[i]
 		if ob.Spec.Destinations == nil {
 			return nil, nil
 		}
-		return resolveSelectorVRFs(ob.Spec.Destinations, data), nil
+		return resolveSelectorVRFs(namespace, ob.Spec.Destinations, data), nil
 	}
 	return nil, fmt.Errorf("outbound %q not found", name)
 }

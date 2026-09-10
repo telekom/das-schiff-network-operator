@@ -67,13 +67,13 @@ func (m *Manager) reconcileVRFFinalizers(ctx context.Context, fetched *resolver.
 	referencedVRFs := make(map[string]bool)
 	for i := range fetched.Destinations {
 		if fetched.Destinations[i].Spec.VRFRef != nil {
-			referencedVRFs[*fetched.Destinations[i].Spec.VRFRef] = true
+			referencedVRFs[resolver.NamespacedKey(fetched.Destinations[i].Namespace, *fetched.Destinations[i].Spec.VRFRef)] = true
 		}
 	}
 
 	for i := range fetched.AllVRFs {
 		vrf := &fetched.AllVRFs[i]
-		if referencedVRFs[vrf.Name] {
+		if referencedVRFs[resolver.NamespacedKey(vrf.Namespace, vrf.Name)] {
 			if !controllerutil.ContainsFinalizer(vrf, nc.FinalizerVRFInUse) {
 				controllerutil.AddFinalizer(vrf, nc.FinalizerVRFInUse)
 				if err := m.client.Update(ctx, vrf); err != nil {
@@ -100,21 +100,21 @@ func (m *Manager) reconcileNetworkFinalizers(ctx context.Context, fetched *resol
 	referencedNetworks := make(map[string]bool)
 
 	for i := range fetched.Layer2Attachments {
-		referencedNetworks[fetched.Layer2Attachments[i].Spec.NetworkRef] = true
+		referencedNetworks[resolver.NamespacedKey(fetched.Layer2Attachments[i].Namespace, fetched.Layer2Attachments[i].Spec.NetworkRef)] = true
 	}
 	for i := range fetched.Inbounds {
-		referencedNetworks[fetched.Inbounds[i].Spec.NetworkRef] = true
+		referencedNetworks[resolver.NamespacedKey(fetched.Inbounds[i].Namespace, fetched.Inbounds[i].Spec.NetworkRef)] = true
 	}
 	for i := range fetched.Outbounds {
-		referencedNetworks[fetched.Outbounds[i].Spec.NetworkRef] = true
+		referencedNetworks[resolver.NamespacedKey(fetched.Outbounds[i].Namespace, fetched.Outbounds[i].Spec.NetworkRef)] = true
 	}
 	for i := range fetched.PodNetworks {
-		referencedNetworks[fetched.PodNetworks[i].Spec.NetworkRef] = true
+		referencedNetworks[resolver.NamespacedKey(fetched.PodNetworks[i].Namespace, fetched.PodNetworks[i].Spec.NetworkRef)] = true
 	}
 
 	for i := range fetched.AllNetworks {
 		net := &fetched.AllNetworks[i]
-		if referencedNetworks[net.Name] {
+		if referencedNetworks[resolver.NamespacedKey(net.Namespace, net.Name)] {
 			if !controllerutil.ContainsFinalizer(net, nc.FinalizerNetworkInUse) {
 				controllerutil.AddFinalizer(net, nc.FinalizerNetworkInUse)
 				if err := m.client.Update(ctx, net); err != nil {
@@ -142,7 +142,7 @@ func (m *Manager) reconcileDestinationFinalizers(ctx context.Context, fetched *r
 
 	for i := range fetched.AllDestinations {
 		dest := &fetched.AllDestinations[i]
-		selected := isSelectedByAny(dest.Labels, selectors)
+		selected := isSelectedByAny(dest.Namespace, dest.Labels, selectors)
 
 		if selected {
 			if !controllerutil.ContainsFinalizer(dest, nc.FinalizerDestinationInUse) {
@@ -169,12 +169,12 @@ func (m *Manager) reconcileDestinationFinalizers(ctx context.Context, fetched *r
 func (m *Manager) reconcileCollectorFinalizers(ctx context.Context, fetched *resolver.FetchedResources) error {
 	referencedCollectors := make(map[string]bool)
 	for i := range fetched.TrafficMirrors {
-		referencedCollectors[fetched.TrafficMirrors[i].Spec.Collector] = true
+		referencedCollectors[resolver.NamespacedKey(fetched.TrafficMirrors[i].Namespace, fetched.TrafficMirrors[i].Spec.Collector)] = true
 	}
 
 	for i := range fetched.Collectors {
 		col := &fetched.Collectors[i]
-		if referencedCollectors[col.Name] {
+		if referencedCollectors[resolver.NamespacedKey(col.Namespace, col.Name)] {
 			if !controllerutil.ContainsFinalizer(col, nc.FinalizerCollectorInUse) {
 				controllerutil.AddFinalizer(col, nc.FinalizerCollectorInUse)
 				if err := m.client.Update(ctx, col); err != nil {
@@ -196,35 +196,43 @@ func (m *Manager) reconcileCollectorFinalizers(ctx context.Context, fetched *res
 }
 
 // collectDestinationSelectors gathers all label selectors that target Destinations.
-func collectDestinationSelectors(fetched *resolver.FetchedResources) []*metav1.LabelSelector {
-	var selectors []*metav1.LabelSelector
+type namespacedSelector struct {
+	namespace string
+	selector  *metav1.LabelSelector
+}
+
+func collectDestinationSelectors(fetched *resolver.FetchedResources) []namespacedSelector {
+	var selectors []namespacedSelector
 	for i := range fetched.Layer2Attachments {
 		if fetched.Layer2Attachments[i].Spec.Destinations != nil {
-			selectors = append(selectors, fetched.Layer2Attachments[i].Spec.Destinations)
+			selectors = append(selectors, namespacedSelector{fetched.Layer2Attachments[i].Namespace, fetched.Layer2Attachments[i].Spec.Destinations})
 		}
 	}
 	for i := range fetched.Inbounds {
 		if fetched.Inbounds[i].Spec.Destinations != nil {
-			selectors = append(selectors, fetched.Inbounds[i].Spec.Destinations)
+			selectors = append(selectors, namespacedSelector{fetched.Inbounds[i].Namespace, fetched.Inbounds[i].Spec.Destinations})
 		}
 	}
 	for i := range fetched.Outbounds {
 		if fetched.Outbounds[i].Spec.Destinations != nil {
-			selectors = append(selectors, fetched.Outbounds[i].Spec.Destinations)
+			selectors = append(selectors, namespacedSelector{fetched.Outbounds[i].Namespace, fetched.Outbounds[i].Spec.Destinations})
 		}
 	}
 	for i := range fetched.PodNetworks {
 		if fetched.PodNetworks[i].Spec.Destinations != nil {
-			selectors = append(selectors, fetched.PodNetworks[i].Spec.Destinations)
+			selectors = append(selectors, namespacedSelector{fetched.PodNetworks[i].Namespace, fetched.PodNetworks[i].Spec.Destinations})
 		}
 	}
 	return selectors
 }
 
 // isSelectedByAny returns true if the given resource labels match any of the selectors.
-func isSelectedByAny(resourceLabels map[string]string, selectors []*metav1.LabelSelector) bool {
-	for _, sel := range selectors {
-		selector, err := metav1.LabelSelectorAsSelector(sel)
+func isSelectedByAny(namespace string, resourceLabels map[string]string, selectors []namespacedSelector) bool {
+	for _, candidate := range selectors {
+		if candidate.namespace != namespace {
+			continue
+		}
+		selector, err := metav1.LabelSelectorAsSelector(candidate.selector)
 		if err != nil {
 			continue
 		}

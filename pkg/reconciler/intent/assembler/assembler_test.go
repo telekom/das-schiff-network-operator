@@ -17,11 +17,14 @@ limitations under the License.
 package assembler
 
 import (
+	"strings"
 	"testing"
 
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/builder"
 )
+
+const testRoutePrefix = "192.0.2.0/27"
 
 func TestAssemble_Nil(t *testing.T) {
 	result, err := Assemble(nil)
@@ -164,6 +167,73 @@ func TestAssemble_MergeFabricVRFs(t *testing.T) {
 	}
 }
 
+func TestAssemble_StaticRoutePrefersExplicitNextHop(t *testing.T) {
+	combo := "s-combo"
+	routed := builder.NewNodeContribution()
+	routed.FabricVRFs["edge"] = networkv1alpha1.FabricVRF{
+		VRF: networkv1alpha1.VRF{
+			StaticRoutes: []networkv1alpha1.StaticRoute{{
+				Prefix:  testRoutePrefix,
+				NextHop: &networkv1alpha1.NextHop{Vrf: &combo},
+			}},
+		},
+	}
+	aggregate := builder.NewNodeContribution()
+	aggregate.FabricVRFs["edge"] = networkv1alpha1.FabricVRF{
+		VRF: networkv1alpha1.VRF{
+			StaticRoutes: []networkv1alpha1.StaticRoute{{Prefix: testRoutePrefix}},
+		},
+	}
+
+	for _, contributions := range [][]*builder.NodeContribution{
+		{routed, aggregate},
+		{aggregate, routed},
+	} {
+		result, err := Assemble(contributions)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		routes := result.Spec.FabricVRFs["edge"].StaticRoutes
+		if len(routes) != 1 {
+			t.Fatalf("expected one merged route, got %#v", routes)
+		}
+		if routes[0].NextHop == nil || routes[0].NextHop.Vrf == nil || *routes[0].NextHop.Vrf != combo {
+			t.Errorf("expected explicit combo VRF next-hop to win, got %#v", routes[0])
+		}
+	}
+}
+
+func TestAssemble_RejectsConflictingExplicitVRFNextHops(t *testing.T) {
+	firstCombo := "l-first"
+	secondCombo := "l-second"
+	first := builder.NewNodeContribution()
+	first.FabricVRFs["edge"] = networkv1alpha1.FabricVRF{
+		VRF: networkv1alpha1.VRF{
+			StaticRoutes: []networkv1alpha1.StaticRoute{{
+				Prefix:  testRoutePrefix,
+				NextHop: &networkv1alpha1.NextHop{Vrf: &firstCombo},
+			}},
+		},
+	}
+	second := builder.NewNodeContribution()
+	second.FabricVRFs["edge"] = networkv1alpha1.FabricVRF{
+		VRF: networkv1alpha1.VRF{
+			StaticRoutes: []networkv1alpha1.StaticRoute{{
+				Prefix:  testRoutePrefix,
+				NextHop: &networkv1alpha1.NextHop{Vrf: &secondCombo},
+			}},
+		},
+	}
+
+	_, err := Assemble([]*builder.NodeContribution{first, second})
+	if err == nil {
+		t.Fatal("expected conflicting explicit VRF next-hop error")
+	}
+	if !strings.Contains(err.Error(), `VRF "edge" has conflicting next-hop VRFs`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestAssemble_MergeClusterVRF(t *testing.T) {
 	c1 := builder.NewNodeContribution()
 	c1.ClusterVRF = &networkv1alpha1.VRF{
@@ -208,6 +278,36 @@ func TestAssemble_SkipsNilContributions(t *testing.T) {
 	}
 	if len(result.Spec.Layer2s) != 1 {
 		t.Errorf("expected 1 Layer2, got %d", len(result.Spec.Layer2s))
+	}
+}
+
+func TestAssemble_RejectsFabricLocalVRFNameCollision(t *testing.T) {
+	c := builder.NewNodeContribution()
+	c.FabricVRFs["shared-name"] = networkv1alpha1.FabricVRF{}
+	c.LocalVRFs["shared-name"] = networkv1alpha1.VRF{}
+
+	_, err := Assemble([]*builder.NodeContribution{c})
+	if err == nil {
+		t.Fatal("expected FabricVRF/LocalVRF name collision error")
+	}
+}
+
+func TestAssemble_RejectsReservedLocalVRFName(t *testing.T) {
+	c := builder.NewNodeContribution()
+	c.LocalVRFs["cluster"] = networkv1alpha1.VRF{}
+
+	_, err := Assemble([]*builder.NodeContribution{c})
+	if err == nil {
+		t.Fatal("expected reserved LocalVRF name error")
+	}
+}
+
+func TestAssemble_RejectsReservedFabricVRFName(t *testing.T) {
+	contrib := builder.NewNodeContribution()
+	contrib.FabricVRFs["cluster"] = networkv1alpha1.FabricVRF{}
+
+	if _, err := Assemble([]*builder.NodeContribution{contrib}); err == nil {
+		t.Fatal("expected reserved FabricVRF name error")
 	}
 }
 

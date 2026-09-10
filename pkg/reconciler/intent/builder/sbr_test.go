@@ -111,6 +111,58 @@ func TestSBRBuilder_BasicOutbound(t *testing.T) {
 	assert.Equal(t, vrfname.SBRName("internet"), *pr.NextHop.Vrf)
 }
 
+func TestSBRBuilder_ReportsConflictingDestinationPrefixes(t *testing.T) {
+	const otherVRF = "other"
+	data := baseSBRData()
+	otherRef := "other-vrf"
+	data.Destinations["other-dest"] = &resolver.ResolvedDestination{
+		Name:    "other-dest",
+		Spec:    nc.DestinationSpec{VRFRef: &otherRef, Prefixes: []string{"0.0.0.0/0"}},
+		VRFSpec: &nc.VRFSpec{VRF: otherVRF, VNI: ptrInt32(1001)},
+	}
+	data.RawDestinations = append(data.RawDestinations, nc.Destination{
+		ObjectMeta: metav1.ObjectMeta{Name: "other-dest", Labels: map[string]string{"role": "external"}},
+		Spec:       nc.DestinationSpec{VRFRef: &otherRef, Prefixes: []string{"0.0.0.0/0"}},
+	})
+	data.Outbounds = []nc.Outbound{{
+		ObjectMeta: metav1.ObjectMeta{Name: "egress"},
+		Spec: nc.OutboundSpec{
+			Addresses:    &nc.AddressAllocation{IPv4: []string{"198.51.100.10"}},
+			Destinations: &metav1.LabelSelector{MatchLabels: map[string]string{"role": "external"}},
+		},
+	}}
+
+	report := NewBuildReport()
+	result, err := NewSBRBuilder().Build(WithReport(context.Background(), report), data)
+	require.NoError(t, err)
+	assert.Empty(t, result)
+	require.Len(t, report.Issues(), 1)
+	assert.Equal(t, "ConflictingStaticRoute", report.Issues()[0].Reason)
+}
+
+func TestSBRBuilder_ReportsIntermediateVRFNameCollision(t *testing.T) {
+	data := baseSBRData()
+	comboName := vrfname.SBRName("internet")
+	data.VRFs["collision"] = &resolver.ResolvedVRF{
+		Name: "collision",
+		Spec: nc.VRFSpec{VRF: comboName},
+	}
+	data.Outbounds = []nc.Outbound{{
+		ObjectMeta: metav1.ObjectMeta{Name: "egress"},
+		Spec: nc.OutboundSpec{
+			Addresses:    &nc.AddressAllocation{IPv4: []string{"198.51.100.10"}},
+			Destinations: &metav1.LabelSelector{MatchLabels: map[string]string{"role": "external"}},
+		},
+	}}
+
+	report := NewBuildReport()
+	result, err := NewSBRBuilder().Build(WithReport(context.Background(), report), data)
+	require.NoError(t, err)
+	assert.Empty(t, result)
+	require.Len(t, report.Issues(), 1)
+	assert.Equal(t, reasonIntermediateVRFNameCollision, report.Issues()[0].Reason)
+}
+
 func TestSBRBuilder_InboundWithStatusAddresses(t *testing.T) {
 	data := baseSBRData()
 	data.Inbounds = []nc.Inbound{

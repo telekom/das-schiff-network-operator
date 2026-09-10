@@ -22,12 +22,27 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/resolver"
+	"github.com/telekom/das-schiff-network-operator/pkg/vrfname"
+)
+
+const (
+	testNode1     = "node-1"
+	testNode2     = "node-2"
+	testRackLabel = "rack"
+	testSelected  = "selected"
+	testOther     = "other"
+	testDocCIDR   = "192.0.2.0/24"
+	testDMZVRFRef = "dmz-vrf"
+	testDMZName   = "dmz"
+	testEdgeDest  = "edge-dest"
 )
 
 // ---------------------------------------------------------------------------
@@ -57,7 +72,8 @@ func TestBGPPeeringBuilder_ListenRange(t *testing.T) { //nolint:funlen // table-
 
 	data := &resolver.ResolvedData{
 		Nodes: []corev1.Node{
-			{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
+			{ObjectMeta: metav1.ObjectMeta{Name: testNode1, Labels: map[string]string{testRackLabel: testSelected}}},
+			{ObjectMeta: metav1.ObjectMeta{Name: testNode2, Labels: map[string]string{testRackLabel: testOther}}},
 		},
 		Networks: map[string]*resolver.ResolvedNetwork{
 			"transfer-net": {
@@ -104,6 +120,9 @@ func TestBGPPeeringBuilder_ListenRange(t *testing.T) { //nolint:funlen // table-
 					Destinations: &metav1.LabelSelector{
 						MatchLabels: map[string]string{"env": "prod"},
 					},
+					NodeSelector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{testRackLabel: testSelected},
+					},
 				},
 			},
 		},
@@ -127,11 +146,11 @@ func TestBGPPeeringBuilder_ListenRange(t *testing.T) { //nolint:funlen // table-
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(result) != 1 {
-		t.Fatalf("expected 1 node contribution, got %d", len(result))
+	if len(result) != 2 {
+		t.Fatalf("expected single-VRF listener on all 2 nodes, got %d contributions", len(result))
 	}
 
-	contrib, ok := result["node-1"]
+	contrib, ok := result[testNode1]
 	if !ok {
 		t.Fatal("expected contribution for node-1")
 	}
@@ -146,6 +165,8 @@ func TestBGPPeeringBuilder_ListenRange(t *testing.T) { //nolint:funlen // table-
 	if len(fvrf.BGPPeers) != 2 {
 		t.Fatalf("expected 2 BGPPeers (IPv4 + IPv6), got %d", len(fvrf.BGPPeers))
 	}
+	require.Len(t, result[testNode2].FabricVRFs["prod"].BGPPeers, 2,
+		"single-VRF listener placement must remain independent of the L2A node selector")
 
 	// Check IPv4 peer.
 	p4 := fvrf.BGPPeers[0]
@@ -323,9 +344,88 @@ func assertImportAllows(t *testing.T, af *networkv1alpha1.AddressFamily, prefix 
 	}
 }
 
-// TestBGPPeeringBuilder_ListenRangeFanOut verifies that when a Layer2Attachment
-// destinations selector matches multiple Destinations across multiple VRFs,
-// the listen-range peer is installed on each matched VRF. Persona review C2.
+func TestBGPPeeringBuilder_ListenRangeSkipsOwnershipConflictedL2A(t *testing.T) {
+	data := &resolver.ResolvedData{
+		Nodes: []corev1.Node{{ObjectMeta: metav1.ObjectMeta{Name: testNode1}}},
+		Networks: map[string]*resolver.ResolvedNetwork{
+			"transfer-net": {
+				Name: "transfer-net",
+				Spec: nc.NetworkSpec{
+					VLAN: ptr(int32(100)),
+					VNI:  ptr(int32(10100)),
+					IPv4: &nc.IPNetwork{CIDR: testDocCIDR},
+				},
+			},
+		},
+		VRFs: map[string]*resolver.ResolvedVRF{
+			"prod-vrf": {
+				Name: "prod-vrf",
+				Spec: nc.VRFSpec{VRF: "prod", VNI: ptr(int32(5001)), RouteTarget: ptr("65000:5001")},
+			},
+			testDMZVRFRef: {
+				Name: testDMZVRFRef,
+				Spec: nc.VRFSpec{VRF: testDMZName, VNI: ptr(int32(5002)), RouteTarget: ptr("65000:5002")},
+			},
+		},
+		Destinations: map[string]*resolver.ResolvedDestination{
+			"dc-dest": {
+				Name:    "dc-dest",
+				Spec:    nc.DestinationSpec{VRFRef: ptr("prod-vrf")},
+				VRFSpec: &nc.VRFSpec{VRF: "prod", VNI: ptr(int32(5001)), RouteTarget: ptr("65000:5001")},
+			},
+			testEdgeDest: {
+				Name:    testEdgeDest,
+				Spec:    nc.DestinationSpec{VRFRef: ptr(testDMZVRFRef)},
+				VRFSpec: &nc.VRFSpec{VRF: testDMZName, VNI: ptr(int32(5002)), RouteTarget: ptr("65000:5002")},
+			},
+		},
+		RawDestinations: []nc.Destination{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "dc-dest", Labels: map[string]string{"env": "prod"}},
+				Spec:       nc.DestinationSpec{VRFRef: ptr("prod-vrf")},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: testEdgeDest, Labels: map[string]string{"env": "prod"}},
+				Spec:       nc.DestinationSpec{VRFRef: ptr(testDMZVRFRef)},
+			},
+		},
+		Layer2Attachments: []nc.Layer2Attachment{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "owner-l2a"},
+				Spec: nc.Layer2AttachmentSpec{
+					NetworkRef: "transfer-net",
+					Destinations: &metav1.LabelSelector{
+						MatchLabels: map[string]string{"env": "prod"},
+					},
+				},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "transfer-l2a"},
+				Spec: nc.Layer2AttachmentSpec{
+					NetworkRef: "transfer-net",
+					Destinations: &metav1.LabelSelector{
+						MatchLabels: map[string]string{"env": "prod"},
+					},
+				},
+			},
+		},
+		BGPPeerings: []nc.BGPPeering{{
+			ObjectMeta: metav1.ObjectMeta{Name: "listen-peer"},
+			Spec: nc.BGPPeeringSpec{
+				Mode: nc.BGPPeeringModeListenRange,
+				Ref:  nc.BGPPeeringRef{AttachmentRef: ptr("transfer-l2a")},
+			},
+		}},
+	}
+
+	result, err := NewBGPPeeringBuilder().Build(context.Background(), data)
+	require.NoError(t, err)
+	require.Empty(t, result, "listener must not be emitted when the referenced L2A loses ownership placement")
+}
+
+// TestBGPPeeringBuilder_ListenRangeComboVRF verifies that the listener follows
+// a multi-VRF L2A's IRB into the combo VRF. Learned routes are imported into
+// each selected FabricVRF and exported through EVPN.
 func TestBGPPeeringBuilder_ListenRangeFanOut(t *testing.T) {
 	b := NewBGPPeeringBuilder()
 
@@ -333,7 +433,10 @@ func TestBGPPeeringBuilder_ListenRangeFanOut(t *testing.T) {
 	dmzSpec := &nc.VRFSpec{VRF: "dmz", VNI: ptr(int32(5002)), RouteTarget: ptr("65000:5002")}
 
 	data := &resolver.ResolvedData{
-		Nodes: []corev1.Node{{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}}},
+		Nodes: []corev1.Node{
+			{ObjectMeta: metav1.ObjectMeta{Name: testNode1, Labels: map[string]string{testRackLabel: testSelected}}},
+			{ObjectMeta: metav1.ObjectMeta{Name: testNode2, Labels: map[string]string{testRackLabel: testOther}}},
+		},
 		Networks: map[string]*resolver.ResolvedNetwork{
 			"transfer-net": {
 				Name: "transfer-net",
@@ -342,6 +445,10 @@ func TestBGPPeeringBuilder_ListenRangeFanOut(t *testing.T) {
 					VNI:  ptr(int32(10100)),
 					IPv4: &nc.IPNetwork{CIDR: "10.100.0.0/24"},
 				},
+			},
+			"allowed-net": {
+				Name: "allowed-net",
+				Spec: nc.NetworkSpec{IPv4: &nc.IPNetwork{CIDR: "10.200.0.0/24"}},
 			},
 		},
 		VRFs: map[string]*resolver.ResolvedVRF{
@@ -364,6 +471,7 @@ func TestBGPPeeringBuilder_ListenRangeFanOut(t *testing.T) {
 				Spec: nc.Layer2AttachmentSpec{
 					NetworkRef:   "transfer-net",
 					Destinations: &metav1.LabelSelector{MatchLabels: map[string]string{"tier": "shared"}},
+					NodeSelector: &metav1.LabelSelector{MatchLabels: map[string]string{testRackLabel: testSelected}},
 				},
 			},
 		},
@@ -376,6 +484,14 @@ func TestBGPPeeringBuilder_ListenRangeFanOut(t *testing.T) {
 					WorkloadAS: ptr(int64(65100)),
 				},
 			},
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "lp-allowed"},
+				Spec: nc.BGPPeeringSpec{
+					Mode:       nc.BGPPeeringModeListenRange,
+					Ref:        nc.BGPPeeringRef{AttachmentRef: ptr("transfer-l2a"), NetworkRefs: []string{"allowed-net"}},
+					WorkloadAS: ptr(int64(65101)),
+				},
+			},
 		},
 	}
 
@@ -384,18 +500,98 @@ func TestBGPPeeringBuilder_ListenRangeFanOut(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	contrib := result["node-1"]
-	if contrib == nil {
-		t.Fatal("expected node-1 contribution")
+	require.NotNil(t, contrib)
+	assert.NotContains(t, result, testNode2)
+
+	comboName := vrfname.L2AName("dmz-dest+prod-dest")
+	combo, ok := contrib.LocalVRFs[comboName]
+	if !ok {
+		t.Fatalf("expected combo LocalVRF %q, got keys %v", comboName, keys(contrib.LocalVRFs))
 	}
+	if len(combo.BGPPeers) != 2 {
+		t.Fatalf("expected 2 BGPPeers in combo VRF, got %d", len(combo.BGPPeers))
+	}
+
 	for _, vrf := range []string{"prod", "dmz"} {
 		fvrf, ok := contrib.FabricVRFs[vrf]
 		if !ok {
-			t.Fatalf("expected listen-range peer fanned out to FabricVRF %q, got keys %v", vrf, keys(contrib.FabricVRFs))
+			t.Fatalf("expected FabricVRF %q, got keys %v", vrf, keys(contrib.FabricVRFs))
 		}
-		if len(fvrf.BGPPeers) != 1 {
-			t.Errorf("VRF %q: expected 1 BGPPeer, got %d", vrf, len(fvrf.BGPPeers))
+		if len(fvrf.BGPPeers) != 0 {
+			t.Errorf("VRF %q: listener must be in combo VRF, got %d FabricVRF peers", vrf, len(fvrf.BGPPeers))
 		}
+		var comboImport *networkv1alpha1.VRFImport
+		for i := range fvrf.VRFImports {
+			if fvrf.VRFImports[i].FromVRF == comboName {
+				comboImport = &fvrf.VRFImports[i]
+				break
+			}
+		}
+		require.NotNil(t, comboImport)
+		require.Len(t, comboImport.Filter.Items, 2)
+		assert.Equal(t, "10.100.0.0/24", comboImport.Filter.Items[0].Matcher.Prefix.Prefix)
+		assert.Equal(t, "10.200.0.0/24", comboImport.Filter.Items[1].Matcher.Prefix.Prefix)
+		require.NotNil(t, fvrf.EVPNExportFilter)
+		require.Len(t, fvrf.EVPNExportFilter.Items, 2)
+		assert.Equal(t, "10.100.0.0/24", fvrf.EVPNExportFilter.Items[0].Matcher.Prefix.Prefix)
+		assert.Equal(t, "10.200.0.0/24", fvrf.EVPNExportFilter.Items[1].Matcher.Prefix.Prefix)
 	}
+}
+
+func TestBGPPeeringBuilder_ListenRangeMultiVRFRequiresIRB(t *testing.T) {
+	edgeASpec := &nc.VRFSpec{VRF: "edge-a", VNI: ptr(int32(5001)), RouteTarget: ptr("65000:5001")}
+	edgeBSpec := &nc.VRFSpec{VRF: "edge-b", VNI: ptr(int32(5002)), RouteTarget: ptr("65000:5002")}
+	data := &resolver.ResolvedData{
+		Nodes: []corev1.Node{{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}}},
+		Networks: map[string]*resolver.ResolvedNetwork{
+			"transfer-net": {
+				Name: "transfer-net",
+				Spec: nc.NetworkSpec{
+					VLAN: ptr(int32(100)),
+					VNI:  ptr(int32(10100)),
+					IPv4: &nc.IPNetwork{CIDR: "192.0.2.0/24"},
+				},
+			},
+		},
+		Destinations: map[string]*resolver.ResolvedDestination{
+			testMultiVRFDestA: {Name: testMultiVRFDestA, Spec: nc.DestinationSpec{VRFRef: ptr("edge-a-ref")}, VRFSpec: edgeASpec},
+			testMultiVRFDestB: {Name: testMultiVRFDestB, Spec: nc.DestinationSpec{VRFRef: ptr("edge-b-ref")}, VRFSpec: edgeBSpec},
+		},
+		RawDestinations: []nc.Destination{
+			{ObjectMeta: metav1.ObjectMeta{Name: testMultiVRFDestA, Labels: map[string]string{testMultiVRFLabelKey: testMultiVRFLabelValue}},
+				Spec: nc.DestinationSpec{VRFRef: ptr("edge-a-ref")}},
+			{ObjectMeta: metav1.ObjectMeta{Name: testMultiVRFDestB, Labels: map[string]string{testMultiVRFLabelKey: testMultiVRFLabelValue}},
+				Spec: nc.DestinationSpec{VRFRef: ptr("edge-b-ref")}},
+		},
+		Layer2Attachments: []nc.Layer2Attachment{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "transfer-l2a"},
+				Spec: nc.Layer2AttachmentSpec{
+					NetworkRef:     "transfer-net",
+					DisableAnycast: ptr(true),
+					Destinations:   &metav1.LabelSelector{MatchLabels: map[string]string{testMultiVRFLabelKey: testMultiVRFLabelValue}},
+				},
+			},
+		},
+		BGPPeerings: []nc.BGPPeering{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "listener"},
+				Spec: nc.BGPPeeringSpec{
+					Mode:       nc.BGPPeeringModeListenRange,
+					Ref:        nc.BGPPeeringRef{AttachmentRef: ptr("transfer-l2a"), NetworkRefs: []string{"transfer-net"}},
+					WorkloadAS: ptr(int64(65100)),
+				},
+			},
+		},
+	}
+
+	report := NewBuildReport()
+	result, err := NewBGPPeeringBuilder().Build(WithReport(context.Background(), report), data)
+	require.NoError(t, err)
+	assert.Empty(t, result)
+	require.Len(t, report.Issues(), 1)
+	assert.Equal(t, "ListenRangeUnresolved", report.Issues()[0].Reason)
+	assert.Contains(t, report.Issues()[0].Message, "multiple destination VRFs require an enabled HBN IRB")
 }
 
 func TestBGPPeeringBuilder_LoopbackPeer(t *testing.T) {
@@ -743,7 +939,7 @@ func TestFindMatchingAP_NoMatch(t *testing.T) {
 			},
 		},
 	}
-	ap, err := findMatchingAP(map[string]string{"env": "prod"}, "prod", data)
+	ap, err := findMatchingAP("", map[string]string{"env": "prod"}, "prod", data)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -769,7 +965,7 @@ func TestFindMatchingAP_SingleMatch(t *testing.T) {
 			},
 		},
 	}
-	ap, err := findMatchingAP(map[string]string{"env": "prod"}, "prod", data)
+	ap, err := findMatchingAP("", map[string]string{"env": "prod"}, "prod", data)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -794,7 +990,7 @@ func TestFindMatchingAP_MultipleMatchError(t *testing.T) {
 			},
 		},
 	}
-	_, err := findMatchingAP(map[string]string{}, "prod", data)
+	_, err := findMatchingAP("", map[string]string{}, "prod", data)
 	if err == nil {
 		t.Fatal("expected error for multiple matching APs, got nil")
 	}

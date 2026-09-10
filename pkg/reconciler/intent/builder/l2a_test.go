@@ -25,19 +25,58 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/resolver"
+	"github.com/telekom/das-schiff-network-operator/pkg/vrfname"
 )
 
 func ptr[T any](v T) *T { return &v }
 
-const testInterfaceRef = "eth1"
+const (
+	testInterfaceRef       = "eth1"
+	testMultiVRFNetworkV4  = "192.0.2.0/27"
+	testMultiVRFDestAV4    = "198.51.100.0/24"
+	testMultiVRFDestBV4    = "203.0.113.0/24"
+	testMultiVRFNetwork    = "workload-segment"
+	testMultiVRFDestA      = "destination-a"
+	testMultiVRFDestB      = "destination-b"
+	testMultiVRFLabelKey   = "scope"
+	testMultiVRFLabelValue = "shared"
+	testMultiVRFEdgeA      = "edge-a"
+	testMultiVRFEdgeB      = "edge-b"
+	testMultiVRFRefA       = "edge-a-ref"
+	testMultiVRFRefB       = "edge-b-ref"
+	testWorkerA            = "worker-a"
+	testTenantA            = "tenant-a"
+	testTenantB            = "tenant-b"
+)
 
 func TestL2ABuilder_Name(t *testing.T) {
 	b := NewL2ABuilder()
 	if b.Name() != "l2a" {
 		t.Errorf("expected name 'l2a', got %q", b.Name())
 	}
+}
+
+func TestSortedLayer2Attachments(t *testing.T) {
+	items := []nc.Layer2Attachment{
+		{ObjectMeta: metav1.ObjectMeta{Namespace: testTenantB, Name: "attachment-a"}},
+		{ObjectMeta: metav1.ObjectMeta{Namespace: testTenantA, Name: "attachment-b"}},
+		{ObjectMeta: metav1.ObjectMeta{Namespace: testTenantA, Name: "attachment-a"}},
+	}
+
+	sorted := sortedLayer2Attachments(items)
+	assert.Equal(t, []string{
+		testTenantA + "/attachment-a",
+		testTenantA + "/attachment-b",
+		testTenantB + "/attachment-a",
+	}, []string{
+		sorted[0].Namespace + "/" + sorted[0].Name,
+		sorted[1].Namespace + "/" + sorted[1].Name,
+		sorted[2].Namespace + "/" + sorted[2].Name,
+	})
+	assert.Equal(t, testTenantB, items[0].Namespace, "sorting must not mutate resolver input")
 }
 
 func TestL2ABuilder_EmptyData(t *testing.T) {
@@ -256,6 +295,362 @@ func TestL2ABuilder_WithDestinationVRF(t *testing.T) {
 	if fvrf.VNI != 5001 {
 		t.Errorf("expected FabricVRF VNI 5001, got %d", fvrf.VNI)
 	}
+}
+
+func TestL2ABuilder_MultipleDestinationVRFsUseComboVRF(t *testing.T) {
+	b := NewL2ABuilder()
+
+	edgeASpec := &nc.VRFSpec{VRF: testMultiVRFEdgeA, VNI: ptr(int32(5101)), RouteTarget: ptr("64512:5101")}
+	edgeBSpec := &nc.VRFSpec{VRF: testMultiVRFEdgeB, VNI: ptr(int32(5102)), RouteTarget: ptr("64512:5102")}
+	data := &resolver.ResolvedData{
+		Nodes: []corev1.Node{{ObjectMeta: metav1.ObjectMeta{Name: testWorkerA}}},
+		Networks: map[string]*resolver.ResolvedNetwork{
+			testMultiVRFNetwork: {
+				Name: testMultiVRFNetwork,
+				Spec: nc.NetworkSpec{
+					VLAN: ptr(int32(210)),
+					VNI:  ptr(int32(30210)),
+					IPv4: &nc.IPNetwork{CIDR: testMultiVRFNetworkV4},
+					IPv6: &nc.IPNetwork{CIDR: "2001:db8:100::/64"},
+				},
+			},
+		},
+		VRFs: map[string]*resolver.ResolvedVRF{
+			testMultiVRFRefA: {Name: testMultiVRFRefA, Spec: *edgeASpec},
+			testMultiVRFRefB: {Name: testMultiVRFRefB, Spec: *edgeBSpec},
+		},
+		Destinations: map[string]*resolver.ResolvedDestination{
+			testMultiVRFDestA: {
+				Name:    testMultiVRFDestA,
+				Spec:    nc.DestinationSpec{VRFRef: ptr(testMultiVRFRefA), Prefixes: []string{testMultiVRFDestAV4, "2001:db8:200::/48"}},
+				VRFSpec: edgeASpec,
+			},
+			testMultiVRFDestB: {
+				Name:    testMultiVRFDestB,
+				Spec:    nc.DestinationSpec{VRFRef: ptr(testMultiVRFRefB), Prefixes: []string{testMultiVRFDestBV4, "2001:db8:300::/48"}},
+				VRFSpec: edgeBSpec,
+			},
+		},
+		// Reverse order verifies that combo naming and routes do not depend on
+		// Kubernetes list order.
+		RawDestinations: []nc.Destination{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: testMultiVRFDestB, Labels: map[string]string{testMultiVRFLabelKey: testMultiVRFLabelValue}},
+				Spec:       nc.DestinationSpec{VRFRef: ptr(testMultiVRFRefB), Prefixes: []string{testMultiVRFDestBV4, "2001:db8:300::/48"}},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: testMultiVRFDestA, Labels: map[string]string{testMultiVRFLabelKey: testMultiVRFLabelValue}},
+				Spec:       nc.DestinationSpec{VRFRef: ptr(testMultiVRFRefA), Prefixes: []string{testMultiVRFDestAV4, "2001:db8:200::/48"}},
+			},
+		},
+		Layer2Attachments: []nc.Layer2Attachment{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "shared-segment"},
+				Spec: nc.Layer2AttachmentSpec{
+					NetworkRef:   testMultiVRFNetwork,
+					Destinations: &metav1.LabelSelector{MatchLabels: map[string]string{testMultiVRFLabelKey: testMultiVRFLabelValue}},
+				},
+			},
+		},
+		AnnouncementPolicies: []nc.AnnouncementPolicy{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "edge-a-policy"},
+				Spec: nc.AnnouncementPolicySpec{
+					VRFRef: testMultiVRFRefA,
+					Aggregate: &nc.AggregateConfig{
+						PrefixLengthV4: ptr(int32(28)),
+						PrefixLengthV6: ptr(int32(80)),
+					},
+				},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "edge-b-policy"},
+				Spec: nc.AnnouncementPolicySpec{
+					VRFRef: testMultiVRFRefB,
+					Aggregate: &nc.AggregateConfig{
+						PrefixLengthV4: ptr(int32(28)),
+						PrefixLengthV6: ptr(int32(80)),
+					},
+				},
+			},
+		},
+	}
+
+	result, err := b.Build(context.Background(), data)
+	require.NoError(t, err)
+
+	contrib := result[testWorkerA]
+	require.NotNil(t, contrib)
+
+	comboName := vrfname.L2AName(testMultiVRFDestA + "+" + testMultiVRFDestB)
+	layer2 := contrib.Layer2s["210"]
+	require.NotNil(t, layer2.IRB)
+	assert.Equal(t, comboName, layer2.IRB.VRF)
+	assert.Empty(t, contrib.ClusterVRF, "directly attached combo VRF must not require policy routing")
+
+	combo, ok := contrib.LocalVRFs[comboName]
+	require.True(t, ok)
+	require.Len(t, combo.StaticRoutes, 4)
+	assertVRFRoute(t, combo.StaticRoutes, testMultiVRFDestAV4, testMultiVRFEdgeA)
+	assertVRFRoute(t, combo.StaticRoutes, "2001:db8:200::/48", testMultiVRFEdgeA)
+	assertVRFRoute(t, combo.StaticRoutes, testMultiVRFDestBV4, testMultiVRFEdgeB)
+	assertVRFRoute(t, combo.StaticRoutes, "2001:db8:300::/48", testMultiVRFEdgeB)
+
+	for _, vrfName := range []string{testMultiVRFEdgeA, testMultiVRFEdgeB} {
+		fabric, ok := contrib.FabricVRFs[vrfName]
+		require.True(t, ok)
+		assertVRFRoute(t, fabric.StaticRoutes, testMultiVRFNetworkV4, comboName)
+		assertVRFRoute(t, fabric.StaticRoutes, "2001:db8:100::/64", comboName)
+		assertVRFRoute(t, fabric.StaticRoutes, "192.0.2.0/28", comboName)
+		assertVRFRoute(t, fabric.StaticRoutes, "2001:db8:100::/80", comboName)
+		assertNoBlackholeRoute(t, fabric.StaticRoutes, "192.0.2.0/28")
+		assertNoBlackholeRoute(t, fabric.StaticRoutes, "2001:db8:100::/80")
+		assertFilterPrefix(t, fabric.EVPNExportFilter, testMultiVRFNetworkV4)
+		assertFilterPrefix(t, fabric.EVPNExportFilter, "2001:db8:100::/64")
+		require.Len(t, fabric.VRFImports, 1)
+		assert.Empty(t, fabric.VRFImports[0].Filter.Items, "multi-VRF network must return through the combo VRF, not cluster")
+	}
+}
+
+func TestAddNetworkRoutesToVRFReplacesBlackhole(t *testing.T) {
+	fvrf := networkv1alpha1.FabricVRF{
+		VRF: networkv1alpha1.VRF{
+			StaticRoutes: []networkv1alpha1.StaticRoute{{Prefix: testMultiVRFNetworkV4}},
+		},
+	}
+	net := &resolver.ResolvedNetwork{
+		Spec: nc.NetworkSpec{IPv4: &nc.IPNetwork{CIDR: testMultiVRFNetworkV4}},
+	}
+
+	addNetworkRoutesToVRF(&fvrf, net, "combo")
+
+	require.Len(t, fvrf.StaticRoutes, 1)
+	assertVRFRoute(t, fvrf.StaticRoutes, testMultiVRFNetworkV4, "combo")
+}
+
+func TestMultiVRFRouteClaimsRejectConflictingNextHop(t *testing.T) {
+	routing := &l2aVRFRouting{
+		irbVRF: "l-second",
+		vrfSpecs: map[string]*nc.VRFSpec{
+			testMultiVRFEdgeA: {VRF: testMultiVRFEdgeA},
+			testMultiVRFEdgeB: {VRF: testMultiVRFEdgeB},
+		},
+	}
+	validated := &validatedL2A{
+		matchingNodes: []corev1.Node{{ObjectMeta: metav1.ObjectMeta{Name: testWorkerA}}},
+		aps:           map[string]*nc.AnnouncementPolicy{},
+	}
+	net := &resolver.ResolvedNetwork{
+		Spec: nc.NetworkSpec{IPv4: &nc.IPNetwork{CIDR: testMultiVRFNetworkV4}},
+	}
+	owners := map[string]staticRouteOwner{
+		testWorkerA + "\x00" + testMultiVRFEdgeA + "\x00" + testMultiVRFNetworkV4: {
+			l2a:     "first-attachment",
+			nextVRF: "l-first",
+		},
+	}
+
+	_, err := multiVRFRouteClaims(
+		&nc.Layer2Attachment{ObjectMeta: metav1.ObjectMeta{Name: "second-attachment"}},
+		net,
+		routing,
+		validated,
+		owners,
+	)
+	require.Error(t, err)
+	assert.Equal(t, reasonConflictingStaticRoute, skipReason(err))
+	assert.Contains(t, err.Error(), "first-attachment")
+	assert.Contains(t, err.Error(), "second-attachment")
+}
+
+func TestL2ABuilder_MultipleDestinationVRFsRequireIRB(t *testing.T) {
+	edgeASpec := &nc.VRFSpec{VRF: testMultiVRFEdgeA, VNI: ptr(int32(5101)), RouteTarget: ptr("64512:5101")}
+	edgeBSpec := &nc.VRFSpec{VRF: testMultiVRFEdgeB, VNI: ptr(int32(5102)), RouteTarget: ptr("64512:5102")}
+
+	tests := []struct {
+		name           string
+		vni            *int32
+		disableAnycast *bool
+		interfaceRef   *string
+		sriov          *nc.SRIOVConfig
+	}{
+		{name: "anycast disabled", vni: ptr(int32(30211)), disableAnycast: ptr(true)},
+		{name: "pure L2 network", interfaceRef: ptr(testInterfaceRef)},
+		{name: "SR-IOV attachment", vni: ptr(int32(30211)), sriov: &nc.SRIOVConfig{Enabled: true}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data := &resolver.ResolvedData{
+				Nodes: []corev1.Node{{ObjectMeta: metav1.ObjectMeta{Name: testWorkerA}}},
+				Networks: map[string]*resolver.ResolvedNetwork{
+					testMultiVRFNetwork: {
+						Name: testMultiVRFNetwork,
+						Spec: nc.NetworkSpec{
+							VLAN: ptr(int32(211)),
+							VNI:  tt.vni,
+							IPv4: &nc.IPNetwork{CIDR: testMultiVRFNetworkV4},
+						},
+					},
+				},
+				Destinations: map[string]*resolver.ResolvedDestination{
+					testMultiVRFDestA: {
+						Name:    testMultiVRFDestA,
+						Spec:    nc.DestinationSpec{VRFRef: ptr(testMultiVRFRefA), Prefixes: []string{testMultiVRFDestAV4}},
+						VRFSpec: edgeASpec,
+					},
+					testMultiVRFDestB: {
+						Name:    testMultiVRFDestB,
+						Spec:    nc.DestinationSpec{VRFRef: ptr(testMultiVRFRefB), Prefixes: []string{testMultiVRFDestBV4}},
+						VRFSpec: edgeBSpec,
+					},
+				},
+				RawDestinations: []nc.Destination{
+					{
+						ObjectMeta: metav1.ObjectMeta{Name: testMultiVRFDestA, Labels: map[string]string{testMultiVRFLabelKey: testMultiVRFLabelValue}},
+						Spec:       nc.DestinationSpec{VRFRef: ptr(testMultiVRFRefA), Prefixes: []string{testMultiVRFDestAV4}},
+					},
+					{
+						ObjectMeta: metav1.ObjectMeta{Name: testMultiVRFDestB, Labels: map[string]string{testMultiVRFLabelKey: testMultiVRFLabelValue}},
+						Spec:       nc.DestinationSpec{VRFRef: ptr(testMultiVRFRefB), Prefixes: []string{testMultiVRFDestBV4}},
+					},
+				},
+				Layer2Attachments: []nc.Layer2Attachment{
+					{
+						ObjectMeta: metav1.ObjectMeta{Name: "shared-segment"},
+						Spec: nc.Layer2AttachmentSpec{
+							NetworkRef:     testMultiVRFNetwork,
+							DisableAnycast: tt.disableAnycast,
+							InterfaceRef:   tt.interfaceRef,
+							SRIOV:          tt.sriov,
+							Destinations:   &metav1.LabelSelector{MatchLabels: map[string]string{testMultiVRFLabelKey: testMultiVRFLabelValue}},
+						},
+					},
+				},
+			}
+
+			report := NewBuildReport()
+			result, err := NewL2ABuilder().Build(WithReport(context.Background(), report), data)
+			require.NoError(t, err)
+			assert.Empty(t, result, "invalid multi-VRF attachment must not leave partial routing")
+			require.Len(t, report.Issues(), 1)
+			assert.Equal(t, reasonMultiVRFRequiresIRB, report.Issues()[0].Reason)
+		})
+	}
+}
+
+func TestL2ABuilder_MultipleDestinationVRFsRejectAmbiguousPrefix(t *testing.T) {
+	b := NewL2ABuilder()
+	sharedPrefix := testMultiVRFDestAV4
+	data := &resolver.ResolvedData{
+		Destinations: map[string]*resolver.ResolvedDestination{
+			testMultiVRFDestA: {
+				Name:    testMultiVRFDestA,
+				Spec:    nc.DestinationSpec{VRFRef: ptr(testMultiVRFRefA), Prefixes: []string{sharedPrefix}},
+				VRFSpec: &nc.VRFSpec{VRF: testMultiVRFEdgeA},
+			},
+			testMultiVRFDestB: {
+				Name:    testMultiVRFDestB,
+				Spec:    nc.DestinationSpec{VRFRef: ptr(testMultiVRFRefB), Prefixes: []string{"198.51.100.1/24"}},
+				VRFSpec: &nc.VRFSpec{VRF: testMultiVRFEdgeB},
+			},
+		},
+		RawDestinations: []nc.Destination{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: testMultiVRFDestA, Labels: map[string]string{testMultiVRFLabelKey: testMultiVRFLabelValue}},
+				Spec:       nc.DestinationSpec{VRFRef: ptr(testMultiVRFRefA), Prefixes: []string{sharedPrefix}},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: testMultiVRFDestB, Labels: map[string]string{testMultiVRFLabelKey: testMultiVRFLabelValue}},
+				Spec:       nc.DestinationSpec{VRFRef: ptr(testMultiVRFRefB), Prefixes: []string{"198.51.100.1/24"}},
+			},
+		},
+	}
+	l2a := &nc.Layer2Attachment{
+		Spec: nc.Layer2AttachmentSpec{
+			Destinations: &metav1.LabelSelector{MatchLabels: map[string]string{testMultiVRFLabelKey: testMultiVRFLabelValue}},
+		},
+	}
+
+	_, err := b.resolveDestinationVRFs(l2a, data)
+	require.ErrorContains(t, err, `destination prefix "198.51.100.0/24" is assigned to multiple VRFs`)
+}
+
+func TestL2ABuilder_MultipleDestinationVRFsRejectNameCollision(t *testing.T) {
+	comboName := vrfname.L2AName(testMultiVRFDestA + "+" + testMultiVRFDestB)
+	collidingFabricName := comboName[:3] + "a" + comboName[3:]
+	require.Equal(t, comboName, vrfname.Reduce(collidingFabricName))
+	edgeASpec := &nc.VRFSpec{VRF: testMultiVRFEdgeA}
+	edgeBSpec := &nc.VRFSpec{VRF: testMultiVRFEdgeB}
+	data := &resolver.ResolvedData{
+		VRFs: map[string]*resolver.ResolvedVRF{
+			"colliding-vrf": {Name: "colliding-vrf", Spec: nc.VRFSpec{VRF: collidingFabricName}},
+		},
+		Destinations: map[string]*resolver.ResolvedDestination{
+			testMultiVRFDestA: {
+				Name:    testMultiVRFDestA,
+				Spec:    nc.DestinationSpec{VRFRef: ptr(testMultiVRFRefA)},
+				VRFSpec: edgeASpec,
+			},
+			testMultiVRFDestB: {
+				Name:    testMultiVRFDestB,
+				Spec:    nc.DestinationSpec{VRFRef: ptr(testMultiVRFRefB)},
+				VRFSpec: edgeBSpec,
+			},
+		},
+		RawDestinations: []nc.Destination{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: testMultiVRFDestA, Labels: map[string]string{testMultiVRFLabelKey: testMultiVRFLabelValue}},
+				Spec:       nc.DestinationSpec{VRFRef: ptr(testMultiVRFRefA)},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: testMultiVRFDestB, Labels: map[string]string{testMultiVRFLabelKey: testMultiVRFLabelValue}},
+				Spec:       nc.DestinationSpec{VRFRef: ptr(testMultiVRFRefB)},
+			},
+		},
+	}
+	l2a := &nc.Layer2Attachment{
+		Spec: nc.Layer2AttachmentSpec{
+			Destinations: &metav1.LabelSelector{MatchLabels: map[string]string{testMultiVRFLabelKey: testMultiVRFLabelValue}},
+		},
+	}
+
+	_, err := NewL2ABuilder().resolveDestinationVRFs(l2a, data)
+	require.ErrorContains(t, err, `collides with FabricVRF "colliding-vrf" after name reduction`)
+	assert.Equal(t, reasonIntermediateVRFNameCollision, skipReason(err))
+}
+
+func assertVRFRoute(t *testing.T, routes []networkv1alpha1.StaticRoute, prefix, vrf string) {
+	t.Helper()
+	for i := range routes {
+		if routes[i].Prefix != prefix || routes[i].NextHop == nil || routes[i].NextHop.Vrf == nil {
+			continue
+		}
+		if *routes[i].NextHop.Vrf == vrf {
+			return
+		}
+	}
+	t.Errorf("expected route %s via VRF %s, got %#v", prefix, vrf, routes)
+}
+
+func assertNoBlackholeRoute(t *testing.T, routes []networkv1alpha1.StaticRoute, prefix string) {
+	t.Helper()
+	for i := range routes {
+		if routes[i].Prefix == prefix && routes[i].NextHop == nil {
+			t.Errorf("unexpected blackhole route %s, got %#v", prefix, routes)
+		}
+	}
+}
+
+func assertFilterPrefix(t *testing.T, filter *networkv1alpha1.Filter, prefix string) {
+	t.Helper()
+	require.NotNil(t, filter)
+	for i := range filter.Items {
+		if filter.Items[i].Matcher.Prefix != nil && filter.Items[i].Matcher.Prefix.Prefix == prefix {
+			return
+		}
+	}
+	t.Errorf("expected filter prefix %s, got %#v", prefix, filter.Items)
 }
 
 func TestL2ABuilder_RejectsSharedL2L3RouteTarget(t *testing.T) {
@@ -561,6 +956,44 @@ func TestL2ABuilder_DuplicateInterfaceNameOnSameNode(t *testing.T) {
 	if _, ok := contrib.Layer2s["502"]; ok {
 		t.Error("expected conflicting L2A (VLAN 502) to be skipped")
 	}
+}
+
+func TestL2ABuilder_OwnershipConflictIdentifiesNamespaces(t *testing.T) {
+	b := NewL2ABuilder()
+	const (
+		networkName  = "net"
+		networkACIDR = "10.0.1.0/24"
+		networkBCIDR = "10.0.2.0/24"
+	)
+	ifName := "shared-interface"
+	data := &resolver.ResolvedData{
+		Nodes: []corev1.Node{{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}}},
+		NetworksByKey: map[string]*resolver.ResolvedNetwork{
+			resolver.NamespacedKey(testTenantA, networkName): {
+				Namespace: testTenantA,
+				Name:      networkName,
+				Spec:      nc.NetworkSpec{VLAN: ptr(int32(501)), VNI: ptr(int32(10501)), IPv4: &nc.IPNetwork{CIDR: networkACIDR}},
+			},
+			resolver.NamespacedKey(testTenantB, networkName): {
+				Namespace: testTenantB,
+				Name:      networkName,
+				Spec:      nc.NetworkSpec{VLAN: ptr(int32(502)), VNI: ptr(int32(10502)), IPv4: &nc.IPNetwork{CIDR: networkBCIDR}},
+			},
+		},
+		Layer2Attachments: []nc.Layer2Attachment{
+			{ObjectMeta: metav1.ObjectMeta{Namespace: testTenantA, Name: "attachment"}, Spec: nc.Layer2AttachmentSpec{NetworkRef: networkName, InterfaceName: &ifName}},
+			{ObjectMeta: metav1.ObjectMeta{Namespace: testTenantB, Name: "attachment"}, Spec: nc.Layer2AttachmentSpec{NetworkRef: networkName, InterfaceName: &ifName}},
+		},
+	}
+
+	report := NewBuildReport()
+	_, err := b.Build(WithReport(context.Background(), report), data)
+	require.NoError(t, err)
+	issues := report.Issues()
+	require.Len(t, issues, 1)
+	assert.Equal(t, testTenantB, issues[0].Namespace)
+	assert.Contains(t, issues[0].Message, testTenantA+"/attachment")
+	assert.Contains(t, issues[0].Message, testTenantB+"/attachment")
 }
 
 func TestL2ABuilder_DefaultVLANNameConflictsWithInterfaceName(t *testing.T) {

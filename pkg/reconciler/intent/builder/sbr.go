@@ -18,6 +18,9 @@ package builder
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"net"
 	"sort"
 	"strings"
 
@@ -59,10 +62,27 @@ type sbrGroup struct {
 	key            string              // sorted destination names joined by "+" (dedup key)
 	vrfRoutes      map[string][]string // vrfName → destination prefixes
 	sourcePrefixes []string            // consumer source addresses that need SBR
+	consumers      []sbrConsumer
+}
+
+type sbrConsumer struct {
+	kind      string
+	namespace string
+	name      string
 }
 
 // Build produces per-node LocalVRFs and ClusterVRF PolicyRoutes for SBR.
-func (b *SBRBuilder) Build(_ context.Context, data *resolver.ResolvedData) (map[string]*NodeContribution, error) {
+func (b *SBRBuilder) Build(ctx context.Context, data *resolver.ResolvedData) (map[string]*NodeContribution, error) {
+	groups := b.collectGroups(data)
+	removeInvalidSBRGroups(ctx, groups, data)
+	if len(groups) == 0 {
+		return nil, nil
+	}
+
+	return b.buildContributions(groups, data), nil
+}
+
+func (b *SBRBuilder) collectGroups(data *resolver.ResolvedData) map[string]*sbrGroup {
 	// groups maps a VRF-set key → sbrGroup.
 	// Consumers targeting the same VRF combination share a group.
 	groups := make(map[string]*sbrGroup)
@@ -74,7 +94,7 @@ func (b *SBRBuilder) Build(_ context.Context, data *resolver.ResolvedData) (map[
 		if len(sources) == 0 {
 			continue
 		}
-		b.addConsumerToGroups(inb.Spec.Destinations, sources, data, groups)
+		b.addConsumerToGroups(sbrConsumer{mirrorSourceInbound, inb.Namespace, inb.Name}, inb.Spec.Destinations, sources, data, groups)
 	}
 
 	// Scan Outbound consumers.
@@ -84,23 +104,40 @@ func (b *SBRBuilder) Build(_ context.Context, data *resolver.ResolvedData) (map[
 		if len(sources) == 0 {
 			continue
 		}
-		b.addConsumerToGroups(outb.Spec.Destinations, sources, data, groups)
+		b.addConsumerToGroups(sbrConsumer{mirrorSourceOutbound, outb.Namespace, outb.Name}, outb.Spec.Destinations, sources, data, groups)
 	}
 
 	// Scan PodNetwork consumers.
 	for i := range data.PodNetworks {
 		pnet := &data.PodNetworks[i]
-		sources := collectPodNetworkSources(pnet, data.Networks)
+		sources := collectPodNetworkSources(pnet, data)
 		if len(sources) == 0 {
 			continue
 		}
-		b.addConsumerToGroups(pnet.Spec.Destinations, sources, data, groups)
+		b.addConsumerToGroups(sbrConsumer{"PodNetwork", pnet.Namespace, pnet.Name}, pnet.Spec.Destinations, sources, data, groups)
 	}
+	return groups
+}
 
-	if len(groups) == 0 {
-		return nil, nil
+func removeInvalidSBRGroups(ctx context.Context, groups map[string]*sbrGroup, data *resolver.ResolvedData) {
+	for key, group := range groups {
+		err := validateSBRGroup(group, data)
+		if err == nil {
+			continue
+		}
+		reason := "ConflictingStaticRoute"
+		var skipErr *skipReasonError
+		if errors.As(err, &skipErr) {
+			reason = skipErr.reason
+		}
+		for _, consumer := range group.consumers {
+			reportSkip(ctx, consumer.kind, consumer.namespace, consumer.name, reason, err.Error())
+		}
+		delete(groups, key)
 	}
+}
 
+func (b *SBRBuilder) buildContributions(groups map[string]*sbrGroup, data *resolver.ResolvedData) map[string]*NodeContribution {
 	// Build per-node contributions.
 	result := make(map[string]*NodeContribution)
 	for i := range data.Nodes {
@@ -143,7 +180,7 @@ func (b *SBRBuilder) Build(_ context.Context, data *resolver.ResolvedData) (map[
 		}
 	}
 
-	return result, nil
+	return result
 }
 
 // addConsumerToGroups resolves a consumer's destination selector and adds its
@@ -153,6 +190,7 @@ func (b *SBRBuilder) Build(_ context.Context, data *resolver.ResolvedData) (map[
 // Multi-VRF consumers get a combo group keyed by sorted destination names → "s-<hash>".
 // Two consumers selecting the same destinations share the same combo group.
 func (*SBRBuilder) addConsumerToGroups(
+	consumer sbrConsumer,
 	destSelector *metav1.LabelSelector,
 	sourcePrefixes []string,
 	data *resolver.ResolvedData,
@@ -162,7 +200,7 @@ func (*SBRBuilder) addConsumerToGroups(
 		return
 	}
 
-	grouped := groupDestinationsByVRF(destSelector, data)
+	grouped := groupDestinationsByVRF(consumer.namespace, destSelector, data)
 	if len(grouped) == 0 {
 		return
 	}
@@ -179,6 +217,7 @@ func (*SBRBuilder) addConsumerToGroups(
 				groups[vrfName] = group
 			}
 			group.sourcePrefixes = appendUnique(group.sourcePrefixes, sourcePrefixes...)
+			group.consumers = appendUniqueSBRConsumer(group.consumers, consumer)
 			for di := range dests {
 				group.vrfRoutes[vrfName] = appendUnique(group.vrfRoutes[vrfName], dests[di].Spec.Prefixes...)
 			}
@@ -188,7 +227,7 @@ func (*SBRBuilder) addConsumerToGroups(
 
 	// Multi-VRF — key by sorted destination names so consumers selecting the
 	// same set of destinations share a single combo VRF.
-	key := destinationSetKey(destSelector, data)
+	key := destinationSetKey(consumer.namespace, destSelector, data)
 	group, ok := groups[key]
 	if !ok {
 		group = &sbrGroup{
@@ -199,6 +238,7 @@ func (*SBRBuilder) addConsumerToGroups(
 	}
 
 	group.sourcePrefixes = appendUnique(group.sourcePrefixes, sourcePrefixes...)
+	group.consumers = appendUniqueSBRConsumer(group.consumers, consumer)
 	for vrfName, dests := range grouped {
 		for di := range dests {
 			group.vrfRoutes[vrfName] = appendUnique(group.vrfRoutes[vrfName], dests[di].Spec.Prefixes...)
@@ -206,17 +246,49 @@ func (*SBRBuilder) addConsumerToGroups(
 	}
 }
 
+func appendUniqueSBRConsumer(consumers []sbrConsumer, consumer sbrConsumer) []sbrConsumer {
+	for i := range consumers {
+		if consumers[i] == consumer {
+			return consumers
+		}
+	}
+	return append(consumers, consumer)
+}
+
+func validateSBRGroup(group *sbrGroup, data *resolver.ResolvedData) error {
+	if err := validateIntermediateVRFName(intermediateVRFName(group), data); err != nil {
+		return err
+	}
+	prefixVRFs := make(map[string]string)
+	for vrfName, prefixes := range group.vrfRoutes {
+		for _, prefix := range prefixes {
+			_, network, err := net.ParseCIDR(prefix)
+			if err != nil {
+				return fmt.Errorf("invalid destination prefix %q: %w", prefix, err)
+			}
+			canonical := network.String()
+			if existingVRF, exists := prefixVRFs[canonical]; exists && existingVRF != vrfName {
+				return fmt.Errorf("destination prefix %q is assigned to multiple VRFs %q and %q",
+					canonical, existingVRF, vrfName)
+			}
+			prefixVRFs[canonical] = vrfName
+		}
+	}
+	return nil
+}
+
 // destinationSetKey produces a deterministic key from the sorted names of all
 // Destination resources matched by a selector.
-func destinationSetKey(sel *metav1.LabelSelector, data *resolver.ResolvedData) string {
+func destinationSetKey(namespace string, sel *metav1.LabelSelector, data *resolver.ResolvedData) string {
 	selector, err := metav1.LabelSelectorAsSelector(sel)
 	if err != nil {
 		return ""
 	}
 	var names []string
 	for i := range data.RawDestinations {
-		if selector.Matches(labels.Set(data.RawDestinations[i].Labels)) {
-			names = append(names, data.RawDestinations[i].Name)
+		if data.RawDestinations[i].Namespace == namespace &&
+			selector.Matches(labels.Set(data.RawDestinations[i].Labels)) {
+			names = append(names, layer2AttachmentDisplayName(namespace, data.RawDestinations[i].Name))
 		}
 	}
 	sort.Strings(names)
@@ -238,7 +310,7 @@ func (*SBRBuilder) buildComboVRF(group *sbrGroup) networkv1alpha1.VRF {
 	vrf := networkv1alpha1.VRF{
 		VRFImports: []networkv1alpha1.VRFImport{
 			{
-				FromVRF: "cluster",
+				FromVRF: clusterVRFName,
 				Filter: networkv1alpha1.Filter{
 					DefaultAction: networkv1alpha1.Action{
 						Type: networkv1alpha1.Accept,
@@ -281,18 +353,18 @@ func collectOutboundSources(outb *nc.Outbound) []string {
 }
 
 // collectPodNetworkSources extracts source CIDRs from a PodNetwork's referenced Network.
-func collectPodNetworkSources(pnet *nc.PodNetwork, networks map[string]*resolver.ResolvedNetwork) []string {
-	net, ok := networks[pnet.Spec.NetworkRef]
+func collectPodNetworkSources(pnet *nc.PodNetwork, data *resolver.ResolvedData) []string {
+	network, ok := data.Network(pnet.Namespace, pnet.Spec.NetworkRef)
 	if !ok {
 		return nil
 	}
 
 	var sources []string
-	if net.Spec.IPv4 != nil {
-		sources = append(sources, net.Spec.IPv4.CIDR)
+	if network.Spec.IPv4 != nil {
+		sources = append(sources, network.Spec.IPv4.CIDR)
 	}
-	if net.Spec.IPv6 != nil {
-		sources = append(sources, net.Spec.IPv6.CIDR)
+	if network.Spec.IPv6 != nil {
+		sources = append(sources, network.Spec.IPv6.CIDR)
 	}
 	return sources
 }

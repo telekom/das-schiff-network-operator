@@ -25,8 +25,22 @@ func ResolveVRFs(vrfs []nc.VRF) map[string]*ResolvedVRF {
 	resolved := make(map[string]*ResolvedVRF, len(vrfs))
 	for i := range vrfs {
 		resolved[vrfs[i].Name] = &ResolvedVRF{
-			Name: vrfs[i].Name,
-			Spec: vrfs[i].Spec,
+			Namespace: vrfs[i].Namespace,
+			Name:      vrfs[i].Name,
+			Spec:      vrfs[i].Spec,
+		}
+	}
+	return resolved
+}
+
+// ResolveVRFsByKey builds a namespace/name keyed VRF map.
+func ResolveVRFsByKey(vrfs []nc.VRF) map[string]*ResolvedVRF {
+	resolved := make(map[string]*ResolvedVRF, len(vrfs))
+	for i := range vrfs {
+		resolved[NamespacedKey(vrfs[i].Namespace, vrfs[i].Name)] = &ResolvedVRF{
+			Namespace: vrfs[i].Namespace,
+			Name:      vrfs[i].Name,
+			Spec:      vrfs[i].Spec,
 		}
 	}
 	return resolved
@@ -37,8 +51,22 @@ func ResolveNetworks(networks []nc.Network) map[string]*ResolvedNetwork {
 	resolved := make(map[string]*ResolvedNetwork, len(networks))
 	for i := range networks {
 		resolved[networks[i].Name] = &ResolvedNetwork{
-			Name: networks[i].Name,
-			Spec: networks[i].Spec,
+			Namespace: networks[i].Namespace,
+			Name:      networks[i].Name,
+			Spec:      networks[i].Spec,
+		}
+	}
+	return resolved
+}
+
+// ResolveNetworksByKey builds a namespace/name keyed Network map.
+func ResolveNetworksByKey(networks []nc.Network) map[string]*ResolvedNetwork {
+	resolved := make(map[string]*ResolvedNetwork, len(networks))
+	for i := range networks {
+		resolved[NamespacedKey(networks[i].Namespace, networks[i].Name)] = &ResolvedNetwork{
+			Namespace: networks[i].Namespace,
+			Name:      networks[i].Name,
+			Spec:      networks[i].Spec,
 		}
 	}
 	return resolved
@@ -50,8 +78,9 @@ func ResolveDestinations(destinations []nc.Destination, vrfs map[string]*Resolve
 	resolved := make(map[string]*ResolvedDestination, len(destinations))
 	for i := range destinations {
 		d := &ResolvedDestination{
-			Name: destinations[i].Name,
-			Spec: destinations[i].Spec,
+			Namespace: destinations[i].Namespace,
+			Name:      destinations[i].Name,
+			Spec:      destinations[i].Spec,
 		}
 
 		// VRFRef is optional (Destination may use nextHop instead).
@@ -67,4 +96,28 @@ func ResolveDestinations(destinations []nc.Destination, vrfs map[string]*Resolve
 		resolved[destinations[i].Name] = d
 	}
 	return resolved, nil
+}
+
+// ResolveDestinationsByKey builds a namespace/name keyed Destination map and
+// resolves each vrfRef only within the Destination's namespace.
+func ResolveDestinationsByKey(
+	destinations []nc.Destination,
+	vrfs map[string]*ResolvedVRF,
+) map[string]*ResolvedDestination {
+	resolved := make(map[string]*ResolvedDestination, len(destinations))
+	for i := range destinations {
+		destination := &destinations[i]
+		d := &ResolvedDestination{
+			Namespace: destination.Namespace,
+			Name:      destination.Name,
+			Spec:      destination.Spec,
+		}
+		if destination.Spec.VRFRef != nil {
+			if vrf, ok := vrfs[NamespacedKey(destination.Namespace, *destination.Spec.VRFRef)]; ok {
+				d.VRFSpec = &vrf.Spec
+			}
+		}
+		resolved[NamespacedKey(destination.Namespace, destination.Name)] = d
+	}
+	return resolved
 }

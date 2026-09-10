@@ -298,6 +298,12 @@ func NNCHasLayer2(nnc *unstructured.Unstructured, l2Key string) bool {
 	return err == nil && found && l2 != nil
 }
 
+// NNCLayer2IRBVRF returns the VRF assigned to a Layer2 IRB.
+func NNCLayer2IRBVRF(nnc *unstructured.Unstructured, l2Key string) string {
+	vrf, _, _ := unstructured.NestedString(nnc.Object, "spec", "layer2s", l2Key, "irb", "vrf")
+	return vrf
+}
+
 // WaitForNNCVRFs waits until the NNC for the given node contains all specified fabricVRFs.
 func (f *Framework) WaitForNNCVRFs(ctx context.Context, nodeName string, vrfNames []string, timeout time.Duration) error {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
@@ -373,6 +379,16 @@ func NNCFabricVRFHasAggregateRoute(nnc *unstructured.Unstructured, vrfName, pref
 	return false
 }
 
+// NNCFabricVRFStaticRouteTarget checks if a FabricVRF has a static route for the
+// given prefix pointing to the expected target VRF via nextHop.vrf.
+func NNCFabricVRFStaticRouteTarget(nnc *unstructured.Unstructured, vrfName, prefix, targetVRF string) bool {
+	routes, found, err := unstructured.NestedSlice(nnc.Object, "spec", "fabricVRFs", vrfName, "staticRoutes")
+	if err != nil || !found {
+		return false
+	}
+	return staticRouteTargetsVRF(routes, prefix, targetVRF)
+}
+
 // NNCHasLocalVRF checks if a NNC has a localVRF entry with the given name.
 func NNCHasLocalVRF(nnc *unstructured.Unstructured, vrfName string) bool {
 	vrf, found, err := unstructured.NestedMap(nnc.Object, "spec", "localVRFs", vrfName)
@@ -399,6 +415,10 @@ func NNCLocalVRFStaticRouteTarget(nnc *unstructured.Unstructured, localVRFName, 
 	if err != nil || !found {
 		return false
 	}
+	return staticRouteTargetsVRF(routes, prefix, targetVRF)
+}
+
+func staticRouteTargetsVRF(routes []interface{}, prefix, targetVRF string) bool {
 	for _, r := range routes {
 		m, ok := r.(map[string]interface{})
 		if !ok {
@@ -439,6 +459,26 @@ func NNCClusterVRFHasPolicyRoute(nnc *unstructured.Unstructured, srcPrefix, targ
 			continue
 		}
 		if tm["srcPrefix"] == srcPrefix && nh["vrf"] == targetVRF {
+			return true
+		}
+	}
+	return false
+}
+
+// NNCClusterVRFHasPolicyRouteTarget checks if any cluster VRF policy route
+// points to the given target VRF.
+func NNCClusterVRFHasPolicyRouteTarget(nnc *unstructured.Unstructured, targetVRF string) bool {
+	routes, found, err := unstructured.NestedSlice(nnc.Object, "spec", "clusterVRF", "policyRoutes")
+	if err != nil || !found {
+		return false
+	}
+	for _, r := range routes {
+		m, ok := r.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		nh, ok := m["nextHop"].(map[string]interface{})
+		if ok && nh["vrf"] == targetVRF {
 			return true
 		}
 	}

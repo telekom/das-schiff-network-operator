@@ -41,6 +41,8 @@ type Controller struct {
 	Reconciler *intentreconciler.Reconciler
 }
 
+//+kubebuilder:rbac:groups="",resources=events,verbs=create;patch
+//+kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;patch
 //+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=vrfs,verbs=get;list;watch;update;patch
 //+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=vrfs/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=network-connector.sylvaproject.org,resources=vrfs/finalizers,verbs=update

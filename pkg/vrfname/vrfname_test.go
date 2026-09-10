@@ -25,6 +25,23 @@ func TestSBRName(t *testing.T) {
 	}
 }
 
+func TestL2ANameUsesDistinctNamespace(t *testing.T) {
+	key := "blue+green"
+	l2a := L2AName(key)
+	if len(l2a) > MaxLen {
+		t.Fatalf("L2AName(%q) = %q exceeds MaxLen", key, l2a)
+	}
+	if l2a[:2] != "l-" {
+		t.Errorf("L2AName(%q) = %q must keep the l- prefix", key, l2a)
+	}
+	if l2a == SBRName(key) {
+		t.Errorf("L2AName and SBRName must differ for the same key, got %q", l2a)
+	}
+	if L2AName(key) != l2a {
+		t.Error("L2AName is not deterministic")
+	}
+}
+
 func TestReduce_ShortNamesUnchanged(t *testing.T) {
 	// Anything already within MaxLen must pass through untouched.
 	cases := []string{

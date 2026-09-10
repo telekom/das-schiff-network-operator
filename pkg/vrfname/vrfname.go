@@ -36,26 +36,40 @@ const MaxLen = 15
 // VRF.
 const sbrPrefix = "s-"
 
-// sbrHashLen is the number of hex characters used for the hashed SBR name. It
-// is the largest value that still fits within MaxLen after the prefix, which
-// maximises collision resistance (sbrHashLen*4 bits) for free.
-const sbrHashLen = MaxLen - len(sbrPrefix)
+// l2aPrefix prefixes the name of a Layer2Attachment intermediate VRF. It is
+// distinct from sbrPrefix because SBR imports the cluster routing table while
+// an L2 attachment must not inherit that reachability.
+const l2aPrefix = "l-"
 
-// SBRName returns the name of the SBR intermediate VRF for the given key.
+// IntermediateName returns the name of an intermediate VRF for the given key.
 //
 // For a single-VRF key that still fits within MaxLen it keeps the readable
 // "s-<key>" form. Otherwise (a key that would overflow MaxLen, or a multi-VRF
 // combo key which contains "+") it falls back to a hash: "s-<hash>", sized to
 // fill MaxLen exactly. It is deterministic: the same key always yields the same
 // name.
-func SBRName(key string) string {
+func IntermediateName(key string) string {
+	return buildIntermediateName(sbrPrefix, key)
+}
+
+// L2AName returns the name of a Layer2Attachment intermediate VRF.
+func L2AName(key string) string {
+	return buildIntermediateName(l2aPrefix, key)
+}
+
+func buildIntermediateName(prefix, key string) string {
 	if !strings.Contains(key, "+") {
-		if candidate := sbrPrefix + key; len(candidate) <= MaxLen {
+		if candidate := prefix + key; len(candidate) <= MaxLen {
 			return candidate
 		}
 	}
 	sum := sha256.Sum256([]byte(key))
-	return sbrPrefix + hex.EncodeToString(sum[:])[:sbrHashLen]
+	return prefix + hex.EncodeToString(sum[:])[:MaxLen-len(prefix)]
+}
+
+// SBRName returns the name of an SBR intermediate VRF for the given key.
+func SBRName(key string) string {
+	return IntermediateName(key)
 }
 
 // Reduce shortens name to at most MaxLen bytes using the cascade described in

@@ -15,6 +15,8 @@ import (
 	"github.com/telekom/das-schiff-network-operator/pkg/vrfname"
 )
 
+const reservedClusterVRFName = "cluster"
+
 // Reduce rewrites every VRF name in spec to its reduced form. It is
 // deterministic and idempotent. It returns an error if two distinct VRF names
 // reduce to the same value (a collision), which must be surfaced rather than
@@ -28,12 +30,23 @@ func Reduce(spec *v1alpha1.NodeNetworkConfigSpec) error {
 	if err != nil {
 		return fmt.Errorf("fabric VRFs: %w", err)
 	}
-	spec.FabricVRFs = fabric
+	if _, exists := fabric[reservedClusterVRFName]; exists {
+		return fmt.Errorf("fabric VRF name reduces to reserved cluster VRF %q", reservedClusterVRFName)
+	}
 
 	local, err := reduceKeys(spec.LocalVRFs)
 	if err != nil {
 		return fmt.Errorf("local VRFs: %w", err)
 	}
+	for name := range local {
+		if name == reservedClusterVRFName {
+			return fmt.Errorf("local VRF name reduces to reserved cluster VRF %q", name)
+		}
+		if _, exists := fabric[name]; exists {
+			return fmt.Errorf("fabric VRF and local VRF both reduce to %q", name)
+		}
+	}
+	spec.FabricVRFs = fabric
 	spec.LocalVRFs = local
 
 	if spec.ClusterVRF != nil {

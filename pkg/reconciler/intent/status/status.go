@@ -22,9 +22,11 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/tools/events"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
@@ -68,16 +70,46 @@ func applyBuildIssue(issues map[string]ResourceIssue, kind, namespace, name stri
 
 // Updater handles status condition updates for intent CRDs.
 type Updater struct {
-	client client.Client
-	logger logr.Logger
+	client        client.Client
+	logger        logr.Logger
+	eventRecorder events.EventRecorder
 }
 
 // NewUpdater creates a new status Updater.
-func NewUpdater(c client.Client, logger logr.Logger) *Updater {
-	return &Updater{
+func NewUpdater(c client.Client, logger logr.Logger, eventRecorders ...events.EventRecorder) *Updater {
+	updater := &Updater{
 		client: c,
 		logger: logger.WithName("status-updater"),
 	}
+	if len(eventRecorders) > 0 {
+		updater.eventRecorder = eventRecorders[0]
+	}
+	return updater
+}
+
+func (u *Updater) emitReadyWarning(
+	object client.Object,
+	previousReady *metav1.Condition,
+	readyStatus metav1.ConditionStatus,
+	reason,
+	message string,
+) {
+	if u.eventRecorder == nil || readyStatus != metav1.ConditionFalse {
+		return
+	}
+	if previousReady != nil && previousReady.Status == metav1.ConditionFalse {
+		return
+	}
+	u.eventRecorder.Eventf(object, nil, corev1.EventTypeWarning, reason, "IntentNotReady", "%s", message)
+}
+
+func readyConditionSnapshot(conditions []metav1.Condition) *metav1.Condition {
+	current := apimeta.FindStatusCondition(conditions, nc.ConditionTypeReady)
+	if current == nil {
+		return nil
+	}
+	snapshot := *current
+	return &snapshot
 }
 
 // statusUpdateWithRetry performs a status update with conflict retry.
@@ -187,12 +219,13 @@ func (u *Updater) updateNetworkConditions(ctx context.Context, fetched *resolver
 func (u *Updater) updateDestinationConditions(ctx context.Context, fetched *resolver.FetchedResources, resolved *resolver.ResolvedData) error {
 	for i := range fetched.Destinations {
 		dest := &fetched.Destinations[i]
+		previousReady := readyConditionSnapshot(dest.Status.Conditions)
 		resolvedStatus := metav1.ConditionTrue
 		resolvedReason := reasonAllResolved
 		resolvedMsg := msgAllResolved
 
 		if dest.Spec.VRFRef != nil {
-			if _, ok := resolved.VRFs[*dest.Spec.VRFRef]; !ok {
+			if _, ok := resolved.VRF(dest.Namespace, *dest.Spec.VRFRef); !ok {
 				resolvedStatus = metav1.ConditionFalse
 				resolvedReason = "VRFNotFound"
 				resolvedMsg = fmt.Sprintf("referenced VRF %q not found", *dest.Spec.VRFRef)
@@ -213,6 +246,7 @@ func (u *Updater) updateDestinationConditions(ctx context.Context, fetched *reso
 		}); err != nil {
 			return fmt.Errorf("updating Destination %q status: %w", dest.Name, err)
 		}
+		u.emitReadyWarning(dest, previousReady, readyStatus, resolvedReason, readyMsg)
 	}
 	return nil
 }
@@ -220,7 +254,8 @@ func (u *Updater) updateDestinationConditions(ctx context.Context, fetched *reso
 func (u *Updater) updateInboundConditions(ctx context.Context, fetched *resolver.FetchedResources, resolved *resolver.ResolvedData, issues map[string]ResourceIssue) error {
 	for i := range fetched.Inbounds {
 		inb := &fetched.Inbounds[i]
-		resolvedStatus, resolvedReason, resolvedMsg := checkNetworkRef(inb.Spec.NetworkRef, resolved)
+		previousReady := readyConditionSnapshot(inb.Status.Conditions)
+		resolvedStatus, resolvedReason, resolvedMsg := checkNetworkRef(inb.Namespace, inb.Spec.NetworkRef, resolved)
 
 		readyStatus := resolvedStatus
 		readyReason := resolvedReason
@@ -230,7 +265,7 @@ func (u *Updater) updateInboundConditions(ctx context.Context, fetched *resolver
 		}
 		readyStatus, readyReason, readyMsg = applyBuildIssue(issues, "Inbound", inb.Namespace, inb.Name, readyStatus, readyReason, readyMsg)
 
-		vrfs := resolved.SelectorVRFRefs(inb.Spec.Destinations)
+		vrfs := resolved.SelectorVRFRefs(inb.Namespace, inb.Spec.Destinations)
 
 		if err := u.statusUpdateWithRetry(ctx, inb, func(obj client.Object) {
 			in := obj.(*nc.Inbound)
@@ -248,6 +283,7 @@ func (u *Updater) updateInboundConditions(ctx context.Context, fetched *resolver
 		}); err != nil {
 			return fmt.Errorf("updating Inbound %q status: %w", inb.Name, err)
 		}
+		u.emitReadyWarning(inb, previousReady, readyStatus, readyReason, readyMsg)
 	}
 	return nil
 }
@@ -255,7 +291,8 @@ func (u *Updater) updateInboundConditions(ctx context.Context, fetched *resolver
 func (u *Updater) updateOutboundConditions(ctx context.Context, fetched *resolver.FetchedResources, resolved *resolver.ResolvedData, issues map[string]ResourceIssue) error {
 	for i := range fetched.Outbounds {
 		outb := &fetched.Outbounds[i]
-		resolvedStatus, resolvedReason, resolvedMsg := checkNetworkRef(outb.Spec.NetworkRef, resolved)
+		previousReady := readyConditionSnapshot(outb.Status.Conditions)
+		resolvedStatus, resolvedReason, resolvedMsg := checkNetworkRef(outb.Namespace, outb.Spec.NetworkRef, resolved)
 
 		readyStatus := resolvedStatus
 		readyReason := resolvedReason
@@ -265,7 +302,7 @@ func (u *Updater) updateOutboundConditions(ctx context.Context, fetched *resolve
 		}
 		readyStatus, readyReason, readyMsg = applyBuildIssue(issues, "Outbound", outb.Namespace, outb.Name, readyStatus, readyReason, readyMsg)
 
-		vrfs := resolved.SelectorVRFRefs(outb.Spec.Destinations)
+		vrfs := resolved.SelectorVRFRefs(outb.Namespace, outb.Spec.Destinations)
 
 		if err := u.statusUpdateWithRetry(ctx, outb, func(obj client.Object) {
 			o := obj.(*nc.Outbound)
@@ -279,6 +316,7 @@ func (u *Updater) updateOutboundConditions(ctx context.Context, fetched *resolve
 		}); err != nil {
 			return fmt.Errorf("updating Outbound %q status: %w", outb.Name, err)
 		}
+		u.emitReadyWarning(outb, previousReady, readyStatus, readyReason, readyMsg)
 	}
 	return nil
 }
@@ -286,7 +324,8 @@ func (u *Updater) updateOutboundConditions(ctx context.Context, fetched *resolve
 func (u *Updater) updateLayer2AttachmentConditions(ctx context.Context, fetched *resolver.FetchedResources, resolved *resolver.ResolvedData, issues map[string]ResourceIssue) error {
 	for i := range fetched.Layer2Attachments {
 		l2a := &fetched.Layer2Attachments[i]
-		resolvedStatus, resolvedReason, resolvedMsg := checkNetworkRef(l2a.Spec.NetworkRef, resolved)
+		previousReady := readyConditionSnapshot(l2a.Status.Conditions)
+		resolvedStatus, resolvedReason, resolvedMsg := checkNetworkRef(l2a.Namespace, l2a.Spec.NetworkRef, resolved)
 
 		readyStatus := resolvedStatus
 		readyReason := resolvedReason
@@ -297,8 +336,8 @@ func (u *Updater) updateLayer2AttachmentConditions(ctx context.Context, fetched 
 		readyStatus, readyReason, readyMsg = applyBuildIssue(issues, "Layer2Attachment", l2a.Namespace, l2a.Name, readyStatus, readyReason, readyMsg)
 
 		effIfName := effectiveInterfaceName(l2a, resolved)
-		netIPv4, netIPv6 := resolved.NetworkCIDRs(l2a.Spec.NetworkRef)
-		vrfs := resolved.SelectorVRFRefs(l2a.Spec.Destinations)
+		netIPv4, netIPv6 := resolved.NetworkCIDRs(l2a.Namespace, l2a.Spec.NetworkRef)
+		vrfs := resolved.SelectorVRFRefs(l2a.Namespace, l2a.Spec.Destinations)
 
 		if err := u.statusUpdateWithRetry(ctx, l2a, func(obj client.Object) {
 			la := obj.(*nc.Layer2Attachment)
@@ -312,6 +351,7 @@ func (u *Updater) updateLayer2AttachmentConditions(ctx context.Context, fetched 
 		}); err != nil {
 			return fmt.Errorf("updating Layer2Attachment %q status: %w", l2a.Name, err)
 		}
+		u.emitReadyWarning(l2a, previousReady, readyStatus, readyReason, readyMsg)
 	}
 	return nil
 }
@@ -319,7 +359,8 @@ func (u *Updater) updateLayer2AttachmentConditions(ctx context.Context, fetched 
 func (u *Updater) updatePodNetworkConditions(ctx context.Context, fetched *resolver.FetchedResources, resolved *resolver.ResolvedData, issues map[string]ResourceIssue) error {
 	for i := range fetched.PodNetworks {
 		pn := &fetched.PodNetworks[i]
-		resolvedStatus, resolvedReason, resolvedMsg := checkNetworkRef(pn.Spec.NetworkRef, resolved)
+		previousReady := readyConditionSnapshot(pn.Status.Conditions)
+		resolvedStatus, resolvedReason, resolvedMsg := checkNetworkRef(pn.Namespace, pn.Spec.NetworkRef, resolved)
 
 		readyStatus := resolvedStatus
 		readyReason := resolvedReason
@@ -329,8 +370,8 @@ func (u *Updater) updatePodNetworkConditions(ctx context.Context, fetched *resol
 		}
 		readyStatus, readyReason, readyMsg = applyBuildIssue(issues, "PodNetwork", pn.Namespace, pn.Name, readyStatus, readyReason, readyMsg)
 
-		netIPv4, netIPv6 := resolved.NetworkCIDRs(pn.Spec.NetworkRef)
-		vrfs := resolved.SelectorVRFRefs(pn.Spec.Destinations)
+		netIPv4, netIPv6 := resolved.NetworkCIDRs(pn.Namespace, pn.Spec.NetworkRef)
+		vrfs := resolved.SelectorVRFRefs(pn.Namespace, pn.Spec.Destinations)
 
 		if err := u.statusUpdateWithRetry(ctx, pn, func(obj client.Object) {
 			p := obj.(*nc.PodNetwork)
@@ -343,6 +384,7 @@ func (u *Updater) updatePodNetworkConditions(ctx context.Context, fetched *resol
 		}); err != nil {
 			return fmt.Errorf("updating PodNetwork %q status: %w", pn.Name, err)
 		}
+		u.emitReadyWarning(pn, previousReady, readyStatus, readyReason, readyMsg)
 	}
 	return nil
 }
@@ -350,6 +392,7 @@ func (u *Updater) updatePodNetworkConditions(ctx context.Context, fetched *resol
 func (u *Updater) updateCollectorConditions(ctx context.Context, fetched *resolver.FetchedResources, issues map[string]ResourceIssue) error {
 	for i := range fetched.Collectors {
 		col := &fetched.Collectors[i]
+		previousReady := readyConditionSnapshot(col.Status.Conditions)
 		readyStatus, readyReason, readyMsg := applyBuildIssue(issues, "Collector", col.Namespace, col.Name,
 			metav1.ConditionTrue, "Ready", "Collector is ready")
 		if err := u.statusUpdateWithRetry(ctx, col, func(obj client.Object) {
@@ -360,6 +403,7 @@ func (u *Updater) updateCollectorConditions(ctx context.Context, fetched *resolv
 		}); err != nil {
 			return fmt.Errorf("updating Collector %q status: %w", col.Name, err)
 		}
+		u.emitReadyWarning(col, previousReady, readyStatus, readyReason, readyMsg)
 	}
 	return nil
 }
@@ -367,16 +411,20 @@ func (u *Updater) updateCollectorConditions(ctx context.Context, fetched *resolv
 func (u *Updater) updateTrafficMirrorConditions(ctx context.Context, fetched *resolver.FetchedResources, resolved *resolver.ResolvedData, issues map[string]ResourceIssue) error {
 	collectorNames := make(map[string]bool, len(resolved.Collectors))
 	for i := range resolved.Collectors {
-		collectorNames[resolved.Collectors[i].Name] = true
+		collectorNames[resolver.NamespacedKey(
+			resolved.Collectors[i].Namespace,
+			resolved.Collectors[i].Name,
+		)] = true
 	}
 
 	for i := range fetched.TrafficMirrors {
 		tm := &fetched.TrafficMirrors[i]
+		previousReady := readyConditionSnapshot(tm.Status.Conditions)
 		resolvedStatus := metav1.ConditionTrue
 		resolvedReason := reasonAllResolved
 		resolvedMsg := msgAllResolved
 
-		if !collectorNames[tm.Spec.Collector] {
+		if !collectorNames[resolver.NamespacedKey(tm.Namespace, tm.Spec.Collector)] {
 			resolvedStatus = metav1.ConditionFalse
 			resolvedReason = "CollectorNotFound"
 			resolvedMsg = fmt.Sprintf("referenced Collector %q not found", tm.Spec.Collector)
@@ -398,6 +446,7 @@ func (u *Updater) updateTrafficMirrorConditions(ctx context.Context, fetched *re
 		}); err != nil {
 			return fmt.Errorf("updating TrafficMirror %q status: %w", tm.Name, err)
 		}
+		u.emitReadyWarning(tm, previousReady, readyStatus, readyReason, readyMsg)
 	}
 	return nil
 }
@@ -405,11 +454,12 @@ func (u *Updater) updateTrafficMirrorConditions(ctx context.Context, fetched *re
 func (u *Updater) updateNodeAttachmentConditions(ctx context.Context, fetched *resolver.FetchedResources, resolved *resolver.ResolvedData, issues map[string]ResourceIssue) error {
 	for i := range fetched.NodeAttachments {
 		na := &fetched.NodeAttachments[i]
+		previousReady := readyConditionSnapshot(na.Status.Conditions)
 		resolvedStatus := metav1.ConditionTrue
 		resolvedReason := reasonAllResolved
 		resolvedMsg := msgAllResolved
 
-		if _, ok := resolved.VRFs[na.Spec.VRFRef]; !ok {
+		if _, ok := resolved.VRF(na.Namespace, na.Spec.VRFRef); !ok {
 			resolvedStatus = metav1.ConditionFalse
 			resolvedReason = "VRFNotFound"
 			resolvedMsg = fmt.Sprintf("referenced VRF %q not found", na.Spec.VRFRef)
@@ -423,7 +473,7 @@ func (u *Updater) updateNodeAttachmentConditions(ctx context.Context, fetched *r
 		}
 		readyStatus, readyReason, readyMsg = applyBuildIssue(issues, "NodeAttachment", na.Namespace, na.Name, readyStatus, readyReason, readyMsg)
 
-		vrfs := resolved.SelectorVRFRefs(na.Spec.Destinations)
+		vrfs := resolved.SelectorVRFRefs(na.Namespace, na.Spec.Destinations)
 
 		if err := u.statusUpdateWithRetry(ctx, na, func(obj client.Object) {
 			n := obj.(*nc.NodeAttachment)
@@ -434,6 +484,7 @@ func (u *Updater) updateNodeAttachmentConditions(ctx context.Context, fetched *r
 		}); err != nil {
 			return fmt.Errorf("updating NodeAttachment %q status: %w", na.Name, err)
 		}
+		u.emitReadyWarning(na, previousReady, readyStatus, readyReason, readyMsg)
 	}
 	return nil
 }
@@ -441,6 +492,7 @@ func (u *Updater) updateNodeAttachmentConditions(ctx context.Context, fetched *r
 func (u *Updater) updateBGPPeeringConditions(ctx context.Context, fetched *resolver.FetchedResources, resolved *resolver.ResolvedData, issues map[string]ResourceIssue, nodeASNs map[string]int64) error {
 	for i := range fetched.BGPPeerings {
 		bp := &fetched.BGPPeerings[i]
+		previousReady := readyConditionSnapshot(bp.Status.Conditions)
 		resolvedStatus, resolvedReason, resolvedMsg := checkBGPPeeringRefs(bp, resolved)
 
 		readyStatus := resolvedStatus
@@ -472,6 +524,7 @@ func (u *Updater) updateBGPPeeringConditions(ctx context.Context, fetched *resol
 		}); err != nil {
 			return fmt.Errorf("updating BGPPeering %q status: %w", bp.Name, err)
 		}
+		u.emitReadyWarning(bp, previousReady, readyStatus, readyReason, readyMsg)
 	}
 	return nil
 }
@@ -525,14 +578,14 @@ func checkBGPPeeringRefs(bp *nc.BGPPeering, resolved *resolver.ResolvedData) (co
 		if bp.Spec.Ref.AttachmentRef == nil {
 			return metav1.ConditionFalse, "AttachmentRefMissing", "listenRange mode requires attachmentRef"
 		}
-		if !layer2AttachmentExists(*bp.Spec.Ref.AttachmentRef, resolved) {
+		if !layer2AttachmentExists(bp.Namespace, *bp.Spec.Ref.AttachmentRef, resolved) {
 			return metav1.ConditionFalse, "AttachmentNotFound", fmt.Sprintf("referenced Layer2Attachment %q not found", *bp.Spec.Ref.AttachmentRef)
 		}
 		if len(bp.Spec.Ref.NetworkRefs) == 0 {
 			return metav1.ConditionFalse, "NetworkRefsMissing", "listenRange mode requires at least one networkRef"
 		}
 		for _, ref := range bp.Spec.Ref.NetworkRefs {
-			if _, ok := resolved.Networks[ref]; !ok {
+			if _, ok := resolved.Network(bp.Namespace, ref); !ok {
 				return metav1.ConditionFalse, "NetworkNotFound", fmt.Sprintf("referenced Network %q not found", ref)
 			}
 		}
@@ -541,7 +594,7 @@ func checkBGPPeeringRefs(bp *nc.BGPPeering, resolved *resolver.ResolvedData) (co
 			return metav1.ConditionFalse, "InboundRefsMissing", "loopbackPeer mode requires at least one inboundRef"
 		}
 		for _, ref := range bp.Spec.Ref.InboundRefs {
-			if !inboundExists(ref, resolved) {
+			if !inboundExists(bp.Namespace, ref, resolved) {
 				return metav1.ConditionFalse, "InboundNotFound", fmt.Sprintf("referenced Inbound %q not found", ref)
 			}
 		}
@@ -553,9 +606,9 @@ func checkBGPPeeringRefs(bp *nc.BGPPeering, resolved *resolver.ResolvedData) (co
 
 // layer2AttachmentExists reports whether a Layer2Attachment with the given name
 // is present in the resolved data.
-func layer2AttachmentExists(name string, resolved *resolver.ResolvedData) bool {
+func layer2AttachmentExists(namespace, name string, resolved *resolver.ResolvedData) bool {
 	for i := range resolved.Layer2Attachments {
-		if resolved.Layer2Attachments[i].Name == name {
+		if resolved.Layer2Attachments[i].Namespace == namespace && resolved.Layer2Attachments[i].Name == name {
 			return true
 		}
 	}
@@ -564,9 +617,9 @@ func layer2AttachmentExists(name string, resolved *resolver.ResolvedData) bool {
 
 // inboundExists reports whether an Inbound with the given name is present in the
 // resolved data.
-func inboundExists(name string, resolved *resolver.ResolvedData) bool {
+func inboundExists(namespace, name string, resolved *resolver.ResolvedData) bool {
 	for i := range resolved.Inbounds {
-		if resolved.Inbounds[i].Name == name {
+		if resolved.Inbounds[i].Namespace == namespace && resolved.Inbounds[i].Name == name {
 			return true
 		}
 	}
@@ -574,8 +627,8 @@ func inboundExists(name string, resolved *resolver.ResolvedData) bool {
 }
 
 // checkNetworkRef checks if a networkRef resolves to an existing Network.
-func checkNetworkRef(networkRef string, resolved *resolver.ResolvedData) (condStatus metav1.ConditionStatus, reason, message string) {
-	if _, ok := resolved.Networks[networkRef]; !ok {
+func checkNetworkRef(namespace, networkRef string, resolved *resolver.ResolvedData) (condStatus metav1.ConditionStatus, reason, message string) {
+	if _, ok := resolved.Network(namespace, networkRef); !ok {
 		return metav1.ConditionFalse, "NetworkNotFound", fmt.Sprintf("referenced Network %q not found", networkRef)
 	}
 	return metav1.ConditionTrue, reasonAllResolved, msgAllResolved
@@ -589,7 +642,7 @@ func checkNetworkRef(networkRef string, resolved *resolver.ResolvedData) (condSt
 // when the name cannot be determined. This mirrors the naming logic in
 // intent.buildNetplanState so the status reflects what lands on the node.
 func effectiveInterfaceName(l2a *nc.Layer2Attachment, resolved *resolver.ResolvedData) string {
-	net, ok := resolved.Networks[l2a.Spec.NetworkRef]
+	net, ok := resolved.Network(l2a.Namespace, l2a.Spec.NetworkRef)
 	if ok && net.Spec.VLAN == nil {
 		// Native/untagged mode: the parent interfaceRef is configured directly.
 		if l2a.Spec.InterfaceRef != nil && *l2a.Spec.InterfaceRef != "" {

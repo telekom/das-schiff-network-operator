@@ -21,7 +21,8 @@ import (
 	"errors"
 	"fmt"
 	stdnet "net"
-	"sort"
+	"slices"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -32,12 +33,27 @@ import (
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/ipmath"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/resolver"
+	"github.com/telekom/das-schiff-network-operator/pkg/vrfname"
 )
 
 const defaultMTU = 1500
 
 // L2ABuilder transforms Layer2Attachment intent CRDs into NNC Layer2 configs.
 type L2ABuilder struct{}
+
+type validatedL2A struct {
+	matchingNodes []corev1.Node
+	layer2        *networkv1alpha1.Layer2
+	aps           map[string]*nc.AnnouncementPolicy
+	routes        []NetplanRoute
+}
+
+type staticRouteOwner struct {
+	l2a     string
+	nextVRF string
+}
+
+const reasonConflictingStaticRoute = "ConflictingStaticRoute"
 
 // NewL2ABuilder creates a new L2ABuilder.
 func NewL2ABuilder() *L2ABuilder {
@@ -51,46 +67,92 @@ func (*L2ABuilder) Name() string {
 
 // Build produces per-node Layer2 configurations from Layer2Attachment resources.
 func (b *L2ABuilder) Build(ctx context.Context, data *resolver.ResolvedData) (map[string]*NodeContribution, error) {
+	result, _, _ := b.buildWithPlacements(ctx, data, true)
+	return result, nil
+}
+
+func (b *L2ABuilder) buildWithPlacements(
+	ctx context.Context,
+	data *resolver.ResolvedData,
+	reportSkips bool,
+) (map[string]*NodeContribution, map[string][]string, map[string]error) {
 	logger := log.FromContext(ctx).WithName("l2a-builder")
 	result := make(map[string]*NodeContribution)
+	placements := make(map[string][]string)
+	placementErrors := make(map[string]error)
 	// Track which L2A owns each per-node netplan slot and device name.
 	// Keys are namespaced: "<node>\x00slot\x00<mapKey>" and
 	// "<node>\x00dev\x00<deviceName>"; value is the owning L2A name.
 	ifOwner := make(map[string]string)
+	routeOwner := make(map[string]staticRouteOwner)
 
-	for i := range data.Layer2Attachments {
-		l2a := &data.Layer2Attachments[i]
+	layer2Attachments := sortedLayer2Attachments(data.Layer2Attachments)
+	for i := range layer2Attachments {
+		l2a := &layer2Attachments[i]
 
 		// Resolve the referenced Network — skip L2As with dangling refs.
-		net, ok := data.Networks[l2a.Spec.NetworkRef]
+		net, ok := data.Network(l2a.Namespace, l2a.Spec.NetworkRef)
 		if !ok {
+			err := fmt.Errorf("Layer2Attachment %q references unknown Network %q", l2a.Name, l2a.Spec.NetworkRef)
+			placementErrors[layer2AttachmentKey(l2a.Namespace, l2a.Name)] = err
 			logger.Info("skipping Layer2Attachment with unknown Network reference",
 				"l2a", l2a.Name, "networkRef", l2a.Spec.NetworkRef)
+			if reportSkips {
+				reportSkip(ctx, "Layer2Attachment", l2a.Namespace, l2a.Name, "NetworkNotFound", err.Error())
+			}
 			continue
 		}
 
-		// Resolve destinations to find VRF for IRB — skip on resolution errors.
-		vrfName, vrfSpec, err := b.resolveDestinationVRF(l2a, data)
+		// Resolve every selected destination VRF. A single VRF receives the IRB
+		// directly; multiple VRFs are connected through a combo LocalVRF.
+		routing, err := b.resolveDestinationVRFs(l2a, data)
 		if err != nil {
+			placementErrors[layer2AttachmentKey(l2a.Namespace, l2a.Name)] = err
 			// Surface the misconfiguration (e.g. an invalid destinations
 			// selector) as Ready=False, not just a log line.
 			logger.Info("skipping Layer2Attachment with unresolvable destinations",
 				"l2a", l2a.Name, "error", err.Error())
-			reportSkip(ctx, "Layer2Attachment", l2a.Namespace, l2a.Name, skipReason(err), err.Error())
+			if reportSkips {
+				reportSkip(ctx, "Layer2Attachment", l2a.Namespace, l2a.Name, skipReason(err), err.Error())
+			}
 			continue
 		}
 
-		if err := b.applyL2AToNodes(l2a, net, vrfName, vrfSpec, data, result, ifOwner); err != nil {
+		nodes, err := b.applyL2AToNodes(l2a, net, routing, data, result, ifOwner, routeOwner)
+		if err != nil {
+			placementErrors[layer2AttachmentKey(l2a.Namespace, l2a.Name)] = err
 			// Never abort the reconcile for one bad L2A: skip it and surface the
 			// failure as a Ready=False condition (with a specific reason) so it
 			// is visible in the resource status, not only the controller log.
 			logger.Info("skipping Layer2Attachment", "l2a", l2a.Name, "error", err.Error())
-			reportSkip(ctx, "Layer2Attachment", l2a.Namespace, l2a.Name, skipReason(err), err.Error())
+			if reportSkips {
+				reportSkip(ctx, "Layer2Attachment", l2a.Namespace, l2a.Name, skipReason(err), err.Error())
+			}
 			continue
 		}
+		placements[layer2AttachmentKey(l2a.Namespace, l2a.Name)] = nodes
 	}
 
-	return result, nil
+	return result, placements, placementErrors
+}
+
+func sortedLayer2Attachments(items []nc.Layer2Attachment) []nc.Layer2Attachment {
+	sorted := slices.Clone(items)
+	slices.SortFunc(sorted, func(a, b nc.Layer2Attachment) int {
+		return strings.Compare(a.Namespace+"\x00"+a.Name, b.Namespace+"\x00"+b.Name)
+	})
+	return sorted
+}
+
+func layer2AttachmentKey(namespace, name string) string {
+	return namespace + "\x00" + name
+}
+
+func layer2AttachmentDisplayName(namespace, name string) string {
+	if namespace == "" {
+		return name
+	}
+	return namespace + "/" + name
 }
 
 // applyL2AToNodes fans out a single L2A to every matching node.
@@ -104,33 +166,18 @@ func (b *L2ABuilder) Build(ctx context.Context, data *resolver.ResolvedData) (ma
 func (b *L2ABuilder) applyL2AToNodes(
 	l2a *nc.Layer2Attachment,
 	net *resolver.ResolvedNetwork,
-	vrfName string,
-	vrfSpec *nc.VRFSpec,
+	routing *l2aVRFRouting,
 	data *resolver.ResolvedData,
 	result map[string]*NodeContribution,
 	ifOwner map[string]string,
-) error {
+	routeOwner map[string]staticRouteOwner,
+) ([]string, error) {
 	vlanID := b.vlanID(net)
 	mapKey := netplanMapKey(vlanID, l2a)
 
-	matchingNodes, err := matchNodes(data.Nodes, l2a.Spec.NodeSelector)
+	validated, err := b.validateL2A(l2a, net, routing, data)
 	if err != nil {
-		return fmt.Errorf("Layer2Attachment %q node selector error: %w", l2a.Name, err)
-	}
-
-	// Layer2 config is node-independent; this guards the L2/L3 route-target collision.
-	layer2, err := b.buildLayer2(l2a, net, vrfName, vrfSpec)
-	if err != nil {
-		return fmt.Errorf("Layer2Attachment %q config build failed: %w", l2a.Name, err)
-	}
-
-	// Resolve the IRB AnnouncementPolicy once (node-independent).
-	var ap *nc.AnnouncementPolicy
-	if vrfName != "" && vrfSpec != nil {
-		ap, err = findMatchingAP(l2a.Labels, vrfName, data)
-		if err != nil {
-			return fmt.Errorf("Layer2Attachment %q: %w", l2a.Name, err)
-		}
+		return nil, err
 	}
 
 	// Detect ownership conflicts across L2As before claiming any. Two kinds of
@@ -143,11 +190,129 @@ func (b *L2ABuilder) applyL2AToNodes(
 	//     parent interfaceRef in native mode, or the InterfaceName override for a
 	//     tagged VLAN). Two L2As on different VLANs but the same device name also
 	//     collide.
-	claims := ownershipClaims(matchingNodes, mapKey, netplanClaimName(net, l2a))
+	claims := ownershipClaims(validated.matchingNodes, mapKey, netplanClaimName(net, l2a))
+	l2aDisplayName := layer2AttachmentDisplayName(l2a.Namespace, l2a.Name)
 	for i := range claims {
 		if prev, exists := ifOwner[claims[i].key]; exists {
-			return fmt.Errorf("Layer2Attachments %q and %q both configure %s on node %q",
-				prev, l2a.Name, claims[i].what, claims[i].node)
+			return nil, fmt.Errorf("Layer2Attachments %q and %q both configure %s on node %q",
+				prev, l2aDisplayName, claims[i].what, claims[i].node)
+		}
+	}
+	routeClaims, err := multiVRFRouteClaims(l2a, net, routing, validated, routeOwner)
+	if err != nil {
+		return nil, err
+	}
+
+	// Mutation phase — validation passed, so nothing below can fail.
+	for i := range claims {
+		ifOwner[claims[i].key] = l2aDisplayName
+	}
+	for key, owner := range routeClaims {
+		routeOwner[key] = owner
+	}
+
+	for i := range validated.matchingNodes {
+		node := &validated.matchingNodes[i]
+		contrib := ensureContrib(result, node.Name)
+		if validated.layer2 != nil {
+			contrib.Layer2s[mapKey] = *validated.layer2
+		}
+
+		// Carry netplan-only device info for this VLAN (interface name/parent
+		// overrides plus, when enabled, per-node IPs). Kept off the NNC API.
+		if dev, ok := buildNetplanDevice(l2a, net, node.Name, validated.routes); ok {
+			contrib.NetplanNodeIPs[mapKey] = dev
+		}
+
+		switch len(routing.vrfSpecs) {
+		case 0:
+			// No VRF plumbing requested.
+		case 1:
+			vrfName := sortedVRFNames(routing.vrfSpecs)[0]
+			b.applyVRFContrib(net, vrfName, routing.vrfSpecs[vrfName], contrib, validated.aps[vrfName])
+		default:
+			b.applyMultiVRFContrib(net, routing, contrib, validated.aps)
+		}
+	}
+
+	nodeNames := make([]string, 0, len(validated.matchingNodes))
+	for i := range validated.matchingNodes {
+		nodeNames = append(nodeNames, validated.matchingNodes[i].Name)
+	}
+	return nodeNames, nil
+}
+
+func multiVRFRouteClaims(
+	l2a *nc.Layer2Attachment,
+	net *resolver.ResolvedNetwork,
+	routing *l2aVRFRouting,
+	validated *validatedL2A,
+	owners map[string]staticRouteOwner,
+) (map[string]staticRouteOwner, error) {
+	claims := make(map[string]staticRouteOwner)
+	if len(routing.vrfSpecs) <= 1 {
+		return claims, nil
+	}
+
+	contrib := NewNodeContribution()
+	(&L2ABuilder{}).applyMultiVRFContrib(net, routing, contrib, validated.aps)
+	for i := range validated.matchingNodes {
+		nodeName := validated.matchingNodes[i].Name
+		for vrfName := range contrib.FabricVRFs {
+			for _, route := range contrib.FabricVRFs[vrfName].StaticRoutes {
+				if route.NextHop == nil || route.NextHop.Vrf == nil {
+					continue
+				}
+				key := nodeName + "\x00" + vrfName + "\x00" + route.Prefix
+				claim := staticRouteOwner{
+					l2a:     layer2AttachmentDisplayName(l2a.Namespace, l2a.Name),
+					nextVRF: *route.NextHop.Vrf,
+				}
+				if previous, exists := owners[key]; exists && previous.nextVRF != claim.nextVRF {
+					return nil, &skipReasonError{
+						reason: reasonConflictingStaticRoute,
+						err: fmt.Errorf(
+							"Layer2Attachments %q and %q route prefix %q in VRF %q through different intermediate VRFs on node %q",
+							previous.l2a, layer2AttachmentDisplayName(l2a.Namespace, l2a.Name),
+							route.Prefix, vrfName, nodeName,
+						),
+					}
+				}
+				claims[key] = claim
+			}
+		}
+	}
+	return claims, nil
+}
+
+// validateL2A resolves all node-independent and selector-dependent inputs used
+// by both the L2A and listen-range BGPPeering builders.
+func (b *L2ABuilder) validateL2A(
+	l2a *nc.Layer2Attachment,
+	net *resolver.ResolvedNetwork,
+	routing *l2aVRFRouting,
+	data *resolver.ResolvedData,
+) (*validatedL2A, error) {
+	matchingNodes, err := matchNodes(data.Nodes, l2a.Spec.NodeSelector)
+	if err != nil {
+		return nil, fmt.Errorf("Layer2Attachment %q node selector error: %w", l2a.Name, err)
+	}
+
+	// Layer2 config is node-independent; this guards the L2/L3 route-target collision.
+	layer2, err := b.buildLayer2(l2a, net, routing.irbVRF, routing.irbVRFSpec)
+	if err != nil {
+		return nil, fmt.Errorf("Layer2Attachment %q config build failed: %w", l2a.Name, err)
+	}
+	if err := validateMultiVRFIRB(l2a, layer2, routing); err != nil {
+		return nil, err
+	}
+
+	// Resolve AnnouncementPolicies for every selected FabricVRF up front.
+	aps := make(map[string]*nc.AnnouncementPolicy, len(routing.vrfSpecs))
+	for _, vrfName := range sortedVRFNames(routing.vrfSpecs) {
+		aps[vrfName], err = findMatchingAP(l2a.Namespace, l2a.Labels, vrfName, data)
+		if err != nil {
+			return nil, fmt.Errorf("Layer2Attachment %q: %w", l2a.Name, err)
 		}
 	}
 
@@ -156,33 +321,15 @@ func (b *L2ABuilder) applyL2AToNodes(
 	// (Ready=False), so validate it here before the mutation phase.
 	routes, err := destinationRoutes(l2a, data)
 	if err != nil {
-		return fmt.Errorf("Layer2Attachment %q: %w", l2a.Name, err)
+		return nil, fmt.Errorf("Layer2Attachment %q: %w", l2a.Name, err)
 	}
 
-	// Mutation phase — validation passed, so nothing below can fail.
-	for i := range claims {
-		ifOwner[claims[i].key] = l2a.Name
-	}
-
-	for i := range matchingNodes {
-		node := &matchingNodes[i]
-		contrib := ensureContrib(result, node.Name)
-		if layer2 != nil {
-			contrib.Layer2s[mapKey] = *layer2
-		}
-
-		// Carry netplan-only device info for this VLAN (interface name/parent
-		// overrides plus, when enabled, per-node IPs). Kept off the NNC API.
-		if dev, ok := buildNetplanDevice(l2a, net, node.Name, routes); ok {
-			contrib.NetplanNodeIPs[mapKey] = dev
-		}
-
-		if vrfName != "" && vrfSpec != nil {
-			b.applyVRFContrib(net, vrfName, vrfSpec, contrib, ap)
-		}
-	}
-
-	return nil
+	return &validatedL2A{
+		matchingNodes: matchingNodes,
+		layer2:        layer2,
+		aps:           aps,
+		routes:        routes,
+	}, nil
 }
 
 // applyVRFContrib updates the FabricVRF entry for a single node from an L2A.
@@ -202,30 +349,218 @@ func (*L2ABuilder) applyVRFContrib(
 	contrib.FabricVRFs[vrfName] = fvrf
 }
 
-// resolveDestinationVRF finds the VRF for IRB plumbing by selecting Destinations
-// matching the L2A's destination selector.
-func (*L2ABuilder) resolveDestinationVRF(l2a *nc.Layer2Attachment, data *resolver.ResolvedData) (string, *nc.VRFSpec, error) {
+// l2aVRFRouting contains the resolved routing topology for one L2A.
+type l2aVRFRouting struct {
+	irbVRF       string
+	irbVRFSpec   *nc.VRFSpec
+	vrfSpecs     map[string]*nc.VRFSpec
+	destinations map[string][]nc.Destination
+	comboRoutes  []networkv1alpha1.StaticRoute
+}
+
+// resolveDestinationVRFs finds all FabricVRFs selected by an L2A. A single
+// FabricVRF owns the IRB directly. For multiple FabricVRFs, the IRB is placed
+// in a deterministic combo LocalVRF and routes are leaked in both directions.
+func (*L2ABuilder) resolveDestinationVRFs(l2a *nc.Layer2Attachment, data *resolver.ResolvedData) (*l2aVRFRouting, error) {
+	routing := &l2aVRFRouting{
+		vrfSpecs:     make(map[string]*nc.VRFSpec),
+		destinations: make(map[string][]nc.Destination),
+	}
 	if l2a.Spec.Destinations == nil {
-		return "", nil, nil // no VRF plumbing requested
+		return routing, nil
 	}
 
 	selector, err := metav1.LabelSelectorAsSelector(l2a.Spec.Destinations)
 	if err != nil {
-		return "", nil, fmt.Errorf("invalid destination selector: %w", err)
+		return nil, fmt.Errorf("invalid destination selector: %w", err)
 	}
 
-	// Match against raw Destination CRDs using their labels.
+	var destinationNames []string
 	for i := range data.RawDestinations {
 		rawDest := &data.RawDestinations[i]
-		if selector.Matches(labels.Set(rawDest.Labels)) {
-			resolved, ok := data.Destinations[rawDest.Name]
-			if ok && resolved.VRFSpec != nil {
-				return resolved.VRFSpec.VRF, resolved.VRFSpec, nil
+		if rawDest.Namespace != l2a.Namespace || !selector.Matches(labels.Set(rawDest.Labels)) {
+			continue
+		}
+		resolved, ok := data.Destination(l2a.Namespace, rawDest.Name)
+		if !ok || resolved.VRFSpec == nil || resolved.Spec.VRFRef == nil {
+			continue
+		}
+		vrfName := resolved.VRFSpec.VRF
+		routing.vrfSpecs[vrfName] = resolved.VRFSpec
+		routing.destinations[vrfName] = append(routing.destinations[vrfName], *rawDest)
+		destinationNames = append(destinationNames, layer2AttachmentDisplayName(rawDest.Namespace, rawDest.Name))
+	}
+
+	switch len(routing.vrfSpecs) {
+	case 0:
+		return routing, nil
+	case 1:
+		routing.irbVRF = sortedVRFNames(routing.vrfSpecs)[0]
+		routing.irbVRFSpec = routing.vrfSpecs[routing.irbVRF]
+	default:
+		slices.Sort(destinationNames)
+		routing.irbVRF = vrfname.L2AName(strings.Join(destinationNames, "+"))
+		if err := validateIntermediateVRFName(routing.irbVRF, data); err != nil {
+			return nil, err
+		}
+		routing.comboRoutes, err = destinationVRFRoutes(routing.destinations)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return routing, nil
+}
+
+const (
+	reasonIntermediateVRFNameCollision = "IntermediateVRFNameCollision"
+	reasonMultiVRFRequiresIRB          = "MultiVRFRequiresIRB"
+)
+
+func validateIntermediateVRFName(name string, data *resolver.ResolvedData) error {
+	if name == clusterVRFName {
+		return &skipReasonError{
+			reason: reasonIntermediateVRFNameCollision,
+			err:    fmt.Errorf("generated intermediate VRF name %q collides with a reserved VRF", name),
+		}
+	}
+	vrfs := data.VRFsByKey
+	if vrfs == nil {
+		vrfs = data.VRFs
+	}
+	for _, resolvedVRF := range vrfs {
+		if resolvedVRF != nil && vrfname.Reduce(resolvedVRF.Spec.VRF) == name {
+			return &skipReasonError{
+				reason: reasonIntermediateVRFNameCollision,
+				err: fmt.Errorf("generated intermediate VRF name %q collides with FabricVRF %q after name reduction",
+					name, layer2AttachmentDisplayName(resolvedVRF.Namespace, resolvedVRF.Name)),
+			}
+		}
+	}
+	return nil
+}
+
+func validateMultiVRFIRB(
+	l2a *nc.Layer2Attachment,
+	layer2 *networkv1alpha1.Layer2,
+	routing *l2aVRFRouting,
+) error {
+	if len(routing.vrfSpecs) <= 1 {
+		return nil
+	}
+	if layer2 != nil && layer2.IRB != nil && (l2a.Spec.SRIOV == nil || !l2a.Spec.SRIOV.Enabled) {
+		return nil
+	}
+	return &skipReasonError{
+		reason: reasonMultiVRFRequiresIRB,
+		err:    fmt.Errorf("multiple destination VRFs require an enabled HBN IRB"),
+	}
+}
+
+// applyMultiVRFContrib connects an L2 network to multiple FabricVRFs through a
+// combo LocalVRF. Static VRF nexthops provide bidirectional routing without
+// ClusterVRF policy routes: destination prefixes point from the combo VRF to
+// their FabricVRF, while each FabricVRF points the attached Network back to the
+// combo VRF and exports it through EVPN.
+func (*L2ABuilder) applyMultiVRFContrib(
+	net *resolver.ResolvedNetwork,
+	routing *l2aVRFRouting,
+	contrib *NodeContribution,
+	aps map[string]*nc.AnnouncementPolicy,
+) {
+	combo := contrib.LocalVRFs[routing.irbVRF]
+	for _, route := range routing.comboRoutes {
+		combo.StaticRoutes = appendUniqueVRFStaticRoute(combo.StaticRoutes, route)
+	}
+	contrib.LocalVRFs[routing.irbVRF] = combo
+
+	for _, vrfName := range sortedVRFNames(routing.vrfSpecs) {
+		fvrf, exists := contrib.FabricVRFs[vrfName]
+		if !exists {
+			fvrf = buildFabricVRF(routing.vrfSpecs[vrfName])
+		}
+		addNetworkToEVPNExport(&fvrf, net, aps[vrfName])
+		addNetworkRoutesToVRF(&fvrf, net, routing.irbVRF)
+		addAggregateRoutesViaVRF(&fvrf, net, aps[vrfName], routing.irbVRF)
+		contrib.FabricVRFs[vrfName] = fvrf
+	}
+}
+
+func sortedVRFNames(vrfs map[string]*nc.VRFSpec) []string {
+	names := make([]string, 0, len(vrfs))
+	for name := range vrfs {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	return names
+}
+
+func destinationVRFRoutes(grouped map[string][]nc.Destination) ([]networkv1alpha1.StaticRoute, error) {
+	routes := make(map[string]networkv1alpha1.StaticRoute)
+	prefixVRFs := make(map[string]string)
+	for vrfName, destinations := range grouped {
+		for i := range destinations {
+			for _, prefix := range destinations[i].Spec.Prefixes {
+				_, network, err := stdnet.ParseCIDR(prefix)
+				if err != nil {
+					return nil, fmt.Errorf("invalid destination prefix %q: %w", prefix, err)
+				}
+				canonicalPrefix := network.String()
+				if existingVRF, exists := prefixVRFs[canonicalPrefix]; exists && existingVRF != vrfName {
+					return nil, fmt.Errorf("destination prefix %q is assigned to multiple VRFs %q and %q",
+						canonicalPrefix, existingVRF, vrfName)
+				}
+				prefixVRFs[canonicalPrefix] = vrfName
+				nextVRF := vrfName
+				key := canonicalPrefix + "\x00" + vrfName
+				routes[key] = networkv1alpha1.StaticRoute{
+					Prefix:  canonicalPrefix,
+					NextHop: &networkv1alpha1.NextHop{Vrf: &nextVRF},
+				}
 			}
 		}
 	}
 
-	return "", nil, nil // no matching destination with VRF
+	keys := make([]string, 0, len(routes))
+	for key := range routes {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+
+	result := make([]networkv1alpha1.StaticRoute, 0, len(keys))
+	for _, key := range keys {
+		result = append(result, routes[key])
+	}
+	return result, nil
+}
+
+func addNetworkRoutesToVRF(fvrf *networkv1alpha1.FabricVRF, net *resolver.ResolvedNetwork, vrfName string) {
+	if net.Spec.IPv4 != nil && net.Spec.IPv4.CIDR != "" {
+		nextVRF := vrfName
+		fvrf.StaticRoutes = appendUniqueStaticRoute(fvrf.StaticRoutes, networkv1alpha1.StaticRoute{
+			Prefix:  net.Spec.IPv4.CIDR,
+			NextHop: &networkv1alpha1.NextHop{Vrf: &nextVRF},
+		})
+	}
+	if net.Spec.IPv6 != nil && net.Spec.IPv6.CIDR != "" {
+		nextVRF := vrfName
+		fvrf.StaticRoutes = appendUniqueStaticRoute(fvrf.StaticRoutes, networkv1alpha1.StaticRoute{
+			Prefix:  net.Spec.IPv6.CIDR,
+			NextHop: &networkv1alpha1.NextHop{Vrf: &nextVRF},
+		})
+	}
+}
+
+func appendUniqueVRFStaticRoute(routes []networkv1alpha1.StaticRoute, route networkv1alpha1.StaticRoute) []networkv1alpha1.StaticRoute {
+	for i := range routes {
+		if routes[i].Prefix != route.Prefix || routes[i].NextHop == nil || route.NextHop == nil {
+			continue
+		}
+		if routes[i].NextHop.Vrf != nil && route.NextHop.Vrf != nil && *routes[i].NextHop.Vrf == *route.NextHop.Vrf {
+			return routes
+		}
+	}
+	return append(routes, route)
 }
 
 // buildLayer2 creates a NNC Layer2 from a Layer2Attachment and its resolved Network.
@@ -514,10 +849,13 @@ func destinationRoutes(l2a *nc.Layer2Attachment, data *resolver.ResolvedData) ([
 	var routes []NetplanRoute
 	for i := range data.RawDestinations {
 		destination := &data.RawDestinations[i]
+		if destination.Namespace != l2a.Namespace {
+			continue
+		}
 		if !selector.Matches(labels.Set(destination.Labels)) {
 			continue
 		}
-		resolved, ok := data.Destinations[destination.Name]
+		resolved, ok := data.Destination(l2a.Namespace, destination.Name)
 		if !ok || resolved.Spec.NextHop == nil {
 			continue
 		}
@@ -534,11 +872,11 @@ func destinationRoutes(l2a *nc.Layer2Attachment, data *resolver.ResolvedData) ([
 			routes = append(routes, route)
 		}
 	}
-	sort.Slice(routes, func(i, j int) bool {
-		if routes[i].To != routes[j].To {
-			return routes[i].To < routes[j].To
+	slices.SortFunc(routes, func(a, b NetplanRoute) int {
+		if byDestination := strings.Compare(a.To, b.To); byDestination != 0 {
+			return byDestination
 		}
-		return routes[i].Via < routes[j].Via
+		return strings.Compare(a.Via, b.Via)
 	})
 	return routes, nil
 }

@@ -52,7 +52,7 @@ func (b *NodeAttachmentBuilder) Build(ctx context.Context, data *resolver.Resolv
 		na := &data.NodeAttachments[i]
 
 		// Resolve VRF spec via destination selector (same pattern as other builders).
-		grouped := groupDestinationsByVRF(na.Spec.Destinations, data)
+		grouped := groupDestinationsByVRF(na.Namespace, na.Spec.Destinations, data)
 		if len(grouped) == 0 {
 			continue
 		}
@@ -183,7 +183,7 @@ func (*NodeAttachmentBuilder) resolveVRFSpec(vrfName string, grouped map[string]
 	if len(dests) == 0 {
 		return nil
 	}
-	resolved, ok := data.Destinations[dests[0].Name]
+	resolved, ok := data.Destination(dests[0].Namespace, dests[0].Name)
 	if !ok || resolved.VRFSpec == nil {
 		return nil
 	}

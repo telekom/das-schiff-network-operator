@@ -58,6 +58,8 @@ type FetchedResources struct {
 func ResolveAll(fetched *FetchedResources) (*ResolvedData, error) {
 	vrfs := ResolveVRFs(fetched.VRFs)
 	networks := ResolveNetworks(fetched.Networks)
+	vrfsByKey := ResolveVRFsByKey(fetched.VRFs)
+	networksByKey := ResolveNetworksByKey(fetched.Networks)
 
 	destinations, err := ResolveDestinations(fetched.Destinations, vrfs)
 	if err != nil {
@@ -69,6 +71,9 @@ func ResolveAll(fetched *FetchedResources) (*ResolvedData, error) {
 		VRFs:                 vrfs,
 		Networks:             networks,
 		Destinations:         destinations,
+		VRFsByKey:            vrfsByKey,
+		NetworksByKey:        networksByKey,
+		DestinationsByKey:    ResolveDestinationsByKey(fetched.Destinations, vrfsByKey),
 		RawDestinations:      fetched.Destinations,
 		Layer2Attachments:    fetched.Layer2Attachments,
 		Inbounds:             fetched.Inbounds,

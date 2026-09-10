@@ -50,8 +50,10 @@ func (b *OutboundBuilder) Build(ctx context.Context, data *resolver.ResolvedData
 	for i := range data.Outbounds {
 		ob := &data.Outbounds[i]
 
-		net, ok := data.Networks[ob.Spec.NetworkRef]
+		net, ok := data.Network(ob.Namespace, ob.Spec.NetworkRef)
 		if !ok {
+			reportSkip(ctx, "Outbound", ob.Namespace, ob.Name, "NetworkNotFound",
+				fmt.Sprintf("referenced Network %q not found", ob.Spec.NetworkRef))
 			continue
 		}
 
@@ -89,7 +91,7 @@ func (b *OutboundBuilder) applyOutbound(
 	data *resolver.ResolvedData,
 	result map[string]*NodeContribution,
 ) error {
-	grouped := groupDestinationsByVRF(ob.Spec.Destinations, data)
+	grouped := groupDestinationsByVRF(ob.Namespace, ob.Spec.Destinations, data)
 	if len(grouped) == 0 {
 		return nil
 	}
@@ -99,7 +101,7 @@ func (b *OutboundBuilder) applyOutbound(
 	// Validate and resolve every VRF before mutating any node contribution.
 	contribs := make([]outboundVRFContrib, 0, len(grouped))
 	for vrfName, dests := range grouped {
-		ap, err := findMatchingAP(ob.Labels, vrfName, data)
+		ap, err := findMatchingAP(ob.Namespace, ob.Labels, vrfName, data)
 		if err != nil {
 			return fmt.Errorf("outbound %q: %w", ob.Name, err)
 		}
@@ -148,7 +150,7 @@ func (*OutboundBuilder) resolveVRFSpec(dests []nc.Destination, data *resolver.Re
 	if len(dests) == 0 {
 		return nil
 	}
-	resolved, ok := data.Destinations[dests[0].Name]
+	resolved, ok := data.Destination(dests[0].Namespace, dests[0].Name)
 	if !ok || resolved.VRFSpec == nil {
 		return nil
 	}
