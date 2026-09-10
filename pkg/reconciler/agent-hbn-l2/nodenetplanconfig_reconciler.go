@@ -466,25 +466,25 @@ func (reconciler *NodeNetplanConfigReconciler) Reconcile(ctx context.Context) er
 	}
 
 	if err := reconcileVLANs(cfg.Spec.DesiredState.Network.VLans); err != nil {
-		_ = reconciler.healthChecker.UpdateReadinessCondition(ctx, corev1.ConditionFalse, healthcheck.ReasonVLANReconcileFailed, err.Error())
+		healthcheck.ReportUnready(ctx, reconciler.healthChecker, reconciler.logger, healthcheck.ReasonVLANReconcileFailed, err.Error())
 		return fmt.Errorf("error reconciling VLANs: %w", err)
 	}
 	if err := reconcileLoopbacks(cfg.Spec.DesiredState.Network.Dummies); err != nil {
-		_ = reconciler.healthChecker.UpdateReadinessCondition(ctx, corev1.ConditionFalse, healthcheck.ReasonLoopbackReconcileFail, err.Error())
+		healthcheck.ReportUnready(ctx, reconciler.healthChecker, reconciler.logger, healthcheck.ReasonLoopbackReconcileFail, err.Error())
 		return fmt.Errorf("error reconciling loopbacks: %w", err)
 	}
 
 	// Perform health checks (interfaces / reachability / API server)
 	if err := reconciler.healthChecker.CheckInterfaces(); err != nil {
-		_ = reconciler.healthChecker.UpdateReadinessCondition(ctx, corev1.ConditionFalse, healthcheck.ReasonInterfaceCheckFailed, err.Error())
+		healthcheck.ReportUnready(ctx, reconciler.healthChecker, reconciler.logger, healthcheck.ReasonInterfaceCheckFailed, err.Error())
 		return fmt.Errorf("error checking network interfaces: %w", err)
 	}
 	if err := reconciler.healthChecker.CheckReachability(); err != nil {
-		_ = reconciler.healthChecker.UpdateReadinessCondition(ctx, corev1.ConditionFalse, healthcheck.ReasonReachabilityFailed, err.Error())
+		healthcheck.ReportUnready(ctx, reconciler.healthChecker, reconciler.logger, healthcheck.ReasonReachabilityFailed, err.Error())
 		return fmt.Errorf("error checking network reachability: %w", err)
 	}
 	if err := reconciler.healthChecker.CheckAPIServer(ctx); err != nil {
-		_ = reconciler.healthChecker.UpdateReadinessCondition(ctx, corev1.ConditionFalse, healthcheck.ReasonAPIServerFailed, err.Error())
+		healthcheck.ReportUnready(ctx, reconciler.healthChecker, reconciler.logger, healthcheck.ReasonAPIServerFailed, err.Error())
 		return fmt.Errorf("error checking API Server reachability: %w", err)
 	}
 	if err := reconciler.healthChecker.UpdateReadinessCondition(ctx, corev1.ConditionTrue, healthcheck.ReasonHealthChecksPassed, "All network operator health checks passed"); err != nil {
