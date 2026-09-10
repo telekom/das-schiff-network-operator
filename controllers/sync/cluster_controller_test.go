@@ -19,7 +19,7 @@ import (
 func newCapiCluster(namespace string) *unstructured.Unstructured {
 	cluster := &unstructured.Unstructured{}
 	cluster.SetGroupVersionKind(capiClusterGVK)
-	cluster.SetName("test-cluster")
+	cluster.SetName(testClusterNamespace)
 	cluster.SetNamespace(namespace)
 	return cluster
 }
@@ -50,10 +50,10 @@ func addRemoteClientForTest(c *ClusterController, key types.NamespacedName, remo
 func TestClusterReconcile_ClusterNotFound(t *testing.T) {
 	c := newClusterController()
 	// Pre-populate a remote client to verify Remove is called.
-	addRemoteClientForTest(c, types.NamespacedName{Namespace: "test-ns", Name: "test-cluster"}, fake.NewClientBuilder().WithScheme(testScheme()).Build())
+	addRemoteClientForTest(c, types.NamespacedName{Namespace: testManagementNamespace, Name: testClusterNamespace}, fake.NewClientBuilder().WithScheme(testScheme()).Build())
 
 	result, err := c.Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: types.NamespacedName{Namespace: "test-ns", Name: "test-cluster"},
+		NamespacedName: types.NamespacedName{Namespace: testManagementNamespace, Name: testClusterNamespace},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -61,17 +61,17 @@ func TestClusterReconcile_ClusterNotFound(t *testing.T) {
 	if result.RequeueAfter != 0 {
 		t.Errorf("expected no requeue, got RequeueAfter=%v", result.RequeueAfter)
 	}
-	if c.Remotes.Has(types.NamespacedName{Namespace: "test-ns", Name: "test-cluster"}) {
+	if c.Remotes.Has(types.NamespacedName{Namespace: testManagementNamespace, Name: testClusterNamespace}) {
 		t.Error("expected remote client to be removed")
 	}
 }
 
 func TestClusterReconcile_SecretNotFound(t *testing.T) {
-	cluster := newCapiCluster("test-ns")
+	cluster := newCapiCluster(testManagementNamespace)
 	c := newClusterController(cluster)
 
 	result, err := c.Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: types.NamespacedName{Namespace: "test-ns", Name: "test-cluster"},
+		NamespacedName: types.NamespacedName{Namespace: testManagementNamespace, Name: testClusterNamespace},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -82,11 +82,11 @@ func TestClusterReconcile_SecretNotFound(t *testing.T) {
 }
 
 func TestClusterReconcile_SecretMissingValueKey(t *testing.T) {
-	cluster := newCapiCluster("test-ns")
+	cluster := newCapiCluster(testManagementNamespace)
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-cluster-kubeconfig",
-			Namespace: "test-ns",
+			Name:      testClusterKubeconfigSecret,
+			Namespace: testManagementNamespace,
 		},
 		Data: map[string][]byte{
 			"other-key": []byte("irrelevant"),
@@ -95,7 +95,7 @@ func TestClusterReconcile_SecretMissingValueKey(t *testing.T) {
 	c := newClusterController(cluster, secret)
 
 	result, err := c.Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: types.NamespacedName{Namespace: "test-ns", Name: "test-cluster"},
+		NamespacedName: types.NamespacedName{Namespace: testManagementNamespace, Name: testClusterNamespace},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -106,20 +106,20 @@ func TestClusterReconcile_SecretMissingValueKey(t *testing.T) {
 }
 
 func TestClusterReconcile_SecretEmptyValue(t *testing.T) {
-	cluster := newCapiCluster("test-ns")
+	cluster := newCapiCluster(testManagementNamespace)
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-cluster-kubeconfig",
-			Namespace: "test-ns",
+			Name:      testClusterKubeconfigSecret,
+			Namespace: testManagementNamespace,
 		},
 		Data: map[string][]byte{
-			"value": {},
+			kubeconfigSecretValueKey: {},
 		},
 	}
 	c := newClusterController(cluster, secret)
 
 	result, err := c.Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: types.NamespacedName{Namespace: "test-ns", Name: "test-cluster"},
+		NamespacedName: types.NamespacedName{Namespace: testManagementNamespace, Name: testClusterNamespace},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -130,20 +130,20 @@ func TestClusterReconcile_SecretEmptyValue(t *testing.T) {
 }
 
 func TestClusterReconcile_InvalidKubeconfig(t *testing.T) {
-	cluster := newCapiCluster("test-ns")
+	cluster := newCapiCluster(testManagementNamespace)
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-cluster-kubeconfig",
-			Namespace: "test-ns",
+			Name:      testClusterKubeconfigSecret,
+			Namespace: testManagementNamespace,
 		},
 		Data: map[string][]byte{
-			"value": []byte("not-a-valid-kubeconfig"),
+			kubeconfigSecretValueKey: []byte("not-a-valid-kubeconfig"),
 		},
 	}
 	c := newClusterController(cluster, secret)
 
 	_, err := c.Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: types.NamespacedName{Namespace: "test-ns", Name: "test-cluster"},
+		NamespacedName: types.NamespacedName{Namespace: testManagementNamespace, Name: testClusterNamespace},
 	})
 	if err == nil {
 		t.Fatal("expected error for invalid kubeconfig, got nil")
@@ -154,7 +154,7 @@ func TestClusterReconcile_InvalidKubeconfig(t *testing.T) {
 }
 
 func TestClusterReconcile_Success(t *testing.T) {
-	cluster := newCapiCluster("test-ns")
+	cluster := newCapiCluster(testManagementNamespace)
 	// Minimal valid kubeconfig that clientcmd.RESTConfigFromKubeConfig can parse.
 	kubeconfig := []byte(`apiVersion: v1
 kind: Config
@@ -175,17 +175,17 @@ users:
 `)
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-cluster-kubeconfig",
-			Namespace: "test-ns",
+			Name:      testClusterKubeconfigSecret,
+			Namespace: testManagementNamespace,
 		},
 		Data: map[string][]byte{
-			"value": kubeconfig,
+			kubeconfigSecretValueKey: kubeconfig,
 		},
 	}
 	c := newClusterController(cluster, secret)
 
 	result, err := c.Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: types.NamespacedName{Namespace: "test-ns", Name: "test-cluster"},
+		NamespacedName: types.NamespacedName{Namespace: testManagementNamespace, Name: testClusterNamespace},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -193,7 +193,7 @@ users:
 	if result.RequeueAfter != 0 {
 		t.Errorf("expected no requeue, got RequeueAfter=%v", result.RequeueAfter)
 	}
-	if !c.Remotes.Has(types.NamespacedName{Namespace: "test-ns", Name: "test-cluster"}) {
+	if !c.Remotes.Has(types.NamespacedName{Namespace: testManagementNamespace, Name: testClusterNamespace}) {
 		t.Error("expected remote client to be registered after successful reconcile")
 	}
 }
