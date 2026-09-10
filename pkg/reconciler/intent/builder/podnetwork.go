@@ -51,7 +51,7 @@ func (b *PodNetworkBuilder) Build(ctx context.Context, data *resolver.ResolvedDa
 		pn := &data.PodNetworks[i]
 
 		// Resolve the referenced Network.
-		net, ok := data.Networks[pn.Spec.NetworkRef]
+		net, ok := data.Network(pn.Namespace, pn.Spec.NetworkRef)
 		if !ok {
 			logger.Info("skipping PodNetwork with unknown Network reference",
 				"podnetwork", pn.Name, "networkRef", pn.Spec.NetworkRef)
@@ -74,7 +74,7 @@ func (b *PodNetworkBuilder) Build(ctx context.Context, data *resolver.ResolvedDa
 		}
 
 		// Resolve matching announcement policy for this PodNetwork.
-		ap, err := findMatchingAP(pn.Labels, vrfName, data)
+		ap, err := findMatchingAP(pn.Namespace, pn.Labels, vrfName, data)
 		if err != nil {
 			logger.Info("skipping PodNetwork with ambiguous announcement policy",
 				"podnetwork", pn.Name, "error", err.Error())
@@ -123,8 +123,8 @@ func (*PodNetworkBuilder) resolveDestinationVRF(pn *nc.PodNetwork, data *resolve
 
 	for i := range data.RawDestinations {
 		rawDest := &data.RawDestinations[i]
-		if selector.Matches(labels.Set(rawDest.Labels)) {
-			resolved, ok := data.Destinations[rawDest.Name]
+		if rawDest.Namespace == pn.Namespace && selector.Matches(labels.Set(rawDest.Labels)) {
+			resolved, ok := data.Destination(pn.Namespace, rawDest.Name)
 			if ok && resolved.VRFSpec != nil && resolved.Spec.VRFRef != nil {
 				return resolved.VRFSpec.VRF, resolved.VRFSpec, nil
 			}

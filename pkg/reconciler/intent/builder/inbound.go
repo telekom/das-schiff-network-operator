@@ -51,7 +51,7 @@ func (b *InboundBuilder) Build(ctx context.Context, data *resolver.ResolvedData)
 		ib := &data.Inbounds[i]
 
 		// Resolve the referenced Network.
-		net, ok := data.Networks[ib.Spec.NetworkRef]
+		net, ok := data.Network(ib.Namespace, ib.Spec.NetworkRef)
 		if !ok {
 			logger.Info("skipping Inbound with unknown Network reference",
 				"inbound", ib.Name, "networkRef", ib.Spec.NetworkRef)
@@ -64,7 +64,7 @@ func (b *InboundBuilder) Build(ctx context.Context, data *resolver.ResolvedData)
 			continue
 		}
 
-		grouped := groupDestinationsByVRF(ib.Spec.Destinations, data)
+		grouped := groupDestinationsByVRF(ib.Namespace, ib.Spec.Destinations, data)
 		if len(grouped) == 0 {
 			continue
 		}
@@ -75,7 +75,7 @@ func (b *InboundBuilder) Build(ctx context.Context, data *resolver.ResolvedData)
 		aps := make(map[string]*nc.AnnouncementPolicy, len(grouped))
 		ambiguous := false
 		for vrfName := range grouped {
-			ap, err := findMatchingAP(ib.Labels, vrfName, data)
+			ap, err := findMatchingAP(ib.Namespace, ib.Labels, vrfName, data)
 			if err != nil {
 				logger.Info("skipping Inbound with ambiguous announcement policy",
 					"inbound", ib.Name, "error", err.Error())
@@ -156,7 +156,7 @@ func (*InboundBuilder) resolveVRFSpec(vrfName string, grouped map[string][]nc.De
 	if len(dests) == 0 {
 		return nil
 	}
-	resolved, ok := data.Destinations[dests[0].Name]
+	resolved, ok := data.Destination(dests[0].Namespace, dests[0].Name)
 	if !ok || resolved.VRFSpec == nil {
 		return nil
 	}

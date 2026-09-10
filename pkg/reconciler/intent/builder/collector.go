@@ -53,7 +53,7 @@ func (*CollectorBuilder) Build(ctx context.Context, data *resolver.ResolvedData)
 
 		// Resolve mirror VRF.
 		vrfName := col.Spec.MirrorVRF.Name
-		resolvedVRF, ok := data.VRFs[vrfName]
+		resolvedVRF, ok := data.VRF(col.Namespace, vrfName)
 		if !ok {
 			logger.Info("skipping Collector with unknown VRF reference",
 				"collector", col.Name, "vrf", vrfName)
