@@ -173,6 +173,13 @@ func (m *Manager) isReservedVRF(name string) bool {
 	return name == m.baseConfig.ManagementVRF.Name || name == m.baseConfig.ClusterVRF.Name
 }
 
+// ApplyConfiguration renders nodeCfg and commits it to the VSR. The candidate is
+// first replaced with the startup configuration read at agent start and the
+// rendered configuration is merged on top, so the startup configuration is the
+// contract for everything the agent does not render itself: the base config,
+// and anything committed on the device out of band (e.g. an online licence
+// activation) survives a reconcile only if it has been saved to startup
+// (`copy running startup`).
 func (m *Manager) ApplyConfiguration(
 	ctx context.Context,
 	nodeCfg *v1alpha1.NodeNetworkConfigSpec,
@@ -223,7 +230,7 @@ func (m *Manager) makeVRouter(nodeCfg *v1alpha1.NodeNetworkConfigSpec) (*VRouter
 		return nil, err
 	}
 
-	l2 := NewLayer2(nodeCfg, &ns, m)
+	l2 := NewLayer2(nodeCfg, &ns, vrouter, m)
 	if err := l2.setup(); err != nil {
 		return nil, err
 	}

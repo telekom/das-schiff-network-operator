@@ -82,17 +82,68 @@ func (LayerBGP) convStaticRoute(from v1alpha1.StaticRoute) StaticRoute {
 	}
 
 	if from.NextHop != nil {
-		if from.NextHop.Address != nil {
-			nh.NextHop = *from.NextHop.Address
-		}
-		if from.NextHop.Vrf != nil {
+		switch {
+		case from.NextHop.Interface != nil:
+			// Interface (on-link) next hop, e.g. workload CNI host routes pointing
+			// at the moved CRA-side interface: `... next-hop <ifname>`. An
+			// interface next hop resolves in the route's own VRF, so no VRF
+			// attribute is rendered.
+			nh.NextHop = *from.NextHop.Interface
+		case from.NextHop.Vrf != nil:
 			nh.NextHop = *from.NextHop.Vrf
 			nh.VRF = from.NextHop.Vrf
+		case from.NextHop.Address != nil:
+			nh.NextHop = *from.NextHop.Address
 		}
 	}
 	to.NextHops = append(to.NextHops, nh)
 
 	return to
+}
+
+// convWorkloadPorts converts the NNC workload-port spec into the cra-vsr renderer's
+// WorkloadPort form (see workloadports.go / applyWorkloadPorts).
+func (LayerBGP) convWorkloadPorts(from []v1alpha1.WorkloadPort) []WorkloadPort {
+	if len(from) == 0 {
+		return nil
+	}
+	out := make([]WorkloadPort, 0, len(from))
+	for i := range from {
+		out = append(out, WorkloadPort{
+			IfName:     from[i].Interface,
+			Transport:  from[i].Transport,
+			SocketPath: from[i].SocketPath,
+			SocketMode: from[i].SocketMode,
+			GatewayV4:  from[i].GatewayV4,
+			GatewayV6:  from[i].GatewayV6,
+			HostRoutes: from[i].HostRoutes,
+		})
+	}
+	return out
+}
+
+// applyWorkloadPorts layers the NNC workload ports of a VRF onto the composed VSR
+// VRF and registers any fast-path fpvhost virtual-ports (vhostuser transport) on
+// the global system subtree.
+func (l *LayerBGP) applyWorkloadPorts(vrf *VRF, ports []v1alpha1.WorkloadPort) error {
+	vports, err := applyWorkloadPorts(vrf, l.convWorkloadPorts(ports)...)
+	if err != nil {
+		return err
+	}
+	registerFpvhostVirtualPorts(l.vrouter, vports)
+	return nil
+}
+
+// applyGlobalWorkloadPorts layers the NNC workload ports requested without a
+// target VRF onto the namespace's default table and registers any fast-path
+// fpvhost virtual-ports on the global system subtree.
+func (l *LayerBGP) applyGlobalWorkloadPorts(ports []v1alpha1.WorkloadPort) error {
+	vports, err := applyGlobalWorkloadPorts(l.ns, l.convWorkloadPorts(ports)...)
+	if err != nil {
+		return err
+	}
+	registerFpvhostVirtualPorts(l.vrouter, vports)
+	return nil
 }
 
 func (LayerBGP) mkStaticRoute(routing *Routing, routes ...StaticRoute) {
@@ -653,6 +704,10 @@ func (l *LayerBGP) setupLocalVRF(name string, conf *v1alpha1.VRF) error {
 		l.setupNeighbor(bgp, &conf.BGPPeers[i])
 	}
 
+	if err := l.applyWorkloadPorts(vrf, conf.WorkloadPorts); err != nil {
+		return fmt.Errorf("applying workload ports to vrf %s: %w", name, err)
+	}
+
 	return nil
 }
 
@@ -737,6 +792,10 @@ func (l *LayerBGP) setupFabricVRF(name string, conf *v1alpha1.FabricVRF) error {
 		l.setupNeighbor(bgp, &conf.BGPPeers[i])
 	}
 
+	if err := l.applyWorkloadPorts(vrf, conf.WorkloadPorts); err != nil {
+		return fmt.Errorf("applying workload ports to fabric vrf %s: %w", name, err)
+	}
+
 	return nil
 }
 
@@ -813,6 +872,10 @@ func (l *LayerBGP) setupClusterVRF() error {
 
 		for _, rt := range conf.StaticRoutes {
 			l.mkStaticRoute(vrf.Routing, l.convStaticRoute(rt))
+		}
+
+		if err := l.applyWorkloadPorts(vrf, conf.WorkloadPorts); err != nil {
+			return fmt.Errorf("applying workload ports to cluster vrf %s: %w", name, err)
 		}
 	}
 
@@ -944,12 +1007,16 @@ func (l *LayerBGP) setupManagementVRF() error {
 		for i := range conf.BGPPeers {
 			l.setupNeighbor(bgp, &conf.BGPPeers[i])
 		}
+
+		if err := l.applyWorkloadPorts(vrf, conf.WorkloadPorts); err != nil {
+			return fmt.Errorf("applying workload ports to management vrf %s: %w", name, err)
+		}
 	}
 
 	return nil
 }
 
-func (l *LayerBGP) setupDefaultVRF() {
+func (l *LayerBGP) setupDefaultVRF() error {
 	baseCfg := l.mgr.baseConfig
 
 	bgp := l.ns.Routing.BGP
@@ -996,6 +1063,11 @@ func (l *LayerBGP) setupDefaultVRF() {
 			},
 		})
 	}
+
+	if err := l.applyGlobalWorkloadPorts(l.nodeCfg.GlobalWorkloadPorts); err != nil {
+		return fmt.Errorf("applying global workload ports: %w", err)
+	}
+	return nil
 }
 
 //nolint:funlen
@@ -1199,7 +1271,9 @@ func (l *LayerBGP) setupGlobalConfiguration() {
 
 func (l *LayerBGP) setup() error {
 	l.setupGlobalConfiguration()
-	l.setupDefaultVRF()
+	if err := l.setupDefaultVRF(); err != nil {
+		return fmt.Errorf("failed to setup BGP default VRF: %w", err)
+	}
 
 	if err := l.setupManagementVRF(); err != nil {
 		return fmt.Errorf("failed to setup BGP management VRF: %w", err)

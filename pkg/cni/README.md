@@ -271,8 +271,17 @@ agent records the attachment on `NodeWorkloadPorts` and merges it into the
   `<deviceID>` is the device plugin's socket directory
   `/run/vsr-vhost-user/<deviceID>/` that the VSR auto-discovers as network-port
   `fpvhost-<deviceID>`; the socket path is implicit) + `interface fpvhost
-  <ifname> port fpvhost-<deviceID>`. See
+  <ifname> port fpvhost-<deviceID>`. Attached ports of either transport are
+  declared in the namespace's own `interface` set and only *enslaved* from the
+  Layer2 bridge: a bridge in an IRB VRF must not declare its slaves under
+  `l3vrf <vrf> interface`, the VSR accepts that but never creates the netdev
+  (a port cannot be a VRF slave and a bridge slave at once). See
   `pkg/cra-vsr/workloadports.go` / `layer2.go` and `pkg/workloadcni` (transport).
+  The agent rebuilds the candidate from the VSR **startup** configuration on
+  every reconcile, so anything committed on the device out of band (an online
+  licence activation, hand edits) must be saved with `copy running startup` or
+  it is lost on the next reconcile. The cra-vsr DaemonSet needs the same
+  `/run/das-schiff` hostPath as cra-frr (`config/agent-cra-vsr/agent.yaml`).
 
 ### Transport
 

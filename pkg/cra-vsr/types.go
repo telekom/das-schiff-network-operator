@@ -53,8 +53,57 @@ type VRouterState struct {
 }
 
 type VRouter struct {
+	System     *System        `xml:"system,omitempty"`
 	Namespaces []Namespace    `xml:"vrf,omitempty"`
 	Routing    *GlobalRouting `xml:"routing,omitempty"`
+}
+
+// System is the global (non-VRF) 6WIND vrouter system container. Only the
+// fast-path subtree is modelled: it hosts the fpvhost virtual-port declarations
+// that the vhost-user transport needs (socket-mode, profile). It is omitted
+// entirely unless at least one fpvhost port is present, so the common veth and
+// L2 paths never touch the system subtree.
+type System struct {
+	XMLName  xml.Name  `xml:"urn:6wind:vrouter/system system"`
+	FastPath *FastPath `xml:"fast-path,omitempty"`
+}
+
+// FastPath is the 6WIND fast-path (DPDK) container. Only the virtual-port list
+// is modelled here.
+type FastPath struct {
+	XMLName     xml.Name     `xml:"urn:6wind:vrouter/fast-path fast-path"`
+	VirtualPort *VirtualPort `xml:"virtual-port,omitempty"`
+}
+
+// VirtualPort groups the fast-path virtual-port declarations by kind. Only the
+// fpvhost kind is modelled (the infrastructure kind is auto-created by VSR when
+// referenced by an interface).
+type VirtualPort struct {
+	Fpvhosts []FpvhostVirtualPort `xml:"fpvhost,omitempty"`
+}
+
+// FpvhostVirtualPort is a single fast-path fpvhost virtual-port declaration:
+//
+//	system fast-path virtual-port fpvhost <name> [profile <p>] [socket-mode <mode>]
+//
+// The vSR auto-discovers a network-port for every socket directory under
+// /run/vsr-vhost-user/<dir>/ (type virtual); this virtual-port's Name MUST
+// match that autodiscovered port exactly (fpvhost-<dir>), and the socket at
+// /run/vsr-vhost-user/<dir>/socket is then created by the vSR itself - there is
+// no configurable "sockpath" leaf; the path is implicit from the name. Profile
+// defaults to "nfv" and SocketMode defaults to "server" when unset. SocketMode
+// is rendered from the VSR fast-path perspective (already inverted from the
+// workload's view by the caller).
+//
+// SocketPath is kept as a Go field for callers that still want to carry the
+// allocated socket path around (e.g. for logging/debugging), but it is never
+// serialized: lab verification against a real vSR 3.12.2 (cra-vsr-6wind,
+// ce-vhost) showed the device has no "sockpath" leaf at all.
+type FpvhostVirtualPort struct {
+	XMLName    xml.Name `xml:"urn:6wind:vrouter/fpvhost fpvhost"`
+	Name       string   `xml:"name"`
+	Profile    *string  `xml:"profile,omitempty"`
+	SocketMode *string  `xml:"socket-mode,omitempty"`
 }
 
 type GlobalRouting struct {
@@ -352,13 +401,35 @@ type Interfaces struct {
 	VXLANs    []VXLAN          `xml:"vxlan,omitempty"`
 	VLANs     []VLAN           `xml:"vlan,omitempty"`
 	Infras    []Infrastructure `xml:"infrastructure,omitempty"`
+	Fpvhosts  []Fpvhost        `xml:"fpvhost,omitempty"`
 	GREs      []GRE            `xml:"gre,omitempty"`
 	GRETaps   []GRETap         `xml:"gretap,omitempty"`
 	Loopbacks []Loopback       `xml:"loopback,omitempty"`
 }
 
 type Infrastructure struct {
-	Name string `xml:"name"`
+	XMLName xml.Name       `xml:"urn:6wind:vrouter/infrastructure infrastructure"`
+	Name    string         `xml:"name"`
+	Port    *string        `xml:"port,omitempty"`
+	IPv4    *IPAddressList `xml:"ipv4,omitempty"`
+	IPv6    *IPAddressList `xml:"ipv6,omitempty"`
+}
+
+// Fpvhost is a fast-path vhost-user (virtio-user) interface bound to a fpvhost
+// virtual-port:
+//
+//	vrf main interface fpvhost <name> port fpvhost-<deviceID>
+//
+// It mirrors Infrastructure (a moved CRA-side port) but is backed by a DPDK
+// vhost socket instead of a veth. VSR-only. Port references the fast-path
+// virtual-port's auto-discovered name (fpvhost-<deviceID>, see
+// FpvhostVirtualPort), not the interface's own Name.
+type Fpvhost struct {
+	XMLName xml.Name       `xml:"urn:6wind:vrouter/fpvhost fpvhost"`
+	Name    string         `xml:"name"`
+	Port    *string        `xml:"port,omitempty"`
+	IPv4    *IPAddressList `xml:"ipv4,omitempty"`
+	IPv6    *IPAddressList `xml:"ipv6,omitempty"`
 }
 
 type Physical struct {
