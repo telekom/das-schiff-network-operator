@@ -680,6 +680,15 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#one-attachment-in-multiple-vrfs" class="md-nav__link">
+    <span class="md-ellipsis">
+      One attachment in multiple VRFs
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1256,6 +1265,15 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#one-attachment-in-multiple-vrfs" class="md-nav__link">
+    <span class="md-ellipsis">
+      One attachment in multiple VRFs
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1539,6 +1557,18 @@ in the <code>type: gateway</code> VRF:</p>
 <a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a><span class="w">    </span><span class="nt">matchLabels</span><span class="p">:</span>
 <a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a><span class="w">      </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">gateway</span>
 </code></pre></div>
+<h3 id="one-attachment-in-multiple-vrfs">One attachment in multiple VRFs<a class="headerlink" href="#one-attachment-in-multiple-vrfs" title="Permanent link">&para;</a></h3>
+<p>When a <code>destinations</code> selector matches Destinations in multiple VRFs, the
+operator places the attachment's IRB in a deterministic local combo VRF. The
+combo VRF routes each selected Destination prefix through its Fabric VRF, and
+each Fabric VRF routes the attached Network back through the combo VRF for EVPN
+export. Because the L2 segment is directly attached to the combo VRF, this does
+not require source-based policy routes in the cluster VRF.</p>
+<p>Multi-VRF attachments require HBN mode with the anycast gateway enabled. A
+pure-L2 Network or <code>disableAnycast: true</code> cannot attach the segment to the combo
+VRF and is therefore rejected. A <code>listenRange</code> BGPPeering referencing a
+multi-VRF attachment terminates in the combo VRF; accepted routes are imported
+into every selected Fabric VRF for EVPN export.</p>
 <div class="admonition tip">
 <p class="admonition-title">Anycast gateway</p>
 <p>In HBN mode the operator provisions an anycast gateway for the segment; its
