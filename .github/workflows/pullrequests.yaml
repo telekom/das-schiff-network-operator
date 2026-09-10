@@ -20,7 +20,11 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Install packages
-        run: sudo apt-get update && sudo apt-get install -y llvm clang libbpf-dev gcc-multilib linux-headers-$(uname -r)
+        run: |
+          # Avoid intermittent apt failures from preinstalled Microsoft feeds.
+          sudo rm -f /etc/apt/sources.list.d/azure-cli.* /etc/apt/sources.list.d/microsoft-prod.* /etc/apt/sources.list.d/packages-microsoft-prod.*
+          sudo apt-get update
+          sudo apt-get install -y llvm clang libbpf-dev gcc-multilib linux-headers-$(uname -r)
       - name: run code generators
         run: make generate
       - name: golangci-lint
@@ -38,7 +42,11 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Install packages
-        run: sudo apt-get update && sudo apt-get install -y llvm clang libbpf-dev gcc-multilib linux-headers-$(uname -r)
+        run: |
+          # Avoid intermittent apt failures from preinstalled Microsoft feeds.
+          sudo rm -f /etc/apt/sources.list.d/azure-cli.* /etc/apt/sources.list.d/microsoft-prod.* /etc/apt/sources.list.d/packages-microsoft-prod.*
+          sudo apt-get update
+          sudo apt-get install -y llvm clang libbpf-dev gcc-multilib linux-headers-$(uname -r)
       - name: Run Tests
         run: make test
       - name: Upload coverage report
@@ -59,7 +67,11 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Install packages
-        run: sudo apt-get update && sudo apt-get install -y llvm clang libbpf-dev gcc-multilib linux-headers-$(uname -r)
+        run: |
+          # Avoid intermittent apt failures from preinstalled Microsoft feeds.
+          sudo rm -f /etc/apt/sources.list.d/azure-cli.* /etc/apt/sources.list.d/microsoft-prod.* /etc/apt/sources.list.d/packages-microsoft-prod.*
+          sudo apt-get update
+          sudo apt-get install -y llvm clang libbpf-dev gcc-multilib linux-headers-$(uname -r)
       - name: run code generators
         run: make generate
       - name: run manifest generators
