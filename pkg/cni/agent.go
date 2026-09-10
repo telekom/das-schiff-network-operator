@@ -36,27 +36,55 @@ import (
 // the CNI ADD/DEL past the runtime's own deadline.
 const agentCallTimeout = 10 * time.Second
 
-// notifyAgentAdd hands the routed attachment to the node-local CRA agent so it
-// can render the CRA-side datapath (netlink via frr-cra for FRR, NETCONF for
-// VSR). The plugin is flavor-agnostic; the agent decides how to program it.
-func notifyAgentAdd(conf *NetConf, args *skel.CmdArgs, portName string, gwV4, gwV6 net.IP, result *current.Result) error {
-	ns, name := podIdentity(args.Args)
+// notifyAgentAdd hands the attachment to the node-local CRA agent so it can
+// render the CRA-side datapath (netlink via frr-cra for FRR, NETCONF for VSR).
+// The plugin is flavor-agnostic; the agent decides how to program it. Routed and
+// L2 attach modes differ in the request payload: routed carries VRF + on-link
+// gateways + host routes, while L2 carries only the Layer2 reference(s) — a
+// single untagged access ref or a tagged trunk list (the agent enslaves the port
+// or its VLAN sub-interfaces to the matching bridges).
+func notifyAgentAdd(conf *NetConf, args *skel.CmdArgs, portName string, gwV4, gwV6 net.IP,
+	result *current.Result,
+) error {
+	podNs, name := podIdentity(args.Args)
+	port := &pb.WorkloadPort{
+		Interface: portName,
+		//nolint:gosec // validateModes bounds mtu to MinPortMTU..MaxPortMTU
+		Mtu: uint32(conf.mtu()),
+	}
 	req := &pb.AddRequest{
-		PodNamespace: ns,
+		PodNamespace: podNs,
 		PodName:      name,
 		ContainerId:  args.ContainerID,
-		Vrf:          conf.VRF,
-		Port: &pb.WorkloadPort{
-			Interface:  portName,
-			GatewayV4:  gwV4.String() + "/32",
-			GatewayV6:  gwV6.String() + "/128",
-			HostRoutes: hostRoutes(result),
-		},
+		Port:         port,
 	}
+
+	if conf.isL2() {
+		if conf.Layer2AttachmentRef != nil {
+			req.Layer2AttachmentRef = &pb.Layer2AttachmentRef{Name: conf.Layer2AttachmentRef.Name}
+		}
+		for i := range conf.Layer2Trunk {
+			member := &pb.Layer2TrunkMember{
+				Ref: &pb.Layer2AttachmentRef{Name: conf.Layer2Trunk[i].Name},
+			}
+			// vlan 0 on the wire means "inherit the domain's own VLAN id"; the
+			// plugin never resolves Layer2Attachments, so the agent does it.
+			if vlan := conf.Layer2Trunk[i].VLAN; vlan != nil {
+				member.Vlan = uint32(*vlan)
+			}
+			req.Layer2Trunk = append(req.Layer2Trunk, member)
+		}
+	} else {
+		req.Vrf = conf.VRF
+		port.GatewayV4 = gwV4.String() + "/32"
+		port.GatewayV6 = gwV6.String() + "/128"
+		port.HostRoutes = hostRoutes(result)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), agentCallTimeout)
 	defer cancel()
 	if err := workloadcni.Add(ctx, conf.AgentSocket, req); err != nil {
-		return fmt.Errorf("notifying agent of routed add: %w", err)
+		return fmt.Errorf("notifying agent of attach add: %w", err)
 	}
 	return nil
 }

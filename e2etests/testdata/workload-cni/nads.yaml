@@ -1,0 +1,92 @@
+# NetworkAttachmentDefinitions driving the workload CNI (cni-workload) from
+# plain pods. They are applied into the test namespace (the namespace in
+# metadata is overridden by ApplyManifestInNamespace).
+#
+# The Layer2Attachments referenced here come from intent/base-configs.yaml and
+# are resolved by name in the agent's --intent-namespace ("default"), which is
+# also where the intent fixtures live.
+---
+# L2 access attach on VLAN 501: the CRA-side port is enslaved into the l2.501
+# bridge, so the pod shares the L2 domain with the macvlan pods on vlan.501.
+# The address comes from the VLAN 501 subnet (10.250.0.0/24), not from a routed
+# /32, and there is no on-link default — the domain's own gateway is used.
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: wl-l2-vlan501
+  namespace: default
+spec:
+  config: |
+    {
+      "cniVersion": "1.0.0",
+      "name": "wl-l2-vlan501",
+      "type": "cni-workload",
+      "craNetns": "auto",
+      "trunkInterface": "hbn",
+      "attachMode": "l2",
+      "layer2AttachmentRef": {
+        "name": "l2a-base-vlan501"
+      },
+      "ipam": {
+        "type": "static",
+        "addresses": [
+          { "address": "10.250.0.60/24" },
+          { "address": "fd94:685b:30cf:501::60/64" }
+        ]
+      }
+    }
+---
+# L2 trunk carrying two domains on one port, both tagged:
+#   - VLAN 501 under its own fabric id (no "vlan" override),
+#   - VLAN 502 translated to id 200 on the workload side.
+# No ipam: on a trunk there is no untagged address to assign, the pod addresses
+# its own VLAN sub-interfaces.
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: wl-l2-trunk
+  namespace: default
+spec:
+  config: |
+    {
+      "cniVersion": "1.0.0",
+      "name": "wl-l2-trunk",
+      "type": "cni-workload",
+      "craNetns": "auto",
+      "trunkInterface": "hbn",
+      "attachMode": "l2",
+      "mtu": 1500,
+      "layer2Trunk": [
+        { "name": "l2a-base-vlan501" },
+        { "name": "l2a-base-vlan502", "vlan": 200 }
+      ]
+    }
+---
+# Routed attach with a delegated host-local IPAM, used to cover allocation and
+# release. The subnet is test-local and deliberately not one of the fabric
+# VLANs: the assertions are about IPAM, not about reachability.
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: wl-routed-ipam
+  namespace: default
+spec:
+  config: |
+    {
+      "cniVersion": "1.0.0",
+      "name": "wl-routed-ipam",
+      "type": "cni-workload",
+      "craNetns": "auto",
+      "trunkInterface": "hbn",
+      "linkLocalGateways": {
+        "ipv4": "169.254.1.1",
+        "ipv6": "fe80::1"
+      },
+      "ipam": {
+        "type": "host-local",
+        "ranges": [
+          [{ "subnet": "10.202.0.0/24" }],
+          [{ "subnet": "fd00:202::/64" }]
+        ]
+      }
+    }

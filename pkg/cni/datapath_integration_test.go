@@ -106,7 +106,7 @@ func TestDatapathAddDel(t *testing.T) {
 			{Address: net.IPNet{IP: net.ParseIP("fd00:100::5"), Mask: net.CIDRMask(64, 128)}},
 		},
 	}
-	port := portName(args.ContainerID, args.IfName)
+	port := portName(args.ContainerID, args.IfName, false)
 
 	if _, err := setupPodSide(conf, args, craNS.Path(), port, result); err != nil {
 		t.Fatalf("setupPodSide: %v", err)

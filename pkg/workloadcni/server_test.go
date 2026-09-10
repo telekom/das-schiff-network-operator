@@ -18,13 +18,16 @@ package workloadcni
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/go-logr/logr"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -50,6 +53,25 @@ func getNRP(t *testing.T, c client.Client, node string) *v1alpha1.NodeWorkloadPo
 		t.Fatalf("getting NodeWorkloadPorts: %v", err)
 	}
 	return nrp
+}
+
+// seedLayer2s stores a NodeNetworkConfig for node carrying one Layer2 per
+// stamped Layer2Attachment reference (name@namespace → vlan), which is the
+// precondition an L2 ADD is checked against.
+func seedLayer2s(ctx context.Context, t *testing.T, c client.Client, node string,
+	refs map[v1alpha1.Layer2AttachmentRef]uint16,
+) {
+	t.Helper()
+	cfg := &v1alpha1.NodeNetworkConfig{}
+	cfg.Name = node
+	cfg.Spec.Layer2s = map[string]v1alpha1.Layer2{}
+	for ref, vlan := range refs {
+		r := ref
+		cfg.Spec.Layer2s[fmt.Sprintf("l2.%d", vlan)] = v1alpha1.Layer2{VLAN: vlan, AttachmentRef: &r}
+	}
+	if err := c.Create(ctx, cfg); err != nil {
+		t.Fatalf("seeding NodeNetworkConfig: %v", err)
+	}
 }
 
 func TestServerAddCreatesAndUpserts(t *testing.T) {
@@ -105,6 +127,67 @@ func TestServerAddAcceptsMaximumLengthInterface(t *testing.T) {
 	}
 }
 
+func TestServerAddValidatesTrunkSubinterfaceName(t *testing.T) {
+	tests := []struct {
+		name    string
+		ifName  string
+		vlan    uint32
+		wantErr bool
+	}{
+		{
+			name:    "rejects full bare name with four digit VLAN",
+			ifName:  "cra012345678901",
+			vlan:    4094,
+			wantErr: true,
+		},
+		{
+			name:   "accepts exact maximum VLAN capacity",
+			ifName: "cra0123456",
+			vlan:   4094,
+		},
+		{
+			name:   "uses explicit VLAN length",
+			ifName: "cra01234567",
+			vlan:   100,
+		},
+		{
+			name:    "reserves maximum capacity for inherited VLAN",
+			ifName:  "cra01234567",
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			c := newFakeClient(t)
+			seedLayer2s(ctx, t, c, "node-1", map[v1alpha1.Layer2AttachmentRef]uint16{
+				{Name: "blue", Namespace: DefaultLayer2Namespace}: 501,
+			})
+			s := NewServer(c, "node-1", logr.Discard())
+			_, err := s.Add(ctx, &pb.AddRequest{
+				PodNamespace: "ns",
+				PodName:      "vm-launcher",
+				ContainerId:  "cid-1",
+				Port:         &pb.WorkloadPort{Interface: tc.ifName},
+				Layer2Trunk: []*pb.Layer2TrunkMember{{
+					Ref:  &pb.Layer2AttachmentRef{Name: "blue"},
+					Vlan: tc.vlan,
+				}},
+			})
+			if tc.wantErr {
+				if status.Code(err) != codes.InvalidArgument {
+					t.Fatalf("Add error = %v, want InvalidArgument", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Add: %v", err)
+			}
+		})
+	}
+}
+
 func TestServerDelRemoves(t *testing.T) {
 	c := newFakeClient(t)
 	s := NewServer(c, "node-1", logr.Discard())
@@ -140,6 +223,15 @@ func TestServerDelRemoves(t *testing.T) {
 	}
 }
 
+// clearRouted strips the routed-mode fields from a request so it can carry an
+// L2 attachment, which is mutually exclusive with them.
+func clearRouted(r *pb.AddRequest) {
+	r.Vrf = ""
+	r.Port.GatewayV4 = ""
+	r.Port.GatewayV6 = ""
+	r.Port.HostRoutes = nil
+}
+
 func TestServerAddValidatesInput(t *testing.T) {
 	s := NewServer(newFakeClient(t), "node-1", logr.Discard())
 	ctx := context.Background()
@@ -173,6 +265,53 @@ func TestServerAddValidatesInput(t *testing.T) {
 		"v6 subnet host route": func(r *pb.AddRequest) { r.Port.HostRoutes = []string{"fd00:201::/64"} },
 		"subnet gateway v4":    func(r *pb.AddRequest) { r.Port.GatewayV4 = "169.254.1.1/24" },
 		"subnet gateway v6":    func(r *pb.AddRequest) { r.Port.GatewayV6 = "fe80::1/64" },
+		"l2 ref without name": func(r *pb.AddRequest) {
+			clearRouted(r)
+			r.Layer2AttachmentRef = &pb.Layer2AttachmentRef{}
+		},
+		"l2 ref with routed fields": func(r *pb.AddRequest) {
+			r.Layer2AttachmentRef = &pb.Layer2AttachmentRef{Name: "blue"}
+		},
+		"l2 ref and trunk together": func(r *pb.AddRequest) {
+			clearRouted(r)
+			r.Layer2AttachmentRef = &pb.Layer2AttachmentRef{Name: "blue"}
+			r.Layer2Trunk = []*pb.Layer2TrunkMember{
+				{Ref: &pb.Layer2AttachmentRef{Name: "green"}},
+			}
+		},
+		"trunk member without name": func(r *pb.AddRequest) {
+			clearRouted(r)
+			r.Layer2Trunk = []*pb.Layer2TrunkMember{{Ref: &pb.Layer2AttachmentRef{}}}
+		},
+		"trunk member without ref": func(r *pb.AddRequest) {
+			clearRouted(r)
+			r.Layer2Trunk = []*pb.Layer2TrunkMember{{Vlan: 100}}
+		},
+		"trunk vlan out of range": func(r *pb.AddRequest) {
+			clearRouted(r)
+			r.Layer2Trunk = []*pb.Layer2TrunkMember{
+				{Ref: &pb.Layer2AttachmentRef{Name: "green"}, Vlan: 4095},
+			}
+		},
+		"trunk duplicate ref": func(r *pb.AddRequest) {
+			clearRouted(r)
+			r.Layer2Trunk = []*pb.Layer2TrunkMember{
+				{Ref: &pb.Layer2AttachmentRef{Name: "green"}},
+				{Ref: &pb.Layer2AttachmentRef{Name: "green"}, Vlan: 100},
+			}
+		},
+		"trunk duplicate vlan": func(r *pb.AddRequest) {
+			clearRouted(r)
+			r.Layer2Trunk = []*pb.Layer2TrunkMember{
+				{Ref: &pb.Layer2AttachmentRef{Name: "green"}, Vlan: 100},
+				{Ref: &pb.Layer2AttachmentRef{Name: "red"}, Vlan: 100},
+			}
+		},
+		"trunk with routed fields": func(r *pb.AddRequest) {
+			r.Layer2Trunk = []*pb.Layer2TrunkMember{
+				{Ref: &pb.Layer2AttachmentRef{Name: "green"}},
+			}
+		},
 	}
 	for name, mutate := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -240,4 +379,203 @@ func TestServeRefusesToRemoveNonSocketPath(t *testing.T) {
 	if _, err := os.Stat(regular); err != nil {
 		t.Fatalf("Serve removed a path that was not a socket: %v", err)
 	}
+}
+
+func TestServerAddRecordsLayer2Trunk(t *testing.T) {
+	c := newFakeClient(t)
+	ctx := context.Background()
+	seedLayer2s(ctx, t, c, "node-1", map[v1alpha1.Layer2AttachmentRef]uint16{
+		{Name: "green", Namespace: "tenant-a"}: 501,
+		{Name: "red", Namespace: "tenant-a"}:   502,
+	})
+	s := NewServer(c, "node-1", logr.Discard(), WithLayer2Namespace("tenant-a"))
+
+	if _, err := s.Add(ctx, &pb.AddRequest{
+		PodNamespace: "ns",
+		PodName:      "vnf",
+		ContainerId:  "cid-1",
+		Port:         &pb.WorkloadPort{Interface: "cra0cid1"},
+		Layer2Trunk: []*pb.Layer2TrunkMember{
+			{Ref: &pb.Layer2AttachmentRef{Name: "green"}},
+			{Ref: &pb.Layer2AttachmentRef{Name: "red"}, Vlan: 200},
+		},
+	}); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	ports := getNRP(t, c, "node-1").Spec.Ports
+	if len(ports) != 1 {
+		t.Fatalf("expected 1 port, got %d", len(ports))
+	}
+	entry := &ports[0]
+	if entry.Layer2AttachmentRef != nil {
+		t.Fatalf("expected no access ref, got %+v", entry.Layer2AttachmentRef)
+	}
+	if len(entry.Layer2Trunk) != 2 {
+		t.Fatalf("expected 2 trunk members, got %+v", entry.Layer2Trunk)
+	}
+	// The wire carries bare names; the configured namespace is stamped on.
+	for i := range entry.Layer2Trunk {
+		if ns := entry.Layer2Trunk[i].Namespace; ns != "tenant-a" {
+			t.Fatalf("member %d: expected namespace %q, got %q", i, "tenant-a", ns)
+		}
+	}
+	// vlan 0 on the wire means "inherit the domain's own id", which stays
+	// unresolved until the merge sees the NodeNetworkConfig.
+	if entry.Layer2Trunk[0].VLAN != nil {
+		t.Fatalf("expected an inherited vlan, got %d", *entry.Layer2Trunk[0].VLAN)
+	}
+	if entry.Layer2Trunk[1].VLAN == nil || *entry.Layer2Trunk[1].VLAN != 200 {
+		t.Fatalf("expected vlan 200, got %v", entry.Layer2Trunk[1].VLAN)
+	}
+}
+
+func TestServerAddStampsLayer2Namespace(t *testing.T) {
+	c := newFakeClient(t)
+	ctx := context.Background()
+	// No option: references are resolved in the default intent namespace.
+	seedLayer2s(ctx, t, c, "node-1", map[v1alpha1.Layer2AttachmentRef]uint16{
+		{Name: "blue", Namespace: DefaultLayer2Namespace}: 501,
+	})
+	s := NewServer(c, "node-1", logr.Discard())
+
+	if _, err := s.Add(ctx, &pb.AddRequest{
+		PodNamespace:        "ns",
+		PodName:             "vnf",
+		ContainerId:         "cid-1",
+		Port:                &pb.WorkloadPort{Interface: "cra0cid1"},
+		Layer2AttachmentRef: &pb.Layer2AttachmentRef{Name: "blue"},
+	}); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	ports := getNRP(t, c, "node-1").Spec.Ports
+	if len(ports) != 1 || ports[0].Layer2AttachmentRef == nil {
+		t.Fatalf("unexpected ports %+v", ports)
+	}
+	ref := ports[0].Layer2AttachmentRef
+	if ref.Name != "blue" || ref.Namespace != DefaultLayer2Namespace {
+		t.Fatalf("unexpected ref %+v", ref)
+	}
+}
+
+// TestServerAddRecordsRequestedMTU covers the requested MTU reaching the
+// recorded attachment, and an unset one becoming the default rather than a zero
+// each renderer would have to interpret for itself.
+func TestServerAddRecordsRequestedMTU(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		mtu  uint32
+		want uint16
+	}{
+		{name: "explicit", mtu: 9000, want: 9000},
+		{name: "unset defaults", mtu: 0, want: DefaultPortMTU},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := newFakeClient(t)
+			s := NewServer(c, "node-1", logr.Discard())
+
+			if _, err := s.Add(context.Background(), &pb.AddRequest{
+				PodNamespace: "ns", PodName: "pod", ContainerId: "c1",
+				Port: &pb.WorkloadPort{Interface: "cra012345", Mtu: tc.mtu},
+			}); err != nil {
+				t.Fatalf("Add: %v", err)
+			}
+			ports := getNRP(t, c, "node-1").Spec.Ports
+			if len(ports) != 1 || ports[0].MTU != tc.want {
+				t.Fatalf("recorded ports = %+v, want mtu %d", ports, tc.want)
+			}
+		})
+	}
+}
+
+// TestServerAddRejectsOutOfRangeMTU covers a request asking for a size no
+// datapath could configure being refused at the door.
+func TestServerAddRejectsOutOfRangeMTU(t *testing.T) {
+	for _, mtu := range []uint32{68, 65535} {
+		c := newFakeClient(t)
+		s := NewServer(c, "node-1", logr.Discard())
+
+		_, err := s.Add(context.Background(), &pb.AddRequest{
+			PodNamespace: "ns", PodName: "pod", ContainerId: "c1",
+			Port: &pb.WorkloadPort{Interface: "cra012345", Mtu: mtu},
+		})
+		if status.Code(err) != codes.InvalidArgument {
+			t.Errorf("Add with mtu %d = %v, want InvalidArgument", mtu, err)
+		}
+	}
+}
+
+// TestServerAddRejectsUnstampedLayer2 covers the precondition on an L2 ADD: a
+// Layer2Attachment that is not (yet) stamped onto the node's NodeNetworkConfig
+// - typically because the intent reconciler is off or the L2A does not select
+// the node - fails the ADD instead of being recorded and skipped forever.
+func TestServerAddRejectsUnstampedLayer2(t *testing.T) {
+	ctx := context.Background()
+	access := &pb.AddRequest{
+		PodNamespace:        "ns",
+		PodName:             "vnf",
+		ContainerId:         "cid-1",
+		Port:                &pb.WorkloadPort{Interface: "cra0cid1"},
+		Layer2AttachmentRef: &pb.Layer2AttachmentRef{Name: "blue"},
+	}
+
+	t.Run("no NodeNetworkConfig", func(t *testing.T) {
+		c := newFakeClient(t)
+		_, err := NewServer(c, "node-1", logr.Discard()).Add(ctx, access)
+		if status.Code(err) != codes.FailedPrecondition {
+			t.Fatalf("Add error = %v, want FailedPrecondition", err)
+		}
+		nrp := &v1alpha1.NodeWorkloadPorts{}
+		if err := c.Get(ctx, types.NamespacedName{Name: "node-1"}, nrp); !apierrors.IsNotFound(err) {
+			t.Fatalf("rejected attachment must not be recorded, got %+v (err %v)", nrp.Spec.Ports, err)
+		}
+	})
+
+	t.Run("Layer2Attachment not stamped", func(t *testing.T) {
+		c := newFakeClient(t)
+		seedLayer2s(ctx, t, c, "node-1", map[v1alpha1.Layer2AttachmentRef]uint16{
+			{Name: "green", Namespace: DefaultLayer2Namespace}: 501,
+		})
+		_, err := NewServer(c, "node-1", logr.Discard()).Add(ctx, access)
+		if status.Code(err) != codes.FailedPrecondition {
+			t.Fatalf("Add error = %v, want FailedPrecondition", err)
+		}
+		if msg := status.Convert(err).Message(); !strings.Contains(msg, "blue") ||
+			!strings.Contains(msg, "enable-intent-reconciler") {
+			t.Fatalf("error should name the reference and hint at the intent reconciler, got %q", msg)
+		}
+	})
+
+	t.Run("one trunk member missing", func(t *testing.T) {
+		c := newFakeClient(t)
+		seedLayer2s(ctx, t, c, "node-1", map[v1alpha1.Layer2AttachmentRef]uint16{
+			{Name: "green", Namespace: DefaultLayer2Namespace}: 501,
+		})
+		_, err := NewServer(c, "node-1", logr.Discard()).Add(ctx, &pb.AddRequest{
+			PodNamespace: "ns",
+			PodName:      "vnf",
+			ContainerId:  "cid-1",
+			Port:         &pb.WorkloadPort{Interface: "cra0cid1"},
+			Layer2Trunk: []*pb.Layer2TrunkMember{
+				{Ref: &pb.Layer2AttachmentRef{Name: "green"}},
+				{Ref: &pb.Layer2AttachmentRef{Name: "red"}, Vlan: 200},
+			},
+		})
+		if status.Code(err) != codes.FailedPrecondition {
+			t.Fatalf("Add error = %v, want FailedPrecondition", err)
+		}
+	})
+
+	t.Run("routed attachment needs no NodeNetworkConfig", func(t *testing.T) {
+		c := newFakeClient(t)
+		if _, err := NewServer(c, "node-1", logr.Discard()).Add(ctx, &pb.AddRequest{
+			PodNamespace: "ns",
+			PodName:      "vm",
+			ContainerId:  "cid-1",
+			Port:         &pb.WorkloadPort{Interface: "cra0cid1"},
+		}); err != nil {
+			t.Fatalf("Add: %v", err)
+		}
+	})
 }

@@ -28,20 +28,38 @@ func TestPortNameDeterministicAndBounded(t *testing.T) {
 	const maxIfNameLen = 15
 	id := "abc123def456containeridwithlotsofcharacters"
 
-	a := portName(id, "net1")
-	b := portName(id, "net1")
-	if a != b {
-		t.Errorf("portName not deterministic: %q != %q", a, b)
-	}
-	if len(a) > maxIfNameLen {
-		t.Errorf("portName %q length %d exceeds %d", a, len(a), maxIfNameLen)
-	}
-	if portName("other-id", "net1") == a {
-		t.Errorf("portName collision between distinct container IDs")
-	}
-	// The runtime (Multus) reuses one container ID for every attachment of a
-	// pod, so the pod-side interface name must be part of the key.
-	if portName(id, "net2") == a {
-		t.Errorf("portName collision between distinct interfaces of one container")
+	for _, tc := range []struct {
+		name    string
+		isTrunk bool
+		wantLen int
+	}{
+		{name: "routed or access", wantLen: maxIfNameLen},
+		{name: "trunk", isTrunk: true, wantLen: maxIfNameLen - len(maxTrunkVLANNameSuffix)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := portName(id, "net1", tc.isTrunk)
+			b := portName(id, "net1", tc.isTrunk)
+			if a != b {
+				t.Errorf("portName not deterministic: %q != %q", a, b)
+			}
+			if len(a) != tc.wantLen {
+				t.Errorf("portName %q length %d, want %d", a, len(a), tc.wantLen)
+			}
+			if len(a) > maxIfNameLen {
+				t.Errorf("portName %q length %d exceeds %d", a, len(a), maxIfNameLen)
+			}
+			if tc.isTrunk && len(a+maxTrunkVLANNameSuffix) != maxIfNameLen {
+				t.Errorf("trunk sub-interface %q length %d, want %d",
+					a+maxTrunkVLANNameSuffix, len(a+maxTrunkVLANNameSuffix), maxIfNameLen)
+			}
+			if portName("other-id", "net1", tc.isTrunk) == a {
+				t.Error("portName collision between distinct container IDs")
+			}
+			// The runtime (Multus) reuses one container ID for every attachment
+			// of a pod, so the pod-side interface name must be part of the key.
+			if portName(id, "net2", tc.isTrunk) == a {
+				t.Error("portName collision between distinct interfaces of one container")
+			}
+		})
 	}
 }

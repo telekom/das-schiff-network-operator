@@ -1,0 +1,42 @@
+# NetworkAttachmentDefinition carrying several L2 domains on one port as an
+# 802.1Q trunk (attachMode "l2" with layer2Trunk instead of a single
+# layer2AttachmentRef).
+#
+# - layer2Trunk: every member is TAGGED. A member without "vlan" is carried
+#   under the L2 domain's own VLAN id, which the agent resolves from the
+#   NodeNetworkConfig; a member with "vlan" is translated to that workload-side
+#   id (here: the "green" domain is reached on VLAN 200 inside the guest no
+#   matter which VLAN id it has on the fabric).
+# - The referenced Layer2Attachments are named only; they are resolved in the
+#   agent's --intent-namespace, the same namespace the operator's intent
+#   pipeline is scoped to. If any of them is not configured on the node, the
+#   whole attachment is skipped until it is.
+# - layer2Trunk is mutually exclusive with layer2AttachmentRef: an untagged
+#   member would leak every unmapped VLAN id into the untagged domain, which the
+#   VSR bridge model cannot filter. Untagged traffic on a trunk port is
+#   therefore not forwarded anywhere.
+# - ipam is omitted: on a trunk there is no untagged pod-side address to assign,
+#   the guest addresses its VLAN interfaces itself (see virtualmachine-l2-trunk.yaml).
+# - mtu is what the port (and every member sub-interface) is sized with. At
+#   least one member domain has to carry it, or the attachment is skipped; the
+#   4 bytes the tag adds on the wire come on top of it.
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: l2-trunk-vm-net
+  namespace: default
+spec:
+  config: |
+    {
+      "cniVersion": "1.0.0",
+      "name": "l2-trunk-vm-net",
+      "type": "cni-workload",
+      "craNetns": "auto",
+      "trunkInterface": "hbn",
+      "attachMode": "l2",
+      "mtu": 9000,
+      "layer2Trunk": [
+        { "name": "blue" },
+        { "name": "green", "vlan": 200 }
+      ]
+    }
