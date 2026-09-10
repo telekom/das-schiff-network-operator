@@ -38,8 +38,9 @@ const (
 // WorkloadPort is the datapath payload for a routed attachment.
 type WorkloadPort struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// interface is the moved interface name inside the CRA network namespace.
-	// VSR references it as infra-<interface>.
+	// interface is the bare CRA-side VSR interface name. VSR resolves a veth
+	// through infra-<interface> via its ifalias; vhostuser uses
+	// fpvhost-<interface> for matching fpvhost and virtual-port references.
 	Interface string `protobuf:"bytes,1,opt,name=interface,proto3" json:"interface,omitempty"`
 	// gateway_v4 is the on-link IPv4 gateway address (with prefix length).
 	GatewayV4 string `protobuf:"bytes,2,opt,name=gateway_v4,json=gatewayV4,proto3" json:"gateway_v4,omitempty"`
@@ -48,6 +49,14 @@ type WorkloadPort struct {
 	// host_routes are the workload host addresses (/32, /128) reachable via the
 	// interface.
 	HostRoutes []string `protobuf:"bytes,4,rep,name=host_routes,json=hostRoutes,proto3" json:"host_routes,omitempty"`
+	// transport selects the datapath wiring: "veth" (default) or "vhostuser".
+	// vhost-user is VSR-only (fpvhost fast-path virtual-port).
+	Transport string `protobuf:"bytes,5,opt,name=transport,proto3" json:"transport,omitempty"`
+	// socket_path is the vhost-user unix socket path (transport=vhostuser only).
+	SocketPath string `protobuf:"bytes,6,opt,name=socket_path,json=socketPath,proto3" json:"socket_path,omitempty"`
+	// socket_mode is the pod-side vhost-user socket mode ("client"|"server").
+	// VSR renders the inverted mode (pod server => VSR client).
+	SocketMode string `protobuf:"bytes,7,opt,name=socket_mode,json=socketMode,proto3" json:"socket_mode,omitempty"`
 	// mtu is the MTU the attachment requested (the CNI config's mtu, which the
 	// plugin also applied to the workload-side interface). The CRA needs it to
 	// size the interfaces it derives from the port, and to reject a request the
@@ -113,6 +122,27 @@ func (x *WorkloadPort) GetHostRoutes() []string {
 		return x.HostRoutes
 	}
 	return nil
+}
+
+func (x *WorkloadPort) GetTransport() string {
+	if x != nil {
+		return x.Transport
+	}
+	return ""
+}
+
+func (x *WorkloadPort) GetSocketPath() string {
+	if x != nil {
+		return x.SocketPath
+	}
+	return ""
+}
+
+func (x *WorkloadPort) GetSocketMode() string {
+	if x != nil {
+		return x.SocketMode
+	}
+	return ""
 }
 
 func (x *WorkloadPort) GetMtu() uint32 {
@@ -461,7 +491,7 @@ var File_workloadcni_proto protoreflect.FileDescriptor
 
 const file_workloadcni_proto_rawDesc = "" +
 	"\n" +
-	"\x11workloadcni.proto\x12\x0eworkloadcni.v1\"\x9d\x01\n" +
+	"\x11workloadcni.proto\x12\x0eworkloadcni.v1\"\xfd\x01\n" +
 	"\fWorkloadPort\x12\x1c\n" +
 	"\tinterface\x18\x01 \x01(\tR\tinterface\x12\x1d\n" +
 	"\n" +
@@ -469,7 +499,12 @@ const file_workloadcni_proto_rawDesc = "" +
 	"\n" +
 	"gateway_v6\x18\x03 \x01(\tR\tgatewayV6\x12\x1f\n" +
 	"\vhost_routes\x18\x04 \x03(\tR\n" +
-	"hostRoutes\x12\x10\n" +
+	"hostRoutes\x12\x1c\n" +
+	"\ttransport\x18\x05 \x01(\tR\ttransport\x12\x1f\n" +
+	"\vsocket_path\x18\x06 \x01(\tR\n" +
+	"socketPath\x12\x1f\n" +
+	"\vsocket_mode\x18\a \x01(\tR\n" +
+	"socketMode\x12\x10\n" +
 	"\x03mtu\x18\b \x01(\rR\x03mtu\":\n" +
 	"\x13Layer2AttachmentRef\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04nameJ\x04\b\x02\x10\x03R\tnamespace\"^\n" +

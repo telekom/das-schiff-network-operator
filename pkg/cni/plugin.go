@@ -41,6 +41,13 @@ func CmdAdd(args *skel.CmdArgs) error {
 		return err
 	}
 
+	// vhost-user is a fast-path socket transport (VSR-only): no veth, no
+	// CRA-side netns port move. It is handled entirely by the agent, so it does
+	// not need the CRA netns resolved.
+	if conf.isVhostUser() {
+		return cmdAddVhostUser(conf, args)
+	}
+
 	craNetnsPath, err := resolveCRANetnsPath(conf)
 	if err != nil {
 		return err
@@ -98,7 +105,7 @@ func CmdAdd(args *skel.CmdArgs) error {
 	// Hand the attachment to the node-local CRA agent over gRPC. The agent
 	// programs the CRA-side datapath (netlink via frr-cra for FRR, NETCONF for
 	// VSR); the plugin itself is flavor-agnostic.
-	if err := notifyAgentAdd(conf, args, portName, gwV4, gwV6, result); err != nil {
+	if err := notifyAgentAdd(conf, args, portName, gwV4, gwV6, result, nil); err != nil {
 		return err
 	}
 	defer func() {
@@ -133,6 +140,10 @@ func CmdDel(args *skel.CmdArgs) error {
 	conf, err := parseConfig(args.StdinData)
 	if err != nil {
 		return err
+	}
+
+	if conf.isVhostUser() {
+		return cmdDelVhostUser(conf, args)
 	}
 
 	portName := portName(args.ContainerID, args.IfName, len(conf.Layer2Trunk) > 0)
@@ -171,9 +182,15 @@ func CmdDel(args *skel.CmdArgs) error {
 
 // CmdCheck implements the CNI CHECK command.
 func CmdCheck(args *skel.CmdArgs) error {
-	_, err := parseConfig(args.StdinData)
+	conf, err := parseConfig(args.StdinData)
 	if err != nil {
 		return err
+	}
+	// The vhost-user transport creates no pod-side netdev at all: the workload
+	// talks to a unix socket owned by the device plugin. There is nothing to
+	// look up in the pod netns, so checking for a link would always fail.
+	if conf.isVhostUser() {
+		return nil
 	}
 	if args.Netns == "" {
 		return nil

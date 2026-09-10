@@ -53,6 +53,19 @@ const (
 	// (referenced by Layer2AttachmentRef) as a bridge slave, with no L3
 	// addressing. The bridge/L2VNI is assumed to already exist on the node.
 	AttachModeL2 = "l2"
+
+	// TransportVeth is the default transport: a veth pair whose CRA-side end is
+	// moved into the CRA network namespace.
+	TransportVeth = "veth"
+	// TransportVhostUser is a DPDK/virtio-user vhost-user socket transport,
+	// rendered by VSR as an fpvhost fast-path virtual-port. It is VSR-only; the
+	// FRR agent rejects it.
+	TransportVhostUser = "vhostuser"
+
+	// SocketModeClient / SocketModeServer are the vhost-user socket modes from
+	// the workload's perspective. VSR inverts them when rendering fpvhost.
+	SocketModeClient = "client"
+	SocketModeServer = "server"
 )
 
 // NetConf is the CNI configuration for the cni-workload plugin.
@@ -74,6 +87,13 @@ type NetConf struct {
 	//     by Layer2AttachmentRef; no L3 addressing.
 	AttachMode string `json:"attachMode,omitempty"`
 
+	// Transport selects the CRA-side wiring:
+	//   - "veth" (default): a veth pair whose CRA-side end is moved into the CRA
+	//     netns.
+	//   - "vhostuser": a DPDK/virtio-user vhost-user socket (VSR-only, rendered
+	//     as an fpvhost fast-path virtual-port).
+	Transport string `json:"transport,omitempty"`
+
 	// Layer2AttachmentRef identifies the Layer2Attachment whose bridge the port
 	// is enslaved to as an untagged access port in the "l2" attach mode.
 	// Mutually exclusive with Layer2Trunk; exactly one of the two is required
@@ -86,6 +106,26 @@ type NetConf struct {
 	// forwarded. Mutually exclusive with Layer2AttachmentRef and only valid
 	// when AttachMode is "l2".
 	Layer2Trunk []Layer2TrunkMember `json:"layer2Trunk,omitempty"`
+
+	// SocketPath overrides the host-side vhost-user unix socket path that is
+	// otherwise derived from the device-plugin allocation. It never replaces the
+	// allocation itself: an attachment with no deviceID is rejected outright.
+	// Only meaningful for "vhostuser".
+	SocketPath string `json:"socketPath,omitempty"`
+
+	// SocketMode is the vhost-user socket mode from the workload's perspective
+	// ("client" or "server"). It comes from the NAD userdata socket_mode field.
+	// The current 6WIND device plugin always reports "server" in device info,
+	// so that field must not override this configured workload-side mode. VSR
+	// inverts it when rendering the fpvhost virtual-port.
+	SocketMode string `json:"socket_mode,omitempty"`
+
+	// DeviceResource is the device-plugin resource the attachment is allocated
+	// from, i.e. the value of the NAD's k8s.v1.cni.cncf.io/resourceName
+	// annotation. It selects which of the two 6WIND socket trees holds the
+	// host-side and which the pod-side path; it does not allocate anything.
+	// Defaults to nc-k8s-plugin.6wind.com/virtio-user.
+	DeviceResource string `json:"deviceResource,omitempty"`
 
 	// AgentSocket overrides the unix socket the plugin uses to reach the
 	// node-local CRA agent (workloadcni.DefaultSocketPath when empty). The plugin
@@ -116,8 +156,29 @@ type NetConf struct {
 	// IPAM is the delegated IPAM configuration (e.g. host-local).
 	IPAM json.RawMessage `json:"ipam,omitempty"`
 
+	// DeviceID is the device-plugin-allocated device identifier, set directly by
+	// some runtimes (Multus also mirrors it into RuntimeConfig.DeviceID when the
+	// "deviceID" capability is enabled). Only meaningful for vhost-user.
+	DeviceID string `json:"deviceID,omitempty"`
+
+	// RuntimeConfig carries per-invocation values injected by the runtime when
+	// the matching capabilities are enabled in the NetworkAttachmentDefinition
+	// (deviceID, CNIDeviceInfoFile). Only meaningful for vhost-user.
+	RuntimeConfig RuntimeConfig `json:"runtimeConfig,omitempty"`
+
 	// PrevResult is populated by the runtime when chaining.
 	RawPrevResult map[string]interface{} `json:"prevResult,omitempty"`
+}
+
+// RuntimeConfig holds the runtime-injected capability values.
+type RuntimeConfig struct {
+	// DeviceID is the device-plugin-allocated device (from the "deviceID"
+	// capability).
+	DeviceID string `json:"deviceID,omitempty"`
+	// CNIDeviceInfoFile is the path the plugin writes the device info JSON to
+	// (from the "CNIDeviceInfoFile" capability), consumed downstream (e.g. the
+	// KubeVirt vhost-user hook sidecar).
+	CNIDeviceInfoFile string `json:"CNIDeviceInfoFile,omitempty"`
 }
 
 // LinkLocalGateways holds the on-link next-hop addresses for each family.
@@ -155,9 +216,22 @@ func (c *NetConf) attachMode() string {
 	return c.AttachMode
 }
 
+// transport returns the configured transport or the default ("veth").
+func (c *NetConf) transport() string {
+	if c.Transport == "" {
+		return TransportVeth
+	}
+	return c.Transport
+}
+
 // isL2 reports whether the port is attached in L2 (bridge-slave) mode.
 func (c *NetConf) isL2() bool {
 	return c.attachMode() == AttachModeL2
+}
+
+// isVhostUser reports whether the CRA-side transport is vhost-user.
+func (c *NetConf) isVhostUser() bool {
+	return c.transport() == TransportVhostUser
 }
 
 // mtu returns the configured MTU or the default.
@@ -222,12 +296,13 @@ func parseConfig(stdin []byte) (*NetConf, error) {
 	if err := json.Unmarshal(stdin, conf); err != nil {
 		return nil, fmt.Errorf("failed to parse network configuration: %w", err)
 	}
-	// IPAM is required for routed attachments (the pod-side address is relayed
-	// to the guest). It is optional in L2 attach mode, where the workload is
-	// addressed inside the shared L2 domain. When configured it is always
-	// delegated and applied.
+	// IPAM is required for routed veth attachments (the pod-side address is
+	// relayed to the guest). It is optional for vhost-user, whose addressing may
+	// be guest-side, and in the L2 attach mode, where the workload is addressed
+	// inside the shared L2 domain rather than by this plugin. When it is
+	// configured it is always delegated and applied.
 	if len(conf.IPAM) == 0 {
-		if !conf.isL2() {
+		if !conf.isVhostUser() && !conf.isL2() {
 			return nil, fmt.Errorf("%q is required", "ipam")
 		}
 	} else if _, err := conf.ipamType(); err != nil {
@@ -249,7 +324,8 @@ func parseConfig(stdin []byte) (*NetConf, error) {
 	return conf, nil
 }
 
-// validateModes checks the attach mode and its mode-specific required fields.
+// validateModes checks the transport and attach-mode axes and their
+// mode-specific required fields.
 // validateMTU bounds the requested MTU so the value handed to the agent (and
 // from there to the datapath) is always one an interface can be configured
 // with. Whether the L2 domain can carry it is only knowable on the node, so the
@@ -270,6 +346,12 @@ func (c *NetConf) validateModes() error {
 	default:
 		return fmt.Errorf("invalid attachMode %q (want %q or %q)", c.AttachMode, AttachModeRouted, AttachModeL2)
 	}
+	switch c.transport() {
+	case TransportVeth, TransportVhostUser:
+	default:
+		return fmt.Errorf("invalid transport %q (want %q or %q)", c.Transport, TransportVeth, TransportVhostUser)
+	}
+
 	if c.isL2() {
 		if err := c.validateL2Attach(); err != nil {
 			return err
@@ -278,6 +360,21 @@ func (c *NetConf) validateModes() error {
 		return fmt.Errorf("layer2AttachmentRef and layer2Trunk are only valid when attachMode is %q", AttachModeL2)
 	}
 
+	if c.isVhostUser() {
+		// socketPath is optional and is normally derived from the device-plugin
+		// allocation. socket_mode must be stated in the NAD: current 6WIND
+		// device-info always reports "server", irrespective of the actual mode.
+		switch c.SocketMode {
+		case SocketModeClient, SocketModeServer:
+		default:
+			return fmt.Errorf("socket_mode must be %q or %q when transport is %q",
+				SocketModeClient, SocketModeServer, TransportVhostUser)
+		}
+	}
+	if !c.isVhostUser() && (c.SocketPath != "" || c.SocketMode != "" || c.DeviceResource != "") {
+		return fmt.Errorf("socketPath, socketMode and deviceResource are only valid when transport is %q",
+			TransportVhostUser)
+	}
 	return nil
 }
 
@@ -337,4 +434,10 @@ func validateTrunk(members []Layer2TrunkMember) error {
 		seenVLANs[*vlan] = struct{}{}
 	}
 	return nil
+}
+
+// socketMode returns the workload-side vhost-user socket mode selected by the
+// NAD userdata. validateModes requires a valid value for vhost-user.
+func (c *NetConf) socketMode() string {
+	return c.SocketMode
 }

@@ -53,6 +53,15 @@ const (
 	trunkPortNameHexLen = portNameHexLen - len(maxTrunkVLANNameSuffix)
 )
 
+// vhostPortNamePrefix / vhostPortNameHexLen derive a deterministic bare VSR
+// interface name for a vhost-user port. The fpvhost-<portName> reference is a
+// VSR virtual-port name, so it does not constrain this 15-character name.
+const (
+	vhostPortNamePrefix      = "vho"
+	vhostPortNameHexLen      = 12
+	vhostTrunkPortNameHexLen = vhostPortNameHexLen - len(maxTrunkVLANNameSuffix)
+)
+
 // onLinkRouteMetric keeps the routed on-link default at a lower priority than the
 // pod's own primary default (on eth0) so the virt-launcher pod itself is
 // unaffected while the guest still learns the CRA gateway as its next hop.
@@ -73,6 +82,39 @@ func portName(containerID, ifName string, isTrunk bool) string {
 		hashLen = trunkPortNameHexLen
 	}
 	return portNamePrefix + hex.EncodeToString(sum[:])[:hashLen]
+}
+
+// vhostPortName derives a collision-resistant bare VSR interface name for a
+// vhost-user attachment. It uses a distinct prefix from a real veth device but
+// the same 15-character interface-name budget. Trunks reserve space for their
+// longest VLAN sub-interface without truncating the deterministic hash.
+func vhostPortName(containerID, ifName string, isTrunk bool) string {
+	sum := sha256.Sum256([]byte(containerID + "/" + ifName))
+	hashLen := vhostPortNameHexLen
+	if isTrunk {
+		hashLen = vhostTrunkPortNameHexLen
+	}
+	return vhostPortNamePrefix + hex.EncodeToString(sum[:])[:hashLen]
+}
+
+// vhostMAC derives the locally administered unicast MAC address reported for a
+// vhost-user attachment. There is no kernel netdev to read one from: the
+// workload's virtio-user driver picks whatever it is told (or a random address
+// when told nothing), so the CNI result is the place where the address is
+// fixed. It is derived from the same key as the port name, so a consumer that
+// re-reads the network-status annotation (a KubeVirt hook, 6WIND's run_dpdk.py)
+// always sees the address the pod was started with, and the EVPN MAC learnt for
+// an L2 attachment is stable across restarts of the workload.
+func vhostMAC(containerID, ifName string) net.HardwareAddr {
+	const (
+		macLen              = 6
+		locallyAdministered = 0x02
+		multicastBit        = 0x01
+	)
+	sum := sha256.Sum256([]byte("mac/" + containerID + "/" + ifName))
+	mac := net.HardwareAddr(sum[:macLen])
+	mac[0] = (mac[0] | locallyAdministered) &^ multicastBit
+	return mac
 }
 
 // setupPodSide creates the veth pair inside the pod netns, configures the
