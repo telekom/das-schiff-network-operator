@@ -294,7 +294,7 @@ func TestAllocateDualStack(t *testing.T) {
 	t.Run("IPv6 exhaustion does not discard IPv4 allocation", func(t *testing.T) {
 		pools := make(map[string]*networkPool)
 		// Request 2 addresses: IPv4 /24 has room, IPv6 /128 is exhausted past 1.
-		alloc, err := a.allocate("net", 2, newNetworks(), pools, true, nil)
+		alloc, err := a.allocate("", "net", 2, &resolver.ResolvedData{Networks: newNetworks()}, pools, true, nil)
 		require.Error(t, err)
 		require.NotNil(t, alloc)
 		assert.Len(t, alloc.IPv4, 2)
@@ -306,7 +306,7 @@ func TestAllocateDualStack(t *testing.T) {
 		nets := newNetworks()
 		nets["net"].Spec.IPv6 = &nc.IPNetwork{CIDR: "fd00::/120"}
 		pools := make(map[string]*networkPool)
-		alloc, err := a.allocate("net", 2, nets, pools, true, nil)
+		alloc, err := a.allocate("", "net", 2, &resolver.ResolvedData{Networks: nets}, pools, true, nil)
 		require.NoError(t, err)
 		assert.Len(t, alloc.IPv4, 2)
 		assert.Len(t, alloc.IPv6, 2)
@@ -314,10 +314,37 @@ func TestAllocateDualStack(t *testing.T) {
 
 	t.Run("network not found returns nil allocation", func(t *testing.T) {
 		pools := make(map[string]*networkPool)
-		alloc, err := a.allocate("missing", 1, newNetworks(), pools, true, nil)
+		alloc, err := a.allocate("", "missing", 1, &resolver.ResolvedData{Networks: newNetworks()}, pools, true, nil)
 		require.Error(t, err)
 		assert.Nil(t, alloc)
 	})
+}
+
+func TestAllocateSeparatesSameNamedNetworksByNamespace(t *testing.T) {
+	data := &resolver.ResolvedData{
+		NetworksByKey: map[string]*resolver.ResolvedNetwork{
+			resolver.NamespacedKey("tenant-a", "shared"): {
+				Namespace: "tenant-a",
+				Name:      "shared",
+				Spec:      nc.NetworkSpec{IPv4: &nc.IPNetwork{CIDR: "10.1.0.0/30"}},
+			},
+			resolver.NamespacedKey("tenant-b", "shared"): {
+				Namespace: "tenant-b",
+				Name:      "shared",
+				Spec:      nc.NetworkSpec{IPv4: &nc.IPNetwork{CIDR: "10.2.0.0/30"}},
+			},
+		},
+	}
+	pools := make(map[string]*networkPool)
+	allocator := &Allocator{}
+
+	first, err := allocator.allocate("tenant-a", "shared", 1, data, pools, true, nil)
+	require.NoError(t, err)
+	second, err := allocator.allocate("tenant-b", "shared", 1, data, pools, true, nil)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"10.1.0.0"}, first.IPv4)
+	assert.Equal(t, []string{"10.2.0.0"}, second.IPv4)
+	assert.Len(t, pools, 2)
 }
 
 func TestSeedExistingAllocationsSkipsStaleExplicitCIDRs(t *testing.T) {
@@ -359,10 +386,10 @@ func TestSeedExistingAllocationsSkipsStaleExplicitCIDRs(t *testing.T) {
 			pools := make(map[string]*networkPool)
 			allocator := &Allocator{}
 
-			allocator.seedExistingAllocations(tt.fetched, pools, networks)
+			allocator.seedExistingAllocations(tt.fetched, pools, &resolver.ResolvedData{Networks: networks})
 			assert.Empty(t, pools, "stale explicit CIDRs must not seed an IPAM pool")
 
-			allocated, err := allocator.allocate("net", int(count), networks, pools, true, nil)
+			allocated, err := allocator.allocate("", "net", int(count), &resolver.ResolvedData{Networks: networks}, pools, true, nil)
 			require.NoError(t, err)
 			assert.Equal(t, []string{"10.0.0.0"}, allocated.IPv4)
 		})

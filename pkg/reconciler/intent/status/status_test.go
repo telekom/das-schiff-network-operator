@@ -20,11 +20,57 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/tools/events"
 
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/resolver"
 )
+
+func TestEmitReadyWarning(t *testing.T) {
+	recorder := events.NewFakeRecorder(1)
+	updater := &Updater{eventRecorder: recorder}
+	object := &nc.Layer2Attachment{
+		ObjectMeta: metav1.ObjectMeta{Name: "attachment-a", Namespace: "tenant-a"},
+	}
+
+	updater.emitReadyWarning(
+		object,
+		nil,
+		metav1.ConditionFalse,
+		"ConflictingStaticRoute",
+		"conflicting route",
+	)
+
+	select {
+	case event := <-recorder.Events:
+		assert.Contains(t, event, corev1.EventTypeWarning+" ConflictingStaticRoute conflicting route")
+	default:
+		t.Fatal("expected Warning event for Ready=False")
+	}
+
+	updater.emitReadyWarning(object, nil, metav1.ConditionTrue, "Ready", "ready")
+	select {
+	case event := <-recorder.Events:
+		t.Fatalf("unexpected event for Ready=True: %s", event)
+	default:
+	}
+
+	existing := &metav1.Condition{
+		Type:               nc.ConditionTypeReady,
+		Status:             metav1.ConditionFalse,
+		Reason:             "ConflictingStaticRoute",
+		Message:            "conflicting route",
+		ObservedGeneration: 1,
+	}
+	updater.emitReadyWarning(object, existing, metav1.ConditionFalse, "DifferentReason", "different message")
+	select {
+	case event := <-recorder.Events:
+		t.Fatalf("unexpected duplicate event for unchanged Ready=False: %s", event)
+	default:
+	}
+}
 
 func TestEffectiveInterfaceName(t *testing.T) {
 	vlan1000 := int32(1000)

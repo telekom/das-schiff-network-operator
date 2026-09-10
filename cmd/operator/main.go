@@ -277,7 +277,13 @@ func setupReconcilers(mgr manager.Manager, cfg *operatorConfig) error {
 }
 
 func setupIntentReconciler(mgr manager.Manager, apiTimeout time.Duration, cfg *operatorConfig) error {
-	ir, err := intentreconciler.NewReconciler(mgr.GetClient(), mgr.GetLogger().WithName("IntentReconciler"), apiTimeout, cfg.intentNamespace)
+	ir, err := intentreconciler.NewReconciler(
+		mgr.GetClient(),
+		mgr.GetLogger().WithName("IntentReconciler"),
+		apiTimeout,
+		cfg.intentNamespace,
+		mgr.GetEventRecorder("intent-reconciler"),
+	)
 	if err != nil {
 		return fmt.Errorf("unable to create intent reconciler: %w", err)
 	}

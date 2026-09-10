@@ -739,8 +739,9 @@ func (r *Controller) reconcileIPAM(ctx context.Context, namespace string) (*ipam
 		Layer2Attachments: l2aList.Items,
 	}
 	networks := resolver.ResolveNetworks(fetched.Networks)
+	resolved := &resolver.ResolvedData{Networks: networks}
 
-	if err := r.IPAMAllocator.ReconcileAllocations(ctx, fetched, networks); err != nil {
+	if err := r.IPAMAllocator.ReconcileAllocations(ctx, fetched, resolved); err != nil {
 		return nil, fmt.Errorf("IPAM allocation: %w", err)
 	}
 

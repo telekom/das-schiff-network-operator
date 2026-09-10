@@ -85,16 +85,16 @@ func newPool(ip net.IP, ipNet *net.IPNet, l3 bool) *networkPool {
 // and allocates IPs from their referenced Network's CIDR.
 // It also allocates per-node IPs for Layer2Attachments with nodeIPs.enabled.
 // Allocated IPs are written to the resource's status.addresses field.
-func (a *Allocator) ReconcileAllocations(ctx context.Context, fetched *resolver.FetchedResources, networks map[string]*resolver.ResolvedNetwork) error {
+func (a *Allocator) ReconcileAllocations(ctx context.Context, fetched *resolver.FetchedResources, data *resolver.ResolvedData) error {
 	pools := make(map[string]*networkPool)
 
 	// Seed pools with already-allocated addresses to avoid duplicate allocations.
-	a.seedExistingAllocations(fetched, pools, networks)
+	a.seedExistingAllocations(fetched, pools, data)
 
-	if err := a.reconcileInboundAllocations(ctx, fetched, networks, pools); err != nil {
+	if err := a.reconcileInboundAllocations(ctx, fetched, data, pools); err != nil {
 		return err
 	}
-	if err := a.reconcileOutboundAllocations(ctx, fetched, networks, pools); err != nil {
+	if err := a.reconcileOutboundAllocations(ctx, fetched, data, pools); err != nil {
 		return err
 	}
 
@@ -104,7 +104,7 @@ func (a *Allocator) ReconcileAllocations(ctx context.Context, fetched *resolver.
 		if l2a.Spec.NodeIPs == nil || !l2a.Spec.NodeIPs.Enabled {
 			continue
 		}
-		if err := a.reconcileNodeIPs(ctx, l2a, fetched.Nodes, networks, pools); err != nil {
+		if err := a.reconcileNodeIPs(ctx, l2a, fetched.Nodes, data, pools); err != nil {
 			a.logger.Error(err, "node IP allocation failed for Layer2Attachment", "l2a", l2a.Name)
 		}
 	}
@@ -112,7 +112,7 @@ func (a *Allocator) ReconcileAllocations(ctx context.Context, fetched *resolver.
 	return nil
 }
 
-func (a *Allocator) reconcileInboundAllocations(ctx context.Context, fetched *resolver.FetchedResources, networks map[string]*resolver.ResolvedNetwork, pools map[string]*networkPool) error {
+func (a *Allocator) reconcileInboundAllocations(ctx context.Context, fetched *resolver.FetchedResources, data *resolver.ResolvedData, pools map[string]*networkPool) error {
 	for i := range fetched.Inbounds {
 		inb := &fetched.Inbounds[i]
 		if inb.Spec.Count == nil || inb.Spec.Addresses != nil {
@@ -124,7 +124,7 @@ func (a *Allocator) reconcileInboundAllocations(ctx context.Context, fetched *re
 		if inb.Status.Addresses != nil && ipamAllocatedCorrectly(inb.Status.Addresses, int(*inb.Spec.Count)) {
 			continue
 		}
-		addrs, err := a.allocate(inb.Spec.NetworkRef, int(*inb.Spec.Count), networks, pools, true, nil)
+		addrs, err := a.allocate(inb.Namespace, inb.Spec.NetworkRef, int(*inb.Spec.Count), data, pools, true, nil)
 		if addrs == nil {
 			a.logger.Error(err, "IPAM allocation failed for Inbound", "inbound", inb.Name)
 			continue
@@ -144,7 +144,7 @@ func (a *Allocator) reconcileInboundAllocations(ctx context.Context, fetched *re
 	return nil
 }
 
-func (a *Allocator) reconcileOutboundAllocations(ctx context.Context, fetched *resolver.FetchedResources, networks map[string]*resolver.ResolvedNetwork, pools map[string]*networkPool) error {
+func (a *Allocator) reconcileOutboundAllocations(ctx context.Context, fetched *resolver.FetchedResources, data *resolver.ResolvedData, pools map[string]*networkPool) error {
 	for i := range fetched.Outbounds {
 		outb := &fetched.Outbounds[i]
 		if outb.Spec.Count == nil || outb.Spec.Addresses != nil {
@@ -154,7 +154,7 @@ func (a *Allocator) reconcileOutboundAllocations(ctx context.Context, fetched *r
 		if outb.Status.Addresses != nil && ipamAllocatedCorrectly(outb.Status.Addresses, int(*outb.Spec.Count)) {
 			continue
 		}
-		addrs, err := a.allocate(outb.Spec.NetworkRef, int(*outb.Spec.Count), networks, pools, true, nil)
+		addrs, err := a.allocate(outb.Namespace, outb.Spec.NetworkRef, int(*outb.Spec.Count), data, pools, true, nil)
 		if addrs == nil {
 			a.logger.Error(err, "IPAM allocation failed for Outbound", "outbound", outb.Name)
 			continue
@@ -211,17 +211,17 @@ func ipamAllocatedCorrectly(addrs *nc.AddressAllocation, wantPerFamily int) bool
 // Pools are created with the same L2/L3 semantics that the live allocation path
 // uses for that consumer, so a routed (L3) pool keeps the network and broadcast
 // addresses usable across reconciles.
-func (*Allocator) seedExistingAllocations(fetched *resolver.FetchedResources, pools map[string]*networkPool, networks map[string]*resolver.ResolvedNetwork) {
-	collectAddresses := func(networkRef string, addrs *nc.AddressAllocation, l3 bool) {
+func (*Allocator) seedExistingAllocations(fetched *resolver.FetchedResources, pools map[string]*networkPool, data *resolver.ResolvedData) {
+	collectAddresses := func(namespace, networkRef string, addrs *nc.AddressAllocation, l3 bool) {
 		if addrs == nil {
 			return
 		}
-		netObj, ok := networks[networkRef]
+		netObj, ok := data.Network(namespace, networkRef)
 		if !ok {
 			return
 		}
-		seedPoolFromAddresses(networkRef+"/v4", netObj.Spec.IPv4, addrs.IPv4, pools, l3)
-		seedPoolFromAddresses(networkRef+"/v6", netObj.Spec.IPv6, addrs.IPv6, pools, l3)
+		seedPoolFromAddresses(networkPoolKey(namespace, networkRef, "v4"), netObj.Spec.IPv4, addrs.IPv4, pools, l3)
+		seedPoolFromAddresses(networkPoolKey(namespace, networkRef, "v6"), netObj.Spec.IPv6, addrs.IPv6, pools, l3)
 	}
 
 	// Seed L3 routing pools (Inbound/Outbound) first so a Network shared with an
@@ -235,20 +235,20 @@ func (*Allocator) seedExistingAllocations(fetched *resolver.FetchedResources, po
 		if inb.Spec.Count != nil && inb.Spec.Addresses == nil && !ipamAllocatedCorrectly(inb.Status.Addresses, int(*inb.Spec.Count)) {
 			continue
 		}
-		collectAddresses(inb.Spec.NetworkRef, inb.Status.Addresses, true)
+		collectAddresses(inb.Namespace, inb.Spec.NetworkRef, inb.Status.Addresses, true)
 	}
 	for i := range fetched.Outbounds {
 		outb := &fetched.Outbounds[i]
 		if outb.Spec.Count != nil && outb.Spec.Addresses == nil && !ipamAllocatedCorrectly(outb.Status.Addresses, int(*outb.Spec.Count)) {
 			continue
 		}
-		collectAddresses(outb.Spec.NetworkRef, outb.Status.Addresses, true)
+		collectAddresses(outb.Namespace, outb.Spec.NetworkRef, outb.Status.Addresses, true)
 	}
 	// Seed from L2A per-node allocations (L2 subnet semantics).
 	for i := range fetched.Layer2Attachments {
 		l2a := &fetched.Layer2Attachments[i]
 		for _, addrs := range l2a.Status.NodeAddresses {
-			collectAddresses(l2a.Spec.NetworkRef, &addrs, false)
+			collectAddresses(l2a.Namespace, l2a.Spec.NetworkRef, &addrs, false)
 		}
 	}
 }
@@ -303,7 +303,7 @@ func compareIPs(a, b net.IP) int {
 // reconcileNodeIPs allocates one IP per node for an L2A with nodeIPs.enabled.
 // Existing allocations are preserved; new nodes get the next available IP.
 // IPs that fall within nodeIPs.reservedRanges (reserved for pod use) are skipped.
-func (a *Allocator) reconcileNodeIPs(ctx context.Context, l2a *nc.Layer2Attachment, nodes []corev1.Node, networks map[string]*resolver.ResolvedNetwork, pools map[string]*networkPool) error {
+func (a *Allocator) reconcileNodeIPs(ctx context.Context, l2a *nc.Layer2Attachment, nodes []corev1.Node, data *resolver.ResolvedData, pools map[string]*networkPool) error {
 	if l2a.Status.NodeAddresses == nil {
 		l2a.Status.NodeAddresses = make(map[string]nc.AddressAllocation)
 	}
@@ -324,7 +324,7 @@ func (a *Allocator) reconcileNodeIPs(ctx context.Context, l2a *nc.Layer2Attachme
 			continue // already allocated
 		}
 
-		addrs, err := a.allocate(l2a.Spec.NetworkRef, 1, networks, pools, false, reserved)
+		addrs, err := a.allocate(l2a.Namespace, l2a.Spec.NetworkRef, 1, data, pools, false, reserved)
 		if addrs == nil {
 			// Hard failure (e.g. network not resolved): abort this L2A.
 			return fmt.Errorf("allocating node IP for %q on network %q: %w", nodeName, l2a.Spec.NetworkRef, err)
@@ -380,8 +380,8 @@ func parseReservedRanges(ranges []string) ([]*net.IPNet, error) {
 // reported via the returned error. This prevents one family's exhaustion from
 // blocking exposure of the other. A nil allocation is returned only when the
 // network itself cannot be resolved.
-func (*Allocator) allocate(networkRef string, count int, networks map[string]*resolver.ResolvedNetwork, pools map[string]*networkPool, l3 bool, reserved []*net.IPNet) (*nc.AddressAllocation, error) {
-	netObj, ok := networks[networkRef]
+func (*Allocator) allocate(namespace, networkRef string, count int, data *resolver.ResolvedData, pools map[string]*networkPool, l3 bool, reserved []*net.IPNet) (*nc.AddressAllocation, error) {
+	netObj, ok := data.Network(namespace, networkRef)
 	if !ok {
 		return nil, fmt.Errorf("network %q not found", networkRef)
 	}
@@ -390,7 +390,7 @@ func (*Allocator) allocate(networkRef string, count int, networks map[string]*re
 	var errs []error
 
 	if netObj.Spec.IPv4 != nil {
-		ips, err := allocateFromCIDR(networkRef+"/v4", netObj.Spec.IPv4.CIDR, count, pools, l3, reserved)
+		ips, err := allocateFromCIDR(networkPoolKey(namespace, networkRef, "v4"), netObj.Spec.IPv4.CIDR, count, pools, l3, reserved)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("IPv4 allocation from network %q: %w", networkRef, err))
 		} else {
@@ -399,7 +399,7 @@ func (*Allocator) allocate(networkRef string, count int, networks map[string]*re
 	}
 
 	if netObj.Spec.IPv6 != nil {
-		ips, err := allocateFromCIDR(networkRef+"/v6", netObj.Spec.IPv6.CIDR, count, pools, l3, reserved)
+		ips, err := allocateFromCIDR(networkPoolKey(namespace, networkRef, "v6"), netObj.Spec.IPv6.CIDR, count, pools, l3, reserved)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("IPv6 allocation from network %q: %w", networkRef, err))
 		} else {
@@ -408,6 +408,10 @@ func (*Allocator) allocate(networkRef string, count int, networks map[string]*re
 	}
 
 	return alloc, errors.Join(errs...)
+}
+
+func networkPoolKey(namespace, networkRef, family string) string {
+	return resolver.NamespacedKey(namespace, networkRef) + "/" + family
 }
 
 // allocateFromCIDR sequentially allocates count IPs from a CIDR. For L2 subnets

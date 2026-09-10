@@ -28,6 +28,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/tools/events"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
@@ -69,7 +70,13 @@ type Reconciler struct {
 // NewReconciler creates a new intent reconciler.
 // The namespace parameter restricts which namespace intent CRDs are read from.
 // An empty string means all namespaces (cluster-wide).
-func NewReconciler(clusterClient client.Client, logger logr.Logger, timeout time.Duration, namespace string) (*Reconciler, error) {
+func NewReconciler(
+	clusterClient client.Client,
+	logger logr.Logger,
+	timeout time.Duration,
+	namespace string,
+	eventRecorders ...events.EventRecorder,
+) (*Reconciler, error) {
 	r := &Reconciler{
 		logger:    logger,
 		timeout:   timeout,
@@ -88,7 +95,7 @@ func NewReconciler(clusterClient client.Client, logger logr.Logger, timeout time
 			builder.NewSBRBuilder(),
 		},
 		finalizerManager: finalizer.NewManager(clusterClient, logger),
-		statusUpdater:    status.NewUpdater(clusterClient, logger),
+		statusUpdater:    status.NewUpdater(clusterClient, logger, eventRecorders...),
 		ipamAllocator:    ipam.NewAllocator(clusterClient, logger),
 		legacyDetector:   legacy.NewDetector(clusterClient, logger),
 	}
@@ -144,7 +151,7 @@ func (r *Reconciler) ReconcileDebounced(ctx context.Context) error {
 	}
 
 	// 4. IPAM allocation for count-mode Inbound/Outbound (before builders).
-	if err := r.ipamAllocator.ReconcileAllocations(timeoutCtx, fetched, resolved.Networks); err != nil {
+	if err := r.ipamAllocator.ReconcileAllocations(timeoutCtx, fetched, resolved); err != nil {
 		r.logger.Error(err, "IPAM allocation failed")
 		// Continue — partial allocation is acceptable.
 	}
