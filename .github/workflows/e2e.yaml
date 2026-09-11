@@ -237,6 +237,12 @@ jobs:
               > "/tmp/e2e-logs/${node}-cra.log" 2>&1 || true
             docker exec "$node" journalctl -u kubelet.service --no-pager \
               > "/tmp/e2e-logs/${node}-kubelet.log" 2>&1 || true
+            docker exec "$node" ip -4 route show table all \
+              > "/tmp/e2e-logs/${node}-ip4-routes.log" 2>&1 || true
+            docker exec "$node" ip rule show \
+              > "/tmp/e2e-logs/${node}-ip-rules.log" 2>&1 || true
+            docker exec "$node" ip -4 route get 10.100.0.200 \
+              > "/tmp/e2e-logs/${node}-ip4-route-get-worker-vip.log" 2>&1 || true
           done
           # Cluster-1 state
           docker exec nwop-control-plane kubectl \
@@ -287,6 +293,12 @@ jobs:
           docker exec nwop2-worker kubectl \
             --kubeconfig=/etc/kubernetes/admin.conf get events -A \
             --sort-by='.lastTimestamp' > /tmp/e2e-logs/cluster2-events.log 2>&1 || true
+          docker exec nwop-control-plane kubectl \
+            --kubeconfig=/etc/kubernetes/admin.conf --request-timeout=15s get nodes -o yaml \
+            > /tmp/e2e-logs/cluster1-nodes.yaml 2>&1 || true
+          docker exec nwop2-worker kubectl \
+            --kubeconfig=/etc/kubernetes/admin.conf --request-timeout=15s get nodes -o yaml \
+            > /tmp/e2e-logs/cluster2-nodes.yaml 2>&1 || true
           # Cluster-2 operator logs (current + previous crashed container)
           docker exec nwop2-worker bash -c \
             'POD=$(kubectl --kubeconfig=/etc/kubernetes/admin.conf -n kube-system \
@@ -356,6 +368,21 @@ jobs:
                CRA_PID=$(cat /proc/$P/task/*/children 2>/dev/null | head -1 | tr -d " \n"); \
                [ -n "$CRA_PID" ] && nsenter -t $CRA_PID -m -n -- ip -6 route show table all' \
               > "/tmp/e2e-logs/${node}-cra-ip6-routes.log" 2>&1 || true
+            docker exec "$node" bash -c \
+              'P=$(systemctl show cra.service -p MainPID --value 2>/dev/null); \
+               CRA_PID=$(cat /proc/$P/task/*/children 2>/dev/null | head -1 | tr -d " \\n"); \
+               [ -n "$CRA_PID" ] && nsenter -t $CRA_PID -n -- ip -4 route show table all' \
+              > "/tmp/e2e-logs/${node}-cra-ip4-routes.log" 2>&1 || true
+            docker exec "$node" bash -c \
+              'P=$(systemctl show cra.service -p MainPID --value 2>/dev/null); \
+               CRA_PID=$(cat /proc/$P/task/*/children 2>/dev/null | head -1 | tr -d " \\n"); \
+               [ -n "$CRA_PID" ] && nsenter -t $CRA_PID -n -- ip rule show' \
+              > "/tmp/e2e-logs/${node}-cra-ip-rules.log" 2>&1 || true
+            docker exec "$node" bash -c \
+              'P=$(systemctl show cra.service -p MainPID --value 2>/dev/null); \
+               CRA_PID=$(cat /proc/$P/task/*/children 2>/dev/null | head -1 | tr -d " \\n"); \
+               [ -n "$CRA_PID" ] && nsenter -t $CRA_PID -m -n -- vtysh -c "show ip route vrf all"' \
+              > "/tmp/e2e-logs/${node}-cra-ip4-vrf-routes.log" 2>&1 || true
             docker exec "$node" bash -c \
               'P=$(systemctl show cra.service -p MainPID --value 2>/dev/null); \
                CRA_PID=$(cat /proc/$P/task/*/children 2>/dev/null | head -1 | tr -d " \n"); \
