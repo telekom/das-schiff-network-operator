@@ -53,8 +53,10 @@ func CmdAdd(args *skel.CmdArgs) (retErr error) {
 		return err
 	}
 
-	// Delegate address allocation to the configured IPAM plugin.
-	ipamResult, err := runIPAM(conf, args)
+	// Delegate address allocation to the configured IPAM plugin. IPAM is
+	// optional in the L2 attach mode, where the workload is addressed inside
+	// the shared L2 domain rather than by this plugin.
+	result, releaseIPAM, err := runOptionalIPAM(conf, args)
 	if err != nil {
 		return err
 	}
@@ -65,12 +67,11 @@ func CmdAdd(args *skel.CmdArgs) (retErr error) {
 	retainIPAM := false
 	defer func() {
 		if !success && !retainIPAM {
-			_ = ipam.ExecDel(ipamTypeOrEmpty(conf), args.StdinData)
+			releaseIPAM()
 		}
 	}()
 
-	result, err := prepareIPAMResult(ipamResult)
-	if err != nil {
+	if err := prepareIPAMResult(conf, result); err != nil {
 		return err
 	}
 	gwV4, gwV6, err := conf.gateways()
@@ -154,25 +155,6 @@ func CmdAdd(args *skel.CmdArgs) (retErr error) {
 	return nil
 }
 
-// prepareIPAMResult converts the delegated IPAM result and shapes it for the
-// pod interface. The attachment is routed: the workload reaches everything,
-// including its own IPAM pool, through the on-link CRA gateway. An address kept
-// at the pool's prefix length (host-local hands out e.g. a /24) would add a
-// connected route on the pod side and make same-pool traffic ARP on the
-// isolated veth instead, so the addresses are narrowed to host prefixes — which
-// is also what the agent exports.
-func prepareIPAMResult(ipamResult types.Result) (*current.Result, error) {
-	result, err := current.NewResultFromResult(ipamResult)
-	if err != nil {
-		return nil, fmt.Errorf("failed to convert IPAM result: %w", err)
-	}
-	if len(result.IPs) == 0 {
-		return nil, fmt.Errorf("IPAM plugin returned no addresses")
-	}
-	normalizeHostPrefixes(result)
-	return result, nil
-}
-
 // CmdDel implements the CNI DEL command.
 //
 // DEL must make as much cleanup progress as possible even when one step fails,
@@ -235,14 +217,39 @@ func CmdDel(args *skel.CmdArgs) error {
 	// exported, and while the CRA-side veth lingers the kernel still routes the
 	// address toward the stale port — either way an address handed straight to
 	// another workload would be black-holed or hijacked. A failed step returns
-	// an error, the runtime retries the DEL, and the retry releases it.
-	if len(errs) == 0 {
+	// an error, the runtime retries the DEL, and the retry releases it. An L2
+	// attachment without IPAM has nothing to release.
+	if len(errs) == 0 && len(conf.IPAM) != 0 {
 		if err := ipam.ExecDel(ipamTypeOrEmpty(conf), args.StdinData); err != nil {
 			errs = append(errs, fmt.Errorf("failed to release IPAM allocation: %w", err))
 		}
 	}
 
 	return errors.Join(errs...)
+}
+
+// prepareIPAMResult checks the delegated IPAM result against the attach mode
+// and shapes it for the pod interface.
+//
+// A routed attachment reaches everything, including its own IPAM pool, through
+// the on-link CRA gateway. An address kept at the pool's prefix length
+// (host-local hands out e.g. a /24) would add a connected route on the pod side
+// and make same-pool traffic ARP on the isolated veth instead, so the addresses
+// are narrowed to host prefixes — which is also what the agent exports. An L2
+// attachment lives in the pool's subnet and keeps it; its IPAM routes are
+// applied to the pod interface, which needs an address to reach them from.
+func prepareIPAMResult(conf *NetConf, result *current.Result) error {
+	if conf.isL2() {
+		if len(result.Routes) > 0 && len(result.IPs) == 0 {
+			return fmt.Errorf("IPAM returned routes but no addresses to reach them from")
+		}
+		return nil
+	}
+	if len(result.IPs) == 0 {
+		return fmt.Errorf("IPAM plugin returned no addresses")
+	}
+	normalizeHostPrefixes(result)
+	return nil
 }
 
 // normalizeHostPrefixes narrows every address of the IPAM result to a host
@@ -260,7 +267,8 @@ func normalizeHostPrefixes(result *current.Result) {
 
 // CmdCheck implements the CNI CHECK command.
 func CmdCheck(args *skel.CmdArgs) error {
-	if _, err := parseConfig(args.StdinData); err != nil {
+	_, err := parseConfig(args.StdinData)
+	if err != nil {
 		return err
 	}
 	if args.Netns == "" {
@@ -297,6 +305,30 @@ func runIPAM(conf *NetConf, args *skel.CmdArgs) (types.Result, error) {
 		return nil, fmt.Errorf("failed to run IPAM plugin: %w", err)
 	}
 	return res, nil
+}
+
+// runOptionalIPAM runs the delegated IPAM plugin if one is configured,
+// returning the CNI result and a cleanup function that releases the allocation.
+// L2 attachments can run without IPAM, so a missing IPAM block yields an empty
+// result and a no-op cleanup.
+func runOptionalIPAM(conf *NetConf, args *skel.CmdArgs) (*current.Result, func(), error) {
+	if len(conf.IPAM) == 0 {
+		return &current.Result{}, func() {}, nil
+	}
+	ipamResult, err := runIPAM(conf, args)
+	if err != nil {
+		return nil, nil, err
+	}
+	// From here on the allocation exists and has to be released on any failure,
+	// including the conversion below: CmdAdd only arms its cleanup once this
+	// returns successfully.
+	cleanup := func() { _ = ipam.ExecDel(ipamTypeOrEmpty(conf), args.StdinData) }
+	result, err := current.NewResultFromResult(ipamResult)
+	if err != nil {
+		cleanup()
+		return nil, nil, fmt.Errorf("failed to convert IPAM result: %w", err)
+	}
+	return result, cleanup, nil
 }
 
 // ipamTypeOrEmpty returns the delegated IPAM plugin type, or "" if it cannot be

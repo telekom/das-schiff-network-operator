@@ -56,6 +56,11 @@ const DefaultSocketPath = "/run/das-schiff/workload-cni.sock"
 // its pod-side peer. The two sides therefore MUST use this same prefix.
 const InfraPortPrefix = "infra-"
 
+// DefaultPortMTU is the MTU an attachment gets when its CNI configuration does
+// not request one. It is shared with the plugin so both ends of the wire agree
+// on what an unset mtu means.
+const DefaultPortMTU = 1500
+
 // isDefaultVRF reports whether name denotes the underlay/default table (no
 // tenant VRF): empty, "default" or "main".
 func isDefaultVRF(name string) bool {
@@ -76,11 +81,11 @@ func UpsertEntry(spec *v1alpha1.NodeWorkloadPortsSpec, entry *v1alpha1.WorkloadP
 			if equality.Semantic.DeepEqual(&spec.Ports[i], entry) {
 				return false
 			}
-			spec.Ports[i] = *entry
+			spec.Ports[i] = *entry.DeepCopy()
 			return true
 		}
 	}
-	spec.Ports = append(spec.Ports, *entry)
+	spec.Ports = append(spec.Ports, *entry.DeepCopy())
 	return true
 }
 
@@ -156,6 +161,75 @@ func ValidateEntry(e *v1alpha1.WorkloadPortEntry, reservedVRFs map[string]bool) 
 			return err
 		}
 	}
+	if e.MTU != 0 && (e.MTU < MinPortMTU || e.MTU > MaxPortMTU) {
+		return fmt.Errorf("mtu %d is out of range (%d-%d)", e.MTU, MinPortMTU, MaxPortMTU)
+	}
+	return validateLayer2Attach(e)
+}
+
+// validateLayer2Attach enforces the mutual exclusion between L2 attach mode and
+// the routed fields, and between the access and trunk forms of L2 attach, and
+// checks each trunk member for a usable reference, VLAN id and sub-interface
+// name. Members that inherit their VLAN id can only be checked for collisions
+// once the referenced Layer2 is known, which happens at merge time.
+func validateLayer2Attach(e *v1alpha1.WorkloadPortEntry) error {
+	ref, trunk := e.Layer2AttachmentRef, e.Layer2Trunk
+	if ref == nil && len(trunk) == 0 {
+		return nil
+	}
+	if ref != nil && len(trunk) > 0 {
+		return errors.New("layer2_attachment_ref (untagged access port) and layer2_trunk (tagged trunk) are mutually exclusive")
+	}
+	if ref != nil && ref.Name == "" {
+		return errors.New("layer2_attachment_ref.name is required")
+	}
+	if e.VRF != "" || e.GatewayV4 != "" || e.GatewayV6 != "" || len(e.HostRoutes) > 0 {
+		return errors.New("L2 attach mode is mutually exclusive with vrf, gateways and host routes")
+	}
+	if len(trunk) > maxLayer2TrunkMembers {
+		return fmt.Errorf("layer2_trunk has %d members (max %d)", len(trunk), maxLayer2TrunkMembers)
+	}
+	seenRefs := make(map[string]struct{}, len(trunk))
+	seenVLANs := make(map[uint16]struct{}, len(trunk))
+	for i := range trunk {
+		if err := validateLayer2TrunkMember(e.Interface, &trunk[i], seenRefs, seenVLANs); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateLayer2TrunkMember checks one trunk member: a usable reference that is
+// not listed twice, a valid and unique explicit VLAN id, and a sub-interface
+// name the kernel accepts. Inherited VLANs are not known until the merge, so
+// they reserve the largest assignable suffix; explicit VLANs use their actual
+// length.
+func validateLayer2TrunkMember(iface string, m *v1alpha1.Layer2TrunkMember,
+	seenRefs map[string]struct{}, seenVLANs map[uint16]struct{},
+) error {
+	if m.Name == "" {
+		return errors.New("layer2_trunk member requires ref.name")
+	}
+	key := layer2AttachmentRefLog(&m.Layer2AttachmentRef)
+	if _, dup := seenRefs[key]; dup {
+		return fmt.Errorf("layer2_trunk references %q more than once", m.Name)
+	}
+	seenRefs[key] = struct{}{}
+	vlan := uint16(maxVLANID)
+	if m.VLAN != nil {
+		vlan = *m.VLAN
+		if vlan == 0 || vlan > maxVLANID {
+			return fmt.Errorf("layer2_trunk member %q has an invalid vlan %d (want 1-%d)", m.Name, vlan, maxVLANID)
+		}
+		if _, dup := seenVLANs[vlan]; dup {
+			return fmt.Errorf("layer2_trunk uses vlan %d more than once", vlan)
+		}
+		seenVLANs[vlan] = struct{}{}
+	}
+	if sub := fmt.Sprintf("%s.%d", iface, vlan); len(sub) > kernelIfNameLen {
+		return fmt.Errorf("layer2_trunk member %q creates sub-interface %q exceeding %d characters",
+			m.Name, sub, kernelIfNameLen)
+	}
 	return nil
 }
 
@@ -215,8 +289,8 @@ func validateHostRoute(value string) error {
 // ones it drops. The server already refuses such an ADD; this guards the
 // datapath against an entry that reached NodeWorkloadPorts some other way (an
 // older agent, a hand-written object) and would otherwise be programmed as
-// recorded — a /24 host route advertised to the fabric, or a local VRF adopting
-// the platform's device of that name.
+// recorded — a /24 host route advertised to the fabric, a local VRF adopting
+// the platform's device of that name, or an L2 trunk colliding with itself.
 func DropInvalidEntries(entries []v1alpha1.WorkloadPortEntry, reservedVRFs []string,
 	log logr.Logger,
 ) []v1alpha1.WorkloadPortEntry {
@@ -265,18 +339,192 @@ func DropInvalidEntries(entries []v1alpha1.WorkloadPortEntry, reservedVRFs []str
 // here, so the agent refuses them at ADD (WithReservedVRFs) and drops any entry
 // that still names one before merging (DropInvalidEntries).
 //
+// L2 attach entries are instead enslaved to the Layer2 domain(s) they
+// reference: an access entry (Layer2AttachmentRef) becomes an untagged bridge
+// slave of the matching Layer2, while a trunk entry (Layer2Trunk) becomes one
+// tagged member per referenced Layer2. A trunk member without an explicit VLAN
+// id inherits the id of the domain it references; an explicit id translates
+// between the workload-side and the fabric-side id.
+//
+// An L2 entry is applied all-or-nothing: if any referenced Layer2 is not (yet)
+// present on the node, or two trunk members end up on the same workload-side
+// VLAN id, the whole entry is dropped and logged rather than leaving a
+// half-wired trunk. The bridges are a precondition owned by the L2A pipeline,
+// so a dropped entry is applied by a later reconcile once they exist.
+//
 // Any workload ports already present on cfg are dropped first, so merging is
 // idempotent and repeated merges onto the same object cannot accumulate
-// duplicates. It returns true if the config carries workload ports afterwards.
-func MergeIntoNodeNetworkConfig(cfg *v1alpha1.NodeNetworkConfig, entries []v1alpha1.WorkloadPortEntry) bool {
+// duplicates. It returns true if the config carries workload ports afterwards,
+// which is not the same as len(entries) > 0: an L2 entry whose Layer2 is absent
+// is dropped and does not count.
+func MergeIntoNodeNetworkConfig(cfg *v1alpha1.NodeNetworkConfig, entries []v1alpha1.WorkloadPortEntry,
+	log logr.Logger,
+) bool {
 	clearWorkloadPorts(&cfg.Spec)
+	applied := false
 	for i := range entries {
-		applyEntryToVRF(&cfg.Spec, &entries[i])
+		e := &entries[i]
+		if e.Layer2AttachmentRef != nil || len(e.Layer2Trunk) > 0 {
+			if err := applyEntryToLayer2(&cfg.Spec, e); err != nil {
+				log.Info("skipping L2 workload port attachment", "container", e.ContainerID,
+					"interface", e.Interface, "reason", err.Error())
+				continue
+			}
+			applied = true
+			continue
+		}
+		applyEntryToVRF(&cfg.Spec, e)
+		applied = true
 	}
-	return len(entries) > 0
+	return applied
 }
 
-// clearWorkloadPorts drops every workload port previously merged into spec.
+// resolvedMember is a trunk (or access) member whose Layer2Attachment reference
+// has been resolved to a Layer2 of this node's config.
+type resolvedMember struct {
+	// layer2 is the key of the Layer2 in spec.Layer2s the port is attached to.
+	layer2 string
+	// vlan is the workload-side 802.1Q id, or 0 for the untagged access member.
+	vlan uint16
+}
+
+// applyEntryToLayer2 attaches an L2 entry to the Layer2 domain(s) it
+// references. It resolves every member first and only mutates the spec once all
+// of them are resolvable and collision-free, so a partially resolvable trunk
+// never reaches the datapath.
+func applyEntryToLayer2(spec *v1alpha1.NodeNetworkConfigSpec, e *v1alpha1.WorkloadPortEntry) error {
+	members, err := resolveLayer2Members(spec, e)
+	if err != nil {
+		return err
+	}
+	if err := checkLayer2MTU(spec, e, members); err != nil {
+		return err
+	}
+	for _, m := range members {
+		l2 := spec.Layer2s[m.layer2]
+		l2.AttachedPorts = append(l2.AttachedPorts, v1alpha1.AttachedPort{
+			Interface: e.Interface,
+			VLAN:      m.vlan,
+			MTU:       e.MTU,
+		})
+		spec.Layer2s[m.layer2] = l2
+	}
+	return nil
+}
+
+// checkLayer2MTU rejects an attachment asking for more than its L2 domains can
+// carry: the workload would black-hole anything above a bridge's MTU, and on
+// the FRR flavor the kernel refuses a VLAN sub-interface larger than its parent
+// outright.
+//
+// Every domain the port touches has to carry the whole requested MTU. A trunk's
+// sub-interfaces all inherit the port MTU, so one large member does not make
+// the smaller ones safe: frames sized for the port would still be dropped on a
+// member whose bridge cannot carry them, and the workload has no way to tell.
+// Routed attachments are not constrained at all: they never touch a bridge.
+func checkLayer2MTU(spec *v1alpha1.NodeNetworkConfigSpec, e *v1alpha1.WorkloadPortEntry,
+	members []resolvedMember,
+) error {
+	mtu := e.MTU
+	if mtu == 0 {
+		mtu = DefaultPortMTU
+	}
+	for _, m := range members {
+		// A domain that does not state an MTU constrains nothing.
+		l2MTU := spec.Layer2s[m.layer2].MTU
+		if l2MTU == 0 || l2MTU >= mtu {
+			continue
+		}
+		if len(members) == 1 {
+			return fmt.Errorf("requested mtu %d exceeds the mtu %d of Layer2 %s", mtu, l2MTU, m.layer2)
+		}
+		return fmt.Errorf("requested mtu %d exceeds the mtu %d of trunk member Layer2 %s", mtu, l2MTU, m.layer2)
+	}
+	return nil
+}
+
+// resolveLayer2Members maps every Layer2Attachment reference of an L2 entry to a
+// Layer2 of this node's config and pins down the workload-side VLAN id of each
+// member, inheriting the domain's own id where none was requested.
+func resolveLayer2Members(spec *v1alpha1.NodeNetworkConfigSpec,
+	e *v1alpha1.WorkloadPortEntry,
+) ([]resolvedMember, error) {
+	if e.Layer2AttachmentRef != nil {
+		name, ok := findLayer2(spec, e.Layer2AttachmentRef)
+		if !ok {
+			return nil, fmt.Errorf("Layer2Attachment %s is not configured on this node",
+				layer2AttachmentRefLog(e.Layer2AttachmentRef))
+		}
+		return []resolvedMember{{layer2: name}}, nil
+	}
+
+	members := make([]resolvedMember, 0, len(e.Layer2Trunk))
+	seenVLANs := make(map[uint16]string, len(e.Layer2Trunk))
+	seenL2s := make(map[string]string, len(e.Layer2Trunk))
+	for i := range e.Layer2Trunk {
+		ref := &e.Layer2Trunk[i].Layer2AttachmentRef
+		name, ok := findLayer2(spec, ref)
+		if !ok {
+			return nil, fmt.Errorf("Layer2Attachment %s is not configured on this node",
+				layer2AttachmentRefLog(ref))
+		}
+		// The gRPC server already rejects a repeated reference, but a
+		// NodeWorkloadPorts written by hand does not go through it: carrying one
+		// domain under two tags would flood every frame straight back out of the
+		// port it came from.
+		if other, dup := seenL2s[name]; dup {
+			return nil, fmt.Errorf("trunk members %s and %s reference the same Layer2Attachment",
+				other, layer2AttachmentRefLog(ref))
+		}
+		seenL2s[name] = layer2AttachmentRefLog(ref)
+		// No explicit id means the domain is carried under its own VLAN id, which
+		// only the node config knows; an explicit one translates it.
+		vlan := spec.Layer2s[name].VLAN
+		if requested := e.Layer2Trunk[i].VLAN; requested != nil {
+			vlan = *requested
+		}
+		if vlan == 0 {
+			return nil, fmt.Errorf("Layer2Attachment %s has no VLAN id to inherit as a trunk member",
+				layer2AttachmentRefLog(ref))
+		}
+		// An explicit id was already bounded on the way in, but an inherited one
+		// comes from the Layer2 schema, which still allows the reserved 4095/4096.
+		if vlan > maxVLANID {
+			return nil, fmt.Errorf("Layer2Attachment %s carries vlan id %d, which is not assignable to a trunk member",
+				layer2AttachmentRefLog(ref), vlan)
+		}
+		if other, dup := seenVLANs[vlan]; dup {
+			return nil, fmt.Errorf("trunk members %s and %s collide on workload-side vlan %d",
+				other, layer2AttachmentRefLog(ref), vlan)
+		}
+		seenVLANs[vlan] = layer2AttachmentRefLog(ref)
+		members = append(members, resolvedMember{layer2: name, vlan: vlan})
+	}
+	return members, nil
+}
+
+// findLayer2 returns the key of the Layer2 whose stamped AttachmentRef matches
+// ref.
+func findLayer2(spec *v1alpha1.NodeNetworkConfigSpec, ref *v1alpha1.Layer2AttachmentRef) (string, bool) {
+	for name, l2 := range spec.Layer2s {
+		if layer2AttachmentRefEqual(l2.AttachmentRef, ref) {
+			return name, true
+		}
+	}
+	return "", false
+}
+
+// layer2AttachmentRefEqual reports whether two Layer2AttachmentRefs denote the
+// same Layer2Attachment. Nil refs never match.
+func layer2AttachmentRefEqual(a, b *v1alpha1.Layer2AttachmentRef) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	return a.Name == b.Name && a.Namespace == b.Namespace
+}
+
+// clearWorkloadPorts drops every workload port previously merged into spec
+// (both routed VRF placements and L2 bridge-slave attachments).
 // It deliberately mirrors applyEntryToVRF: spec.ClusterVRF is not touched
 // because it is never a placement target, so it can never hold merged ports.
 func clearWorkloadPorts(spec *v1alpha1.NodeNetworkConfigSpec) {
@@ -291,16 +539,24 @@ func clearWorkloadPorts(spec *v1alpha1.NodeNetworkConfigSpec) {
 		lv.WorkloadPorts = nil
 		spec.LocalVRFs[name] = lv
 	}
+	for name := range spec.Layer2s {
+		l2 := spec.Layer2s[name]
+		l2.AttachedPorts = nil
+		spec.Layer2s[name] = l2
+	}
 }
 
 func applyEntryToVRF(spec *v1alpha1.NodeNetworkConfigSpec, e *v1alpha1.WorkloadPortEntry) {
+	// Deep-copy so the merged spec never aliases the caller's entry slices.
+	port := *e.WorkloadPort.DeepCopy()
+
 	if isDefaultVRF(e.VRF) {
-		spec.GlobalWorkloadPorts = append(spec.GlobalWorkloadPorts, e.WorkloadPort)
+		spec.GlobalWorkloadPorts = append(spec.GlobalWorkloadPorts, port)
 		return
 	}
 
 	if fv, ok := spec.FabricVRFs[e.VRF]; ok {
-		fv.WorkloadPorts = append(fv.WorkloadPorts, e.WorkloadPort)
+		fv.WorkloadPorts = append(fv.WorkloadPorts, port)
 		spec.FabricVRFs[e.VRF] = fv
 		return
 	}
@@ -309,8 +565,17 @@ func applyEntryToVRF(spec *v1alpha1.NodeNetworkConfigSpec, e *v1alpha1.WorkloadP
 		spec.LocalVRFs = map[string]v1alpha1.VRF{}
 	}
 	lv := spec.LocalVRFs[e.VRF]
-	lv.WorkloadPorts = append(lv.WorkloadPorts, e.WorkloadPort)
+	lv.WorkloadPorts = append(lv.WorkloadPorts, port)
 	spec.LocalVRFs[e.VRF] = lv
+}
+
+// vlanSortKey orders a trunk member's workload-side VLAN id, with "inherited"
+// (unset) sorting before every explicit id so the ordering is total.
+func vlanSortKey(vlan *uint16) int {
+	if vlan == nil {
+		return -1
+	}
+	return int(*vlan)
 }
 
 // HashEntries returns a stable content hash of the workload-port entries. It is
@@ -328,6 +593,22 @@ func HashEntries(entries []v1alpha1.WorkloadPortEntry) string {
 			normalised[i].HostRoutes = []string{}
 		} else {
 			slices.Sort(normalised[i].HostRoutes)
+		}
+		// The trunk is a set: the render order of its members does not matter,
+		// but their VLAN ids do, so sort by reference and keep the ids.
+		if len(normalised[i].Layer2Trunk) == 0 {
+			normalised[i].Layer2Trunk = []v1alpha1.Layer2TrunkMember{}
+		} else {
+			slices.SortFunc(normalised[i].Layer2Trunk, func(a, b v1alpha1.Layer2TrunkMember) int {
+				return cmp.Or(
+					strings.Compare(a.Namespace, b.Namespace),
+					strings.Compare(a.Name, b.Name),
+					// A well-formed trunk never references one attachment twice,
+					// but a hand-written one can, and the hash must still be a
+					// function of the set rather than of its order.
+					cmp.Compare(vlanSortKey(a.VLAN), vlanSortKey(b.VLAN)),
+				)
+			})
 		}
 	}
 	slices.SortFunc(normalised, func(a, b v1alpha1.WorkloadPortEntry) int {

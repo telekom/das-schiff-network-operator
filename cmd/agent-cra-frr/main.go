@@ -107,10 +107,13 @@ func main() {
 	var nodeNetworkConfigPath string
 	var healthAddr string
 	var metricsAddr string
+	var intentNamespace string
 	flag.StringVar(&nodeNetworkConfigPath, "nodenetworkconfig-path", common.DefaultNodeNetworkConfigPath,
 		"Path to store working node configuration.")
 	flag.StringVar(&healthAddr, "health-addr", ":7081", "bind address of health/readiness probes")
 	flag.StringVar(&metricsAddr, "metrics-addr", ":7080", "bind address of metrics endpoint")
+	flag.StringVar(&intentNamespace, "intent-namespace", workloadcni.DefaultLayer2Namespace,
+		"namespace the intent CRDs live in; workload CNI Layer2Attachment references are resolved in it")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -152,7 +155,7 @@ func main() {
 
 	// Start the node-local workload-cni gRPC server so the workload CNI plugin can
 	// hand attachments to this agent (which programs them via frr-cra netlink).
-	if err := startWorkloadCNIServer(mgr, r.ReservedVRFs()); err != nil {
+	if err := startWorkloadCNIServer(mgr, intentNamespace, r.ReservedVRFs()); err != nil {
 		setupLog.Error(err, "unable to start workload-cni server")
 		os.Exit(1)
 	}
@@ -166,12 +169,19 @@ func main() {
 
 // startWorkloadCNIServer registers the node-local workload-cni gRPC server as a
 // manager runnable so it shares the manager's lifecycle and client.
-func startWorkloadCNIServer(mgr manager.Manager, reservedVRFs []string) error {
+func startWorkloadCNIServer(mgr manager.Manager, intentNamespace string, reservedVRFs []string) error {
 	nodeName := os.Getenv(healthcheck.NodenameEnv)
 	if nodeName == "" {
 		// Without it the server would write NodeWorkloadPorts objects with an empty
 		// name, failing every CNI ADD with an opaque API error.
 		return fmt.Errorf("%s must be set to run the workload-cni server", healthcheck.NodenameEnv)
+	}
+	// The operator reads "" as "all namespaces", but a bare Layer2Attachment name
+	// on the CNI wire is only unambiguous within one namespace: cluster-wide, two
+	// tenants could each own an attachment of that name and the agent would have
+	// to guess which domain to bridge the workload into.
+	if intentNamespace == "" {
+		return fmt.Errorf("--intent-namespace must name a single namespace to run the workload-cni server")
 	}
 	socketPath := os.Getenv("ROUTED_CNI_SOCKET")
 	// The server mutates NodeWorkloadPorts read-modify-write on every CNI ADD/DEL,
@@ -184,7 +194,8 @@ func startWorkloadCNIServer(mgr manager.Manager, reservedVRFs []string) error {
 		return fmt.Errorf("unable to create direct client for workload-cni server: %w", err)
 	}
 	srv := workloadcni.NewServer(directClient, nodeName, mgr.GetLogger(),
-		workloadcni.WithReservedVRFs(reservedVRFs...))
+		workloadcni.WithReservedVRFs(reservedVRFs...),
+		workloadcni.WithLayer2Namespace(intentNamespace))
 	if err := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
 		return srv.Serve(ctx, socketPath)
 	})); err != nil {
