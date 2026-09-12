@@ -1,0 +1,106 @@
+//go:build linux
+
+/*
+Copyright 2025.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package cni
+
+import (
+	"net"
+	"reflect"
+	"testing"
+
+	"github.com/containernetworking/cni/pkg/skel"
+	current "github.com/containernetworking/cni/pkg/types/100"
+)
+
+func TestPodIdentity(t *testing.T) {
+	ns, name := podIdentity("IgnoreUnknown=1;K8S_POD_NAMESPACE=demo;K8S_POD_NAME=vm-launcher;K8S_POD_INFRA_CONTAINER_ID=abc")
+	if ns != "demo" || name != "vm-launcher" {
+		t.Fatalf("unexpected identity ns=%q name=%q", ns, name)
+	}
+
+	ns, name = podIdentity("")
+	if ns != "" || name != "" {
+		t.Fatalf("expected empty identity, got ns=%q name=%q", ns, name)
+	}
+}
+
+func TestHostRoutes(t *testing.T) {
+	result := &current.Result{
+		IPs: []*current.IPConfig{
+			{Address: net.IPNet{IP: net.ParseIP("10.201.0.10"), Mask: net.CIDRMask(32, 32)}},
+			{Address: net.IPNet{IP: net.ParseIP("fd00:201::10"), Mask: net.CIDRMask(128, 128)}},
+		},
+	}
+	got := hostRoutes(result)
+	want := []string{"10.201.0.10/32", "fd00:201::10/128"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("hostRoutes = %v, want %v", got, want)
+	}
+}
+
+func TestNormalizeHostPrefixes(t *testing.T) {
+	result := &current.Result{
+		IPs: []*current.IPConfig{
+			{Address: net.IPNet{IP: net.ParseIP("10.201.0.10"), Mask: net.CIDRMask(24, 32)}},
+			{Address: net.IPNet{IP: net.ParseIP("fd00:201::10"), Mask: net.CIDRMask(64, 128)}},
+			{Address: net.IPNet{IP: net.ParseIP("10.201.0.11"), Mask: net.CIDRMask(32, 32)}},
+		},
+	}
+	normalizeHostPrefixes(result)
+	want := []string{"10.201.0.10/32", "fd00:201::10/128", "10.201.0.11/32"}
+	for i, ip := range result.IPs {
+		if got := ip.Address.String(); got != want[i] {
+			t.Errorf("IPs[%d] = %s, want %s", i, got, want[i])
+		}
+	}
+}
+
+func TestAddRequestCarriesOnlyPresentGatewayFamilies(t *testing.T) {
+	conf := &NetConf{VRF: "tenant"}
+	args := &skel.CmdArgs{ContainerID: "cid", Args: "K8S_POD_NAMESPACE=demo;K8S_POD_NAME=vm"}
+	gwV4, gwV6 := net.ParseIP("169.254.1.1"), net.ParseIP("fe80::1")
+	v4 := &current.IPConfig{Address: net.IPNet{IP: net.ParseIP("10.201.0.10"), Mask: net.CIDRMask(32, 32)}}
+	v6 := &current.IPConfig{Address: net.IPNet{IP: net.ParseIP("fd00:201::10"), Mask: net.CIDRMask(128, 128)}}
+
+	tests := []struct {
+		name           string
+		ips            []*current.IPConfig
+		wantV4, wantV6 string
+	}{
+		{name: "ipv4 only", ips: []*current.IPConfig{v4}, wantV4: "169.254.1.1/32"},
+		{name: "ipv6 only", ips: []*current.IPConfig{v6}, wantV6: "fe80::1/128"},
+		{name: "dual stack", ips: []*current.IPConfig{v4, v6}, wantV4: "169.254.1.1/32", wantV6: "fe80::1/128"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := addRequest(conf, args, "cra0cid", gwV4, gwV6, &current.Result{IPs: tc.ips})
+			if req.GetPodNamespace() != "demo" || req.GetPodName() != "vm" || req.GetVrf() != "tenant" {
+				t.Fatalf("unexpected identity in %+v", req)
+			}
+			if got := req.GetPort().GetGatewayV4(); got != tc.wantV4 {
+				t.Errorf("gateway_v4 = %q, want %q", got, tc.wantV4)
+			}
+			if got := req.GetPort().GetGatewayV6(); got != tc.wantV6 {
+				t.Errorf("gateway_v6 = %q, want %q", got, tc.wantV6)
+			}
+			if got := len(req.GetPort().GetHostRoutes()); got != len(tc.ips) {
+				t.Errorf("host routes = %d, want %d", got, len(tc.ips))
+			}
+		})
+	}
+}
