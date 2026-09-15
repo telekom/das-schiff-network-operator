@@ -42,6 +42,11 @@ spec:
                   fieldPath: spec.nodeName
             - name: CRA_URL
               value: https://[fd00:7:caa5::]:8443,https://169.254.1.0:8443
+            # Must match the cni-workload node config's agentSocket (see
+            # config/cni-workload/node-config.yaml) and lie in the
+            # workload-cni-socket hostPath mounted below.
+            - name: WORKLOAD_CNI_SOCKET
+              value: /run/das-schiff/workload-cni.sock
             - name: CRA_TIMEOUT
               value: 30s
             - name: CRA_CLIENT_CERT
@@ -97,6 +102,8 @@ spec:
               name: certs
             - mountPath: /opt/healthcheck/
               name: healthcheck-config
+            - mountPath: /run/das-schiff
+              name: workload-cni-socket
       terminationGracePeriodSeconds: 10
       serviceAccountName: controller-manager
       volumes:
@@ -114,3 +121,10 @@ spec:
         - configMap:
             name: healthcheck-config
           name: healthcheck-config
+        # Shared with the workload CNI plugin (which runs in the host mount
+        # namespace): the agent serves the workload-cni gRPC socket here so the
+        # plugin can hand routed attachments over on CNI ADD/DEL.
+        - hostPath:
+            path: /run/das-schiff
+            type: DirectoryOrCreate
+          name: workload-cni-socket
