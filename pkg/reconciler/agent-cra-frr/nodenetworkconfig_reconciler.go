@@ -54,14 +54,24 @@ func (a *CRAFRRConfigApplier) convertNodeConfigToNetlink(nodeCfg *v1alpha1.NodeN
 			VlanID:              int(layer2.VLAN),
 			MTU:                 int(layer2.MTU),
 			VNI:                 int(layer2.VNI),
-			AnycastMAC:          new(string),
 			DisableSegmentation: layer2.DisableSegmentation,
 		}
 
+		// AnycastMAC stays nil without an IRB: the netlink layer parses every
+		// non-nil value, and an empty string is not a MAC.
 		if layer2.IRB != nil {
+			mac := layer2.IRB.MACAddress
 			nlLayer2.AnycastGateways = layer2.IRB.IPAddresses
-			*nlLayer2.AnycastMAC = layer2.IRB.MACAddress
+			nlLayer2.AnycastMAC = &mac
 			nlLayer2.VRF = layer2.IRB.VRF
+		}
+
+		for j := range layer2.AttachedPorts {
+			ap := &layer2.AttachedPorts[j]
+			nlLayer2.AttachedPorts = append(nlLayer2.AttachedPorts, nl.L2AttachedPort{
+				Interface: ap.Interface,
+				VlanID:    ap.VLAN,
+			})
 		}
 
 		netlinkConfig.Layer2s = append(netlinkConfig.Layer2s, nlLayer2)

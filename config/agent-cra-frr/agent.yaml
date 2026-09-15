@@ -33,6 +33,11 @@ spec:
             - "--nodenetworkconfig-path=/tmp/current-config.yaml"
             - "--health-addr=[$(HOST_IP)]:7081"
             - "--metrics-addr=[$(HOST_IP)]:7080"
+            # Must match the operator's --intent-namespace (config/operator/
+            # operator.yaml): workload-CNI Layer2 references are resolved and
+            # stamped with this namespace and matched against the Layer2
+            # intents the operator renders into the NodeNetworkConfig.
+            - "--intent-namespace=default"
           command:
             - /agent
           env:
