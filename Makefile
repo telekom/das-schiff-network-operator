@@ -325,20 +325,19 @@ go-licenses: $(GO_LICENSES_TARGET) ## Download go-licenses locally if necessary.
 $(GO_LICENSES_TARGET): $(LOCALBIN_TARGET) versions.env
 	$(call go-install-tool,$(GO_LICENSES),github.com/google/go-licenses,$(GO_LICENSES_VERSION))
 
-CRD_REF_DOCS = $(shell pwd)/bin/crd-ref-docs
+CRD_REF_DOCS = $(LOCALBIN)/crd-ref-docs
 .PHONY: crd-ref-docs
 crd-ref-docs: ## Download crd-ref-docs locally if necessary.
 	$(call go-get-tool,$(CRD_REF_DOCS),github.com/elastic/crd-ref-docs@v0.3.0)
 
-# go-get-tool will 'go get' any package $2 and install it to $1.
-PROJECT_DIR := $(shell dirname $(abspath $(lastword $(MAKEFILE_LIST))))
+# go-get-tool installs package $2 into the directory containing tool $1.
 define go-get-tool
 @[ -f "$(1)" ] || { \
 TMP_DIR=$$(mktemp -d) ; trap 'rm -rf "$$TMP_DIR"' EXIT ;\
 cd "$$TMP_DIR" ;\
 go mod init tmp ;\
 echo "Downloading $(2)" ;\
-GOBIN="$(PROJECT_DIR)/bin" go install $(2) ;\
+GOBIN="$$(dirname "$(1)")" go install "$(2)" ;\
 }
 endef
 
@@ -357,7 +356,7 @@ package=$(2)@$(3) ;\
 echo "Downloading $${package}" ;\
 tmpdir=$$(mktemp -d) ;\
 trap 'rm -rf "$$tmpdir"' EXIT ;\
-GOBIN=$$tmpdir go install $${package} ;\
+GOBIN="$$tmpdir" go install "$${package}" ;\
 tmpbin="$$tmpdir/$$(basename "$(1)")" ;\
 [ -f "$$tmpbin" ] ;\
 mv "$$tmpbin" "$(1)-$(3)" ;\
