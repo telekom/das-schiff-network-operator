@@ -59,11 +59,26 @@ jobs:
           go-version-file: go.mod
 
       - name: Create Licenses Report
-        run: make licenses-report
+        run: |
+          max_attempts=3
+          attempt=1
+          while [ "$attempt" -le "$max_attempts" ]; do
+            if make licenses-report; then
+              exit 0
+            fi
+            if [ "$attempt" -lt "$max_attempts" ]; then
+              sleep 10
+            fi
+            attempt=$((attempt + 1))
+          done
+          echo "make licenses-report failed after ${max_attempts} attempts" >&2
+          exit 1
 
       - name: Read Go version
         id: go-version
-        run: echo "version=$(awk '/^go / { print $2 }' go.mod)" >> $GITHUB_OUTPUT
+        run: |
+          version=$(awk '$1 == "go" { version = $2 } $1 == "toolchain" { version = $2; sub(/^go/, "", version) } END { print version }' go.mod)
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0

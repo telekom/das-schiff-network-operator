@@ -1,0 +1,149 @@
+# SPDX-FileCopyrightText: 2025 Deutsche Telekom AG
+#
+# SPDX-License-Identifier: Apache-2.0
+
+name: Security Scan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 6 * * 1" # Every Monday at 6am UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  govulncheck:
+    name: Go Vulnerability Check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Install packages
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/azure-cli.* /etc/apt/sources.list.d/microsoft-prod.* /etc/apt/sources.list.d/packages-microsoft-prod.*
+          sudo apt-get update
+          sudo apt-get install -y llvm clang libbpf-dev gcc-multilib linux-headers-$(uname -r)
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+
+      - name: Run govulncheck
+        # JSON output exits zero for findings, so the report enforces the
+        # reachable-vulnerability policy. Scanner execution errors retain
+        # their original status; malformed reports also fail the step.
+        run: |
+          scan_status=0
+          govulncheck -format json ./... > govulncheck.json || scan_status=$?
+          report_status=0
+          if [ -s govulncheck.json ]; then
+            python3 .github/scripts/govulncheck-report.py govulncheck.json >> "$GITHUB_STEP_SUMMARY" || report_status=$?
+          else
+            echo "govulncheck produced no JSON report" >> "$GITHUB_STEP_SUMMARY"
+            report_status=1
+          fi
+          if [ "$scan_status" -ne 0 ]; then
+            exit "$scan_status"
+          fi
+          exit "$report_status"
+
+  trivy-fs:
+    name: Trivy Filesystem Scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      sarif-artifact: ${{ steps.sarif.outputs.artifact-id }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-fs-results.sarif'
+          severity: 'HIGH,CRITICAL'
+          exit-code: '1'
+          # For SARIF output the action ignores `severity` unless this is set.
+          # Without it Trivy scans every severity, and `exit-code: 1` then fails
+          # the job on LOW, MEDIUM and UNKNOWN findings too.
+          limit-severities-for-sarif: 'true'
+
+      - name: Save Trivy scan results
+        id: sarif
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always() && github.event_name != 'pull_request' && hashFiles('trivy-fs-results.sarif') != ''
+        with:
+          name: trivy-sarif
+          path: trivy-fs-results.sarif
+          retention-days: 1
+
+  upload-trivy:
+    name: Upload Trivy SARIF
+    needs: trivy-fs
+    if: always() && !cancelled() && github.event_name != 'pull_request' && needs.trivy-fs.outputs.sarif-artifact != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: trivy-sarif
+      - name: Upload Trivy scan results
+        uses: github/codeql-action/upload-sarif@0d579ffd059c29b07949a3cce3983f0780820c98 # v4.32.6
+        with:
+          sarif_file: trivy-fs-results.sarif
+
+  license-audit:
+    name: Dependency License Audit
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Install packages
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/azure-cli.* /etc/apt/sources.list.d/microsoft-prod.* /etc/apt/sources.list.d/packages-microsoft-prod.*
+          sudo apt-get update
+          sudo apt-get install -y llvm clang libbpf-dev gcc-multilib linux-headers-$(uname -r)
+
+      # Note: This workflow intentionally uses go-licenses v2 for `check`.
+      # The Makefile still uses go-licenses v1 for other tasks (e.g. save/report),
+      # so both major versions coexist by design.
+      - name: Install go-licenses
+        run: go install github.com/google/go-licenses/v2@v2.0.1
+
+      - name: Check dependency licenses
+        run: |
+          go-licenses check ./... \
+            --allowed_licenses=Apache-2.0,MIT,BSD-2-Clause,BSD-3-Clause,ISC,MPL-2.0,CC0-1.0,Unlicense \
+            --ignore=github.com/rackn/gohai
