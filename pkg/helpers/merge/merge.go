@@ -120,6 +120,7 @@ func mergeMapping(into, from mapping, strict bool) (mapping, error) {
 	}
 	return merged, nil
 }
+
 func mergeSequence(into, from sequence) (sequence, error) {
 	if len(into) > math.MaxInt-len(from) {
 		return nil, fmt.Errorf("sequence merge: combined length %d + %d overflows", len(into), len(from))
