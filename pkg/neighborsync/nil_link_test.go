@@ -3,9 +3,10 @@ package neighborsync
 import (
 	"testing"
 
-	mock_nl "github.com/telekom/das-schiff-network-operator/pkg/nl/mock"
 	"github.com/vishvananda/netlink"
 	"go.uber.org/mock/gomock"
+
+	mock_nl "github.com/telekom/das-schiff-network-operator/pkg/nl/mock"
 )
 
 func TestSuppressionRejectsNilLink(t *testing.T) {
