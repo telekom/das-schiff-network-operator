@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	. "github.com/onsi/ginkgo"
@@ -1330,6 +1331,62 @@ var _ = Describe("CreateL3()", func() {
 		err := nm.CreateL3(vrfInfo)
 		Expect(err).To(HaveOccurred())
 		procSysNetPath = oldProcSysNetPath
+	})
+})
+
+var _ = Describe("setEUIAutogeneration()", func() {
+	It("fails before file IO for invalid interface names", func() {
+		oldProcSysNetPath := procSysNetPath
+		testProcSysNetPath, err := os.MkdirTemp("", "proc-sys-net-")
+		Expect(err).ToNot(HaveOccurred())
+		procSysNetPath = testProcSysNetPath
+		defer func() {
+			procSysNetPath = oldProcSysNetPath
+			Expect(os.RemoveAll(testProcSysNetPath)).To(Succeed())
+		}()
+
+		nm := &Manager{}
+		for _, tc := range []struct {
+			name string
+			want string
+		}{
+			{name: "", want: "invalid interface name"},
+			{name: ".", want: "invalid interface name"},
+			{name: "..", want: "invalid interface name"},
+			{name: "eth/0", want: "contains path separators or NUL bytes"},
+			{name: "eth\x000", want: "contains path separators or NUL bytes"},
+			{name: strings.Repeat("a", unix.IFNAMSIZ), want: "exceeds Linux limit"},
+		} {
+			err := nm.setEUIAutogeneration(tc.name, false)
+			Expect(err).To(MatchError(ContainSubstring(tc.want)))
+			Expect(err).NotTo(MatchError(ContainSubstring("error opening file")))
+		}
+	})
+
+	It("writes addr_gen_mode for valid interface names", func() {
+		oldProcSysNetPath := procSysNetPath
+		testProcSysNetPath, err := os.MkdirTemp("", "proc-sys-net-")
+		Expect(err).ToNot(HaveOccurred())
+		procSysNetPath = testProcSysNetPath
+		defer func() {
+			procSysNetPath = oldProcSysNetPath
+			Expect(os.RemoveAll(testProcSysNetPath)).To(Succeed())
+		}()
+
+		nm := &Manager{}
+		intfName := "vxlan100"
+		addrGenModePathIPv6 := filepath.Join(procSysNetPath, "ipv6", "conf", intfName, addrGenMode)
+		createInterfaceFile(addrGenModePathIPv6)
+
+		Expect(nm.setEUIAutogeneration(intfName, true)).To(Succeed())
+		value, err := os.ReadFile(addrGenModePathIPv6)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(string(value)).To(Equal("0\n"))
+
+		Expect(nm.setEUIAutogeneration(intfName, false)).To(Succeed())
+		value, err = os.ReadFile(addrGenModePathIPv6)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(string(value)).To(Equal("1\n"))
 	})
 })
 

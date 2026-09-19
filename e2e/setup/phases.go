@@ -319,7 +319,7 @@ func PhaseUnderlay(cluster *Cluster) error {
 
 	// Wait for BGP convergence
 	Logf("Waiting for BGP convergence...")
-	return WaitFor("BGP convergence", 120*time.Second, 5*time.Second, func() (bool, error) {
+	if err := WaitFor("BGP convergence", 120*time.Second, 5*time.Second, func() (bool, error) {
 		out, err := DockerExec("clab-nwop-leaf1", "vtysh", "-c", "show bgp summary json")
 		if err != nil {
 			return false, err
@@ -352,7 +352,24 @@ func PhaseUnderlay(cluster *Cluster) error {
 		}
 		Logf("  BGP: %d/4 peers established on leaf1", established)
 		return established >= 4, nil
-	})
+	}); err != nil {
+		return err
+	}
+
+	return writeCRAKnownHosts(cluster)
+}
+
+func writeCRAKnownHosts(cluster *Cluster) error {
+	// The FRR-based E2E CRA has no SSH/NETCONF server; this placeholder covers
+	// startup validation of the configured CRA URL without requiring live scan.
+	const e2eCRAKnownHosts = "[169.254.33.1]:830 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8g"
+
+	for _, node := range cluster.Nodes {
+		if err := DockerExecInput(node.Name, e2eCRAKnownHosts+"\n", "tee", "/etc/cra/known_hosts"); err != nil {
+			return fmt.Errorf("writing CRA known_hosts on %s: %w", node.Name, err)
+		}
+	}
+	return nil
 }
 
 // Phase 3: Configure NAT64/DNS64 and deploy kube-vip.
