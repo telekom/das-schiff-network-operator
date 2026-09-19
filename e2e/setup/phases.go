@@ -43,6 +43,11 @@ func phaseLoadPrebuiltImages() error {
 		if err := RunCmd("docker", "load", "-i", tarPath); err != nil {
 			return fmt.Errorf("docker load %s: %w", entry.Name(), err)
 		}
+		if os.Getenv("E2E_DELETE_LOADED_TARBALLS") == "true" {
+			if err := os.Remove(tarPath); err != nil {
+				return fmt.Errorf("removing loaded image tarball %s: %w", entry.Name(), err)
+			}
+		}
 	}
 
 	Logf("All pre-built images loaded.")
