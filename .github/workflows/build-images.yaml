@@ -61,7 +61,7 @@ jobs:
       - name: Create Licenses Report
         run: |
           max_attempts=3
-          for attempt in 1 2 3; do
+          for ((attempt=1; attempt<=max_attempts; attempt++)); do
             if make licenses-report; then
               exit 0
             fi
