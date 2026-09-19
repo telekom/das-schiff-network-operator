@@ -49,7 +49,7 @@ jobs:
 
       - name: Read Go version
         id: go-version
-        run: echo "version=$(awk '/^go / { print $2 }' go.mod)" >> $GITHUB_OUTPUT
+        run: echo "version=$(awk '/^go / { print $2; exit }' go.mod)" >> "$GITHUB_OUTPUT"
 
       - name: Build cra-frr image
         run: |
@@ -112,7 +112,7 @@ jobs:
 
       - name: Read Go version
         id: go-version
-        run: echo "version=$(awk '/^go / { print $2 }' go.mod)" >> $GITHUB_OUTPUT
+        run: echo "version=$(awk '/^go / { print $2; exit }' go.mod)" >> "$GITHUB_OUTPUT"
 
       - name: Build image
         run: |
@@ -154,7 +154,7 @@ jobs:
 
       - name: Read Go version
         id: go-version
-        run: echo "version=$(awk '/^go / { print $2 }' go.mod)" >> $GITHUB_OUTPUT
+        run: echo "version=$(awk '/^go / { print $2; exit }' go.mod)" >> "$GITHUB_OUTPUT"
 
       - name: Build tester image
         run: |
