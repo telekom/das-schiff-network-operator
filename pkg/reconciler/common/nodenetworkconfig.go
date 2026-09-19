@@ -269,17 +269,17 @@ func (r *NodeNetworkConfigReconciler) restoreNodeNetworkConfig(ctx context.Conte
 
 func (r *NodeNetworkConfigReconciler) checkHealth(ctx context.Context) (ctrl.Result, error) {
 	if err := r.healthChecker.CheckInterfaces(); err != nil {
-		_ = r.healthChecker.UpdateReadinessCondition(ctx, corev1.ConditionFalse, healthcheck.ReasonInterfaceCheckFailed, err.Error())
+		healthcheck.ReportUnready(ctx, r.healthChecker, r.logger, healthcheck.ReasonInterfaceCheckFailed, err.Error())
 		return ctrl.Result{}, fmt.Errorf("error checking network interfaces: %w", err)
 	}
 
 	if err := r.healthChecker.CheckReachability(); err != nil {
-		_ = r.healthChecker.UpdateReadinessCondition(ctx, corev1.ConditionFalse, healthcheck.ReasonReachabilityFailed, err.Error())
+		healthcheck.ReportUnready(ctx, r.healthChecker, r.logger, healthcheck.ReasonReachabilityFailed, err.Error())
 		return ctrl.Result{}, fmt.Errorf("error checking network reachability: %w", err)
 	}
 
 	if err := r.healthChecker.CheckAPIServer(ctx); err != nil {
-		_ = r.healthChecker.UpdateReadinessCondition(ctx, corev1.ConditionFalse, healthcheck.ReasonAPIServerFailed, err.Error())
+		healthcheck.ReportUnready(ctx, r.healthChecker, r.logger, healthcheck.ReasonAPIServerFailed, err.Error())
 		return ctrl.Result{}, fmt.Errorf("error checking API Server reachability: %w", err)
 	}
 
