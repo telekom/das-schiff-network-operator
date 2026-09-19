@@ -152,9 +152,9 @@ spec:
 
 		AfterEach(func() {
 			ctx = context.Background()
-			defer func() {
-				Expect(deleteCluster2Object(ctx, f, "vrfs", vrfName)).To(Succeed())
-			}()
+			DeferCleanup(func() error {
+				return deleteCluster2Object(ctx, f, "vrfs", vrfName)
+			})
 
 			By("Cleaning up simulated Helm-owned sync VRF from mgmt cluster")
 			Expect(f.DeleteManifestInNamespace(ctx, []byte(helmOwnedSourceVRFUpdatedYAML), syncNamespace)).To(Succeed())
