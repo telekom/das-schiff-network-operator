@@ -278,10 +278,8 @@ func (r *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 				}
 			}
 		}
-		for _, remoteClient := range remoteClients {
-			if err := r.sweepRemoteOrphans(ctx, log, remoteClient, list, desiredNames, req.Namespace); err != nil {
-				return ctrl.Result{}, err
-			}
+		if err := r.sweepRemoteOrphans(ctx, log, remoteClient, list, desiredNames, req.Namespace); err != nil {
+			return ctrl.Result{}, err
 		}
 	}
 
