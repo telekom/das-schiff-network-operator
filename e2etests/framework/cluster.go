@@ -38,6 +38,7 @@ type Framework struct {
 
 	// Track namespaces created during tests for cleanup.
 	testNamespaces []string
+	execInPodFn    func(context.Context, string, string, string, []string) (string, string, error)
 }
 
 // New creates a new Framework from the given config.

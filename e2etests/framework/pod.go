@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/netip"
 	"os/exec"
@@ -114,12 +115,22 @@ func (f *Framework) CreateTestPod(ctx context.Context, namespace, name, nodeName
 		}
 
 		if err := f.WaitForPodReady(ctx, namespace, name, f.Config.PodReadyTimeout); err != nil {
-			return fmt.Errorf("wait for pod %s/%s to become ready before IPv6 DAD check: %w", namespace, name, err)
+			return f.deleteCreatedTestPodAfterError(
+				ctx,
+				namespace,
+				name,
+				fmt.Errorf("wait for pod %s/%s to become ready before IPv6 DAD check: %w", namespace, name, err),
+			)
 		}
 
 		dadFailed, err := f.podHasIPv6DADFailure(ctx, namespace, name, testPodDADCheckTimeout)
 		if err != nil {
-			return fmt.Errorf("check IPv6 DAD state for pod %s/%s: %w", namespace, name, err)
+			return f.deleteCreatedTestPodAfterError(
+				ctx,
+				namespace,
+				name,
+				fmt.Errorf("check IPv6 DAD state for pod %s/%s: %w", namespace, name, err),
+			)
 		}
 		if !dadFailed {
 			return nil
@@ -227,7 +238,7 @@ func (f *Framework) podHasIPv6DADFailure(ctx context.Context, namespace, name st
 			return false, nil
 		}
 
-		stdout, stderr, err := f.ExecInPod(ctx, namespace, name, "", []string{"ip", "-6", "addr", "show"})
+		stdout, stderr, err := f.executePodCommand(ctx, namespace, name, "", []string{"ip", "-6", "addr", "show"})
 		if err != nil {
 			return false, fmt.Errorf("inspect IPv6 addresses in pod %s/%s failed (stderr=%s): %w", namespace, name, stderr, err)
 		}
@@ -241,6 +252,13 @@ func (f *Framework) podHasIPv6DADFailure(ctx context.Context, namespace, name st
 		return true, nil
 	})
 	return dadFailed, err
+}
+
+func (f *Framework) executePodCommand(ctx context.Context, namespace, podName, containerName string, command []string) (stdout, stderr string, err error) {
+	if f.execInPodFn != nil {
+		return f.execInPodFn(ctx, namespace, podName, containerName, command)
+	}
+	return f.ExecInPod(ctx, namespace, podName, containerName, command)
 }
 
 func podIsReady(pod *corev1.Pod) bool {
@@ -319,6 +337,13 @@ func (f *Framework) deletePodBestEffort(ctx context.Context, namespace, name str
 		return apierrors.IsNotFound(err), nil
 	})
 	return nil
+}
+
+func (f *Framework) deleteCreatedTestPodAfterError(ctx context.Context, namespace, name string, cause error) error {
+	if err := f.DeletePod(ctx, namespace, name); err != nil {
+		return errors.Join(cause, fmt.Errorf("delete pod %s/%s after error: %w", namespace, name, err))
+	}
+	return cause
 }
 
 // ExecInPod executes a command in a running pod and returns stdout, stderr.
