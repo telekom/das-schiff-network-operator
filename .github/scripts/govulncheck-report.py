@@ -8,10 +8,11 @@ import sys
 # Split govulncheck findings into standard library and module findings.
 #
 # A finding whose first trace entry names a function is one that govulncheck
-# considers reachable from this code. Only those decide the exit code.
+# considers reachable from this code. Only those decide the vulnerability exit code.
 #
-# The workflow propagates scanner failures; report-generation errors also
-# fail the step. Reachable module and standard-library findings fail the job.
+# JSON-mode govulncheck returns zero even for findings. This report fails for
+# reachable module or standard-library findings; the workflow separately
+# preserves scanner execution errors and report-generation failures.
 
 path = sys.argv[1]
 decoder = json.JSONDecoder()
@@ -68,6 +69,8 @@ print("\n".join(out))
 
 if called_mod:
     print(f"govulncheck: {len(called_mod)} module vulnerability(ies) reachable from this code", file=sys.stderr)
-    sys.exit(1)
 if called_std:
     print(f"govulncheck: {len(called_std)} standard library vulnerability(ies); upgrade the Go toolchain", file=sys.stderr)
+
+if called_mod or called_std:
+    sys.exit(1)
