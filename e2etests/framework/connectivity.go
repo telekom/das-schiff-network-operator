@@ -214,7 +214,12 @@ func (f *Framework) WaitForIPv6DADComplete(ctx context.Context, namespace, podNa
 				continue
 			}
 			if strings.Contains(line, "dadfailed") {
-				return false, fmt.Errorf("IPv6 DAD failed for %s on %s: %s", ipv6Addr, iface, strings.TrimSpace(line))
+				if err := resetIPv6Address(func(command []string) (string, string, error) {
+					return f.ExecInPod(ctx, namespace, podName, "", command)
+				}, ipv6Addr, iface); err != nil {
+					return false, err
+				}
+				return false, nil
 			}
 			if strings.Contains(line, "tentative") {
 				continue
@@ -223,6 +228,17 @@ func (f *Framework) WaitForIPv6DADComplete(ctx context.Context, namespace, podNa
 		}
 		return false, nil
 	})
+}
+
+func resetIPv6Address(exec func([]string) (string, string, error), ipv6Addr, iface string) error {
+	addr := ipv6Addr + "/64"
+	if _, stderr, err := exec([]string{"ip", "addr", "del", addr, "dev", iface}); err != nil {
+		return fmt.Errorf("delete IPv6 address %s: %s: %w", addr, stderr, err)
+	}
+	if _, stderr, err := exec([]string{"ip", "addr", "add", addr, "dev", iface}); err != nil {
+		return fmt.Errorf("re-add IPv6 address %s: %s: %w", addr, stderr, err)
+	}
+	return nil
 }
 
 func parseCanonicalIPv6(s string) (netip.Addr, error) {
