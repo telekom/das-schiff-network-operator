@@ -280,6 +280,12 @@ func PhaseUnderlay(cluster *Cluster) error {
 	for _, node := range cluster.Nodes {
 		Logf("Starting CRA on %s...", node.Name)
 
+		if cluster.Name == "nwop2" {
+			if _, err := DockerExec(node.Name, "touch", "/etc/cra/no-ephemeral"); err != nil {
+				return fmt.Errorf("disable ephemeral CRA snapshot on %s: %w", node.Name, err)
+			}
+		}
+
 		// CRA configs are already bind-mounted at /etc/cra.
 		// systemd generator reads /etc/cra/interfaces + /etc/cra/flavour → creates cra.service.
 		if _, err := DockerExec(node.Name, "systemctl", "daemon-reload"); err != nil {
