@@ -68,6 +68,7 @@ vet: ## Run go vet against code.
 
 .PHONY: test
 test: manifests generate fmt vet envtest ## Run tests.
+	set -e
 	TEST_PACKAGES=$$(go list -tags=integration ./...); \
 	TEST_PACKAGES=$$(printf '%s\n' "$$TEST_PACKAGES" | grep -v -e '/e2etests$$' -e /e2etests/tests -e /e2etests/config -e /e2e/ || true); \
 	if [ -z "$$TEST_PACKAGES" ]; then \
