@@ -30,11 +30,6 @@ import (
 	"golang.org/x/crypto/ssh/knownhosts"
 )
 
-var (
-	_ func([]string, string, string, time.Duration) *Netconf          = NewNetconf
-	_ func([]string, string, string, time.Duration) (*Manager, error) = NewManager
-)
-
 func TestValidateKnownHostsEntries(t *testing.T) {
 	hostKey := newTestPublicKey(t)
 
