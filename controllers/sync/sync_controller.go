@@ -296,7 +296,9 @@ func (r *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 func (r *Controller) remoteClusterExists(ctx context.Context, namespace string) (bool, error) {
 	clusterList := &unstructured.UnstructuredList{}
-	clusterList.SetGroupVersionKind(capiClusterGVK)
+	clusterListGVK := capiClusterGVK
+	clusterListGVK.Kind += "List"
+	clusterList.SetGroupVersionKind(clusterListGVK)
 	if err := r.Client.List(ctx, clusterList, client.InNamespace(namespace)); err != nil {
 		if apierrors.IsNotFound(err) || apimeta.IsNoMatchError(err) {
 			return false, nil
