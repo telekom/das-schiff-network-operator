@@ -29,7 +29,7 @@ func TestIsIPv6Target(t *testing.T) {
 		{name: "public 8.8.8.8", target: "8.8.8.8", want: false},
 
 		// IPv4-mapped IPv6 (::ffff:a.b.c.d) — net.ParseIP.To4() is non-nil,
-		// so these are treated as IPv4 for ping purposes (same behaviour as before).
+		// so these are intentionally treated as IPv4 for ping purposes.
 		{name: "IPv4-mapped ::ffff:192.0.2.1", target: "::ffff:192.0.2.1", want: false},
 
 		// Edge cases that the old strings.Contains(target, ":") approach got wrong.
