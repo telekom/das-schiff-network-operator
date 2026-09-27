@@ -73,6 +73,9 @@ func parseIPv6DADState(ipAddrOutput string, ipv6Addr netip.Addr) (string, ipv6DA
 			continue
 		}
 		cidr := fields[1]
+		if _, err := netip.ParsePrefix(cidr); err != nil {
+			continue
+		}
 		address, err := netip.ParseAddr(strings.SplitN(cidr, "/", 2)[0])
 		if err != nil || address.Compare(ipv6Addr) != 0 {
 			continue
