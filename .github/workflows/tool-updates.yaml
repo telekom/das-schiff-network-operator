@@ -66,6 +66,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          KUSTOMIZE_VERSION: ${{ steps.versions.outputs.kustomize }}
+          CONTROLLER_TOOLS_VERSION: ${{ steps.versions.outputs.controller_tools }}
+          GOLANGCI_LINT_VERSION: ${{ steps.versions.outputs.golangci_lint }}
         run: |
           # updates_lines accumulates one markdown bullet per tool with an available update.
           # It is only written to updates.md after all checks, when found_any=true.
@@ -94,9 +97,9 @@ jobs:
             fi
           }
 
-          check_github_release "kubernetes-sigs/kustomize" "${{ steps.versions.outputs.kustomize }}" "kustomize"
-          check_github_release "kubernetes-sigs/controller-tools" "${{ steps.versions.outputs.controller_tools }}" "controller-tools"
-          check_github_release "golangci/golangci-lint" "${{ steps.versions.outputs.golangci_lint }}" "golangci-lint"
+          check_github_release "kubernetes-sigs/kustomize" "$KUSTOMIZE_VERSION" "kustomize"
+          check_github_release "kubernetes-sigs/controller-tools" "$CONTROLLER_TOOLS_VERSION" "controller-tools"
+          check_github_release "golangci/golangci-lint" "$GOLANGCI_LINT_VERSION" "golangci-lint"
 
           if [ "$found_any" = "true" ]; then
             # Write updates.md only when there are actual updates to report.
