@@ -154,4 +154,6 @@ jobs:
             --allowed_licenses=Apache-2.0,MIT,BSD-2-Clause,BSD-3-Clause,ISC,MPL-2.0,CC0-1.0,Unlicense \
             --ignore=github.com/rackn/gohai
           (cd e2e/setup && go-licenses check ./... \
-            --allowed_licenses=Apache-2.0,MIT,BSD-2-Clause,BSD-3-Clause,ISC,MPL-2.0,CC0-1.0,Unlicense)
+            --allowed_licenses=Apache-2.0,MIT,BSD-2-Clause,BSD-3-Clause,ISC,MPL-2.0,CC0-1.0,Unlicense \
+            --ignore=github.com/telekom/das-schiff-network-operator/e2e/setup \
+            --ignore=github.com/telekom/das-schiff-network-operator/e2e/setup/cmd)
