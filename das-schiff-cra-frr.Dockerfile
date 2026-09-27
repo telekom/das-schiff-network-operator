@@ -22,7 +22,7 @@ COPY pkg/ pkg/
 
 # Copy BPF C source and compile .o objects before go build
 COPY bpf/ bpf/
-RUN cd pkg/bpf && go generate ./...
+RUN cd pkg/bpf && go generate .
 
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-$(go env GOARCH)} \
     go build -trimpath -ldflags="-s -w ${ldflags}" -o frr-cra main.go
