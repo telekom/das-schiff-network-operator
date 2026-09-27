@@ -140,7 +140,7 @@ func isTypedNilHealthChecker(hc healthcheck.HealthCheckerInterface) bool {
 	}
 	v := reflect.ValueOf(hc)
 	switch v.Kind() {
-	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
 		return v.IsNil()
 	default:
 		return false
