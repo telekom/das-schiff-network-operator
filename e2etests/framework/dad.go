@@ -74,7 +74,7 @@ func parseIPv6DADState(ipAddrOutput string, ipv6Addr netip.Addr) (string, ipv6DA
 		}
 		cidr := fields[1]
 		address, err := netip.ParseAddr(strings.SplitN(cidr, "/", 2)[0])
-		if err != nil || address.Addr().Compare(ipv6Addr) != 0 {
+		if err != nil || address.Compare(ipv6Addr) != 0 {
 			continue
 		}
 		if strings.Contains(line, "dadfailed") {
