@@ -41,6 +41,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y llvm clang libbpf-dev gcc-multilib linux-headers-$(uname -r)
 
+      - name: Generate BPF objects
+        run: make bpf-generate
+
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
 
@@ -136,6 +139,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y llvm clang libbpf-dev gcc-multilib linux-headers-$(uname -r)
 
+      - name: Generate BPF objects
+        run: make bpf-generate
+
       # Note: This workflow intentionally uses go-licenses v2 for `check`.
       # The Makefile still uses go-licenses v1 for other tasks (e.g. save/report),
       # so both major versions coexist by design.
@@ -147,3 +153,5 @@ jobs:
           go-licenses check ./... \
             --allowed_licenses=Apache-2.0,MIT,BSD-2-Clause,BSD-3-Clause,ISC,MPL-2.0,CC0-1.0,Unlicense \
             --ignore=github.com/rackn/gohai
+          (cd e2e/setup && go-licenses check ./... \
+            --allowed_licenses=Apache-2.0,MIT,BSD-2-Clause,BSD-3-Clause,ISC,MPL-2.0,CC0-1.0,Unlicense)
