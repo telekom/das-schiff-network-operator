@@ -53,14 +53,23 @@ jobs:
         # their original status; malformed reports also fail the step.
         run: |
           scan_status=0
-          govulncheck -format json ./... > govulncheck.json || scan_status=$?
+          run_scan() {
+            local module_dir=$1
+            local report=$2
+            local report_path="$PWD/$report"
+            (cd "$module_dir" && govulncheck -format json ./... > "$report_path") || scan_status=$?
+          }
+          run_scan . govulncheck.json
+          run_scan e2e/setup e2e-setup-govulncheck.json
           report_status=0
-          if [ -s govulncheck.json ]; then
-            python3 .github/scripts/govulncheck-report.py govulncheck.json >> "$GITHUB_STEP_SUMMARY" || report_status=$?
-          else
-            echo "govulncheck produced no JSON report" >> "$GITHUB_STEP_SUMMARY"
-            report_status=1
-          fi
+          for report in govulncheck.json e2e-setup-govulncheck.json; do
+            if [ -s "$report" ]; then
+              python3 .github/scripts/govulncheck-report.py "$report" >> "$GITHUB_STEP_SUMMARY" || report_status=$?
+            else
+              echo "govulncheck produced no JSON report: $report" >> "$GITHUB_STEP_SUMMARY"
+              report_status=1
+            fi
+          done
           if [ "$scan_status" -ne 0 ]; then
             exit "$scan_status"
           fi
