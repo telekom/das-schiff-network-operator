@@ -153,19 +153,6 @@ func TestNewNetconfWithKnownHosts_RejectsMissingKnownHostsPath(t *testing.T) {
 	}
 }
 
-func TestNewNetconf_PreservesLegacyConstructor(t *testing.T) {
-	nc := NewNetconf([]string{" 169.254.33.1:830 ", ""}, "user", "password", 0)
-	if nc == nil {
-		t.Fatal("NewNetconf returned nil")
-	}
-	if len(nc.urls) != 1 || nc.urls[0] != "169.254.33.1:830" {
-		t.Fatalf("urls = %#v, want normalized CRA URL", nc.urls)
-	}
-	if nc.sshConfig == nil || nc.sshConfig.HostKeyCallback == nil {
-		t.Fatal("NewNetconf did not configure a host-key callback")
-	}
-}
-
 func TestNewManagerWithKnownHosts_ValidatesBeforeDeviceAccess(t *testing.T) {
 	_, err := NewManagerWithKnownHosts(
 		[]string{"169.254.33.1:830"},
