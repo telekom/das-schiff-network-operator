@@ -74,17 +74,6 @@ type Metrics struct {
 	BridgeFDB        ShowBridgeFDBOutput
 }
 
-// NewManager creates a CRA manager with the legacy host-key behavior.
-//
-// Deprecated: use NewManagerWithKnownHosts for host-key verification.
-func NewManager(
-	urls []string,
-	user, password string,
-	timeout time.Duration,
-) (*Manager, error) {
-	return buildManager(urls, user, password, "", timeout, false)
-}
-
 // NewManagerWithKnownHosts creates a CRA manager that verifies CRA host keys
 // against the supplied known_hosts file.
 func NewManagerWithKnownHosts(
@@ -93,24 +82,15 @@ func NewManagerWithKnownHosts(
 	knownHostsPath string,
 	timeout time.Duration,
 ) (*Manager, error) {
-	return buildManager(urls, user, password, knownHostsPath, timeout, true)
+	return buildManager(urls, user, password, knownHostsPath, timeout)
 }
 
 func buildManager(
 	urls []string,
 	user, password, knownHostsPath string,
 	timeout time.Duration,
-	verifyKnownHosts bool,
 ) (*Manager, error) {
-	var (
-		netconfClient *Netconf
-		err           error
-	)
-	if verifyKnownHosts {
-		netconfClient, err = NewNetconfWithKnownHosts(urls, user, password, knownHostsPath, timeout)
-	} else {
-		netconfClient = NewNetconf(urls, user, password, timeout)
-	}
+	netconfClient, err := NewNetconfWithKnownHosts(urls, user, password, knownHostsPath, timeout)
 	if err != nil {
 		return nil, err
 	}

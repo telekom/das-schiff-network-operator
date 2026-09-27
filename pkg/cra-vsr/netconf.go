@@ -93,13 +93,6 @@ type Netconf struct {
 	urls      []string
 }
 
-// NewNetconf creates a NETCONF client with the legacy host-key behavior.
-//
-// Deprecated: use NewNetconfWithKnownHosts for host-key verification.
-func NewNetconf(urls []string, user, pwd string, timeout time.Duration) *Netconf {
-	return buildNetconf(urls, user, pwd, timeout, ssh.InsecureIgnoreHostKey()) //nolint:gosec // preserve legacy API behavior
-}
-
 // NewNetconfWithKnownHosts creates a NETCONF client that verifies CRA host keys
 // against the supplied known_hosts file.
 func NewNetconfWithKnownHosts(urls []string, user, pwd, knownHostsPath string, timeout time.Duration) (*Netconf, error) {
