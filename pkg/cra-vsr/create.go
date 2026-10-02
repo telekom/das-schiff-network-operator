@@ -153,7 +153,7 @@ func (m *Manager) createVXLAN(
 	br.Slaves = append(br.Slaves, slave)
 }
 
-func (m *Manager) createVLAN(vlanID, mtu int, br *Bridge, intfs *Interfaces) *VLAN {
+func (m *Manager) createVLAN(vlanID, mtu int, disableSegmentation bool, br *Bridge, intfs *Interfaces) *VLAN {
 	vlan := VLAN{
 		Name:          fmt.Sprintf("%s%d", vlanPrefix, vlanID),
 		MTU:           &mtu,
@@ -165,6 +165,10 @@ func (m *Manager) createVLAN(vlanID, mtu int, br *Bridge, intfs *Interfaces) *VL
 			},
 		},
 	}
+	tso := !disableSegmentation
+	gso := !disableSegmentation
+	vlan.TSOEnabled = &tso
+	vlan.GSOEnabled = &gso
 	intfs.VLANs = append(intfs.VLANs, vlan)
 
 	slave := BridgeSlave{

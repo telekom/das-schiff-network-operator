@@ -433,6 +433,8 @@ type VLAN struct {
 	VlanID        int           `xml:"vlan-id"`
 	LinkInterface string        `xml:"link-interface"`
 	MTU           *int          `xml:"mtu,omitempty"`
+	TSOEnabled    *bool         `xml:"tso-enabled,omitempty"`
+	GSOEnabled    *bool         `xml:"gso-enabled,omitempty"`
 	NetworkStack  *NetworkStack `xml:"network-stack,omitempty"`
 }
 
