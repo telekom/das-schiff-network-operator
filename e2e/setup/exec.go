@@ -2,11 +2,14 @@ package setup
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
 	"time"
+
+	"k8s.io/apimachinery/pkg/util/wait"
 )
 
 // DockerExec runs a command inside a container via docker exec.
@@ -66,24 +69,25 @@ func RunCmdOutput(name string, args ...string) (string, error) {
 }
 
 // WaitFor polls fn every interval until it returns true or timeout expires.
+// Condition errors are logged and retried; true succeeds even with a diagnostic.
+// The timeout interrupts the polling interval, but cannot interrupt fn itself.
 func WaitFor(description string, timeout, interval time.Duration, fn func() (bool, error)) error {
 	start := time.Now()
-	deadline := start.Add(timeout)
-	for {
+	err := wait.PollUntilContextTimeout(context.Background(), interval, timeout, true, func(context.Context) (bool, error) {
 		ok, err := fn()
 		if err != nil {
 			Logf("  %s: %v", description, err)
 		}
-		if ok {
-			return nil
+		if !ok {
+			Logf("  waiting for %s... (%v / %v)", description,
+				time.Since(start).Round(time.Second), timeout)
 		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("timeout waiting for %s (%v)", description, timeout)
-		}
-		Logf("  waiting for %s... (%v / %v)", description,
-			time.Since(start).Round(time.Second), timeout)
-		time.Sleep(interval)
+		return ok, nil
+	})
+	if err != nil {
+		return fmt.Errorf("timeout waiting for %s (%v): %w", description, timeout, err)
 	}
+	return nil
 }
 
 // Logf prints a timestamped log message.
