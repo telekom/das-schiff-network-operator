@@ -16,9 +16,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Command cni-workload is a CNI plugin that provides fully routed, no-shared-L2
-// secondary attachments for KubeVirt VMs (via the built-in bridge binding) and
-// routed pods. See pkg/cni for details.
+// Command cni-workload is a CNI plugin that provides secondary attachments for
+// KubeVirt VMs (via the built-in bridge binding) and pods: fully routed with no
+// shared L2 by default, or attached to existing Layer2 bridges as an access or
+// trunk port. See pkg/cni for details.
 
 package main
 

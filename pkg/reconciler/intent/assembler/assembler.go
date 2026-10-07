@@ -58,21 +58,7 @@ func Assemble(contributions []*builder.NodeContribution) (*AssembleResult, error
 				spec.Layer2s[k] = v
 				continue
 			}
-			// Prefer non-zero scalar fields (the L2A builder sets VLAN/VNI/MTU,
-			// while the mirror builder may contribute only MirrorACLs).
-			if v.VLAN != 0 {
-				existing.VLAN = v.VLAN
-			}
-			if v.VNI != 0 {
-				existing.VNI = v.VNI
-			}
-			if v.MTU != 0 {
-				existing.MTU = v.MTU
-			}
-			if v.IRB != nil {
-				existing.IRB = v.IRB
-			}
-			existing.MirrorACLs = append(existing.MirrorACLs, v.MirrorACLs...)
+			mergeLayer2(&existing, &v)
 			spec.Layer2s[k] = existing
 		}
 
@@ -255,6 +241,29 @@ func mergeStringSlice(a, b []string) []string {
 		}
 	}
 	return a
+}
+
+// mergeLayer2 folds a further contribution for the same Layer2 key into
+// existing. Non-zero scalars and the attachment identity win (the L2A builder
+// sets VLAN/VNI/MTU/IRB/AttachmentRef, while the mirror builder may contribute
+// only MirrorACLs), MirrorACLs are appended.
+func mergeLayer2(existing, v *networkv1alpha1.Layer2) {
+	if v.VLAN != 0 {
+		existing.VLAN = v.VLAN
+	}
+	if v.VNI != 0 {
+		existing.VNI = v.VNI
+	}
+	if v.MTU != 0 {
+		existing.MTU = v.MTU
+	}
+	if v.IRB != nil {
+		existing.IRB = v.IRB
+	}
+	if v.AttachmentRef != nil {
+		existing.AttachmentRef = v.AttachmentRef
+	}
+	existing.MirrorACLs = append(existing.MirrorACLs, v.MirrorACLs...)
 }
 
 // mergeStaticRoutes deduplicates identical routes and prefers an explicit

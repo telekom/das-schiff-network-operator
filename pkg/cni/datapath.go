@@ -20,11 +20,13 @@ package cni
 
 import (
 	"crypto/sha256"
-	"encoding/hex"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"net"
 	"os"
+	"strconv"
+	"strings"
 
 	"github.com/containernetworking/cni/pkg/skel"
 	current "github.com/containernetworking/cni/pkg/types/100"
@@ -39,12 +41,24 @@ import (
 // portNamePrefix prefixes the CRA-side veth name.
 const portNamePrefix = "cra"
 
-// portNameHexLen is the number of hash hex characters appended after
-// portNamePrefix. The generated value is a real veth device name and must fit
-// the 15-character kernel IFNAMSIZ-1 limit: len("cra") + 12 = 15. The VSR
-// resolves infra-<portName> through the veth's ifalias, so that reference does
-// not constrain the device name.
-const portNameHexLen = 12
+const (
+	// maxTrunkVLANNameSuffix is the largest VLAN sub-interface suffix a trunk
+	// port can grow: <port>.<vlan> is a real device name as well.
+	maxTrunkVLANNameSuffix = ".4094"
+	// portNameHashLen is the number of hash characters appended after
+	// portNamePrefix. The generated value is a real veth device name and must
+	// fit the 15-character kernel IFNAMSIZ-1 limit together with the longest
+	// VLAN suffix: len("cra") + 7 + len(".4094") = 15. The budget is reserved
+	// for every attachment, not just trunks, so the name does not depend on the
+	// attach mode: DEL derives it from the config it is handed, which may no
+	// longer say "trunk" by the time the sandbox goes away. The VSR resolves
+	// infra-<portName> through the veth's ifalias, so that reference does not
+	// constrain the device name.
+	portNameHashLen = 7
+	// portNameBase encodes the hash in base36 to keep ~36 bits of entropy in
+	// the 7 characters left over.
+	portNameBase = 36
+)
 
 // onLinkRouteMetric keeps the routed on-link default at a lower priority than the
 // pod's own primary default (on eth0) so the virt-launcher pod itself is
@@ -55,11 +69,32 @@ const onLinkRouteMetric = 4096
 // container ID and the pod-side interface name. The interface name is part of
 // the key because the runtime (Multus) reuses one container ID for every
 // attachment of a pod, so hashing the container ID alone would collide between
-// two routed networks on the same pod. The generated real veth device name is
-// bounded to 15 characters, the kernel IFNAMSIZ-1 limit.
+// two routed networks on the same pod.
 func portName(containerID, ifName string) string {
 	sum := sha256.Sum256([]byte(containerID + "/" + ifName))
-	return portNamePrefix + hex.EncodeToString(sum[:])[:portNameHexLen]
+	// Reduce the first 64 hash bits modulo base^len so the encoding is exactly
+	// portNameHashLen characters (zero-padded), uniformly distributed.
+	space := uint64(1)
+	for range portNameHashLen {
+		space *= portNameBase
+	}
+	digits := strconv.FormatUint(binary.BigEndian.Uint64(sum[:8])%space, portNameBase)
+	return portNamePrefix + strings.Repeat("0", portNameHashLen-len(digits)) + digits
+}
+
+// ipv6MinMTU is the smallest link MTU IPv6 runs on (RFC 8200). The kernel
+// refuses IPv6 addresses on a smaller link, so an attachment whose IPAM result
+// carries IPv6 is rejected up front with a clear reason instead of a bare
+// EINVAL from AddrAdd.
+const ipv6MinMTU = 1280
+
+// checkIPv6MTU rejects an MTU below the IPv6 minimum when the result contains
+// an IPv6 address. Smaller MTUs stay valid for IPv4-only attachments.
+func checkIPv6MTU(conf *NetConf, result *current.Result) error {
+	if _, haveV6 := addressFamilies(result); haveV6 && conf.mtu() < ipv6MinMTU {
+		return fmt.Errorf("mtu %d is below the IPv6 minimum of %d but the IPAM result carries an IPv6 address", conf.mtu(), ipv6MinMTU)
+	}
+	return nil
 }
 
 // openCRANetns opens the resolved CRA netns and verifies that the namespace
@@ -84,6 +119,9 @@ func openCRANetns(conf *NetConf, craNetnsPath string) (ns.NetNS, error) {
 // (named portName) into the CRA network namespace through the verified handle
 // craNS. It returns the pod-side interface descriptor.
 func setupPodSide(conf *NetConf, args *skel.CmdArgs, craNS ns.NetNS, portName string, result *current.Result) (*current.Interface, error) {
+	if err := checkIPv6MTU(conf, result); err != nil {
+		return nil, err
+	}
 	iface := &current.Interface{Name: args.IfName, Sandbox: args.Netns}
 
 	err := ns.WithNetNSPath(args.Netns, func(_ ns.NetNS) (err error) {
@@ -133,12 +171,17 @@ func setupPodSide(conf *NetConf, args *skel.CmdArgs, craNS ns.NetNS, portName st
 			return fmt.Errorf("failed to set pod interface up: %w", uerr)
 		}
 
-		// KubeVirt bridge binding derives the guest gateway from a route on the
-		// pod interface (filterIPv4RoutesByInterface): it needs at least one
-		// route whose next-hop interface is this link and relays that next-hop
-		// to the guest as its gateway. Install on-link default routes via the
-		// CRA link-local gateways.
-		if rerr := installOnLinkDefaults(conf, podLink, result); rerr != nil {
+		// In routed mode, KubeVirt bridge binding derives the guest gateway from
+		// a route on the pod interface (filterIPv4RoutesByInterface): it needs
+		// at least one route whose next-hop interface is this link and relays
+		// that next-hop to the guest as its gateway. Install on-link default
+		// routes via the CRA link-local gateways. In L2 mode the guest reaches
+		// its gateway over the shared L2 domain, so no on-link default is added.
+		if conf.isL2() {
+			if rerr := installIPAMRoutes(podLink, result); rerr != nil {
+				return rerr
+			}
+		} else if rerr := installOnLinkDefaults(conf, podLink, result); rerr != nil {
 			return rerr
 		}
 
@@ -209,6 +252,53 @@ func addRoute(route *netlink.Route) error {
 		return fmt.Errorf("route already exists in the pod (installed by another interface); refusing to replace it: %w", err)
 	}
 	return fmt.Errorf("route add: %w", err)
+}
+
+// installIPAMRoutes applies the routes the delegated IPAM returned (e.g. the
+// `routes` block of static/host-local) to the pod interface in L2 mode, where
+// the plugin has no gateway of its own. A route without a gateway falls back to
+// the IPAM gateway of the same address family (the CNI convention, as in
+// ip.ConfigureIface) and is on-link when there is none either.
+func installIPAMRoutes(podLink netlink.Link, result *current.Result) error {
+	for i, r := range result.Routes {
+		if r == nil {
+			return fmt.Errorf("IPAM returned an empty route entry at index %d", i)
+		}
+		gw := r.GW
+		if gw == nil {
+			for _, ipc := range result.IPs {
+				if ipc != nil && ipc.Gateway != nil && (ipc.Gateway.To4() != nil) == (r.Dst.IP.To4() != nil) {
+					gw = ipc.Gateway
+					break
+				}
+			}
+		}
+		dst := r.Dst
+		route := &netlink.Route{
+			LinkIndex: podLink.Attrs().Index,
+			Dst:       &dst,
+			Gw:        gw,
+			Priority:  r.Priority,
+			MTU:       r.MTU,
+			AdvMSS:    r.AdvMSS,
+		}
+		if r.Table != nil {
+			route.Table = *r.Table
+		}
+		switch {
+		case r.Scope != nil:
+			if *r.Scope < 0 || *r.Scope > int(netlink.SCOPE_NOWHERE) {
+				return fmt.Errorf("IPAM route %s has an invalid scope %d", r.Dst.String(), *r.Scope)
+			}
+			route.Scope = netlink.Scope(*r.Scope) //nolint:gosec // range-checked above
+		case gw == nil:
+			route.Scope = netlink.SCOPE_LINK
+		}
+		if rerr := addRoute(route); rerr != nil {
+			return fmt.Errorf("failed to add IPAM route %s via %v: %w", r.Dst.String(), gw, rerr)
+		}
+	}
+	return nil
 }
 
 // setupCRASide brings the moved CRA-side port up inside the CRA network

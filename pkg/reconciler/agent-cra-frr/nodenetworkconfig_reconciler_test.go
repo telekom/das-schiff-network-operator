@@ -81,3 +81,45 @@ func TestConvertWorkloadPortsCoversEveryTable(t *testing.T) {
 		}
 	}
 }
+
+// TestConvertLayer2LeavesAnycastMACNilWithoutIRB guards the CRA agent against a
+// Layer2 domain that has no IRB (legacy without anycast gateways, or an L2A
+// with DisableAnycast): the netlink layer parses every non-nil AnycastMAC, so
+// a pointer to "" would abort ApplyConfiguration for the whole node.
+func TestConvertLayer2LeavesAnycastMACNilWithoutIRB(t *testing.T) {
+	applier := &CRAFRRConfigApplier{baseConfig: &config.BaseConfig{}}
+
+	nodeCfg := &v1alpha1.NodeNetworkConfig{
+		Spec: v1alpha1.NodeNetworkConfigSpec{
+			Layer2s: map[string]v1alpha1.Layer2{
+				"100": {VLAN: 100, VNI: 100100},
+				"200": {VLAN: 200, VNI: 100200, IRB: &v1alpha1.IRB{
+					VRF: "tenant-a", IPAddresses: []string{"10.0.0.1/24"}, MACAddress: "02:00:00:00:00:01",
+				}},
+			},
+		},
+	}
+
+	netlinkConfig := applier.convertNodeConfigToNetlink(nodeCfg)
+	if len(netlinkConfig.Layer2s) != 2 {
+		t.Fatalf("expected 2 Layer2s, got %d", len(netlinkConfig.Layer2s))
+	}
+	for i := range netlinkConfig.Layer2s {
+		l2 := &netlinkConfig.Layer2s[i]
+		switch l2.VlanID {
+		case 100:
+			if l2.AnycastMAC != nil {
+				t.Errorf("vlan 100 has no IRB but AnycastMAC=%q", *l2.AnycastMAC)
+			}
+		case 200:
+			if l2.AnycastMAC == nil || *l2.AnycastMAC != "02:00:00:00:00:01" {
+				t.Errorf("vlan 200: AnycastMAC not carried over: %v", l2.AnycastMAC)
+			}
+			if l2.VRF != "tenant-a" || len(l2.AnycastGateways) != 1 {
+				t.Errorf("vlan 200: IRB not carried over: %+v", l2)
+			}
+		default:
+			t.Errorf("unexpected vlan %d", l2.VlanID)
+		}
+	}
+}

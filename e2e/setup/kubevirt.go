@@ -29,8 +29,9 @@ func preloadGuestImage(cluster *Cluster) error {
 }
 
 // PhaseKubeVirt installs KubeVirt and deploys the routed-VM datapath fixture:
-// the cni-workload installer DaemonSet, the routed NetworkAttachmentDefinition and
-// a test VirtualMachine whose only data NIC is the routed secondary network.
+// the routed NetworkAttachmentDefinition and a test VirtualMachine whose only
+// data NIC is the routed secondary network. The cni-workload plugin it relies on
+// is installed by PhaseWorkloadCNI, which runs for every lab.
 //
 // It is opt-in (invoked only when E2E_KUBEVIRT is set) because the base lab does
 // not otherwise need KubeVirt. Teardown is handled by the normal `down` flow
@@ -44,34 +45,6 @@ func PhaseKubeVirt(cluster *Cluster, repoRoot string) error {
 		fullArgs := append([]string{"--kubeconfig=" + kubeconfigPath}, args...)
 		_, err := DockerExec(cp.Name, append([]string{"kubectl"}, fullArgs...)...)
 		return err
-	}
-
-	// Load the cni-workload image into every node's containerd.
-	imgBase := EnvOr("IMG_BASE", "ghcr.io/telekom")
-	cniImg := imgBase + "/das-schiff-nwop-cni-workload:latest"
-	Logf("Loading %s into nodes...", cniImg)
-	for _, node := range cluster.Nodes {
-		if err := importImage(node.Name, cniImg); err != nil {
-			return fmt.Errorf("loading %s on %s: %w", cniImg, node.Name, err)
-		}
-	}
-
-	// Install the cni-workload plugin binary on all nodes.
-	Logf("Installing cni-workload installer DaemonSet...")
-	if err := kubectl("apply", "-f", "/repo/e2e/kubevirt/install/daemonset.yaml"); err != nil {
-		return fmt.Errorf("apply cni-workload installer: %w", err)
-	}
-	// The manifest names the public image; point it at the one loaded above so
-	// an overridden IMG_BASE does not end in a pull of an unavailable image.
-	if err := kubectl("-n", "kube-system", "set", "image", "daemonset/cni-workload-installer",
-		"installer="+cniImg); err != nil {
-		return fmt.Errorf("set cni-workload installer image: %w", err)
-	}
-	// The VM below is only schedulable once every node has the plugin binary:
-	// a Multus ADD on a node the installer has not reached yet fails outright.
-	if err := kubectl("-n", "kube-system", "rollout", "status", "daemonset/cni-workload-installer",
-		"--timeout=180s"); err != nil {
-		return fmt.Errorf("waiting for cni-workload installer rollout: %w", err)
 	}
 
 	// Install KubeVirt operator + CR.

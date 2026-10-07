@@ -26,6 +26,7 @@ import (
 	"testing"
 
 	"github.com/containernetworking/cni/pkg/skel"
+	"github.com/containernetworking/cni/pkg/types"
 	current "github.com/containernetworking/cni/pkg/types/100"
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/containernetworking/plugins/pkg/testutils"
@@ -184,6 +185,71 @@ func TestDatapathAddDel(t *testing.T) {
 	}
 	if _, err := openCRANetns(conf, "/var/run/netns/does-not-exist-"+args.ContainerID); !errors.As(err, new(ns.NSPathNotExistErr)) {
 		t.Errorf("openCRANetns on missing netns: got %v, want NSPathNotExistErr", err)
+	}
+}
+
+// TestInstallIPAMRoutesRefusesToHijackExistingRoute pins the secondary-attachment
+// contract: a route the pod already owns through another interface (here the
+// primary interface's metric-0 default) must fail the ADD instead of being
+// silently replaced by the IPAM route of the L2 attachment.
+func TestInstallIPAMRoutesRefusesToHijackExistingRoute(t *testing.T) {
+	requireRoot(t)
+
+	podNS, err := testutils.NewNS()
+	if err != nil {
+		t.Fatalf("create pod netns: %v", err)
+	}
+	defer testutils.UnmountNS(podNS) //nolint:errcheck
+
+	if derr := podNS.Do(func(_ ns.NetNS) error {
+		primary := &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: "eth0"}}
+		if e := netlink.LinkAdd(primary); e != nil {
+			return fmt.Errorf("add eth0: %w", e)
+		}
+		if e := netlink.LinkSetUp(primary); e != nil {
+			return fmt.Errorf("up eth0: %w", e)
+		}
+		if e := netlink.AddrAdd(primary, &netlink.Addr{IPNet: &net.IPNet{IP: net.ParseIP("10.0.0.2"), Mask: net.CIDRMask(24, 32)}}); e != nil {
+			return fmt.Errorf("addr eth0: %w", e)
+		}
+		if e := netlink.RouteAdd(&netlink.Route{LinkIndex: primary.Attrs().Index, Gw: net.ParseIP("10.0.0.1")}); e != nil {
+			return fmt.Errorf("default via eth0: %w", e)
+		}
+		secondary := &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: "net1"}}
+		if e := netlink.LinkAdd(secondary); e != nil {
+			return fmt.Errorf("add net1: %w", e)
+		}
+		if e := netlink.LinkSetUp(secondary); e != nil {
+			return fmt.Errorf("up net1: %w", e)
+		}
+		if e := netlink.AddrAdd(secondary, &netlink.Addr{IPNet: &net.IPNet{IP: net.ParseIP("10.100.0.5"), Mask: net.CIDRMask(24, 32)}}); e != nil {
+			return fmt.Errorf("addr net1: %w", e)
+		}
+
+		_, anyV4, _ := net.ParseCIDR("0.0.0.0/0")
+		result := &current.Result{
+			IPs:    []*current.IPConfig{{Address: net.IPNet{IP: net.ParseIP("10.100.0.5"), Mask: net.CIDRMask(24, 32)}, Gateway: net.ParseIP("10.100.0.1")}},
+			Routes: []*types.Route{{Dst: *anyV4}},
+		}
+		if e := installIPAMRoutes(secondary, result); e == nil || !isExists(e) {
+			t.Errorf("installIPAMRoutes with a colliding default: got %v, want EEXIST", e)
+		}
+
+		routes, e := netlink.RouteList(nil, netlink.FAMILY_V4)
+		if e != nil {
+			return fmt.Errorf("list routes: %w", e)
+		}
+		for _, r := range routes {
+			if r.Dst != nil && r.Dst.IP != nil && !r.Dst.IP.IsUnspecified() {
+				continue
+			}
+			if r.LinkIndex != primary.Attrs().Index || !r.Gw.Equal(net.ParseIP("10.0.0.1")) {
+				t.Errorf("default route was hijacked: %+v", r)
+			}
+		}
+		return nil
+	}); derr != nil {
+		t.Fatalf("pod netns: %v", derr)
 	}
 }
 

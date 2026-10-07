@@ -82,6 +82,18 @@ type WorkloadPort struct {
 	HostRoutes []string `json:"hostRoutes,omitempty"`
 }
 
+// L2AttachedPort is a workload-CNI port attached to a Layer2 bridge (L2 attach
+// mode): the moved interface is added as a bridge slave with no L3 addressing.
+type L2AttachedPort struct {
+	// Interface is the moved interface name inside the CRA netns.
+	Interface string `json:"interface"`
+	// VlanID is the workload-side 802.1Q id the domain is carried under on a
+	// trunk port. 0 means the port itself is an untagged bridge slave; a
+	// non-zero id means the domain is reached through an <Interface>.<VlanID>
+	// VLAN sub-interface, which is what is enslaved to the bridge instead.
+	VlanID uint16 `json:"vlanId,omitempty"`
+}
+
 type NetlinkConfiguration struct {
 	VRFs          []VRFInformation    `json:"vrf"`
 	Layer2s       []Layer2Information `json:"layer2"`
