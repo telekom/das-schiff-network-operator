@@ -1,0 +1,65 @@
+# DaemonSet that installs the cni-workload plugin binary onto every node's CNI bin
+# directory. The per-network CNI config is delivered via the
+# NetworkAttachmentDefinition (Multus), so this ships the binary and the
+# optional node config (the plugin's trust anchors).
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: cni-workload-installer
+  namespace: kube-system
+  labels:
+    app: cni-workload-installer
+spec:
+  selector:
+    matchLabels:
+      app: cni-workload-installer
+  template:
+    metadata:
+      labels:
+        app: cni-workload-installer
+    spec:
+      hostNetwork: true
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: installer
+          image: ghcr.io/telekom/das-schiff-nwop-cni-workload:latest
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            privileged: true
+          env:
+            - name: CNI_BIN_DIR
+              value: /host/opt/cni/bin
+            - name: CNI_CONF_DIR
+              value: /host/etc/cni/net.d
+            - name: CNI_NODE_CONF_DIR
+              value: /host/etc/cni/cni-workload
+          volumeMounts:
+            - name: cni-bin
+              mountPath: /host/opt/cni/bin
+            - name: cni-conf
+              mountPath: /host/etc/cni/net.d
+            - name: cni-node-conf
+              mountPath: /host/etc/cni/cni-workload
+            - name: node-config
+              mountPath: /etc/cni-workload
+              readOnly: true
+      volumes:
+        - name: cni-bin
+          hostPath:
+            path: /opt/cni/bin
+            type: DirectoryOrCreate
+        - name: cni-conf
+          hostPath:
+            path: /etc/cni/net.d
+            type: DirectoryOrCreate
+        - name: cni-node-conf
+          hostPath:
+            path: /etc/cni/cni-workload
+            type: DirectoryOrCreate
+        # Node-level plugin settings (trust anchors), see config/cni-workload/
+        # node-config.yaml. Optional: without it the plugin uses its defaults.
+        - name: node-config
+          configMap:
+            name: cni-workload-node-config
+            optional: true

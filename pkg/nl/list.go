@@ -44,7 +44,7 @@ func (n *Manager) ListVRFInterfaces() (map[int]VRFInformation, error) {
 	}
 
 	for _, link := range links {
-		if link.Type() != "vrf" {
+		if link.Type() != linkTypeVRF {
 			continue
 		}
 		vrf, ok := link.(*netlink.Vrf)
@@ -87,7 +87,7 @@ func (n *Manager) ListL3() ([]VRFInformation, error) {
 	}
 
 	for _, link := range links {
-		if !(link.Type() == "vrf") {
+		if link.Type() != linkTypeVRF {
 			continue
 		}
 		name := link.Attrs().Name
@@ -241,7 +241,7 @@ func (n *Manager) ListL2() ([]Layer2Information, error) {
 			if err != nil {
 				return nil, fmt.Errorf("error getting link by index: %w", err)
 			}
-			if vrf.Type() == "vrf" {
+			if vrf.Type() == linkTypeVRF {
 				info.VRF = vrf.Attrs().Name
 			}
 		}

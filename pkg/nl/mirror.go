@@ -661,7 +661,7 @@ func mirrorVRFIndexSet(links []netlink.Link, tunnels []GRETunnel, loopbacks []Lo
 	}
 	indices := make(map[int]struct{})
 	for _, link := range links {
-		if link.Type() != "vrf" {
+		if link.Type() != linkTypeVRF {
 			continue
 		}
 		if _, ok := mirrorVRFNames[link.Attrs().Name]; ok {

@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"text/template"
 
@@ -27,6 +28,22 @@ type FRRTemplate struct {
 type frrTemplateData struct {
 	Config     *config.BaseConfig
 	NodeConfig *v1alpha1.NodeNetworkConfigSpec
+	// GlobalWorkloadHostRoutes is the sorted, de-duplicated set of host routes
+	// of all VRF-less workload ports. The template exports exactly these into
+	// the underlay; a stable set keeps the rendered config (and thus FRR
+	// reloads) independent of port order and of routes shared between ports.
+	GlobalWorkloadHostRoutes []string
+}
+
+// globalWorkloadHostRoutes collects the host routes of the VRF-less workload
+// ports as a sorted set without duplicates.
+func globalWorkloadHostRoutes(nodeConfig *v1alpha1.NodeNetworkConfigSpec) []string {
+	routes := make([]string, 0, len(nodeConfig.GlobalWorkloadPorts))
+	for i := range nodeConfig.GlobalWorkloadPorts {
+		routes = append(routes, nodeConfig.GlobalWorkloadPorts[i].HostRoutes...)
+	}
+	slices.Sort(routes)
+	return slices.Compact(routes)
 }
 
 func (tpl FRRTemplate) TemplateFRR(cfg *config.BaseConfig, nodeConfig *v1alpha1.NodeNetworkConfigSpec) (string, error) {
@@ -36,8 +53,9 @@ func (tpl FRRTemplate) TemplateFRR(cfg *config.BaseConfig, nodeConfig *v1alpha1.
 	}
 
 	data := frrTemplateData{
-		Config:     cfg,
-		NodeConfig: nodeConfig,
+		Config:                   cfg,
+		NodeConfig:               nodeConfig,
+		GlobalWorkloadHostRoutes: globalWorkloadHostRoutes(nodeConfig),
 	}
 
 	t := template.New("frr")

@@ -19,16 +19,22 @@ package agent_cra_frr //nolint:revive
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/controllers/shared"
+	"github.com/telekom/das-schiff-network-operator/pkg/healthcheck"
 	agentcrafrr "github.com/telekom/das-schiff-network-operator/pkg/reconciler/agent-cra-frr"
 )
 
@@ -45,6 +51,7 @@ type NodeNetworkConfigReconciler struct {
 //+kubebuilder:rbac:groups=network.t-caas.telekom.com,resources=nodenetworkconfigs,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=network.t-caas.telekom.com,resources=nodenetworkconfigs/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=network.t-caas.telekom.com,resources=nodenetworkconfigs/finalizers,verbs=update
+//+kubebuilder:rbac:groups=network.t-caas.telekom.com,resources=nodeworkloadports,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=core,resources=nodes,verbs=get;list;watch;update
 //+kubebuilder:rbac:groups=core,resources=nodes/status,verbs=get;update;patch
 
@@ -78,9 +85,35 @@ func (r *NodeNetworkConfigReconciler) Reconcile(ctx context.Context, _ ctrl.Requ
 func (r *NodeNetworkConfigReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	err := ctrl.NewControllerManagedBy(mgr).
 		For(&networkv1alpha1.NodeNetworkConfig{}, builder.WithPredicates(shared.BuildNamePredicates())).
+		// Re-render when this node's workload CNI attachments change: they arrive
+		// via the aggregate per-node NodeWorkloadPorts object (out-of-band from the
+		// NodeNetworkConfig revision), so a change there must trigger a reconcile.
+		Watches(&networkv1alpha1.NodeWorkloadPorts{},
+			handler.EnqueueRequestsFromMapFunc(r.mapNodeWorkloadPorts),
+			builder.WithPredicates(nodeWorkloadPortsPredicate())).
 		Complete(r)
 	if err != nil {
 		return fmt.Errorf("error creating controller: %w", err)
 	}
 	return nil
+}
+
+// nodeWorkloadPortsPredicate admits events for this node's NodeWorkloadPorts
+// object. Unlike shared.BuildNamePredicates it also admits Delete: removing
+// the object withdraws every workload port at once, and without a reconcile
+// the agent would keep the last ports programmed until an unrelated event.
+func nodeWorkloadPortsPredicate() predicate.Funcs {
+	nodeName := os.Getenv(healthcheck.NodenameEnv)
+	return predicate.NewPredicateFuncs(func(o client.Object) bool {
+		return nodeName != "" && o.GetName() == nodeName
+	})
+}
+
+// mapNodeWorkloadPorts enqueues a reconcile for the node's NodeNetworkConfig when
+// its NodeWorkloadPorts object changes. NodeWorkloadPorts and NodeNetworkConfig
+// share the node name, so the request maps by name.
+func (*NodeNetworkConfigReconciler) mapNodeWorkloadPorts(_ context.Context, obj client.Object) []reconcile.Request {
+	return []reconcile.Request{{
+		NamespacedName: types.NamespacedName{Name: obj.GetName()},
+	}}
 }

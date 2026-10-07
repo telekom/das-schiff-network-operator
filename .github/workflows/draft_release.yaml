@@ -54,6 +54,7 @@ jobs:
             "das-schiff-nwop-agent-cra-vsr"
             "das-schiff-nwop-agent-netplan"
             "das-schiff-nwop-agent-hbn-l2"
+            "das-schiff-nwop-cni-workload"
           )
 
           # Build kustomize set-image args: match by image name, set release tag
@@ -84,11 +85,22 @@ jobs:
           "${KUSTOMIZE}" build config/crd > out/crds.yaml
           echo "Generated crds.yaml with $(wc -l < out/crds.yaml) lines"
 
+          # --- Workload CNI install manifest (default + opt-in cni-workload installer) ---
+          # Temporarily layer the cni-workload component onto the (already
+          # image-pinned) default overlay so the installer DaemonSet inherits the
+          # network-operator- prefix, kube-system namespace and common labels.
+          # Generated last so it does not leak into install.yaml / hbn-standalone.
+          cd config/default
+          "${KUSTOMIZE}" edit add component ../cni-workload
+          cd "${{ github.workspace }}"
+          "${KUSTOMIZE}" build config/default > out/install-cni-workload.yaml
+          echo "Generated install-cni-workload.yaml with $(wc -l < out/install-cni-workload.yaml) lines"
+
           # Restore kustomization files modified by 'kustomize edit set image'
           git checkout -- config/default config/hbn-standalone
 
           # Verify no :latest images remain in generated manifests
-          for f in out/install.yaml out/install-hbn-standalone.yaml; do
+          for f in out/install.yaml out/install-hbn-standalone.yaml out/install-cni-workload.yaml; do
             if grep -q 'image:.*:latest' "$f"; then
               echo "::error file=$f::$f still contains :latest image references"
               grep 'image:.*:latest' "$f"
@@ -135,7 +147,7 @@ jobs:
         run: |
           set -euo pipefail
           cd out
-          FILES="install.yaml install-hbn-standalone.yaml crds.yaml licenses.tar.gz"
+          FILES="install.yaml install-hbn-standalone.yaml install-cni-workload.yaml crds.yaml licenses.tar.gz"
           MISSING=0
           for f in $FILES; do
             if [ ! -f "$f" ]; then

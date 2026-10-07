@@ -20,6 +20,10 @@ const (
 	linkTypeBridge = "bridge"
 	// linkTypeVXLAN is the netlink link type string for a VXLAN interface.
 	linkTypeVXLAN = "vxlan"
+	// linkTypeVeth is the netlink link type string for a veth interface.
+	linkTypeVeth = "veth"
+	// linkTypeVRF is the netlink link type string for a VRF device.
+	linkTypeVRF = "vrf"
 
 	underlayInterfaceName = "dum.underlay"
 
