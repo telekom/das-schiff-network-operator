@@ -287,6 +287,9 @@ func setupIntentReconciler(mgr manager.Manager, apiTimeout time.Duration, cfg *o
 	if err != nil {
 		return fmt.Errorf("unable to create intent reconciler: %w", err)
 	}
+	if err := mgr.Add(ir); err != nil {
+		return fmt.Errorf("unable to register intent worker lifecycle: %w", err)
+	}
 
 	if err = (&intentctrl.Controller{
 		Client:     mgr.GetClient(),
@@ -377,6 +380,12 @@ func setupLegacyReconcilers(mgr manager.Manager, apiTimeout time.Duration, cfg *
 	if err != nil {
 		return fmt.Errorf("unable to create node reconciler: %w", err)
 	}
+	if err := mgr.Add(cr); err != nil {
+		return fmt.Errorf("unable to register config worker lifecycle: %w", err)
+	}
+	if err := mgr.Add(ncr); err != nil {
+		return fmt.Errorf("unable to register revision worker lifecycle: %w", err)
+	}
 
 	initialSetup := newOnLeaderElectionEvent(cr)
 	if err := mgr.Add(initialSetup); err != nil {
@@ -421,8 +430,6 @@ func (*onLeaderElectionEvent) NeedLeaderElection() bool {
 }
 
 func (e *onLeaderElectionEvent) Start(ctx context.Context) error {
-	if err := e.cr.ReconcileDebounced(ctx); err != nil {
-		return fmt.Errorf("error configuring initial configuration revision: %w", err)
-	}
+	e.cr.Reconcile(ctx)
 	return nil
 }

@@ -22,10 +22,10 @@ const (
 
 // ConfigReconciler is responsible for creating NetworkConfigRevision objects.
 type ConfigReconciler struct {
-	logger    logr.Logger
-	debouncer *debounce.Debouncer
-	client    client.Client
-	timeout   time.Duration
+	*debounce.Debouncer
+	logger  logr.Logger
+	client  client.Client
+	timeout time.Duration
 }
 
 type reconcileConfig struct {
@@ -35,7 +35,7 @@ type reconcileConfig struct {
 
 // Reconcile starts reconciliation.
 func (cr *ConfigReconciler) Reconcile(ctx context.Context) {
-	cr.debouncer.Debounce(ctx)
+	cr.Debounce(ctx)
 }
 
 // // NewConfigReconciler creates new reconciler that creates NetworkConfigRevision objects.
@@ -46,7 +46,7 @@ func NewConfigReconciler(clusterClient client.Client, logger logr.Logger, timeou
 		client:  clusterClient,
 	}
 
-	reconciler.debouncer = debounce.NewDebouncer(reconciler.ReconcileDebounced, defaultDebounceTime, logger)
+	reconciler.Debouncer = debounce.NewDebouncer(reconciler.ReconcileDebounced, defaultDebounceTime, logger)
 
 	return reconciler, nil
 }

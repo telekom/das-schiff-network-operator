@@ -55,8 +55,8 @@ const (
 // Reconciler is the intent-based reconciler that watches all intent CRDs
 // and produces NodeNetworkConfig objects per node.
 type Reconciler struct {
+	*debounce.Debouncer
 	logger           logr.Logger
-	debouncer        *debounce.Debouncer
 	client           client.Client
 	timeout          time.Duration
 	namespace        string
@@ -100,14 +100,14 @@ func NewReconciler(
 		legacyDetector:   legacy.NewDetector(clusterClient, logger),
 	}
 
-	r.debouncer = debounce.NewDebouncer(r.ReconcileDebounced, defaultDebounceTime, logger)
+	r.Debouncer = debounce.NewDebouncer(r.ReconcileDebounced, defaultDebounceTime, logger)
 
 	return r, nil
 }
 
 // Reconcile triggers the debounced reconciliation.
 func (r *Reconciler) Reconcile(ctx context.Context) {
-	r.debouncer.Debounce(ctx)
+	r.Debounce(ctx)
 }
 
 // ReconcileDebounced is the main reconciliation logic executed after debounce.
