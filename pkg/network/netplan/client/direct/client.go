@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/util/yaml"
 
 	"github.com/telekom/das-schiff-network-operator/pkg/network/netplan"
@@ -52,31 +51,6 @@ func (dc *Client) netplanWithInput(arguments []string, input string) (string, er
 			}
 		}()
 	}
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf(
-			"failed to execute %s %s: '%w' '%s' '%s'",
-			defaultNetplanBinary,
-			strings.Join(arguments, " "),
-			err,
-			stdout.String(),
-			stderr.String(),
-		)
-	}
-	return stdout.String(), nil
-}
-
-//nolint:unused
-func (dc *Client) netplanWithStdin(arguments []string) (string, error) {
-	cmd := exec.Command(dc.binaryPath, arguments...) //nolint:gosec
-	var stdout, stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	cmd.Stdout = &stdout
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return "", fmt.Errorf("failed to create pipe for writing into %s: %w", defaultNetplanBinary, err)
-	}
-	defer stdin.Close()
-
 	if err := cmd.Run(); err != nil {
 		return "", fmt.Errorf(
 			"failed to execute %s %s: '%w' '%s' '%s'",
@@ -134,24 +108,4 @@ func (dc *Client) Get() (*netplan.State, netplan.Error) {
 }
 func (*Client) Apply(_ string, _ *netplan.State, _ time.Duration, _ func() error) netplan.Error {
 	panic("NotImplemented")
-}
-
-//nolint:unused
-func (dc *Client) setSingle(hint, path string, value interface{}) error {
-	delta := path + "="
-	if value == nil {
-		delta += "NULL"
-	} else {
-		if jsonValue, err := json.Marshal(value); err == nil {
-			delta += string(jsonValue)
-		} else {
-			delta += fmt.Sprint(value)
-		}
-	}
-	res, err := dc.netplan([]string{"set", delta, "--origin-hint", hint})
-	if err != nil {
-		return err
-	}
-	logrus.Info(res)
-	return nil
 }

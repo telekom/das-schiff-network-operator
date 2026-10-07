@@ -167,10 +167,6 @@ func (s *State) YAML() string {
 func (s *State) String() string {
 	return s.YAML()
 }
-func (s *State) ContainsVirtualInterfaces() bool {
-	return len(s.Network.Bonds) > 0 || len(s.Network.Bridges) > 0
-}
-
 func (s *NetworkState) Equals(target *NetworkState) bool {
 	return s.Version == target.Version &&
 		maps.AreEqual(s.Ethernets, target.Ethernets) &&

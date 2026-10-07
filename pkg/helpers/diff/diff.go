@@ -9,6 +9,8 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"gopkg.in/yaml.v2"
+
+	"github.com/telekom/das-schiff-network-operator/pkg/helpers/merge"
 )
 
 type (
@@ -81,16 +83,16 @@ func findOverrides(origin, final interface{}) (interface{}, error) {
 		// Allow higher-priority YAML to explicitly nil out lower-priority entries.
 		return nil, nil
 	}
-	if IsScalar(final) && IsScalar(origin) {
+	if merge.IsScalar(final) && merge.IsScalar(origin) {
 		if !cmp.Equal(final, origin) {
 			return final, nil
 		}
 		return nil, nil
 	}
-	if IsSequence(final) && IsSequence(origin) {
+	if merge.IsSequence(final) && merge.IsSequence(origin) {
 		return findOverridesSequence(origin.(sequence), final.(sequence))
 	}
-	if IsMapping(final) && IsMapping(origin) {
+	if merge.IsMapping(final) && merge.IsMapping(origin) {
 		return findOverridesMapping(origin.(mapping), final.(mapping))
 	}
 	return final, nil
@@ -122,23 +124,4 @@ func findOverridesMapping(from, into mapping) (interface{}, error) {
 		return result, nil
 	}
 	return nil, nil
-}
-
-// IsMapping reports whether a type is a mapping in YAML, represented as a
-// map[interface{}]interface{}.
-func IsMapping(i interface{}) bool {
-	_, is := i.(mapping)
-	return is
-}
-
-// IsSequence reports whether a type is a sequence in YAML, represented as an
-// []interface{}.
-func IsSequence(i interface{}) bool {
-	_, is := i.(sequence)
-	return is
-}
-
-// IsScalar reports whether a type is a scalar value in YAML.
-func IsScalar(i interface{}) bool {
-	return !IsMapping(i) && !IsSequence(i)
 }

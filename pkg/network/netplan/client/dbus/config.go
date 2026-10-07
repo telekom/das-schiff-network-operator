@@ -3,7 +3,6 @@ package dbus
 import (
 	"encoding/json"
 	"fmt"
-	"time"
 
 	"github.com/godbus/dbus/v5"
 	"github.com/sirupsen/logrus"
@@ -15,7 +14,6 @@ import (
 
 const (
 	ConfigGetCall    = "io.netplan.Netplan.Config.Get"
-	ConfigTryCall    = "io.netplan.Netplan.Config.Try"
 	ConfigSetCall    = "io.netplan.Netplan.Config.Set"
 	ConfigApplyCall  = "io.netplan.Netplan.Config.Apply"
 	ConfigCancelCall = "io.netplan.Netplan.Config.Cancel"
@@ -130,26 +128,6 @@ func (config *Config) setProperty(hint, path string, value interface{}) error {
 	return nil
 }
 
-//nolint:unused
-func (config *Config) try(timeout time.Duration) error {
-	configObject := config.conn.Object(InterfacePath, dbus.ObjectPath(config.path))
-	tryTimeout := uint32(timeout.Seconds())
-	config.log.Debugf("trying configuration for %d seconds", tryTimeout)
-	config.executionLog.Infof("busctl --system call io.netplan.Netplan %s io.netplan.Netplan.Config Try", config.path)
-	call := configObject.Call(ConfigTryCall, 0, tryTimeout)
-	if call.Err != nil {
-		return call.Err
-	}
-	var tryResult bool
-	if err := call.Store(&tryResult); err != nil {
-		return fmt.Errorf("failed to store dbus try reply: %w", err)
-	}
-	if !tryResult {
-		return fmt.Errorf("failed to try configuration within %d seconds", tryTimeout)
-	}
-	return nil
-}
-
 func (config *Config) apply() netplan.Error {
 	config.log.Debugf("applying configuration")
 	configObject := config.conn.Object(InterfacePath, dbus.ObjectPath(config.path))
@@ -202,15 +180,6 @@ func (config *Config) Set(state *netplan.State) netplan.Error {
 		return netplan.InvalidConfigurationError{Err: err}
 	}
 	return nil
-}
-
-//nolint:unused
-func (config *Config) canTry() (bool, error) {
-	state, err := config.Get()
-	if err != nil {
-		return false, err
-	}
-	return !state.ContainsVirtualInterfaces(), nil
 }
 
 //nolint:revive
