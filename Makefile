@@ -261,6 +261,7 @@ e2e-test-sync: ## Run E2E sync controller tests.
 CONTROLLER_GEN = $(shell pwd)/bin/controller-gen
 .PHONY: controller-gen
 controller-gen: ## Download controller-gen locally if necessary.
+	@[ ! -f $(CONTROLLER_GEN) ] || $(CONTROLLER_GEN) --version | grep -q 'Version: v0.22.0$$' || rm -f $(CONTROLLER_GEN)
 	$(call go-get-tool,$(CONTROLLER_GEN),sigs.k8s.io/controller-tools/cmd/controller-gen@v0.22.0)
 
 KUSTOMIZE = $(shell pwd)/bin/kustomize
@@ -283,16 +284,12 @@ CRD_REF_DOCS = $(shell pwd)/bin/crd-ref-docs
 crd-ref-docs: ## Download crd-ref-docs locally if necessary.
 	$(call go-get-tool,$(CRD_REF_DOCS),github.com/elastic/crd-ref-docs@v0.3.0)
 
-# go-get-tool will 'go get' any package $2 and install it to $1.
+# go-get-tool installs the pinned package $2 into the project's bin directory.
 PROJECT_DIR := $(shell dirname $(abspath $(lastword $(MAKEFILE_LIST))))
 define go-get-tool
 @[ -f $(1) ] || { \
 set -e ;\
-TMP_DIR=$$(mktemp -d) ;\
-cd $$TMP_DIR ;\
-go mod init tmp ;\
 echo "Downloading $(2)" ;\
 GOBIN=$(PROJECT_DIR)/bin go install $(2) ;\
-rm -rf $$TMP_DIR ;\
 }
 endef
