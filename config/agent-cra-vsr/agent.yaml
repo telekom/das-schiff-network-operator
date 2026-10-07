@@ -48,6 +48,8 @@ spec:
               value: admin
             - name: CRA_TIMEOUT
               value: 30s
+            - name: CRA_KNOWN_HOSTS
+              value: /etc/cra-host/known_hosts
             - name: OPERATOR_NETHEALTHCHECK_CONFIG
               value: /opt/healthcheck/config.yaml
             - name: HOST_IP
@@ -89,6 +91,9 @@ spec:
           volumeMounts:
             - mountPath: /etc/cra/config/base-config.yaml
               name: base-config
+            - mountPath: /etc/cra-host/known_hosts
+              name: cra-known-hosts
+              readOnly: true
             - mountPath: /opt/healthcheck/
               name: healthcheck-config
       terminationGracePeriodSeconds: 10
@@ -98,6 +103,10 @@ spec:
             path: /etc/cra/base-config.yaml
             type: File
           name: base-config
+        - hostPath:
+            path: /etc/cra/known_hosts
+            type: File
+          name: cra-known-hosts
         - configMap:
             name: healthcheck-config
           name: healthcheck-config

@@ -2,6 +2,7 @@ package agent_hbn_l2 //nolint:revive
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -40,8 +41,9 @@ const (
 )
 
 var (
-	dummyAliasPrefix = fmt.Sprintf("%s::%s::", aliasPrefix, dummyNamePrefix)
-	vlanAliasPrefix  = fmt.Sprintf("%s::%s::", aliasPrefix, vlanNamePrefix)
+	dummyAliasPrefix       = fmt.Sprintf("%s::%s::", aliasPrefix, dummyNamePrefix)
+	vlanAliasPrefix        = fmt.Sprintf("%s::%s::", aliasPrefix, vlanNamePrefix)
+	procSysNetIPv6ConfPath = "/proc/sys/net/ipv6/conf"
 )
 
 type addresses struct {
@@ -500,11 +502,10 @@ func (reconciler *NodeNetplanConfigReconciler) Reconcile(ctx context.Context) er
 }
 
 func setEUIAutogeneration(intfName string, generateEUI bool) error {
-	safe := filepath.Base(intfName)
-	if safe == "." || safe == ".." || strings.ContainsAny(safe, "/\\") {
-		return fmt.Errorf("invalid interface name: %q", intfName)
+	if err := nl.ValidateInterfaceName(intfName); err != nil {
+		return fmt.Errorf("validate interface name %q: %w", intfName, err)
 	}
-	fileName := fmt.Sprintf("/proc/sys/net/ipv6/conf/%s/addr_gen_mode", safe)
+	fileName := filepath.Join(procSysNetIPv6ConfPath, intfName, "addr_gen_mode")
 	file, err := os.OpenFile(fileName, os.O_WRONLY, 0)
 	if err != nil {
 		return fmt.Errorf("error opening file: %w", err)
@@ -514,7 +515,9 @@ func setEUIAutogeneration(intfName string, generateEUI bool) error {
 		value = "0"
 	}
 	if _, err := fmt.Fprintf(file, "%s\n", value); err != nil {
-		file.Close()
+		if closeErr := file.Close(); closeErr != nil {
+			err = errors.Join(err, closeErr)
+		}
 		return fmt.Errorf("error writing to file: %w", err)
 	}
 	if err := file.Close(); err != nil {
