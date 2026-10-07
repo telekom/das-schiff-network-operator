@@ -4,55 +4,26 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"k8s.io/apimachinery/pkg/util/wait"
 )
 
 // Poll calls condition repeatedly at interval until it returns true, an error,
 // or the context expires.
+// It always checks immediately, even if ctx is already canceled, and returns
+// condition errors unchanged. Cancellation between attempts wraps ctx.Err().
 func Poll(ctx context.Context, interval time.Duration, condition func() (bool, error)) error {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	// Check immediately.
-	done, err := condition()
-	if err != nil {
-		return err
-	}
-	if done {
-		return nil
-	}
-
-	for {
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("timed out waiting for condition: %w", ctx.Err())
-		case <-ticker.C:
-			done, err := condition()
-			if err != nil {
-				return err
-			}
-			if done {
-				return nil
-			}
-		}
-	}
-}
-
-// WaitForCondition is a convenience wrapper around Poll with a timeout.
-func WaitForCondition(timeout, interval time.Duration, condition func() (bool, error)) error {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-	return Poll(ctx, interval, condition)
-}
-
-// Eventually retries f until it succeeds (returns nil) or the timeout expires.
-func Eventually(timeout, interval time.Duration, f func() error) error {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	return Poll(ctx, interval, func() (bool, error) {
-		if err := f(); err != nil {
-			return false, nil // Retry
-		}
-		return true, nil
+	var conditionErr error
+	err := wait.PollUntilContextCancel(ctx, interval, true, func(context.Context) (bool, error) {
+		var done bool
+		done, conditionErr = condition()
+		return done, conditionErr
 	})
+	if conditionErr != nil {
+		return conditionErr
+	}
+	if err != nil {
+		return fmt.Errorf("timed out waiting for condition: %w", err)
+	}
+	return nil
 }
