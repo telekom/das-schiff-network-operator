@@ -40,10 +40,8 @@ versions and preserve domain-specific behavior.
 | Kubernetes discovery tracking | `github.com/telekom/t-caas-go-library/pkg/discovery/tracker` |
 | Repeated Kubernetes patch retry composition | `github.com/telekom/t-caas-go-library/pkg/patch` |
 
-The library's [`docs/upstream-libraries.md`](https://github.com/telekom/t-caas-go-library/blob/main/docs/upstream-libraries.md)
-has detailed decisions and compatibility caveats; it is currently private and
-is planned to become public. This condensed table is included here so this
-guidance remains useful until then. Relevant merged packages include `pkg/netutil`,
+The public library's [`docs/upstream-libraries.md`](https://github.com/telekom/t-caas-go-library/blob/main/docs/upstream-libraries.md)
+has detailed decisions and compatibility caveats. Relevant merged packages include `pkg/netutil`,
 `pkg/remoteclient`, `pkg/discovery/tracker`, and `pkg/patch`; check the guide and
 package docs for availability and exact semantics before adopting others.
 
@@ -52,23 +50,32 @@ repeats across multiple repositories. Contribute that shared wrapper to
 `telekom/t-caas-go-library` instead of duplicating it here. Keep this operator's
 domain policy and configuration local.
 
-### Existing migration candidates
+### Adoption status and remaining candidates
 
-These are candidates for separate migration work, not changes in this
-documentation update. Preserve the behavior noted when evaluating replacements:
+The following migrations are in open, unmerged PRs. Until they merge, the default
+branch still uses the local implementations; do not duplicate that work:
 
-- `pkg/reconciler/intent/ipmath/ipmath.go` implements address/prefix behavior
-  that may use `pkg/netutil`; retain its `/32` rejection and verify IPv4/IPv6
-  edge cases.
-- `controllers/sync/remote_client.go` maintains remote clients; compare with
-  `pkg/remoteclient`, while keeping namespace enumeration local.
-- `controllers/shared/predicates.go` builds name predicates; consider
-  `predicate.NewPredicateFuncs` and retain the intended event behavior.
-- `pkg/debounce/debounce.go` implements delayed reconciliation; evaluate the
-  typed client-go workqueue rather than creating another timer engine.
+- `pkg/reconciler/intent/ipmath/ipmath.go`: gateway derivation delegates to
+  `github.com/telekom/t-caas-go-library/pkg/netutil.FirstUsable` in the adoption
+  PR. Keep the local formatting and error context, `/32` and `/128` rejection,
+  and `/31` and `/127` point-to-point behavior.
+- `pkg/debounce/debounce.go`: the workqueue migration uses the typed client-go
+  delaying queue and joins workers on shutdown.
+- `e2etests/framework/wait.go` and `e2e/setup/exec.go`: the polling migration
+  uses apimachinery wait while keeping their different error semantics.
+- Collection helpers: the stdlib migration uses `slices` and `maps` at callers
+  and removes unused slice helpers; do not add new helpers for those operations.
+
+Other candidates need separate semantic evaluation:
+
+- `controllers/sync/remote_client.go` accepts plugin/filesystem kubeconfigs
+  and enumerates clients by namespace. These behaviors are not provided by
+  `pkg/remoteclient`; it is not a drop-in replacement.
+- `controllers/shared/predicates.go` accepts only matching create/update
+  events and rejects delete/generic events. `predicate.NewPredicateFuncs`
+  alone does not preserve that event behavior.
 - `e2etests/framework/cluster.go` decodes/applies manifests and polls
   resources; consider the e2e-framework decoder and waits while preserving
   namespace overrides, cleanup, and resource-specific readiness checks.
-- `pkg/monitoring/collector.go` has custom collector registration and
-  collection; use the Prometheus registry/collectors directly where applicable,
-  retaining operator-specific metrics and scrape behavior.
+- `pkg/monitoring/collector.go` already implements native Prometheus collectors.
+  Keep its domain-specific scrape success/duration metrics and collector fan-out.
