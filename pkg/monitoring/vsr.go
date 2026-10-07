@@ -32,7 +32,6 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	"github.com/telekom/das-schiff-network-operator/pkg/cra-vsr"
-	"github.com/telekom/das-schiff-network-operator/pkg/helpers/slice"
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
 )
 
@@ -192,7 +191,7 @@ func (*VSRCollector) isIPv6(address string) bool {
 
 func (*VSRCollector) convertToStateFloat(state string) float64 {
 	lowerState := strings.ToLower(state)
-	if slice.ContainsString([]string{"up", "established", "ok", "true"}, lowerState) {
+	if slices.Contains([]string{"up", "established", "ok", "true"}, lowerState) {
 		return 1.0
 	}
 	return 0.0

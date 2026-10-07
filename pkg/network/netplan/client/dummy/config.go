@@ -6,12 +6,12 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 
 	netwrangler "github.com/rackn/netwrangler/netplan"
 	"github.com/rackn/netwrangler/util"
 	"github.com/sirupsen/logrus"
 
-	"github.com/telekom/das-schiff-network-operator/pkg/helpers/slice"
 	"github.com/telekom/das-schiff-network-operator/pkg/network/netplan"
 )
 
@@ -60,13 +60,13 @@ func (config *Config) clear() error {
 		if info.IsDir() {
 			return nil
 		}
-		if slice.Find(config.initialHints, func(h string, _ int) bool {
-			return slice.Contains([]string{
+		if slices.ContainsFunc(config.initialHints, func(h string) bool {
+			return slices.Contains([]string{
 				h,
 				fmt.Sprintf("%s.yml", h),
 				fmt.Sprintf("%s.yaml", h),
 			}, info.Name())
-		}) != nil {
+		}) {
 			config.log.Infof("removing existing netplan file %s", path)
 			if err := os.Remove(path); err != nil {
 				return fmt.Errorf("failed to remove file %s: %w", path, err)

@@ -83,15 +83,33 @@ func (s *State) DeviceIterator() StateDeviceIterator {
 		items = append(items, StateDeviceIteratorItem{Type: t, Name: n, Device: d})
 	}
 
-	maps.ForEach(s.Network.Ethernets, func(name string, device Device) { add(net.InterfaceTypeEthernet, name, device) })
-	maps.ForEach(s.Network.Modems, func(name string, device Device) { add(net.InterfaceTypeModem, name, device) })
-	maps.ForEach(s.Network.Wifis, func(name string, device Device) { add(net.InterfaceTypeWifi, name, device) })
-	maps.ForEach(s.Network.Bridges, func(name string, device Device) { add(net.InterfaceTypeBridge, name, device) })
-	maps.ForEach(s.Network.Bonds, func(name string, device Device) { add(net.InterfaceTypeBond, name, device) })
-	maps.ForEach(s.Network.Tunnels, func(name string, device Device) { add(net.InterfaceTypeTunnel, name, device) })
-	maps.ForEach(s.Network.VLans, func(name string, device Device) { add(net.InterfaceTypeVLan, name, device) })
-	maps.ForEach(s.Network.VRFs, func(name string, device Device) { add(net.InterfaceTypeVRF, name, device) })
-	maps.ForEach(s.Network.Dummies, func(name string, device Device) { add(net.InterfaceTypeDummy, name, device) })
+	for name, device := range s.Network.Ethernets {
+		add(net.InterfaceTypeEthernet, name, device)
+	}
+	for name, device := range s.Network.Modems {
+		add(net.InterfaceTypeModem, name, device)
+	}
+	for name, device := range s.Network.Wifis {
+		add(net.InterfaceTypeWifi, name, device)
+	}
+	for name, device := range s.Network.Bridges {
+		add(net.InterfaceTypeBridge, name, device)
+	}
+	for name, device := range s.Network.Bonds {
+		add(net.InterfaceTypeBond, name, device)
+	}
+	for name, device := range s.Network.Tunnels {
+		add(net.InterfaceTypeTunnel, name, device)
+	}
+	for name, device := range s.Network.VLans {
+		add(net.InterfaceTypeVLan, name, device)
+	}
+	for name, device := range s.Network.VRFs {
+		add(net.InterfaceTypeVRF, name, device)
+	}
+	for name, device := range s.Network.Dummies {
+		add(net.InterfaceTypeDummy, name, device)
+	}
 
 	return StateDeviceIterator{
 		state:       s,
@@ -149,10 +167,6 @@ func (s *State) YAML() string {
 func (s *State) String() string {
 	return s.YAML()
 }
-func (s *State) ContainsVirtualInterfaces() bool {
-	return len(s.Network.Bonds) > 0 || len(s.Network.Bridges) > 0
-}
-
 func (s *NetworkState) Equals(target *NetworkState) bool {
 	return s.Version == target.Version &&
 		maps.AreEqual(s.Ethernets, target.Ethernets) &&

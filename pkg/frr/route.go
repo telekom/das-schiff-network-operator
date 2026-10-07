@@ -2,10 +2,11 @@ package frr
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"strconv"
 
 	"github.com/vishvananda/netlink"
-	"golang.org/x/exp/maps"
 
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
 	"github.com/telekom/das-schiff-network-operator/pkg/route"
@@ -42,7 +43,7 @@ func getQuantity(routeSummaries RouteSummaries, addressFamily int, vrf, table st
 			routeSummaryInfos[routeKey] = routeInformation
 		}
 	}
-	return maps.Values(routeSummaryInfos), nil
+	return slices.AppendSeq(make([]route.Information, 0, len(routeSummaryInfos)), maps.Values(routeSummaryInfos)), nil
 }
 
 func (m *Manager) ListVrfs() ([]VrfVniSpec, error) {

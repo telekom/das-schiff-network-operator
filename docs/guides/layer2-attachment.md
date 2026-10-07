@@ -141,6 +141,15 @@ into every selected Fabric VRF for EVPN export.
     MAC and gateway addresses are surfaced in `status.anycast`. Disable it with
     `spec.disableAnycast: true` when the gateway lives elsewhere.
 
+Gateway derivation uses the shared `t-caas-go-library/pkg/netutil.FirstUsable`
+convention: ordinary IPv4 and IPv6 pools use the network address plus one;
+point-to-point `/31` and `/127` pools use the network address itself.
+Single-host `/32` and `/128` pools have no usable anycast gateway and produce
+`Ready=False` with reason `InvalidIRBGateway`. IRB addresses retain the pool's
+prefix length; Netplan default routes and `BGPPeering.status.localIPs` use the
+same gateway without a prefix. Node address allocations are not changed by
+this derivation.
+
 ## non-HBN mode (pure L2 / VLAN sub-interface)
 
 Set `interfaceRef` to the name of an existing NIC or bond. The agent creates a
