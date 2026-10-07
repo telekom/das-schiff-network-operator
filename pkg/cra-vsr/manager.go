@@ -197,6 +197,14 @@ func (m *Manager) ApplyConfiguration(
 		return err
 	}
 
+	// A successful NETCONF commit only means the VSR accepted the RPC - it
+	// does not guarantee every object in the tree (bridges/vxlans/vlans) was
+	// actually instantiated by the device. Read back the running config and
+	// verify the layer2 config landed before declaring success.
+	if err := m.verifyLayer2Applied(ctx, nodeCfg); err != nil {
+		return fmt.Errorf("configuration committed but verification failed: %w", err)
+	}
+
 	m.running = vrouter
 	return nil
 }

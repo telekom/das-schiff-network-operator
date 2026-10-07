@@ -752,6 +752,51 @@ func LookupVRF(ns *Namespace, name string) *VRF {
 	return nil
 }
 
+func LookupBridge(intfs *Interfaces, name string) *Bridge {
+	if intfs == nil {
+		return nil
+	}
+	for i := range intfs.Bridges {
+		if intfs.Bridges[i].Name == name {
+			return &intfs.Bridges[i]
+		}
+	}
+	return nil
+}
+
+func LookupVXLAN(intfs *Interfaces, name string) *VXLAN {
+	if intfs == nil {
+		return nil
+	}
+	for i := range intfs.VXLANs {
+		if intfs.VXLANs[i].Name == name {
+			return &intfs.VXLANs[i]
+		}
+	}
+	return nil
+}
+
+func LookupVLAN(intfs *Interfaces, name string) *VLAN {
+	if intfs == nil {
+		return nil
+	}
+	for i := range intfs.VLANs {
+		if intfs.VLANs[i].Name == name {
+			return &intfs.VLANs[i]
+		}
+	}
+	return nil
+}
+
+func (br *Bridge) hasSlave(name string) bool {
+	for i := range br.Slaves {
+		if br.Slaves[i].Name == name {
+			return true
+		}
+	}
+	return false
+}
+
 func (ip *IPAddressList) Sort() {
 	sort.Slice(ip.IPAddresses, func(i, j int) bool {
 		return ip.IPAddresses[i].IP < ip.IPAddresses[j].IP
