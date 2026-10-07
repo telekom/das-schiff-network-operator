@@ -2,18 +2,18 @@ package debounce
 
 import (
 	"context"
-	"sync/atomic"
+	"sync"
 	"time"
 
 	"github.com/go-logr/logr"
+	"k8s.io/client-go/util/workqueue"
 )
 
 // Debouncer struct.
 type Debouncer struct {
-	// Used for atomic operations
-	scheduled             atomic.Bool
-	calledDuringExecution atomic.Bool
-	// Stores the function as an interface so we can use reflect
+	once     sync.Once
+	queue    workqueue.TypedDelayingInterface[struct{}]
+	done     chan struct{}
 	function func(context.Context) error
 	// Duration between function call
 	debounceTime time.Duration
@@ -34,48 +34,60 @@ func NewDebouncer(function func(context.Context) error, debounceTime time.Durati
 		logger:          logger,
 		cancel:          cancel,
 		internalCtxFunc: func() context.Context { return ctx },
+		done:            make(chan struct{}),
 	}
 }
 
 func (d *Debouncer) debounceRoutine(ctx context.Context) {
+	defer close(d.done)
 	for {
-		// First sleep for the debounceTime
-		time.Sleep(d.debounceTime)
-		d.calledDuringExecution.Store(false)
-		err := d.function(ctx)
-		if err == nil {
-			// If debounce was called during execution run debounceRoutine again otherwise reset
-			// scheduled to false
-			if d.calledDuringExecution.CompareAndSwap(true, false) {
-				d.debounceRoutine(ctx)
-			} else {
-				d.scheduled.Store(false)
-			}
-			break
+		key, shutdown := d.queue.Get()
+		if shutdown {
+			return
 		}
-		d.logger.Error(err, "error debouncing")
+		if ctx.Err() == nil {
+			if err := d.function(ctx); err != nil && ctx.Err() == nil {
+				d.logger.Error(err, "error debouncing")
+				d.queue.AddAfter(key, d.debounceTime)
+			}
+		}
+		d.queue.Done(key)
 	}
 }
 
-// Run function. First run will be in debounceTime, runs will be separated by debounceTime.
+func (d *Debouncer) start() {
+	d.queue = workqueue.NewTypedDelayingQueue[struct{}]()
+	go d.debounceRoutine(d.internalCtxFunc()) //nolint:contextcheck // worker uses the internal lifecycle context
+}
+
+// Debounce schedules work after debounceTime, coalescing pending triggers.
+// Triggers during execution schedule a serialized follow-up when their delay expires.
 // The incoming ctx is used only to signal that the caller wants to debounce; the actual
 // goroutine always runs with the Debouncer's internal context so it is not canceled when
 // a short-lived reconcile context expires.
 func (d *Debouncer) Debounce(_ context.Context) {
-	// If we haven't scheduled a goroutine yet, set scheduled=false and run goroutine
-	// We use atomic compare-and-swap to first check if scheduled equals false (not yet scheduled)
-	// and then swap the value with true
-	// Always set calledDuringExection to true but reset it to false if we schedule it the first time.
-	// This way a debounce during running execution (scheduled is still true, calledDuringExecution will
-	// be true) will run the debounced routine once again
-	d.calledDuringExecution.Store(true)
-	if d.scheduled.CompareAndSwap(false, true) {
-		go d.debounceRoutine(d.internalCtxFunc()) //nolint:contextcheck // context is from internal closure, not request-scoped
-	}
+	d.once.Do(d.start)
+	d.queue.AddAfter(struct{}{}, d.debounceTime)
 }
 
-// Stop cancels the Debouncer's internal context, which will cause any in-progress
-// debounced goroutine to observe a canceled context on its next function call.
+// Start binds worker shutdown to the manager's lifetime.
+func (d *Debouncer) Start(ctx context.Context) error {
+	<-ctx.Done()
+	d.Stop()
+	return nil
+}
+
+// NeedLeaderElection keeps shutdown registered even on a non-leader manager.
+// Only leader-elected controllers and startup hooks trigger work.
+func (*Debouncer) NeedLeaderElection() bool {
+	return false
+}
+
+// Stop cancels in-flight work, discards pending work and waits for the worker.
+// The callback must honor cancellation; Stop must not be called from the callback.
 func (d *Debouncer) Stop() {
 	d.cancel()
+	d.once.Do(d.start)
+	d.queue.ShutDown()
+	<-d.done
 }

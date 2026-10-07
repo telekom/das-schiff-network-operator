@@ -54,6 +54,17 @@ node — see [Debugging](../advanced/debugging.md).
 - **Cross-cluster**: resources are authored in a management cluster and synced
   into workload clusters.
 
+## Reconciliation worker lifecycle
+
+Intent and legacy operator reconcilers coalesce events through client-go's
+single-key delaying workqueue. Pending triggers keep the earliest scheduled
+time; triggers received during execution produce a serialized follow-up when
+their delay expires, rather than sleeping again after a long reconciliation.
+Retries are scheduled after the debounce interval; an already-due trigger can
+run sooner. The manager owns worker shutdown:
+it cancels in-flight API work, discards pending callbacks and joins the worker.
+Short-lived controller request contexts do not cancel shared reconciliation.
+
 ## Related
 
 - [Concepts](../getting-started/concepts.md)

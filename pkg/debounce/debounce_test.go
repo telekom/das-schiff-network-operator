@@ -1,94 +1,152 @@
+// SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+// SPDX-License-Identifier: Apache-2.0
+
 package debounce
 
 import (
 	"context"
-	"sync"
+	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/go-logr/logr"
-	. "github.com/onsi/ginkgo"
-	. "github.com/onsi/gomega"
-	ctrl "sigs.k8s.io/controller-runtime"
 )
 
-var (
-	logger logr.Logger
-)
-
-var _ = BeforeSuite(func() {
-
-})
-
-func TestDebounce(t *testing.T) {
-	RegisterFailHandler(Fail)
-	logger = ctrl.Log.WithName("debounce-test")
-	RunSpecs(t,
-		"Debounce Suite")
+func await(t *testing.T, ch <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-ch:
+	case <-time.After(10 * time.Second):
+		t.Fatal("worker did not make progress")
+	}
 }
 
-var _ = Describe("debounce", func() {
-	Context("NewDebouncer() should", func() {
-		It("create new debouncer", func() {
-			d := NewDebouncer(nil, time.Millisecond, logger)
-			Expect(d).ToNot(BeNil())
-		})
-	})
-})
-
-// TestDebounce_CanceledRequestCtxDoesNotCancelDebouncedRun verifies that canceling the
-// request-scoped context passed to Debounce() does NOT cancel the debounced goroutine.
-// The debouncer must use its own internal long-lived context for async work.
-func TestDebounce_CanceledRequestCtxDoesNotCancelDebouncedRun(t *testing.T) {
-	var (
-		mu        sync.Mutex
-		ctxPassed context.Context
-	)
-
-	fn := func(ctx context.Context) error {
-		mu.Lock()
-		ctxPassed = ctx
-		mu.Unlock()
+func TestCanceledRequestDoesNotCancelWork(t *testing.T) {
+	called := make(chan struct{})
+	var callbackErr error
+	d := NewDebouncer(func(ctx context.Context) error {
+		callbackErr = ctx.Err()
+		close(called)
 		return nil
-	}
-
-	d := NewDebouncer(fn, 10*time.Millisecond, logr.Discard())
+	}, time.Millisecond, logr.Discard())
 	defer d.Stop()
 
-	// Create a request-scoped context and immediately cancel it.
-	reqCtx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-
-	// Debounce with the already-canceled request context.
-	d.Debounce(reqCtx)
-
-	// Wait enough for the debounce routine to fire.
-	time.Sleep(100 * time.Millisecond)
-
-	mu.Lock()
-	got := ctxPassed
-	mu.Unlock()
-
-	if got == nil {
-		t.Fatal("debounced function was not called; expected it to run regardless of canceled request ctx")
-	}
-	if err := got.Err(); err != nil {
-		t.Errorf("debounced function received canceled context (err=%v); expected internal non-canceled context", err)
+	d.Debounce(ctx)
+	await(t, called)
+	if callbackErr != nil {
+		t.Fatalf("request cancellation reached the worker: %v", callbackErr)
 	}
 }
 
-// TestDebounce_StopCancelsInternalContext verifies that calling Stop() cancels the
-// Debouncer's internal context, signaling any long-running debounced work.
-func TestDebounce_StopCancelsInternalContext(t *testing.T) {
-	d := NewDebouncer(func(_ context.Context) error { return nil }, time.Hour, logr.Discard())
-
-	if err := d.internalCtxFunc().Err(); err != nil {
-		t.Fatalf("internal context should be live before Stop(); got: %v", err)
-	}
-
+func TestStopDiscardsPendingWork(t *testing.T) {
+	var calls atomic.Int32
+	d := NewDebouncer(func(context.Context) error {
+		calls.Add(1)
+		return nil
+	}, time.Hour, logr.Discard())
+	d.Debounce(context.Background())
 	d.Stop()
-
-	if err := d.internalCtxFunc().Err(); err == nil {
-		t.Fatal("internal context should be canceled after Stop()")
+	d.Debounce(context.Background())
+	d.Stop()
+	if calls.Load() != 0 {
+		t.Fatal("Stop allowed a pending or post-shutdown callback")
 	}
+}
+
+func TestStopCancelsAndJoinsInFlightRetry(t *testing.T) {
+	entered, canceled, release, stopped := make(chan struct{}), make(chan struct{}), make(chan struct{}), make(chan struct{})
+	d := NewDebouncer(func(ctx context.Context) error {
+		close(entered)
+		<-ctx.Done()
+		close(canceled)
+		<-release
+		return errors.New("retry must stop on cancellation")
+	}, time.Millisecond, logr.Discard())
+	t.Cleanup(func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+		d.Stop()
+	})
+	d.Debounce(context.Background())
+	await(t, entered)
+	go func() {
+		d.Stop()
+		close(stopped)
+	}()
+	await(t, canceled)
+	select {
+	case <-stopped:
+		t.Fatal("Stop returned before in-flight cleanup completed")
+	default:
+	}
+	close(release)
+	await(t, stopped)
+}
+
+func TestTriggerDuringExecutionSchedulesSerialFollowUp(t *testing.T) {
+	entered, release, followUp := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	var calls atomic.Int32
+	d := NewDebouncer(func(ctx context.Context) error {
+		switch calls.Add(1) {
+		case 1:
+			close(entered)
+			select {
+			case <-release:
+			case <-ctx.Done():
+			}
+		case 2:
+			close(followUp)
+		default:
+			t.Error("unexpected duplicate callback")
+		}
+		return nil
+	}, time.Millisecond, logr.Discard())
+	defer d.Stop()
+	d.Debounce(context.Background())
+	await(t, entered)
+	d.Debounce(context.Background())
+	select {
+	case <-followUp:
+		t.Fatal("callbacks ran concurrently")
+	default:
+	}
+	close(release)
+	await(t, followUp)
+}
+
+func TestErrorsRetryWithoutAnotherTrigger(t *testing.T) {
+	retried := make(chan struct{})
+	var calls atomic.Int32
+	d := NewDebouncer(func(context.Context) error {
+		if calls.Add(1) == 1 {
+			return errors.New("transient failure")
+		}
+		close(retried)
+		return nil
+	}, time.Millisecond, logr.Discard())
+	defer d.Stop()
+	d.Debounce(context.Background())
+	await(t, retried)
+}
+
+func TestManagerLifetimeStopsWorker(t *testing.T) {
+	d := NewDebouncer(func(context.Context) error { return nil }, time.Hour, logr.Discard())
+	ctx, cancel := context.WithCancel(context.Background())
+	finished := make(chan struct{})
+	go func() {
+		if err := d.Start(ctx); err != nil {
+			t.Errorf("manager runnable failed: %v", err)
+		}
+		close(finished)
+	}()
+	d.Debounce(context.Background())
+	cancel()
+	await(t, finished)
+	d.Stop()
 }

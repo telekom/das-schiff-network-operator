@@ -58,8 +58,8 @@ const (
 
 // ConfigRevisionReconciler is responsible for creating NodeConfig objects.
 type ConfigRevisionReconciler struct {
+	*debounce.Debouncer
 	logger           logr.Logger
-	debouncer        *debounce.Debouncer
 	vrfConfig        *config.Config
 	client           client.Client
 	apiTimeout       time.Duration
@@ -89,7 +89,7 @@ type mirrorAllocCache struct {
 
 // Reconcile starts reconciliation.
 func (crr *ConfigRevisionReconciler) Reconcile(ctx context.Context) {
-	crr.debouncer.Debounce(ctx)
+	crr.Debounce(ctx)
 }
 
 // // NewNodeConfigReconciler creates new reconciler that creates NodeConfig objects.
@@ -111,7 +111,7 @@ func NewNodeConfigReconciler(clusterClient client.Client, logger logr.Logger, ap
 	}
 	reconciler.vrfConfig = cfg
 
-	reconciler.debouncer = debounce.NewDebouncer(reconciler.reconcileDebounced, defaultDebounceTime, logger)
+	reconciler.Debouncer = debounce.NewDebouncer(reconciler.reconcileDebounced, defaultDebounceTime, logger)
 
 	return reconciler, nil
 }
