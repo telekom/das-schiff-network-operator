@@ -130,6 +130,10 @@ each Fabric VRF routes the attached Network back through the combo VRF for EVPN
 export. Because the L2 segment is directly attached to the combo VRF, this does
 not require source-based policy routes in the cluster VRF.
 
+Static next-hop VRF routes do not require BGP VRF imports. The CRA-VSR agent
+only configures a combo VRF's BGP import route map when `vrfImports` are
+present; static-only combo VRFs have no BGP import route-map reference.
+
 Multi-VRF attachments require HBN mode with the anycast gateway enabled. A
 pure-L2 Network or `disableAnycast: true` cannot attach the segment to the combo
 VRF and is therefore rejected. A `listenRange` BGPPeering referencing a
