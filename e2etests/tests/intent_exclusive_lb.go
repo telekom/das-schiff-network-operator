@@ -3,6 +3,7 @@ package tests
 import (
 	"context"
 	"fmt"
+	"net"
 	"strings"
 	"time"
 
@@ -126,7 +127,7 @@ var _ = Describe("Intent-Exclusive: LoadBalancer Service", Label("intent-exclusi
 			By(fmt.Sprintf("Verifying m2mgw can curl LB VIP %s (IPv4)", lbIPv4))
 			Eventually(func() string {
 				code, _ := f.CurlFromCluster2Pod(ctx, "e2e-gateways", "m2m-gateway",
-					fmt.Sprintf("http://%s:80", lbIPv4))
+					"http://"+net.JoinHostPort(lbIPv4, "80"))
 				return code
 			}).WithTimeout(cfg.BGPTimeout).WithPolling(5*time.Second).Should(
 				Equal("200"), "Intent-exclusive: Expected HTTP 200 from LB VIP via intent pipeline")
