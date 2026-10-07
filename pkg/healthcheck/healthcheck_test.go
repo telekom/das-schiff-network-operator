@@ -10,12 +10,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-logr/logr"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	"github.com/vishvananda/netlink"
 	"go.uber.org/mock/gomock"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -233,7 +236,74 @@ var _ = Describe("RemoveTaints()", func() {
 		Expect(err).ToNot(HaveOccurred())
 		Expect(node.Spec.Taints).To(BeEmpty())
 	})
+	It("treats a typed Conflict error as transient and returns no error", func() {
+		c := &taintedNodeClient{updateErr: newConflictError(
+			"Operation cannot be fulfilled on nodes \"" + testHostname + "\": the object has been modified; " +
+				"please apply your changes to the latest version and try again")}
+		hc := newTaintHealthChecker(c)
+		err := hc.RemoveTaints(context.Background())
+		Expect(err).ToNot(HaveOccurred())
+		// Taints were not actually removed, so the next reconciliation must try again.
+		Expect(hc.TaintsRemoved()).To(BeFalse())
+	})
+	It("treats a Conflict error without the usual message as transient", func() {
+		// A Conflict StatusError whose message does not contain "the object has been
+		// modified" - the previous string match would have wrongly failed the healthcheck.
+		c := &taintedNodeClient{updateErr: newConflictError("some other conflict cause")}
+		hc := newTaintHealthChecker(c)
+		err := hc.RemoveTaints(context.Background())
+		Expect(err).ToNot(HaveOccurred())
+		Expect(hc.TaintsRemoved()).To(BeFalse())
+	})
+	It("returns non-conflict errors even if the message mentions the object being modified", func() {
+		// A non-Conflict error that merely mentions the phrase - the previous string match
+		// would have wrongly swallowed it and reported success.
+		c := &taintedNodeClient{updateErr: errors.New("webhook denied the request: the object has been modified")}
+		hc := newTaintHealthChecker(c)
+		err := hc.RemoveTaints(context.Background())
+		Expect(err).To(HaveOccurred())
+		Expect(hc.TaintsRemoved()).To(BeFalse())
+	})
+	It("returns other API errors, e.g. Forbidden", func() {
+		c := &taintedNodeClient{updateErr: apierrors.NewForbidden(
+			schema.GroupResource{Resource: "nodes"}, testHostname, errors.New("not allowed"))}
+		hc := newTaintHealthChecker(c)
+		err := hc.RemoveTaints(context.Background())
+		Expect(err).To(HaveOccurred())
+		Expect(hc.TaintsRemoved()).To(BeFalse())
+	})
 })
+var _ = Describe("ReportUnready()", func() {
+	It("publishes ConditionFalse with the given reason and message", func() {
+		ctrl := gomock.NewController(GinkgoT())
+		defer ctrl.Finish()
+		hc := mock_healthcheck.NewMockHealthCheckerInterface(ctrl)
+		ctx := context.Background()
+		hc.EXPECT().
+			UpdateReadinessCondition(ctx, corev1.ConditionFalse, "SomeReason", "some message").
+			Return(nil).
+			Times(1)
+
+		ReportUnready(ctx, hc, logr.Discard(), "SomeReason", "some message")
+	})
+	It("does not panic when the condition cannot be published", func() {
+		// The callers are already returning the underlying failure, so a failure to
+		// publish the condition must be logged and must not change control flow.
+		ctrl := gomock.NewController(GinkgoT())
+		defer ctrl.Finish()
+		hc := mock_healthcheck.NewMockHealthCheckerInterface(ctrl)
+		ctx := context.Background()
+		hc.EXPECT().
+			UpdateReadinessCondition(ctx, corev1.ConditionFalse, "SomeReason", "some message").
+			Return(errors.New("api server unreachable")).
+			Times(1)
+
+		Expect(func() {
+			ReportUnready(ctx, hc, logr.Discard(), "SomeReason", "some message")
+		}).ToNot(Panic())
+	})
+})
+
 var _ = Describe("UpdateReadinessCondition()", func() {
 	It("creates readiness condition when absent", func() {
 		node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: testHostname}}
@@ -760,6 +830,44 @@ func (*updateErrorClient) Get(_ context.Context, _ types.NamespacedName, o clien
 		Effect: corev1.TaintEffectNoSchedule,
 	})
 	return nil
+}
+
+// taintedNodeClient returns a node carrying both test taints and fails Update with a
+// configurable error, so RemoveTaints() always reaches the Update error handling.
+type taintedNodeClient struct {
+	client.Client
+	updateErr error
+}
+
+func (c *taintedNodeClient) Update(_ context.Context, _ client.Object, _ ...client.UpdateOption) error {
+	return c.updateErr
+}
+
+func (*taintedNodeClient) Get(_ context.Context, _ types.NamespacedName, o client.Object, _ ...client.GetOption) error {
+	node, ok := o.(*corev1.Node)
+	if !ok {
+		return fmt.Errorf("error casting object %v as corev1.Node", o)
+	}
+	node.Name = testHostname
+	node.Spec.Taints = append(node.Spec.Taints,
+		corev1.Taint{Key: testTaint, Effect: corev1.TaintEffectNoSchedule},
+		corev1.Taint{Key: testTaint2, Effect: corev1.TaintEffectNoSchedule})
+	return nil
+}
+
+// newConflictError builds a typed Conflict StatusError with an arbitrary message,
+// as the apiserver would return on a resourceVersion mismatch.
+func newConflictError(message string) error {
+	return apierrors.NewConflict(
+		schema.GroupResource{Resource: "nodes"}, testHostname, errors.New(message))
+}
+
+func newTaintHealthChecker(c client.Client) *HealthChecker {
+	hc, err := NewHealthChecker(c, nil, &NetHealthcheckConfig{Taints: []string{testTaint, testTaint2}})
+	Expect(err).ToNot(HaveOccurred())
+	Expect(hc).ToNot(BeNil())
+	Expect(hc.TaintsRemoved()).To(BeFalse())
+	return hc
 }
 
 // statusUpdateErrorClient is a client that fails on Status().Update() calls.

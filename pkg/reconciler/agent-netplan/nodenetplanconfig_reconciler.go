@@ -107,21 +107,21 @@ func (reconciler *NodeNetplanConfigReconciler) Reconcile(ctx context.Context) er
 			reconciler.logger.Error(err, "failed to discard pending netplan configuration")
 		}
 	} else if err := netplanConfig.Apply(); err != nil {
-		_ = reconciler.healthChecker.UpdateReadinessCondition(ctx, corev1.ConditionFalse, healthcheck.ReasonNetplanApplyFailed, err.Error())
+		healthcheck.ReportUnready(ctx, reconciler.healthChecker, reconciler.logger, healthcheck.ReasonNetplanApplyFailed, err.Error())
 		return fmt.Errorf("error applying desired state: %w", err)
 	}
 
 	// Run basic health checks (interfaces/reachability + API) after applying netplan config
 	if err := reconciler.healthChecker.CheckInterfaces(); err != nil {
-		_ = reconciler.healthChecker.UpdateReadinessCondition(ctx, corev1.ConditionFalse, healthcheck.ReasonInterfaceCheckFailed, err.Error())
+		healthcheck.ReportUnready(ctx, reconciler.healthChecker, reconciler.logger, healthcheck.ReasonInterfaceCheckFailed, err.Error())
 		return fmt.Errorf("error checking network interfaces: %w", err)
 	}
 	if err := reconciler.healthChecker.CheckReachability(); err != nil {
-		_ = reconciler.healthChecker.UpdateReadinessCondition(ctx, corev1.ConditionFalse, healthcheck.ReasonReachabilityFailed, err.Error())
+		healthcheck.ReportUnready(ctx, reconciler.healthChecker, reconciler.logger, healthcheck.ReasonReachabilityFailed, err.Error())
 		return fmt.Errorf("error checking network reachability: %w", err)
 	}
 	if err := reconciler.healthChecker.CheckAPIServer(ctx); err != nil {
-		_ = reconciler.healthChecker.UpdateReadinessCondition(ctx, corev1.ConditionFalse, healthcheck.ReasonAPIServerFailed, err.Error())
+		healthcheck.ReportUnready(ctx, reconciler.healthChecker, reconciler.logger, healthcheck.ReasonAPIServerFailed, err.Error())
 		return fmt.Errorf("error checking API Server reachability: %w", err)
 	}
 	if err := reconciler.healthChecker.UpdateReadinessCondition(ctx, corev1.ConditionTrue, healthcheck.ReasonHealthChecksPassed, "All network operator health checks passed"); err != nil {
