@@ -73,7 +73,7 @@ graph TD
 
 !!! info "Who creates VRF and Network?"
     This operator does **not** provision infrastructure. `VRF` and `Network` are
-    the *contract boundary*: any provisioner (BM4X, Netbox, or a human) creates
+    the *contract boundary*: any external provisioner (or a human) creates
     them, and the operator handles everything downstream. You can also create
     them by hand — see the [Quick Start](quick-start.md).
 
