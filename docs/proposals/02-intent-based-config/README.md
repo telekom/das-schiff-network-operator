@@ -762,7 +762,8 @@ status:
 - When `interfaceRef` is set and `interfaceName` is omitted, it defaults to `vlan.<vlanID>`.
 - `nodeIPs.enabled` must be `false` when SR-IOV is enabled and `interfaceName` is not set.
 - `disableNeighborSuppression` must be `true` when `disableAnycast` is set.
-- External provider constraint: if both SR-IOV and `interfaceName` are set/enabled, only one VRF is allowed.
+- Multiple destination VRFs require an enabled HBN IRB without SR-IOV.
+  SR-IOV attachments are limited to one destination VRF regardless of `interfaceName`.
 
 **Controller Behavior:**
 
