@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2025 Deutsche Telekom AG
+#
+# SPDX-License-Identifier: Apache-2.0
+
 name: E2E Tests
 
 on:
@@ -182,6 +186,7 @@ jobs:
 
       - name: system-level-dependencies
         run: |
+          sudo rm -f /etc/apt/sources.list.d/azure-cli.* /etc/apt/sources.list.d/microsoft-prod.* /etc/apt/sources.list.d/packages-microsoft-prod.*
           sudo apt update
           sudo apt -y install linux-modules-extra-$(uname -r)
 
