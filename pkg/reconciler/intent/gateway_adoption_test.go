@@ -74,18 +74,20 @@ func TestGatewayAdoptionIntentOutputs(t *testing.T) {
 			require.NoError(t, reconciler.ReconcileDebounced(ctx))
 			require.NoError(t, k8sClient.Get(ctx, client.ObjectKeyFromObject(bgp), bgp))
 			assert.Equal(t, tt.gateways, bgp.Status.LocalIPs)
+			nnc := reconcileAndGetNNC(t, ctx, name)
+			netplan := getNetplanConfig(t, ctx, name)
 			if tt.gateways == nil {
 				require.NoError(t, k8sClient.Get(ctx, client.ObjectKeyFromObject(l2a), l2a))
 				ready := apimeta.FindStatusCondition(l2a.Status.Conditions, "Ready")
 				require.NotNil(t, ready)
 				assert.Equal(t, metav1.ConditionFalse, ready.Status)
 				assert.Equal(t, "InvalidIRBGateway", ready.Reason)
+				assert.NotContains(t, nnc.Spec.Layer2s, "149")
+				assert.NotContains(t, netplan.Spec.DesiredState.Network.VLans, "vlan.149")
 				return
 			}
-			nnc := reconcileAndGetNNC(t, ctx, name)
 			require.NotNil(t, nnc.Spec.Layer2s["149"].IRB)
 			assert.Equal(t, tt.irb, nnc.Spec.Layer2s["149"].IRB.IPAddresses)
-			netplan := getNetplanConfig(t, ctx, name)
 			var vlan struct {
 				Addresses []string               `json:"addresses"`
 				Routes    []builder.NetplanRoute `json:"routes"`
