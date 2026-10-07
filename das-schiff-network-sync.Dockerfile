@@ -1,5 +1,5 @@
 # Build the network-sync binary
-ARG GO_VERSION=1.25
+ARG GO_VERSION=1.26.8
 FROM docker.io/library/golang:${GO_VERSION}-alpine AS builder
 
 WORKDIR /workspace
