@@ -5,11 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 
 	"github.com/google/go-cmp/cmp"
 	"gopkg.in/yaml.v2"
-
-	"github.com/telekom/das-schiff-network-operator/pkg/helpers/slice"
 )
 
 type (
@@ -99,7 +98,7 @@ func findOverrides(origin, final interface{}) (interface{}, error) {
 func findOverridesSequence(from, into sequence) (interface{}, error) {
 	result := make(sequence, 0)
 	for _, item := range from {
-		if !slice.Contains(into, item) {
+		if !slices.ContainsFunc(into, func(candidate interface{}) bool { return cmp.Equal(item, candidate) }) {
 			result = append(result, item)
 		}
 	}

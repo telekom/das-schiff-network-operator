@@ -38,6 +38,11 @@ The following rule governs code contributions:
 * Newly created files must be opened by an instantiated version to the file 'templates/file-header.txt'
 * At least if you add a new file to the repository, add your name into the contributor section of the file NOTICE (please respect the preset entry structure)
 
+Use standard-library `slices` and `maps` for collection operations, and plain
+`range` loops instead of callback-only iteration helpers. Netplan's helpers
+retain deep comparison and stable, structural YAML sequence deduplication;
+`slices.Compact` and comparable-only equality are not replacements for those semantics.
+
 ## Contributing Documentation
 
 You are welcome to contribute documentation to the project.
@@ -71,4 +76,3 @@ The following rule governs documentation contributions:
 * Please provide as much context as possible when you open an issue. The information you provide must be comprehensive enough to reproduce that issue for the assignee. Therefore, contributors may use but aren't restricted to the issue template provided by the project maintainers.
 
 * When creating an issue, try using one of our issue templates which already contain some guidelines on which content is expected to process the issue most efficiently. If no template applies, you can of course also create an issue from scratch.
-
