@@ -1,6 +1,7 @@
 package maps
 
 import (
+	stdmaps "maps"
 	"reflect"
 
 	"github.com/google/go-cmp/cmp"
@@ -9,27 +10,7 @@ import (
 )
 
 func AreEqual[M1, M2 ~map[K]V, K comparable, V any](m1 M1, m2 M2) bool {
-	if len(m1) != len(m2) {
-		return false
-	}
-	for k, v1 := range m1 {
-		if v2, ok := m2[k]; !ok || !cmp.Equal(v1, v2) {
-			return false
-		}
-	}
-	return true
-}
-func Keys[M ~map[K]V, K comparable, V any](data M) []K {
-	result := make([]K, 0)
-	for key := range data {
-		result = append(result, key)
-	}
-	return result
-}
-func ForEach[M ~map[K]V, K comparable, V any](elems M, fn func(K, V)) {
-	for k, v := range elems {
-		fn(k, v)
-	}
+	return stdmaps.EqualFunc(m1, m2, func(a, b V) bool { return cmp.Equal(a, b) })
 }
 func Deduplicate(elems map[string]interface{}) error {
 	for k, v := range elems {
@@ -52,12 +33,4 @@ func Deduplicate(elems map[string]interface{}) error {
 		}
 	}
 	return nil
-}
-
-func FromSlice[S any, I comparable](elems []S, key func(S) I) map[I]S {
-	result := make(map[I]S)
-	for _, item := range elems {
-		result[key(item)] = item
-	}
-	return result
 }

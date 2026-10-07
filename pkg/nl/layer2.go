@@ -3,6 +3,7 @@ package nl
 import (
 	"bytes"
 	"fmt"
+	"maps"
 	"net"
 	"os"
 	"path/filepath"
@@ -11,7 +12,6 @@ import (
 	"time"
 
 	"github.com/vishvananda/netlink"
-	"golang.org/x/exp/maps"
 	"golang.org/x/sys/unix"
 
 	schiff_unix "github.com/telekom/das-schiff-network-operator/pkg/unix"
@@ -658,5 +658,5 @@ func (n *Manager) ListNeighborInformation() ([]NeighborInformation, error) {
 		}
 	}
 
-	return maps.Values(neighbors), nil
+	return slices.AppendSeq([]NeighborInformation{}, maps.Values(neighbors)), nil
 }

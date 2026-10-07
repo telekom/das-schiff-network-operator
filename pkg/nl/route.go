@@ -3,11 +3,12 @@ package nl
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"math"
+	"slices"
 	"strconv"
 
 	"github.com/vishvananda/netlink"
-	"golang.org/x/exp/maps"
 	"golang.org/x/sys/unix"
 
 	"github.com/telekom/das-schiff-network-operator/pkg/route"
@@ -202,5 +203,5 @@ func (n *Manager) ListRouteInformation() ([]route.Information, error) {
 			}
 		}
 	}
-	return maps.Values(routes), nil
+	return slices.AppendSeq([]route.Information{}, maps.Values(routes)), nil
 }
