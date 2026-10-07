@@ -68,7 +68,7 @@ We introduce twelve new namespaced CRDs under `network-connector.sylvaproject.or
 | CRD | Purpose |
 |---|---|
 | `VRF` | Backbone VRF metadata — name, VNI, route target, loopbacks. Defined once, referenced by `Destination` |
-| `Network` | Pool definition — CIDR, VLAN, VNI, allocation pool. Referenced by name from usage CRDs |
+| `Network` | Pool definition — CIDR, VLAN, VNI. Referenced by name from usage CRDs |
 | `Destination` | Routing target — prefixes + either `vrfRef` (VRF import) or `nextHop` (static route). Referenced by label from attachments |
 | `Layer2Attachment` | Attach a `Network` as L2 segment to nodes; supports HBN and non-HBN (physical/SR-IOV interfaces) |
 | `Inbound` | Allocate IPs from a `Network` for MetalLB pools + BGP/L2 advertisement; works with or without HBN |
@@ -230,10 +230,10 @@ In the current low-level model, `VRFRouteConfiguration` is a powerful, composabl
 
 The initial intent CRD design embedded VRF lists **inline** in each attachment (`Layer2Attachment.spec.network.VRFs`, `Inbound.spec.network.VRFs`). This has several issues:
 
-1. **Duplication:** If two `Layer2Attachment`s and an `Inbound` all need connectivity to `m2m_enc`, the VRF name and its routing config appear in three places.
+1. **Duplication:** If two `Layer2Attachment`s and an `Inbound` all need connectivity to `example_vrf`, the VRF name and its routing config appear in three places.
 2. **No composability:** The current model lets multiple `VRFRouteConfiguration` resources build up a VRF's import/export list incrementally. With VRFs inlined in attachments, each attachment must carry its own complete routing view.
-3. **SBR complexity hidden:** Source-based routing (SBR) is needed when two different attachments on the same node reach different VRFs whose imported prefixes overlap — e.g. both "internet" and "m2m_enc" import `0.0.0.0/0`. The controller must auto-detect this overlap and generate intermediate VRFs (`s-<vrf>`) with policy routes. This is a cross-attachment concern that belongs in the controller, not on any single attachment's spec.
-4. **No shared connectivity:** A VRF like `m2m_enc` represents a backbone destination. Multiple attachments, connections, and pod networks may all need routes to/from it. It's a **shared concept**, not something each attachment should independently define.
+3. **SBR complexity hidden:** Source-based routing (SBR) is needed when two different attachments on the same node reach different VRFs whose imported prefixes overlap — e.g. both "internet" and "example_vrf" import `0.0.0.0/0`. The controller must auto-detect this overlap and generate intermediate VRFs (`s-<vrf>`) with policy routes. This is a cross-attachment concern that belongs in the controller, not on any single attachment's spec.
+4. **No shared connectivity:** A VRF like `example_vrf` represents a backbone destination. Multiple attachments, connections, and pod networks may all need routes to/from it. It's a **shared concept**, not something each attachment should independently define.
 
 #### Solution: Two Complementary CRDs — `VRF` and `Destination`
 
@@ -248,9 +248,9 @@ We separate **VRF metadata** from **routing targets** into two distinct CRDs:
 apiVersion: network.t-caas.telekom.com/v1alpha1
 kind: VRF
 metadata:
-  name: m2m-enc
+  name: example-vrf
 spec:
-  vrf: m2m_enc          # VRF name (≤12 chars)
+  vrf: example_vrf      # VRF name (≤12 chars)
   vni: 10100            # VXLAN Network Identifier
   routeTarget: "64500:10100"
 ---
@@ -258,12 +258,12 @@ spec:
 apiVersion: network.t-caas.telekom.com/v1alpha1
 kind: Destination
 metadata:
-  name: m2m-enc-routes
+  name: example-vrf-routes
   labels:
-    network.t-caas.telekom.com/vrf: m2m_enc
+    network.t-caas.telekom.com/vrf: example_vrf
     network.t-caas.telekom.com/zone: secure
 spec:
-  vrfRef: m2m-enc       # → VRF resource by name
+  vrfRef: example-vrf   # → VRF resource by name
   prefixes:
   - 198.51.100.0/27
   - 192.0.2.0/24
@@ -310,7 +310,7 @@ This means:
 
 #### Why Labels Instead of Direct Name References?
 
-Direct name references (`vrfs: [m2m_enc]`) are simple but rigid:
+Direct name references (`vrfs: [example_vrf]`) are simple but rigid:
 - Adding a new VRF requires updating every attachment that should reach it.
 - No grouping — each VRF must be listed individually.
 - No way to express "all production VRFs" or "all VRFs in security zone X".
@@ -329,18 +329,18 @@ Multiple attachments selecting the same `Destination` produce **merged** VRF con
 #### Diagram
 
 ```
-  VRF "m2m-enc"                     VRF "internet"
-    vrf: m2m_enc                      vrf: internet
+  VRF "example-vrf"                 VRF "internet"
+    vrf: example_vrf                  vrf: internet
     vni: 10100                        vni: 10200
     routeTarget: 64500:10100          routeTarget: 64500:10200
         ▲                                 ▲
         │ vrfRef                          │ vrfRef
         │                                 │
-  Destination "m2m-enc-routes"      Destination "internet-routes"
+  Destination "example-vrf-routes"  Destination "internet-routes"
   labels:                           labels:
     zone: secure                      zone: public
   spec:                             spec:
-    vrfRef: m2m-enc                   vrfRef: internet
+    vrfRef: example-vrf               vrfRef: internet
     prefixes:                         prefixes:
     - 192.0.2.0/24                      - 0.0.0.0/0
     - 203.0.113.0/24
@@ -365,7 +365,7 @@ Multiple attachments selecting the same `Destination` produce **merged** VRF con
      from Destination)
 ```
 
-All three resources select the `m2m-enc-routes` destination and inherit its prefixes (`192.0.2.0/24`, `203.0.113.0/24`). The controller resolves `vrfRef: m2m-enc` → VRF metadata (VNI, RT) and merges each attachment's export requirements (its own subnets) into a single VRF configuration for `m2m_enc`, preserving the composability of today's model. Attachments can optionally specify additional routes beyond what the Destination defines.
+All three resources select the `example-vrf-routes` destination and inherit its prefixes (`192.0.2.0/24`, `203.0.113.0/24`). The controller resolves `vrfRef: example-vrf` → VRF metadata (VNI, RT) and merges each attachment's export requirements (its own subnets) into a single VRF configuration for `example_vrf`, preserving the composability of today's model. Attachments can optionally specify additional routes beyond what the Destination defines.
 
 ### 3.6 Traffic Mirroring — Intent-Based Wrapper Around MirrorSelector / MirrorTarget
 
@@ -434,10 +434,10 @@ Multiple `Collector` resources can reference the same mirror `VRF` (e.g., multip
 apiVersion: network.t-caas.telekom.com/v1alpha1
 kind: VRF
 metadata:
-  name: m2m-enc
+  name: example-vrf
 spec:
   # VRF name in the backbone
-  vrf: m2m_enc
+  vrf: example_vrf
   # VXLAN Network Identifier for the VRF
   vni: 10100
   # BGP route target for the VRF
@@ -477,15 +477,15 @@ status:
 apiVersion: network.t-caas.telekom.com/v1alpha1
 kind: Destination
 metadata:
-  name: m2m-enc-routes
+  name: example-vrf-routes
   labels:
-    network.t-caas.telekom.com/vrf: m2m_enc
+    network.t-caas.telekom.com/vrf: example_vrf
     network.t-caas.telekom.com/zone: secure
 spec:
   # --- VRF mode (HBN) ---
   # References a VRF resource by name. The controller resolves VNI, RT,
   # and loopback config from the VRF. Prefixes become VRF import entries.
-  vrfRef: m2m-enc
+  vrfRef: example-vrf
   # Subnets reachable via this destination.
   # Defined once here, inherited by every attachment that selects this destination.
   # Attachments do NOT need to repeat these prefixes.
@@ -1434,16 +1434,16 @@ Network "secure-net"                      (pool definition)
     vlan: 234
     vni: 10234
 
-VRF "m2m-enc"                             (VRF metadata — defined once)
+VRF "example-vrf"                         (VRF metadata — defined once)
   spec:
-    vrf: m2m_enc
+    vrf: example_vrf
     vni: 10100
     routeTarget: "64500:10100"
 
-Destination "m2m-enc-routes"              (routing target — references VRF)
+Destination "example-vrf-routes"          (routing target — references VRF)
   labels: { zone: secure }
   spec:
-    vrfRef: m2m-enc                       ← resolves VNI/RT from VRF
+    vrfRef: example-vrf                   ← resolves VNI/RT from VRF
     prefixes:                             ← subnets reachable via this VRF
     - 198.51.100.0/27
     - 192.0.2.0/24
@@ -1458,11 +1458,11 @@ Layer2Attachment "my-vlan"                Equivalent L2 + VRF config in revision
     nodeSelector:                             anycastMac: aa:bb:cc:dd:ee:ff
       matchLabels:                            anycastGateways: [2001:db8:100::1/64]
         worker-group: wg1                     neighSuppression: true
-    destinations:                             vrf: m2m_enc    ← from VRF via Destination
+    destinations:                             vrf: example_vrf ← from VRF via Destination
       matchLabels:                            nodeSelector:
         zone: secure                            worker-group: wg1
     # no routes needed — inherited       VRF:
-    # from Destination                      vrf: m2m_enc      ← from VRF
+    # from Destination                      vrf: example_vrf  ← from VRF
                                               import:           ← from Destination.prefixes
                                               - cidr: 198.51.100.0/27
                                                 action: permit
@@ -1473,20 +1473,20 @@ Layer2Attachment "my-vlan"                Equivalent L2 + VRF config in revision
                                                 action: permit
 ```
 
-**Key point:** If `PodNetwork "extra-pods"` also selects `zone: secure` and references another `Network`, its routes are **merged** into the same `m2m_enc` VRF config — just like multiple `VRFRouteConfiguration` resources merge today.
+**Key point:** If `PodNetwork "extra-pods"` also selects `zone: secure` and references another `Network`, its routes are **merged** into the same `example_vrf` VRF config — just like multiple `VRFRouteConfiguration` resources merge today.
 
 ### 6.2 Shared Destination — Multiple Attachments, Merged VRF Config
 
 ```
-VRF "m2m-enc"          ← VRF metadata
-  vrf: m2m_enc
+VRF "example-vrf"      ← VRF metadata
+  vrf: example_vrf
   vni: 10100
   routeTarget: 64500:10100
         ▲
         │ vrfRef
         │
-Destination "m2m-enc-routes"  ← selected by both:
-  vrfRef: m2m-enc
+Destination "example-vrf-routes" ← selected by both:
+  vrfRef: example-vrf
   prefixes:            ← defined once
   - 198.51.100.0/27
   - 192.0.2.0/24
@@ -1502,7 +1502,7 @@ Destination "m2m-enc-routes"  ← selected by both:
         │                  │
         └────────┬─────────┘
                  ▼
-  Merged VRF config for m2m_enc:
+  Merged VRF config for example_vrf:
     import:                                   ← from Destination.prefixes (shared)
     - cidr: 198.51.100.0/27, action: permit
     - cidr: 192.0.2.0/24,     action: permit
@@ -1521,9 +1521,9 @@ Network "ingress-net"                     (pool definition)
     ipv4: { cidr: 203.0.113.0/28 }
     vlan: 300
 
-Destination "m2m-enc-routes"              (routing target)
+Destination "example-vrf-routes"          (routing target)
   labels: { zone: secure }
-  spec: { vrfRef: m2m-enc }
+  spec: { vrfRef: example-vrf }
                 ▲
                 │
 Inbound "ingress-1"
@@ -1540,7 +1540,7 @@ Inbound "ingress-1"
   ┌─────────────────────────────────────────────────────────┐
   │ Produced config:                                         │
   │                                                          │
-  │ VRF entry for "m2m_enc" in revision                   │
+  │ VRF entry for "example_vrf" in revision               │
   │   export (hosts): 203.0.113.1/32, 203.0.113.2/32       │
   │   communities: <from Inbound>                           │
   │                                                          │
@@ -1560,9 +1560,9 @@ Network "egress-net"                      (pool definition)
     ipv4: { cidr: 203.0.113.16/28 }
     vlan: 301
 
-Destination "m2m-enc-routes"              (routing target)
+Destination "example-vrf-routes"          (routing target)
   labels: { zone: secure }
-  spec: { vrfRef: m2m-enc }
+  spec: { vrfRef: example-vrf }
                 ▲
                 │
 Outbound "egress-1"
@@ -1579,7 +1579,7 @@ Outbound "egress-1"
   ┌─────────────────────────────────────────────────────────┐
   │ Produced config:                                         │
   │                                                          │
-  │ VRF entry for "m2m_enc" in revision                   │
+  │ VRF entry for "example_vrf" in revision               │
   │   export (hosts): 203.0.113.17/32 .. 203.0.113.19/32   │
   │                                                          │
   │ Coil Egress "egress-1"                                  │
@@ -2123,7 +2123,7 @@ spec:
   provider: example                     # illustrative external backend
   vrfs:                                  # VRFs this cluster needs routing info for
     - application                        #   primary VRF — real network ordered here
-    - shared-services                    #   additional routing metadata
+    - services                           #   additional routing metadata
   # Illustrative provider-specific network request parameters
   sizeV4: 24
   allocationClass: example-private
@@ -2228,7 +2228,7 @@ Mgmt Cluster                                  Tenant Cluster
 
 NetworkBinding
   (name: application-net, provider: example,
-   vrfs: [application, shared-services],
+   vrfs: [application, services],
    sizeV4: 24, …)
     │
     ▼
@@ -2239,7 +2239,7 @@ NetworkBinding controller
     │     (vrf: application, sizeV4: 24, …)
     │
     └── Routing metadata request
-          (vrf: shared-services)
+          (vrf: services)
     │
     ▼
 Provider integration
@@ -2256,7 +2256,7 @@ NetworkBinding controller
     │
     ├──→ Network  (CIDR, VLAN, VNI from .status)
     ├──→ VRF      (application: VNI+RT, deduplicated)
-    └──→ VRF      (shared-services: VNI+RT, deduplicated)
+    └──→ VRF      (services: VNI+RT, deduplicated)
 
 ═══ USAGE (team-authored) ══════════════════════════════════
 
@@ -2334,7 +2334,7 @@ Given the breadth of the design, we prioritize delivery of value:
 | D3 | **RESOLVED — Pipeline integration: Option B** (Intent CRDs + Low-Level CRDs → Revision directly) — the `ConfigReconciler` is extended to watch intent CRDs; no intermediate low-level CRDs are generated | Option B is architecturally cleaner: single layer, no generated artifacts, simpler debugging (intent CRD → revision → node config). Low-level CRDs remain as a user-managed escape hatch. See D24 |
 | D4 | All controllers run in the **tenant cluster only** — no management cluster component in this iteration | Simplifies architecture; auto-allocation can be added later transparently |
 | D5 | All network parameters (VLAN, VNI, subnet, IPs) are **explicit on the tenant-cluster `Network`** — no provisioning logic in the tenant operator | Reduces complexity; allocation policy and IPAM are management-cluster concerns. The proposed mgmt-cluster `NetworkBinding` controller provisions upstream and auto-generates `Network` + `VRF` CRDs with the resolved values. Teams author usage CRDs (`Destination`, `Inbound`, `Outbound`, etc.) and all are synced to the tenant. See D44 |
-| D6 | **`Network` CRD as pure pool definition** — CIDR, VLAN, VNI, allocation pool. Referenced by name via `networkRef` from usage CRDs. No VRFs, no node scope. | Separates pool definition from pool usage. A `Network` is not per se L2 — it only becomes L2 when a `Layer2Attachment` attaches it |
+| D6 | **`Network` CRD as pure pool definition** — CIDR, VLAN, VNI. Referenced by name via `networkRef` from usage CRDs. No VRFs, no node scope. | Separates pool definition from pool usage. A `Network` is not per se L2 — it only becomes L2 when a `Layer2Attachment` attaches it |
 | D7 | Coexistence of intent-based and low-level CRDs during migration | Non-disruptive adoption; escape hatch for edge cases |
 | D8 | Prioritize `VRF` + `Network` + `Destination` + `Layer2Attachment` (non-SRIOV) + `Inbound` for first iteration | Highest value, most common use cases, fastest ops burden reduction |
 | D9 | Bidirectional = Inbound + Outbound combined; a convenience `Gress` CRD may bundle both roles in a future iteration | Reduces first-iteration scope; inbound + outbound cover the majority of use cases. See D31 |

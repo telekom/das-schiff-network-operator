@@ -14,7 +14,7 @@ This document summarises the differences between the **initial architecture** (A
 | **Traffic mirroring** | Not covered | **Added** — `Collector` and `TrafficMirror` CRDs (§3.6, §4.8, §4.9) | Builds on Proposal 01; mirroring is an ideal fit for intent-based simplification |
 | **VRFAttachment → Inbound + Outbound** | Single `VRFAttachment` CRD with `connections[]` array mixing inbound/outbound | **Split into two CRDs**: `Inbound` (MetalLB pool + advertisement) and `Outbound` (Coil Egress + Calico) | Ingress and egress are semantically distinct — different IP allocation logic, different platform resources |
 | **Non-HBN support** | Not addressed — all examples assumed HBN VXLAN tunneling | **Added** — `destinations` is optional; omitting it produces only platform resources (MetalLB/Coil) without VRF plumbing. `Layer2Attachment.interfaceRef` enables physical interface / bond / SR-IOV VF attachment | Enables use on clusters without HBN infrastructure |
-| **`Network` CRD (pool/usage separation)** | Network params embedded inline on each attachment (`spec.network.vlanID`, `spec.network.vni`, etc.) | **Added** — new `Network` CRD is a pure pool definition (CIDR, VLAN, VNI, allocationPool). Usage CRDs reference it via `networkRef`. A Network is not per se L2 — it only becomes L2 when a `Layer2Attachment` attaches it to nodes. **IP addresses are optional** — a `Network` with only `vlan` (no `ipv4`/`ipv6`) represents a pure L2 segment | Separates pool definition from usage. Enables future automatic allocation on a single CRD. Pure L2 segments (VLAN-only, no IP) are common for non-HBN deployments |
+| **`Network` CRD (pool/usage separation)** | Network params embedded inline on each attachment (`spec.network.vlanID`, `spec.network.vni`, etc.) | **Added** — new `Network` CRD is a pure pool definition (CIDR, VLAN, VNI). Usage CRDs reference it via `networkRef`. A Network is not per se L2 — it only becomes L2 when a `Layer2Attachment` attaches it to nodes. **IP addresses are optional** — a `Network` with only `vlan` (no `ipv4`/`ipv6`) represents a pure L2 segment | Separates pool definition from usage. Future external allocation belongs in the management-cluster integration. Pure L2 segments (VLAN-only, no IP) are common for non-HBN deployments |
 | **`nodeSelector` replaces `workerGroups`** | `workerGroups: [wg1, wg2]` — string array referencing named worker groups | **Replaced** with `nodeSelector: metav1.LabelSelector` — standard Kubernetes label selector | More flexible: supports arbitrary label combinations, set-based requirements, and standard K8s selection semantics. No dependency on a specific "worker group" label convention |
 | **Infrastructure provisioning — `InterfaceConfig` CRD** | Not addressed (input assumed infrastructure already exists) | **New `InterfaceConfig` CRD** — user-authored with `nodeSelector`, netplan-inspired spec for bonds and ethernets (MTU, SR-IOV VF count). Operator resolves per-node into `NodeNetplanConfig`; `agent-netplan` applies via netplan/DBus. `Layer2Attachment.interfaceRef` references the resulting bonds/NICs | Replaces "out of scope" (D19 → D46). Real clusters need bond creation and VF provisioning as part of their network config. Same intent → per-node pattern as other CRDs |
 | **Use-case coverage matrix** | Not present | **Added** (§3.3) — maps four deployment categories (L2 ordering on the fly, GitOps L2 configs, externally provisioned SR-IOV, HBN use cases) to CRDs and fields, with a concrete pure-L2 YAML example | Makes coverage explicit; validates the design against deployment requirements |
@@ -25,7 +25,7 @@ This document summarises the differences between the **initial architecture** (A
 
 | Concept | What It Is | Why It Was Added |
 |---|---|---|
-| **`Network` CRD** (§4.2) | Pure pool definition: IPv4/IPv6 CIDRs with `prefixLength`, VLAN, VNI, per-AF `allocationPool`. Referenced by name via `networkRef` from usage CRDs. No VRFs, no node scope. **IP addresses are optional** — a `Network` with only `vlan` is a valid pure L2 segment. | The input embedded network parameters inline on each attachment. This caused duplication and conflated pool definition with pool usage. `Network` separates them — a pool is defined once and referenced many times. Pure L2 (VLAN-only, no IP) is common for non-HBN deployments. |
+| **`Network` CRD** (§4.2) | Pure pool definition: IPv4/IPv6 CIDRs with `prefixLength`, VLAN, VNI. Referenced by name via `networkRef` from usage CRDs. No VRFs, no node scope. **IP addresses are optional** — a `Network` with only `vlan` is a valid pure L2 segment. | The input embedded network parameters inline on each attachment. This caused duplication and conflated pool definition with pool usage. `Network` separates them — a pool is defined once and referenced many times. Pure L2 (VLAN-only, no IP) is common for non-HBN deployments. |
 | **Use-case coverage matrix** (§3.3) | Maps four deployment categories to CRDs and fields: (1) L2 ordering on the fly (vSphere/OpenStack), (2) GitOps L2 configs (bonds+VLANs+SR-IOV VFs), (3) externally provisioned SR-IOV, (4) HBN. Includes concrete YAML example for pure L2. | Validates the design against deployment requirements; makes coverage explicit. |
 | **`VRF` CRD** (§4.1) | A first-class resource representing backbone VRF metadata: name, VNI, route target, loopbacks. Referenced by name from `Destination` via `vrfRef` and from `Collector` via `mirrorVRF`. | Separates VRF identity from routing targets. VRF metadata is defined once; Destination references it and adds only routing concerns (prefixes + forwarding method). Resolves Open Question 19 (option c). |
 | **`Destination` CRD** (§4.2) | A routing target: prefixes + either `vrfRef` (HBN — VRF import routing) or `nextHop` (non-HBN — static routing). Referenced by label selector from attachments. | The input used inline VRF lists (`spec.network.VRFs: [vrf_a, vrf_b]`) on every attachment. `Destination` decouples routing from VRF metadata and supports both HBN and non-HBN modes uniformly. |
@@ -55,7 +55,7 @@ This document summarises the differences between the **initial architecture** (A
 | **VRF binding** | `spec.network.VRFs: [vrf_a, vrf_b]` — inline list of VRF names | `spec.destinations.matchLabels: { zone: secure }` — label selector on `Destination` CRDs (which reference `VRF` resources via `vrfRef`). **Optional** — omitting it activates non-HBN mode. | Major structural change — VRFs are now first-class resources; Destinations are routing targets selected by label |
 | **Node scoping** | `spec.workerGroups: [wg1]` — string array | `spec.nodeSelector.matchLabels` — standard `metav1.LabelSelector` | More flexible: arbitrary label combinations, set-based requirements |
 | **Routes** | `spec.routes[].vrf` + `prefixes` — per-VRF route blocks on the attachment | Import prefixes inherited from `Destination.spec.prefixes`; export derived from `Network` subnet; optional `routes` for extras | Simplifies: most cases need no `routes` at all |
-| **Network allocation fields** | Network name, allocation class, and IPv4 size — used by external provisioners | Moved to `Network.spec.allocationPool` (per-AF: `ipv4`, `ipv6`). **Not processed** in this iteration | Users must supply CIDRs, VLAN, VNI directly in the `Network` CRD |
+| **Network allocation fields** | Network name, allocation class, and IPv4 size — used by external provisioners | Removed from the tenant API; future allocation belongs in the management-cluster integration (D44) | Users must supply CIDRs, VLAN, VNI directly in the `Network` CRD |
 | **VNI** | Not on the attachment (implied from network allocation) | On the `Network` CRD (`spec.vni`) — explicitly user-specified | Moved to `Network` CRD |
 | **BGP config** | Inline `spec.bgp` block | Inline `spec.bgp` block — **kept as-is** | No change |
 | **SR-IOV** | `spec.sriov.enabled` | Same — **kept as-is** | No change |
@@ -80,7 +80,7 @@ This document summarises the differences between the **initial architecture** (A
 | **Connections array** | `connections[].direction: inbound`, `count`, `routes`, `disableLoadBalancer` | **Removed** — `count`, `advertisement` are top-level fields. No `disableLoadBalancer` (always creates MetalLB pool). | Simplified: no polymorphic array, each field has a single purpose |
 | **MetalLB advertisement** | Implicit (always BGP) | Explicit `spec.advertisement: bgp|l2` | User controls BGP vs. L2 advertisement mode |
 | **Ingress controller** | Not in input | **Not in proposal** — intentionally out of scope. Inbound stops at MetalLB pool + advertisement. | Ingress controller lifecycle is a separate concern |
-| **Network allocation fields** | `harmonization`, `ipv4.size` | Moved to `Network.spec.allocationPool` (per-AF). Reserved but not processed | Same as Layer2Attachment |
+| **Network allocation fields** | Allocation class, IPv4 size | Removed from the tenant API; future allocation belongs in the management-cluster integration (D44) | Same as Layer2Attachment |
 | **Non-HBN mode** | Not addressed | Omit `destinations` → MetalLB pool + advertisement only, no VRF plumbing | New capability |
 | **Status** | `connections[].addresses` / `addressesv4` | `allocatedIPs`, `metalLBPoolName`, `conditions` | Restructured for single-purpose CRD |
 | **Community** | On VRFRouteConfiguration (per-attachment, single string) | `spec.communities: []string` — list of BGP communities on the Inbound, not on Destination | Moved to usage level, made a list |
@@ -115,7 +115,7 @@ This document summarises the differences between the **initial architecture** (A
 | **VRF binding** | `spec.network.VRFs: [vrf_a, vrf_b]` — inline list | `spec.destinations.matchLabels` | Same structural change |
 | **Node scoping** | `spec.workerGroups: [wg1]` | `spec.nodeSelector` — standard `metav1.LabelSelector` | More flexible |
 | **Routes** | `spec.routes[].vrf` + `prefixes` | Import prefixes from `Destination`; optional `routes` for extras | Simplified |
-| **Network allocation fields** | `harmonization`, `ipv4.size` | Moved to `Network.spec.allocationPool` (per-AF). Reserved but not processed | Same |
+| **Network allocation fields** | Allocation class, IPv4 size | Removed from the tenant API; future allocation belongs in the management-cluster integration (D44) | Same |
 | **Controller behaviour** | "configure cluster networking implementation" (Calico) | Expanded: Calico IP pools, network policies, routes toward VRFs | More specific |
 
 ### 3.6 Collector & TrafficMirror *(new — not in input)*
@@ -149,7 +149,7 @@ These are entirely new CRDs, not present in the input document. See §3.6, §4.8
 
 | Input | Proposal |
 |---|---|
-| Mix of user-specified and externally allocated values; params inline on each attachment | `Network` CRD defines the pool (CIDR, VLAN, VNI, allocationPool). Usage CRDs reference via `networkRef`. All user-specified; `allocationPool` fields reserved for future use |
+| Mix of user-specified and externally allocated values; params inline on each attachment | `Network` CRD defines the pool (CIDR, VLAN, VNI). Usage CRDs reference via `networkRef`. All values are explicit; future allocation belongs in the management-cluster integration |
 
 ### 4.5 Node Scoping
 
@@ -167,7 +167,7 @@ These are entirely new CRDs, not present in the input document. See §3.6, §4.8
 | Automatic network allocation (external provisioner / OpenStack / vSphere) | **Deferred** | Transparent enhancement |
 | DNS record creation | **Dropped** | Not scoped in the proposal |
 | `spec.network.networkName` (OpenStack/vSphere) | **Dropped** | Replaced by `Network` CRD — the `Network` resource name serves as the logical network identifier |
-| Provider-specific allocation class | **Restructured** | Replaced by `Network.spec.allocationPool` with separate `ipv4` and `ipv6` fields. Not processed in this iteration. |
+| Provider-specific allocation class | **Removed from tenant API** | Future allocation belongs in the management-cluster integration; the tenant receives resolved IPv4/IPv6 CIDRs (D44). |
 | `spec.network.ipv4.size` (dynamic sizing) | **Replaced** | Replaced by `Network.spec.ipv4.prefixLength` — allocation slice size. Not processed in this iteration. |
 | Bidirectional connections | **Deferred** | Bidirectional = Inbound + Outbound combined (D31). A future `Gress` convenience CRD may bundle both roles |
 | `Consequences` / `Considerations` sections | **Reworked** | Replaced by §8 Open Questions, §9 Considerations, §10 Decision Record |
@@ -196,7 +196,7 @@ The following concepts passed through from the input to the proposal with no str
 | # | Decision | Input Position | Proposal Position |
 |---|---|---|---|
 | 1 | Management-cluster controller | Included | Removed (tenant-only) |
-| 2 | Network allocation | Automatic via external provisioners | User-specified; `allocationPool` fields reserved per-AF on `Network` CRD |
+| 2 | Network allocation | Automatic via external provisioners | Explicit values; future allocation belongs in the management-cluster integration |
 | 3 | VRF references | Inline name lists | `VRF` CRD (metadata) + `Destination` CRD (routing) + label selectors |
 | 4 | Import prefixes | Per-attachment route blocks | On `Destination`, inherited automatically |
 | 5 | Pipeline integration | Implicit Option A | **Resolved: Option B** (D24). `ConfigReconciler` extended to watch intent CRDs directly; no low-level CRDs generated. Low-level CRDs remain as user-managed escape hatch. Conflicts rejected (D32) |
@@ -206,7 +206,7 @@ The following concepts passed through from the input to the proposal with no str
 | 9 | `VRFAttachment` → `Inbound` + `Outbound` | Single CRD with `connections[]` array | Split into two CRDs — cleaner separation between ingress and egress |
 | 10 | Network pool definition | Inline `spec.network.*` on each attachment | New `Network` CRD — pool defined once, referenced via `networkRef`. Not per se L2 — only becomes L2 when attached. `managed: false` for external networks (D40) |
 | 11 | Node scoping | `workerGroups: []string` | `nodeSelector: metav1.LabelSelector` — standard Kubernetes label selector |
-| 12 | Per-AF allocation | Single `harmonization` string for both AFs | `allocationPool.ipv4` and `allocationPool.ipv6` — independent per address family |
+| 12 | Per-AF allocation | Single allocation class for both AFs | Provider-side policy resolves independent IPv4/IPv6 CIDRs before syncing to the tenant |
 | 13 | Non-HBN support | Not addressed (HBN assumed) | Optional `destinations` + `interfaceRef` enable non-HBN deployments |
 | 14 | Community placement | On `VRFRouteConfiguration` (per-attachment, single string) | `communities: []string` on each usage CRD (`Layer2Attachment`, `Inbound`, `Outbound`, `PodNetwork`), **not** on `Destination`. List, not single string |
 | 15 | Static routing for non-HBN L2 | Not addressed | `Destination.nextHop.ipv4`/`.ipv6` — controller creates static routes for the destination's prefixes via the next-hop on the VLAN sub-interface. Default gw = `prefixes: ["0.0.0.0/0"]` + `nextHop` |
