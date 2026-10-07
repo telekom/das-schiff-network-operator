@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
 // SPDX-License-Identifier: Apache-2.0
+// Framework polling contract regression coverage.
 
 package framework
 
@@ -30,7 +31,7 @@ func TestPollConditionContract(t *testing.T) {
 				calls++
 				return tc.done, tc.err
 			})
-			if err != tc.err || calls != 1 {
+			if err != tc.err || calls != 1 { //nolint:errorlint // Poll promises unchanged condition errors, not just matching causes.
 				t.Fatalf("got error %v after %d calls; want %v after one immediate call", err, calls, tc.err)
 			}
 		})
