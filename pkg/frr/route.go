@@ -43,7 +43,7 @@ func getQuantity(routeSummaries RouteSummaries, addressFamily int, vrf, table st
 			routeSummaryInfos[routeKey] = routeInformation
 		}
 	}
-	return slices.AppendSeq([]route.Information{}, maps.Values(routeSummaryInfos)), nil
+	return slices.AppendSeq(make([]route.Information, 0, len(routeSummaryInfos)), maps.Values(routeSummaryInfos)), nil
 }
 
 func (m *Manager) ListVrfs() ([]VrfVniSpec, error) {

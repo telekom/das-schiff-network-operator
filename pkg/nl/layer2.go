@@ -658,5 +658,5 @@ func (n *Manager) ListNeighborInformation() ([]NeighborInformation, error) {
 		}
 	}
 
-	return slices.AppendSeq([]NeighborInformation{}, maps.Values(neighbors)), nil
+	return slices.AppendSeq(make([]NeighborInformation, 0, len(neighbors)), maps.Values(neighbors)), nil
 }

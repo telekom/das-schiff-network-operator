@@ -203,5 +203,5 @@ func (n *Manager) ListRouteInformation() ([]route.Information, error) {
 			}
 		}
 	}
-	return slices.AppendSeq([]route.Information{}, maps.Values(routes)), nil
+	return slices.AppendSeq(make([]route.Information, 0, len(routes)), maps.Values(routes)), nil
 }
