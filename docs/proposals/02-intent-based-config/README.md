@@ -702,7 +702,7 @@ spec:
 
   # --- SR-IOV Configuration ---
   sriov:
-    enabled: true          # configure SR-IOV for the external provider (immutable)
+    enabled: true          # VF passthrough; skip CRA VXLAN/VLAN setup (immutable)
 
   # --- Node IP Assignment ---
   nodeIPs:
@@ -2109,7 +2109,7 @@ declare which networks and VRFs a cluster needs without managing individual
 provider resources. The management-cluster controller would handle allocation
 and resolve the provider's routing metadata.
 
-`NetworkBinding` replaces that role. It is the **input** CRD that declares what a cluster
+`NetworkBinding` is the proposed **input** CRD that declares what a cluster
 needs, and a controller creates the upstream provisioning resources from it. The direction
 is inverted compared to a simple pointer: **NetworkBinding → creates provider resources**,
 not provider resources → referenced by NetworkBinding.
@@ -2206,7 +2206,7 @@ the controller auto-generates:
 |---|---|
 | Requested VRF name | `metadata.name` |
 | Provisioned L3 VNI | `spec.vni` |
-| Provisioned BGP route target | `spec.rt` |
+| Provisioned BGP route target | `spec.routeTarget` |
 
 VRFs are **deduplicated**: if multiple NetworkBindings list the same VRF, the controller
 deduplicates the provider's routing metadata requests and creates only one `VRF` CRD
