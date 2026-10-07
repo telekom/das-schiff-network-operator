@@ -12,7 +12,7 @@ import (
 // Debouncer struct.
 type Debouncer struct {
 	once     sync.Once
-	queue    workqueue.TypedDelayingInterface[struct{}]
+	queue    workqueue.TypedDelayingInterface[string]
 	done     chan struct{}
 	function func(context.Context) error
 	// Duration between function call
@@ -55,8 +55,8 @@ func (d *Debouncer) debounceRoutine(ctx context.Context) {
 	}
 }
 
-func (d *Debouncer) start() {
-	d.queue = workqueue.NewTypedDelayingQueue[struct{}]()
+func (d *Debouncer) initializeWorker() {
+	d.queue = workqueue.NewTypedDelayingQueue[string]()
 	go d.debounceRoutine(d.internalCtxFunc()) //nolint:contextcheck // worker uses the internal lifecycle context
 }
 
@@ -66,8 +66,8 @@ func (d *Debouncer) start() {
 // goroutine always runs with the Debouncer's internal context so it is not canceled when
 // a short-lived reconcile context expires.
 func (d *Debouncer) Debounce(_ context.Context) {
-	d.once.Do(d.start)
-	d.queue.AddAfter(struct{}{}, d.debounceTime)
+	d.once.Do(d.initializeWorker)
+	d.queue.AddAfter("reconcile", d.debounceTime)
 }
 
 // Start binds worker shutdown to the manager's lifetime.
@@ -87,7 +87,7 @@ func (*Debouncer) NeedLeaderElection() bool {
 // The callback must honor cancellation; Stop must not be called from the callback.
 func (d *Debouncer) Stop() {
 	d.cancel()
-	d.once.Do(d.start)
+	d.once.Do(d.initializeWorker)
 	d.queue.ShutDown()
 	<-d.done
 }
