@@ -276,7 +276,7 @@ envtest: ## Download setup-envtest locally if necessary.
 GO_LICENSES = $(shell pwd)/bin/go-licenses
 .PHONY: go-licenses
 go-licenses: ## Download go-licenses locally if necessary.
-	$(call go-get-tool,$(GO_LICENSES),github.com/google/go-licenses@latest)
+	$(call go-get-tool,$(GO_LICENSES),github.com/google/go-licenses@v1.6.0)
 
 CRD_REF_DOCS = $(shell pwd)/bin/crd-ref-docs
 .PHONY: crd-ref-docs
