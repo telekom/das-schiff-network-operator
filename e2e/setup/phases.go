@@ -11,6 +11,21 @@ import (
 	"time"
 )
 
+func installMultus(kubectl func(...string) error, version string) error {
+	url := fmt.Sprintf("https://raw.githubusercontent.com/k8snetworkplumbingwg/multus-cni/%s/deployments/multus-daemonset-thick.yml", version)
+	if err := kubectl("apply", "-f", url); err != nil {
+		return fmt.Errorf("apply Multus: %w", err)
+	}
+	if err := kubectl("-n", "kube-system", "patch", "daemonset", "kube-multus-ds", "--type=json",
+		`-p=[{"op":"replace","path":"/spec/template/spec/containers/0/resources/limits/memory","value":"512Mi"},{"op":"replace","path":"/spec/template/spec/containers/0/resources/requests/memory","value":"512Mi"}]`); err != nil {
+		return fmt.Errorf("patch Multus: %w", err)
+	}
+	if err := kubectl("-n", "kube-system", "rollout", "status", "daemonset/kube-multus-ds", "--timeout=180s"); err != nil {
+		return fmt.Errorf("wait for Multus rollout: %w", err)
+	}
+	return nil
+}
+
 // PhaseBuildImages builds or loads all Docker images required for the E2E lab.
 //
 // When E2E_SKIP_BUILD=true, pre-built OCI tarballs are loaded from E2E_IMAGE_DIR
@@ -589,10 +604,9 @@ ports:
 	// Multus
 	multusVersion := EnvOr("MULTUS_VERSION", "v4.1.4")
 	Logf("Installing Multus %s...", multusVersion)
-	kubectl("apply", "-f", //nolint:errcheck
-		fmt.Sprintf("https://raw.githubusercontent.com/k8snetworkplumbingwg/multus-cni/%s/deployments/multus-daemonset-thick.yml", multusVersion))
-	kubectl("-n", "kube-system", "patch", "daemonset", "kube-multus-ds", "--type=json", //nolint:errcheck
-		`-p=[{"op":"replace","path":"/spec/template/spec/containers/0/resources/limits/memory","value":"512Mi"},{"op":"replace","path":"/spec/template/spec/containers/0/resources/requests/memory","value":"512Mi"}]`)
+	if err := installMultus(kubectl, multusVersion); err != nil {
+		return err
+	}
 
 	// MetalLB (controller only, no speaker — kube-vip handles VIP BGP)
 	metallbVersion := EnvOr("METALLB_VERSION", "v0.14.9")
@@ -858,10 +872,9 @@ func PhaseCluster2Components(cluster *Cluster, repoRoot string) error {
 
 	// Multus
 	multusVersion := EnvOr("MULTUS_VERSION", "v4.1.4")
-	kubectl("apply", "-f", //nolint:errcheck
-		fmt.Sprintf("https://raw.githubusercontent.com/k8snetworkplumbingwg/multus-cni/%s/deployments/multus-daemonset-thick.yml", multusVersion))
-	kubectl("-n", "kube-system", "patch", "daemonset", "kube-multus-ds", "--type=json", //nolint:errcheck
-		`-p=[{"op":"replace","path":"/spec/template/spec/containers/0/resources/limits/memory","value":"512Mi"},{"op":"replace","path":"/spec/template/spec/containers/0/resources/requests/memory","value":"512Mi"}]`)
+	if err := installMultus(kubectl, multusVersion); err != nil {
+		return err
+	}
 
 	// Operator + agents
 	if _, err := DockerExecShell(cp.Name, fmt.Sprintf(
