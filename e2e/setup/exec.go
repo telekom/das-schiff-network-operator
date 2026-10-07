@@ -73,7 +73,9 @@ func RunCmdOutput(name string, args ...string) (string, error) {
 // The timeout interrupts the polling interval, but cannot interrupt fn itself.
 func WaitFor(description string, timeout, interval time.Duration, fn func() (bool, error)) error {
 	start := time.Now()
-	err := wait.PollUntilContextTimeout(context.Background(), interval, timeout, true, func(context.Context) (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	err := (wait.Backoff{Duration: interval}).DelayFunc().Until(ctx, true, true, func(context.Context) (bool, error) {
 		ok, err := fn()
 		if err != nil {
 			Logf("  %s: %v", description, err)
