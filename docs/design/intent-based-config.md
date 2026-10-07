@@ -64,6 +64,9 @@ Retries are scheduled after the debounce interval; an already-due trigger can
 run sooner. The manager owns worker shutdown:
 it cancels in-flight API work, discards pending callbacks and joins the worker.
 Short-lived controller request contexts do not cancel shared reconciliation.
+The legacy leader-election startup hook also queues its initial reconciliation
+on that worker, so startup cannot overlap controller-triggered callbacks.
+Startup errors follow the worker's retry policy rather than stopping the manager.
 
 ## Related
 

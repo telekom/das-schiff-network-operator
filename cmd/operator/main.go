@@ -430,8 +430,6 @@ func (*onLeaderElectionEvent) NeedLeaderElection() bool {
 }
 
 func (e *onLeaderElectionEvent) Start(ctx context.Context) error {
-	if err := e.cr.ReconcileDebounced(ctx); err != nil {
-		return fmt.Errorf("error configuring initial configuration revision: %w", err)
-	}
+	e.cr.Reconcile(ctx)
 	return nil
 }
