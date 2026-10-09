@@ -24,6 +24,10 @@ import (
 type NodeNetworkConfigSpec struct {
 	// Revision stores hash of the NodeConfigRevision that was used to create the NodeNetworkConfig object.
 	Revision string `json:"revision"`
+	// ConfigHash identifies the resolved node network and Netplan configuration, excluding revision metadata.
+	ConfigHash string `json:"configHash,omitempty"`
+	// ConfigUpdateTime records deployment start time and is excluded from ConfigHash.
+	ConfigUpdateTime *metav1.Time `json:"configUpdateTime,omitempty"`
 	// Layer2s is a map of Layer2 configurations.
 	Layer2s map[string]Layer2 `json:"layer2s,omitempty"`
 	// ClusterVRF is the default VRF configuration used for the default route of HBR.
@@ -350,6 +354,8 @@ type NodeNetworkConfigStatus struct {
 	LastUpdate metav1.Time `json:"lastUpdate"`
 	// LastAppliedRevision stores hash of the NodeConfigRevision that was last applied to the node.
 	LastAppliedRevision string `json:"lastAppliedRevision,omitempty"`
+	// LastAppliedConfigHash identifies the resolved configuration last attempted by the node agent.
+	LastAppliedConfigHash string `json:"lastAppliedConfigHash,omitempty"`
 	// ErrorMessage contains the error message when ConfigStatus is 'invalid'.
 	// This field is cleared whenever ConfigStatus transitions to any non-'invalid' state
 	// (including 'provisioning' and 'provisioned'), so stale errors do not persist.

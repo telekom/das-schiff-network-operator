@@ -23,6 +23,23 @@ misconfigure.
 
 All resources below are **cluster-scoped**.
 
+Node selectors are re-evaluated when a ready node's labels change. The operator
+rebuilds that node's `NodeNetworkConfig` and `NodeNetplanConfig`, adding or removing
+selected networks and VRFs without creating a new global `NetworkConfigRevision`.
+The operator hashes the resolved node network and Netplan specifications in
+`NodeNetworkConfig.spec.configHash`, excluding labels and revision metadata.
+Each reconciliation loads the operator's VRF configuration once and builds all
+ready nodes from that snapshot.
+Agents track `status.lastAppliedConfigHash` alongside the global revision.
+Unrelated labels, or selector changes that produce identical configuration, do
+not trigger deployment. A new global revision with identical node configuration
+updates provenance without reapplying it. Label-driven configuration changes use
+the same rollout concurrency limit as revision changes.
+Failed node-local updates do not invalidate the global revision, so correcting
+the node labels can recover the configuration. Deployment timeouts are measured
+using `spec.configUpdateTime` and agent status updates; timed-out node-local
+updates do not permanently occupy rollout slots.
+
 ## VRFRouteConfiguration
 
 Defines a VRF and the routes leaked between it and the cluster VRF. Multiple

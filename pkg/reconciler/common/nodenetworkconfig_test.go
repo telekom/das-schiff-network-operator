@@ -802,6 +802,107 @@ var _ = Describe("NodeNetworkConfigReconciler", func() {
 	})
 
 	Context("Reconcile edge cases", func() {
+		const sameConfigHash = "same-config"
+		It("should apply changed resolved configuration even when the global revision is unchanged", func() {
+			storedCfg := createTestNodeNetworkConfig("1")
+			storedCfg.Spec.ConfigHash = "old-config"
+			cfg := storedCfg.DeepCopy()
+			cfg.Spec.ConfigHash = "new-config"
+			cfg.Spec.Layer2s = map[string]v1alpha1.Layer2{"100": {VLAN: 100, MTU: 1500}}
+			cfg.Status.ConfigStatus = operator.StatusProvisioned
+			cfg.Status.LastAppliedRevision = cfg.Spec.Revision
+			cfg.Status.LastAppliedConfigHash = storedCfg.Spec.ConfigHash
+			fakeClient = fake.NewClientBuilder().
+				WithScheme(scheme).WithObjects(cfg).WithStatusSubresource(cfg).Build()
+			r := newMockReconciler(mockCtrl, fakeClient, configPath, ReconcilerOptions{})
+			r.NodeNetworkConfig = storedCfg
+			r.mockApplier.EXPECT().ApplyConfig(gomock.Any(), gomock.Any()).Return(nil)
+			r.setupHealthyHealthCheck()
+
+			_, err := r.Reconcile(context.Background())
+			Expect(err).ToNot(HaveOccurred())
+			Expect(r.NodeNetworkConfig.Spec.ConfigHash).To(Equal(cfg.Spec.ConfigHash))
+			Expect(r.NodeNetworkConfig.Status.LastAppliedConfigHash).To(Equal(cfg.Spec.ConfigHash))
+			persisted, err := ReadNodeNetworkConfig(configPath)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(persisted.Spec.ConfigHash).To(Equal(cfg.Spec.ConfigHash))
+			r.NodeNetworkConfig = persisted
+			r.mockHealthChecker.EXPECT().TaintsRemoved().Return(true)
+			_, err = r.Reconcile(context.Background())
+			Expect(err).ToNot(HaveOccurred())
+		})
+
+		It("should retry an invalid configuration when its resolved configuration changes", func() {
+			cfg := createTestNodeNetworkConfig("1")
+			cfg.Spec.ConfigHash = "new-config"
+			cfg.Status.ConfigStatus = operator.StatusInvalid
+			cfg.Status.LastAppliedRevision = cfg.Spec.Revision
+			cfg.Status.LastAppliedConfigHash = "old-config"
+			fakeClient = fake.NewClientBuilder().
+				WithScheme(scheme).WithObjects(cfg).WithStatusSubresource(cfg).Build()
+			r := newMockReconciler(mockCtrl, fakeClient, configPath, ReconcilerOptions{})
+			r.mockApplier.EXPECT().ApplyConfig(gomock.Any(), gomock.Any()).Return(nil)
+			r.setupHealthyHealthCheck()
+
+			_, err := r.Reconcile(context.Background())
+			Expect(err).ToNot(HaveOccurred())
+			Expect(r.NodeNetworkConfig.Status.ConfigStatus).To(Equal(operator.StatusProvisioned))
+			Expect(r.NodeNetworkConfig.Status.LastAppliedConfigHash).To(Equal(cfg.Spec.ConfigHash))
+		})
+
+		It("should not retry an invalid configuration with the same configuration hash", func() {
+			cfg := createTestNodeNetworkConfig("1")
+			cfg.Spec.ConfigHash = sameConfigHash
+			cfg.Status.ConfigStatus = operator.StatusInvalid
+			cfg.Status.LastAppliedRevision = cfg.Spec.Revision
+			cfg.Status.LastAppliedConfigHash = cfg.Spec.ConfigHash
+			fakeClient = fake.NewClientBuilder().
+				WithScheme(scheme).WithObjects(cfg).WithStatusSubresource(cfg).Build()
+			r := newMockReconciler(mockCtrl, fakeClient, configPath, ReconcilerOptions{})
+
+			_, err := r.Reconcile(context.Background())
+			Expect(err).ToNot(HaveOccurred())
+			Expect(r.NodeNetworkConfig).To(BeNil())
+		})
+
+		It("should update provenance without reapplying an identical configuration", func() {
+			storedCfg := createTestNodeNetworkConfig("1")
+			storedCfg.Spec.ConfigHash = sameConfigHash
+			cfg := createTestNodeNetworkConfig("2")
+			cfg.Spec.ConfigHash = storedCfg.Spec.ConfigHash
+			cfg.Status.ConfigStatus = operator.StatusProvisioned
+			cfg.Status.LastAppliedRevision = storedCfg.Spec.Revision
+			cfg.Status.LastAppliedConfigHash = storedCfg.Spec.ConfigHash
+			fakeClient = fake.NewClientBuilder().
+				WithScheme(scheme).WithObjects(cfg).WithStatusSubresource(cfg).Build()
+			r := newMockReconciler(mockCtrl, fakeClient, configPath, ReconcilerOptions{})
+			r.NodeNetworkConfig = storedCfg
+			r.mockHealthChecker.EXPECT().TaintsRemoved().Return(true)
+
+			_, err := r.Reconcile(context.Background())
+			Expect(err).ToNot(HaveOccurred())
+			Expect(r.NodeNetworkConfig.Spec.Revision).To(Equal(cfg.Spec.Revision))
+			Expect(r.NodeNetworkConfig.Status.LastAppliedRevision).To(Equal(cfg.Spec.Revision))
+		})
+
+		It("should adopt a content hash without reapplying an unchanged saved configuration", func() {
+			storedCfg := createTestNodeNetworkConfig("1")
+			cfg := storedCfg.DeepCopy()
+			cfg.Spec.ConfigHash = sameConfigHash
+			cfg.Spec.Layer2s = map[string]v1alpha1.Layer2{}
+			cfg.Spec.FabricVRFs = map[string]v1alpha1.FabricVRF{}
+			cfg.Status.ConfigStatus = operator.StatusProvisioned
+			fakeClient = fake.NewClientBuilder().
+				WithScheme(scheme).WithObjects(cfg).WithStatusSubresource(cfg).Build()
+			r := newMockReconciler(mockCtrl, fakeClient, configPath, ReconcilerOptions{})
+			r.NodeNetworkConfig = storedCfg
+			r.mockHealthChecker.EXPECT().TaintsRemoved().Return(true)
+
+			_, err := r.Reconcile(context.Background())
+			Expect(err).ToNot(HaveOccurred())
+			Expect(r.NodeNetworkConfig.Status.LastAppliedConfigHash).To(Equal(cfg.Spec.ConfigHash))
+		})
+
 		It("should skip invalid NodeNetworkConfig with same revision", func() {
 			cfg := createTestNodeNetworkConfig("1")
 			cfg.Status.ConfigStatus = operator.StatusInvalid
