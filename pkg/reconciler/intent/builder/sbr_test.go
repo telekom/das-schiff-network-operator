@@ -35,6 +35,87 @@ import (
 func ptrString(s string) *string { return &s }
 func ptrInt32(i int32) *int32    { return &i }
 
+func TestAggregateRoutesLastResort(t *testing.T) {
+	net := &resolver.ResolvedNetwork{
+		Spec: nc.NetworkSpec{
+			IPv4: &nc.IPNetwork{CIDR: "192.0.2.0/24"},
+			IPv6: &nc.IPNetwork{CIDR: "2001:db8::/64"},
+		},
+	}
+	for _, tt := range []struct {
+		name   string
+		policy *nc.AnnouncementPolicy
+		vrf    string
+		want   []networkv1alpha1.StaticRoute
+	}{
+		{
+			name: "default aggregates",
+			want: []networkv1alpha1.StaticRoute{
+				{Prefix: "192.0.2.0/24", LastResort: true},
+				{Prefix: "2001:db8::/64", LastResort: true},
+			},
+		},
+		{
+			name: "policy aggregates",
+			policy: &nc.AnnouncementPolicy{Spec: nc.AnnouncementPolicySpec{
+				Aggregate: &nc.AggregateConfig{Enabled: ptr(true), PrefixLengthV4: ptrInt32(28), PrefixLengthV6: ptrInt32(80)},
+			}},
+			want: []networkv1alpha1.StaticRoute{
+				{Prefix: "192.0.2.0/28", LastResort: true},
+				{Prefix: "2001:db8::/80", LastResort: true},
+			},
+		},
+		{
+			name: "disabled aggregates",
+			policy: &nc.AnnouncementPolicy{Spec: nc.AnnouncementPolicySpec{
+				Aggregate: &nc.AggregateConfig{Enabled: ptr(false)},
+			}},
+		},
+		{
+			name: "forwarding aggregates",
+			vrf:  "combo",
+			want: []networkv1alpha1.StaticRoute{
+				{Prefix: "192.0.2.0/24", NextHop: &networkv1alpha1.NextHop{Vrf: ptrString("combo")}},
+				{Prefix: "2001:db8::/64", NextHop: &networkv1alpha1.NextHop{Vrf: ptrString("combo")}},
+			},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			fvrf := networkv1alpha1.FabricVRF{EVPNExportFilter: &networkv1alpha1.Filter{}}
+			if tt.vrf == "" {
+				addAggregateRoutes(&fvrf, net, tt.policy)
+			} else {
+				addAggregateRoutesViaVRF(&fvrf, net, tt.policy, tt.vrf)
+			}
+			assert.Equal(t, tt.want, fvrf.StaticRoutes)
+			require.Len(t, fvrf.EVPNExportFilter.Items, len(tt.want))
+			for i, route := range tt.want {
+				assert.Equal(t, route.Prefix, fvrf.EVPNExportFilter.Items[i].Matcher.Prefix.Prefix)
+			}
+		})
+	}
+}
+
+func TestAppendUniqueStaticRoutePreservesOrdinaryBlackholes(t *testing.T) {
+	aggregate := networkv1alpha1.StaticRoute{Prefix: "2001:db8::/64", LastResort: true}
+	blackhole := networkv1alpha1.StaticRoute{Prefix: aggregate.Prefix}
+	forwarding := networkv1alpha1.StaticRoute{
+		Prefix: aggregate.Prefix, NextHop: &networkv1alpha1.NextHop{Vrf: ptrString("combo")},
+	}
+	for _, routes := range [][]networkv1alpha1.StaticRoute{
+		{aggregate, blackhole}, {blackhole, aggregate},
+	} {
+		got := appendUniqueStaticRoute(routes[:1:1], routes[1])
+		assert.Equal(t, []networkv1alpha1.StaticRoute{blackhole}, got)
+	}
+	for _, routes := range [][]networkv1alpha1.StaticRoute{
+		{blackhole, forwarding}, {forwarding, blackhole},
+	} {
+		got := appendUniqueStaticRoute(routes[:1:1], routes[1])
+		assert.ElementsMatch(t, []networkv1alpha1.StaticRoute{blackhole, forwarding}, got)
+	}
+}
+
 func baseSBRData() *resolver.ResolvedData {
 	return &resolver.ResolvedData{
 		Nodes: []corev1.Node{

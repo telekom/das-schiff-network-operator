@@ -1107,6 +1107,12 @@ spec:
                           required:
                           - minInterval
                           type: object
+                        lastResort:
+                          description: |-
+                            LastResort makes a blackhole route a fallback behind ordinary routes to
+                            the same prefix. Agents translate this intent into vendor-specific
+                            preference values. It does not override longest-prefix matching.
+                          type: boolean
                         nextHop:
                           description: NextHop is the next hop for the static route.
                           properties:
@@ -1123,6 +1129,10 @@ spec:
                       required:
                       - prefix
                       type: object
+                      x-kubernetes-validations:
+                      - message: lastResort is only supported for blackhole routes
+                          without a nextHop
+                        rule: '!has(self.lastResort) || !self.lastResort || !has(self.nextHop)'
                     type: array
                   vrfImports:
                     description: VRFImports is a list of VRF import configurations.
@@ -2473,6 +2483,12 @@ spec:
                             required:
                             - minInterval
                             type: object
+                          lastResort:
+                            description: |-
+                              LastResort makes a blackhole route a fallback behind ordinary routes to
+                              the same prefix. Agents translate this intent into vendor-specific
+                              preference values. It does not override longest-prefix matching.
+                            type: boolean
                           nextHop:
                             description: NextHop is the next hop for the static route.
                             properties:
@@ -2489,6 +2505,10 @@ spec:
                         required:
                         - prefix
                         type: object
+                        x-kubernetes-validations:
+                        - message: lastResort is only supported for blackhole routes
+                            without a nextHop
+                          rule: '!has(self.lastResort) || !self.lastResort || !has(self.nextHop)'
                       type: array
                     vni:
                       description: VNI is the Virtual Network Identifier.
@@ -3811,6 +3831,12 @@ spec:
                             required:
                             - minInterval
                             type: object
+                          lastResort:
+                            description: |-
+                              LastResort makes a blackhole route a fallback behind ordinary routes to
+                              the same prefix. Agents translate this intent into vendor-specific
+                              preference values. It does not override longest-prefix matching.
+                            type: boolean
                           nextHop:
                             description: NextHop is the next hop for the static route.
                             properties:
@@ -3827,6 +3853,10 @@ spec:
                         required:
                         - prefix
                         type: object
+                        x-kubernetes-validations:
+                        - message: lastResort is only supported for blackhole routes
+                            without a nextHop
+                          rule: '!has(self.lastResort) || !self.lastResort || !has(self.nextHop)'
                       type: array
                     vrfImports:
                       description: VRFImports is a list of VRF import configurations.

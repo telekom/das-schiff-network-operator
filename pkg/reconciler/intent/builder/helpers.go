@@ -367,8 +367,9 @@ func addAggregateRoutesWithNextHop(
 		}
 		prefix := computeAggregatePrefix(net.Spec.IPv4.CIDR, overrideLen)
 		fvrf.StaticRoutes = appendUniqueStaticRoute(fvrf.StaticRoutes, networkv1alpha1.StaticRoute{
-			Prefix:  prefix,
-			NextHop: nextHop,
+			Prefix:     prefix,
+			NextHop:    nextHop,
+			LastResort: nextHop == nil,
 		})
 		if fvrf.EVPNExportFilter != nil {
 			fvrf.EVPNExportFilter.Items = appendUniqueFilterItem(fvrf.EVPNExportFilter.Items, networkv1alpha1.FilterItem{
@@ -384,8 +385,9 @@ func addAggregateRoutesWithNextHop(
 		}
 		prefix := computeAggregatePrefix(net.Spec.IPv6.CIDR, overrideLen)
 		fvrf.StaticRoutes = appendUniqueStaticRoute(fvrf.StaticRoutes, networkv1alpha1.StaticRoute{
-			Prefix:  prefix,
-			NextHop: nextHop,
+			Prefix:     prefix,
+			NextHop:    nextHop,
+			LastResort: nextHop == nil,
 		})
 		if fvrf.EVPNExportFilter != nil {
 			fvrf.EVPNExportFilter.Items = appendUniqueFilterItem(fvrf.EVPNExportFilter.Items, networkv1alpha1.FilterItem{
@@ -439,7 +441,7 @@ func computeAggregatePrefix(cidr string, overrideLen *int32) string {
 }
 
 // appendUniqueStaticRoute deduplicates identical routes and prefers an explicit
-// next hop over a blackhole for the same prefix. Conflicting explicit routes
+// ordinary route over a last-resort blackhole for the same prefix. Conflicting explicit routes
 // remain visible for downstream validation instead of being silently discarded.
 func appendUniqueStaticRoute(routes []networkv1alpha1.StaticRoute, route networkv1alpha1.StaticRoute) []networkv1alpha1.StaticRoute {
 	for i := range routes {
@@ -449,10 +451,10 @@ func appendUniqueStaticRoute(routes []networkv1alpha1.StaticRoute, route network
 		switch {
 		case sameBuilderStaticRoute(routes[i], route):
 			return routes
-		case routes[i].NextHop == nil && route.NextHop != nil:
+		case routes[i].NextHop == nil && routes[i].LastResort && !route.LastResort:
 			routes[i] = route
 			return routes
-		case routes[i].NextHop != nil && route.NextHop == nil:
+		case !routes[i].LastResort && route.NextHop == nil && route.LastResort:
 			return routes
 		}
 	}
@@ -460,7 +462,7 @@ func appendUniqueStaticRoute(routes []networkv1alpha1.StaticRoute, route network
 }
 
 func sameBuilderStaticRoute(a, b networkv1alpha1.StaticRoute) bool {
-	if a.Prefix != b.Prefix {
+	if a.Prefix != b.Prefix || a.LastResort != b.LastResort {
 		return false
 	}
 	if a.NextHop == nil || b.NextHop == nil {

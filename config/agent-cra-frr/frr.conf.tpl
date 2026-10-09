@@ -9,7 +9,7 @@
 {{ if isIPv4 $route.Prefix }}ip{{ else }}ipv6{{ end }} route {{ $route.Prefix }} {{ $route.NextHop.Vrf }} nexthop-vrf {{ $route.NextHop.Vrf }}
 {{ end }}
 {{ else }}
-{{ if isIPv4 $route.Prefix }}ip{{ else }}ipv6{{ end }} route {{ $route.Prefix }} blackhole
+{{ if isIPv4 $route.Prefix }}ip{{ else }}ipv6{{ end }} route {{ $route.Prefix }} blackhole{{ if $route.LastResort }} 254{{ end }}
 {{ end }}
 {{ end }}
 {{ end }}
