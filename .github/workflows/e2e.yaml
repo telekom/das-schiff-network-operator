@@ -180,6 +180,10 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Test E2E setup
+        working-directory: e2e/setup
+        run: go test ./...
+
       - name: system-level-dependencies
         run: |
           sudo apt update

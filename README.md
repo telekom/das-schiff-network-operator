@@ -77,6 +77,19 @@ There are two possibilities to deploy the operator:
 WIP
 ```
 
+## E2E CNI bootstrap
+
+Both E2E clusters wait for the Multus DaemonSet rollout before continuing.
+The daemon's readiness probe requires its host-side `00-multus.conf` and Unix
+socket to exist, preventing annotated pods from starting with Calico alone
+while Multus is still installing.
+
+Cluster-2 gateway readiness probes also verify the secondary IPv4/IPv6
+addresses and routes, so a merely `Running` gateway cannot conceal a missing
+network attachment. Installation and readiness failures stop setup rather
+than allowing cascading connectivity failures in the test suites.
+`MULTUS_VERSION` selects the upstream manifest version (default: `v4.1.4`).
+
 ## License
 
 This project is licensed under Apache License Version 2.0.
