@@ -2,6 +2,8 @@ package operator
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"sort"
 
 	corev1 "k8s.io/api/core/v1"
@@ -47,8 +49,8 @@ func (crr *ConfigRevisionReconciler) buildNodeVrf(node *corev1.Node, revision *v
 		}
 	}
 
-	for _, vrfImport := range defaultImportMap {
-		c.Spec.ClusterVRF.VRFImports = append(c.Spec.ClusterVRF.VRFImports, vrfImport)
+	for _, name := range slices.Sorted(maps.Keys(defaultImportMap)) {
+		c.Spec.ClusterVRF.VRFImports = append(c.Spec.ClusterVRF.VRFImports, defaultImportMap[name])
 	}
 
 	return nil

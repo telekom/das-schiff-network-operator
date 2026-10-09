@@ -1270,6 +1270,15 @@ spec:
                       type: object
                     type: array
                 type: object
+              configHash:
+                description: ConfigHash identifies the resolved node network and Netplan
+                  configuration, excluding revision metadata.
+                type: string
+              configUpdateTime:
+                description: ConfigUpdateTime records deployment start time and is
+                  excluded from ConfigHash.
+                format: date-time
+                type: string
               fabricVRFs:
                 additionalProperties:
                   description: FabricVRF represents a fabric VRF configuration.
@@ -4006,6 +4015,10 @@ spec:
                   ErrorMessage contains the error message when ConfigStatus is 'invalid'.
                   This field is cleared whenever ConfigStatus transitions to any non-'invalid' state
                   (including 'provisioning' and 'provisioned'), so stale errors do not persist.
+                type: string
+              lastAppliedConfigHash:
+                description: LastAppliedConfigHash identifies the resolved configuration
+                  last attempted by the node agent.
                 type: string
               lastAppliedRevision:
                 description: LastAppliedRevision stores hash of the NodeConfigRevision

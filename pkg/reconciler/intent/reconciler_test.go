@@ -40,7 +40,9 @@ import (
 
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	nc "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
+	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/assembler"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/builder"
+	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/resolver"
 	"github.com/telekom/das-schiff-network-operator/pkg/vrfname"
 )
 
@@ -105,6 +107,64 @@ func TestMain(m *testing.M) {
 
 // testNamespace is used for all namespaced intent CRDs in tests.
 const testNamespace = "default"
+
+func TestNodeAttachmentRevisionDeterministic(t *testing.T) {
+	data := &resolver.ResolvedData{
+		Nodes: []corev1.Node{{
+			ObjectMeta: metav1.ObjectMeta{Name: "hash-test-node"},
+			Status: corev1.NodeStatus{Addresses: []corev1.NodeAddress{
+				{Type: corev1.NodeInternalIP, Address: "192.0.2.10"},
+			}},
+		}},
+		NodeAttachments: []nc.NodeAttachment{{
+			Spec: nc.NodeAttachmentSpec{Destinations: &metav1.LabelSelector{}},
+		}},
+		Destinations: make(map[string]*resolver.ResolvedDestination),
+	}
+	vni := int32(5000)
+	for _, name := range []string{"zebra", "alpha", "middle"} {
+		spec := nc.DestinationSpec{
+			VRFRef: ptr(name), Prefixes: []string{"198.51.100.128/25", "198.51.100.0/24"},
+		}
+		data.RawDestinations = append(data.RawDestinations, nc.Destination{
+			ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: spec,
+		})
+		data.Destinations[name] = &resolver.ResolvedDestination{
+			Name: name, Spec: spec,
+			VRFSpec: &nc.VRFSpec{VRF: name, VNI: ptr(vni), RouteTarget: ptr("65000:5000")},
+		}
+		vni++
+	}
+	b := builder.NewNodeAttachmentBuilder()
+	var firstRevision string
+	for range 30 {
+		contributions, err := b.Build(context.Background(), data)
+		require.NoError(t, err)
+		contrib := contributions[data.Nodes[0].Name]
+		require.NotNil(t, contrib)
+		result, err := assembler.Assemble([]*builder.NodeContribution{contrib})
+		require.NoError(t, err)
+		require.NotNil(t, result.Spec.ClusterVRF)
+		require.Len(t, result.Spec.ClusterVRF.VRFImports, 3)
+		for i, name := range []string{"alpha", "middle", "zebra"} {
+			assert.Equal(t, name, result.Spec.ClusterVRF.VRFImports[i].FromVRF)
+		}
+		revision, err := computeRevision(result.Spec)
+		require.NoError(t, err)
+		if firstRevision == "" {
+			firstRevision = revision
+		}
+		assert.Equal(t, firstRevision, revision, "map iteration must not change the applied revision")
+
+		rules := contrib.ClusterVRF.VRFImports[0].Filter.Items
+		rules[0], rules[1] = rules[1], rules[0]
+		reordered, err := assembler.Assemble([]*builder.NodeContribution{contrib})
+		require.NoError(t, err)
+		changedRevision, err := computeRevision(reordered.Spec)
+		require.NoError(t, err)
+		assert.NotEqual(t, firstRevision, changedRevision, "filter-rule order must remain significant")
+	}
+}
 
 // --- Helpers ---.
 

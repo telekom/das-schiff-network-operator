@@ -2,6 +2,8 @@ package operator
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -10,6 +12,7 @@ import (
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -39,6 +42,9 @@ const (
 	numOfDeploymentRetries = 3
 
 	permitRoute = "permit"
+
+	nodeLocalRevisionAnnotation = "network.t-caas.telekom.com/node-local-revision"
+	provisioningTimeoutMessage  = "provisioning timeout reached"
 )
 
 type AddressFamily int
@@ -145,7 +151,10 @@ func (crr *ConfigRevisionReconciler) reconcileDebounced(ctx context.Context) err
 
 	revisionToDeploy := getFirstValidRevision(revisions.Items)
 
-	nodesToDeploy := getOutdatedNodes(nodes, nodeConfigs.Items, revisionToDeploy)
+	nodesToDeploy, err := crr.getOutdatedNodes(ctx, nodes, nodeConfigs.Items, revisionToDeploy)
+	if err != nil {
+		return fmt.Errorf("error calculating desired node configurations: %w", err)
+	}
 
 	if err := crr.updateRevisionCounters(ctx, revisions.Items, revisionToDeploy, len(nodesToDeploy), totalNodes, cntMap); err != nil {
 		return fmt.Errorf("failed to update queue counters: %w", err)
@@ -158,7 +167,7 @@ func (crr *ConfigRevisionReconciler) reconcileDebounced(ctx context.Context) err
 	}
 
 	if revisionToDeploy.Status.Ongoing < crr.maxUpdating && len(nodesToDeploy) > 0 {
-		if err := crr.deployNodeConfig(ctx, nodesToDeploy[0], revisionToDeploy); err != nil {
+		if err := crr.deployNodeConfig(ctx, nodesToDeploy[0]); err != nil {
 			return fmt.Errorf("error deploying node configurations: %w", err)
 		}
 	}
@@ -188,6 +197,7 @@ func getFirstValidRevision(revisions []v1alpha1.NetworkConfigRevision) *v1alpha1
 
 type counters struct {
 	ready, ongoing, invalid int
+	revisionInvalid         bool
 	failedNode              string
 	failedMessage           string
 	failedAt                metav1.Time
@@ -200,7 +210,7 @@ func (crr *ConfigRevisionReconciler) processConfigsForRevision(ctx context.Conte
 	}
 	cnt := crr.getRevisionCounters(configs, revision)
 
-	if cnt.invalid > 0 {
+	if cnt.revisionInvalid {
 		// Invalidate when transitioning to invalid state, or when the failed node
 		// has changed (a different node may fail on an already-invalid revision).
 		if !revision.Status.IsInvalid || revision.Status.FailedNode != cnt.failedNode {
@@ -224,21 +234,19 @@ func (crr *ConfigRevisionReconciler) getRevisionCounters(configs []v1alpha1.Node
 		if cfg.Spec.Revision != revision.Spec.Revision {
 			continue
 		}
+		status := cfg.Status.ConfigStatus
+		if cfg.Spec.ConfigHash != cfg.Status.LastAppliedConfigHash &&
+			(status == StatusProvisioned || status == StatusInvalid) {
+			status = ""
+		}
 
 		timeout := crr.configTimeout
-		switch cfg.Status.ConfigStatus {
+		switch status {
 		case StatusProvisioned:
 			// Update ready counter
 			cnt.ready++
 		case StatusInvalid:
-			// Increase 'invalid' counter so we know that the revision results in invalid configs
-			cnt.invalid++
-			// Capture the failure info; choose lexicographically smallest node name for determinism.
-			if cnt.failedNode == "" || cfg.Name < cnt.failedNode {
-				cnt.failedNode = cfg.Name
-				cnt.failedMessage = cfg.Status.ErrorMessage
-				cnt.failedAt = cfg.Status.LastUpdate
-			}
+			cnt.recordFailure(cfg, cfg.Status.ErrorMessage, cfg.Status.LastUpdate)
 		case "":
 			// Set longer timeout if status was not yet updated
 			timeout = crr.preconfigTimeout
@@ -247,17 +255,31 @@ func (crr *ConfigRevisionReconciler) getRevisionCounters(configs []v1alpha1.Node
 			// Update ongoing counter
 			cnt.ongoing++
 			if wasConfigTimeoutReached(cfg, timeout) {
-				// If timeout was reached revision is invalid (but still counts as ongoing).
-				cnt.invalid++
-				if cnt.failedNode == "" || cfg.Name < cnt.failedNode {
-					cnt.failedNode = cfg.Name
-					cnt.failedMessage = "provisioning timeout reached"
-					cnt.failedAt = metav1.NewTime(cfg.Status.LastUpdate.Add(timeout))
+				cnt.recordFailure(cfg, provisioningTimeoutMessage, metav1.NewTime(configUpdateTime(cfg).Add(timeout)))
+				if isNodeLocalConfig(cfg) {
+					cnt.ongoing--
+					crr.logger.Error(fmt.Errorf("%s", provisioningTimeoutMessage), "node-local configuration failed", "node", cfg.Name, "configHash", cfg.Spec.ConfigHash)
 				}
 			}
 		}
 	}
 	return cnt
+}
+
+func (cnt *counters) recordFailure(cfg *v1alpha1.NodeNetworkConfig, message string, failedAt metav1.Time) {
+	cnt.invalid++
+	if isNodeLocalConfig(cfg) {
+		return
+	}
+	cnt.revisionInvalid = true
+	if cnt.failedNode == "" || cfg.Name < cnt.failedNode {
+		cnt.failedNode, cnt.failedMessage, cnt.failedAt = cfg.Name, message, failedAt
+	}
+}
+
+func isNodeLocalConfig(cfg *v1alpha1.NodeNetworkConfig) bool {
+	revision, ok := cfg.Annotations[nodeLocalRevisionAnnotation]
+	return ok && revision == cfg.Spec.Revision
 }
 
 func (crr *ConfigRevisionReconciler) removeRedundantConfigs(ctx context.Context, configs []v1alpha1.NodeNetworkConfig) ([]v1alpha1.NodeNetworkConfig, error) {
@@ -293,31 +315,83 @@ func (crr *ConfigRevisionReconciler) invalidateRevision(ctx context.Context, rev
 }
 
 func wasConfigTimeoutReached(cfg *v1alpha1.NodeNetworkConfig, timeout time.Duration) bool {
-	if cfg.Status.LastUpdate.IsZero() {
+	lastUpdate := configUpdateTime(cfg)
+	if lastUpdate.IsZero() {
 		return false
 	}
-	return time.Now().After(cfg.Status.LastUpdate.Add(timeout))
+	return time.Now().After(lastUpdate.Add(timeout))
 }
 
-func getOutdatedNodes(nodes map[string]*corev1.Node, configs []v1alpha1.NodeNetworkConfig, revision *v1alpha1.NetworkConfigRevision) []*corev1.Node {
+func configUpdateTime(cfg *v1alpha1.NodeNetworkConfig) metav1.Time {
+	if cfg.Spec.ConfigUpdateTime != nil && cfg.Spec.ConfigUpdateTime.After(cfg.Status.LastUpdate.Time) {
+		return *cfg.Spec.ConfigUpdateTime
+	}
+	return cfg.Status.LastUpdate
+}
+
+type nodeConfigDeployment struct {
+	node          *corev1.Node
+	networkConfig *v1alpha1.NodeNetworkConfig
+	netplanConfig *v1alpha1.NodeNetplanConfig
+}
+
+func (crr *ConfigRevisionReconciler) getOutdatedNodes(ctx context.Context, nodes map[string]*corev1.Node, configs []v1alpha1.NodeNetworkConfig, revision *v1alpha1.NetworkConfigRevision) ([]*nodeConfigDeployment, error) {
 	if revision == nil {
-		return []*corev1.Node{}
+		return nil, nil
 	}
-
-	for nodeName := range nodes {
-		for i := range configs {
-			if configs[i].Name == nodeName && configs[i].Spec.Revision == revision.Spec.Revision {
-				delete(nodes, nodeName)
-				break
-			}
-		}
+	if len(nodes) == 0 {
+		return nil, nil
 	}
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		return nil, fmt.Errorf("error loading config snapshot: %w", err)
+	}
+	crr.vrfConfig = cfg
 
-	nodesToDeploy := []*corev1.Node{}
+	current := make(map[string]*v1alpha1.NodeNetworkConfig, len(configs))
+	for i := range configs {
+		current[configs[i].Name] = &configs[i]
+	}
+	nodesToDeploy := make([]*nodeConfigDeployment, 0, len(nodes))
 	for _, node := range nodes {
-		nodesToDeploy = append(nodesToDeploy, node)
+		networkConfig, err := crr.buildNodeNetworkConfig(ctx, node, revision)
+		if err != nil {
+			return nil, fmt.Errorf("error preparing NodeNetworkConfig for node %s: %w", node.Name, err)
+		}
+		netplanConfig, err := crr.createNodeNetplanConfig(node, revision)
+		if err != nil {
+			return nil, fmt.Errorf("error preparing NodeNetplanConfig for node %s: %w", node.Name, err)
+		}
+		networkConfig.Spec.ConfigHash, err = nodeConfigHash(networkConfig.Spec, &netplanConfig.Spec)
+		if err != nil {
+			return nil, fmt.Errorf("error hashing configuration for node %s: %w", node.Name, err)
+		}
+		if cfg := current[node.Name]; cfg != nil && nodeConfigMatches(cfg, networkConfig) {
+			continue
+		}
+		nodesToDeploy = append(nodesToDeploy, &nodeConfigDeployment{
+			node: node, networkConfig: networkConfig, netplanConfig: netplanConfig,
+		})
 	}
-	return nodesToDeploy
+	return nodesToDeploy, nil
+}
+
+func nodeConfigHash(networkSpec v1alpha1.NodeNetworkConfigSpec, netplanSpec *v1alpha1.NodeNetplanConfigSpec) (string, error) {
+	networkSpec.Revision = ""
+	networkSpec.ConfigHash = ""
+	networkSpec.ConfigUpdateTime = nil
+	data, err := json.Marshal(struct {
+		Network v1alpha1.NodeNetworkConfigSpec  `json:"network"`
+		Netplan *v1alpha1.NodeNetplanConfigSpec `json:"netplan"`
+	}{Network: networkSpec, Netplan: netplanSpec})
+	if err != nil {
+		return "", fmt.Errorf("error marshaling resolved node configuration: %w", err)
+	}
+	return fmt.Sprintf("%x", sha256.Sum256(data)), nil
+}
+
+func nodeConfigMatches(current, desired *v1alpha1.NodeNetworkConfig) bool {
+	return current.Spec.Revision == desired.Spec.Revision && current.Spec.ConfigHash == desired.Spec.ConfigHash
 }
 
 func (crr *ConfigRevisionReconciler) updateRevisionCounters(ctx context.Context, revisions []v1alpha1.NetworkConfigRevision, currentRevision *v1alpha1.NetworkConfigRevision, queued, totalNodes int, cnt map[string]*counters) error {
@@ -381,7 +455,9 @@ func (crr *ConfigRevisionReconciler) listConfigs(ctx context.Context) (*v1alpha1
 	return nodeConfigs, nil
 }
 
-func (crr *ConfigRevisionReconciler) deployNodeConfig(ctx context.Context, node *corev1.Node, revision *v1alpha1.NetworkConfigRevision) error {
+func (crr *ConfigRevisionReconciler) deployNodeConfig(ctx context.Context, deployment *nodeConfigDeployment) error {
+	node := deployment.node
+	newConfig := deployment.networkConfig
 	currentConfig := &v1alpha1.NodeNetworkConfig{}
 	if err := crr.client.Get(ctx, types.NamespacedName{Name: node.Name}, currentConfig); err != nil {
 		if !apierrors.IsNotFound(err) {
@@ -390,29 +466,23 @@ func (crr *ConfigRevisionReconciler) deployNodeConfig(ctx context.Context, node 
 		currentConfig = nil
 	}
 
-	if currentConfig != nil && currentConfig.Spec.Revision == revision.Spec.Revision {
-		// current config is the same as current revision - skip
+	if currentConfig != nil && nodeConfigMatches(currentConfig, newConfig) {
 		return nil
 	}
 
-	newConfig, err := crr.CreateNodeNetworkConfig(ctx, node, revision)
-	if err != nil {
-		return fmt.Errorf("error preparing NodeNetworkConfig for node %s: %w", node.Name, err)
+	// Deploy Netplan first so a failure cannot be hidden by the NodeNetworkConfig skip check.
+	if err := crr.createOrUpdateNetplanConfig(ctx, deployment.netplanConfig); err != nil {
+		return fmt.Errorf("failed to deploy NodeNetplanConfig: %w", err)
 	}
 
 	for i := 0; i < numOfDeploymentRetries; i++ {
 		if err := crr.deployNodeNetworkConfig(ctx, newConfig, currentConfig, node); err != nil {
-			if errors.Is(err, context.DeadlineExceeded) {
+			if errors.Is(err, context.DeadlineExceeded) && i < numOfDeploymentRetries-1 {
 				continue
 			}
 			return fmt.Errorf("error deploying NodeNetworkConfig for node %s: %w", node.Name, err)
 		}
 		break
-	}
-
-	// create netplan config
-	if err := crr.createOrUpdateNetplanConfig(ctx, node, revision); err != nil {
-		return fmt.Errorf("failed to deploy NodeNetworkConfig: %w", err)
 	}
 
 	crr.logger.Info("deployed NodeNetworkConfig", "name", newConfig.Name)
@@ -434,15 +504,18 @@ func matchSelector(node *corev1.Node, selector *metav1.LabelSelector) bool {
 }
 
 func (crr *ConfigRevisionReconciler) CreateNodeNetworkConfig(ctx context.Context, node *corev1.Node, revision *v1alpha1.NetworkConfigRevision) (*v1alpha1.NodeNetworkConfig, error) {
+	if err := crr.vrfConfig.ReloadConfig(); err != nil {
+		return nil, fmt.Errorf("error reloading config: %w", err)
+	}
+	return crr.buildNodeNetworkConfig(ctx, node, revision)
+}
+
+func (crr *ConfigRevisionReconciler) buildNodeNetworkConfig(ctx context.Context, node *corev1.Node, revision *v1alpha1.NetworkConfigRevision) (*v1alpha1.NodeNetworkConfig, error) {
 	// create new config
 	c := &v1alpha1.NodeNetworkConfig{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: node.Name,
 		},
-	}
-
-	if err := crr.vrfConfig.ReloadConfig(); err != nil {
-		return nil, fmt.Errorf("error reloading config: %w", err)
 	}
 
 	if err := crr.buildNodeVrf(node, revision, c); err != nil {
@@ -510,26 +583,28 @@ func (crr *ConfigRevisionReconciler) createNodeNetplanConfig(node *corev1.Node, 
 	return c, nil
 }
 
-func (crr *ConfigRevisionReconciler) createOrUpdateNetplanConfig(ctx context.Context, node *corev1.Node, revision *v1alpha1.NetworkConfigRevision) error {
+func (crr *ConfigRevisionReconciler) createOrUpdateNetplanConfig(ctx context.Context, netplanConfig *v1alpha1.NodeNetplanConfig) error {
+	nodeName := netplanConfig.Name
 	currentNetplanConfig := &v1alpha1.NodeNetplanConfig{}
-	if err := crr.client.Get(ctx, types.NamespacedName{Name: node.Name}, currentNetplanConfig); err != nil {
+	if err := crr.client.Get(ctx, types.NamespacedName{Name: nodeName}, currentNetplanConfig); err != nil {
 		if !apierrors.IsNotFound(err) {
-			return fmt.Errorf("error getting NodeNetplanConfig object for node %s: %w", node.Name, err)
+			return fmt.Errorf("error getting NodeNetplanConfig object for node %s: %w", nodeName, err)
 		}
 		currentNetplanConfig = nil
 	}
-	netplanConfig, err := crr.createNodeNetplanConfig(node, revision)
-	if err != nil {
-		return fmt.Errorf("error creating NodeNetplanConfig for node %s: %w", node.Name, err)
-	}
 	if currentNetplanConfig == nil {
 		if err := crr.client.Create(ctx, netplanConfig); err != nil {
-			return fmt.Errorf("error creating NodeNetplanConfig for node %s: %w", node.Name, err)
+			return fmt.Errorf("error creating NodeNetplanConfig for node %s: %w", nodeName, err)
 		}
 	} else {
+		if equality.Semantic.DeepEqual(currentNetplanConfig.Spec, netplanConfig.Spec) &&
+			equality.Semantic.DeepEqual(currentNetplanConfig.OwnerReferences, netplanConfig.OwnerReferences) {
+			return nil
+		}
 		currentNetplanConfig.Spec = netplanConfig.Spec
+		currentNetplanConfig.OwnerReferences = netplanConfig.OwnerReferences
 		if err := crr.client.Update(ctx, currentNetplanConfig); err != nil {
-			return fmt.Errorf("error updating NodeNetplanConfig for node %s: %w", node.Name, err)
+			return fmt.Errorf("error updating NodeNetplanConfig for node %s: %w", nodeName, err)
 		}
 	}
 
@@ -567,6 +642,22 @@ func (crr *ConfigRevisionReconciler) deployNodeNetworkConfig(ctx context.Context
 	var cfg *v1alpha1.NodeNetworkConfig
 	if currentConfig != nil {
 		cfg = currentConfig
+		newConfig.Spec.ConfigUpdateTime = cfg.Spec.ConfigUpdateTime
+		if cfg.Spec.Revision != newConfig.Spec.Revision {
+			delete(cfg.Annotations, nodeLocalRevisionAnnotation)
+		}
+		if cfg.Spec.ConfigHash != newConfig.Spec.ConfigHash {
+			now := metav1.Now()
+			newConfig.Spec.ConfigUpdateTime = &now
+			if cfg.Spec.Revision == newConfig.Spec.Revision &&
+				(isNodeLocalConfig(cfg) || (cfg.Status.ConfigStatus == StatusProvisioned &&
+					cfg.Spec.ConfigHash == cfg.Status.LastAppliedConfigHash)) {
+				if cfg.Annotations == nil {
+					cfg.Annotations = make(map[string]string)
+				}
+				cfg.Annotations[nodeLocalRevisionAnnotation] = newConfig.Spec.Revision
+			}
+		}
 		// there already is config for node - update
 		cfg.Spec = newConfig.Spec
 		cfg.ObjectMeta.OwnerReferences = newConfig.ObjectMeta.OwnerReferences
@@ -576,6 +667,8 @@ func (crr *ConfigRevisionReconciler) deployNodeNetworkConfig(ctx context.Context
 		}
 	} else {
 		cfg = newConfig
+		now := metav1.Now()
+		cfg.Spec.ConfigUpdateTime = &now
 		// there is no config for node - create one
 		if err := crr.client.Create(deploymentCtx, cfg); err != nil {
 			return fmt.Errorf("error creating NodeNetworkConfig for node %s: %w", node.Name, err)
