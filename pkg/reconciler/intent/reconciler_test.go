@@ -30,6 +30,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -109,6 +110,52 @@ const testNamespace = "default"
 // --- Helpers ---.
 
 func ptr[T any](v T) *T { return &v }
+
+func TestLastResortStaticRouteValidation(t *testing.T) {
+	for _, kind := range []string{"cluster", "fabric", "local"} {
+		for _, tt := range []struct {
+			name       string
+			lastResort bool
+			nextHop    *networkv1alpha1.NextHop
+			wantError  bool
+		}{
+			{name: "aggregate", lastResort: true},
+			{name: "ordinary-blackhole"},
+			{name: "ordinary-forwarding", nextHop: &networkv1alpha1.NextHop{Vrf: ptr("combo")}},
+			{name: "invalid-forwarding", lastResort: true, nextHop: &networkv1alpha1.NextHop{Vrf: ptr("combo")}, wantError: true},
+		} {
+			t.Run(kind+"/"+tt.name, func(t *testing.T) {
+				vrf := networkv1alpha1.VRF{StaticRoutes: []networkv1alpha1.StaticRoute{{
+					Prefix: "2001:db8::/64", LastResort: tt.lastResort, NextHop: tt.nextHop,
+				}}}
+				nnc := &networkv1alpha1.NodeNetworkConfig{
+					ObjectMeta: metav1.ObjectMeta{Name: "last-resort-validation"},
+					Spec:       networkv1alpha1.NodeNetworkConfigSpec{Revision: "test"},
+				}
+				switch kind {
+				case "cluster":
+					nnc.Spec.ClusterVRF = &vrf
+				case "fabric":
+					nnc.Spec.FabricVRFs = map[string]networkv1alpha1.FabricVRF{"tenant": {
+						VRF: vrf, VNI: 1001,
+						EVPNExportFilter:       &networkv1alpha1.Filter{DefaultAction: networkv1alpha1.Action{Type: networkv1alpha1.Reject}},
+						EVPNImportRouteTargets: []string{},
+						EVPNExportRouteTargets: []string{},
+					}}
+				case "local":
+					nnc.Spec.LocalVRFs = map[string]networkv1alpha1.VRF{"tenant": vrf}
+				}
+				err := k8sClient.Create(context.Background(), nnc, client.DryRunAll)
+				if tt.wantError {
+					require.True(t, apierrors.IsInvalid(err), "expected invalid last-resort forwarding route, got %v", err)
+					assert.Contains(t, err.Error(), "lastResort is only supported for blackhole routes")
+				} else {
+					require.NoError(t, err)
+				}
+			})
+		}
+	}
+}
 
 func mapKeys[K comparable, V any](m map[K]V) []K {
 	keys := make([]K, 0, len(m))

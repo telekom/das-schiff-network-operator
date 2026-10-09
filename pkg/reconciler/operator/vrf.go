@@ -116,7 +116,8 @@ func createDefaultClusterVRF() *v1alpha1.VRF {
 func updateFabricVRF(fabricVrf *v1alpha1.FabricVRF, vrf *v1alpha1.VRFRevision, defaultImportMap map[string]v1alpha1.VRFImport, importMode ImportMode) {
 	for _, aggregate := range vrf.Aggregate {
 		fabricVrf.StaticRoutes = append(fabricVrf.StaticRoutes, v1alpha1.StaticRoute{
-			Prefix: aggregate,
+			Prefix:     aggregate,
+			LastResort: true,
 		})
 	}
 

@@ -96,6 +96,18 @@ keeps intent loosely coupled.
 | `BGPPeering` | BGP session with L2 clients or tenant workloads | [BGPPeering](../guides/bgp-peering.md) |
 | `Collector` + `TrafficMirror` | Mirror traffic to a GRE collector | [Traffic Mirroring](../guides/traffic-mirroring.md) |
 
+## Aggregate route preference
+
+Aggregate blackholes generated for Networks, including those controlled by
+`AnnouncementPolicy.spec.aggregate`, are last-resort routes. An ordinary route
+to the same prefix (for example, an L2 segment's connected `/64`) takes
+precedence; the blackhole remains a fallback when no preferred route exists.
+Only generated aggregate blackholes receive this preference. Aggregates that
+forward through another VRF and other blackhole routes are unchanged.
+The generated `NodeNetworkConfig` expresses this as `lastResort: true`, which
+CRA agents translate into native route preferences. Longest-prefix matching
+still applies.
+
 ## Deployment modes: HBN vs. non-HBN (pure L2 / netplan)
 
 The same intent CRDs support two data-plane modes. Which one you get is decided

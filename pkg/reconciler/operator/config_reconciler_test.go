@@ -2,6 +2,9 @@ package operator
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -310,6 +313,58 @@ var _ = Describe("ConfigReconciler", func() {
 			Expect(data.bgps).To(HaveLen(1))
 			Expect(data.mirrorTargets).To(HaveLen(1))
 			Expect(data.mirrorSelectors).To(HaveLen(1))
+		})
+	})
+
+	Describe("NewRevision aggregate generation", func() {
+		It("rolls out existing aggregate blackholes after an upgrade without changing inputs", func() {
+			vrfs := []v1alpha1.VRFRevision{{
+				Name: "vrf-a",
+				VRFRouteConfigurationSpec: v1alpha1.VRFRouteConfigurationSpec{
+					VRF: "tenant-a", Aggregate: []string{"2001:db8::/64"},
+				},
+			}}
+			oldSpec := v1alpha1.NetworkConfigRevisionSpec{Vrf: vrfs}
+			data, err := json.Marshal(oldSpec)
+			Expect(err).NotTo(HaveOccurred())
+			hash := sha256.Sum256(data)
+			oldSpec.Revision = hex.EncodeToString(hash[:])
+			existing := v1alpha1.NetworkConfigRevision{
+				Spec: oldSpec, Status: v1alpha1.NetworkConfigRevisionStatus{Ready: 1},
+			}
+			updated, err := v1alpha1.NewRevision(nil, vrfs, nil, nil, nil)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(updated.Spec.Revision).NotTo(Equal(existing.Spec.Revision))
+			cr := &ConfigReconciler{logger: logger}
+			Expect(cr.shouldSkip(&v1alpha1.NetworkConfigRevisionList{Items: []v1alpha1.NetworkConfigRevision{existing}}, updated)).To(BeFalse())
+			node := makeNode("node1", true)
+			oldConfig := v1alpha1.NodeNetworkConfig{
+				ObjectMeta: metav1.ObjectMeta{Name: node.Name},
+				Spec: v1alpha1.NodeNetworkConfigSpec{
+					Revision: oldSpec.Revision,
+					FabricVRFs: map[string]v1alpha1.FabricVRF{
+						"tenant-a": {VRF: v1alpha1.VRF{StaticRoutes: []v1alpha1.StaticRoute{{Prefix: vrfs[0].Aggregate[0]}}}},
+					},
+				},
+			}
+			Expect(getOutdatedNodes(map[string]*corev1.Node{node.Name: node}, []v1alpha1.NodeNetworkConfig{oldConfig}, updated)).To(ConsistOf(node))
+			generated := &v1alpha1.NodeNetworkConfig{}
+			Expect(newTestCRR(ImportModeImport).buildNodeVrf(node, updated, generated)).To(Succeed())
+			Expect(generated.Spec.FabricVRFs["tenant-a"].StaticRoutes).To(ConsistOf(v1alpha1.StaticRoute{
+				Prefix: vrfs[0].Aggregate[0], LastResort: true,
+			}))
+			repeated, err := v1alpha1.NewRevision(nil, vrfs, nil, nil, nil)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(repeated.Spec.Revision).To(Equal(updated.Spec.Revision))
+		})
+
+		It("preserves revision hashes for configurations without aggregates", func() {
+			revision, err := v1alpha1.NewRevision(nil, nil, nil, nil, nil)
+			Expect(err).NotTo(HaveOccurred())
+			data, err := json.Marshal(v1alpha1.NetworkConfigRevisionSpec{})
+			Expect(err).NotTo(HaveOccurred())
+			hash := sha256.Sum256(data)
+			Expect(revision.Spec.Revision).To(Equal(hex.EncodeToString(hash[:])))
 		})
 	})
 
