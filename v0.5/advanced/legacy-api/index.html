@@ -1186,6 +1186,22 @@ a direct-use escape hatch for existing and advanced setups, but you have to
 manage VNIs, route targets and node selection yourself.</p>
 </div>
 <p>All resources below are <strong>cluster-scoped</strong>.</p>
+<p>Node selectors are re-evaluated when a ready node's labels change. The operator
+rebuilds that node's <code>NodeNetworkConfig</code> and <code>NodeNetplanConfig</code>, adding or removing
+selected networks and VRFs without creating a new global <code>NetworkConfigRevision</code>.
+The operator hashes the resolved node network and Netplan specifications in
+<code>NodeNetworkConfig.spec.configHash</code>, excluding labels and revision metadata.
+Each reconciliation loads the operator's VRF configuration once and builds all
+ready nodes from that snapshot.
+Agents track <code>status.lastAppliedConfigHash</code> alongside the global revision.
+Unrelated labels, or selector changes that produce identical configuration, do
+not trigger deployment. A new global revision with identical node configuration
+updates provenance without reapplying it. Label-driven configuration changes use
+the same rollout concurrency limit as revision changes.
+Failed node-local updates do not invalidate the global revision, so correcting
+the node labels can recover the configuration. Deployment timeouts are measured
+using <code>spec.configUpdateTime</code> and agent status updates; timed-out node-local
+updates do not permanently occupy rollout slots.</p>
 <h2 id="vrfrouteconfiguration">VRFRouteConfiguration<a class="headerlink" href="#vrfrouteconfiguration" title="Permanent link">&para;</a></h2>
 <p>Defines a VRF and the routes leaked between it and the cluster VRF. Multiple
 <code>VRFRouteConfiguration</code> objects may target the <strong>same</strong> <code>vrf</code>; they are merged by

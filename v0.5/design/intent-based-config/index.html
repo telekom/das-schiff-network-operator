@@ -1179,6 +1179,9 @@ node — see <a href="../../advanced/debugging/">Debugging</a>.</p>
   (<a href="../../getting-started/concepts/#lifecycle-and-deletion-order">Concepts → Lifecycle</a>).</li>
 <li><strong>Cross-cluster</strong>: resources are authored in a management cluster and synced
   into workload clusters.</li>
+<li><strong>Stable change detection</strong>: generated node configurations are content-hashed.
+  Outer VRF-import entries are ordered by source VRF name before hashing; filter
+  rules retain their evaluation order within each import.</li>
 </ul>
 <h2 id="related">Related<a class="headerlink" href="#related" title="Permanent link">&para;</a></h2>
 <ul>
