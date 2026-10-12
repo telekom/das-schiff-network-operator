@@ -352,11 +352,17 @@ func (l *LayerBGP) setupVRFImport(vrf *VRF, i int, conf v1alpha1.VRFImport) {
 
 	l.setupRouteMaps(vrf.Name+"_import_"+conf.FromVRF, conf.Filter)
 
-	if ucast := vrf.Routing.BGP.AF.UcastV4; ucast != nil {
-		vrfImports := ucast.VRFImports.Imports
-		vrfImports.VRFs = append(vrfImports.VRFs, conf.FromVRF)
-	}
-	if ucast := vrf.Routing.BGP.AF.UcastV6; ucast != nil {
+	for _, ucast := range []*BGPUcast{vrf.Routing.BGP.AF.UcastV4, vrf.Routing.BGP.AF.UcastV6} {
+		if ucast == nil {
+			continue
+		}
+		if ucast.VRFImports == nil {
+			ucast.VRFImports = &BGPUcastVRF{
+				Imports: &BGPUcastImportVRF{
+					RouteMaps: []string{"rm_" + vrf.Name + "_import"},
+				},
+			}
+		}
 		vrfImports := ucast.VRFImports.Imports
 		vrfImports.VRFs = append(vrfImports.VRFs, conf.FromVRF)
 	}
@@ -618,11 +624,6 @@ func (l *LayerBGP) setupLocalVRF(name string, conf *v1alpha1.VRF) error {
 				Protocol: BGPRedistStatic,
 			},
 		},
-		VRFImports: &BGPUcastVRF{
-			Imports: &BGPUcastImportVRF{
-				RouteMaps: []string{"rm_" + name + "_import"},
-			},
-		},
 	}
 	bgp.AF.UcastV6 = &BGPUcast{
 		Redists: []BGPRedist{
@@ -630,11 +631,6 @@ func (l *LayerBGP) setupLocalVRF(name string, conf *v1alpha1.VRF) error {
 				Protocol: BGPRedistConnect,
 			}, {
 				Protocol: BGPRedistStatic,
-			},
-		},
-		VRFImports: &BGPUcastVRF{
-			Imports: &BGPUcastImportVRF{
-				RouteMaps: []string{"rm_" + name + "_import"},
 			},
 		},
 	}
@@ -679,11 +675,6 @@ func (l *LayerBGP) setupFabricVRF(name string, conf *v1alpha1.FabricVRF) error {
 				Protocol: BGPRedistStatic,
 			},
 		},
-		VRFImports: &BGPUcastVRF{
-			Imports: &BGPUcastImportVRF{
-				RouteMaps: []string{"rm_" + name + "_import"},
-			},
-		},
 	}
 	bgp.AF.UcastV6 = &BGPUcast{
 		Redists: []BGPRedist{
@@ -691,11 +682,6 @@ func (l *LayerBGP) setupFabricVRF(name string, conf *v1alpha1.FabricVRF) error {
 				Protocol: BGPRedistConnect,
 			}, {
 				Protocol: BGPRedistStatic,
-			},
-		},
-		VRFImports: &BGPUcastVRF{
-			Imports: &BGPUcastImportVRF{
-				RouteMaps: []string{"rm_" + name + "_import"},
 			},
 		},
 	}
