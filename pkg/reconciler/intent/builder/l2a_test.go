@@ -415,7 +415,7 @@ func TestL2ABuilder_MultipleDestinationVRFsUseComboVRF(t *testing.T) {
 func TestAddNetworkRoutesToVRFReplacesBlackhole(t *testing.T) {
 	fvrf := networkv1alpha1.FabricVRF{
 		VRF: networkv1alpha1.VRF{
-			StaticRoutes: []networkv1alpha1.StaticRoute{{Prefix: testMultiVRFNetworkV4}},
+			StaticRoutes: []networkv1alpha1.StaticRoute{{Prefix: testMultiVRFNetworkV4, LastResort: true}},
 		},
 	}
 	net := &resolver.ResolvedNetwork{

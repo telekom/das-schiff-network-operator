@@ -252,11 +252,17 @@ type ModifyRouteAction struct {
 }
 
 // StaticRoute represents a static route configuration.
+// +kubebuilder:validation:XValidation:rule="!has(self.lastResort) || !self.lastResort || !has(self.nextHop)",message="lastResort is only supported for blackhole routes without a nextHop"
 type StaticRoute struct {
 	// Prefix is the prefix for the static route.
 	Prefix string `json:"prefix"`
 	// NextHop is the next hop for the static route.
 	NextHop *NextHop `json:"nextHop,omitempty"`
+	// LastResort makes a blackhole route a fallback behind ordinary routes to
+	// the same prefix. Agents translate this intent into vendor-specific
+	// preference values. It does not override longest-prefix matching.
+	// +optional
+	LastResort bool `json:"lastResort,omitempty"`
 	// BFDProfile is the BFD profile for the static route.
 	BFDProfile *BFDProfile `json:"bfdProfile,omitempty"`
 }

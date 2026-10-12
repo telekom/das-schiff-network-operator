@@ -128,6 +128,17 @@ func NewRevision(layer2 []Layer2Revision, vrfs []VRFRevision, bgps []BGPRevision
 	}
 
 	h := sha256.New()
+	// Rebuild existing legacy aggregates when their generated route semantics
+	// change, even if the user-facing configuration is unchanged.
+	for i := range vrfs {
+		if len(vrfs[i].Aggregate) > 0 {
+			const aggregateGenerationVersion = "last-resort-aggregates:v1\n"
+			if _, err := h.Write([]byte(aggregateGenerationVersion)); err != nil {
+				return nil, fmt.Errorf("failed hashing aggregate generation version: %w", err)
+			}
+			break
+		}
+	}
 	if _, err := h.Write(data); err != nil {
 		return nil, fmt.Errorf("failed hashing network config: %w", err)
 	}

@@ -80,6 +80,10 @@ func (LayerBGP) convStaticRoute(from v1alpha1.StaticRoute) StaticRoute {
 	nh := NextHop{
 		NextHop: "blackhole",
 	}
+	if from.LastResort && from.NextHop == nil {
+		const lastResortDistance uint8 = 254
+		nh.Distance = types.ToPtr(lastResortDistance)
+	}
 
 	if from.NextHop != nil {
 		if from.NextHop.Address != nil {

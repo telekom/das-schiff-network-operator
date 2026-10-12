@@ -27,6 +27,8 @@ import (
 	"github.com/go-logr/logr"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v2"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -44,6 +46,45 @@ import (
 func TestCraVsr(t *testing.T) {
 	RegisterFailHandler(Fail)
 	RunSpecs(t, "CRA-VSR test suite")
+}
+
+func TestStaticRouteLastResort(t *testing.T) {
+	vrf := "combo"
+	address := "192.0.2.1"
+	for _, prefix := range []string{"192.0.2.0/24", "2001:db8::/64"} {
+		for _, tt := range []struct {
+			name       string
+			lastResort bool
+			nextHop    *v1alpha1.NextHop
+			wantHop    string
+			wantXML    string
+		}{
+			{name: "aggregate blackhole", lastResort: true, wantHop: "blackhole", wantXML: "<distance>254</distance>"},
+			{name: "ordinary blackhole", wantHop: "blackhole"},
+			{name: "forwarding aggregate", nextHop: &v1alpha1.NextHop{Vrf: &vrf}, wantHop: vrf},
+			{name: "address route", nextHop: &v1alpha1.NextHop{Address: &address}, wantHop: address},
+		} {
+			t.Run(prefix+"/"+tt.name, func(t *testing.T) {
+				layer := LayerBGP{}
+				route := layer.convStaticRoute(v1alpha1.StaticRoute{
+					Prefix: prefix, LastResort: tt.lastResort, NextHop: tt.nextHop,
+				})
+				assert.Equal(t, prefix, route.Destination)
+				require.Len(t, route.NextHops, 1)
+				assert.Equal(t, tt.wantHop, route.NextHops[0].NextHop)
+				encoded, err := xml.Marshal(route)
+				require.NoError(t, err)
+				if tt.wantXML != "" {
+					require.NotNil(t, route.NextHops[0].Distance)
+					assert.Equal(t, uint8(254), *route.NextHops[0].Distance)
+					assert.Contains(t, string(encoded), "<next-hop><next-hop>blackhole</next-hop>"+tt.wantXML+"</next-hop>")
+				} else {
+					assert.Nil(t, route.NextHops[0].Distance)
+					assert.NotContains(t, string(encoded), "<distance>")
+				}
+			})
+		}
+	}
 }
 
 const operatorConfigEnv = "OPERATOR_CONFIG"

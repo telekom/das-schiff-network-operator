@@ -277,8 +277,9 @@ type StaticRoute struct {
 }
 
 type NextHop struct {
-	NextHop string  `xml:"next-hop"`
-	VRF     *string `xml:"nexthop-l3vrf,omitempty"`
+	NextHop  string  `xml:"next-hop"`
+	VRF      *string `xml:"nexthop-l3vrf,omitempty"`
+	Distance *uint8  `xml:"distance,omitempty"`
 }
 
 type PolicyBasedRouting struct {

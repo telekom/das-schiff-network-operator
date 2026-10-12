@@ -206,7 +206,7 @@ var _ = Describe("VRF building", func() {
 			vrf := &v1alpha1.VRFRevision{
 				VRFRouteConfigurationSpec: v1alpha1.VRFRouteConfigurationSpec{
 					VRF:       "tenant-a",
-					Aggregate: []string{"10.0.0.0/8", "192.168.0.0/16"},
+					Aggregate: []string{"10.0.0.0/8", "2001:db8::/64"},
 					Import:    []v1alpha1.VrfRouteConfigurationPrefixItem{},
 					Export:    []v1alpha1.VrfRouteConfigurationPrefixItem{},
 				},
@@ -216,7 +216,11 @@ var _ = Describe("VRF building", func() {
 			updateFabricVRF(&fabricVrf, vrf, importMap, ImportModeImport)
 			Expect(fabricVrf.StaticRoutes).To(HaveLen(2))
 			Expect(fabricVrf.StaticRoutes[0].Prefix).To(Equal("10.0.0.0/8"))
-			Expect(fabricVrf.StaticRoutes[1].Prefix).To(Equal("192.168.0.0/16"))
+			Expect(fabricVrf.StaticRoutes[1].Prefix).To(Equal("2001:db8::/64"))
+			for _, route := range fabricVrf.StaticRoutes {
+				Expect(route.NextHop).To(BeNil())
+				Expect(route.LastResort).To(BeTrue())
+			}
 		})
 
 		It("should not process imports when importMode is not ImportModeImport", func() {

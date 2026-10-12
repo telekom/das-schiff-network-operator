@@ -258,7 +258,7 @@ func mergeStringSlice(a, b []string) []string {
 }
 
 // mergeStaticRoutes deduplicates identical routes and prefers an explicit
-// next-hop over a blackhole aggregate for the same prefix. This keeps
+// ordinary route over a last-resort blackhole aggregate for the same prefix. This keeps
 // cross-VRF forwarding routes usable when another contribution also announces
 // the prefix as an aggregate.
 func mergeStaticRoutes(existing, incoming []networkv1alpha1.StaticRoute) []networkv1alpha1.StaticRoute {
@@ -271,10 +271,10 @@ func mergeStaticRoutes(existing, incoming []networkv1alpha1.StaticRoute) []netwo
 			switch {
 			case sameStaticRoute(existing[i], route):
 				merged = true
-			case existing[i].NextHop == nil && route.NextHop != nil:
+			case existing[i].NextHop == nil && existing[i].LastResort && !route.LastResort:
 				existing[i] = route
 				merged = true
-			case existing[i].NextHop != nil && route.NextHop == nil:
+			case !existing[i].LastResort && route.NextHop == nil && route.LastResort:
 				merged = true
 			}
 			if merged {
@@ -289,7 +289,7 @@ func mergeStaticRoutes(existing, incoming []networkv1alpha1.StaticRoute) []netwo
 }
 
 func sameStaticRoute(a, b networkv1alpha1.StaticRoute) bool {
-	if a.Prefix != b.Prefix {
+	if a.Prefix != b.Prefix || a.LastResort != b.LastResort {
 		return false
 	}
 	if a.NextHop == nil || b.NextHop == nil {

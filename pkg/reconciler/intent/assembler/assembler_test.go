@@ -181,7 +181,7 @@ func TestAssemble_StaticRoutePrefersExplicitNextHop(t *testing.T) {
 	aggregate := builder.NewNodeContribution()
 	aggregate.FabricVRFs["edge"] = networkv1alpha1.FabricVRF{
 		VRF: networkv1alpha1.VRF{
-			StaticRoutes: []networkv1alpha1.StaticRoute{{Prefix: testRoutePrefix}},
+			StaticRoutes: []networkv1alpha1.StaticRoute{{Prefix: testRoutePrefix, LastResort: true}},
 		},
 	}
 
@@ -231,6 +231,29 @@ func TestAssemble_RejectsConflictingExplicitVRFNextHops(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), `VRF "edge" has conflicting next-hop VRFs`) {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestMergeStaticRoutesPreservesOrdinaryBlackholes(t *testing.T) {
+	combo := "combo"
+	aggregate := networkv1alpha1.StaticRoute{Prefix: testRoutePrefix, LastResort: true}
+	blackhole := networkv1alpha1.StaticRoute{Prefix: testRoutePrefix}
+	forwarding := networkv1alpha1.StaticRoute{Prefix: testRoutePrefix, NextHop: &networkv1alpha1.NextHop{Vrf: &combo}}
+	for _, routes := range [][]networkv1alpha1.StaticRoute{
+		{aggregate, blackhole}, {blackhole, aggregate},
+	} {
+		got := mergeStaticRoutes(routes[:1:1], routes[1:])
+		if len(got) != 1 || got[0].NextHop != nil || got[0].LastResort {
+			t.Errorf("expected ordinary blackhole to keep normal preference, got %#v", got)
+		}
+	}
+	for _, routes := range [][]networkv1alpha1.StaticRoute{
+		{blackhole, forwarding}, {forwarding, blackhole},
+	} {
+		got := mergeStaticRoutes(routes[:1:1], routes[1:])
+		if len(got) != 2 {
+			t.Errorf("expected ordinary blackhole and forwarding route to remain, got %#v", got)
+		}
 	}
 }
 
