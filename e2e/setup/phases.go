@@ -587,12 +587,9 @@ ports:
 	DockerExecInput(cp.Name, epSlice, "kubectl", "--kubeconfig="+kubeconfigPath, "apply", "-f", "-") //nolint:errcheck
 
 	// Multus
-	multusVersion := EnvOr("MULTUS_VERSION", "v4.1.4")
-	Logf("Installing Multus %s...", multusVersion)
-	kubectl("apply", "-f", //nolint:errcheck
-		fmt.Sprintf("https://raw.githubusercontent.com/k8snetworkplumbingwg/multus-cni/%s/deployments/multus-daemonset-thick.yml", multusVersion))
-	kubectl("-n", "kube-system", "patch", "daemonset", "kube-multus-ds", "--type=json", //nolint:errcheck
-		`-p=[{"op":"replace","path":"/spec/template/spec/containers/0/resources/limits/memory","value":"512Mi"},{"op":"replace","path":"/spec/template/spec/containers/0/resources/requests/memory","value":"512Mi"}]`)
+	if err := InstallMultus(cp.Name); err != nil {
+		return err
+	}
 
 	// MetalLB (controller only, no speaker — kube-vip handles VIP BGP)
 	metallbVersion := EnvOr("METALLB_VERSION", "v0.14.9")
@@ -857,11 +854,9 @@ func PhaseCluster2Components(cluster *Cluster, repoRoot string) error {
 	kubectl("apply", "-k", "/repo/e2e/calico-cluster2") //nolint:errcheck
 
 	// Multus
-	multusVersion := EnvOr("MULTUS_VERSION", "v4.1.4")
-	kubectl("apply", "-f", //nolint:errcheck
-		fmt.Sprintf("https://raw.githubusercontent.com/k8snetworkplumbingwg/multus-cni/%s/deployments/multus-daemonset-thick.yml", multusVersion))
-	kubectl("-n", "kube-system", "patch", "daemonset", "kube-multus-ds", "--type=json", //nolint:errcheck
-		`-p=[{"op":"replace","path":"/spec/template/spec/containers/0/resources/limits/memory","value":"512Mi"},{"op":"replace","path":"/spec/template/spec/containers/0/resources/requests/memory","value":"512Mi"}]`)
+	if err := InstallMultus(cp.Name); err != nil {
+		return err
+	}
 
 	// Operator + agents
 	if _, err := DockerExecShell(cp.Name, fmt.Sprintf(
@@ -985,9 +980,15 @@ func PhaseCluster2Gateway(cluster *Cluster, repoRoot string) error {
 				"get", "pod", pod, "-n", "e2e-gateways",
 				"-o", "jsonpath={.status.phase}")
 			if err != nil {
+				return false, err
+			}
+			if strings.TrimSpace(out) != "Running" {
 				return false, nil
 			}
-			return strings.TrimSpace(out) == "Running", nil
+			_, err = DockerExec(cp.Name, "kubectl", "--kubeconfig="+kubeconfigPath,
+				"wait", "--for=condition=Ready", "pod/"+pod,
+				"-n", "e2e-gateways", "--timeout=5s")
+			return err == nil, err
 		}); err != nil {
 			return fmt.Errorf("waiting for %s pod: %w", pod, err)
 		}

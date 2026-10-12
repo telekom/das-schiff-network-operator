@@ -95,6 +95,17 @@ spec:
   - name: gw
     image: busybox:1.37
     command: ["sleep", "86400"]
+    readinessProbe:
+      exec:
+        command:
+          - sh
+          - -ec
+          - |
+            ip -4 addr show dev net1 | grep -F 'inet 10.102.0.2/24 '
+            ip -6 addr show dev net1 | grep -F 'inet6 fda5:25c1:193c::2/64 ' | grep -Ev 'tentative|dadfailed'
+            ip -4 route get 10.250.0.1 | grep -F 'via 10.102.0.1 dev net1'
+            ip -6 route get fd94:685b:30cf::1 | grep -F 'via fda5:25c1:193c::1 dev net1'
+      periodSeconds: 2
   restartPolicy: Never
   tolerations:
   - key: node-role.kubernetes.io/control-plane
@@ -115,6 +126,17 @@ spec:
   - name: gw
     image: busybox:1.37
     command: ["sleep", "86400"]
+    readinessProbe:
+      exec:
+        command:
+          - sh
+          - -ec
+          - |
+            ip -4 addr show dev net1 | grep -F 'inet 10.102.1.2/24 '
+            ip -6 addr show dev net1 | grep -F 'inet6 fda5:25c1:193d::2/64 ' | grep -Ev 'tentative|dadfailed'
+            ip -4 route get 10.250.0.1 | grep -F 'via 10.102.1.1 dev net1'
+            ip -6 route get fd94:685b:30cf::1 | grep -F 'via fda5:25c1:193d::1 dev net1'
+      periodSeconds: 2
   restartPolicy: Never
   tolerations:
   - key: node-role.kubernetes.io/control-plane
