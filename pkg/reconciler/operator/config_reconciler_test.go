@@ -5,6 +5,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -347,9 +349,17 @@ var _ = Describe("ConfigReconciler", func() {
 					},
 				},
 			}
-			Expect(getOutdatedNodes(map[string]*corev1.Node{node.Name: node}, []v1alpha1.NodeNetworkConfig{oldConfig}, updated)).To(ConsistOf(node))
+			configPath := filepath.Join(GinkgoT().TempDir(), "operator.yaml")
+			Expect(os.WriteFile(configPath, []byte("vrfConfig:\n  tenant-a:\n    vni: 1000\n    rt: '65000:1000'\n"), 0o600)).To(Succeed())
+			GinkgoT().Setenv("OPERATOR_CONFIG", configPath)
+			crr := newTestCRR(ImportModeImport)
+			crr.scheme = testScheme
+			deployments, err := crr.getOutdatedNodes(context.Background(), map[string]*corev1.Node{node.Name: node}, []v1alpha1.NodeNetworkConfig{oldConfig}, updated)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(deployments).To(HaveLen(1))
+			Expect(deployments[0].node).To(Equal(node))
 			generated := &v1alpha1.NodeNetworkConfig{}
-			Expect(newTestCRR(ImportModeImport).buildNodeVrf(node, updated, generated)).To(Succeed())
+			Expect(crr.buildNodeVrf(node, updated, generated)).To(Succeed())
 			Expect(generated.Spec.FabricVRFs["tenant-a"].StaticRoutes).To(ConsistOf(v1alpha1.StaticRoute{
 				Prefix: vrfs[0].Aggregate[0], LastResort: true,
 			}))
