@@ -17,6 +17,7 @@ limitations under the License.
 package assembler
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -25,6 +26,50 @@ import (
 )
 
 const testRoutePrefix = "192.0.2.0/27"
+
+func TestAssemble_DeterministicVRFImportOrder(t *testing.T) {
+	const lastVRF = "zebra"
+	items := []networkv1alpha1.FilterItem{
+		{
+			Matcher: networkv1alpha1.Matcher{Prefix: &networkv1alpha1.PrefixMatcher{Prefix: "192.0.2.128/25"}},
+			Action:  networkv1alpha1.Action{Type: networkv1alpha1.Reject},
+		},
+		{
+			Matcher: networkv1alpha1.Matcher{Prefix: &networkv1alpha1.PrefixMatcher{Prefix: testRoutePrefix}},
+			Action:  networkv1alpha1.Action{Type: networkv1alpha1.Accept},
+		},
+	}
+	imports := []networkv1alpha1.VRFImport{
+		{FromVRF: lastVRF, Filter: networkv1alpha1.Filter{Items: items}},
+		{FromVRF: "alpha", Filter: networkv1alpha1.Filter{Items: items}},
+		{FromVRF: "middle", Filter: networkv1alpha1.Filter{Items: items}},
+	}
+	contrib := builder.NewNodeContribution()
+	contrib.ClusterVRF = &networkv1alpha1.VRF{VRFImports: imports}
+	contrib.FabricVRFs["fabric"] = networkv1alpha1.FabricVRF{VRF: networkv1alpha1.VRF{VRFImports: imports}}
+	contrib.LocalVRFs["local"] = networkv1alpha1.VRF{VRFImports: imports}
+	result, err := Assemble([]*builder.NodeContribution{contrib})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fabric, local := result.Spec.FabricVRFs["fabric"], result.Spec.LocalVRFs["local"]
+	for _, vrf := range []*networkv1alpha1.VRF{result.Spec.ClusterVRF, &fabric.VRF, &local} {
+		if len(vrf.VRFImports) != len(imports) {
+			t.Fatalf("expected %d imports, got %d", len(imports), len(vrf.VRFImports))
+		}
+		for i, name := range []string{"alpha", "middle", lastVRF} {
+			if vrf.VRFImports[i].FromVRF != name {
+				t.Errorf("import %d: expected %q, got %q", i, name, vrf.VRFImports[i].FromVRF)
+			}
+			if !reflect.DeepEqual(vrf.VRFImports[i].Filter.Items, items) {
+				t.Errorf("filter-rule order changed for import %q", name)
+			}
+		}
+	}
+	if imports[0].FromVRF != lastVRF {
+		t.Error("assembly reordered the input contribution's imports")
+	}
+}
 
 func TestAssemble_Nil(t *testing.T) {
 	result, err := Assemble(nil)

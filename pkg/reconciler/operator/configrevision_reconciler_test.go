@@ -2,6 +2,8 @@ package operator
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -11,12 +13,17 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
+	"github.com/telekom/das-schiff-network-operator/pkg/config"
+	"github.com/telekom/das-schiff-network-operator/pkg/network/netplan"
 )
 
 var _ = Describe("ConfigRevisionReconciler helpers", func() {
+	const previousConfigHash = "old-config"
 	var logger logr.Logger
 
 	BeforeEach(func() {
@@ -128,6 +135,47 @@ var _ = Describe("ConfigRevisionReconciler helpers", func() {
 			Expect(cnt.ongoing).To(Equal(0))
 			Expect(cnt.invalid).To(Equal(0))
 		})
+
+		DescribeTable("ignoring terminal status from a previous resolved configuration",
+			func(status string) {
+				revision := makeRevision("rev001", false, time.Now())
+				cfg := makeNodeConfig("node1", "rev001", status, time.Now().Add(-time.Hour))
+				cfg.Spec.ConfigHash = "new-config"
+				cfg.Status.LastAppliedConfigHash = previousConfigHash
+				now := metav1.Now()
+				cfg.Spec.ConfigUpdateTime = &now
+				cnt := crr.getRevisionCounters([]v1alpha1.NodeNetworkConfig{cfg}, &revision)
+				Expect(cnt.ready).To(BeZero())
+				Expect(cnt.invalid).To(BeZero())
+				Expect(cnt.ongoing).To(Equal(1))
+			},
+			Entry("provisioned", StatusProvisioned),
+			Entry("invalid", StatusInvalid),
+		)
+
+		DescribeTable("bounding unacknowledged configuration updates",
+			func(local bool) {
+				revision := makeRevision("rev001", false, time.Now())
+				start := metav1.NewTime(time.Now().Add(-time.Hour))
+				cfg := makeNodeConfig("node1", "rev001", StatusProvisioned, start.Time.Add(-time.Hour))
+				cfg.Spec.ConfigHash, cfg.Status.LastAppliedConfigHash = "new-config", previousConfigHash
+				cfg.Spec.ConfigUpdateTime = &start
+				if local {
+					cfg.Annotations = map[string]string{nodeLocalRevisionAnnotation: revision.Spec.Revision}
+				}
+				cnt := crr.getRevisionCounters([]v1alpha1.NodeNetworkConfig{cfg}, &revision)
+				Expect(cnt.ready).To(BeZero())
+				Expect(cnt.invalid).To(Equal(1))
+				Expect(cnt.revisionInvalid).To(Equal(!local))
+				if local {
+					Expect(cnt.ongoing).To(BeZero())
+				} else {
+					Expect(cnt.ongoing).To(Equal(1))
+				}
+			},
+			Entry("node-local update releases its rollout slot", true),
+			Entry("global update retains revision invalidation", false),
+		)
 	})
 
 	Describe("wasConfigTimeoutReached", func() {
@@ -150,39 +198,317 @@ var _ = Describe("ConfigRevisionReconciler helpers", func() {
 		})
 	})
 
-	Describe("getOutdatedNodes", func() {
-		It("should return no nodes when revision is nil", func() {
-			nodes := map[string]*corev1.Node{
-				"node1": makeNode("node1", true),
+	Describe("nodeConfigHash", func() {
+		It("should ignore provenance and hash maps deterministically", func() {
+			spec := v1alpha1.NodeNetworkConfigSpec{
+				Revision: "first", ConfigHash: "previous",
+				Layer2s: map[string]v1alpha1.Layer2{"100": {VLAN: 100}, "200": {VLAN: 200}},
 			}
-			result := getOutdatedNodes(nodes, nil, nil)
-			Expect(result).To(BeEmpty())
+			netplanSpec := v1alpha1.NodeNetplanConfigSpec{}
+			hash, err := nodeConfigHash(spec, &netplanSpec)
+			Expect(err).ToNot(HaveOccurred())
+			spec.Revision, spec.ConfigHash = "second", ""
+			now := metav1.Now()
+			spec.ConfigUpdateTime = &now
+			spec.Layer2s = map[string]v1alpha1.Layer2{"200": {VLAN: 200}, "100": {VLAN: 100}}
+			otherHash, err := nodeConfigHash(spec, &netplanSpec)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(otherHash).To(Equal(hash))
+			spec.Layer2s["100"] = v1alpha1.Layer2{VLAN: 100, MTU: 9000}
+			otherHash, err = nodeConfigHash(spec, &netplanSpec)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(otherHash).ToNot(Equal(hash))
 		})
 
-		It("should exclude nodes that already have matching config", func() {
-			revision := makeRevision("rev001", false, time.Now())
-			nodes := map[string]*corev1.Node{
-				"node1": makeNode("node1", true),
-				"node2": makeNode("node2", true),
+		It("should include Netplan-only settings and surface invalid device JSON", func() {
+			spec := v1alpha1.NodeNetworkConfigSpec{}
+			netplanSpec := v1alpha1.NodeNetplanConfigSpec{}
+			hash, err := nodeConfigHash(spec, &netplanSpec)
+			Expect(err).ToNot(HaveOccurred())
+			netplanSpec.DesiredState.Network.Dummies = map[string]netplan.Device{
+				"lo.test": {Raw: []byte(`{"addresses":["192.0.2.1/32"]}`)},
 			}
-			configs := []v1alpha1.NodeNetworkConfig{
-				makeNodeConfig("node1", "rev001", StatusProvisioned, time.Now()),
+			otherHash, err := nodeConfigHash(spec, &netplanSpec)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(otherHash).ToNot(Equal(hash))
+			netplanSpec.DesiredState.Network.Dummies["lo.test"] = netplan.Device{Raw: []byte("{")}
+			_, err = nodeConfigHash(spec, &netplanSpec)
+			Expect(err).To(HaveOccurred())
+		})
+	})
+
+	Describe("label-driven reconciliation", func() {
+		const enabled = "enabled"
+		var (
+			node       *corev1.Node
+			revision   v1alpha1.NetworkConfigRevision
+			crr        *ConfigRevisionReconciler
+			fakeClient client.Client
+		)
+
+		BeforeEach(func() {
+			configPath, err := filepath.Abs("../../../config/operator/config.yaml")
+			Expect(err).ToNot(HaveOccurred())
+			GinkgoT().Setenv("OPERATOR_CONFIG", configPath)
+			node = makeNode("node1", true)
+			node.UID = types.UID(node.Name)
+			revision = makeRevision("rev001", false, time.Now())
+			revision.UID = types.UID(revision.Name)
+			selector := &metav1.LabelSelector{
+				MatchExpressions: []metav1.LabelSelectorRequirement{
+					{Key: "network", Operator: metav1.LabelSelectorOpIn, Values: []string{enabled}},
+				},
 			}
-			result := getOutdatedNodes(nodes, configs, &revision)
-			Expect(result).To(HaveLen(1))
-			Expect(result[0].Name).To(Equal("node2"))
+			revision.Spec.Layer2 = []v1alpha1.Layer2Revision{{
+				Layer2NetworkConfigurationSpec: v1alpha1.Layer2NetworkConfigurationSpec{
+					ID: 100, VNI: 100100, MTU: 1500, NodeSelector: selector,
+				},
+			}}
+			vni, rt := 100200, "64512:100200"
+			revision.Spec.Vrf = []v1alpha1.VRFRevision{{
+				VRFRouteConfigurationSpec: v1alpha1.VRFRouteConfigurationSpec{
+					VRF: "example", VNI: &vni, RouteTarget: &rt, Seq: 10, NodeSelector: selector,
+				},
+			}}
+			fakeClient = fake.NewClientBuilder().WithScheme(testScheme).
+				WithObjects(node, &revision).
+				WithStatusSubresource(&revision, &v1alpha1.NodeNetworkConfig{}).Build()
+			crr = &ConfigRevisionReconciler{
+				client: fakeClient, logger: logger, scheme: testScheme,
+				vrfConfig: &config.Config{}, apiTimeout: time.Minute, maxUpdating: 1,
+				configTimeout: time.Minute, preconfigTimeout: time.Minute,
+			}
 		})
 
-		It("should return all nodes when no configs match revision", func() {
-			revision := makeRevision("rev001", false, time.Now())
-			nodes := map[string]*corev1.Node{
-				"node1": makeNode("node1", true),
+		It("should add and remove selected Layer2, VRF and Netplan configs without a new revision", func() {
+			for _, value := range []string{"", enabled, "disabled", "", enabled} {
+				before := &v1alpha1.NodeNetworkConfig{}
+				key := client.ObjectKey{Name: node.Name}
+				err := fakeClient.Get(context.Background(), key, before)
+				if err != nil {
+					Expect(client.IgnoreNotFound(err)).To(Succeed())
+				}
+				node.Labels = map[string]string{}
+				if value != "" {
+					node.Labels["network"] = value
+				}
+				Expect(fakeClient.Update(context.Background(), node)).To(Succeed())
+				Expect(crr.reconcileDebounced(context.Background())).To(Succeed())
+				cfg := &v1alpha1.NodeNetworkConfig{}
+				Expect(fakeClient.Get(context.Background(), key, cfg)).To(Succeed())
+				Expect(cfg.Spec.Revision).To(Equal(revision.Spec.Revision))
+				Expect(cfg.Spec.ConfigHash).ToNot(BeEmpty())
+				Expect(cfg.Spec.ConfigUpdateTime).ToNot(BeNil())
+				if before.Spec.ConfigHash == cfg.Spec.ConfigHash {
+					Expect(cfg.ResourceVersion).To(Equal(before.ResourceVersion))
+				}
+				netplanCfg := &v1alpha1.NodeNetplanConfig{}
+				Expect(fakeClient.Get(context.Background(), key, netplanCfg)).To(Succeed())
+				if value == enabled {
+					Expect(cfg.Spec.Layer2s).To(HaveKey("100"))
+					Expect(cfg.Spec.FabricVRFs).To(HaveKey("example"))
+					Expect(netplanCfg.Spec.DesiredState.Network.VLans).To(HaveKey("vlan.100"))
+				} else {
+					Expect(cfg.Spec.Layer2s).To(BeEmpty())
+					Expect(cfg.Spec.FabricVRFs).To(BeEmpty())
+					Expect(netplanCfg.Spec.DesiredState.Network.VLans).To(BeEmpty())
+				}
+				cfg.Status.ConfigStatus = StatusProvisioned
+				cfg.Status.LastAppliedRevision = cfg.Spec.Revision
+				cfg.Status.LastAppliedConfigHash = cfg.Spec.ConfigHash
+				Expect(fakeClient.Status().Update(context.Background(), cfg)).To(Succeed())
+				resourceVersion := cfg.ResourceVersion
+				Expect(crr.reconcileDebounced(context.Background())).To(Succeed())
+				Expect(fakeClient.Get(context.Background(), key, cfg)).To(Succeed())
+				Expect(cfg.ResourceVersion).To(Equal(resourceVersion), "unchanged output must not redeploy")
 			}
-			configs := []v1alpha1.NodeNetworkConfig{
-				makeNodeConfig("node1", "rev000", StatusProvisioned, time.Now()),
+
+			revisions := &v1alpha1.NetworkConfigRevisionList{}
+			Expect(fakeClient.List(context.Background(), revisions)).To(Succeed())
+			Expect(revisions.Items).To(HaveLen(1))
+		})
+
+		It("should ignore unrelated labels and selector changes with identical output", func() {
+			revision.Spec.Layer2[0].NodeSelector.MatchExpressions[0].Values = []string{enabled, "also-enabled"}
+			revision.Spec.Vrf[0].NodeSelector = revision.Spec.Layer2[0].NodeSelector
+			Expect(fakeClient.Update(context.Background(), &revision)).To(Succeed())
+			node.Labels["network"] = enabled
+			Expect(fakeClient.Update(context.Background(), node)).To(Succeed())
+			Expect(crr.reconcileDebounced(context.Background())).To(Succeed())
+			cfg := &v1alpha1.NodeNetworkConfig{}
+			key := client.ObjectKey{Name: node.Name}
+			Expect(fakeClient.Get(context.Background(), key, cfg)).To(Succeed())
+			cfg.Status.ConfigStatus = StatusProvisioned
+			cfg.Status.LastAppliedConfigHash = cfg.Spec.ConfigHash
+			Expect(fakeClient.Status().Update(context.Background(), cfg)).To(Succeed())
+			netplanCfg := &v1alpha1.NodeNetplanConfig{}
+			Expect(fakeClient.Get(context.Background(), key, netplanCfg)).To(Succeed())
+			configVersion, netplanVersion := cfg.ResourceVersion, netplanCfg.ResourceVersion
+
+			for _, value := range []string{enabled, "also-enabled"} {
+				node.Labels["network"] = value
+				node.Labels["unrelated"] = value
+				Expect(fakeClient.Update(context.Background(), node)).To(Succeed())
+				Expect(crr.reconcileDebounced(context.Background())).To(Succeed())
+				Expect(fakeClient.Get(context.Background(), key, cfg)).To(Succeed())
+				Expect(fakeClient.Get(context.Background(), key, netplanCfg)).To(Succeed())
+				Expect(cfg.ResourceVersion).To(Equal(configVersion))
+				Expect(netplanCfg.ResourceVersion).To(Equal(netplanVersion))
+				Expect(cfg.Status.ConfigStatus).To(Equal(StatusProvisioned))
 			}
-			result := getOutdatedNodes(nodes, configs, &revision)
-			Expect(result).To(HaveLen(1))
+		})
+
+		It("should queue only the node whose resolved configuration changes", func() {
+			other := makeNode("node2", true)
+			other.UID = types.UID(other.Name)
+			Expect(fakeClient.Create(context.Background(), other)).To(Succeed())
+			nodes := map[string]*corev1.Node{node.Name: node, other.Name: other}
+			deployments, err := crr.getOutdatedNodes(context.Background(), nodes, nil, &revision)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(deployments).To(HaveLen(2))
+			configs := make([]v1alpha1.NodeNetworkConfig, 0, len(deployments))
+			for _, deployment := range deployments {
+				configs = append(configs, *deployment.networkConfig)
+			}
+			node.Labels["network"] = enabled
+			deployments, err = crr.getOutdatedNodes(context.Background(), nodes, configs, &revision)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(deployments).To(HaveLen(1))
+			Expect(deployments[0].node.Name).To(Equal(node.Name))
+		})
+
+		It("should not queue any nodes without a valid revision", func() {
+			deployments, err := crr.getOutdatedNodes(context.Background(), map[string]*corev1.Node{node.Name: node}, nil, nil)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(deployments).To(BeEmpty())
+		})
+
+		It("should read one config snapshot for all nodes and reload on the next pass", func() {
+			configPath := filepath.Join(GinkgoT().TempDir(), "operator.yaml")
+			Expect(os.WriteFile(configPath, []byte("vrfConfig:\n  example:\n    vni: 100300\n    rt: '64512:100300'\n"), 0o600)).To(Succeed())
+			GinkgoT().Setenv("OPERATOR_CONFIG", configPath)
+			revision.Spec.Vrf[0].VNI = nil
+			revision.Spec.Vrf[0].RouteTarget = nil
+			revision.Spec.Vrf[0].NodeSelector = nil
+			revision.Spec.MirrorSelectors = []v1alpha1.MirrorSelectorRevision{{}}
+			other := makeNode("snapshot-node", true)
+			other.UID = types.UID(other.Name)
+			removed := false
+			crr.client = fake.NewClientBuilder().WithScheme(testScheme).
+				WithObjects(node, other).
+				WithInterceptorFuncs(interceptor.Funcs{
+					List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+						if _, ok := list.(*corev1.NodeList); ok && !removed {
+							Expect(os.Remove(configPath)).To(Succeed())
+							removed = true
+						}
+						return c.List(ctx, list, opts...)
+					},
+				}).Build()
+			nodes := map[string]*corev1.Node{node.Name: node, other.Name: other}
+			deployments, err := crr.getOutdatedNodes(context.Background(), nodes, nil, &revision)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(removed).To(BeTrue(), "config file is removed during the first node build")
+			Expect(deployments).To(HaveLen(2))
+			for _, deployment := range deployments {
+				vrf := deployment.networkConfig.Spec.FabricVRFs["example"]
+				Expect(vrf.VNI).To(Equal(uint32(100300)))
+				Expect(vrf.EVPNImportRouteTargets).To(Equal([]string{"64512:100300"}))
+			}
+			_, err = crr.getOutdatedNodes(context.Background(), nodes, nil, &revision)
+			Expect(err).To(MatchError(ContainSubstring("error loading config snapshot")))
+			_, err = crr.CreateNodeNetworkConfig(context.Background(), node, &revision)
+			Expect(err).To(MatchError(ContainSubstring("error reloading config")))
+		})
+
+		It("should hash repeated builds with multiple imported VRFs identically", func() {
+			node.Labels["network"] = enabled
+			for _, name := range []string{"extra-a", "extra-b", "extra-c"} {
+				vrf := revision.Spec.Vrf[0]
+				vrf.VRF = name
+				vrf.Import = []v1alpha1.VrfRouteConfigurationPrefixItem{{CIDR: "192.0.2.0/24", Action: permitRoute}}
+				revision.Spec.Vrf = append(revision.Spec.Vrf, vrf)
+			}
+			nodes := map[string]*corev1.Node{node.Name: node}
+			deployments, err := crr.getOutdatedNodes(context.Background(), nodes, nil, &revision)
+			Expect(err).ToNot(HaveOccurred())
+			configs := []v1alpha1.NodeNetworkConfig{*deployments[0].networkConfig}
+			for range 20 {
+				deployments, err = crr.getOutdatedNodes(context.Background(), nodes, configs, &revision)
+				Expect(err).ToNot(HaveOccurred())
+				Expect(deployments).To(BeEmpty())
+			}
+		})
+
+		It("should preserve ready status when only the global revision changes", func() {
+			node.Labels["network"] = enabled
+			Expect(fakeClient.Update(context.Background(), node)).To(Succeed())
+			Expect(crr.reconcileDebounced(context.Background())).To(Succeed())
+			cfg := &v1alpha1.NodeNetworkConfig{}
+			key := client.ObjectKey{Name: node.Name}
+			Expect(fakeClient.Get(context.Background(), key, cfg)).To(Succeed())
+			hash := cfg.Spec.ConfigHash
+			cfg.Status.ConfigStatus = StatusProvisioned
+			cfg.Status.LastAppliedRevision = cfg.Spec.Revision
+			cfg.Status.LastAppliedConfigHash = hash
+			Expect(fakeClient.Status().Update(context.Background(), cfg)).To(Succeed())
+
+			next := makeRevision("rev002", false, time.Now().Add(time.Minute))
+			next.UID = types.UID(next.Name)
+			next.Spec.Layer2, next.Spec.Vrf = revision.Spec.Layer2, revision.Spec.Vrf
+			Expect(fakeClient.Create(context.Background(), &next)).To(Succeed())
+			Expect(crr.reconcileDebounced(context.Background())).To(Succeed())
+			Expect(fakeClient.Get(context.Background(), key, cfg)).To(Succeed())
+			Expect(cfg.Spec.Revision).To(Equal(next.Spec.Revision))
+			Expect(cfg.Spec.ConfigHash).To(Equal(hash))
+			Expect(cfg.Status.ConfigStatus).To(Equal(StatusProvisioned))
+			netplanCfg := &v1alpha1.NodeNetplanConfig{}
+			Expect(fakeClient.Get(context.Background(), key, netplanCfg)).To(Succeed())
+			Expect(netplanCfg.OwnerReferences).To(ContainElement(HaveField("UID", next.UID)))
+		})
+
+		It("should recover a failed node-local update when labels are corrected", func() {
+			Expect(crr.reconcileDebounced(context.Background())).To(Succeed())
+			key := client.ObjectKey{Name: node.Name}
+			cfg := &v1alpha1.NodeNetworkConfig{}
+			Expect(fakeClient.Get(context.Background(), key, cfg)).To(Succeed())
+			originalHash := cfg.Spec.ConfigHash
+			cfg.Status.ConfigStatus = StatusProvisioned
+			cfg.Status.LastAppliedRevision = cfg.Spec.Revision
+			cfg.Status.LastAppliedConfigHash = originalHash
+			Expect(fakeClient.Status().Update(context.Background(), cfg)).To(Succeed())
+			node.Labels["network"] = enabled
+			Expect(fakeClient.Update(context.Background(), node)).To(Succeed())
+			Expect(crr.reconcileDebounced(context.Background())).To(Succeed())
+			Expect(fakeClient.Get(context.Background(), key, cfg)).To(Succeed())
+			Expect(cfg.Spec.ConfigHash).ToNot(Equal(originalHash))
+			cfg.Status.ConfigStatus = StatusInvalid
+			cfg.Status.LastAppliedConfigHash = cfg.Spec.ConfigHash
+			Expect(fakeClient.Status().Update(context.Background(), cfg)).To(Succeed())
+			delete(node.Labels, "network")
+			Expect(fakeClient.Update(context.Background(), node)).To(Succeed())
+
+			Expect(crr.reconcileDebounced(context.Background())).To(Succeed())
+			Expect(fakeClient.Get(context.Background(), key, cfg)).To(Succeed())
+			Expect(cfg.Spec.ConfigHash).To(Equal(originalHash))
+			Expect(fakeClient.Get(context.Background(), client.ObjectKeyFromObject(&revision), &revision)).To(Succeed())
+			Expect(revision.Status.IsInvalid).To(BeFalse())
+		})
+
+		It("should respect the rollout concurrency limit for label changes", func() {
+			node.Labels["network"] = enabled
+			Expect(fakeClient.Update(context.Background(), node)).To(Succeed())
+			cfg := makeNodeConfig("node1", "rev001", StatusProvisioning, time.Now())
+			cfg.Spec.ConfigHash = previousConfigHash
+			cfg.OwnerReferences = []metav1.OwnerReference{{Name: node.Name}, {Name: revision.Name}}
+			Expect(fakeClient.Create(context.Background(), &cfg)).To(Succeed())
+			Expect(fakeClient.Status().Update(context.Background(), &cfg)).To(Succeed())
+			Expect(crr.reconcileDebounced(context.Background())).To(Succeed())
+			Expect(fakeClient.Get(context.Background(), client.ObjectKeyFromObject(&cfg), &cfg)).To(Succeed())
+			Expect(cfg.Spec.ConfigHash).To(Equal(previousConfigHash))
+			Expect(fakeClient.Get(context.Background(), client.ObjectKeyFromObject(&revision), &revision)).To(Succeed())
+			Expect(revision.Status.Ongoing).To(Equal(1))
+			Expect(revision.Status.Queued).To(Equal(1))
 		})
 	})
 

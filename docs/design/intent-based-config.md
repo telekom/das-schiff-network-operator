@@ -53,6 +53,9 @@ node — see [Debugging](../advanced/debugging.md).
   ([Concepts → Lifecycle](../getting-started/concepts.md#lifecycle-and-deletion-order)).
 - **Cross-cluster**: resources are authored in a management cluster and synced
   into workload clusters.
+- **Stable change detection**: generated node configurations are content-hashed.
+  Outer VRF-import entries are ordered by source VRF name before hashing; filter
+  rules retain their evaluation order within each import.
 
 ## Related
 

@@ -27,6 +27,7 @@ import (
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -142,15 +143,15 @@ func (r *NodeNetworkConfigReconciler) Reconcile(ctx context.Context) (ctrl.Resul
 	asnNeedsWrite := cfg.Status.ASNumber != r.localASN
 	cfg.Status.ASNumber = r.localASN
 
-	if r.NodeNetworkConfig != nil && r.NodeNetworkConfig.Spec.Revision == cfg.Spec.Revision {
+	if r.NodeNetworkConfig != nil && sameAppliedConfig(r.NodeNetworkConfig.Spec, cfg.Spec) {
 		// replace in-memory working NodeNetworkConfig and store it on the disk
 		if err := r.storeConfig(cfg, r.NodeNetworkConfigPath); err != nil {
 			return ctrl.Result{}, fmt.Errorf("error saving NodeNetworkConfig status: %w", err)
 		}
 
-		// current in-memory config has the same revision as the fetched one
-		// this means that NodeNetworkConfig was already provisioned - skip
-		if cfg.Status.ConfigStatus != operator.StatusProvisioned || asnNeedsWrite {
+		// The resolved configuration is already provisioned; acknowledge any new provenance.
+		if cfg.Status.ConfigStatus != operator.StatusProvisioned || asnNeedsWrite ||
+			cfg.Status.LastAppliedRevision != cfg.Spec.Revision || cfg.Status.LastAppliedConfigHash != cfg.Spec.ConfigHash {
 			if err := SetStatus(ctx, r.client, cfg, operator.StatusProvisioned, r.logger); err != nil {
 				return ctrl.Result{}, fmt.Errorf("error setting NodeNetworkConfig status: %w", err)
 			}
@@ -169,7 +170,7 @@ func (r *NodeNetworkConfigReconciler) Reconcile(ctx context.Context) (ctrl.Resul
 	}
 
 	// NodeNetworkConfig is invalid - discard
-	if cfg.Spec.Revision == cfg.Status.LastAppliedRevision && cfg.Status.ConfigStatus == operator.StatusInvalid {
+	if cfg.Status.ConfigStatus == operator.StatusInvalid && configAttempted(cfg) {
 		r.logger.Info("skipping invalid NodeNetworkConfig", "name", cfg.Name)
 		return ctrl.Result{}, nil
 	}
@@ -185,6 +186,27 @@ func (r *NodeNetworkConfigReconciler) Reconcile(ctx context.Context) (ctrl.Resul
 	}
 
 	return result, nil
+}
+
+func sameAppliedConfig(current, desired v1alpha1.NodeNetworkConfigSpec) bool {
+	if desired.ConfigHash == "" {
+		return current.ConfigHash == "" && current.Revision == desired.Revision
+	}
+	if current.ConfigHash != "" {
+		return current.ConfigHash == desired.ConfigHash
+	}
+	// Upgrading a saved configuration should not reapply unchanged network settings.
+	current.Revision, desired.Revision = "", ""
+	current.ConfigHash, desired.ConfigHash = "", ""
+	current.ConfigUpdateTime, desired.ConfigUpdateTime = nil, nil
+	return equality.Semantic.DeepEqual(current, desired)
+}
+
+func configAttempted(cfg *v1alpha1.NodeNetworkConfig) bool {
+	if cfg.Spec.ConfigHash != "" {
+		return cfg.Spec.ConfigHash == cfg.Status.LastAppliedConfigHash
+	}
+	return cfg.Spec.Revision == cfg.Status.LastAppliedRevision
 }
 
 func (r *NodeNetworkConfigReconciler) storeConfig(
@@ -406,6 +428,7 @@ func SetStatusWithError(
 
 	if status == operator.StatusProvisioned || status == operator.StatusInvalid {
 		cfg.Status.LastAppliedRevision = cfg.Spec.Revision
+		cfg.Status.LastAppliedConfigHash = cfg.Spec.ConfigHash
 	}
 
 	// Set or clear error message based on status

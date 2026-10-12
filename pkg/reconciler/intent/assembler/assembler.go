@@ -17,6 +17,7 @@ limitations under the License.
 package assembler
 
 import (
+	"cmp"
 	"fmt"
 	"slices"
 
@@ -176,7 +177,33 @@ func Assemble(contributions []*builder.NodeContribution) (*AssembleResult, error
 		}
 	}
 
+	orderVRFImports(spec)
+
 	return &AssembleResult{Spec: spec, Origins: origins, NetplanNodeIPs: netplanNodeIPs}, nil
+}
+
+func orderVRFImports(spec *networkv1alpha1.NodeNetworkConfigSpec) {
+	if spec.ClusterVRF != nil {
+		spec.ClusterVRF.VRFImports = sortedVRFImports(spec.ClusterVRF.VRFImports)
+	}
+	for name := range spec.FabricVRFs {
+		vrf := spec.FabricVRFs[name]
+		vrf.VRFImports = sortedVRFImports(vrf.VRFImports)
+		spec.FabricVRFs[name] = vrf
+	}
+	for name := range spec.LocalVRFs {
+		vrf := spec.LocalVRFs[name]
+		vrf.VRFImports = sortedVRFImports(vrf.VRFImports)
+		spec.LocalVRFs[name] = vrf
+	}
+}
+
+func sortedVRFImports(imports []networkv1alpha1.VRFImport) []networkv1alpha1.VRFImport {
+	sorted := slices.Clone(imports)
+	slices.SortStableFunc(sorted, func(a, b networkv1alpha1.VRFImport) int {
+		return cmp.Compare(a.FromVRF, b.FromVRF)
+	})
+	return sorted
 }
 
 func validateVRFNames(spec *networkv1alpha1.NodeNetworkConfigSpec) error {
