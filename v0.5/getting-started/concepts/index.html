@@ -543,6 +543,15 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#aggregate-route-preference" class="md-nav__link">
+    <span class="md-ellipsis">
+      Aggregate route preference
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#deployment-modes-hbn-vs-non-hbn-pure-l2-netplan" class="md-nav__link">
     <span class="md-ellipsis">
       Deployment modes: HBN vs. non-HBN (pure L2 / netplan)
@@ -1247,6 +1256,15 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#aggregate-route-preference" class="md-nav__link">
+    <span class="md-ellipsis">
+      Aggregate route preference
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#deployment-modes-hbn-vs-non-hbn-pure-l2-netplan" class="md-nav__link">
     <span class="md-ellipsis">
       Deployment modes: HBN vs. non-HBN (pure L2 / netplan)
@@ -1468,6 +1486,16 @@ keeps intent loosely coupled.</p>
 </tr>
 </tbody>
 </table>
+<h2 id="aggregate-route-preference">Aggregate route preference<a class="headerlink" href="#aggregate-route-preference" title="Permanent link">&para;</a></h2>
+<p>Aggregate blackholes generated for Networks, including those controlled by
+<code>AnnouncementPolicy.spec.aggregate</code>, are last-resort routes. An ordinary route
+to the same prefix (for example, an L2 segment's connected <code>/64</code>) takes
+precedence; the blackhole remains a fallback when no preferred route exists.
+Only generated aggregate blackholes receive this preference. Aggregates that
+forward through another VRF and other blackhole routes are unchanged.
+The generated <code>NodeNetworkConfig</code> expresses this as <code>lastResort: true</code>, which
+CRA agents translate into native route preferences. Longest-prefix matching
+still applies.</p>
 <h2 id="deployment-modes-hbn-vs-non-hbn-pure-l2-netplan">Deployment modes: HBN vs. non-HBN (pure L2 / netplan)<a class="headerlink" href="#deployment-modes-hbn-vs-non-hbn-pure-l2-netplan" title="Permanent link">&para;</a></h2>
 <p>The same intent CRDs support two data-plane modes. Which one you get is decided
 by <em>field presence</em>, not a separate resource — there is no mode switch and the
