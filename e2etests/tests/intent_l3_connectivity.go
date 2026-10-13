@@ -35,6 +35,9 @@ var _ = Describe("Intent: L3 Connectivity", Label("intent", "l3"), func() {
 		l3, err := readTestdata("intent/l3/manifests.yaml")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(f.ApplyManifest(ctx, l3)).To(Succeed())
+		DeferCleanup(func() {
+			_ = f.DeleteManifest(context.Background(), l3)
+		})
 
 		By("Applying L2 NADs for VLAN 501 and 502")
 		nad, err := readTestdata("l2-connectivity/nad.yaml")
