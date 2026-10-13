@@ -150,8 +150,7 @@ func (r *NodeNetworkConfigReconciler) Reconcile(ctx context.Context) (ctrl.Resul
 		}
 
 		// The resolved configuration is already provisioned; acknowledge any new provenance.
-		if cfg.Status.ConfigStatus != operator.StatusProvisioned || asnNeedsWrite ||
-			cfg.Status.LastAppliedRevision != cfg.Spec.Revision || cfg.Status.LastAppliedConfigHash != cfg.Spec.ConfigHash {
+		if cfg.Status.ConfigStatus != operator.StatusProvisioned || asnNeedsWrite || !configAcknowledged(cfg) {
 			if err := SetStatus(ctx, r.client, cfg, operator.StatusProvisioned, r.logger); err != nil {
 				return ctrl.Result{}, fmt.Errorf("error setting NodeNetworkConfig status: %w", err)
 			}
@@ -170,7 +169,7 @@ func (r *NodeNetworkConfigReconciler) Reconcile(ctx context.Context) (ctrl.Resul
 	}
 
 	// NodeNetworkConfig is invalid - discard
-	if cfg.Status.ConfigStatus == operator.StatusInvalid && configAttempted(cfg) {
+	if cfg.Status.ConfigStatus == operator.StatusInvalid && configAttempted(cfg) && !cfg.HasSuccessfulConfig() {
 		r.logger.Info("skipping invalid NodeNetworkConfig", "name", cfg.Name)
 		return ctrl.Result{}, nil
 	}
@@ -202,11 +201,16 @@ func sameAppliedConfig(current, desired v1alpha1.NodeNetworkConfigSpec) bool {
 	return equality.Semantic.DeepEqual(current, desired)
 }
 
+func configAcknowledged(cfg *v1alpha1.NodeNetworkConfig) bool {
+	return cfg.Status.LastAppliedRevision == cfg.Spec.Revision &&
+		cfg.Status.LastAppliedConfigHash == cfg.Spec.ConfigHash &&
+		cfg.Status.LastSuccessfulRevision == cfg.Spec.Revision &&
+		cfg.Status.LastSuccessfulConfigHash == cfg.Spec.ConfigHash
+}
+
 func configAttempted(cfg *v1alpha1.NodeNetworkConfig) bool {
-	if cfg.Spec.ConfigHash != "" {
-		return cfg.Spec.ConfigHash == cfg.Status.LastAppliedConfigHash
-	}
-	return cfg.Spec.Revision == cfg.Status.LastAppliedRevision
+	return cfg.Spec.Revision == cfg.Status.LastAppliedRevision &&
+		(cfg.Spec.ConfigHash == "" || cfg.Spec.ConfigHash == cfg.Status.LastAppliedConfigHash)
 }
 
 func (r *NodeNetworkConfigReconciler) storeConfig(
@@ -423,6 +427,13 @@ func SetStatusWithError(
 ) error {
 	logger.Info("setting NodeNetworkConfig status", "name", cfg.Name, "status", status)
 
+	if status == operator.StatusProvisioned {
+		cfg.Status.LastSuccessfulRevision = cfg.Spec.Revision
+		cfg.Status.LastSuccessfulConfigHash = cfg.Spec.ConfigHash
+	} else if cfg.Status.ConfigStatus == operator.StatusProvisioned && cfg.Status.LastAppliedRevision != "" {
+		cfg.Status.LastSuccessfulRevision = cfg.Status.LastAppliedRevision
+		cfg.Status.LastSuccessfulConfigHash = cfg.Status.LastAppliedConfigHash
+	}
 	cfg.Status.ConfigStatus = status
 	cfg.Status.LastUpdate = metav1.Now()
 

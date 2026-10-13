@@ -39,6 +39,68 @@ Failed node-local updates do not invalidate the global revision, so correcting
 the node labels can recover the configuration. Deployment timeouts are measured
 using `spec.configUpdateTime` and agent status updates; timed-out node-local
 updates do not permanently occupy rollout slots.
+Changing either the resolved configuration hash or the global revision starts
+a fresh acknowledgement timeout, including revision-only provenance updates.
+
+### Revision deployment and node recovery
+
+`NetworkConfigRevision.status.deployed` is a persistent marker set after the
+first complete rollout: every registered node, including NotReady nodes, must
+have successfully acknowledged the revision and its current resolved
+configuration at least once,
+and no ready node may still need a configuration update. An empty cluster does
+not count as a completed rollout.
+
+Each agent persists `NodeNetworkConfig.status.lastSuccessfulRevision` and
+`lastSuccessfulConfigHash` when provisioning succeeds. Subsequent provisioning
+or failed recovery attempts preserve that success history. A node whose desired
+revision and config hash match this history stays rollout-complete, even if it
+reboots while other nodes are still being deployed. Its recovery is excluded
+from rollout failure and concurrency accounting immediately, not only after a
+timeout. `ncr.status.ready` counts these successful deployments, not current
+node health; `status.total` includes all registered nodes.
+
+A first attempt without matching success history still uses the normal failure
+and timeout rules during the initial rollout, even while the node is NotReady.
+Success with another revision or hash does not exempt the new attempt.
+Once `deployed` is true, later failures remain node-local: they do not set
+`isInvalid` or trigger cluster-wide rollback. Node configuration status and
+errors remain visible, and timed-out recovery attempts release their rollout
+slots so other nodes can progress. New revisions must complete their own rollout
+before receiving this protection.
+
+Agents still reapply configuration after a reboot when their local saved config
+is absent; in particular, a rebooted vSR still needs configuration. The deployment
+marker does not bypass agent provisioning or health checks.
+An invalid first attempt is still skipped until the revision or resolved
+configuration hash changes, but failed recovery of a previously successful
+configuration can be retried. A new revision with the same hash must still be
+attempted if no local applied configuration remains.
+CRA agents watch config creation, recreation, and spec changes, not their own
+status-only updates, so repeated recovery failures follow controller error
+backoff instead of immediately triggering another attempt.
+An upgraded agent preserves the last provisioned acknowledgement into success
+history before changing its status to provisioning, even if the spec already
+targets another revision. A failed attempt alone
+(`lastAppliedRevision` / `lastAppliedConfigHash`) is never success evidence.
+Deploy the updated CRDs before agents so the API server retains the new fields;
+older agents do not persist this per-node history.
+
+On upgrade, the operator also recognizes previously completed rollouts from
+persisted counters (`ready == total > 0`, no ongoing or queued work), provided
+every currently registered node has a retained NNC owned by that Node's UID.
+Matching node names or counts alone is insufficient: deleted or replaced nodes'
+configs do not contribute to completion evidence or rollout counters. A
+same-name replacement receives a fresh NNC without the old node's success or
+node-local protection; rebooting an existing Node retains its UID and history.
+Already-invalid revisions are not automatically
+rehabilitated. Any non-empty acknowledgement on these retained NNCs
+must match the candidate revision, even if the NNC spec has advanced to another
+revision. Non-empty successful history must also name the candidate: a failed
+attempt acknowledging the candidate cannot override success on another revision.
+An empty acknowledgement on the candidate spec also blocks backfill;
+an unchanged config hash alone is not proof of a complete rollout of a new
+revision.
 
 ## VRFRouteConfiguration
 

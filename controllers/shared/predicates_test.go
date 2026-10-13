@@ -17,6 +17,7 @@ limitations under the License.
 package shared
 
 import (
+	"strconv"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -125,5 +126,47 @@ func TestBuildNamePredicates_DeleteAndGeneric(t *testing.T) {
 	}
 	if got := p.Generic(event.GenericEvent{Object: obj}); got {
 		t.Errorf("Generic() = true, want false")
+	}
+}
+
+func TestBuildConfigPredicates_RecoveryStatusUpdates(t *testing.T) {
+	t.Setenv(healthcheck.NodenameEnv, "worker-1")
+	p := BuildConfigPredicates()
+	config := &networkv1alpha1.NodeNetworkConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: "worker-1", UID: "current-config", Generation: 1, ResourceVersion: "1"},
+		Spec:       networkv1alpha1.NodeNetworkConfigSpec{Revision: "revision-one"},
+	}
+	if !p.Create(event.CreateEvent{Object: config}) {
+		t.Fatal("initial config must trigger reconciliation")
+	}
+	for i, status := range []string{"provisioning", "invalid", "provisioning", "invalid", "provisioning", "invalid"} {
+		previous := config.DeepCopy()
+		config.Status.ConfigStatus = status
+		config.ResourceVersion = strconv.Itoa(i + 2)
+		e := event.UpdateEvent{ObjectOld: previous, ObjectNew: config}
+		if p.Update(e) {
+			t.Errorf("status-only update to %q must not enqueue an immediate retry", status)
+		}
+	}
+	replacement := config.DeepCopy()
+	replacement.UID = "replacement-config"
+	if !p.Update(event.UpdateEvent{ObjectOld: config, ObjectNew: replacement}) {
+		t.Error("a recreated config observed through an informer relist must trigger reconciliation even with the same generation")
+	}
+	next := config.DeepCopy()
+	next.Generation++
+	next.Spec.Revision = "revision-two"
+	if !p.Update(event.UpdateEvent{ObjectOld: config, ObjectNew: next}) {
+		t.Error("a new desired config must still trigger reconciliation")
+	}
+	next.Name = "worker-2"
+	if p.Update(event.UpdateEvent{ObjectOld: config, ObjectNew: next}) {
+		t.Error("another node's config must remain filtered")
+	}
+	if p.Create(event.CreateEvent{Object: next}) {
+		t.Error("another node's config creation must remain filtered")
+	}
+	if p.Delete(event.DeleteEvent{Object: config}) || p.Generic(event.GenericEvent{Object: config}) {
+		t.Error("delete and generic events must remain filtered")
 	}
 }

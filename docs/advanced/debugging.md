@@ -70,7 +70,7 @@ counters tell you how far the revision has progressed across the cluster.
 kubectl get ncr
 ```
 
-The printed columns are `Invalid`, `Queued`, `Ongoing`, `Ready`, `Total` and
+The printed columns are `Invalid`, `Deployed`, `Queued`, `Ongoing`, `Ready`, `Total` and
 (at higher verbosity) `FailedNode`:
 
 ```bash
@@ -79,11 +79,16 @@ kubectl get ncr <revision> \
   -o jsonpath='ready={.status.ready} ongoing={.status.ongoing} queued={.status.queued} total={.status.total}{"\n"}'
 ```
 
-- `ready` — nodes already provisioned with this revision.
-- `ongoing` — nodes currently being provisioned.
+- `ready` — nodes that successfully provisioned their current revision and
+  config hash at least once, including nodes now recovering.
+- `ongoing` — first attempts still being provisioned; already-successful
+  recovery attempts do not occupy rollout slots.
 - `queued` — nodes still waiting for their turn.
-- `total` — nodes targeted by this revision.
-- `isInvalid` / `failedNode` — set when a node failed to provision (see
+- `total` — all registered nodes, including NotReady nodes.
+- `deployed` — persistent record of the first successful rollout to all
+  registered nodes; remains true during subsequent node recovery.
+- `isInvalid` / `failedNode` — set when a node without matching success history
+  failed to provision before the revision's first complete rollout (see
   [Rollout troubleshooting](#rollout-troubleshooting)).
 
 ### 3. Inspect the NodeNetworkConfig on the affected node
@@ -97,6 +102,9 @@ kubectl get nnc <node-name> -o jsonpath='{.status.configStatus}{"\n"}'
 
 # Compare the config the node was built from against the last one it applied.
 kubectl get nnc <node-name> -o jsonpath='spec.revision={.spec.revision}{"\n"}lastApplied={.status.lastAppliedRevision}{"\n"}'
+
+# Successful rollout history is distinct from the most recent attempt:
+kubectl get nnc <node-name> -o jsonpath='lastSuccessfulRevision={.status.lastSuccessfulRevision}{"\n"}lastSuccessfulConfigHash={.status.lastSuccessfulConfigHash}{"\n"}'
 
 # When configStatus is "invalid", the reason is here:
 kubectl get nnc <node-name> -o jsonpath='{.status.errorMessage}{"\n"}'
@@ -160,7 +168,7 @@ The rollout is gated: the operator provisions one node, waits for its
 `NodeNetworkConfig` to reach `configStatus: provisioned`, then moves on. A single
 failing node stalls the rollout for the whole revision.
 
-- **Stuck rollout / invalidated revision.** If a node fails to provision, the
+- **Stuck rollout / invalidated revision.** If a node fails during the first rollout, the
   revision is marked invalid and records the culprit:
 
   ```bash
@@ -170,6 +178,21 @@ failing node stalls the rollout for the whole revision.
 
   `status.failedAt` records when the failure happened. Inspect that node's
   `nnc` `status.errorMessage` for the underlying cause.
+
+- **Recovery failure on a deployed revision.** Once `ncr.status.deployed` is
+  true, a reboot, interrupted reapplication or later node failure does not
+  invalidate that revision. Inspect the affected node's NNC status and agent
+  logs instead. A provisioning timeout is logged by the operator and releases
+  the rollout slot without marking the node provisioned. This protection does
+  not skip reconfiguration of a rebooted vSR.
+
+- **Recovery during the first rollout.** A node that already succeeded on its
+  desired revision and config hash remains rollout-complete if it reboots
+  before other nodes finish. Its recovery does not fail the revision or consume
+  a rollout slot. The NNC's actual `configStatus` and error remain unchanged by
+  this accounting; `ncr.status.ready` is not a current-health count. A node that
+  never succeeded on its desired revision/hash still follows normal
+  first-attempt failure and timeout rules, including while NotReady.
 
 - **A node not progressing.** Check that node's `nnc.status.configStatus`. If it
   stays `provisioning`, the agent on that node is not applying the config —

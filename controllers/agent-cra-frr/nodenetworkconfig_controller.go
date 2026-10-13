@@ -77,7 +77,7 @@ func (r *NodeNetworkConfigReconciler) Reconcile(ctx context.Context, _ ctrl.Requ
 // SetupWithManager sets up the controller with the Manager.
 func (r *NodeNetworkConfigReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	err := ctrl.NewControllerManagedBy(mgr).
-		For(&networkv1alpha1.NodeNetworkConfig{}, builder.WithPredicates(shared.BuildNamePredicates())).
+		For(&networkv1alpha1.NodeNetworkConfig{}, builder.WithPredicates(shared.BuildConfigPredicates())).
 		Complete(r)
 	if err != nil {
 		return fmt.Errorf("error creating controller: %w", err)

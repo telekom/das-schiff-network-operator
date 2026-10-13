@@ -20,6 +20,9 @@ spec:
     - jsonPath: .status.isInvalid
       name: Invalid
       type: string
+    - jsonPath: .status.deployed
+      name: Deployed
+      type: boolean
     - jsonPath: .status.queued
       name: Queued
       type: integer
@@ -679,6 +682,11 @@ spec:
             type: object
           status:
             properties:
+              deployed:
+                description: |-
+                  Deployed records a successful rollout to all registered nodes. Once true,
+                  subsequent node failures do not invalidate this revision.
+                type: boolean
               failedAt:
                 description: FailedAt is when the failure occurred.
                 format: date-time
@@ -704,12 +712,12 @@ spec:
                   to be provisioned with a config derived from the revision.
                 type: integer
               ready:
-                description: Ready informs about how many nodes were already provisioned
-                  with a config derived from the revision.
+                description: Ready counts nodes that successfully provisioned their
+                  current revision and config hash, including nodes recovering afterward.
                 type: integer
               total:
-                description: Total informs about how many nodes in total can be provisioned
-                  with a config derived from the revision.
+                description: Total is the number of registered nodes, including NotReady
+                  nodes.
                 type: integer
             required:
             - isInvalid

@@ -53,3 +53,14 @@ func BuildNamePredicates() predicate.Funcs {
 		GenericFunc: func(event.GenericEvent) bool { return false },
 	}
 }
+
+// BuildConfigPredicates accepts config creation, recreation, and spec changes for
+// this node. Status-only updates must not bypass reconciliation error backoff.
+func BuildConfigPredicates() predicate.Predicate {
+	return predicate.And(BuildNamePredicates(), predicate.Or(
+		predicate.GenerationChangedPredicate{},
+		predicate.Funcs{UpdateFunc: func(e event.UpdateEvent) bool {
+			return e.ObjectOld != nil && e.ObjectNew != nil && e.ObjectOld.GetUID() != e.ObjectNew.GetUID()
+		}},
+	))
+}

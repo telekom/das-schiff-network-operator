@@ -128,22 +128,24 @@ func (crr *ConfigRevisionReconciler) reconcileDebounced(ctx context.Context) err
 		return fmt.Errorf("error listing revisions: %w", err)
 	}
 
-	nodes, err := listNodes(ctx, crr.client)
-	if err != nil {
+	nodeList := &corev1.NodeList{}
+	if err := crr.client.List(ctx, nodeList); err != nil {
 		return fmt.Errorf("error listing nodes: %w", err)
 	}
+	nodes := readyNodes(nodeList.Items)
 
 	nodeConfigs, err := crr.listConfigs(ctx)
 	if err != nil {
 		return fmt.Errorf("error listing configs: %w", err)
 	}
 
-	totalNodes := len(nodes)
+	totalNodes := len(nodeList.Items)
 	cntMap := map[string]*counters{}
 	for i := range revisions.Items {
+		revision := &revisions.Items[i]
 		var cnt *counters
 		var err error
-		if cnt, err = crr.processConfigsForRevision(ctx, nodeConfigs.Items, &revisions.Items[i]); err != nil {
+		if cnt, err = crr.processConfigsForRevision(ctx, nodeConfigs.Items, revision, nodeList.Items); err != nil {
 			return fmt.Errorf("failed to process configs for revision %s: %w", revisions.Items[i].Name, err)
 		}
 		cntMap[revisions.Items[i].Spec.Revision] = cnt
@@ -154,6 +156,11 @@ func (crr *ConfigRevisionReconciler) reconcileDebounced(ctx context.Context) err
 	nodesToDeploy, err := crr.getOutdatedNodes(ctx, nodes, nodeConfigs.Items, revisionToDeploy)
 	if err != nil {
 		return fmt.Errorf("error calculating desired node configurations: %w", err)
+	}
+
+	if revisionToDeploy != nil && len(nodesToDeploy) == 0 &&
+		revisionFullyDeployed(nodeList.Items, nodeConfigs.Items, revisionToDeploy) {
+		revisionToDeploy.Status.Deployed = true
 	}
 
 	if err := crr.updateRevisionCounters(ctx, revisions.Items, revisionToDeploy, len(nodesToDeploy), totalNodes, cntMap); err != nil {
@@ -203,12 +210,28 @@ type counters struct {
 	failedAt                metav1.Time
 }
 
-func (crr *ConfigRevisionReconciler) processConfigsForRevision(ctx context.Context, configs []v1alpha1.NodeNetworkConfig, revision *v1alpha1.NetworkConfigRevision) (*counters, error) {
+func (crr *ConfigRevisionReconciler) processConfigsForRevision(ctx context.Context, configs []v1alpha1.NodeNetworkConfig, revision *v1alpha1.NetworkConfigRevision, nodes []corev1.Node) (*counters, error) {
 	configs, err := crr.removeRedundantConfigs(ctx, configs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to remove redundant configs: %w", err)
 	}
-	cnt := crr.getRevisionCounters(configs, revision)
+	current := make(map[string]*v1alpha1.NodeNetworkConfig, len(configs))
+	for i := range configs {
+		current[configs[i].Name] = &configs[i]
+	}
+	// Deleted or replaced nodes must not contribute stale completion evidence.
+	registeredConfigs := make([]v1alpha1.NodeNetworkConfig, 0, len(nodes))
+	for i := range nodes {
+		if cfg := current[nodes[i].Name]; cfg != nil && nodeOwnsConfig(&nodes[i], cfg) {
+			registeredConfigs = append(registeredConfigs, *cfg)
+		}
+	}
+	// Backfill the latch from a completed rollout observed before this field
+	// existed, before a reboot's provisioning status can invalidate it.
+	if canBackfillRevision(registeredConfigs, revision, len(nodes)) {
+		revision.Status.Deployed = true
+	}
+	cnt := crr.getRevisionCounters(registeredConfigs, revision)
 
 	if cnt.revisionInvalid {
 		// Invalidate when transitioning to invalid state, or when the failed node
@@ -223,6 +246,21 @@ func (crr *ConfigRevisionReconciler) processConfigsForRevision(ctx context.Conte
 	return cnt, nil
 }
 
+func canBackfillRevision(configs []v1alpha1.NodeNetworkConfig, revision *v1alpha1.NetworkConfigRevision, registeredNodes int) bool {
+	return !revision.Status.IsInvalid && revision.Status.Ready > 0 &&
+		revision.Status.Ready == revision.Status.Total && revision.Status.Total == registeredNodes &&
+		len(configs) == registeredNodes && revision.Status.Ongoing == 0 && revision.Status.Queued == 0 &&
+		!slices.ContainsFunc(configs, func(cfg v1alpha1.NodeNetworkConfig) bool {
+			if cfg.Status.LastSuccessfulRevision != "" && cfg.Status.LastSuccessfulRevision != revision.Spec.Revision {
+				return true
+			}
+			if cfg.Status.LastAppliedRevision != "" {
+				return cfg.Status.LastAppliedRevision != revision.Spec.Revision
+			}
+			return cfg.Spec.Revision == revision.Spec.Revision
+		})
+}
+
 func (crr *ConfigRevisionReconciler) getRevisionCounters(configs []v1alpha1.NodeNetworkConfig, revision *v1alpha1.NetworkConfigRevision) *counters {
 	cnt := &counters{
 		ready:   0,
@@ -234,8 +272,12 @@ func (crr *ConfigRevisionReconciler) getRevisionCounters(configs []v1alpha1.Node
 		if cfg.Spec.Revision != revision.Spec.Revision {
 			continue
 		}
+		if cfg.HasSuccessfulConfig() {
+			cnt.ready++
+			continue
+		}
 		status := cfg.Status.ConfigStatus
-		if cfg.Spec.ConfigHash != cfg.Status.LastAppliedConfigHash &&
+		if (cfg.Spec.ConfigHash != cfg.Status.LastAppliedConfigHash || cfg.Spec.Revision != cfg.Status.LastAppliedRevision) &&
 			(status == StatusProvisioned || status == StatusInvalid) {
 			status = ""
 		}
@@ -246,7 +288,7 @@ func (crr *ConfigRevisionReconciler) getRevisionCounters(configs []v1alpha1.Node
 			// Update ready counter
 			cnt.ready++
 		case StatusInvalid:
-			cnt.recordFailure(cfg, cfg.Status.ErrorMessage, cfg.Status.LastUpdate)
+			cnt.recordFailure(cfg, cfg.Status.ErrorMessage, cfg.Status.LastUpdate, revision)
 		case "":
 			// Set longer timeout if status was not yet updated
 			timeout = crr.preconfigTimeout
@@ -255,10 +297,10 @@ func (crr *ConfigRevisionReconciler) getRevisionCounters(configs []v1alpha1.Node
 			// Update ongoing counter
 			cnt.ongoing++
 			if wasConfigTimeoutReached(cfg, timeout) {
-				cnt.recordFailure(cfg, provisioningTimeoutMessage, metav1.NewTime(configUpdateTime(cfg).Add(timeout)))
-				if isNodeLocalConfig(cfg) {
+				cnt.recordFailure(cfg, provisioningTimeoutMessage, metav1.NewTime(configUpdateTime(cfg).Add(timeout)), revision)
+				if revision.Status.Deployed || isNodeLocalConfig(cfg) {
 					cnt.ongoing--
-					crr.logger.Error(fmt.Errorf("%s", provisioningTimeoutMessage), "node-local configuration failed", "node", cfg.Name, "configHash", cfg.Spec.ConfigHash)
+					crr.logger.Error(fmt.Errorf("%s", provisioningTimeoutMessage), "node configuration failed", "node", cfg.Name, "configHash", cfg.Spec.ConfigHash)
 				}
 			}
 		}
@@ -266,9 +308,9 @@ func (crr *ConfigRevisionReconciler) getRevisionCounters(configs []v1alpha1.Node
 	return cnt
 }
 
-func (cnt *counters) recordFailure(cfg *v1alpha1.NodeNetworkConfig, message string, failedAt metav1.Time) {
+func (cnt *counters) recordFailure(cfg *v1alpha1.NodeNetworkConfig, message string, failedAt metav1.Time, revision *v1alpha1.NetworkConfigRevision) {
 	cnt.invalid++
-	if isNodeLocalConfig(cfg) {
+	if revision.Status.Deployed || isNodeLocalConfig(cfg) {
 		return
 	}
 	cnt.revisionInvalid = true
@@ -366,7 +408,7 @@ func (crr *ConfigRevisionReconciler) getOutdatedNodes(ctx context.Context, nodes
 		if err != nil {
 			return nil, fmt.Errorf("error hashing configuration for node %s: %w", node.Name, err)
 		}
-		if cfg := current[node.Name]; cfg != nil && nodeConfigMatches(cfg, networkConfig) {
+		if cfg := current[node.Name]; cfg != nil && nodeOwnsConfig(node, cfg) && nodeConfigMatches(cfg, networkConfig) {
 			continue
 		}
 		nodesToDeploy = append(nodesToDeploy, &nodeConfigDeployment{
@@ -392,6 +434,30 @@ func nodeConfigHash(networkSpec v1alpha1.NodeNetworkConfigSpec, netplanSpec *v1a
 
 func nodeConfigMatches(current, desired *v1alpha1.NodeNetworkConfig) bool {
 	return current.Spec.Revision == desired.Spec.Revision && current.Spec.ConfigHash == desired.Spec.ConfigHash
+}
+
+func nodeOwnsConfig(node *corev1.Node, cfg *v1alpha1.NodeNetworkConfig) bool {
+	return node.UID != "" && slices.ContainsFunc(cfg.OwnerReferences, func(ref metav1.OwnerReference) bool {
+		return ref.Kind == "Node" && ref.Name == node.Name && ref.UID == node.UID
+	})
+}
+
+func revisionFullyDeployed(nodes []corev1.Node, configs []v1alpha1.NodeNetworkConfig, revision *v1alpha1.NetworkConfigRevision) bool {
+	if revision.Status.IsInvalid || len(nodes) == 0 {
+		return false
+	}
+	current := make(map[string]*v1alpha1.NodeNetworkConfig, len(configs))
+	for i := range configs {
+		current[configs[i].Name] = &configs[i]
+	}
+	for i := range nodes {
+		cfg := current[nodes[i].Name]
+		if cfg == nil || !nodeOwnsConfig(&nodes[i], cfg) || len(cfg.OwnerReferences) < numOfRefs || cfg.Spec.Revision != revision.Spec.Revision ||
+			!cfg.HasSuccessfulConfig() {
+			return false
+		}
+	}
+	return true
 }
 
 func (crr *ConfigRevisionReconciler) updateRevisionCounters(ctx context.Context, revisions []v1alpha1.NetworkConfigRevision, currentRevision *v1alpha1.NetworkConfigRevision, queued, totalNodes int, cnt map[string]*counters) error {
@@ -422,7 +488,8 @@ func (crr *ConfigRevisionReconciler) revisionCleanup(ctx context.Context) error 
 		if err != nil {
 			return fmt.Errorf("failed to list configs: %w", err)
 		}
-		if !revisions.Items[0].Status.IsInvalid && revisions.Items[0].Status.Ready == revisions.Items[0].Status.Total {
+		if !revisions.Items[0].Status.IsInvalid && revisions.Items[0].Status.Deployed &&
+			revisions.Items[0].Status.Ready == revisions.Items[0].Status.Total {
 			for i := 1; i < len(revisions.Items); i++ {
 				if countReferences(&revisions.Items[i], nodeConfigs.Items) == 0 {
 					crr.logger.Info("deleting NetworkConfigRevision", "name", revisions.Items[i].Name)
@@ -466,7 +533,7 @@ func (crr *ConfigRevisionReconciler) deployNodeConfig(ctx context.Context, deplo
 		currentConfig = nil
 	}
 
-	if currentConfig != nil && nodeConfigMatches(currentConfig, newConfig) {
+	if currentConfig != nil && nodeOwnsConfig(node, currentConfig) && nodeConfigMatches(currentConfig, newConfig) {
 		return nil
 	}
 
@@ -639,6 +706,13 @@ func convertSelector(matchLabels map[string]string, matchExpressions []metav1.La
 func (crr *ConfigRevisionReconciler) deployNodeNetworkConfig(ctx context.Context, newConfig, currentConfig *v1alpha1.NodeNetworkConfig, node *corev1.Node) error {
 	deploymentCtx, deploymentCtxCancel := context.WithTimeout(ctx, crr.apiTimeout)
 	defer deploymentCtxCancel()
+	if currentConfig != nil && !nodeOwnsConfig(node, currentConfig) {
+		// Recreate instead of adopting success and node-local state from a replaced node.
+		if err := crr.client.Delete(deploymentCtx, currentConfig, client.Preconditions{UID: &currentConfig.UID}); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("error deleting stale NodeNetworkConfig for node %s: %w", node.Name, err)
+		}
+		currentConfig = nil
+	}
 	var cfg *v1alpha1.NodeNetworkConfig
 	if currentConfig != nil {
 		cfg = currentConfig
@@ -646,12 +720,11 @@ func (crr *ConfigRevisionReconciler) deployNodeNetworkConfig(ctx context.Context
 		if cfg.Spec.Revision != newConfig.Spec.Revision {
 			delete(cfg.Annotations, nodeLocalRevisionAnnotation)
 		}
-		if cfg.Spec.ConfigHash != newConfig.Spec.ConfigHash {
+		if cfg.Spec.ConfigHash != newConfig.Spec.ConfigHash || cfg.Spec.Revision != newConfig.Spec.Revision {
 			now := metav1.Now()
 			newConfig.Spec.ConfigUpdateTime = &now
 			if cfg.Spec.Revision == newConfig.Spec.Revision &&
-				(isNodeLocalConfig(cfg) || (cfg.Status.ConfigStatus == StatusProvisioned &&
-					cfg.Spec.ConfigHash == cfg.Status.LastAppliedConfigHash)) {
+				(isNodeLocalConfig(cfg) || cfg.HasSuccessfulConfig()) {
 				if cfg.Annotations == nil {
 					cfg.Annotations = make(map[string]string)
 				}
@@ -685,19 +758,22 @@ func listNodes(ctx context.Context, c client.Client) (map[string]*corev1.Node, e
 		return nil, fmt.Errorf("unable to list nodes: %w", err)
 	}
 
-	// discard control-plane and not-ready nodes
+	return readyNodes(list.Items), nil
+}
+
+func readyNodes(list []corev1.Node) map[string]*corev1.Node {
 	nodes := map[string]*corev1.Node{}
-	for i := range list.Items {
+	for i := range list {
 		// discard nodes that are not in ready state
-		for j := range list.Items[i].Status.Conditions {
+		for j := range list[i].Status.Conditions {
 			// TODO(preexisting): Consider using node taint node.kubernetes.io/not-ready instead of Conditions for revision status
-			if list.Items[i].Status.Conditions[j].Type == corev1.NodeReady &&
-				list.Items[i].Status.Conditions[j].Status == corev1.ConditionTrue {
-				nodes[list.Items[i].Name] = &list.Items[i]
+			if list[i].Status.Conditions[j].Type == corev1.NodeReady &&
+				list[i].Status.Conditions[j].Status == corev1.ConditionTrue {
+				nodes[list[i].Name] = &list[i]
 				break
 			}
 		}
 	}
 
-	return nodes, nil
+	return nodes
 }

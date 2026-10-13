@@ -68,13 +68,16 @@ type NetworkConfigRevisionSpec struct {
 type NetworkConfigRevisionStatus struct {
 	// IsInvalid determines if NetworkConfigRevision results in misconfigured nodes (invalid configuration).
 	IsInvalid bool `json:"isInvalid"`
-	// Ready informs about how many nodes were already provisioned with a config derived from the revision.
+	// Deployed records a successful rollout to all registered nodes. Once true,
+	// subsequent node failures do not invalidate this revision.
+	Deployed bool `json:"deployed,omitempty"`
+	// Ready counts nodes that successfully provisioned their current revision and config hash, including nodes recovering afterward.
 	Ready int `json:"ready"`
 	// Ongoing informs about how many nodes are currently provisioned with a config derived from the revision.
 	Ongoing int `json:"ongoing"`
 	// Queued informs about how many nodes are currently waiting to be provisioned with a config derived from the revision.
 	Queued int `json:"queued"`
-	// Total informs about how many nodes in total can be provisioned with a config derived from the revision.
+	// Total is the number of registered nodes, including NotReady nodes.
 	Total int `json:"total"`
 	// FailedNode is the name of the node where provisioning failed, causing this revision to be invalidated.
 	FailedNode string `json:"failedNode,omitempty"`
@@ -88,6 +91,7 @@ type NetworkConfigRevisionStatus struct {
 //+kubebuilder:subresource:status
 //+kubebuilder:resource:shortName=ncr,scope=Cluster
 //+kubebuilder:printcolumn:name="Invalid",type=string,JSONPath=`.status.isInvalid`
+//+kubebuilder:printcolumn:name="Deployed",type=boolean,JSONPath=`.status.deployed`
 //+kubebuilder:printcolumn:name="Queued",type="integer",JSONPath=".status.queued"
 //+kubebuilder:printcolumn:name="Ongoing",type="integer",JSONPath=".status.ongoing"
 //+kubebuilder:printcolumn:name="Ready",type="integer",JSONPath=".status.ready"
