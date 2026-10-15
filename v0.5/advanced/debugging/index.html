@@ -1368,18 +1368,23 @@ failures usually surface as <code>InterfaceNotFound</code> or <code>DuplicateVRF
 counters tell you how far the revision has progressed across the cluster.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>kubectl<span class="w"> </span>get<span class="w"> </span>ncr
 </code></pre></div>
-<p>The printed columns are <code>Invalid</code>, <code>Queued</code>, <code>Ongoing</code>, <code>Ready</code>, <code>Total</code> and
+<p>The printed columns are <code>Invalid</code>, <code>Deployed</code>, <code>Queued</code>, <code>Ongoing</code>, <code>Ready</code>, <code>Total</code> and
 (at higher verbosity) <code>FailedNode</code>:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>kubectl<span class="w"> </span>get<span class="w"> </span>ncr<span class="w"> </span>-o<span class="w"> </span>wide
 <a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>kubectl<span class="w"> </span>get<span class="w"> </span>ncr<span class="w"> </span>&lt;revision&gt;<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">'ready={.status.ready} ongoing={.status.ongoing} queued={.status.queued} total={.status.total}{"\n"}'</span>
 </code></pre></div>
 <ul>
-<li><code>ready</code> — nodes already provisioned with this revision.</li>
-<li><code>ongoing</code> — nodes currently being provisioned.</li>
+<li><code>ready</code> — nodes that successfully provisioned their current revision and
+  config hash at least once, including nodes now recovering.</li>
+<li><code>ongoing</code> — first attempts still being provisioned; already-successful
+  recovery attempts do not occupy rollout slots.</li>
 <li><code>queued</code> — nodes still waiting for their turn.</li>
-<li><code>total</code> — nodes targeted by this revision.</li>
-<li><code>isInvalid</code> / <code>failedNode</code> — set when a node failed to provision (see
+<li><code>total</code> — all registered nodes, including NotReady nodes.</li>
+<li><code>deployed</code> — persistent record of the first successful rollout to all
+  registered nodes; remains true during subsequent node recovery.</li>
+<li><code>isInvalid</code> / <code>failedNode</code> — set when a node without matching success history
+  failed to provision before the revision's first complete rollout (see
   <a href="#rollout-troubleshooting">Rollout troubleshooting</a>).</li>
 </ul>
 <h3 id="3-inspect-the-nodenetworkconfig-on-the-affected-node">3. Inspect the NodeNetworkConfig on the affected node<a class="headerlink" href="#3-inspect-the-nodenetworkconfig-on-the-affected-node" title="Permanent link">&para;</a></h3>
@@ -1391,8 +1396,11 @@ of <code>provisioning</code>, <code>provisioned</code> or <code>invalid</code>.<
 <a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="c1"># Compare the config the node was built from against the last one it applied.</span>
 <a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>kubectl<span class="w"> </span>get<span class="w"> </span>nnc<span class="w"> </span>&lt;node-name&gt;<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">'spec.revision={.spec.revision}{"\n"}lastApplied={.status.lastAppliedRevision}{"\n"}'</span>
 <a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="c1"># When configStatus is "invalid", the reason is here:</span>
-<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>kubectl<span class="w"> </span>get<span class="w"> </span>nnc<span class="w"> </span>&lt;node-name&gt;<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">'{.status.errorMessage}{"\n"}'</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="c1"># Successful rollout history is distinct from the most recent attempt:</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>kubectl<span class="w"> </span>get<span class="w"> </span>nnc<span class="w"> </span>&lt;node-name&gt;<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">'lastSuccessfulRevision={.status.lastSuccessfulRevision}{"\n"}lastSuccessfulConfigHash={.status.lastSuccessfulConfigHash}{"\n"}'</span>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="c1"># When configStatus is "invalid", the reason is here:</span>
+<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a>kubectl<span class="w"> </span>get<span class="w"> </span>nnc<span class="w"> </span>&lt;node-name&gt;<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">'{.status.errorMessage}{"\n"}'</span>
 </code></pre></div>
 <p><code>kubectl describe nnc &lt;node-name&gt;</code> shows the full resolved spec —
 <code>layer2s</code>, <code>clusterVRF</code>, <code>fabricVRFs</code> and <code>localVRFs</code> — so you can confirm the
@@ -1450,7 +1458,7 @@ your <code>PATH</code> so <code>kubectl</code> discovers it as <code>kubectl nnc
 <code>NodeNetworkConfig</code> to reach <code>configStatus: provisioned</code>, then moves on. A single
 failing node stalls the rollout for the whole revision.</p>
 <ul>
-<li><strong>Stuck rollout / invalidated revision.</strong> If a node fails to provision, the
+<li><strong>Stuck rollout / invalidated revision.</strong> If a node fails during the first rollout, the
   revision is marked invalid and records the culprit:</li>
 </ul>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>kubectl<span class="w"> </span>get<span class="w"> </span>ncr<span class="w"> </span>&lt;revision&gt;<span class="w"> </span><span class="se">\</span>
@@ -1459,6 +1467,23 @@ failing node stalls the rollout for the whole revision.</p>
 <p><code>status.failedAt</code> records when the failure happened. Inspect that node's
   <code>nnc</code> <code>status.errorMessage</code> for the underlying cause.</p>
 <ul>
+<li>
+<p><strong>Recovery failure on a deployed revision.</strong> Once <code>ncr.status.deployed</code> is
+  true, a reboot, interrupted reapplication or later node failure does not
+  invalidate that revision. Inspect the affected node's NNC status and agent
+  logs instead. A provisioning timeout is logged by the operator and releases
+  the rollout slot without marking the node provisioned. This protection does
+  not skip reconfiguration of a rebooted vSR.</p>
+</li>
+<li>
+<p><strong>Recovery during the first rollout.</strong> A node that already succeeded on its
+  desired revision and config hash remains rollout-complete if it reboots
+  before other nodes finish. Its recovery does not fail the revision or consume
+  a rollout slot. The NNC's actual <code>configStatus</code> and error remain unchanged by
+  this accounting; <code>ncr.status.ready</code> is not a current-health count. A node that
+  never succeeded on its desired revision/hash still follows normal
+  first-attempt failure and timeout rules, including while NotReady.</p>
+</li>
 <li>
 <p><strong>A node not progressing.</strong> Check that node's <code>nnc.status.configStatus</code>. If it
   stays <code>provisioning</code>, the agent on that node is not applying the config —

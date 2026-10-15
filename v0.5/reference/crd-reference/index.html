@@ -4272,6 +4272,12 @@ back into the cluster VRF via source-based routing.</p>
 <td></td>
 <td>Optional: {} <br /></td>
 </tr>
+<tr>
+<td><code>ipFamilies</code> <em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#ipfamily-v1-core">IPFamily</a> array</em></td>
+<td>IPFamilies selects which node IP address families are exported into the<br />remote VRF. If omitted or empty, both IPv4 and IPv6 are exported.<br />Destination prefix imports are not filtered by this selector.</td>
+<td></td>
+<td>items:Enum: [IPv4 IPv6] <br />Optional: {} <br /></td>
+</tr>
 </tbody>
 </table>
 <h4 id="nodeattachmentstatus">NodeAttachmentStatus<a class="headerlink" href="#nodeattachmentstatus" title="Permanent link">&para;</a></h4>
