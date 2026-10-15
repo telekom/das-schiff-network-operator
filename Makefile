@@ -19,7 +19,7 @@ SHELL = /usr/bin/env bash -o pipefail
 .SHELLFLAGS = -ec
 
 LDFLAGS := $(shell hack/version.sh)
-ifeq ($(origin GO_VERSION), undefined)
+ifeq ($(strip $(GO_VERSION)),)
 GO_VERSION := $(shell awk '/^go / {print $$2; exit}' go.mod)
 endif
 
