@@ -20,7 +20,7 @@ documentation:
   - changed-files:
       - any-glob-to-any-file:
           - 'docs/**'
-          - '*.md'
+          - '**/*.md'
           - 'README*'
 
 # CI/CD changes

@@ -74,6 +74,7 @@ jobs:
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
           configuration-path: .github/labeler.yml
+          sync-labels: true
 
   size-label:
     name: Add Size Label
