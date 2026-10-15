@@ -18,6 +18,7 @@ package builder
 
 import (
 	"context"
+	"slices"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -82,7 +83,7 @@ func (b *NodeAttachmentBuilder) Build(ctx context.Context, data *resolver.Resolv
 				destPrefixes = append(destPrefixes, dests[di].Spec.Prefixes...)
 			}
 
-			b.applyToNodes(vrfName, vrfSpec, destPrefixes, matchedNodes, result)
+			b.applyToNodes(vrfName, vrfSpec, destPrefixes, matchedNodes, na.Spec.IPFamilies, result)
 		}
 	}
 
@@ -97,6 +98,7 @@ func (*NodeAttachmentBuilder) applyToNodes(
 	vrfSpec *nc.VRFSpec,
 	destPrefixes []string,
 	nodes []corev1.Node,
+	ipFamilies []corev1.IPFamily,
 	result map[string]*NodeContribution,
 ) {
 	// Build filter items for destination prefixes (accept all).
@@ -104,32 +106,34 @@ func (*NodeAttachmentBuilder) applyToNodes(
 
 	for i := range nodes {
 		node := &nodes[i]
-		nodeIPs := collectNodeIPs(node)
-		if len(nodeIPs) == 0 {
+		nodeIPs := collectNodeIPs(node, ipFamilies)
+		if len(nodeIPs) == 0 && len(collectNodeIPs(node, nil)) == 0 {
 			continue
 		}
 
 		contrib := ensureContrib(result, node.Name)
 
 		// --- FabricVRF: export node IPs into the remote VRF ---
-		fvrf, exists := contrib.FabricVRFs[vrfName]
-		if !exists {
-			fvrf = buildFabricVRF(vrfSpec)
-		}
+		if len(nodeIPs) > 0 || len(destFilterItems) > 0 {
+			fvrf, exists := contrib.FabricVRFs[vrfName]
+			if !exists {
+				fvrf = buildFabricVRF(vrfSpec)
+			}
 
-		// Add node IPs as host routes to EVPN export filter (no AP — simple accept).
-		evpnItems := addressFilterItems(nodeIPs, nil)
-		if fvrf.EVPNExportFilter != nil {
-			fvrf.EVPNExportFilter.Items = append(fvrf.EVPNExportFilter.Items, evpnItems...)
-		}
+			// Add node IPs as host routes to EVPN export filter (no AP — simple accept).
+			evpnItems := addressFilterItems(nodeIPs, nil)
+			if fvrf.EVPNExportFilter != nil {
+				fvrf.EVPNExportFilter.Items = append(fvrf.EVPNExportFilter.Items, evpnItems...)
+			}
 
-		// Add node IPs to the FabricVRF's cluster VRF import filter
-		// (so node IPs are leaked from cluster into the fabric VRF).
-		if len(fvrf.VRFImports) > 0 {
-			fvrf.VRFImports[0].Filter.Items = append(fvrf.VRFImports[0].Filter.Items, evpnItems...)
-		}
+			// Add node IPs to the FabricVRF's cluster VRF import filter
+			// (so node IPs are leaked from cluster into the fabric VRF).
+			if len(fvrf.VRFImports) > 0 {
+				fvrf.VRFImports[0].Filter.Items = append(fvrf.VRFImports[0].Filter.Items, evpnItems...)
+			}
 
-		contrib.FabricVRFs[vrfName] = fvrf
+			contrib.FabricVRFs[vrfName] = fvrf
+		}
 
 		// --- ClusterVRF: import destination prefixes from the remote VRF ---
 		if len(destFilterItems) > 0 {
@@ -190,8 +194,9 @@ func (*NodeAttachmentBuilder) resolveVRFSpec(vrfName string, grouped map[string]
 	return resolved.VRFSpec
 }
 
-// collectNodeIPs extracts InternalIP addresses from a node's status as CIDR host routes.
-func collectNodeIPs(node *corev1.Node) []string {
+// collectNodeIPs extracts InternalIP addresses of the selected families as CIDR host routes.
+// An empty family list selects all families.
+func collectNodeIPs(node *corev1.Node, ipFamilies []corev1.IPFamily) []string {
 	var ips []string
 	for _, addr := range node.Status.Addresses {
 		if addr.Type != corev1.NodeInternalIP {
@@ -201,8 +206,13 @@ func collectNodeIPs(node *corev1.Node) []string {
 			continue
 		}
 		suffix := "/32"
+		family := corev1.IPv4Protocol
 		if strings.Contains(addr.Address, ":") {
 			suffix = "/128"
+			family = corev1.IPv6Protocol
+		}
+		if len(ipFamilies) > 0 && !slices.Contains(ipFamilies, family) {
+			continue
 		}
 		ips = append(ips, addr.Address+suffix)
 	}

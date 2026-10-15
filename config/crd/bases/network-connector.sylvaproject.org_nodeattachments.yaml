@@ -108,6 +108,21 @@ spec:
                     type: object
                 type: object
                 x-kubernetes-map-type: atomic
+              ipFamilies:
+                description: |-
+                  IPFamilies selects which node IP address families are exported into the
+                  remote VRF. If omitted or empty, both IPv4 and IPv6 are exported.
+                  Destination prefix imports are not filtered by this selector.
+                items:
+                  description: |-
+                    IPFamily represents the IP Family (IPv4 or IPv6). This type is used
+                    to express the family of an IP expressed by a type (e.g. service.spec.ipFamilies).
+                  enum:
+                  - IPv4
+                  - IPv6
+                  type: string
+                type: array
+                x-kubernetes-list-type: set
               nodeSelector:
                 description: |-
                   NodeSelector restricts which nodes are attached. If omitted, all nodes

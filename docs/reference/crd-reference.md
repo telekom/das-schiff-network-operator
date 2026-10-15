@@ -924,6 +924,7 @@ _Appears in:_
 | `vrfRef` _string_ | VRFRef references a VRF CRD by name. The VRF provides the L3VNI and<br />route target for the fabric VRF that node IPs will be exported into. |  | MinLength: 1 <br />Required: \{\} <br /> |
 | `destinations` _[LabelSelector](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#labelselector-v1-meta)_ | Destinations selects Destination CRDs whose prefixes should be imported<br />back into the cluster VRF (via SBR) for the attached nodes. |  | Required: \{\} <br /> |
 | `nodeSelector` _[LabelSelector](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#labelselector-v1-meta)_ | NodeSelector restricts which nodes are attached. If omitted, all nodes<br />are attached to the VRF. |  | Optional: \{\} <br /> |
+| `ipFamilies` _[IPFamily](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#ipfamily-v1-core) array_ | IPFamilies selects which node IP address families are exported into the<br />remote VRF. If omitted or empty, both IPv4 and IPv6 are exported.<br />Destination prefix imports are not filtered by this selector. |  | items:Enum: [IPv4 IPv6] <br />Optional: \{\} <br /> |
 
 
 #### NodeAttachmentStatus

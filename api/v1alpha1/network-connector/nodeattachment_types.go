@@ -17,6 +17,7 @@ limitations under the License.
 package networkconnector
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -39,6 +40,14 @@ type NodeAttachmentSpec struct {
 	// are attached to the VRF.
 	// +optional
 	NodeSelector *metav1.LabelSelector `json:"nodeSelector,omitempty"`
+
+	// IPFamilies selects which node IP address families are exported into the
+	// remote VRF. If omitted or empty, both IPv4 and IPv6 are exported.
+	// Destination prefix imports are not filtered by this selector.
+	// +optional
+	// +listType=set
+	// +kubebuilder:validation:items:Enum=IPv4;IPv6
+	IPFamilies []corev1.IPFamily `json:"ipFamilies,omitempty"`
 }
 
 // NodeAttachmentStatus defines the observed state of NodeAttachment.
