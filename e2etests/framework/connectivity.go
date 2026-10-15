@@ -165,10 +165,21 @@ func (f *Framework) EnsureIPv6NoDad(ctx context.Context, namespace, podName, ipv
 	if !found {
 		return fmt.Errorf("IPv6 address %s not found on %s", ipv6Addr, iface)
 	}
-	if _, stderr, err = f.ExecInPod(ctx, namespace, podName, "", []string{
+	_, stderr, sysctlErr := f.ExecInPod(ctx, namespace, podName, "", []string{
 		"sysctl", "-w", fmt.Sprintf("net.ipv6.conf.%s.accept_dad=0", iface),
-	}); err != nil {
-		return fmt.Errorf("disable IPv6 DAD on %s: stderr=%s: %w", iface, stderr, err)
+	})
+	if sysctlErr != nil {
+		// CNI tuning can set this before the pod starts, while the pod's /proc/sys
+		// remains read-only. Accept that already-safe state.
+		value, readStderr, readErr := f.ExecInPod(ctx, namespace, podName, "", []string{
+			"sysctl", "-n", fmt.Sprintf("net.ipv6.conf.%s.accept_dad", iface),
+		})
+		if readErr != nil || strings.TrimSpace(value) != "0" {
+			if readErr != nil {
+				stderr = fmt.Sprintf("%s; read current value: %s", stderr, readStderr)
+			}
+			return fmt.Errorf("disable IPv6 DAD on %s: stderr=%s: %w", iface, stderr, sysctlErr)
+		}
 	}
 	if _, stderr, err = f.ExecInPod(ctx, namespace, podName, "", []string{"ip", "addr", "del", cidr, "dev", iface}); err != nil {
 		return fmt.Errorf("remove IPv6 address %s: stderr=%s: %w", cidr, stderr, err)
