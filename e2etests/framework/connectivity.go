@@ -161,10 +161,10 @@ func (f *Framework) CurlFromCluster2Pod(ctx context.Context, namespace, podName,
 // EnsureIPv6NoDad disables DAD on the given interface and re-adds the IPv6
 // address with the prefix currently assigned by CNI.
 func (f *Framework) EnsureIPv6NoDad(ctx context.Context, namespace, podName, ipv6Addr, iface string) error {
-	return ensureIPv6NoDad(f, ctx, namespace, podName, ipv6Addr, iface)
+	return ensureIPv6NoDad(ctx, f, namespace, podName, ipv6Addr, iface)
 }
 
-func ensureIPv6NoDad(exec podExecutor, ctx context.Context, namespace, podName, ipv6Addr, iface string) error {
+func ensureIPv6NoDad(ctx context.Context, exec podExecutor, namespace, podName, ipv6Addr, iface string) error {
 	stdout, stderr, err := exec.ExecInPod(ctx, namespace, podName, "", []string{"ip", "-6", "-o", "addr", "show", "dev", iface})
 	if err != nil {
 		return fmt.Errorf("inspect IPv6 address: stderr=%s: %w", stderr, err)

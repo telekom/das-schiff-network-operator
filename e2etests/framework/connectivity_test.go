@@ -18,7 +18,7 @@ type fakePodExecutor struct {
 	replies []execReply
 }
 
-func (f *fakePodExecutor) ExecInPod(_ context.Context, _, _, _ string, command []string) (string, string, error) {
+func (f *fakePodExecutor) ExecInPod(_ context.Context, _, _, _ string, command []string) (stdout, stderr string, err error) {
 	f.calls = append(f.calls, append([]string(nil), command...))
 	if len(f.calls) > len(f.replies) {
 		return "", "", errors.New("unexpected command")
@@ -52,7 +52,7 @@ func TestEnsureIPv6NoDadAcceptsPreconfiguredDADAndPreservesPrefix(t *testing.T) 
 		{},
 	}}
 
-	if err := ensureIPv6NoDad(exec, context.Background(), "ns", "pod", "2001:db8::42", "net1"); err != nil {
+	if err := ensureIPv6NoDad(context.Background(), exec, "ns", "pod", "2001:db8::42", "net1"); err != nil {
 		t.Fatalf("ensureIPv6NoDad() error = %v", err)
 	}
 
@@ -81,7 +81,7 @@ func TestEnsureIPv6NoDadPreservesWriteErrorWhenFallbackIsUnsafe(t *testing.T) {
 				readReply,
 			}}
 
-			err := ensureIPv6NoDad(exec, context.Background(), "ns", "pod", "2001:db8::42", "net1")
+			err := ensureIPv6NoDad(context.Background(), exec, "ns", "pod", "2001:db8::42", "net1")
 			if !errors.Is(err, writeErr) {
 				t.Fatalf("error = %v, want original write error", err)
 			}
