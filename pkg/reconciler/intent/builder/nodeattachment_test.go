@@ -20,6 +20,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -214,6 +215,114 @@ func TestNodeAttachmentBuilder_NodeSelectorFiltering(t *testing.T) {
 	}
 	if _, ok := result["node-2"]; ok {
 		t.Error("did not expect contribution for node-2")
+	}
+}
+
+func TestNodeAttachmentBuilder_IPFamilies(t *testing.T) {
+	const (
+		node1IPv4 = "10.0.1.10/32"
+		node1IPv6 = "fd00::10/128"
+		node2IPv4 = "10.0.1.11/32"
+	)
+	tests := []struct {
+		name       string
+		ipFamilies []corev1.IPFamily
+		want       map[string][]string
+	}{
+		{
+			name: "omitted exports all",
+			want: map[string][]string{
+				"node-1": {node1IPv4, node1IPv6},
+				"node-2": {node2IPv4},
+			},
+		},
+		{
+			name:       "empty exports all",
+			ipFamilies: []corev1.IPFamily{},
+			want: map[string][]string{
+				"node-1": {node1IPv4, node1IPv6},
+				"node-2": {node2IPv4},
+			},
+		},
+		{
+			name:       "IPv4 only",
+			ipFamilies: []corev1.IPFamily{corev1.IPv4Protocol},
+			want: map[string][]string{
+				"node-1": {node1IPv4},
+				"node-2": {node2IPv4},
+			},
+		},
+		{
+			name:       "IPv6 only preserves imports on IPv4-only nodes",
+			ipFamilies: []corev1.IPFamily{corev1.IPv6Protocol},
+			want: map[string][]string{
+				"node-1": {node1IPv6},
+				"node-2": {},
+			},
+		},
+		{
+			name:       "explicit dual stack",
+			ipFamilies: []corev1.IPFamily{corev1.IPv4Protocol, corev1.IPv6Protocol},
+			want: map[string][]string{
+				"node-1": {node1IPv4, node1IPv6},
+				"node-2": {node2IPv4},
+			},
+		},
+		{
+			name:       "family order does not affect exports",
+			ipFamilies: []corev1.IPFamily{corev1.IPv6Protocol, corev1.IPv4Protocol},
+			want: map[string][]string{
+				"node-1": {node1IPv4, node1IPv6},
+				"node-2": {node2IPv4},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data := baseNodeAttachmentData()
+			data.Nodes[0].Status.Addresses = append(data.Nodes[0].Status.Addresses,
+				corev1.NodeAddress{Type: corev1.NodeExternalIP, Address: "192.0.2.10"},
+				corev1.NodeAddress{Type: corev1.NodeExternalIP, Address: "2001:db8::10"},
+				corev1.NodeAddress{Type: corev1.NodeInternalIP, Address: ""},
+			)
+			data.NodeAttachments = []nc.NodeAttachment{{
+				ObjectMeta: metav1.ObjectMeta{Name: "san"},
+				Spec: nc.NodeAttachmentSpec{
+					VRFRef:       "san-vrf",
+					Destinations: &metav1.LabelSelector{MatchLabels: map[string]string{"type": "san-storage"}},
+					IPFamilies:   tt.ipFamilies,
+				},
+			}}
+
+			result, err := NewNodeAttachmentBuilder().Build(context.Background(), data)
+			require.NoError(t, err)
+			require.Len(t, result, len(tt.want))
+			for nodeName, prefixes := range tt.want {
+				contrib := result[nodeName]
+				require.NotNil(t, contrib, "expected contribution for %s", nodeName)
+				fvrf, ok := contrib.FabricVRFs["san"]
+				require.True(t, ok, "expected FabricVRF for destination imports on %s", nodeName)
+				require.Equal(t, uint32(5000), fvrf.VNI)
+				require.Equal(t, []string{"65000:5000"}, fvrf.EVPNImportRouteTargets)
+				require.NotNil(t, fvrf.EVPNExportFilter)
+				require.Equal(t, networkv1alpha1.Reject, fvrf.EVPNExportFilter.DefaultAction.Type)
+				require.Len(t, fvrf.EVPNExportFilter.Items, len(prefixes))
+				require.Len(t, fvrf.VRFImports, 1)
+				require.Equal(t, "cluster", fvrf.VRFImports[0].FromVRF)
+				require.Equal(t, networkv1alpha1.Reject, fvrf.VRFImports[0].Filter.DefaultAction.Type)
+				require.Len(t, fvrf.VRFImports[0].Filter.Items, len(prefixes))
+				for i, prefix := range prefixes {
+					assertFilterItemPrefix(t, fvrf.EVPNExportFilter.Items[i], prefix)
+					assertFilterItemPrefix(t, fvrf.VRFImports[0].Filter.Items[i], prefix)
+				}
+				require.NotNil(t, contrib.ClusterVRF)
+				require.Len(t, contrib.ClusterVRF.VRFImports, 1)
+				items := contrib.ClusterVRF.VRFImports[0].Filter.Items
+				require.Len(t, items, 2, "expected both destination families for %s", nodeName)
+				assertFilterItemPrefix(t, items[0], "172.16.0.0/16")
+				assertFilterItemPrefix(t, items[1], "fd01::/64")
+			}
+		})
 	}
 }
 
