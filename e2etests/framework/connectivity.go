@@ -187,51 +187,54 @@ func (f *Framework) WaitForIPv6DADComplete(ctx context.Context, namespace, podNa
 	defer cancel()
 
 	return Poll(ctx, 2*time.Second, func() (bool, error) {
-		stdout, stderr, execErr := f.ExecInPod(ctx, namespace, podName, "", []string{
-			"ip", "-6", "-o", "addr", "show", "dev", iface,
-		})
-		if execErr != nil {
-			return false, fmt.Errorf("ip addr show failed (stderr=%s): %w", stderr, execErr)
-		}
-
-		for _, line := range strings.Split(stdout, "\n") {
-			matchesTarget := false
-			for _, field := range strings.Fields(line) {
-				addrPart := field
-				if slash := strings.IndexByte(addrPart, '/'); slash >= 0 {
-					addrPart = addrPart[:slash]
-				}
-				lineAddr, parseErr := parseCanonicalIPv6(addrPart)
-				if parseErr != nil {
-					continue
-				}
-				if lineAddr == canonical {
-					matchesTarget = true
-					break
-				}
-			}
-			if !matchesTarget {
-				continue
-			}
-			if strings.Contains(line, "dadfailed") {
-				addrWithPrefix, err := findIPv6AddressWithPrefix(line, ipv6Addr)
-				if err != nil {
-					return false, err
-				}
-				if err := resetIPv6Address(func(command []string) (string, string, error) {
-					return f.ExecInPod(ctx, namespace, podName, "", command)
-				}, addrWithPrefix, iface); err != nil {
-					return false, err
-				}
-				return false, nil
-			}
-			if strings.Contains(line, "tentative") {
-				continue
-			}
-			return true, nil
-		}
-		return false, nil
+		return f.waitForIPv6DADAttempt(ctx, namespace, podName, ipv6Addr, iface, canonical)
 	})
+}
+
+func (f *Framework) waitForIPv6DADAttempt(ctx context.Context, namespace, podName, ipv6Addr, iface string, canonical netip.Addr) (bool, error) {
+	stdout, stderr, execErr := f.ExecInPod(ctx, namespace, podName, "", []string{
+		"ip", "-6", "-o", "addr", "show", "dev", iface,
+	})
+	if execErr != nil {
+		return false, fmt.Errorf("ip addr show failed (stderr=%s): %w", stderr, execErr)
+	}
+
+	for _, line := range strings.Split(stdout, "\n") {
+		if !lineHasIPv6Address(line, canonical) {
+			continue
+		}
+		if strings.Contains(line, "dadfailed") {
+			addrWithPrefix, err := findIPv6AddressWithPrefix(line, ipv6Addr)
+			if err != nil {
+				return false, err
+			}
+			if err := resetIPv6Address(func(command []string) (string, string, error) {
+				return f.ExecInPod(ctx, namespace, podName, "", command)
+			}, addrWithPrefix, iface); err != nil {
+				return false, err
+			}
+			return false, nil
+		}
+		if strings.Contains(line, "tentative") {
+			continue
+		}
+		return true, nil
+	}
+	return false, nil
+}
+
+func lineHasIPv6Address(line string, canonical netip.Addr) bool {
+	for _, field := range strings.Fields(line) {
+		addrPart := field
+		if slash := strings.IndexByte(addrPart, '/'); slash >= 0 {
+			addrPart = addrPart[:slash]
+		}
+		lineAddr, parseErr := parseCanonicalIPv6(addrPart)
+		if parseErr == nil && lineAddr == canonical {
+			return true
+		}
+	}
+	return false
 }
 
 func resetIPv6Address(exec func([]string) (string, string, error), ipv6Addr, iface string) error {
