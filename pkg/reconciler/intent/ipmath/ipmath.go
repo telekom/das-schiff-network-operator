@@ -21,12 +21,11 @@ limitations under the License.
 package ipmath
 
 import (
-	"encoding/binary"
 	"fmt"
 	"net/netip"
-)
 
-const ipv4MaxPrefixLen = 32
+	"github.com/telekom/t-caas-go-library/pkg/netutil"
+)
 
 // GatewayCIDR returns the anycast gateway CIDR for a Network CIDR: the first
 // usable host (network address + 1) with the original prefix length preserved,
@@ -77,47 +76,10 @@ func GatewayAddr(cidr string) (netip.Addr, int, error) {
 	if err != nil {
 		return netip.Addr{}, 0, fmt.Errorf("invalid CIDR %q: %w", cidr, err)
 	}
-	// Mask defensively so a stray host bit never skews the derived gateway.
-	prefix = prefix.Masked()
-	network := prefix.Addr()
-	bits := prefix.Bits()
-	maxBits := network.BitLen() // 32 for IPv4, 128 for IPv6
-
-	// Point-to-point (/31, /127): use the network address itself.
-	if bits == maxBits-1 {
-		return network, bits, nil
-	}
-
-	gw := network.Next()
-	if !gw.IsValid() || !prefix.Contains(gw) {
+	gw, err := netutil.FirstUsable(prefix)
+	if err != nil {
 		return netip.Addr{}, 0, fmt.Errorf(
-			"cannot derive gateway for CIDR %q: no usable host address in prefix", cidr)
+			"cannot derive gateway for CIDR %q: no usable host address in prefix: %w", cidr, err)
 	}
-	// Reject the IPv4 broadcast (all-ones host) address. For prefixes wider
-	// than /31 network+1 is never the broadcast, but guard explicitly so the
-	// invariant is enforced rather than assumed.
-	if bcast, ok := broadcastAddr(prefix); ok && gw == bcast {
-		return netip.Addr{}, 0, fmt.Errorf(
-			"cannot derive gateway for CIDR %q: only the broadcast address is available", cidr)
-	}
-	return gw, bits, nil
-}
-
-// broadcastAddr returns the IPv4 broadcast (last) address of a prefix. The
-// second return value is false for IPv6 (no broadcast concept) and for prefixes
-// without host bits.
-func broadcastAddr(prefix netip.Prefix) (netip.Addr, bool) {
-	addr := prefix.Masked().Addr()
-	if !addr.Is4() {
-		return netip.Addr{}, false
-	}
-	hostBits := ipv4MaxPrefixLen - prefix.Bits()
-	if hostBits == 0 {
-		return netip.Addr{}, false
-	}
-	b := addr.As4()
-	v := binary.BigEndian.Uint32(b[:])
-	v |= (uint32(1) << hostBits) - 1 // set the host bits to all-ones
-	binary.BigEndian.PutUint32(b[:], v)
-	return netip.AddrFrom4(b), true
+	return gw, prefix.Bits(), nil
 }
