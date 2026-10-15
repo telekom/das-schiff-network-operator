@@ -146,6 +146,9 @@ var _ = Describe("Gateway Connectivity", Label("gateway", "smoke"), func() {
 
 			Expect(f.WaitForPodReady(ctx, ns, "macvlan-01", cfg.PodReadyTimeout)).To(Succeed())
 			Expect(f.WaitForPodReady(ctx, ns, "macvlan-04", cfg.PodReadyTimeout)).To(Succeed())
+			By("Stabilizing IPv6 DAD before cross-VRF assertions")
+			Expect(f.EnsureIPv6NoDad(ctx, ns, "macvlan-01", cfg.Macvlan01IPv6, "net1")).To(Succeed())
+			Expect(f.EnsureIPv6NoDad(ctx, ns, "macvlan-04", cfg.Macvlan04IPv6, "net1")).To(Succeed())
 
 			By("Verifying m2mgw CANNOT reach c2m pod macvlan-04 (IPv4)")
 			result, _ := f.PingFromCluster2Pod(ctx, "e2e-gateways", "m2m-gateway", cfg.Macvlan04IPv4, 3)
