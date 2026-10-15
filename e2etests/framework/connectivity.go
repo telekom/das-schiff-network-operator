@@ -14,6 +14,10 @@ type PingResult struct {
 	Output  string
 }
 
+type podExecutor interface {
+	ExecInPod(context.Context, string, string, string, []string) (string, string, error)
+}
+
 // PingFromPod executes a ping from a pod to a target address.
 // Uses IPv6 if target contains ':', otherwise IPv4.
 func (f *Framework) PingFromPod(ctx context.Context, namespace, podName, target string, count int) (*PingResult, error) {
@@ -157,7 +161,11 @@ func (f *Framework) CurlFromCluster2Pod(ctx context.Context, namespace, podName,
 // EnsureIPv6NoDad disables DAD on the given interface and re-adds the IPv6
 // address with the prefix currently assigned by CNI.
 func (f *Framework) EnsureIPv6NoDad(ctx context.Context, namespace, podName, ipv6Addr, iface string) error {
-	stdout, stderr, err := f.ExecInPod(ctx, namespace, podName, "", []string{"ip", "-6", "-o", "addr", "show", "dev", iface})
+	return ensureIPv6NoDad(f, ctx, namespace, podName, ipv6Addr, iface)
+}
+
+func ensureIPv6NoDad(exec podExecutor, ctx context.Context, namespace, podName, ipv6Addr, iface string) error {
+	stdout, stderr, err := exec.ExecInPod(ctx, namespace, podName, "", []string{"ip", "-6", "-o", "addr", "show", "dev", iface})
 	if err != nil {
 		return fmt.Errorf("inspect IPv6 address: stderr=%s: %w", stderr, err)
 	}
@@ -165,13 +173,13 @@ func (f *Framework) EnsureIPv6NoDad(ctx context.Context, namespace, podName, ipv
 	if !found {
 		return fmt.Errorf("IPv6 address %s not found on %s", ipv6Addr, iface)
 	}
-	_, stderr, sysctlErr := f.ExecInPod(ctx, namespace, podName, "", []string{
+	_, stderr, sysctlErr := exec.ExecInPod(ctx, namespace, podName, "", []string{
 		"sysctl", "-w", fmt.Sprintf("net.ipv6.conf.%s.accept_dad=0", iface),
 	})
 	if sysctlErr != nil {
 		// CNI tuning can set this before the pod starts, while the pod's /proc/sys
 		// remains read-only. Accept that already-safe state.
-		value, readStderr, readErr := f.ExecInPod(ctx, namespace, podName, "", []string{
+		value, readStderr, readErr := exec.ExecInPod(ctx, namespace, podName, "", []string{
 			"sysctl", "-n", fmt.Sprintf("net.ipv6.conf.%s.accept_dad", iface),
 		})
 		if readErr != nil || strings.TrimSpace(value) != "0" {
@@ -181,10 +189,10 @@ func (f *Framework) EnsureIPv6NoDad(ctx context.Context, namespace, podName, ipv
 			return fmt.Errorf("disable IPv6 DAD on %s: stderr=%s: %w", iface, stderr, sysctlErr)
 		}
 	}
-	if _, stderr, err = f.ExecInPod(ctx, namespace, podName, "", []string{"ip", "addr", "del", cidr, "dev", iface}); err != nil {
+	if _, stderr, err = exec.ExecInPod(ctx, namespace, podName, "", []string{"ip", "addr", "del", cidr, "dev", iface}); err != nil {
 		return fmt.Errorf("remove IPv6 address %s: stderr=%s: %w", cidr, stderr, err)
 	}
-	if _, stderr, err = f.ExecInPod(ctx, namespace, podName, "", []string{"ip", "addr", "add", cidr, "dev", iface}); err != nil {
+	if _, stderr, err = exec.ExecInPod(ctx, namespace, podName, "", []string{"ip", "addr", "add", cidr, "dev", iface}); err != nil {
 		return fmt.Errorf("re-add IPv6 address %s: stderr=%s: %w", cidr, stderr, err)
 	}
 	return nil
