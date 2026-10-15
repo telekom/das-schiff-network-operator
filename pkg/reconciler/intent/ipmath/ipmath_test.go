@@ -43,6 +43,18 @@ func TestGatewayAddr(t *testing.T) {
 		{"ipv4 single host /32", "10.0.0.5/32", "", "", ""},
 		{"ipv6 single host /128", "2001:db8::5/128", "", "", ""},
 		{"unparseable", "not-a-cidr", "", "", ""},
+		{"ipv4 host bits masked", "198.51.100.230/27", "198.51.100.225/27", "198.51.100.225", "27"},
+		{"ipv6 host bits masked", "2001:db8::30/64", "2001:db8::1/64", "2001:db8::1", "64"},
+		{"ipv4 default route", "0.0.0.0/0", "0.0.0.1/0", "0.0.0.1", "0"},
+		{"ipv6 default route", "::/0", "::1/0", "::1", "0"},
+		{"ipv4 upper boundary", "255.255.255.252/30", "255.255.255.253/30", "255.255.255.253", "30"},
+		{"ipv6 upper boundary", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:fffc/126", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:fffd/126", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:fffd", "126"},
+		{"mapped IPv4 remains IPv6", "::ffff:192.0.2.0/120", "::ffff:192.0.2.1/120", "::ffff:192.0.2.1", "120"},
+		{"mapped point-to-point", "::ffff:192.0.2.0/127", "::ffff:192.0.2.0/127", "::ffff:192.0.2.0", "127"},
+		{"mapped single host", "::ffff:192.0.2.1/128", "", "", ""},
+		{"empty", "", "", "", ""},
+		{"invalid prefix length", "192.0.2.0/33", "", "", ""},
+		{"zone rejected", "fe80::%eth0/64", "", "", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
