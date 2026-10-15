@@ -27,4 +27,6 @@ with tempfile.TemporaryDirectory() as directory:
         assert "govulncheck:" in result.stdout
     path.write_text("invalid JSON")
     assert subprocess.run([sys.executable, str(report), str(path)], capture_output=True).returncode != 0
+    path.write_text("{}")
+    assert subprocess.run([sys.executable, str(report), str(path)], capture_output=True).returncode != 0
 print("govulncheck report checks passed")

@@ -19,6 +19,7 @@ decoder = json.JSONDecoder()
 text = open(path).read()
 
 findings = []
+recognized_events = 0
 index = 0
 while index < len(text):
     while index < len(text) and text[index] in " \n\r\t":
@@ -26,8 +27,14 @@ while index < len(text):
     if index >= len(text):
         break
     obj, index = decoder.raw_decode(text, index)
+    if any(key in obj for key in ("config", "progress", "finding", "osv", "diagnostic")):
+        recognized_events += 1
     if "finding" in obj:
         findings.append(obj["finding"])
+
+if recognized_events == 0:
+    print("govulncheck report contains no recognized events", file=sys.stderr)
+    sys.exit(2)
 
 called_std = {}
 called_mod = {}
