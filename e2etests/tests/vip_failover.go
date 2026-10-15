@@ -58,6 +58,24 @@ func globalIPv6PrefixLenFromAddrOutput(output string) (string, error) {
 	return "", fmt.Errorf("no global IPv6 prefix found")
 }
 
+func vipWithPrefix(vip, prefix string) string {
+	return vip + "/" + prefix
+}
+
+type vipPrefixResolver func(podName string) (string, error)
+
+func resolveFailoverV6VIPPrefixes(vip string, resolve vipPrefixResolver) (string, string, error) {
+	dstPrefix, err := resolve("failover-dst")
+	if err != nil {
+		return "", "", err
+	}
+	srcPrefix, err := resolve("failover-src")
+	if err != nil {
+		return "", "", err
+	}
+	return vipWithPrefix(vip, dstPrefix), vipWithPrefix(vip, srcPrefix), nil
+}
+
 func hasGlobalScope(fields []string) bool {
 	for i, field := range fields {
 		if field == "scope" && i+1 < len(fields) {
@@ -139,9 +157,10 @@ var _ = Describe("VIP Failover", Label("failover"), func() {
 		Expect(f.EnsureIPv6NoDad(ctx, ns, "failover-dst", cfg.FailoverPod02IPv6, "net1")).To(Succeed())
 
 		By("Determining global IPv6 prefix for failover VIP")
-		vipV6Prefix, err := determineIPv6PrefixLength(ctx, f, ns, "failover-dst", "net1")
+		dstVIPV6WithPrefix, srcVIPV6WithPrefix, err := resolveFailoverV6VIPPrefixes(vipV6, func(podName string) (string, error) {
+			return determineIPv6PrefixLength(ctx, f, ns, podName, "net1")
+		})
 		Expect(err).NotTo(HaveOccurred())
-		vipV6WithPrefix := vipV6 + "/" + vipV6Prefix
 
 		By("Verifying baseline cross-node connectivity")
 		Eventually(func() bool {
@@ -157,7 +176,7 @@ var _ = Describe("VIP Failover", Label("failover"), func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		_, _, err = f.ExecInPod(ctx, ns, "failover-dst", "", []string{
-			"ip", "addr", "add", vipV6WithPrefix, "dev", "net1",
+			"ip", "addr", "add", dstVIPV6WithPrefix, "dev", "net1",
 		})
 		Expect(err).NotTo(HaveOccurred())
 
@@ -184,7 +203,7 @@ var _ = Describe("VIP Failover", Label("failover"), func() {
 			"ip", "addr", "del", vipV4 + "/24", "dev", "net1",
 		})
 		_, _, _ = f.ExecInPod(ctx, ns, "failover-dst", "", []string{
-			"ip", "addr", "del", vipV6WithPrefix, "dev", "net1",
+			"ip", "addr", "del", dstVIPV6WithPrefix, "dev", "net1",
 		})
 
 		By("Adding VIP to failover-src (worker-1)")
@@ -194,7 +213,7 @@ var _ = Describe("VIP Failover", Label("failover"), func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		_, _, err = f.ExecInPod(ctx, ns, "failover-src", "", []string{
-			"ip", "addr", "add", vipV6WithPrefix, "dev", "net1",
+			"ip", "addr", "add", srcVIPV6WithPrefix, "dev", "net1",
 		})
 		Expect(err).NotTo(HaveOccurred())
 
@@ -255,7 +274,7 @@ var _ = Describe("VIP Failover", Label("failover"), func() {
 			"ip", "addr", "del", vipV4 + "/24", "dev", "net1",
 		})
 		_, _, _ = f.ExecInPod(ctx, ns, "failover-src", "", []string{
-			"ip", "addr", "del", vipV6WithPrefix, "dev", "net1",
+			"ip", "addr", "del", srcVIPV6WithPrefix, "dev", "net1",
 		})
 	})
 })
