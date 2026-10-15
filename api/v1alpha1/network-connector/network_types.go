@@ -42,8 +42,8 @@ type NetworkSpec struct {
 	VLAN *int32 `json:"vlan,omitempty"`
 
 	// VNI is the VXLAN Network Identifier for this network.
-	// In BM4X (bare-metal) mode without SR-IOV, the VNI is provided by the
-	// service integration engineer. The node VTEP IP comes from the underlay,
+	// When set, the VNI is an explicit or resolved network parameter supplied
+	// by a provisioner or user. The node VTEP IP comes from the underlay,
 	// not from this CRD.
 	// +optional
 	// +kubebuilder:validation:Minimum=1
