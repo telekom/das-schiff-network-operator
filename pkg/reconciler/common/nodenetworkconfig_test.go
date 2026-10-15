@@ -173,6 +173,43 @@ var _ = Describe("NodeNetworkConfigReconciler", func() {
 		})
 	})
 
+	Context("configAcknowledged", func() {
+		It("should require matching attempted and successful revision and hash", func() {
+			cfg := createTestNodeNetworkConfig("1")
+			cfg.Spec.ConfigHash = "saved-config"
+			cfg.Status.LastAppliedRevision, cfg.Status.LastSuccessfulRevision = cfg.Spec.Revision, cfg.Spec.Revision
+			cfg.Status.LastAppliedConfigHash, cfg.Status.LastSuccessfulConfigHash = cfg.Spec.ConfigHash, cfg.Spec.ConfigHash
+			Expect(configAcknowledged(cfg)).To(BeTrue())
+			for _, field := range []*string{
+				&cfg.Status.LastAppliedRevision, &cfg.Status.LastAppliedConfigHash,
+				&cfg.Status.LastSuccessfulRevision, &cfg.Status.LastSuccessfulConfigHash,
+			} {
+				previous := *field
+				*field = ""
+				Expect(configAcknowledged(cfg)).To(BeFalse())
+				*field = previous
+			}
+		})
+	})
+
+	Context("configAttempted", func() {
+		It("should require the desired revision and, when present, hash", func() {
+			cfg := createTestNodeNetworkConfig("2")
+			cfg.Spec.ConfigHash = "same-config"
+			cfg.Status.LastAppliedRevision = "1"
+			cfg.Status.LastAppliedConfigHash = cfg.Spec.ConfigHash
+			Expect(configAttempted(cfg)).To(BeFalse())
+			cfg.Status.LastAppliedRevision = cfg.Spec.Revision
+			Expect(configAttempted(cfg)).To(BeTrue())
+			cfg.Status.LastAppliedConfigHash = "other-config"
+			Expect(configAttempted(cfg)).To(BeFalse())
+			cfg.Spec.ConfigHash = ""
+			Expect(configAttempted(cfg)).To(BeTrue())
+			cfg.Status.LastAppliedRevision = "1"
+			Expect(configAttempted(cfg)).To(BeFalse())
+		})
+	})
+
 	Context("SetStatus", func() {
 		It("should update status to provisioning", func() {
 			cfg := createTestNodeNetworkConfig("1")
@@ -213,10 +250,82 @@ var _ = Describe("NodeNetworkConfigReconciler", func() {
 			Expect(err).ToNot(HaveOccurred())
 			Expect(cfg.Status.ConfigStatus).To(Equal(operator.StatusInvalid))
 			Expect(cfg.Status.LastAppliedRevision).To(Equal("3"))
+			Expect(cfg.Status.LastSuccessfulRevision).To(BeEmpty())
+			Expect(cfg.Status.LastSuccessfulConfigHash).To(BeEmpty())
 		})
 	})
 
 	Context("SetStatusWithError", func() {
+		It("should preserve success across recovery and a failed replacement, but record a later success", func() {
+			cfg := createTestNodeNetworkConfig("1")
+			cfg.Spec.ConfigHash = "first-config"
+			fakeClient = fake.NewClientBuilder().
+				WithScheme(scheme).WithObjects(cfg).WithStatusSubresource(cfg).Build()
+
+			Expect(SetStatus(context.Background(), fakeClient, cfg, operator.StatusProvisioned, logger)).To(Succeed())
+			Expect(cfg.Status.LastSuccessfulRevision).To(Equal("1"))
+			Expect(cfg.Status.LastSuccessfulConfigHash).To(Equal("first-config"))
+			Expect(SetStatus(context.Background(), fakeClient, cfg, operator.StatusProvisioning, logger)).To(Succeed())
+			Expect(SetStatusWithError(context.Background(), fakeClient, cfg, operator.StatusInvalid, "recovery failed", logger)).To(Succeed())
+			Expect(fakeClient.Get(context.Background(), client.ObjectKeyFromObject(cfg), cfg)).To(Succeed())
+			Expect(cfg.HasSuccessfulConfig()).To(BeTrue())
+			Expect(cfg.Status.ErrorMessage).To(Equal("recovery failed"))
+
+			cfg.Spec.Revision, cfg.Spec.ConfigHash = "2", "second-config"
+			Expect(fakeClient.Update(context.Background(), cfg)).To(Succeed())
+			Expect(SetStatus(context.Background(), fakeClient, cfg, operator.StatusProvisioning, logger)).To(Succeed())
+			Expect(SetStatusWithError(context.Background(), fakeClient, cfg, operator.StatusInvalid, "new config rejected", logger)).To(Succeed())
+			Expect(fakeClient.Get(context.Background(), client.ObjectKeyFromObject(cfg), cfg)).To(Succeed())
+			Expect(cfg.Status.LastAppliedRevision).To(Equal("2"))
+			Expect(cfg.Status.LastAppliedConfigHash).To(Equal("second-config"))
+			Expect(cfg.Status.LastSuccessfulRevision).To(Equal("1"))
+			Expect(cfg.Status.LastSuccessfulConfigHash).To(Equal("first-config"))
+			Expect(cfg.HasSuccessfulConfig()).To(BeFalse())
+
+			Expect(SetStatus(context.Background(), fakeClient, cfg, operator.StatusProvisioned, logger)).To(Succeed())
+			Expect(fakeClient.Get(context.Background(), client.ObjectKeyFromObject(cfg), cfg)).To(Succeed())
+			Expect(cfg.Status.LastSuccessfulRevision).To(Equal("2"))
+			Expect(cfg.Status.LastSuccessfulConfigHash).To(Equal("second-config"))
+			Expect(cfg.HasSuccessfulConfig()).To(BeTrue())
+		})
+
+		It("should retain a pre-upgrade provisioned acknowledgement before starting recovery", func() {
+			cfg := createTestNodeNetworkConfig("1")
+			cfg.Spec.ConfigHash = "saved-config"
+			cfg.Status.ConfigStatus = operator.StatusProvisioned
+			cfg.Status.LastAppliedRevision = cfg.Spec.Revision
+			cfg.Status.LastAppliedConfigHash = cfg.Spec.ConfigHash
+			fakeClient = fake.NewClientBuilder().
+				WithScheme(scheme).WithObjects(cfg).WithStatusSubresource(cfg).Build()
+
+			Expect(SetStatus(context.Background(), fakeClient, cfg, operator.StatusProvisioning, logger)).To(Succeed())
+			Expect(fakeClient.Get(context.Background(), client.ObjectKeyFromObject(cfg), cfg)).To(Succeed())
+			Expect(cfg.Status.ConfigStatus).To(Equal(operator.StatusProvisioning))
+			Expect(cfg.Status.LastSuccessfulRevision).To(Equal(cfg.Spec.Revision))
+			Expect(cfg.Status.LastSuccessfulConfigHash).To(Equal(cfg.Spec.ConfigHash))
+			Expect(cfg.HasSuccessfulConfig()).To(BeTrue())
+		})
+
+		It("should retain pre-upgrade success even when the spec already targets another revision", func() {
+			cfg := createTestNodeNetworkConfig("2")
+			cfg.Spec.ConfigHash = "pending-config"
+			cfg.Status.ConfigStatus = operator.StatusProvisioned
+			cfg.Status.LastAppliedRevision = "1"
+			cfg.Status.LastAppliedConfigHash = "applied-config"
+			fakeClient = fake.NewClientBuilder().
+				WithScheme(scheme).WithObjects(cfg).WithStatusSubresource(cfg).Build()
+
+			Expect(SetStatus(context.Background(), fakeClient, cfg, operator.StatusProvisioning, logger)).To(Succeed())
+			Expect(fakeClient.Get(context.Background(), client.ObjectKeyFromObject(cfg), cfg)).To(Succeed())
+			Expect(cfg.Status.LastSuccessfulRevision).To(Equal("1"))
+			Expect(cfg.Status.LastSuccessfulConfigHash).To(Equal("applied-config"))
+			Expect(SetStatusWithError(context.Background(), fakeClient, cfg, operator.StatusInvalid, "new revision failed", logger)).To(Succeed())
+			Expect(fakeClient.Get(context.Background(), client.ObjectKeyFromObject(cfg), cfg)).To(Succeed())
+			Expect(cfg.Status.LastAppliedRevision).To(Equal("2"))
+			Expect(cfg.Status.LastSuccessfulRevision).To(Equal("1"))
+			Expect(cfg.HasSuccessfulConfig()).To(BeFalse())
+		})
+
 		It("should set error message when status is invalid", func() {
 			cfg := createTestNodeNetworkConfig("1")
 			fakeClient = fake.NewClientBuilder().
@@ -803,6 +912,104 @@ var _ = Describe("NodeNetworkConfigReconciler", func() {
 
 	Context("Reconcile edge cases", func() {
 		const sameConfigHash = "same-config"
+		It("should reapply a provisioned configuration after reboot when no local config remains", func() {
+			cfg := createTestNodeNetworkConfig("1")
+			cfg.Spec.ConfigHash = sameConfigHash
+			cfg.Status.ConfigStatus = operator.StatusProvisioned
+			cfg.Status.LastAppliedRevision = cfg.Spec.Revision
+			cfg.Status.LastAppliedConfigHash = cfg.Spec.ConfigHash
+			fakeClient = fake.NewClientBuilder().
+				WithScheme(scheme).WithObjects(cfg).WithStatusSubresource(cfg).Build()
+			r := newMockReconciler(mockCtrl, fakeClient, configPath, ReconcilerOptions{})
+			Expect(r.NodeNetworkConfig).To(BeNil())
+			r.mockApplier.EXPECT().ApplyConfig(gomock.Any(), gomock.Any()).DoAndReturn(
+				func(ctx context.Context, applied *v1alpha1.NodeNetworkConfig) error {
+					current := &v1alpha1.NodeNetworkConfig{}
+					Expect(fakeClient.Get(ctx, client.ObjectKeyFromObject(cfg), current)).To(Succeed())
+					Expect(current.Status.ConfigStatus).To(Equal(operator.StatusProvisioning))
+					Expect(applied.Spec.ConfigHash).To(Equal(sameConfigHash))
+					return nil
+				})
+			r.setupHealthyHealthCheck()
+
+			_, err := r.Reconcile(context.Background())
+			Expect(err).ToNot(HaveOccurred())
+			Expect(r.NodeNetworkConfig.Status.ConfigStatus).To(Equal(operator.StatusProvisioned))
+			Expect(r.NodeNetworkConfig.Status.LastAppliedConfigHash).To(Equal(sameConfigHash))
+			Expect(r.NodeNetworkConfig.Status.LastSuccessfulRevision).To(Equal(cfg.Spec.Revision))
+			Expect(r.NodeNetworkConfig.Status.LastSuccessfulConfigHash).To(Equal(sameConfigHash))
+		})
+
+		It("should return repeated recovery failures for backoff before eventually succeeding", func() {
+			cfg := createTestNodeNetworkConfig("1")
+			cfg.Spec.ConfigHash = sameConfigHash
+			cfg.Status.ConfigStatus = operator.StatusInvalid
+			cfg.Status.LastAppliedRevision = cfg.Spec.Revision
+			cfg.Status.LastAppliedConfigHash = cfg.Spec.ConfigHash
+			cfg.Status.LastSuccessfulRevision = cfg.Spec.Revision
+			cfg.Status.LastSuccessfulConfigHash = cfg.Spec.ConfigHash
+			fakeClient = fake.NewClientBuilder().
+				WithScheme(scheme).WithObjects(cfg).WithStatusSubresource(cfg).Build()
+			r := newMockReconciler(mockCtrl, fakeClient, configPath, ReconcilerOptions{})
+			failures := r.mockApplier.EXPECT().ApplyConfig(gomock.Any(), gomock.Any()).
+				Return(errors.New("vSR unavailable")).Times(3)
+			r.mockApplier.EXPECT().ApplyConfig(gomock.Any(), gomock.Any()).Return(nil).After(failures)
+			r.setupHealthyHealthCheck()
+
+			for range 3 {
+				_, err := r.Reconcile(context.Background())
+				Expect(err).To(HaveOccurred())
+				Expect(fakeClient.Get(context.Background(), client.ObjectKeyFromObject(cfg), cfg)).To(Succeed())
+				Expect(cfg.Status.ConfigStatus).To(Equal(operator.StatusInvalid))
+				Expect(cfg.Status.ErrorMessage).To(ContainSubstring("vSR unavailable"))
+				Expect(cfg.HasSuccessfulConfig()).To(BeTrue())
+				Expect(r.NodeNetworkConfig).To(BeNil())
+			}
+			_, err := r.Reconcile(context.Background())
+			Expect(err).ToNot(HaveOccurred())
+			Expect(r.NodeNetworkConfig.Status.ConfigStatus).To(Equal(operator.StatusProvisioned))
+			Expect(r.NodeNetworkConfig.HasSuccessfulConfig()).To(BeTrue())
+		})
+
+		It("should attempt a same-hash revision after failed recovery without a local config", func() {
+			cfg := createTestNodeNetworkConfig("1")
+			cfg.Spec.ConfigHash = sameConfigHash
+			cfg.Status.ConfigStatus = operator.StatusProvisioned
+			cfg.Status.LastAppliedRevision, cfg.Status.LastSuccessfulRevision = cfg.Spec.Revision, cfg.Spec.Revision
+			cfg.Status.LastAppliedConfigHash, cfg.Status.LastSuccessfulConfigHash = sameConfigHash, sameConfigHash
+			fakeClient = fake.NewClientBuilder().
+				WithScheme(scheme).WithObjects(cfg).WithStatusSubresource(cfg).Build()
+			r := newMockReconciler(mockCtrl, fakeClient, configPath, ReconcilerOptions{})
+			r.mockApplier.EXPECT().ApplyConfig(gomock.Any(), gomock.Any()).Return(errors.New("vSR unavailable"))
+			_, err := r.Reconcile(context.Background())
+			Expect(err).To(HaveOccurred())
+			Expect(r.NodeNetworkConfig).To(BeNil())
+			Expect(fakeClient.Get(context.Background(), client.ObjectKeyFromObject(cfg), cfg)).To(Succeed())
+			Expect(cfg.Status.ConfigStatus).To(Equal(operator.StatusInvalid))
+			Expect(cfg.Status.LastSuccessfulRevision).To(Equal("1"))
+
+			cfg.Spec.Revision = "2"
+			Expect(fakeClient.Update(context.Background(), cfg)).To(Succeed())
+			r.mockApplier.EXPECT().ApplyConfig(gomock.Any(), gomock.Any()).DoAndReturn(
+				func(_ context.Context, applied *v1alpha1.NodeNetworkConfig) error {
+					Expect(applied.Spec.Revision).To(Equal("2"))
+					Expect(applied.Spec.ConfigHash).To(Equal(sameConfigHash))
+					return nil
+				})
+			r.setupHealthyHealthCheck()
+			_, err = r.Reconcile(context.Background())
+			Expect(err).ToNot(HaveOccurred())
+			Expect(fakeClient.Get(context.Background(), client.ObjectKeyFromObject(cfg), cfg)).To(Succeed())
+			Expect(cfg.Status.ConfigStatus).To(Equal(operator.StatusProvisioned))
+			Expect(cfg.Status.LastAppliedRevision).To(Equal("2"))
+			Expect(cfg.Status.LastSuccessfulRevision).To(Equal("2"))
+			Expect(cfg.Status.LastSuccessfulConfigHash).To(Equal(sameConfigHash))
+			Expect(r.NodeNetworkConfig).ToNot(BeNil())
+			persisted, err := ReadNodeNetworkConfig(configPath)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(persisted.Spec.Revision).To(Equal("2"))
+		})
+
 		It("should apply changed resolved configuration even when the global revision is unchanged", func() {
 			storedCfg := createTestNodeNetworkConfig("1")
 			storedCfg.Spec.ConfigHash = "old-config"
@@ -883,6 +1090,8 @@ var _ = Describe("NodeNetworkConfigReconciler", func() {
 			Expect(err).ToNot(HaveOccurred())
 			Expect(r.NodeNetworkConfig.Spec.Revision).To(Equal(cfg.Spec.Revision))
 			Expect(r.NodeNetworkConfig.Status.LastAppliedRevision).To(Equal(cfg.Spec.Revision))
+			Expect(r.NodeNetworkConfig.Status.LastSuccessfulRevision).To(Equal(cfg.Spec.Revision))
+			Expect(r.NodeNetworkConfig.Status.LastSuccessfulConfigHash).To(Equal(cfg.Spec.ConfigHash))
 		})
 
 		It("should adopt a content hash without reapplying an unchanged saved configuration", func() {

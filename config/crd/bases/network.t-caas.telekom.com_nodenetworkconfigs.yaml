@@ -4054,6 +4054,15 @@ spec:
                 description: LastAppliedRevision stores hash of the NodeConfigRevision
                   that was last applied to the node.
                 type: string
+              lastSuccessfulConfigHash:
+                description: |-
+                  LastSuccessfulConfigHash identifies the resolved configuration last successfully provisioned.
+                  Recovery attempts and failures do not clear this history.
+                type: string
+              lastSuccessfulRevision:
+                description: LastSuccessfulRevision identifies the revision last successfully
+                  provisioned by the node agent.
+                type: string
               lastUpdate:
                 description: LastUpdate determines when last update (change) of the
                   ConfigStatus field took place.

@@ -362,6 +362,11 @@ type NodeNetworkConfigStatus struct {
 	LastAppliedRevision string `json:"lastAppliedRevision,omitempty"`
 	// LastAppliedConfigHash identifies the resolved configuration last attempted by the node agent.
 	LastAppliedConfigHash string `json:"lastAppliedConfigHash,omitempty"`
+	// LastSuccessfulRevision identifies the revision last successfully provisioned by the node agent.
+	LastSuccessfulRevision string `json:"lastSuccessfulRevision,omitempty"`
+	// LastSuccessfulConfigHash identifies the resolved configuration last successfully provisioned.
+	// Recovery attempts and failures do not clear this history.
+	LastSuccessfulConfigHash string `json:"lastSuccessfulConfigHash,omitempty"`
 	// ErrorMessage contains the error message when ConfigStatus is 'invalid'.
 	// This field is cleared whenever ConfigStatus transitions to any non-'invalid' state
 	// (including 'provisioning' and 'provisioned'), so stale errors do not persist.
@@ -398,6 +403,19 @@ type NodeNetworkConfigList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []NodeNetworkConfig `json:"items"`
+}
+
+// HasSuccessfulConfig reports whether the desired revision and resolved config
+// have succeeded, using persisted history or a current provisioned acknowledgement.
+func (c *NodeNetworkConfig) HasSuccessfulConfig() bool {
+	if c.Spec.Revision == "" {
+		return false
+	}
+	return (c.Status.LastSuccessfulRevision == c.Spec.Revision &&
+		c.Status.LastSuccessfulConfigHash == c.Spec.ConfigHash) ||
+		(c.Status.ConfigStatus == "provisioned" &&
+			c.Status.LastAppliedRevision == c.Spec.Revision &&
+			c.Status.LastAppliedConfigHash == c.Spec.ConfigHash)
 }
 
 func NewEmptyConfig(name string) *NodeNetworkConfig {

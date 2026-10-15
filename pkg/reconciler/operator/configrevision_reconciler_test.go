@@ -136,6 +136,61 @@ var _ = Describe("ConfigRevisionReconciler helpers", func() {
 			Expect(cnt.invalid).To(Equal(0))
 		})
 
+		DescribeTable("keeping failures on a deployed revision node-local",
+			func(status string, deployed bool) {
+				revision := makeRevision("rev001", false, time.Now())
+				revision.Status.Deployed = deployed
+				cfg := makeNodeConfig("node1", "rev001", status, time.Now().Add(-time.Hour))
+				cfg.Spec.ConfigHash = previousConfigHash
+				cfg.Status.LastAppliedConfigHash = previousConfigHash
+				cfg.Status.ErrorMessage = "node recovery failed"
+				cnt := crr.getRevisionCounters([]v1alpha1.NodeNetworkConfig{cfg}, &revision)
+				Expect(cnt.invalid).To(Equal(1))
+				Expect(cnt.revisionInvalid).To(Equal(!deployed))
+				if deployed {
+					Expect(cnt.failedNode).To(BeEmpty())
+					Expect(cnt.ongoing).To(BeZero(), "timed-out recovery must release its rollout slot")
+				} else {
+					Expect(cnt.failedNode).To(Equal(cfg.Name))
+				}
+			},
+			Entry("explicit failure after deployment", StatusInvalid, true),
+			Entry("interrupted recovery after deployment", StatusProvisioning, true),
+			Entry("unacknowledged recovery after deployment", "", true),
+			Entry("explicit failure during first rollout", StatusInvalid, false),
+			Entry("timeout during first rollout", StatusProvisioning, false),
+			Entry("preconfig timeout during first rollout", "", false),
+		)
+
+		DescribeTable("excluding a previously successful node from first-rollout failure and concurrency accounting",
+			func(status, successfulRevision, successfulHash string, successful bool) {
+				revision := makeRevision("rev001", false, time.Now())
+				cfg := makeNodeConfig("node1", "rev001", status, time.Now().Add(-time.Hour))
+				cfg.Spec.ConfigHash = previousConfigHash
+				cfg.Status.LastAppliedConfigHash = previousConfigHash
+				cfg.Status.LastSuccessfulRevision = successfulRevision
+				cfg.Status.LastSuccessfulConfigHash = successfulHash
+				cnt := crr.getRevisionCounters([]v1alpha1.NodeNetworkConfig{cfg}, &revision)
+				if successful {
+					Expect(cnt.ready).To(Equal(1))
+					Expect(cnt.ongoing).To(BeZero())
+					Expect(cnt.invalid).To(BeZero())
+					Expect(cnt.revisionInvalid).To(BeFalse())
+				} else {
+					Expect(cnt.ready).To(BeZero())
+					Expect(cnt.invalid).To(Equal(1))
+					Expect(cnt.revisionInvalid).To(BeTrue())
+				}
+			},
+			Entry("recovery still provisioning", StatusProvisioning, "rev001", previousConfigHash, true),
+			Entry("explicit recovery failure", StatusInvalid, "rev001", previousConfigHash, true),
+			Entry("recovery status cleared", "", "rev001", previousConfigHash, true),
+			Entry("success on another revision is not sufficient", StatusInvalid, "rev000", previousConfigHash, false),
+			Entry("success with another config hash is not sufficient", StatusInvalid, "rev001", "different", false),
+			Entry("an attempted hash without success is not sufficient", StatusInvalid, "", "", false),
+			Entry("an interrupted first attempt still times out", StatusProvisioning, "", "", false),
+		)
+
 		DescribeTable("ignoring terminal status from a previous resolved configuration",
 			func(status string) {
 				revision := makeRevision("rev001", false, time.Now())
@@ -151,6 +206,22 @@ var _ = Describe("ConfigRevisionReconciler helpers", func() {
 			},
 			Entry("provisioned", StatusProvisioned),
 			Entry("invalid", StatusInvalid),
+		)
+
+		DescribeTable("requiring current revision acknowledgement even with an unchanged config hash",
+			func(status string) {
+				revision := makeRevision("rev001", false, time.Now())
+				cfg := makeNodeConfig("node1", "rev001", status, time.Now())
+				cfg.Spec.ConfigHash = previousConfigHash
+				cfg.Status.LastAppliedConfigHash = previousConfigHash
+				cfg.Status.LastAppliedRevision = "rev000"
+				cnt := crr.getRevisionCounters([]v1alpha1.NodeNetworkConfig{cfg}, &revision)
+				Expect(cnt.ready).To(BeZero())
+				Expect(cnt.invalid).To(BeZero())
+				Expect(cnt.ongoing).To(Equal(1))
+			},
+			Entry("previous successful revision", StatusProvisioned),
+			Entry("previous failed revision", StatusInvalid),
 		)
 
 		DescribeTable("bounding unacknowledged configuration updates",
@@ -218,6 +289,61 @@ var _ = Describe("ConfigRevisionReconciler helpers", func() {
 			otherHash, err = nodeConfigHash(spec, &netplanSpec)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(otherHash).ToNot(Equal(hash))
+		})
+
+		Describe("revisionFullyDeployed", func() {
+			DescribeTable("requiring every registered node to acknowledge the revision and config",
+				func(status, appliedRevision, appliedHash string, missing, invalid bool, expected bool) {
+					revision := makeRevision("rev001", invalid, time.Now())
+					nodes := []corev1.Node{*makeNode("node1", true), *makeNode("node2", false)}
+					cfg := makeNodeConfig("node1", "rev001", StatusProvisioned, time.Now())
+					cfg.OwnerReferences = []metav1.OwnerReference{{Kind: "Node", Name: "node1", UID: nodes[0].UID}, {Name: revision.Name}}
+					cfg.Spec.ConfigHash = previousConfigHash
+					cfg.Status.LastAppliedRevision = cfg.Spec.Revision
+					cfg.Status.LastAppliedConfigHash = cfg.Spec.ConfigHash
+					configs := []v1alpha1.NodeNetworkConfig{cfg}
+					if !missing {
+						cfg.Name = "node2"
+						cfg.OwnerReferences = []metav1.OwnerReference{{Kind: "Node", Name: "node2", UID: nodes[1].UID}, {Name: revision.Name}}
+						cfg.Status.ConfigStatus = status
+						cfg.Status.LastAppliedRevision = appliedRevision
+						cfg.Status.LastAppliedConfigHash = appliedHash
+						configs = append(configs, cfg)
+					}
+					Expect(revisionFullyDeployed(nodes, configs, &revision)).To(Equal(expected))
+				},
+				Entry("all nodes acknowledged, including a currently NotReady node", StatusProvisioned, "rev001", previousConfigHash, false, false, true),
+				Entry("NotReady node still provisioning", StatusProvisioning, "rev001", previousConfigHash, false, false, false),
+				Entry("NotReady node failed", StatusInvalid, "rev001", previousConfigHash, false, false, false),
+				Entry("NotReady node never received config", "", "", "", true, false, false),
+				Entry("revision provenance not acknowledged", StatusProvisioned, "rev000", previousConfigHash, false, false, false),
+				Entry("resolved config not acknowledged", StatusProvisioned, "rev001", "different", false, false, false),
+				Entry("invalid revision must not be rehabilitated", StatusProvisioned, "rev001", previousConfigHash, false, true, false),
+			)
+
+			It("should not mark an empty cluster as deployed", func() {
+				revision := makeRevision("rev001", false, time.Now())
+				Expect(revisionFullyDeployed(nil, nil, &revision)).To(BeFalse())
+			})
+
+			It("should not count redundant configs removed during reconciliation as deployed", func() {
+				revision := makeRevision("rev001", false, time.Now())
+				cfg := makeNodeConfig("node1", "rev001", StatusProvisioned, time.Now())
+				Expect(revisionFullyDeployed([]corev1.Node{*makeNode("node1", true)}, []v1alpha1.NodeNetworkConfig{cfg}, &revision)).To(BeFalse())
+			})
+
+			It("should include successful nodes that are now NotReady and failed recovery", func() {
+				revision := makeRevision("rev001", false, time.Now())
+				cfg := makeNodeConfig("node1", "rev001", StatusInvalid, time.Now())
+				cfg.OwnerReferences = []metav1.OwnerReference{{Kind: "Node", Name: cfg.Name, UID: types.UID(cfg.Name)}, {Name: revision.Name}}
+				cfg.Spec.ConfigHash = previousConfigHash
+				cfg.Status.LastSuccessfulRevision = cfg.Spec.Revision
+				cfg.Status.LastSuccessfulConfigHash = cfg.Spec.ConfigHash
+				node := makeNode(cfg.Name, false)
+				Expect(revisionFullyDeployed([]corev1.Node{*node}, []v1alpha1.NodeNetworkConfig{cfg}, &revision)).To(BeTrue())
+				node.UID = "replacement-node"
+				Expect(revisionFullyDeployed([]corev1.Node{*node}, []v1alpha1.NodeNetworkConfig{cfg}, &revision)).To(BeFalse())
+			})
 		})
 
 		It("should include Netplan-only settings and surface invalid device JSON", func() {
@@ -440,7 +566,7 @@ var _ = Describe("ConfigRevisionReconciler helpers", func() {
 			}
 		})
 
-		It("should preserve ready status when only the global revision changes", func() {
+		It("should preserve provisioned status and start a fresh timeout when only the global revision changes", func() {
 			node.Labels["network"] = enabled
 			Expect(fakeClient.Update(context.Background(), node)).To(Succeed())
 			Expect(crr.reconcileDebounced(context.Background())).To(Succeed())
@@ -448,9 +574,13 @@ var _ = Describe("ConfigRevisionReconciler helpers", func() {
 			key := client.ObjectKey{Name: node.Name}
 			Expect(fakeClient.Get(context.Background(), key, cfg)).To(Succeed())
 			hash := cfg.Spec.ConfigHash
+			old := metav1.NewTime(time.Now().Add(-2 * crr.preconfigTimeout))
+			cfg.Spec.ConfigUpdateTime = &old
+			Expect(fakeClient.Update(context.Background(), cfg)).To(Succeed())
 			cfg.Status.ConfigStatus = StatusProvisioned
 			cfg.Status.LastAppliedRevision = cfg.Spec.Revision
 			cfg.Status.LastAppliedConfigHash = hash
+			cfg.Status.LastUpdate = old
 			Expect(fakeClient.Status().Update(context.Background(), cfg)).To(Succeed())
 
 			next := makeRevision("rev002", false, time.Now().Add(time.Minute))
@@ -462,9 +592,32 @@ var _ = Describe("ConfigRevisionReconciler helpers", func() {
 			Expect(cfg.Spec.Revision).To(Equal(next.Spec.Revision))
 			Expect(cfg.Spec.ConfigHash).To(Equal(hash))
 			Expect(cfg.Status.ConfigStatus).To(Equal(StatusProvisioned))
+			Expect(cfg.Spec.ConfigUpdateTime).ToNot(BeNil())
+			Expect(cfg.Spec.ConfigUpdateTime.After(old.Time)).To(BeTrue(), "revision-only deployments need a new acknowledgement deadline")
+			Expect(wasConfigTimeoutReached(cfg, crr.preconfigTimeout)).To(BeFalse())
+			deploymentTime := cfg.Spec.ConfigUpdateTime.DeepCopy()
+			for range 2 {
+				Expect(crr.reconcileDebounced(context.Background())).To(Succeed())
+				Expect(fakeClient.Get(context.Background(), client.ObjectKeyFromObject(&next), &next)).To(Succeed())
+				Expect(next.Status.IsInvalid).To(BeFalse(), "old timestamps must not prematurely invalidate the new revision")
+				Expect(next.Status.Ready).To(BeZero())
+				Expect(next.Status.Ongoing).To(Equal(1))
+				Expect(next.Status.Deployed).To(BeFalse(), "unchanged content must not bypass revision acknowledgement")
+				Expect(fakeClient.Get(context.Background(), key, cfg)).To(Succeed())
+				Expect(cfg.Spec.ConfigUpdateTime).To(Equal(deploymentTime), "reconciliation must not extend the acknowledgement deadline")
+			}
 			netplanCfg := &v1alpha1.NodeNetplanConfig{}
 			Expect(fakeClient.Get(context.Background(), key, netplanCfg)).To(Succeed())
 			Expect(netplanCfg.OwnerReferences).To(ContainElement(HaveField("UID", next.UID)))
+			Expect(fakeClient.Get(context.Background(), key, cfg)).To(Succeed())
+			cfg.Status.ConfigStatus = StatusInvalid
+			cfg.Status.LastAppliedRevision = cfg.Spec.Revision
+			cfg.Status.LastAppliedConfigHash = cfg.Spec.ConfigHash
+			Expect(fakeClient.Status().Update(context.Background(), cfg)).To(Succeed())
+			Expect(crr.reconcileDebounced(context.Background())).To(Succeed())
+			Expect(fakeClient.Get(context.Background(), client.ObjectKeyFromObject(&next), &next)).To(Succeed())
+			Expect(next.Status.IsInvalid).To(BeTrue(), "failure before acknowledgement must still invalidate the new revision")
+			Expect(next.Status.Deployed).To(BeFalse())
 		})
 
 		It("should recover a failed node-local update when labels are corrected", func() {
@@ -476,12 +629,17 @@ var _ = Describe("ConfigRevisionReconciler helpers", func() {
 			cfg.Status.ConfigStatus = StatusProvisioned
 			cfg.Status.LastAppliedRevision = cfg.Spec.Revision
 			cfg.Status.LastAppliedConfigHash = originalHash
+			cfg.Status.LastSuccessfulRevision = cfg.Spec.Revision
+			cfg.Status.LastSuccessfulConfigHash = originalHash
+			Expect(fakeClient.Status().Update(context.Background(), cfg)).To(Succeed())
+			cfg.Status.ConfigStatus = StatusProvisioning
 			Expect(fakeClient.Status().Update(context.Background(), cfg)).To(Succeed())
 			node.Labels["network"] = enabled
 			Expect(fakeClient.Update(context.Background(), node)).To(Succeed())
 			Expect(crr.reconcileDebounced(context.Background())).To(Succeed())
 			Expect(fakeClient.Get(context.Background(), key, cfg)).To(Succeed())
 			Expect(cfg.Spec.ConfigHash).ToNot(Equal(originalHash))
+			Expect(cfg.Annotations).To(HaveKeyWithValue(nodeLocalRevisionAnnotation, revision.Spec.Revision))
 			cfg.Status.ConfigStatus = StatusInvalid
 			cfg.Status.LastAppliedConfigHash = cfg.Spec.ConfigHash
 			Expect(fakeClient.Status().Update(context.Background(), cfg)).To(Succeed())
@@ -500,7 +658,7 @@ var _ = Describe("ConfigRevisionReconciler helpers", func() {
 			Expect(fakeClient.Update(context.Background(), node)).To(Succeed())
 			cfg := makeNodeConfig("node1", "rev001", StatusProvisioning, time.Now())
 			cfg.Spec.ConfigHash = previousConfigHash
-			cfg.OwnerReferences = []metav1.OwnerReference{{Name: node.Name}, {Name: revision.Name}}
+			cfg.OwnerReferences = []metav1.OwnerReference{{Kind: "Node", Name: node.Name, UID: node.UID}, {Name: revision.Name}}
 			Expect(fakeClient.Create(context.Background(), &cfg)).To(Succeed())
 			Expect(fakeClient.Status().Update(context.Background(), &cfg)).To(Succeed())
 			Expect(crr.reconcileDebounced(context.Background())).To(Succeed())
@@ -510,6 +668,388 @@ var _ = Describe("ConfigRevisionReconciler helpers", func() {
 			Expect(revision.Status.Ongoing).To(Equal(1))
 			Expect(revision.Status.Queued).To(Equal(1))
 		})
+
+		It("should finish a first rollout while an already-successful node reboots and fails recovery", func() {
+			for _, name := range []string{"node2", "node3"} {
+				other := makeNode(name, true)
+				other.UID = types.UID(name)
+				Expect(fakeClient.Create(context.Background(), other)).To(Succeed())
+			}
+			acknowledge := func(cfg *v1alpha1.NodeNetworkConfig) {
+				cfg.Status.ConfigStatus = StatusProvisioned
+				cfg.Status.LastAppliedRevision, cfg.Status.LastSuccessfulRevision = cfg.Spec.Revision, cfg.Spec.Revision
+				cfg.Status.LastAppliedConfigHash, cfg.Status.LastSuccessfulConfigHash = cfg.Spec.ConfigHash, cfg.Spec.ConfigHash
+				Expect(fakeClient.Status().Update(context.Background(), cfg)).To(Succeed())
+			}
+			configs := &v1alpha1.NodeNetworkConfigList{}
+			Expect(crr.reconcileDebounced(context.Background())).To(Succeed())
+			Expect(fakeClient.List(context.Background(), configs)).To(Succeed())
+			Expect(configs.Items).To(HaveLen(1))
+			first := configs.Items[0].DeepCopy()
+			acknowledge(first)
+			Expect(crr.reconcileDebounced(context.Background())).To(Succeed())
+			Expect(fakeClient.List(context.Background(), configs)).To(Succeed())
+			Expect(configs.Items).To(HaveLen(2))
+			second := configs.Items[0].DeepCopy()
+			if second.Name == first.Name {
+				second = configs.Items[1].DeepCopy()
+			}
+			Expect(fakeClient.Get(context.Background(), client.ObjectKeyFromObject(&revision), &revision)).To(Succeed())
+			Expect(revision.Status.Deployed).To(BeFalse())
+
+			first.Status.ConfigStatus, first.Status.LastUpdate = StatusProvisioning, metav1.Now()
+			Expect(fakeClient.Status().Update(context.Background(), first)).To(Succeed())
+			rebooted := &corev1.Node{}
+			Expect(fakeClient.Get(context.Background(), client.ObjectKey{Name: first.Name}, rebooted)).To(Succeed())
+			rebooted.Status.Conditions[0].Status = corev1.ConditionFalse
+			Expect(fakeClient.Status().Update(context.Background(), rebooted)).To(Succeed())
+			acknowledge(second)
+			restarted := *crr
+			Expect(restarted.reconcileDebounced(context.Background())).To(Succeed())
+			Expect(fakeClient.List(context.Background(), configs)).To(Succeed())
+			Expect(configs.Items).To(HaveLen(3), "recovery must not occupy the single rollout slot")
+			Expect(fakeClient.Get(context.Background(), client.ObjectKeyFromObject(&revision), &revision)).To(Succeed())
+			Expect(revision.Status.Ready).To(Equal(2))
+			Expect(revision.Status.Total).To(Equal(3))
+			Expect(revision.Status.Deployed).To(BeFalse())
+			Expect(revision.Status.IsInvalid).To(BeFalse())
+
+			first.Status.ConfigStatus, first.Status.ErrorMessage = StatusInvalid, "vSR unavailable during recovery"
+			Expect(fakeClient.Status().Update(context.Background(), first)).To(Succeed())
+			for i := range configs.Items {
+				cfg := &configs.Items[i]
+				if cfg.Name != first.Name && cfg.Name != second.Name {
+					acknowledge(cfg)
+				}
+			}
+			Expect(restarted.reconcileDebounced(context.Background())).To(Succeed())
+			Expect(fakeClient.Get(context.Background(), client.ObjectKeyFromObject(&revision), &revision)).To(Succeed())
+			Expect(revision.Status.Ready).To(Equal(3))
+			Expect(revision.Status.Total).To(Equal(3))
+			Expect(revision.Status.Ongoing).To(BeZero())
+			Expect(revision.Status.Deployed).To(BeTrue())
+			Expect(revision.Status.IsInvalid).To(BeFalse())
+			Expect(fakeClient.Get(context.Background(), client.ObjectKeyFromObject(first), first)).To(Succeed())
+			Expect(first.Status.ConfigStatus).To(Equal(StatusInvalid), "rollout completion is not node health")
+			Expect(first.Status.ErrorMessage).To(Equal("vSR unavailable during recovery"))
+		})
+
+		It("should still time out an interrupted first attempt while the node is NotReady", func() {
+			Expect(crr.reconcileDebounced(context.Background())).To(Succeed())
+			cfg := &v1alpha1.NodeNetworkConfig{}
+			Expect(fakeClient.Get(context.Background(), client.ObjectKey{Name: node.Name}, cfg)).To(Succeed())
+			start := metav1.NewTime(time.Now().Add(-time.Hour))
+			cfg.Spec.ConfigUpdateTime = &start
+			Expect(fakeClient.Update(context.Background(), cfg)).To(Succeed())
+			cfg.Status.ConfigStatus, cfg.Status.LastUpdate = StatusProvisioning, start
+			Expect(fakeClient.Status().Update(context.Background(), cfg)).To(Succeed())
+			node.Status.Conditions[0].Status = corev1.ConditionFalse
+			Expect(fakeClient.Status().Update(context.Background(), node)).To(Succeed())
+			Expect(crr.reconcileDebounced(context.Background())).To(Succeed())
+			Expect(fakeClient.Get(context.Background(), client.ObjectKeyFromObject(&revision), &revision)).To(Succeed())
+			Expect(revision.Status.Deployed).To(BeFalse())
+			Expect(revision.Status.IsInvalid).To(BeTrue())
+			Expect(revision.Status.FailedNode).To(Equal(node.Name))
+			Expect(revision.Status.FailedMessage).To(Equal(provisioningTimeoutMessage))
+		})
+
+		It("should persist a complete rollout and survive interrupted recovery after an operator restart", func() {
+			Expect(crr.reconcileDebounced(context.Background())).To(Succeed())
+			key := client.ObjectKey{Name: node.Name}
+			cfg := &v1alpha1.NodeNetworkConfig{}
+			Expect(fakeClient.Get(context.Background(), key, cfg)).To(Succeed())
+			Expect(fakeClient.Get(context.Background(), client.ObjectKeyFromObject(&revision), &revision)).To(Succeed())
+			Expect(revision.Status.Deployed).To(BeFalse())
+
+			cfg.Status.ConfigStatus = StatusProvisioned
+			cfg.Status.LastAppliedRevision = cfg.Spec.Revision
+			cfg.Status.LastAppliedConfigHash = cfg.Spec.ConfigHash
+			cfg.Status.LastSuccessfulRevision = cfg.Spec.Revision
+			cfg.Status.LastSuccessfulConfigHash = cfg.Spec.ConfigHash
+			Expect(fakeClient.Status().Update(context.Background(), cfg)).To(Succeed())
+			Expect(crr.reconcileDebounced(context.Background())).To(Succeed())
+			Expect(fakeClient.Get(context.Background(), client.ObjectKeyFromObject(&revision), &revision)).To(Succeed())
+			Expect(revision.Status.Deployed).To(BeTrue())
+
+			start := metav1.NewTime(time.Now().Add(-time.Hour))
+			cfg.Spec.ConfigUpdateTime = &start
+			Expect(fakeClient.Update(context.Background(), cfg)).To(Succeed())
+			cfg.Status.ConfigStatus = StatusProvisioning
+			cfg.Status.LastUpdate = start
+			Expect(fakeClient.Status().Update(context.Background(), cfg)).To(Succeed())
+			node.Status.Conditions[0].Status = corev1.ConditionFalse
+			Expect(fakeClient.Status().Update(context.Background(), node)).To(Succeed())
+			restarted := *crr
+			Expect(restarted.reconcileDebounced(context.Background())).To(Succeed())
+			Expect(fakeClient.Get(context.Background(), client.ObjectKeyFromObject(&revision), &revision)).To(Succeed())
+			Expect(revision.Status.Deployed).To(BeTrue())
+			Expect(revision.Status.IsInvalid).To(BeFalse())
+			Expect(revision.Status.FailedNode).To(BeEmpty())
+			Expect(revision.Status.Ready).To(Equal(1))
+			Expect(revision.Status.Total).To(Equal(1))
+			Expect(revision.Status.Ongoing).To(BeZero())
+			Expect(fakeClient.Get(context.Background(), key, cfg)).To(Succeed())
+			Expect(cfg.Status.ConfigStatus).To(Equal(StatusProvisioning), "the operator must not fake successful recovery")
+
+			other := makeNode("node2", true)
+			other.UID = types.UID(other.Name)
+			Expect(fakeClient.Create(context.Background(), other)).To(Succeed())
+			Expect(restarted.reconcileDebounced(context.Background())).To(Succeed())
+			otherCfg := &v1alpha1.NodeNetworkConfig{}
+			Expect(fakeClient.Get(context.Background(), client.ObjectKey{Name: other.Name}, otherCfg)).To(Succeed())
+			Expect(otherCfg.Spec.Revision).To(Equal(revision.Spec.Revision))
+		})
+
+		It("should backfill a previously completed rollout before processing a recovery failure", func() {
+			Expect(crr.reconcileDebounced(context.Background())).To(Succeed())
+			Expect(fakeClient.Get(context.Background(), client.ObjectKeyFromObject(&revision), &revision)).To(Succeed())
+			revision.Status.Ready, revision.Status.Total = 1, 1
+			revision.Status.Ongoing, revision.Status.Queued = 0, 0
+			Expect(fakeClient.Status().Update(context.Background(), &revision)).To(Succeed())
+			cfg := &v1alpha1.NodeNetworkConfig{}
+			Expect(fakeClient.Get(context.Background(), client.ObjectKey{Name: node.Name}, cfg)).To(Succeed())
+			cfg.Status.ConfigStatus = StatusInvalid
+			cfg.Status.LastAppliedRevision = cfg.Spec.Revision
+			cfg.Status.LastAppliedConfigHash = cfg.Spec.ConfigHash
+			cfg.Status.ErrorMessage = "vSR unavailable during recovery"
+			Expect(fakeClient.Status().Update(context.Background(), cfg)).To(Succeed())
+			Expect(crr.reconcileDebounced(context.Background())).To(Succeed())
+			Expect(fakeClient.Get(context.Background(), client.ObjectKeyFromObject(&revision), &revision)).To(Succeed())
+			Expect(revision.Status.Deployed).To(BeTrue())
+			Expect(revision.Status.IsInvalid).To(BeFalse())
+			Expect(fakeClient.Get(context.Background(), client.ObjectKey{Name: node.Name}, cfg)).To(Succeed())
+			Expect(cfg.Status.ErrorMessage).To(Equal("vSR unavailable during recovery"))
+		})
+
+		It("should not infer completion from counters that exclude an unconfigured NotReady node", func() {
+			other := makeNode("node2", false)
+			Expect(fakeClient.Create(context.Background(), other)).To(Succeed())
+			Expect(crr.reconcileDebounced(context.Background())).To(Succeed())
+			cfg := &v1alpha1.NodeNetworkConfig{}
+			Expect(fakeClient.Get(context.Background(), client.ObjectKey{Name: node.Name}, cfg)).To(Succeed())
+			cfg.Status.ConfigStatus = StatusProvisioned
+			cfg.Status.LastAppliedRevision = cfg.Spec.Revision
+			cfg.Status.LastAppliedConfigHash = cfg.Spec.ConfigHash
+			Expect(fakeClient.Status().Update(context.Background(), cfg)).To(Succeed())
+			for range 2 {
+				Expect(crr.reconcileDebounced(context.Background())).To(Succeed())
+				Expect(fakeClient.Get(context.Background(), client.ObjectKeyFromObject(&revision), &revision)).To(Succeed())
+				Expect(revision.Status.Ready).To(Equal(1))
+				Expect(revision.Status.Total).To(Equal(2))
+				Expect(revision.Status.Deployed).To(BeFalse())
+			}
+		})
+
+		It("should not backfill stale completion counters when only the previous revision was acknowledged", func() {
+			Expect(crr.reconcileDebounced(context.Background())).To(Succeed())
+			Expect(fakeClient.Get(context.Background(), client.ObjectKeyFromObject(&revision), &revision)).To(Succeed())
+			revision.Status.Ready, revision.Status.Total = 1, 1
+			revision.Status.Ongoing, revision.Status.Queued = 0, 0
+			Expect(fakeClient.Status().Update(context.Background(), &revision)).To(Succeed())
+			cfg := &v1alpha1.NodeNetworkConfig{}
+			Expect(fakeClient.Get(context.Background(), client.ObjectKey{Name: node.Name}, cfg)).To(Succeed())
+			cfg.Status.ConfigStatus = StatusProvisioned
+			cfg.Status.LastAppliedRevision = "rev000"
+			cfg.Status.LastAppliedConfigHash = cfg.Spec.ConfigHash
+			Expect(fakeClient.Status().Update(context.Background(), cfg)).To(Succeed())
+			Expect(crr.reconcileDebounced(context.Background())).To(Succeed())
+			Expect(fakeClient.Get(context.Background(), client.ObjectKeyFromObject(&revision), &revision)).To(Succeed())
+			Expect(revision.Status.Deployed).To(BeFalse())
+			Expect(revision.Status.Ready).To(BeZero())
+			Expect(revision.Status.Ongoing).To(Equal(1))
+		})
+
+		DescribeTable("rejecting stale completion counters when a previously configured node was deleted", func(deleteConfig bool) {
+			Expect(crr.reconcileDebounced(context.Background())).To(Succeed())
+			cfg := &v1alpha1.NodeNetworkConfig{}
+			Expect(fakeClient.Get(context.Background(), client.ObjectKey{Name: node.Name}, cfg)).To(Succeed())
+			Expect(fakeClient.Get(context.Background(), client.ObjectKeyFromObject(&revision), &revision)).To(Succeed())
+			revision.Status.Ready, revision.Status.Total = 1, 1
+			revision.Status.Ongoing, revision.Status.Queued = 0, 0
+			Expect(fakeClient.Status().Update(context.Background(), &revision)).To(Succeed())
+			other := makeNode("node2", false)
+			other.UID = types.UID(other.Name)
+			Expect(fakeClient.Create(context.Background(), other)).To(Succeed())
+			if deleteConfig {
+				Expect(fakeClient.Delete(context.Background(), cfg)).To(Succeed())
+			}
+			Expect(fakeClient.Delete(context.Background(), node)).To(Succeed())
+
+			Expect(crr.reconcileDebounced(context.Background())).To(Succeed())
+			Expect(fakeClient.Get(context.Background(), client.ObjectKeyFromObject(&revision), &revision)).To(Succeed())
+			Expect(revision.Status.Deployed).To(BeFalse(), "the remaining node never received the revision")
+			other.Status.Conditions[0].Status = corev1.ConditionTrue
+			Expect(fakeClient.Status().Update(context.Background(), other)).To(Succeed())
+			Expect(crr.reconcileDebounced(context.Background())).To(Succeed())
+			Expect(fakeClient.Get(context.Background(), client.ObjectKey{Name: other.Name}, cfg)).To(Succeed())
+			cfg.Status.ConfigStatus = StatusInvalid
+			cfg.Status.LastAppliedRevision = cfg.Spec.Revision
+			cfg.Status.LastAppliedConfigHash = cfg.Spec.ConfigHash
+			Expect(fakeClient.Status().Update(context.Background(), cfg)).To(Succeed())
+			Expect(crr.reconcileDebounced(context.Background())).To(Succeed())
+			Expect(fakeClient.Get(context.Background(), client.ObjectKeyFromObject(&revision), &revision)).To(Succeed())
+			Expect(revision.Status.IsInvalid).To(BeTrue(), "the remaining node must retain first-attempt failure handling")
+		},
+			Entry("the deleted node's config is also gone", true),
+			Entry("the deleted node's config is still awaiting cleanup", false),
+		)
+
+		DescribeTable("requiring a same-name replacement to succeed independently", func(backfill bool) {
+			other := makeNode("node2", false)
+			other.UID = types.UID(other.Name)
+			Expect(fakeClient.Create(context.Background(), other)).To(Succeed())
+			Expect(crr.reconcileDebounced(context.Background())).To(Succeed())
+			cfg := &v1alpha1.NodeNetworkConfig{}
+			key := client.ObjectKey{Name: node.Name}
+			Expect(fakeClient.Get(context.Background(), key, cfg)).To(Succeed())
+			cfg.Status.ConfigStatus = StatusProvisioned
+			cfg.Status.LastAppliedRevision, cfg.Status.LastSuccessfulRevision = cfg.Spec.Revision, cfg.Spec.Revision
+			cfg.Status.LastAppliedConfigHash, cfg.Status.LastSuccessfulConfigHash = cfg.Spec.ConfigHash, cfg.Spec.ConfigHash
+			Expect(fakeClient.Status().Update(context.Background(), cfg)).To(Succeed())
+			other.Status.Conditions[0].Status = corev1.ConditionTrue
+			Expect(fakeClient.Status().Update(context.Background(), other)).To(Succeed())
+			Expect(crr.reconcileDebounced(context.Background())).To(Succeed())
+			otherCfg := &v1alpha1.NodeNetworkConfig{}
+			Expect(fakeClient.Get(context.Background(), client.ObjectKeyFromObject(other), otherCfg)).To(Succeed())
+			otherCfg.Status.ConfigStatus = StatusProvisioned
+			otherCfg.Status.LastAppliedRevision = otherCfg.Spec.Revision
+			otherCfg.Status.LastAppliedConfigHash = otherCfg.Spec.ConfigHash
+			Expect(fakeClient.Status().Update(context.Background(), otherCfg)).To(Succeed())
+
+			replacement := makeNode(node.Name, false)
+			replacement.UID = "replacement-node"
+			Expect(fakeClient.Delete(context.Background(), node)).To(Succeed())
+			Expect(fakeClient.Create(context.Background(), replacement)).To(Succeed())
+			if backfill {
+				Expect(fakeClient.Get(context.Background(), client.ObjectKeyFromObject(&revision), &revision)).To(Succeed())
+				revision.Status.Ready, revision.Status.Total = 2, 2
+				revision.Status.Ongoing, revision.Status.Queued = 0, 0
+				Expect(fakeClient.Status().Update(context.Background(), &revision)).To(Succeed())
+			}
+			for range 2 {
+				Expect(crr.reconcileDebounced(context.Background())).To(Succeed())
+				Expect(fakeClient.Get(context.Background(), client.ObjectKeyFromObject(&revision), &revision)).To(Succeed())
+				Expect(revision.Status.Deployed).To(BeFalse())
+				Expect(revision.Status.Ready).To(Equal(1), "the old node's success must not transfer")
+				Expect(revision.Status.Total).To(Equal(2))
+			}
+
+			replacement.Status.Conditions[0].Status = corev1.ConditionTrue
+			Expect(fakeClient.Status().Update(context.Background(), replacement)).To(Succeed())
+			Expect(crr.reconcileDebounced(context.Background())).To(Succeed())
+			Expect(fakeClient.Get(context.Background(), key, cfg)).To(Succeed())
+			Expect(cfg.OwnerReferences).To(ContainElement(And(
+				HaveField("Kind", "Node"), HaveField("UID", replacement.UID),
+			)))
+			Expect(cfg.Status).To(Equal(v1alpha1.NodeNetworkConfigStatus{}), "replacement config must start without inherited status")
+			cfg.Status.ConfigStatus = StatusInvalid
+			cfg.Status.LastAppliedRevision = cfg.Spec.Revision
+			cfg.Status.LastAppliedConfigHash = cfg.Spec.ConfigHash
+			Expect(fakeClient.Status().Update(context.Background(), cfg)).To(Succeed())
+			Expect(crr.reconcileDebounced(context.Background())).To(Succeed())
+			Expect(fakeClient.Get(context.Background(), client.ObjectKeyFromObject(&revision), &revision)).To(Succeed())
+			Expect(revision.Status.Deployed).To(BeFalse())
+			Expect(revision.Status.IsInvalid).To(BeTrue(), "replacement must retain first-attempt failure handling")
+		},
+			Entry("during an incomplete rollout", false),
+			Entry("when legacy completion counters are present", true),
+		)
+
+		It("should still invalidate a failed new revision after the previous revision deployed", func() {
+			revision.Status.Deployed = true
+			Expect(fakeClient.Status().Update(context.Background(), &revision)).To(Succeed())
+			next := makeRevision("rev002", false, time.Now().Add(time.Minute))
+			next.UID = types.UID(next.Name)
+			Expect(fakeClient.Create(context.Background(), &next)).To(Succeed())
+			Expect(crr.reconcileDebounced(context.Background())).To(Succeed())
+			cfg := &v1alpha1.NodeNetworkConfig{}
+			Expect(fakeClient.Get(context.Background(), client.ObjectKey{Name: node.Name}, cfg)).To(Succeed())
+			Expect(cfg.Spec.Revision).To(Equal(next.Spec.Revision))
+			cfg.Status.ConfigStatus = StatusInvalid
+			cfg.Status.LastAppliedRevision = cfg.Spec.Revision
+			cfg.Status.LastAppliedConfigHash = cfg.Spec.ConfigHash
+			cfg.Status.ErrorMessage = "new configuration rejected"
+			Expect(fakeClient.Status().Update(context.Background(), cfg)).To(Succeed())
+			Expect(crr.reconcileDebounced(context.Background())).To(Succeed())
+			Expect(fakeClient.Get(context.Background(), client.ObjectKeyFromObject(&next), &next)).To(Succeed())
+			Expect(next.Status.Deployed).To(BeFalse())
+			Expect(next.Status.IsInvalid).To(BeTrue())
+			Expect(next.Status.FailedMessage).To(Equal("new configuration rejected"))
+			Expect(fakeClient.Get(context.Background(), client.ObjectKeyFromObject(&revision), &revision)).To(Succeed())
+			Expect(revision.Status.Deployed).To(BeTrue())
+			Expect(revision.Status.IsInvalid).To(BeFalse())
+			Expect(fakeClient.Get(context.Background(), client.ObjectKey{Name: node.Name}, cfg)).To(Succeed())
+			Expect(cfg.Spec.Revision).To(Equal(revision.Spec.Revision), "a failed new rollout must retain rollback")
+		})
+	})
+
+	Describe("processConfigsForRevision backfill", func() {
+		DescribeTable("checking successful history before backfilling a failed acknowledgement",
+			func(successfulRevision, status string, deployed, invalid bool) {
+				revision := makeRevision("rev001", false, time.Now())
+				revision.Status.Ready, revision.Status.Total = 1, 1
+				cfg := makeNodeConfig("node1", revision.Spec.Revision, status, time.Now())
+				cfg.Spec.ConfigHash = "same-config"
+				cfg.Status.LastAppliedRevision = revision.Spec.Revision
+				cfg.Status.LastAppliedConfigHash = cfg.Spec.ConfigHash
+				cfg.Status.LastSuccessfulRevision = successfulRevision
+				cfg.Status.LastSuccessfulConfigHash = cfg.Spec.ConfigHash
+				cfg.OwnerReferences = []metav1.OwnerReference{{Kind: "Node", Name: cfg.Name, UID: types.UID(cfg.Name)}, {Name: revision.Name}}
+				fakeClient := fake.NewClientBuilder().WithScheme(testScheme).
+					WithObjects(&revision, &cfg).WithStatusSubresource(&revision).Build()
+				crr := &ConfigRevisionReconciler{
+					client: fakeClient, logger: logger,
+					configTimeout: time.Minute, preconfigTimeout: time.Minute,
+				}
+				nodes := []corev1.Node{*makeNode(cfg.Name, true)}
+				for range 2 {
+					cnt, err := crr.processConfigsForRevision(context.Background(), []v1alpha1.NodeNetworkConfig{cfg}, &revision, nodes)
+					Expect(err).ToNot(HaveOccurred())
+					Expect(revision.Status.Deployed).To(Equal(deployed))
+					Expect(revision.Status.IsInvalid).To(Equal(invalid))
+					revision.Status.Ready, revision.Status.Ongoing = cnt.ready, cnt.ongoing
+				}
+			},
+			Entry("failed first attempt retains older successful history", "rev000", StatusInvalid, false, true),
+			Entry("failed rollback retains newer successful history", "rev002", StatusInvalid, false, true),
+			Entry("ongoing first attempt retains older successful history", "rev000", StatusProvisioning, false, false),
+			Entry("failed recovery retains matching successful history", "rev001", StatusInvalid, true, false),
+			Entry("legacy failed recovery has no successful history", "", StatusInvalid, true, false),
+		)
+
+		DescribeTable("checking retained acknowledgements regardless of the current NNC spec",
+			func(specRevision, appliedRevision string, deployed bool) {
+				revision := makeRevision("rev001", false, time.Now())
+				revision.Status.Ready, revision.Status.Total = 1, 1
+				cfg := makeNodeConfig("node1", specRevision, StatusProvisioned, time.Now())
+				cfg.Status.LastAppliedRevision = appliedRevision
+				cfg.OwnerReferences = []metav1.OwnerReference{{Kind: "Node", Name: cfg.Name, UID: types.UID(cfg.Name)}, {Name: revision.Name}}
+				fakeClient := fake.NewClientBuilder().WithScheme(testScheme).
+					WithObjects(&revision, &cfg).WithStatusSubresource(&revision).Build()
+				crr := &ConfigRevisionReconciler{
+					client: fakeClient, logger: logger,
+					configTimeout: time.Minute, preconfigTimeout: time.Minute,
+				}
+				nodes := []corev1.Node{*makeNode(cfg.Name, true)}
+				cnt, err := crr.processConfigsForRevision(context.Background(), []v1alpha1.NodeNetworkConfig{cfg}, &revision, nodes)
+				Expect(err).ToNot(HaveOccurred())
+				Expect(revision.Status.Deployed).To(Equal(deployed))
+				revision.Status.Ready, revision.Status.Ongoing = cnt.ready, cnt.ongoing
+				cfg.Spec.Revision = revision.Spec.Revision
+				cfg.Status.LastAppliedRevision = revision.Spec.Revision
+				cfg.Status.ConfigStatus = StatusInvalid
+				cfg.Status.ErrorMessage = "candidate configuration rejected"
+				_, err = crr.processConfigsForRevision(context.Background(), []v1alpha1.NodeNetworkConfig{cfg}, &revision, nodes)
+				Expect(err).ToNot(HaveOccurred())
+				Expect(revision.Status.IsInvalid).To(Equal(!deployed), "unacknowledged candidates must retain failure handling")
+			},
+			Entry("candidate spec with an older acknowledgement", "rev001", "rev000", false),
+			Entry("advanced spec with an older acknowledgement", "rev002", "rev000", false),
+			Entry("advanced spec with a newer acknowledgement", "rev002", "rev002", false),
+			Entry("advanced spec retains the candidate acknowledgement", "rev002", "rev001", true),
+			Entry("candidate spec with an empty acknowledgement", "rev001", "", false),
+			Entry("other spec with no acknowledgement does not contradict prior completion", "rev002", "", true),
+		)
 	})
 
 	Describe("removeRedundantConfigs", func() {
@@ -760,8 +1300,9 @@ func makeNodeConfig(name, revision, status string, lastUpdate time.Time) v1alpha
 			Revision: revision,
 		},
 		Status: v1alpha1.NodeNetworkConfigStatus{
-			ConfigStatus: status,
-			LastUpdate:   metav1.NewTime(lastUpdate),
+			ConfigStatus:        status,
+			LastAppliedRevision: revision,
+			LastUpdate:          metav1.NewTime(lastUpdate),
 		},
 	}
 }
@@ -775,6 +1316,7 @@ func makeNode(name string, ready bool) *corev1.Node {
 	return &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:   name,
+			UID:    types.UID(name),
 			Labels: map[string]string{},
 		},
 		Status: corev1.NodeStatus{
