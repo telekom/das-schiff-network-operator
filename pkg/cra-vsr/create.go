@@ -165,10 +165,15 @@ func (m *Manager) createVLAN(vlanID, mtu int, disableSegmentation bool, br *Brid
 			},
 		},
 	}
-	tso := !disableSegmentation
-	gso := !disableSegmentation
-	vlan.TSOEnabled = &tso
-	vlan.GSOEnabled = &gso
+	if m.SupportsSegmentationOffload() {
+		tso := !disableSegmentation
+		gso := !disableSegmentation
+		vlan.TSOEnabled = &tso
+		vlan.GSOEnabled = &gso
+	} else if disableSegmentation {
+		m.logger.Info("DisableSegmentation requested, but this feature is unsupported on this node", "vlanID", vlanID)
+	}
+
 	intfs.VLANs = append(intfs.VLANs, vlan)
 
 	slave := BridgeSlave{
