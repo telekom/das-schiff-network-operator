@@ -64,7 +64,7 @@ var _ = Describe("BGP Peering", Label("bgp", "intent"), func() {
 				return false
 			}
 			if summary.IPv4Unicast != nil {
-				return framework.CountEstablishedPeers(summary.IPv4Unicast) > 0
+				return summary.IPv4Unicast.Peers["10.250.0.50"].State == "Established"
 			}
 			return false
 		}).WithTimeout(cfg.BGPTimeout).WithPolling(10*time.Second).Should(BeTrue(),
@@ -77,7 +77,7 @@ var _ = Describe("BGP Peering", Label("bgp", "intent"), func() {
 				return false
 			}
 			if summary.IPv6Unicast != nil {
-				return framework.CountEstablishedPeers(summary.IPv6Unicast) > 0
+				return summary.IPv6Unicast.Peers["fd94:685b:30cf:501::50"].State == "Established"
 			}
 			return false
 		}).WithTimeout(cfg.BGPTimeout).WithPolling(10*time.Second).Should(BeTrue(),
