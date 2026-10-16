@@ -38,7 +38,6 @@ jobs:
             # than treating an optional missing key as a workflow failure.
             val=$(grep -m1 -E "^${1}=" versions.env | sed 's/^[^=]*=//' || true)
             if [ -z "$val" ]; then
-              echo "::warning::Key ${1} not found or empty in versions.env" >&2
               return 1
             fi
             echo "$val"
@@ -46,9 +45,18 @@ jobs:
           # Capture each version separately so failures from get_version are visible.
           # If a key is absent the output will be empty and check_github_release will
           # emit a warning and set check_failed=true rather than comparing against "".
-          kustomize_ver=$(get_version KUSTOMIZE_VERSION) || true
-          controller_tools_ver=$(get_version CONTROLLER_TOOLS_VERSION) || true
-          golangci_lint_ver=$(get_version GOLANGCI_LINT_VERSION) || true
+          if ! kustomize_ver=$(get_version KUSTOMIZE_VERSION); then
+            echo "::warning::Key KUSTOMIZE_VERSION not found or empty in versions.env"
+            kustomize_ver=""
+          fi
+          if ! controller_tools_ver=$(get_version CONTROLLER_TOOLS_VERSION); then
+            echo "::warning::Key CONTROLLER_TOOLS_VERSION not found or empty in versions.env"
+            controller_tools_ver=""
+          fi
+          if ! golangci_lint_ver=$(get_version GOLANGCI_LINT_VERSION); then
+            echo "::warning::Key GOLANGCI_LINT_VERSION not found or empty in versions.env"
+            golangci_lint_ver=""
+          fi
           echo "skip=false" >> "$GITHUB_OUTPUT"
           if [ -n "$kustomize_ver" ]; then
             echo "kustomize=$kustomize_ver" >> "$GITHUB_OUTPUT"
