@@ -30,7 +30,7 @@ func determineIPv6PrefixLength(ctx context.Context, f *framework.Framework, name
 	return prefix, nil
 }
 
-func globalIPv6PrefixLenFromAddrOutput(output string) (prefix string, err error) {
+func globalIPv6PrefixLenFromAddrOutput(output string) (string, error) {
 	for _, line := range strings.Split(output, "\n") {
 		fields := strings.Fields(line)
 		if !hasGlobalScope(fields) {
@@ -64,7 +64,7 @@ func vipWithPrefix(vip, prefix string) string {
 
 type vipPrefixResolver func(podName string) (string, error)
 
-func resolveFailoverV6VIPPrefixes(vip string, resolve vipPrefixResolver) (string, string, error) {
+func resolveFailoverV6VIPPrefixes(vip string, resolve vipPrefixResolver) (dstVIP string, srcVIP string, err error) {
 	dstPrefix, err := resolve("failover-dst")
 	if err != nil {
 		return "", "", err
