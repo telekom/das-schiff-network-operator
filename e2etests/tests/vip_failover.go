@@ -64,7 +64,7 @@ func vipWithPrefix(vip, prefix string) string {
 
 type vipPrefixResolver func(podName string) (string, error)
 
-func resolveFailoverV6VIPPrefixes(vip string, resolve vipPrefixResolver) (dstVIP string, srcVIP string, err error) {
+func resolveFailoverV6VIPPrefixes(vip string, resolve vipPrefixResolver) (dstVIP, srcVIP string, err error) {
 	dstPrefix, err := resolve("failover-dst")
 	if err != nil {
 		return "", "", err
