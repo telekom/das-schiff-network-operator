@@ -298,6 +298,8 @@
         <vlan-id>501</vlan-id>
         <link-interface>hbn</link-interface>
         <mtu>1500</mtu>
+        <tso-enabled>false</tso-enabled>
+        <gso-enabled>false</gso-enabled>
         <network-stack>
           <ipv6>
             <address-generation-mode>no-link-local</address-generation-mode>
@@ -309,6 +311,8 @@
         <vlan-id>502</vlan-id>
         <link-interface>hbn</link-interface>
         <mtu>1500</mtu>
+        <tso-enabled>true</tso-enabled>
+        <gso-enabled>true</gso-enabled>
         <network-stack>
           <ipv6>
             <address-generation-mode>no-link-local</address-generation-mode>
