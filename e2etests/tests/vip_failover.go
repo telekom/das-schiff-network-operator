@@ -30,7 +30,7 @@ func determineIPv6PrefixLength(ctx context.Context, f *framework.Framework, name
 	return prefix, nil
 }
 
-func globalIPv6PrefixLenFromAddrOutput(output string) (string, error) {
+func globalIPv6PrefixLenFromAddrOutput(output string) (prefix string, err error) {
 	for _, line := range strings.Split(output, "\n") {
 		fields := strings.Fields(line)
 		if !hasGlobalScope(fields) {
