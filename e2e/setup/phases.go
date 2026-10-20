@@ -60,10 +60,15 @@ func phaseBuildAllImages(repoRoot string) error {
 	testerImage := EnvOr("E2E_TESTER_IMAGE", imgBase+"/das-schiff-e2e-tester:latest")
 
 	ldflags := getLDFlags(repoRoot)
+	goVersion, err := getGoVersion(repoRoot)
+	if err != nil {
+		return fmt.Errorf("derive Go version from go.mod: %w", err)
+	}
 
 	// 1. Build cra-frr image
 	Logf("  Building das-schiff-cra-frr...")
 	if err := RunCmd("docker", "build",
+		"--build-arg", "GO_VERSION="+goVersion,
 		"--build-arg", "ldflags="+ldflags,
 		"-f", filepath.Join(repoRoot, "das-schiff-cra-frr.Dockerfile"),
 		"-t", "das-schiff-cra-frr:latest",
@@ -95,6 +100,7 @@ func phaseBuildAllImages(repoRoot string) error {
 	// 3. Build operator + agent + platform images
 	Logf("  Building operator + agent + platform images...")
 	if err := RunCmd("docker", "build",
+		"--build-arg", "GO_VERSION="+goVersion,
 		"--build-arg", "ldflags="+ldflags,
 		"-f", filepath.Join(repoRoot, "das-schiff-network-operator.Dockerfile"),
 		"-t", imgBase+"/das-schiff-network-operator:latest",
@@ -104,6 +110,7 @@ func phaseBuildAllImages(repoRoot string) error {
 	}
 
 	if err := RunCmd("docker", "build",
+		"--build-arg", "GO_VERSION="+goVersion,
 		"--build-arg", "ldflags="+ldflags,
 		"-f", filepath.Join(repoRoot, "das-schiff-nwop-agent-cra-frr.Dockerfile"),
 		"-t", imgBase+"/das-schiff-nwop-agent-cra-frr:latest",
@@ -113,6 +120,7 @@ func phaseBuildAllImages(repoRoot string) error {
 	}
 
 	if err := RunCmd("docker", "build",
+		"--build-arg", "GO_VERSION="+goVersion,
 		"--build-arg", "ldflags="+ldflags,
 		"-f", filepath.Join(repoRoot, "das-schiff-nwop-agent-netplan.Dockerfile"),
 		"-t", imgBase+"/das-schiff-nwop-agent-netplan:latest",
@@ -122,6 +130,7 @@ func phaseBuildAllImages(repoRoot string) error {
 	}
 
 	if err := RunCmd("docker", "build",
+		"--build-arg", "GO_VERSION="+goVersion,
 		"--build-arg", "ldflags="+ldflags,
 		"-f", filepath.Join(repoRoot, "das-schiff-platform-coil.Dockerfile"),
 		"-t", imgBase+"/das-schiff-platform-coil:latest",
@@ -131,6 +140,7 @@ func phaseBuildAllImages(repoRoot string) error {
 	}
 
 	if err := RunCmd("docker", "build",
+		"--build-arg", "GO_VERSION="+goVersion,
 		"--build-arg", "ldflags="+ldflags,
 		"-f", filepath.Join(repoRoot, "das-schiff-platform-metallb.Dockerfile"),
 		"-t", imgBase+"/das-schiff-platform-metallb:latest",
@@ -140,6 +150,7 @@ func phaseBuildAllImages(repoRoot string) error {
 	}
 
 	if err := RunCmd("docker", "build",
+		"--build-arg", "GO_VERSION="+goVersion,
 		"--build-arg", "ldflags="+ldflags,
 		"-f", filepath.Join(repoRoot, "das-schiff-network-sync.Dockerfile"),
 		"-t", imgBase+"/das-schiff-network-sync:latest",
@@ -163,6 +174,7 @@ func phaseBuildAllImages(repoRoot string) error {
 	testerCtx := filepath.Join(repoRoot, "e2e", "images", "tester")
 	Logf("  Building tester image (%s)...", testerImage)
 	if err := RunCmd("docker", "build",
+		"--build-arg", "GO_VERSION="+goVersion,
 		"-t", testerImage,
 		"-f", filepath.Join(testerCtx, "Dockerfile"),
 		testerCtx,
@@ -183,6 +195,20 @@ func getLDFlags(repoRoot string) string {
 		return ""
 	}
 	return strings.TrimSpace(string(out))
+}
+
+func getGoVersion(repoRoot string) (string, error) {
+	data, err := os.ReadFile(filepath.Join(repoRoot, "go.mod"))
+	if err != nil {
+		return "", fmt.Errorf("reading go.mod: %w", err)
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && fields[0] == "go" {
+			return fields[1], nil
+		}
+	}
+	return "", fmt.Errorf("go.mod does not declare a Go version")
 }
 
 // Phase 1a: Create k8s node containers with proper Docker flags.
