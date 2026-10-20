@@ -846,7 +846,7 @@ _Appears in:_
 | `ipv4` _[IPNetwork](#ipnetwork)_ | IPv4 is the IPv4 address pool for this network. The CIDR must be the<br />network address (host bits zero), e.g. "198.51.100.224/27" — not an<br />authored host address like "198.51.100.225/27". The anycast gateway is<br />derived as the first usable host (network address + 1). |  | Optional: \{\} <br /> |
 | `ipv6` _[IPNetwork](#ipnetwork)_ | IPv6 is the IPv6 address pool for this network. The CIDR must be the<br />network address (host bits zero), e.g. "2001:db8::/64". |  | Optional: \{\} <br /> |
 | `vlan` _integer_ | VLAN is the VLAN ID for this network. |  | Maximum: 4094 <br />Minimum: 1 <br />Optional: \{\} <br /> |
-| `vni` _integer_ | VNI is the VXLAN Network Identifier for this network.<br />In BM4X (bare-metal) mode without SR-IOV, the VNI is provided by the<br />service integration engineer. The node VTEP IP comes from the underlay,<br />not from this CRD. |  | Maximum: 1.6777215e+07 <br />Minimum: 1 <br />Optional: \{\} <br /> |
+| `vni` _integer_ | VNI is the VXLAN Network Identifier for this network.<br />When set, the VNI is an explicit or resolved network parameter supplied<br />by a provisioner or user. The node VTEP IP comes from the underlay,<br />not from this CRD. |  | Maximum: 1.6777215e+07 <br />Minimum: 1 <br />Optional: \{\} <br /> |
 
 
 #### NetworkStatus

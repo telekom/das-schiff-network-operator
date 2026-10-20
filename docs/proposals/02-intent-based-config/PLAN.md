@@ -253,7 +253,7 @@ implemented first for the underlying `MirrorTarget` / `MirrorSelector` pipeline.
 | # | Work Item | Files | Depends | Status |
 |---|---|---|---|---|
 | WI-100 | **Migration CLI** — read existing `Layer2NetworkConfiguration` + `VRFRouteConfiguration` + `BGPPeering` and generate equivalent intent CRDs (VRF + Network + Destination + Layer2Attachment + Inbound/Outbound) | `cmd/migrate/` (new) or `hack/migrate.go` | M2, M3, M4 | ⬜ |
-| WI-101 | **SchiffCluster config import** — read `schiff-network` ConfigMap format and generate intent CRDs | `cmd/migrate/` | WI-100 | ⬜ |
+| WI-101 | **Legacy config import** — read an existing cluster network configuration and generate intent CRDs | `cmd/migrate/` | WI-100 | ⬜ |
 | WI-102 | **Diff tool** — compare generated `NetworkConfigRevision` from intent CRDs vs existing low-level CRDs, report differences | `cmd/migrate/` | WI-100 | ⬜ |
 | WI-103 | **Migration runbook** — step-by-step guide: install CRDs → run migration tool → apply intent CRDs → verify revision matches → remove low-level CRDs | `docs/migration.md` | WI-100 | ⬜ |
 
