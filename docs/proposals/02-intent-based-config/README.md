@@ -8,6 +8,12 @@
 
 This proposal describes how to introduce **intent-driven custom resources** for cluster networking in the das-schiff network operator. Instead of requiring operators to understand and manually compose low-level HBR configuration (`Layer2NetworkConfiguration`, `VRFRouteConfiguration`, `BGPPeering`, `MirrorSelector`, `MirrorTarget`), tenants will express their desired network state through high-level intent resources. A set of new controllers translates these intents into the operator's configuration pipeline and manages ancillary platform components (load balancers, egress NAT, CNI pools, traffic mirroring).
 
+For the downstream breakglass utility catalogue and generic integration
+boundary, see [HARMONIZATION.md](HARMONIZATION.md). It maps the seven stable
+generic debug intents to observable network-operator capabilities and records
+where SR-IOV, MultiNetworkPolicy, legacy coexistence, and cluster validation
+remain separate concerns.
+
 Ingress and egress connectivity are modeled as separate CRDs (`Inbound` and `Outbound`), mirroring the natural separation already established in the SchiffCluster API and the schiff CLI. Network pool definitions are separated from pool usage via a `Network` CRD — usage CRDs reference it by name via `networkRef`, keeping pool definition and consumption cleanly decoupled. The intent CRDs support both **HBN** (Host-Based Networking — VXLAN/VRF) and **non-HBN** (physical interfaces, SR-IOV, MetalLB-only) deployment modes.
 
 In this first iteration, all network parameters (VLAN IDs, VNIs, CIDRs) are **specified directly** by the user in `Network` CRDs. Automatic network allocation via a management cluster controller is explicitly out of scope and can be added later as a transparent enhancement.
