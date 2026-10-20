@@ -26,6 +26,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-logr/logr"
+
 	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/pkg/config"
 	"github.com/telekom/das-schiff-network-operator/pkg/helpers/types"
@@ -49,21 +51,40 @@ const (
 	baseConfigPath = "/etc/cra/config/base-config.yaml"
 )
 
+type FeatureFlags struct {
+	SupportsSegmentationOffload bool
+}
+
+type GetSchemaInput struct {
+	XMLName    xml.Name `xml:"urn:ietf:params:xml:ns:yang:ietf-netconf-monitoring get-schema"`
+	Identifier string   `xml:"identifier"`
+}
+
+type GetSchemaOutput struct {
+	Data string `xml:"data"`
+}
+
 type Manager struct {
-	baseConfig *config.BaseConfig
-	timeout    time.Duration
-	startupXML []byte
-	WorkNSName string
-	KpiNSName  string
-	startup    *VRouter
-	running    *VRouter
-	nc         *Netconf
+	logger       logr.Logger
+	baseConfig   *config.BaseConfig
+	timeout      time.Duration
+	startupXML   []byte
+	WorkNSName   string
+	KpiNSName    string
+	startup      *VRouter
+	running      *VRouter
+	nc           *Netconf
+	featureFlags FeatureFlags
 }
 
 // LocalASN returns the local (platform-side) BGP autonomous system number from
 // the manager's base config.
 func (m *Manager) LocalASN() int {
 	return m.baseConfig.LocalASN
+}
+
+func (m *Manager) SupportsSegmentationOffload() bool {
+	return m.featureFlags.SupportsSegmentationOffload
 }
 
 type Metrics struct {
@@ -78,8 +99,10 @@ func NewManager(
 	urls []string,
 	user, password string,
 	timeout time.Duration,
+	logger logr.Logger,
 ) (*Manager, error) {
 	m := &Manager{
+		logger:  logger,
 		timeout: timeout,
 		nc:      NewNetconf(urls, user, password, timeout),
 	}
@@ -128,7 +151,23 @@ func NewManager(
 
 	m.KpiNSName = m.findKpiNSName(m.startup)
 
+	m.detectSegmentationOffloadSupport(ctx)
+
 	return m, nil
+}
+
+func (m *Manager) detectSegmentationOffloadSupport(ctx context.Context) {
+	req := GetSchemaInput{
+		Identifier: "vrouter-vlan",
+	}
+	out := GetSchemaOutput{}
+
+	if err := m.nc.RPC(ctx, &req, &out); err == nil && strings.Contains(out.Data, "tso-enabled") {
+		m.featureFlags.SupportsSegmentationOffload = true
+		return
+	}
+
+	m.featureFlags.SupportsSegmentationOffload = false
 }
 
 func (m *Manager) findWorkNSName(vrouter *VRouter) (string, error) {

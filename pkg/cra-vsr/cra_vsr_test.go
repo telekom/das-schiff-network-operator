@@ -236,12 +236,13 @@ var revision = &v1alpha1.NetworkConfigRevision{
 			{
 				Name: "vlan1",
 				Layer2NetworkConfigurationSpec: v1alpha1.Layer2NetworkConfigurationSpec{
-					ID:              501,
-					MTU:             1500,
-					VNI:             4000002,
-					VRF:             "m2m",
-					AnycastMac:      "1a:ee:cf:2f:a7:a8",
-					AnycastGateways: []string{"10.250.0.1/24", "fd94:685b:30cf:501::1/64"},
+					ID:                  501,
+					MTU:                 1500,
+					DisableSegmentation: true,
+					VNI:                 4000002,
+					VRF:                 "m2m",
+					AnycastMac:          "1a:ee:cf:2f:a7:a8",
+					AnycastGateways:     []string{"10.250.0.1/24", "fd94:685b:30cf:501::1/64"},
 				},
 			}, {
 				Name: "vlan2",
@@ -392,7 +393,9 @@ var _ = Describe("CRA-VSR", func() {
 		ns, _ := manager.findWorkNSName(manager.running)
 		Expect(ns).To(Equal("hbn"))
 	})
+
 	It("Convert NodeNetworkConfig into VSR config", func() {
+		manager.featureFlags.SupportsSegmentationOffload = true
 		scheme := runtime.NewScheme()
 		utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 		utilruntime.Must(v1alpha1.AddToScheme(scheme))
@@ -505,6 +508,95 @@ var _ = Describe("CRA-VSR", func() {
 
 		Expect(generatedXML).To(MatchXML(expectedXML))
 	})
+
+	Context("When SupportsSegmentationOffload is TRUE", func() {
+		BeforeEach(func() {
+			manager.featureFlags.SupportsSegmentationOffload = true
+		})
+
+		It("Disables TSO and GSO on VLAN when DisableSegmentation is true", func() {
+			nodeSpec := &v1alpha1.NodeNetworkConfigSpec{
+				Layer2s: map[string]v1alpha1.Layer2{
+					"l2.501": {
+						VLAN:                501,
+						MTU:                 1500,
+						DisableSegmentation: true,
+					},
+				},
+			}
+
+			generated, err := manager.makeVRouter(nodeSpec)
+			Expect(err).ToNot(HaveOccurred())
+
+			ns := findNamespace(generated, manager.WorkNSName)
+			Expect(ns).ToNot(BeNil())
+
+			targetVLAN := findVLANByName(ns, "vlan.501")
+			Expect(targetVLAN).ToNot(BeNil())
+			Expect(targetVLAN.TSOEnabled).ToNot(BeNil())
+			Expect(*targetVLAN.TSOEnabled).To(BeFalse())
+			Expect(targetVLAN.GSOEnabled).ToNot(BeNil())
+			Expect(*targetVLAN.GSOEnabled).To(BeFalse())
+		})
+
+		It("Enables TSO and GSO on VLAN when DisableSegmentation is false", func() {
+			nodeSpec := &v1alpha1.NodeNetworkConfigSpec{
+				Layer2s: map[string]v1alpha1.Layer2{
+					"l2.502": {
+						VLAN:                502,
+						MTU:                 1500,
+						DisableSegmentation: false,
+					},
+				},
+			}
+
+			generated, err := manager.makeVRouter(nodeSpec)
+			Expect(err).ToNot(HaveOccurred())
+
+			ns := findNamespace(generated, manager.WorkNSName)
+			Expect(ns).ToNot(BeNil())
+
+			targetVLAN := findVLANByName(ns, "vlan.502")
+			Expect(targetVLAN).ToNot(BeNil())
+			Expect(targetVLAN.TSOEnabled).ToNot(BeNil())
+			Expect(*targetVLAN.TSOEnabled).To(BeTrue())
+			Expect(targetVLAN.GSOEnabled).ToNot(BeNil())
+			Expect(*targetVLAN.GSOEnabled).To(BeTrue())
+		})
+	})
+
+	Context("When SupportsSegmentationOffload is FALSE", func() {
+		BeforeEach(func() {
+			manager.featureFlags.SupportsSegmentationOffload = false
+		})
+
+		It("Omits tso-enabled and gso-enabled XML tags completely", func() {
+			nodeSpec := &v1alpha1.NodeNetworkConfigSpec{
+				Layer2s: map[string]v1alpha1.Layer2{
+					"l2.501": {
+						VLAN:                501,
+						MTU:                 1500,
+						DisableSegmentation: true,
+					},
+				},
+			}
+
+			generated, err := manager.makeVRouter(nodeSpec)
+			Expect(err).ToNot(HaveOccurred())
+
+			ns := findNamespace(generated, manager.WorkNSName)
+			targetVLAN := findVLANByName(ns, "vlan.501")
+			Expect(targetVLAN.TSOEnabled).To(BeNil())
+			Expect(targetVLAN.GSOEnabled).To(BeNil())
+
+			xmlBytes, err := xml.Marshal(generated)
+			Expect(err).ToNot(HaveOccurred())
+			xmlStr := string(xmlBytes)
+			Expect(xmlStr).ToNot(ContainSubstring("tso-enabled"))
+			Expect(xmlStr).ToNot(ContainSubstring("gso-enabled"))
+		})
+	})
+
 	It("Uses the management interface for PBR and node-IP static routes", func() {
 		scheme := runtime.NewScheme()
 		utilruntime.Must(clientgoscheme.AddToScheme(scheme))
@@ -567,6 +659,7 @@ var _ = Describe("CRA-VSR", func() {
 		Expect(nodeRoute.NextHops).ToNot(BeEmpty())
 		Expect(nodeRoute.NextHops[0].NextHop).To(Equal("oam0"))
 	})
+
 	It("Falls back to the trunk interface when no management interface is set", func() {
 		prevMgmtInterface := manager.baseConfig.MgmtInterfaceName
 		manager.baseConfig.MgmtInterfaceName = ""
@@ -574,6 +667,7 @@ var _ = Describe("CRA-VSR", func() {
 
 		Expect(manager.baseConfig.MgmtInterface()).To(Equal(manager.baseConfig.TrunkInterfaceName))
 	})
+
 	It("Renders listen-range peers for the management VRF", func() {
 		listenRange := "192.168.100.0/24"
 		remoteASN := int64(65099)
@@ -644,6 +738,18 @@ func findStaticRoute(routes []StaticRoute, destination string) *StaticRoute {
 	for i := range routes {
 		if routes[i].Destination == destination {
 			return &routes[i]
+		}
+	}
+	return nil
+}
+
+func findVLANByName(ns *Namespace, name string) *VLAN {
+	if ns == nil || ns.Interfaces == nil {
+		return nil
+	}
+	for i := range ns.Interfaces.VLANs {
+		if ns.Interfaces.VLANs[i].Name == name {
+			return &ns.Interfaces.VLANs[i]
 		}
 	}
 	return nil

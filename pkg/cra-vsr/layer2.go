@@ -33,13 +33,14 @@ type Layer2 struct {
 }
 
 type InfoL2 struct {
-	vlanID int
-	mtu    int
-	vni    int
-	vrf    string
-	mac    string
-	ips    []string
-	acls   []v1alpha1.MirrorACL
+	vlanID              int
+	mtu                 int
+	disableSegmentation bool
+	vni                 int
+	vrf                 string
+	mac                 string
+	ips                 []string
+	acls                []v1alpha1.MirrorACL
 }
 
 func NewLayer2(
@@ -58,10 +59,11 @@ func NewLayer2(
 func (l *Layer2) setupInformations() {
 	for _, l2 := range l.nodeCfg.Layer2s {
 		info := InfoL2{
-			vlanID: int(l2.VLAN),
-			mtu:    int(l2.MTU),
-			vni:    int(l2.VNI),
-			acls:   l2.MirrorACLs,
+			vlanID:              int(l2.VLAN),
+			mtu:                 int(l2.MTU),
+			disableSegmentation: l2.DisableSegmentation,
+			vni:                 int(l2.VNI),
+			acls:                l2.MirrorACLs,
 		}
 
 		if l2.IRB != nil {
@@ -152,7 +154,7 @@ func (l *Layer2) setup() error {
 
 		br := l.setupBridge(&info, intfs)
 		l.setupVXLAN(&info, br, l.ns.Interfaces)
-		vlan := l.mgr.createVLAN(info.vlanID, info.mtu, br, l.ns.Interfaces)
+		vlan := l.mgr.createVLAN(info.vlanID, info.mtu, info.disableSegmentation, br, l.ns.Interfaces)
 
 		// Mirror the Layer2 access port (vlan.<id>), not the bridge master, so
 		// port-to-port (east-west) traffic between the workload side and the L2VNI

@@ -175,7 +175,7 @@ func createCraManager() (*cra.Manager, error) {
 		return nil, fmt.Errorf("no CRA password provided")
 	}
 
-	craManager, err := cra.NewManager(urls, user, pwd, timeout)
+	craManager, err := cra.NewManager(urls, user, pwd, timeout, ctrl.Log.WithName("setup"))
 	if err != nil {
 		return nil, fmt.Errorf("error creating CRA manager: %w", err)
 	}
