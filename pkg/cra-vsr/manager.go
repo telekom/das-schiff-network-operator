@@ -95,16 +95,24 @@ type Metrics struct {
 	BridgeFDB        ShowBridgeFDBOutput
 }
 
-func NewManager(
+// NewManagerWithKnownHosts creates a CRA manager that verifies CRA host keys
+// against the supplied known_hosts file.
+func NewManagerWithKnownHosts(
 	urls []string,
 	user, password string,
+	knownHostsPath string,
 	timeout time.Duration,
 	logger logr.Logger,
 ) (*Manager, error) {
+	netconfClient, err := NewNetconfWithKnownHosts(urls, user, password, knownHostsPath, timeout)
+	if err != nil {
+		return nil, err
+	}
+
 	m := &Manager{
 		logger:  logger,
 		timeout: timeout,
-		nc:      NewNetconf(urls, user, password, timeout),
+		nc:      netconfClient,
 	}
 	ctx := context.Background()
 
