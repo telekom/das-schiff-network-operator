@@ -186,8 +186,15 @@ jobs:
 
       - name: system-level-dependencies
         run: |
-          sudo apt update
-          sudo apt -y install linux-modules-extra-$(uname -r)
+          sudo apt-get update
+          # Newer Ubuntu kernels ship these modules in linux-modules and have no
+          # linux-modules-extra package (actions/runner-images#15026).
+          pkg="linux-modules-extra-$(uname -r)"
+          if ! apt-cache show "$pkg" >/dev/null 2>&1; then
+            pkg="linux-modules-$(uname -r)"
+          fi
+          sudo apt-get -y install "$pkg"
+          modinfo fou vrf vxlan macvlan >/dev/null
 
       - name: Download all E2E images
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
