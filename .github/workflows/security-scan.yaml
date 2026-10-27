@@ -47,6 +47,9 @@ jobs:
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
 
+      - name: Test govulncheck report script
+        run: python3 .github/scripts/test_govulncheck_report.py
+
       - name: Run govulncheck
         # JSON output exits zero for findings, so the report enforces the
         # reachable-vulnerability policy. Scanner execution errors retain
