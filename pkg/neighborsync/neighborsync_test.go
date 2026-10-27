@@ -12,7 +12,6 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/vishvananda/netlink"
-	netlinkNl "github.com/vishvananda/netlink/nl"
 	"go.uber.org/mock/gomock"
 	"golang.org/x/sys/unix"
 
@@ -25,50 +24,10 @@ func TestNeighborSync(t *testing.T) {
 	RunSpecs(t, "NeighborSync Suite")
 }
 
-// noopNetlinkOps is a no-op implementation of nl.ToolkitInterface for tests that do not
-// exercise any netlink operations (e.g. timer/map logic tests).
-type noopNetlinkOps struct{}
-
-func (noopNetlinkOps) LinkByIndex(_ int) (netlink.Link, error)     { return &netlink.Dummy{}, nil }
-func (noopNetlinkOps) NeighList(_, _ int) ([]netlink.Neigh, error) { return nil, nil }
-func (noopNetlinkOps) NeighSet(_ *netlink.Neigh) error             { return nil }
-func (noopNetlinkOps) LinkByName(_ string) (netlink.Link, error)   { return &netlink.Dummy{}, nil }
-func (noopNetlinkOps) LinkList() ([]netlink.Link, error)           { return nil, nil }
-func (noopNetlinkOps) NewIPNet(_ net.IP) *net.IPNet                { return nil }
-func (noopNetlinkOps) RouteListFiltered(_ int, _ *netlink.Route, _ uint64) ([]netlink.Route, error) {
-	return nil, nil
-}
-func (noopNetlinkOps) RouteDel(_ *netlink.Route) error                        { return nil }
-func (noopNetlinkOps) RouteAdd(_ *netlink.Route) error                        { return nil }
-func (noopNetlinkOps) AddrList(_ netlink.Link, _ int) ([]netlink.Addr, error) { return nil, nil }
-func (noopNetlinkOps) VethPeerIndex(_ *netlink.Veth) (int, error)             { return 0, nil }
-func (noopNetlinkOps) ParseAddr(_ string) (*netlink.Addr, error)              { return nil, nil }
-func (noopNetlinkOps) LinkDel(_ netlink.Link) error                           { return nil }
-func (noopNetlinkOps) LinkSetUp(_ netlink.Link) error                         { return nil }
-func (noopNetlinkOps) LinkAdd(_ netlink.Link) error                           { return nil }
-func (noopNetlinkOps) AddrAdd(_ netlink.Link, _ *netlink.Addr) error          { return nil }
-func (noopNetlinkOps) AddrDel(_ netlink.Link, _ *netlink.Addr) error          { return nil }
-func (noopNetlinkOps) LinkSetLearning(_ netlink.Link, _ bool) error           { return nil }
-func (noopNetlinkOps) LinkSetHairpin(_ netlink.Link, _ bool) error            { return nil }
-func (noopNetlinkOps) FilterAdd(_ netlink.Filter) error                       { return nil }
-func (noopNetlinkOps) FilterDel(_ netlink.Filter) error                       { return nil }
-func (noopNetlinkOps) ExecuteNetlinkRequest(_ *netlinkNl.NetlinkRequest, _ int, _ uint16) ([][]byte, error) {
-	return nil, nil
-}
-func (noopNetlinkOps) LinkSetMTU(_ netlink.Link, _ int) error                       { return nil }
-func (noopNetlinkOps) LinkSetDown(_ netlink.Link) error                             { return nil }
-func (noopNetlinkOps) LinkSetHardwareAddr(_ netlink.Link, _ net.HardwareAddr) error { return nil }
-func (noopNetlinkOps) LinkSetMasterByIndex(_ netlink.Link, _ int) error             { return nil }
-func (noopNetlinkOps) LinkSetNoMaster(_ netlink.Link) error                         { return nil }
-func (noopNetlinkOps) LinkGetProtinfo(_ netlink.Link) (netlink.Protinfo, error) {
-	return netlink.Protinfo{}, nil
-}
-func (noopNetlinkOps) LinkSetMaster(_, _ netlink.Link) error             { return nil }
-func (noopNetlinkOps) QdiscList(_ netlink.Link) ([]netlink.Qdisc, error) { return nil, nil }
-func (noopNetlinkOps) QdiscAdd(_ netlink.Qdisc) error                    { return nil }
-func (noopNetlinkOps) QdiscDel(_ netlink.Qdisc) error                    { return nil }
-func (noopNetlinkOps) FilterList(_ netlink.Link, _ uint32) ([]netlink.Filter, error) {
-	return nil, nil
+// newNetlinkMock returns a strict netlink mock with no expectations: tests
+// using it assert that the code path under test makes no netlink calls.
+func newNetlinkMock() nl.ToolkitInterface {
+	return mock_nl.NewMockToolkitInterface(gomock.NewController(GinkgoT()))
 }
 
 func newTestNeighborSync(nlOps nl.ToolkitInterface) *NeighborSync {
@@ -81,7 +40,7 @@ func newTestNeighborSync(nlOps nl.ToolkitInterface) *NeighborSync {
 
 var _ = Describe("createTimerIfNotExists()", func() {
 	It("stores a new timer when none exists", func() {
-		n := newTestNeighborSync(&noopNetlinkOps{})
+		n := newTestNeighborSync(newNetlinkMock())
 		mac := net.HardwareAddr{0x01, 0x02, 0x03, 0x04, 0x05, 0x06}
 		addr := netip.MustParseAddr("10.0.0.1")
 
@@ -97,7 +56,7 @@ var _ = Describe("createTimerIfNotExists()", func() {
 	})
 
 	It("updates the MAC address when a timer already exists", func() {
-		n := newTestNeighborSync(&noopNetlinkOps{})
+		n := newTestNeighborSync(newNetlinkMock())
 		addr := netip.MustParseAddr("10.0.0.1")
 		mac1 := net.HardwareAddr{0x01, 0x02, 0x03, 0x04, 0x05, 0x06}
 		mac2 := net.HardwareAddr{0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF}
@@ -112,7 +71,7 @@ var _ = Describe("createTimerIfNotExists()", func() {
 	})
 
 	It("stores separate timers for different link indices", func() {
-		n := newTestNeighborSync(&noopNetlinkOps{})
+		n := newTestNeighborSync(newNetlinkMock())
 		mac := net.HardwareAddr{0x01, 0x02, 0x03, 0x04, 0x05, 0x06}
 		addr := netip.MustParseAddr("10.0.0.1")
 
@@ -128,7 +87,7 @@ var _ = Describe("createTimerIfNotExists()", func() {
 
 var _ = Describe("deleteTimerIfExists()", func() {
 	It("removes an existing timer", func() {
-		n := newTestNeighborSync(&noopNetlinkOps{})
+		n := newTestNeighborSync(newNetlinkMock())
 		mac := net.HardwareAddr{0x01, 0x02, 0x03, 0x04, 0x05, 0x06}
 		addr := netip.MustParseAddr("10.0.0.1")
 		n.createTimerIfNotExists(1, mac, addr)
@@ -140,7 +99,7 @@ var _ = Describe("deleteTimerIfExists()", func() {
 	})
 
 	It("is a no-op when no timer exists", func() {
-		n := newTestNeighborSync(&noopNetlinkOps{})
+		n := newTestNeighborSync(newNetlinkMock())
 		addr := netip.MustParseAddr("10.0.0.1")
 
 		Expect(func() { n.deleteTimerIfExists(99, addr) }).NotTo(Panic())
@@ -149,7 +108,7 @@ var _ = Describe("deleteTimerIfExists()", func() {
 
 var _ = Describe("handleNeighborDelete()", func() {
 	It("removes the timer for the deleted neighbor", func() {
-		n := newTestNeighborSync(&noopNetlinkOps{})
+		n := newTestNeighborSync(newNetlinkMock())
 		mac := net.HardwareAddr{0x01, 0x02, 0x03, 0x04, 0x05, 0x06}
 		addr := netip.MustParseAddr("192.168.1.1")
 		n.createTimerIfNotExists(3, mac, addr)
@@ -164,7 +123,7 @@ var _ = Describe("handleNeighborDelete()", func() {
 
 var _ = Describe("handleNeighborAdd()", func() {
 	It("creates a timer when state is NUD_REACHABLE", func() {
-		n := newTestNeighborSync(&noopNetlinkOps{})
+		n := newTestNeighborSync(newNetlinkMock())
 		addr := netip.MustParseAddr("10.1.2.3")
 
 		neigh := &netlink.Neigh{
@@ -180,7 +139,7 @@ var _ = Describe("handleNeighborAdd()", func() {
 	It("does not create a timer when state is NUD_STALE (sends request instead)", func() {
 		requestSent := false
 		n := &NeighborSync{
-			nlOps:                    &noopNetlinkOps{},
+			nlOps:                    newNetlinkMock(),
 			sendGratuitousNeighborFn: func(_ int, _ netip.Addr, _ net.HardwareAddr) {},
 			sendNeighborRequestFn:    func(_ int, _ net.HardwareAddr, _ netip.Addr) { requestSent = true },
 		}
@@ -202,7 +161,7 @@ var _ = Describe("handleNeighborAdd()", func() {
 	It("deletes timer and sends gratuitous neighbor when NTF_EXT_LEARNED and bridge registered", func() {
 		gratSent := false
 		n := &NeighborSync{
-			nlOps:                    &noopNetlinkOps{},
+			nlOps:                    newNetlinkMock(),
 			sendNeighborRequestFn:    func(_ int, _ net.HardwareAddr, _ netip.Addr) {},
 			sendGratuitousNeighborFn: func(_ int, _ netip.Addr, _ net.HardwareAddr) { gratSent = true },
 		}
@@ -227,7 +186,7 @@ var _ = Describe("handleNeighborAdd()", func() {
 	It("deletes timer but skips gratuitous neighbor when NTF_EXT_LEARNED and bridge not registered", func() {
 		gratSent := false
 		n := &NeighborSync{
-			nlOps:                    &noopNetlinkOps{},
+			nlOps:                    newNetlinkMock(),
 			sendNeighborRequestFn:    func(_ int, _ net.HardwareAddr, _ netip.Addr) {},
 			sendGratuitousNeighborFn: func(_ int, _ netip.Addr, _ net.HardwareAddr) { gratSent = true },
 		}
@@ -251,7 +210,7 @@ var _ = Describe("handleNeighborAdd()", func() {
 
 var _ = Describe("processUpdate()", func() {
 	It("ignores updates for interfaces not in neighRefreshInterfaces", func() {
-		n := newTestNeighborSync(&noopNetlinkOps{})
+		n := newTestNeighborSync(newNetlinkMock())
 		ip := net.ParseIP("10.0.0.1").To4()
 		update := &netlink.NeighUpdate{
 			Type:  unix.RTM_NEWNEIGH,
@@ -265,7 +224,7 @@ var _ = Describe("processUpdate()", func() {
 	})
 
 	It("processes RTM_NEWNEIGH for tracked interfaces", func() {
-		n := newTestNeighborSync(&noopNetlinkOps{})
+		n := newTestNeighborSync(newNetlinkMock())
 		n.neighRefreshInterfaces.Store(10, struct{}{})
 
 		ip := net.ParseIP("10.0.0.2").To4()
@@ -286,7 +245,7 @@ var _ = Describe("processUpdate()", func() {
 	})
 
 	It("processes RTM_DELNEIGH for tracked interfaces", func() {
-		n := newTestNeighborSync(&noopNetlinkOps{})
+		n := newTestNeighborSync(newNetlinkMock())
 		n.neighRefreshInterfaces.Store(10, struct{}{})
 
 		ip := net.ParseIP("10.0.0.3").To4()
@@ -305,7 +264,7 @@ var _ = Describe("processUpdate()", func() {
 	})
 
 	It("ignores unrecognised netlink message types", func() {
-		n := newTestNeighborSync(&noopNetlinkOps{})
+		n := newTestNeighborSync(newNetlinkMock())
 		n.neighRefreshInterfaces.Store(10, struct{}{})
 
 		ip := net.ParseIP("10.0.0.4").To4()
@@ -319,7 +278,7 @@ var _ = Describe("processUpdate()", func() {
 
 var _ = Describe("replaceNeighborReachable()", func() {
 	It("returns error when IP is empty", func() {
-		n := newTestNeighborSync(&noopNetlinkOps{})
+		n := newTestNeighborSync(newNetlinkMock())
 		var mac [6]byte
 		err := n.replaceNeighborReachable(1, unix.AF_INET, net.IP{}, mac)
 		Expect(err).To(HaveOccurred())
