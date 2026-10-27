@@ -184,15 +184,8 @@ jobs:
         working-directory: e2e/setup
         run: go test ./...
 
-      - name: Free disk space
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
-          docker system prune -af || true
-          df -h
-
       - name: system-level-dependencies
         run: |
-          sudo rm -f /etc/apt/sources.list.d/azure-cli.* /etc/apt/sources.list.d/microsoft-prod.* /etc/apt/sources.list.d/packages-microsoft-prod.*
           sudo apt update
           sudo apt -y install linux-modules-extra-$(uname -r)
 
