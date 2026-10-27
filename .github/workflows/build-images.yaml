@@ -63,7 +63,9 @@ jobs:
 
       - name: Read Go version
         id: go-version
-        run: echo "version=$(awk '/^go / { print $2 }' go.mod)" >> $GITHUB_OUTPUT
+        # Prefer the toolchain directive so images build with the patched Go release.
+        run: |
+          echo "version=$(awk '/^go / { g = $2 } /^toolchain go/ { t = substr($2, 3) } END { print (t != "" ? t : g) }' go.mod)" >> $GITHUB_OUTPUT
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
