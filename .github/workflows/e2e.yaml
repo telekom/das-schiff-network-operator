@@ -169,7 +169,7 @@ jobs:
   e2e:
     name: E2E Tests
     needs: [build-kind-node, build-e2e-images, build-infra-images]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     timeout-minutes: 60
     permissions:
       contents: read
