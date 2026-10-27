@@ -104,14 +104,6 @@ func NewManagerWithKnownHosts(
 	timeout time.Duration,
 	logger logr.Logger,
 ) (*Manager, error) {
-	return buildManager(urls, user, password, knownHostsPath, timeout)
-}
-
-func buildManager(
-	urls []string,
-	user, password, knownHostsPath string,
-	timeout time.Duration,
-) (*Manager, error) {
 	netconfClient, err := NewNetconfWithKnownHosts(urls, user, password, knownHostsPath, timeout)
 	if err != nil {
 		return nil, err

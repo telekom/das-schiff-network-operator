@@ -26,6 +26,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-logr/logr"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
 )
@@ -155,6 +156,7 @@ func TestNewManagerWithKnownHosts_ValidatesBeforeDeviceAccess(t *testing.T) {
 		"password",
 		" ",
 		time.Second,
+		logr.Discard(),
 	)
 	if err == nil {
 		t.Fatal("NewManagerWithKnownHosts returned nil error, want known hosts validation error")
