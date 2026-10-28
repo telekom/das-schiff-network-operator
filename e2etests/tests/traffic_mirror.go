@@ -158,19 +158,12 @@ func testMirrorACL(cfg *config.Config) map[string]interface{} {
 		"trafficMatch": map[string]interface{}{
 			"srcPrefix": cfg.Macvlan01IPv4 + "/32",
 		},
-		"mirrorDestination": "gre-mirror-test",
+		// collector-prod in mirror/manifests.yaml uses gre- plus its first eight SHA-256 characters.
+		"mirrorDestination": "gre-b8396f72",
 		"direction":         "ingress",
 	}
 }
 
-// verifyMirrorCapture verifies that traffic is mirrored to a capture pod.
-// It starts tcpdump on capturePod FIRST (to avoid missing packets), waits for the
-// process to be active, then sends a ping from srcPod to targetIP, stops the capture,
-// and asserts that at least one packet from srcPod was captured.
-//
-// captureIface is the interface on capturePod to listen on (e.g. "net1").
-// srcPod and srcPodNS identify the pod from which to send test traffic.
-// targetIP is the ping destination.
 // TC-09: Traffic Mirroring (MirrorACL).
 var _ = Describe("Traffic Mirroring", Label("mirror"), func() {
 	var (
