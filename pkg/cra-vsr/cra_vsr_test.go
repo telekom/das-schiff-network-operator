@@ -48,6 +48,30 @@ func TestCraVsr(t *testing.T) {
 	RunSpecs(t, "CRA-VSR test suite")
 }
 
+func TestFindKpiNSNameYANGDefaults(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		kpi  string
+		want string
+	}{
+		{name: "absent KPI"},
+		{name: "absent telegraf", kpi: `<kpi xmlns="urn:6wind:vrouter/kpi"/>`},
+		{name: "absent metrics", kpi: `<kpi xmlns="urn:6wind:vrouter/kpi"><telegraf xmlns="urn:6wind:vrouter/kpi/telegraf"/></kpi>`},
+		{name: "omitted defaults", kpi: `<kpi xmlns="urn:6wind:vrouter/kpi"><telegraf xmlns="urn:6wind:vrouter/kpi/telegraf"><metrics/></telegraf></kpi>`, want: "main"},
+		{name: "explicit enabled", kpi: `<kpi xmlns="urn:6wind:vrouter/kpi"><telegraf xmlns="urn:6wind:vrouter/kpi/telegraf"><enabled>true</enabled><metrics><enabled>true</enabled></metrics></telegraf></kpi>`, want: "main"},
+		{name: "telegraf disabled", kpi: `<kpi xmlns="urn:6wind:vrouter/kpi"><telegraf xmlns="urn:6wind:vrouter/kpi/telegraf"><enabled>false</enabled><metrics/></telegraf></kpi>`},
+		{name: "metrics disabled", kpi: `<kpi xmlns="urn:6wind:vrouter/kpi"><telegraf xmlns="urn:6wind:vrouter/kpi/telegraf"><metrics><enabled>false</enabled></metrics></telegraf></kpi>`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var vrouter VRouter
+			data := `<config xmlns="urn:6wind:vrouter"><vrf><name>main</name>` + tt.kpi + `</vrf></config>`
+			require.NoError(t, xml.Unmarshal([]byte(data), &vrouter))
+			mgr := &Manager{}
+			assert.Equal(t, tt.want, mgr.findKpiNSName(&vrouter))
+		})
+	}
+}
+
 func TestStaticRouteLastResort(t *testing.T) {
 	vrf := "combo"
 	address := "192.0.2.1"
