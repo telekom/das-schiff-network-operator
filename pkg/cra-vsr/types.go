@@ -177,6 +177,17 @@ type Telegraf struct {
 	Metrics  *TelegrafMetrics   `xml:"metrics,omitempty"`
 }
 
+func (telegraf *Telegraf) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
+	// vrouter-telegraf defaults enabled to true, which NETCONF may omit.
+	type plain Telegraf
+	decoded := plain{Enabled: true}
+	if err := d.DecodeElement(&decoded, &start); err != nil {
+		return err
+	}
+	*telegraf = Telegraf(decoded)
+	return nil
+}
+
 type PrometheusClient struct {
 	Address string `xml:"address"`
 	Port    int    `xml:"port"`
@@ -187,6 +198,17 @@ type TelegrafMetrics struct {
 	MonitoredIntfs []MonitoredIntf  `xml:"monitored-interface,omitempty"`
 	Template       *string          `xml:"template,omitempty"`
 	Metrics        []TelegrafMetric `xml:"metric,omitempty"`
+}
+
+func (metrics *TelegrafMetrics) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
+	// The metrics presence container also defaults enabled to true.
+	type plain TelegrafMetrics
+	decoded := plain{Enabled: true}
+	if err := d.DecodeElement(&decoded, &start); err != nil {
+		return err
+	}
+	*metrics = TelegrafMetrics(decoded)
+	return nil
 }
 
 type MonitoredIntf struct {
