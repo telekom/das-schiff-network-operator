@@ -19,6 +19,7 @@ package builder
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -60,23 +61,28 @@ func TestL2ABuilder_Name(t *testing.T) {
 }
 
 func TestSortedLayer2Attachments(t *testing.T) {
+	older := metav1.NewTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+	newer := metav1.NewTime(older.Add(time.Hour))
 	items := []nc.Layer2Attachment{
-		{ObjectMeta: metav1.ObjectMeta{Namespace: testTenantB, Name: "attachment-a"}},
-		{ObjectMeta: metav1.ObjectMeta{Namespace: testTenantA, Name: "attachment-b"}},
-		{ObjectMeta: metav1.ObjectMeta{Namespace: testTenantA, Name: "attachment-a"}},
+		{ObjectMeta: metav1.ObjectMeta{Namespace: testTenantA, Name: "aaa-newest", CreationTimestamp: newer}},
+		{ObjectMeta: metav1.ObjectMeta{Namespace: testTenantB, Name: "attachment-a", CreationTimestamp: older}},
+		{ObjectMeta: metav1.ObjectMeta{Namespace: testTenantA, Name: "attachment-b", CreationTimestamp: older}},
+		{ObjectMeta: metav1.ObjectMeta{Namespace: testTenantA, Name: "attachment-a", CreationTimestamp: older}},
 	}
 
 	sorted := sortedLayer2Attachments(items)
+	got := make([]string, 0, len(sorted))
+	for _, item := range sorted {
+		got = append(got, item.Namespace+"/"+item.Name)
+	}
+	// Oldest first; equal timestamps fall back to namespace/name.
 	assert.Equal(t, []string{
 		testTenantA + "/attachment-a",
 		testTenantA + "/attachment-b",
 		testTenantB + "/attachment-a",
-	}, []string{
-		sorted[0].Namespace + "/" + sorted[0].Name,
-		sorted[1].Namespace + "/" + sorted[1].Name,
-		sorted[2].Namespace + "/" + sorted[2].Name,
-	})
-	assert.Equal(t, testTenantB, items[0].Namespace, "sorting must not mutate resolver input")
+		testTenantA + "/aaa-newest",
+	}, got)
+	assert.Equal(t, "aaa-newest", items[0].Name, "sorting must not mutate resolver input")
 }
 
 func TestL2ABuilder_EmptyData(t *testing.T) {
@@ -994,6 +1000,58 @@ func TestL2ABuilder_OwnershipConflictIdentifiesNamespaces(t *testing.T) {
 	assert.Equal(t, testTenantB, issues[0].Namespace)
 	assert.Contains(t, issues[0].Message, testTenantA+"/attachment")
 	assert.Contains(t, issues[0].Message, testTenantB+"/attachment")
+}
+
+func TestL2ABuilder_SlotConflictWinnerIsDeterministic(t *testing.T) {
+	vlan := int32(501)
+	vni := int32(10501)
+	older := metav1.NewTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+	newer := metav1.NewTime(older.Add(time.Hour))
+
+	// Each L2A carries a distinct MTU so the winner is identifiable in the output.
+	mtus := map[string]int32{"l2a-old": 1400, "l2a-new": 1401, "l2a-a": 1402, "l2a-b": 1403}
+	mk := func(name string, ts metav1.Time) nc.Layer2Attachment {
+		return nc.Layer2Attachment{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default", CreationTimestamp: ts},
+			Spec:       nc.Layer2AttachmentSpec{NetworkRef: "net-vlan501", MTU: ptr(mtus[name])},
+		}
+	}
+	build := func(l2as ...nc.Layer2Attachment) string {
+		data := &resolver.ResolvedData{
+			Nodes: []corev1.Node{{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}}},
+			Networks: map[string]*resolver.ResolvedNetwork{
+				"net-vlan501": {Name: "net-vlan501", Spec: nc.NetworkSpec{VLAN: &vlan, VNI: &vni, IPv4: &nc.IPNetwork{CIDR: "10.0.1.1/24"}}},
+			},
+			Layer2Attachments: l2as,
+		}
+		result, err := NewL2ABuilder().Build(context.Background(), data)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		l2, ok := result["node-1"].Layer2s["501"]
+		if !ok {
+			t.Fatalf("expected VLAN 501 to be configured, got %+v", result["node-1"].Layer2s)
+		}
+		for name, mtu := range mtus {
+			if int32(l2.MTU) == mtu {
+				return name
+			}
+		}
+		t.Fatalf("unexpected MTU %d in VLAN 501 config", l2.MTU)
+		return ""
+	}
+
+	// The input order (informer cache order) must not decide the winner.
+	if got := build(mk("l2a-new", newer), mk("l2a-old", older)); got != "l2a-old" {
+		t.Errorf("expected the older L2A to keep the slot, got %q", got)
+	}
+	if got := build(mk("l2a-old", older), mk("l2a-new", newer)); got != "l2a-old" {
+		t.Errorf("expected the older L2A to keep the slot, got %q", got)
+	}
+	// Equal timestamps fall back to the name.
+	if got := build(mk("l2a-b", older), mk("l2a-a", older)); got != "l2a-a" {
+		t.Errorf("expected name tie-break to pick l2a-a, got %q", got)
+	}
 }
 
 func TestL2ABuilder_DefaultVLANNameConflictsWithInterfaceName(t *testing.T) {

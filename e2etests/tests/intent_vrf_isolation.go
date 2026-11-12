@@ -34,6 +34,9 @@ var _ = Describe("Intent: VRF Isolation", Label("intent", "vrf"), func() {
 		vrf, err := readTestdata("intent/vrf/manifests.yaml")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(f.ApplyManifest(ctx, vrf)).To(Succeed())
+		DeferCleanup(func() {
+			_ = f.DeleteManifest(context.Background(), vrf)
+		})
 
 		By("Applying NADs for m2m (VLAN 501) and c2m (VLAN 503)")
 		nad501, err := readTestdata("l2-connectivity/nad.yaml")
