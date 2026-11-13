@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+#
+# SPDX-License-Identifier: CC0-1.0
+
 processor:
   # Drop the generated *List wrapper types and boilerplate helper structs;
   # they add noise to user-facing docs.
