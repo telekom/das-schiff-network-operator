@@ -17,11 +17,13 @@ limitations under the License.
 package cra
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/base64"
+	"encoding/pem"
 	"errors"
 	"io"
 	"net"
@@ -136,7 +138,7 @@ func TestNewNetconf_NormalizesCRAURLs(t *testing.T) {
 		t.Fatalf("write known_hosts: %v", err)
 	}
 
-	nc, err := NewNetconfWithKnownHosts([]string{" 169.254.33.1:830 ", ""}, "user", "password", path, 0, SSHOptions{})
+	nc, err := NewNetconfWithKnownHosts([]string{" 169.254.33.1:830 ", ""}, "user", ssh.Password("password"), path, 0, SSHOptions{})
 	if err != nil {
 		t.Fatalf("NewNetconfWithKnownHosts returned error: %v", err)
 	}
@@ -146,7 +148,7 @@ func TestNewNetconf_NormalizesCRAURLs(t *testing.T) {
 }
 
 func TestNewNetconfWithKnownHosts_RejectsMissingKnownHostsPath(t *testing.T) {
-	_, err := NewNetconfWithKnownHosts([]string{"169.254.33.1:830"}, "user", "password", " ", 0, SSHOptions{})
+	_, err := NewNetconfWithKnownHosts([]string{"169.254.33.1:830"}, "user", ssh.Password("password"), " ", 0, SSHOptions{})
 	if err == nil {
 		t.Fatal("NewNetconfWithKnownHosts returned nil error, want missing known hosts path error")
 	}
@@ -159,7 +161,7 @@ func TestNewManagerWithKnownHosts_ValidatesBeforeDeviceAccess(t *testing.T) {
 	_, err := NewManagerWithKnownHosts(
 		[]string{"169.254.33.1:830"},
 		"user",
-		"password",
+		ssh.Password("password"),
 		" ",
 		time.Second,
 		SSHOptions{},
@@ -274,14 +276,14 @@ func serveTestNetconf(conn net.Conn, cfg *ssh.ServerConfig) {
 	}
 }
 
-func newTestNetconf(t *testing.T, addr string, knownHostKey ssh.PublicKey, opts SSHOptions) *Netconf {
+func newTestNetconf(t *testing.T, addr string, knownHostKey ssh.PublicKey, auth ssh.AuthMethod, opts SSHOptions) *Netconf {
 	t.Helper()
 
 	path := filepath.Join(t.TempDir(), "known_hosts")
 	if err := os.WriteFile(path, []byte(knownhosts.Line([]string{addr}, knownHostKey)+"\n"), 0o600); err != nil {
 		t.Fatalf("write known_hosts: %v", err)
 	}
-	nc, err := NewNetconfWithKnownHosts([]string{addr}, testNetconfUser, testNetconfPassword, path, 5*time.Second, opts)
+	nc, err := NewNetconfWithKnownHosts([]string{addr}, testNetconfUser, auth, path, 5*time.Second, opts)
 	if err != nil {
 		t.Fatalf("NewNetconfWithKnownHosts: %v", err)
 	}
@@ -312,7 +314,7 @@ func TestNetconfOpen_MatchingHostKeyConnects(t *testing.T) {
 	hostKey := newTestED25519Signer(t)
 	srv := startTestSSHServer(t, hostKey, nil)
 
-	nc := newTestNetconf(t, srv.addr, hostKey.PublicKey(), SSHOptions{})
+	nc := newTestNetconf(t, srv.addr, hostKey.PublicKey(), ssh.Password(testNetconfPassword), SSHOptions{})
 	if err := nc.Open(context.Background()); err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -373,7 +375,7 @@ func TestNetconfOpen_RejectsBeforeAuthentication(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			srv := startTestSSHServer(t, tt.hostKey, tt.configure)
-			nc := newTestNetconf(t, srv.addr, tt.knownHostKey(tt.hostKey), SSHOptions{})
+			nc := newTestNetconf(t, srv.addr, tt.knownHostKey(tt.hostKey), ssh.Password(testNetconfPassword), SSHOptions{})
 
 			err := nc.Open(context.Background())
 			if err == nil {
@@ -388,7 +390,7 @@ func TestNetconfOpen_RejectsBeforeAuthentication(t *testing.T) {
 }
 
 func TestBuildNetconf_RestrictsAlgorithms(t *testing.T) {
-	nc := buildNetconf([]string{"169.254.33.1:830"}, "user", "password", time.Second, ssh.FixedHostKey(newTestPublicKey(t)), SSHOptions{})
+	nc := buildNetconf([]string{"169.254.33.1:830"}, "user", ssh.Password("password"), time.Second, ssh.FixedHostKey(newTestPublicKey(t)), SSHOptions{})
 
 	want := map[string][]string{
 		"KeyExchanges": {"curve25519-sha256", "ecdh-sha2-nistp521", "ecdh-sha2-nistp384", "ecdh-sha2-nistp256", "diffie-hellman-group16-sha512"},
@@ -409,6 +411,133 @@ func TestBuildNetconf_RestrictsAlgorithms(t *testing.T) {
 	}
 }
 
+func writeTestFile(t *testing.T, name string, data []byte, mode os.FileMode) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), name)
+	if err := os.WriteFile(path, data, mode); err != nil {
+		t.Fatalf("write %s: %v", name, err)
+	}
+	if err := os.Chmod(path, mode); err != nil { // WriteFile honours the umask
+		t.Fatalf("chmod %s: %v", name, err)
+	}
+	return path
+}
+
+func newTestClientKeyFile(t *testing.T, mode os.FileMode) (path string, publicKey ssh.PublicKey) {
+	t.Helper()
+
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate client key: %v", err)
+	}
+	block, err := ssh.MarshalPrivateKey(priv, "")
+	if err != nil {
+		t.Fatalf("marshal client key: %v", err)
+	}
+	sshPub, err := ssh.NewPublicKey(pub)
+	if err != nil {
+		t.Fatalf("convert client key: %v", err)
+	}
+	return writeTestFile(t, "id_ed25519", pem.EncodeToMemory(block), mode), sshPub
+}
+
+func TestNetconfOpen_KeyFileAuth(t *testing.T) {
+	enrolledKeyFile, enrolledKey := newTestClientKeyFile(t, 0o600)
+	unknownKeyFile, _ := newTestClientKeyFile(t, 0o600)
+	passwordFile := writeTestFile(t, "password", []byte(testNetconfPassword+"\n"), 0o600)
+	acceptEnrolledKey := func(c ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
+		if c.User() == testNetconfUser && bytes.Equal(key.Marshal(), enrolledKey.Marshal()) {
+			return &ssh.Permissions{}, nil
+		}
+		return nil, errors.New("public key rejected")
+	}
+	keyOnly := func(cfg *ssh.ServerConfig) {
+		cfg.PasswordCallback = nil
+		cfg.PublicKeyCallback = acceptEnrolledKey
+	}
+
+	tests := []struct {
+		name         string
+		keyFile      string
+		passwordFile string
+		configure    func(*ssh.ServerConfig)
+		wantErr      bool
+	}{
+		{name: "enrolled key connects", keyFile: enrolledKeyFile, configure: keyOnly},
+		{name: "unknown key is refused", keyFile: unknownKeyFile, configure: keyOnly, wantErr: true},
+		{name: "password file connects", passwordFile: passwordFile},
+		{name: "password-only client is refused by key-only server", passwordFile: passwordFile, configure: keyOnly, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			hostKey := newTestED25519Signer(t)
+			srv := startTestSSHServer(t, hostKey, tt.configure)
+
+			auth, err := AuthFromFiles(tt.keyFile, tt.passwordFile)
+			if err != nil {
+				t.Fatalf("AuthFromFiles: %v", err)
+			}
+			err = newTestNetconf(t, srv.addr, hostKey.PublicKey(), auth, SSHOptions{}).Open(context.Background())
+			if tt.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "unable to authenticate") {
+					t.Fatalf("Open error = %v, want authentication failure", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Open: %v", err)
+			}
+		})
+	}
+}
+
+func TestAuthFromFiles_RejectsInvalidFiles(t *testing.T) {
+	looseKeyFile, _ := newTestClientKeyFile(t, 0o644)
+	emptyPasswordFile := writeTestFile(t, "password", []byte("\n"), 0o600)
+
+	tests := []struct {
+		name         string
+		keyFile      string
+		passwordFile string
+		wantErrSub   string
+	}{
+		{name: "key file with mode 0644", keyFile: looseKeyFile, wantErrSub: "has mode 0644, must not be wider than 0600"},
+		{name: "missing key file", keyFile: filepath.Join(t.TempDir(), "missing"), wantErrSub: "no such file"},
+		{name: "empty password file", passwordFile: emptyPasswordFile, wantErrSub: "is empty"},
+		{name: "no file", wantErrSub: "no private key file or password file provided"},
+		{name: "encrypted key file", keyFile: newEncryptedTestKeyFile(t), wantErrSub: "is encrypted"},
+		{name: "key file holds no key", keyFile: writeTestFile(t, "not-a-key", []byte("secret"), 0o600), wantErrSub: "parse private key file"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := AuthFromFiles(tt.keyFile, tt.passwordFile)
+			if err == nil || !strings.Contains(err.Error(), tt.wantErrSub) {
+				t.Fatalf("AuthFromFiles error = %v, want substring %q", err, tt.wantErrSub)
+			}
+			if strings.Contains(err.Error(), "secret") || strings.Contains(err.Error(), "PRIVATE KEY") {
+				t.Fatalf("AuthFromFiles error leaks credential content: %v", err)
+			}
+		})
+	}
+}
+
+func newEncryptedTestKeyFile(t *testing.T) string {
+	t.Helper()
+
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate client key: %v", err)
+	}
+	block, err := ssh.MarshalPrivateKeyWithPassphrase(priv, "", []byte("passphrase"))
+	if err != nil {
+		t.Fatalf("marshal client key: %v", err)
+	}
+	return writeTestFile(t, "id_ed25519_encrypted", pem.EncodeToMemory(block), 0o600)
+}
+
 func newTestRSASigner(t *testing.T, bits int) ssh.Signer {
 	t.Helper()
 
@@ -427,7 +556,7 @@ func TestNetconfOpen_RequestsHostKeyTypeFromKnownHosts(t *testing.T) {
 		cfg.AddHostKey(rsaHostKey)
 	})
 
-	nc := newTestNetconf(t, srv.addr, rsaHostKey.PublicKey(), SSHOptions{})
+	nc := newTestNetconf(t, srv.addr, rsaHostKey.PublicKey(), ssh.Password(testNetconfPassword), SSHOptions{})
 	if got := strings.Join(nc.hostKeyAlgorithms[srv.addr], ","); got != "rsa-sha2-512,rsa-sha2-256" {
 		t.Fatalf("host key algorithms = %s, want rsa-sha2-512,rsa-sha2-256", got)
 	}
@@ -440,7 +569,7 @@ func TestNetconfOpen_OptOuts(t *testing.T) {
 	t.Run("lower RSA minimum accepts a 2048-bit host key", func(t *testing.T) {
 		hostKey := newTestRSASigner(t, 2048)
 		srv := startTestSSHServer(t, hostKey, nil)
-		nc := newTestNetconf(t, srv.addr, hostKey.PublicKey(), SSHOptions{MinRSAHostKeyBits: 2048})
+		nc := newTestNetconf(t, srv.addr, hostKey.PublicKey(), ssh.Password(testNetconfPassword), SSHOptions{MinRSAHostKeyBits: 2048})
 		if err := nc.Open(context.Background()); err != nil {
 			t.Fatalf("Open: %v", err)
 		}
@@ -451,7 +580,7 @@ func TestNetconfOpen_OptOuts(t *testing.T) {
 		srv := startTestSSHServer(t, hostKey, func(cfg *ssh.ServerConfig) {
 			cfg.KeyExchanges = []string{ssh.InsecureKeyExchangeDH14SHA1}
 		})
-		nc := newTestNetconf(t, srv.addr, hostKey.PublicKey(), SSHOptions{LegacyAlgorithms: true})
+		nc := newTestNetconf(t, srv.addr, hostKey.PublicKey(), ssh.Password(testNetconfPassword), SSHOptions{LegacyAlgorithms: true})
 		if err := nc.Open(context.Background()); err != nil {
 			t.Fatalf("Open: %v", err)
 		}

@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -107,21 +108,26 @@ type SSHOptions struct {
 	LegacyAlgorithms bool
 }
 
-// NewNetconfWithKnownHosts creates a NETCONF client that verifies CRA host keys
-// against the supplied known_hosts file.
+// NewNetconfWithKnownHosts creates a NETCONF client that authenticates with auth
+// and verifies CRA host keys against the supplied known_hosts file.
 func NewNetconfWithKnownHosts(
 	urls []string,
-	user, pwd, knownHostsPath string,
+	user string,
+	auth ssh.AuthMethod,
+	knownHostsPath string,
 	timeout time.Duration,
 	opts SSHOptions,
 ) (*Netconf, error) {
+	if auth == nil {
+		return nil, errors.New("no CRA SSH auth method provided")
+	}
 	normalizedURLs := normalizeCRAURLs(urls)
 	hostKeyCallback, err := validateKnownHostsEntries(knownHostsPath, normalizedURLs)
 	if err != nil {
 		return nil, err
 	}
 
-	nc := buildNetconf(normalizedURLs, user, pwd, timeout, hostKeyCallback, opts)
+	nc := buildNetconf(normalizedURLs, user, auth, timeout, hostKeyCallback, opts)
 	validationKey, err := newKnownHostsValidationKey()
 	if err != nil {
 		return nil, err
@@ -167,7 +173,8 @@ const DefaultMinRSAHostKeyBits = 3072
 
 func buildNetconf(
 	urls []string,
-	user, pwd string,
+	user string,
+	auth ssh.AuthMethod,
 	timeout time.Duration,
 	hostKeyCallback ssh.HostKeyCallback,
 	opts SSHOptions,
@@ -177,10 +184,8 @@ func buildNetconf(
 		minRSABits = DefaultMinRSAHostKeyBits
 	}
 	cfg := &ssh.ClientConfig{
-		User: user,
-		Auth: []ssh.AuthMethod{
-			ssh.Password(pwd),
-		},
+		User:            user,
+		Auth:            []ssh.AuthMethod{auth},
 		HostKeyCallback: rejectWeakRSAHostKey(hostKeyCallback, minRSABits),
 	}
 	if !opts.LegacyAlgorithms {
@@ -254,6 +259,63 @@ func rejectWeakRSAHostKey(next ssh.HostKeyCallback, minBits int) ssh.HostKeyCall
 		}
 		return next(hostname, remote, key)
 	}
+}
+
+// AuthFromFiles returns public-key authentication with the private key in
+// keyFile or, when keyFile is empty, password authentication with the content
+// of passwordFile without trailing newlines. The file must not be accessible beyond mode 0600.
+func AuthFromFiles(keyFile, passwordFile string) (ssh.AuthMethod, error) {
+	switch {
+	case keyFile != "":
+		data, err := readCredentialFile(keyFile)
+		if err != nil {
+			return nil, err
+		}
+		signer, err := ssh.ParsePrivateKey(data)
+		if err != nil {
+			var passphraseErr *ssh.PassphraseMissingError
+			if errors.As(err, &passphraseErr) {
+				return nil, fmt.Errorf("private key file %q is encrypted; the agent needs an unencrypted key", keyFile)
+			}
+			return nil, fmt.Errorf("parse private key file %q: %w", keyFile, err)
+		}
+		return ssh.PublicKeys(signer), nil
+	case passwordFile != "":
+		data, err := readCredentialFile(passwordFile)
+		if err != nil {
+			return nil, err
+		}
+		password := strings.TrimRight(string(data), "\r\n")
+		if password == "" {
+			return nil, fmt.Errorf("password file %q is empty", passwordFile)
+		}
+		return ssh.Password(password), nil
+	default:
+		return nil, errors.New("no private key file or password file provided")
+	}
+}
+
+// readCredentialFile checks the mode and reads the file through the same file
+// descriptor, so the file cannot be swapped between check and read.
+func readCredentialFile(path string) ([]byte, error) {
+	f, err := os.Open(path) //nolint:gosec // path is operator configuration
+	if err != nil {
+		return nil, fmt.Errorf("credential file: %w", err)
+	}
+	defer f.Close()
+
+	info, err := f.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("credential file: %w", err)
+	}
+	if perm := info.Mode().Perm(); perm&^0o600 != 0 {
+		return nil, fmt.Errorf("credential file %q has mode %04o, must not be wider than 0600", path, perm)
+	}
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return nil, fmt.Errorf("credential file: %w", err)
+	}
+	return data, nil
 }
 
 func normalizeCRAURLs(urls []string) []string {
