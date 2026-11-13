@@ -379,6 +379,7 @@ func (n *NeighborSync) runBpfNeighborSync() {
 		ev.Family = bpf.AddressFamily(b[4])
 		copy(ev.Mac[:], b[5:11])
 		copy(ev.IP[:], b[11:27])
+		ev.Gratuitous = b[27] != 0
 
 		skipping := false
 		if _, ok := n.receiveNeighbors.Load(int(ev.Ifindex)); !ok {
@@ -402,13 +403,13 @@ func (n *NeighborSync) runBpfNeighborSync() {
 			continue
 		}
 
-		if err := n.replaceNeighborReachable(int(ev.Ifindex), family, ip, ev.Mac); err != nil {
+		if err := n.replaceNeighborReachable(int(ev.Ifindex), family, ip, ev.Mac, ev.Gratuitous); err != nil {
 			log.Printf("neigh replace failed: %v", err)
 		}
 	}
 }
 
-func (n *NeighborSync) replaceNeighborReachable(ifindex, family int, ip net.IP, macbuf [6]byte) error {
+func (n *NeighborSync) replaceNeighborReachable(ifindex, family int, ip net.IP, macbuf [6]byte, gratuitous bool) error {
 	if len(ip) == 0 {
 		return errors.New("empty IP from event")
 	}
@@ -446,8 +447,9 @@ func (n *NeighborSync) replaceNeighborReachable(ifindex, family int, ip net.IP, 
 	}
 
 	// Like the kernel with arp_accept=0: gratuitous ARP must not create an
-	// entry. Replies to our own refresh requests only concern existing entries.
-	if _, reject := n.rejectGARPBridges.Load(bridgeIdx); reject && family == unix.AF_INET && !exists {
+	// entry. ARP replies still do, because with anycast gateways the reply to
+	// another node's request arrives here unsolicited.
+	if _, reject := n.rejectGARPBridges.Load(bridgeIdx); reject && gratuitous && !exists {
 		log.Printf("ignoring unknown neighbor %s on bridge %d: gratuitous ARP is not accepted", ip.String(), bridgeIdx)
 		return nil
 	}
@@ -579,8 +581,8 @@ func (n *NeighborSync) EnsureNeighborSuppression(bridgeID, vethID int) error {
 	return nil
 }
 
-// SetAcceptGratuitousARP sets whether IPv4 neighbors learned by BPF may create
-// new entries on the bridge. Without a call, they may.
+// SetAcceptGratuitousARP sets whether gratuitous ARP seen by BPF may create
+// new neighbor entries on the bridge. Without a call, it may.
 func (n *NeighborSync) SetAcceptGratuitousARP(bridgeID int, accept bool) {
 	if accept {
 		n.rejectGARPBridges.Delete(bridgeID)

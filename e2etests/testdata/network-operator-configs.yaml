@@ -68,6 +68,8 @@ kind: Layer2NetworkConfiguration
 metadata:
   name: vlan1
 spec:
+  # TC-11 moves a VIP by gratuitous ARP (the e2e agent sets NWOP_L2_ACCEPT_GARP=never).
+  acceptGratuitousARP: true
   anycastGateways:
   - 10.250.0.1/24
   - fd94:685b:30cf:501::1/64

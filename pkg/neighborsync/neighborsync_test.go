@@ -287,22 +287,28 @@ var _ = Describe("replaceNeighborReachable with gratuitous ARP rejected", func()
 
 	AfterEach(func() { ctrl.Finish() })
 
-	It("does not create an IPv4 entry", func() {
+	It("does not create an entry from gratuitous ARP", func() {
 		nlOps.EXPECT().NeighList(20, unix.AF_INET).Return(nil, nil)
 		nlOps.EXPECT().NeighSet(gomock.Any()).Times(0)
-		Expect(ns.replaceNeighborReachable(10, unix.AF_INET, ip, mac)).To(Succeed())
+		Expect(ns.replaceNeighborReachable(10, unix.AF_INET, ip, mac, true)).To(Succeed())
 	})
 
-	It("updates an existing IPv4 entry", func() {
+	It("updates an existing entry from gratuitous ARP", func() {
 		nlOps.EXPECT().NeighList(20, unix.AF_INET).Return([]netlink.Neigh{{IP: ip}}, nil)
 		nlOps.EXPECT().NeighSet(gomock.Any()).Return(nil)
-		Expect(ns.replaceNeighborReachable(10, unix.AF_INET, ip, mac)).To(Succeed())
+		Expect(ns.replaceNeighborReachable(10, unix.AF_INET, ip, mac, true)).To(Succeed())
 	})
 
-	It("creates the entry again once the network accepts", func() {
+	It("creates an entry from an ARP reply", func() {
+		nlOps.EXPECT().NeighList(20, unix.AF_INET).Return(nil, nil)
+		nlOps.EXPECT().NeighSet(gomock.Any()).Return(nil)
+		Expect(ns.replaceNeighborReachable(10, unix.AF_INET, ip, mac, false)).To(Succeed())
+	})
+
+	It("creates an entry from gratuitous ARP once the network accepts", func() {
 		ns.SetAcceptGratuitousARP(20, true)
 		nlOps.EXPECT().NeighList(20, unix.AF_INET).Return(nil, nil)
 		nlOps.EXPECT().NeighSet(gomock.Any()).Return(nil)
-		Expect(ns.replaceNeighborReachable(10, unix.AF_INET, ip, mac)).To(Succeed())
+		Expect(ns.replaceNeighborReachable(10, unix.AF_INET, ip, mac, true)).To(Succeed())
 	})
 })
