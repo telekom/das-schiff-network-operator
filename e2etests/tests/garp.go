@@ -57,11 +57,13 @@ var _ = Describe("Gratuitous ARP neighbor creation", Label("garp"), func() {
 
 	// announce starts a pod on VLAN vlan with podIP, makes it claim claimIP and
 	// sends gratuitous ARP for claimIP. It returns the pod's MAC address.
+	// The pod also gets an IPv6 address because the NADs install IPv6 routes.
 	announce := func(vlan int, podIP, claimIP string) string {
 		cfg := f.Config
 		pod := fmt.Sprintf("garp-%d", vlan)
 		Expect(f.CreateTestPod(ctx, ns, pod, cfg.WorkerNode1, map[string]string{
-			"k8s.v1.cni.cncf.io/networks": fmt.Sprintf(`[{"name": "macvlan-vlan%d", "ips": ["%s/24"]}]`, vlan, podIP),
+			"k8s.v1.cni.cncf.io/networks": fmt.Sprintf(`[{"name": "macvlan-vlan%d", "ips": ["%s/24", "fd94:685b:30cf:%d::c8/64"]}]`,
+				vlan, podIP, vlan),
 		}, framework.WithNetAdmin())).To(Succeed())
 		Expect(f.WaitForPodReady(ctx, ns, pod, cfg.PodReadyTimeout)).To(Succeed())
 
