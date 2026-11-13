@@ -29,7 +29,17 @@ jobs:
 
       - name: Create Licenses Report
         run: |
-          make licenses-report
+          max_attempts=3
+          for ((attempt=1; attempt<=max_attempts; attempt++)); do
+            if make licenses-report; then
+              exit 0
+            fi
+            if [ "$attempt" -lt "$max_attempts" ]; then
+              sleep 10
+            fi
+          done
+          echo "make licenses-report failed after ${max_attempts} attempts" >&2
+          exit 1
 
       - name: Determine version
         id: version
