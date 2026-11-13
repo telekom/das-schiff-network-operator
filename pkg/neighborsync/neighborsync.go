@@ -432,9 +432,15 @@ func (n *NeighborSync) replaceNeighborReachable(ifindex, family int, ip net.IP, 
 	// Only send gratuitous ARP/NA when the MAC actually changed to avoid
 	// infinite flooding loops through VXLAN (G-NA → remote BPF → G-NA → ...).
 	macChanged, exists := true, false
+	_, rejectGARP := n.rejectGARPBridges.Load(bridgeIdx)
+	rejectGARP = rejectGARP && gratuitous
 	existingNeighs, err := n.nlOps.NeighList(bridgeIdx, family)
 	if err != nil {
-		log.Printf("failed to list neighbors on bridge %d: %v — assuming MAC changed", bridgeIdx, err)
+		if rejectGARP {
+			log.Printf("failed to list neighbors on bridge %d: %v — dropping gratuitous ARP for %s", bridgeIdx, err, ip)
+		} else {
+			log.Printf("failed to list neighbors on bridge %d: %v — assuming MAC changed", bridgeIdx, err)
+		}
 	}
 	for i := range existingNeighs {
 		if existingNeighs[i].IP.Equal(ip) {
@@ -447,17 +453,23 @@ func (n *NeighborSync) replaceNeighborReachable(ifindex, family int, ip net.IP, 
 	}
 
 	// Like the kernel with arp_accept=0: gratuitous ARP must not create an
-	// entry. ARP replies still do, because with anycast gateways the reply to
-	// another node's request arrives here unsolicited.
-	if _, reject := n.rejectGARPBridges.Load(bridgeIdx); reject && gratuitous && !exists {
-		log.Printf("ignoring unknown neighbor %s on bridge %d: gratuitous ARP is not accepted", ip.String(), bridgeIdx)
-		return nil
+	// entry, and an existing entry it updates is only STALE, so it gets
+	// verified again. Unsolicited non-gratuitous ARP replies still create
+	// entries, because with anycast gateways the reply to another node's
+	// request arrives here unsolicited. That is looser than the kernel.
+	state := netlink.NUD_REACHABLE
+	if rejectGARP {
+		if !exists {
+			log.Printf("ignoring unknown neighbor %s on bridge %d: gratuitous ARP is not accepted", ip.String(), bridgeIdx)
+			return nil
+		}
+		state = netlink.NUD_STALE
 	}
 
 	neigh := &netlink.Neigh{
 		LinkIndex:    bridgeIdx,
 		Family:       family,
-		State:        netlink.NUD_REACHABLE,
+		State:        state,
 		IP:           ip,
 		HardwareAddr: hw,
 	}

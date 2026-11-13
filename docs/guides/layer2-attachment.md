@@ -329,6 +329,12 @@ spec:
     `acceptGratuitousARP: true` on CRA-VSR. The CRA-VSR default changes when the
     new agent DaemonSet rolls out, not through a `NetworkConfigRevision` canary.
 
+    Limit on CRA-FRR: rejecting covers only gratuitous ARP, where the sender and
+    target address are the same. Neighbour sync still learns from an unsolicited
+    ARP reply with a different target address and creates an entry for it,
+    because nodes with anycast gateways receive replies to other nodes' requests.
+    That is looser than the kernel with `arp_accept=0`.
+
 ## Verify
 
 List your attachments — the short name is `l2a`, and the printer columns show

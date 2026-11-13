@@ -293,15 +293,27 @@ var _ = Describe("replaceNeighborReachable with gratuitous ARP rejected", func()
 		Expect(ns.replaceNeighborReachable(10, unix.AF_INET, ip, mac, true)).To(Succeed())
 	})
 
-	It("updates an existing entry from gratuitous ARP", func() {
+	It("updates an existing entry from gratuitous ARP as STALE", func() {
 		nlOps.EXPECT().NeighList(20, unix.AF_INET).Return([]netlink.Neigh{{IP: ip}}, nil)
-		nlOps.EXPECT().NeighSet(gomock.Any()).Return(nil)
+		nlOps.EXPECT().NeighSet(gomock.Any()).DoAndReturn(func(n *netlink.Neigh) error {
+			Expect(n.State).To(Equal(netlink.NUD_STALE))
+			return nil
+		})
 		Expect(ns.replaceNeighborReachable(10, unix.AF_INET, ip, mac, true)).To(Succeed())
 	})
 
-	It("creates an entry from an ARP reply", func() {
+	It("drops gratuitous ARP when the neighbor list fails", func() {
+		nlOps.EXPECT().NeighList(20, unix.AF_INET).Return(nil, errors.New("netlink io error"))
+		nlOps.EXPECT().NeighSet(gomock.Any()).Times(0)
+		Expect(ns.replaceNeighborReachable(10, unix.AF_INET, ip, mac, true)).To(Succeed())
+	})
+
+	It("creates a REACHABLE entry from an ARP reply", func() {
 		nlOps.EXPECT().NeighList(20, unix.AF_INET).Return(nil, nil)
-		nlOps.EXPECT().NeighSet(gomock.Any()).Return(nil)
+		nlOps.EXPECT().NeighSet(gomock.Any()).DoAndReturn(func(n *netlink.Neigh) error {
+			Expect(n.State).To(Equal(netlink.NUD_REACHABLE))
+			return nil
+		})
 		Expect(ns.replaceNeighborReachable(10, unix.AF_INET, ip, mac, false)).To(Succeed())
 	})
 
