@@ -498,16 +498,21 @@ func NewHealthCheckToolkit(linkByName func(name string) (netlink.Link, error), l
 
 // NewTCPDialer returns new tcpDialerInterface.
 func NewTCPDialer(dialerTimeout string) TCPDialerInterface {
+	defaultTimeout := time.Second * defaultTCPTimeout
 	timeout, err := time.ParseDuration(dialerTimeout)
 	logger := log.Log.WithName("HealthCheck - TCP dialer")
 	if err != nil {
-		logger.Info("unable to parse TCP dialer timeout provided in HealtCheck config as duration", "timeout", timeout, "value", dialerTimeout)
+		logger.Info("unable to parse TCP dialer timeout provided in HealthCheck config as duration, trying seconds fallback", "value", dialerTimeout)
 		seconds, err := strconv.Atoi(dialerTimeout)
 		if err != nil {
-			logger.Info("unable to parse TCP dialer timeout provided in HealtCheck config as integer, will use default Timeout", "timeout", fmt.Sprintf("%ds", defaultTCPTimeout), "value", dialerTimeout)
-			timeout = time.Second * defaultTCPTimeout
+			logger.Info("unable to parse TCP dialer timeout provided in HealthCheck config as integer, using default timeout", "timeout", defaultTimeout.String(), "value", dialerTimeout)
+			timeout = defaultTimeout
 		} else {
-			timeout = time.Second * time.Duration(seconds)
+			timeout, err = time.ParseDuration(fmt.Sprintf("%ds", seconds))
+			if err != nil {
+				logger.Info("unable to parse TCP dialer timeout seconds fallback in HealthCheck config, using default timeout", "timeout", defaultTimeout.String(), "value", dialerTimeout)
+				timeout = defaultTimeout
+			}
 		}
 	}
 	return &net.Dialer{Timeout: timeout}

@@ -64,3 +64,42 @@ func TestHasStaticIPv6MultusNetwork(t *testing.T) {
 		})
 	}
 }
+
+func TestIPv6AddressOutputHasState(t *testing.T) {
+	tests := []struct {
+		name   string
+		output string
+		state  string
+		want   bool
+	}{
+		{
+			name: "matches tentative with variable whitespace",
+			output: `4: net1@if5: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 state UP qlen 1000
+    inet6 fda5:25c1:193c::1/64    scope global     tentative
+       valid_lft forever preferred_lft forever`,
+			state: "tentative",
+			want:  true,
+		},
+		{
+			name: "matches dadfailed token",
+			output: `inet6 fda5:25c1:193c::1/64 scope global dadfailed tentative
+       valid_lft forever preferred_lft forever`,
+			state: "dadfailed",
+			want:  true,
+		},
+		{
+			name:   "does not match partial token",
+			output: "inet6 fda5:25c1:193c::1/64 scope global nottentative",
+			state:  "tentative",
+			want:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ipv6AddressOutputHasState(tt.output, tt.state); got != tt.want {
+				t.Fatalf("ipv6AddressOutputHasState() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

@@ -102,6 +102,7 @@ var _ = Describe("ListL3()", func() {
 	It("returns no error if the VRF has no bridge/vxlan children", func() {
 		mockctrl := gomock.NewController(GinkgoT())
 		defer mockctrl.Finish()
+
 		netlinkMock := mock_nl.NewMockToolkitInterface(mockctrl)
 		nm := NewManager(netlinkMock, &config.BaseConfig{})
 		netlinkMock.EXPECT().LinkList().Return([]netlink.Link{&netlink.Vrf{LinkAttrs: netlink.LinkAttrs{Name: dummyIntf}}}, nil)
