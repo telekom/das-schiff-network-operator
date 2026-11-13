@@ -136,7 +136,7 @@ func TestNewNetconf_NormalizesCRAURLs(t *testing.T) {
 		t.Fatalf("write known_hosts: %v", err)
 	}
 
-	nc, err := NewNetconfWithKnownHosts([]string{" 169.254.33.1:830 ", ""}, "user", "password", path, 0)
+	nc, err := NewNetconfWithKnownHosts([]string{" 169.254.33.1:830 ", ""}, "user", "password", path, 0, SSHOptions{})
 	if err != nil {
 		t.Fatalf("NewNetconfWithKnownHosts returned error: %v", err)
 	}
@@ -146,7 +146,7 @@ func TestNewNetconf_NormalizesCRAURLs(t *testing.T) {
 }
 
 func TestNewNetconfWithKnownHosts_RejectsMissingKnownHostsPath(t *testing.T) {
-	_, err := NewNetconfWithKnownHosts([]string{"169.254.33.1:830"}, "user", "password", " ", 0)
+	_, err := NewNetconfWithKnownHosts([]string{"169.254.33.1:830"}, "user", "password", " ", 0, SSHOptions{})
 	if err == nil {
 		t.Fatal("NewNetconfWithKnownHosts returned nil error, want missing known hosts path error")
 	}
@@ -162,6 +162,7 @@ func TestNewManagerWithKnownHosts_ValidatesBeforeDeviceAccess(t *testing.T) {
 		"password",
 		" ",
 		time.Second,
+		SSHOptions{},
 		logr.Discard(),
 	)
 	if err == nil {
@@ -273,14 +274,14 @@ func serveTestNetconf(conn net.Conn, cfg *ssh.ServerConfig) {
 	}
 }
 
-func newTestNetconf(t *testing.T, addr string, knownHostKey ssh.PublicKey) *Netconf {
+func newTestNetconf(t *testing.T, addr string, knownHostKey ssh.PublicKey, opts SSHOptions) *Netconf {
 	t.Helper()
 
 	path := filepath.Join(t.TempDir(), "known_hosts")
 	if err := os.WriteFile(path, []byte(knownhosts.Line([]string{addr}, knownHostKey)+"\n"), 0o600); err != nil {
 		t.Fatalf("write known_hosts: %v", err)
 	}
-	nc, err := NewNetconfWithKnownHosts([]string{addr}, testNetconfUser, testNetconfPassword, path, 5*time.Second)
+	nc, err := NewNetconfWithKnownHosts([]string{addr}, testNetconfUser, testNetconfPassword, path, 5*time.Second, opts)
 	if err != nil {
 		t.Fatalf("NewNetconfWithKnownHosts: %v", err)
 	}
@@ -311,7 +312,7 @@ func TestNetconfOpen_MatchingHostKeyConnects(t *testing.T) {
 	hostKey := newTestED25519Signer(t)
 	srv := startTestSSHServer(t, hostKey, nil)
 
-	nc := newTestNetconf(t, srv.addr, hostKey.PublicKey())
+	nc := newTestNetconf(t, srv.addr, hostKey.PublicKey(), SSHOptions{})
 	if err := nc.Open(context.Background()); err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -372,7 +373,7 @@ func TestNetconfOpen_RejectsBeforeAuthentication(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			srv := startTestSSHServer(t, tt.hostKey, tt.configure)
-			nc := newTestNetconf(t, srv.addr, tt.knownHostKey(tt.hostKey))
+			nc := newTestNetconf(t, srv.addr, tt.knownHostKey(tt.hostKey), SSHOptions{})
 
 			err := nc.Open(context.Background())
 			if err == nil {
@@ -387,7 +388,7 @@ func TestNetconfOpen_RejectsBeforeAuthentication(t *testing.T) {
 }
 
 func TestBuildNetconf_RestrictsAlgorithms(t *testing.T) {
-	nc := buildNetconf([]string{"169.254.33.1:830"}, "user", "password", time.Second, ssh.FixedHostKey(newTestPublicKey(t)))
+	nc := buildNetconf([]string{"169.254.33.1:830"}, "user", "password", time.Second, ssh.FixedHostKey(newTestPublicKey(t)), SSHOptions{})
 
 	want := map[string][]string{
 		"KeyExchanges": {"curve25519-sha256", "ecdh-sha2-nistp521", "ecdh-sha2-nistp384", "ecdh-sha2-nistp256", "diffie-hellman-group16-sha512"},
@@ -405,5 +406,77 @@ func TestBuildNetconf_RestrictsAlgorithms(t *testing.T) {
 		if strings.Join(got[field], ",") != strings.Join(w, ",") {
 			t.Errorf("%s = %v, want %v", field, got[field], w)
 		}
+	}
+}
+
+func newTestRSASigner(t *testing.T, bits int) ssh.Signer {
+	t.Helper()
+
+	key, err := rsa.GenerateKey(rand.Reader, bits)
+	if err != nil {
+		t.Fatalf("generate rsa key: %v", err)
+	}
+	return newTestSigner(t, key)
+}
+
+// A router with an ed25519 and an RSA host key whose known_hosts entry pins
+// only the RSA key: the client must ask for RSA, not for its first preference.
+func TestNetconfOpen_RequestsHostKeyTypeFromKnownHosts(t *testing.T) {
+	rsaHostKey := newTestRSASigner(t, 3072)
+	srv := startTestSSHServer(t, newTestED25519Signer(t), func(cfg *ssh.ServerConfig) {
+		cfg.AddHostKey(rsaHostKey)
+	})
+
+	nc := newTestNetconf(t, srv.addr, rsaHostKey.PublicKey(), SSHOptions{})
+	if got := strings.Join(nc.hostKeyAlgorithms[srv.addr], ","); got != "rsa-sha2-512,rsa-sha2-256" {
+		t.Fatalf("host key algorithms = %s, want rsa-sha2-512,rsa-sha2-256", got)
+	}
+	if err := nc.Open(context.Background()); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+}
+
+func TestNetconfOpen_OptOuts(t *testing.T) {
+	t.Run("lower RSA minimum accepts a 2048-bit host key", func(t *testing.T) {
+		hostKey := newTestRSASigner(t, 2048)
+		srv := startTestSSHServer(t, hostKey, nil)
+		nc := newTestNetconf(t, srv.addr, hostKey.PublicKey(), SSHOptions{MinRSAHostKeyBits: 2048})
+		if err := nc.Open(context.Background()); err != nil {
+			t.Fatalf("Open: %v", err)
+		}
+	})
+
+	t.Run("legacy algorithms accept diffie-hellman-group14-sha1", func(t *testing.T) {
+		hostKey := newTestED25519Signer(t)
+		srv := startTestSSHServer(t, hostKey, func(cfg *ssh.ServerConfig) {
+			cfg.KeyExchanges = []string{ssh.InsecureKeyExchangeDH14SHA1}
+		})
+		nc := newTestNetconf(t, srv.addr, hostKey.PublicKey(), SSHOptions{LegacyAlgorithms: true})
+		if err := nc.Open(context.Background()); err != nil {
+			t.Fatalf("Open: %v", err)
+		}
+	})
+}
+
+func TestHostKeyAlgorithmsFor(t *testing.T) {
+	tests := []struct {
+		name     string
+		keyTypes []string
+		legacy   bool
+		want     string
+	}{
+		{name: "ed25519", keyTypes: []string{"ssh-ed25519"}, want: "ssh-ed25519"},
+		{name: "rsa", keyTypes: []string{"ssh-rsa"}, want: "rsa-sha2-512,rsa-sha2-256"},
+		{name: "allow-list order", keyTypes: []string{"ssh-rsa", "ecdsa-sha2-nistp256"}, want: "ecdsa-sha2-nistp256,rsa-sha2-512,rsa-sha2-256"},
+		{name: "not allowed", keyTypes: []string{"ssh-dss"}, want: ""},
+		{name: "none", want: ""},
+		{name: "legacy rsa", keyTypes: []string{"ssh-rsa"}, legacy: true, want: "rsa-sha2-512,rsa-sha2-256,ssh-rsa"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := strings.Join(hostKeyAlgorithmsFor(tt.keyTypes, tt.legacy), ","); got != tt.want {
+				t.Fatalf("hostKeyAlgorithmsFor = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
