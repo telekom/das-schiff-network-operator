@@ -105,6 +105,12 @@ type Layer2AttachmentSpec struct {
 	// +optional
 	DisableSegmentation *bool `json:"disableSegmentation,omitempty"`
 
+	// AcceptGratuitousARP makes the bridge accept gratuitous ARP. Off by default,
+	// so a workload cannot announce another address of the network. Enable it
+	// for setups that move a virtual IP by gratuitous ARP, for example keepalived.
+	// +optional
+	AcceptGratuitousARP *bool `json:"acceptGratuitousARP,omitempty"`
+
 	// SRIOV is the SR-IOV configuration. When set, the CRA agent skips
 	// VXLAN/VLAN bridge setup and configures VF passthrough instead.
 	// +optional

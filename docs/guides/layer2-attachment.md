@@ -221,6 +221,7 @@ authoritative list.
 | `disableAnycast` | bool | Disable the anycast gateway. |
 | `disableNeighborSuppression` | bool | Disable neighbor suppression. |
 | `disableSegmentation` | bool | Disable TX/RX segmentation offload on the interface. |
+| `acceptGratuitousARP` | bool | Accept gratuitous ARP on the bridge (default `false`). |
 | `sriov.enabled` | bool | **Immutable.** SR-IOV VF passthrough; skips VXLAN/VLAN bridge setup. |
 | `nodeIPs.enabled` | bool | Assign per-node IPs from the referenced `Network`. |
 | `nodeIPs.reservedRanges` | []CIDR | Ranges within the Network reserved for pods, never allocated to nodes. |
@@ -296,7 +297,7 @@ spec:
 
 ### Disable anycast, neighbor suppression, or segmentation
 
-Three independent booleans tune the interface behaviour:
+Independent booleans tune the interface behaviour:
 
 ```yaml
 spec:
@@ -310,6 +311,14 @@ spec:
   lives elsewhere).
 - `disableNeighborSuppression` — turn off ARP/ND suppression on the segment.
 - `disableSegmentation` — turn off TX/RX segmentation offload on the interface.
+- `acceptGratuitousARP` — accept gratuitous ARP on the bridge, see below.
+
+!!! warning "Gratuitous ARP is rejected by default"
+    The bridge of a Layer 2 network ignores gratuitous ARP, so a workload cannot
+    announce another address of the network. Setups that move a virtual IP by
+    gratuitous ARP, for example keepalived, need `acceptGratuitousARP: true` on
+    the network. Setting `NWOP_L2_ACCEPT_GARP=always` on the agent DaemonSet
+    (CRA-VSR or CRA-FRR) accepts gratuitous ARP on every bridge of the node.
 
 ## Verify
 

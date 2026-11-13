@@ -2682,6 +2682,10 @@ spec:
                 additionalProperties:
                   description: Layer2 represents a Layer 2 network configuration.
                   properties:
+                    acceptGratuitousARP:
+                      description: AcceptGratuitousARP indicates whether the bridge
+                        accepts gratuitous ARP.
+                      type: boolean
                     disableSegmentation:
                       description: DisableSegmentation indicates whether to disable
                         segmentation for the Layer 2 network.

@@ -41,6 +41,7 @@ type InfoL2 struct {
 	mac                 string
 	ips                 []string
 	acls                []v1alpha1.MirrorACL
+	acceptGARP          bool
 }
 
 func NewLayer2(
@@ -64,6 +65,7 @@ func (l *Layer2) setupInformations() {
 			disableSegmentation: l2.DisableSegmentation,
 			vni:                 int(l2.VNI),
 			acls:                l2.MirrorACLs,
+			acceptGARP:          l2.AcceptGratuitousARP,
 		}
 
 		if l2.IRB != nil {
@@ -106,8 +108,13 @@ func (l *Layer2) setupBridge(info *InfoL2, intfs *Interfaces) *Bridge {
 	}
 	br.NetworkStack.IPv6.AcceptDuplicateAD = types.ToPtr("never")
 
+	// NWOP_L2_ACCEPT_GARP=always restores the old default for every bridge.
+	acceptGARP := "never"
+	if info.acceptGARP || os.Getenv("NWOP_L2_ACCEPT_GARP") == "always" {
+		acceptGARP = "always"
+	}
 	br.NetworkStack.IPv4 = &NetworkStackV4{
-		AcceptARP: types.ToPtr("always"),
+		AcceptARP: types.ToPtr(acceptGARP),
 	}
 	br.NetworkStack.Neighbor = &NeighborNetworkStack{
 		BaseReachableTimeV4: &baseTimer,

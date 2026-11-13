@@ -1221,6 +1221,11 @@ func (in *Layer2AttachmentSpec) DeepCopyInto(out *Layer2AttachmentSpec) {
 		*out = new(bool)
 		**out = **in
 	}
+	if in.AcceptGratuitousARP != nil {
+		in, out := &in.AcceptGratuitousARP, &out.AcceptGratuitousARP
+		*out = new(bool)
+		**out = **in
+	}
 	if in.SRIOV != nil {
 		in, out := &in.SRIOV, &out.SRIOV
 		*out = new(SRIOVConfig)

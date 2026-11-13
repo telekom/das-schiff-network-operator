@@ -602,6 +602,8 @@ func (b *L2ABuilder) buildLayer2(l2a *nc.Layer2Attachment, net *resolver.Resolve
 		VLAN:        uint16(b.vlanID(net)),   //nolint:gosec // value validated by CRD schema (positive integer)
 		RouteTarget: rt,
 		MTU:         b.mtu(l2a),
+
+		AcceptGratuitousARP: l2a.Spec.AcceptGratuitousARP != nil && *l2a.Spec.AcceptGratuitousARP,
 	}
 
 	// Build IRB if anycast is not disabled and we have a VRF.

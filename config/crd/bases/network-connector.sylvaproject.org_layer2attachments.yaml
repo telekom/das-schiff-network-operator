@@ -72,6 +72,12 @@ spec:
           spec:
             description: Layer2AttachmentSpec defines the desired state of Layer2Attachment.
             properties:
+              acceptGratuitousARP:
+                description: |-
+                  AcceptGratuitousARP makes the bridge accept gratuitous ARP. Off by default,
+                  so a workload cannot announce another address of the network. Enable it
+                  for setups that move a virtual IP by gratuitous ARP, for example keepalived.
+                type: boolean
               destinations:
                 description: |-
                   Destinations selects Destination resources by label.

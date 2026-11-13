@@ -62,6 +62,11 @@ type Layer2NetworkConfigurationSpec struct {
 	// This might be required when you use AF_PACKET on the VLAN.
 	DisableSegmentation bool `json:"disableSegmentation,omitempty"`
 
+	// Accept gratuitous ARP on the bridge of this network. Off by default, so a workload cannot
+	// announce another address of the network. Enable it for setups that move a virtual IP by
+	// gratuitous ARP, for example keepalived.
+	AcceptGratuitousARP bool `json:"acceptGratuitousARP,omitempty"`
+
 	// VRF to attach Layer2 network to, default if not set
 	VRF string `json:"vrf,omitempty"`
 

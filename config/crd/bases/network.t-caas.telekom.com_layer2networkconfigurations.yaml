@@ -57,6 +57,12 @@ spec:
             description: Layer2NetworkConfigurationSpec defines the desired state
               of Layer2NetworkConfiguration.
             properties:
+              acceptGratuitousARP:
+                description: |-
+                  Accept gratuitous ARP on the bridge of this network. Off by default, so a workload cannot
+                  announce another address of the network. Enable it for setups that move a virtual IP by
+                  gratuitous ARP, for example keepalived.
+                type: boolean
               advertiseNeighbors:
                 description: If desired network-operator advertises host routes for
                   local neighbors

@@ -68,6 +68,8 @@ kind: Layer2NetworkConfiguration
 metadata:
   name: vlan1
 spec:
+  # TC-11 moves a VIP by gratuitous ARP; TC-12 checks this opt-in against vlan2.
+  acceptGratuitousARP: true
   anycastGateways:
   - 10.250.0.1/24
   - fd94:685b:30cf:501::1/64

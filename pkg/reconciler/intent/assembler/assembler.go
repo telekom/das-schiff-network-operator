@@ -73,6 +73,7 @@ func Assemble(contributions []*builder.NodeContribution) (*AssembleResult, error
 			if v.IRB != nil {
 				existing.IRB = v.IRB
 			}
+			existing.AcceptGratuitousARP = existing.AcceptGratuitousARP || v.AcceptGratuitousARP
 			existing.MirrorACLs = append(existing.MirrorACLs, v.MirrorACLs...)
 			spec.Layer2s[k] = existing
 		}

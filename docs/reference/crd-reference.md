@@ -725,6 +725,7 @@ _Appears in:_
 | `disableAnycast` _boolean_ | DisableAnycast disables the anycast gateway. |  | Optional: \{\} <br /> |
 | `disableNeighborSuppression` _boolean_ | DisableNeighborSuppression disables neighbor suppression. |  | Optional: \{\} <br /> |
 | `disableSegmentation` _boolean_ | DisableSegmentation disables TX/RX segmentation offload on the interface. |  | Optional: \{\} <br /> |
+| `acceptGratuitousARP` _boolean_ | AcceptGratuitousARP makes the bridge accept gratuitous ARP. Off by default,<br />so a workload cannot announce another address of the network. Enable it<br />for setups that move a virtual IP by gratuitous ARP, for example keepalived. |  | Optional: \{\} <br /> |
 | `sriov` _[SRIOVConfig](#sriovconfig)_ | SRIOV is the SR-IOV configuration. When set, the CRA agent skips<br />VXLAN/VLAN bridge setup and configures VF passthrough instead. |  | Optional: \{\} <br /> |
 | `nodeIPs` _[NodeIPConfig](#nodeipconfig)_ | NodeIPs is the node IP assignment configuration. |  | Optional: \{\} <br /> |
 

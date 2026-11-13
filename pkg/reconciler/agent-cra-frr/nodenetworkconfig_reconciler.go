@@ -3,6 +3,7 @@ package agent_cra_frr //nolint:revive
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/go-logr/logr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -51,6 +52,8 @@ func (a *CRAFRRConfigApplier) convertNodeConfigToNetlink(nodeCfg *v1alpha1.NodeN
 			VNI:                 int(layer2.VNI),
 			AnycastMAC:          new(string),
 			DisableSegmentation: layer2.DisableSegmentation,
+			// NWOP_L2_ACCEPT_GARP=always restores the old default for every bridge.
+			AcceptGratuitousARP: layer2.AcceptGratuitousARP || os.Getenv("NWOP_L2_ACCEPT_GARP") == "always",
 		}
 
 		if layer2.IRB != nil {
