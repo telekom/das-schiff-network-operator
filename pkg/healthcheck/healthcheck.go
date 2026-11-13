@@ -16,6 +16,7 @@ import (
 	"github.com/vishvananda/netlink"
 	"gopkg.in/yaml.v2"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -95,9 +96,14 @@ func (hc *HealthChecker) TaintsRemoved() bool {
 }
 
 // RemoveTaints removes taint from the node.
-// If taint removal fails due to a conflict (node was modified by another process),
-// it logs a warning and returns nil - the taints will be removed on the next reconciliation.
-// This prevents transient conflicts from invalidating the NodeNetworkConfig.
+// If taint removal fails due to a conflict (the node was modified concurrently by
+// kubelet or another controller), it logs the event and returns nil - the taints will
+// be removed on the next reconciliation, which re-Gets the node and therefore starts
+// from a fresh resourceVersion. This prevents transient conflicts from invalidating the
+// NodeNetworkConfig. Deliberately not wrapped in retry.RetryOnConflict: the agents
+// already reconcile on a timer and the callers requeue, so an in-line retry loop would
+// only duplicate that at the cost of holding up the reconcile.
+// Any other error is returned to the caller.
 func (hc *HealthChecker) RemoveTaints(ctx context.Context) error {
 	node := &corev1.Node{}
 	err := hc.client.Get(ctx,
@@ -126,9 +132,10 @@ func (hc *HealthChecker) RemoveTaints(ctx context.Context) error {
 	}
 
 	if err := hc.client.Update(ctx, node, &client.UpdateOptions{}); err != nil {
-		// Conflict errors are transient - the node was modified by another process.
+		// Conflict errors are transient - the node was modified by another process
+		// (kubelet and other controllers write Node concurrently).
 		// Don't fail the healthcheck; taints will be removed on next reconciliation.
-		if strings.Contains(err.Error(), "the object has been modified") {
+		if apierrors.IsConflict(err) {
 			hc.Logger.Info("node object was modified by another process, will retry taint removal on next reconciliation")
 			return nil
 		}
@@ -190,6 +197,19 @@ func (hc *HealthChecker) UpdateReadinessCondition(ctx context.Context, status co
 		RecordNodeReadinessCondition(status == corev1.ConditionTrue, reason)
 	}
 	return nil
+}
+
+// ReportUnready sets the NetworkOperatorReady Node condition to False.
+//
+// It exists for the reconcilers' error paths, where the caller is already returning the
+// underlying failure to its own caller. Failing to publish the condition must not mask
+// that failure, so the error is logged rather than returned - but it is deliberately not
+// discarded silently, since a persistently unpublishable condition means the node's
+// readiness is not observable and is worth an operator's attention.
+func ReportUnready(ctx context.Context, hc HealthCheckerInterface, logger logr.Logger, reason, message string) {
+	if err := hc.UpdateReadinessCondition(ctx, corev1.ConditionFalse, reason, message); err != nil {
+		logger.Error(err, "failed to publish NetworkOperatorReady=False condition", "reason", reason)
+	}
 }
 
 // CheckInterfaces checks if all interfaces in the Interfaces slice are in UP state.
