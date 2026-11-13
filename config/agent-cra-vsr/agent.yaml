@@ -44,8 +44,8 @@ spec:
               value: 169.254.33.1:830
             - name: CRA_USER
               value: admin
-            - name: CRA_PASSWORD
-              value: admin
+            - name: CRA_PRIVATE_KEY_FILE
+              value: /etc/cra/netconf/id_ed25519
             - name: CRA_TIMEOUT
               value: 30s
             - name: CRA_KNOWN_HOSTS
@@ -94,6 +94,9 @@ spec:
             - mountPath: /etc/cra-host/known_hosts
               name: cra-known-hosts
               readOnly: true
+            - mountPath: /etc/cra/netconf
+              name: cra-netconf
+              readOnly: true
             - mountPath: /opt/healthcheck/
               name: healthcheck-config
       terminationGracePeriodSeconds: 10
@@ -107,6 +110,10 @@ spec:
             path: /etc/cra/known_hosts
             type: File
           name: cra-known-hosts
+        - hostPath:
+            path: /etc/cra/netconf
+            type: Directory
+          name: cra-netconf
         - configMap:
             name: healthcheck-config
           name: healthcheck-config

@@ -26,10 +26,12 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/go-logr/logr"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
 	"nemith.io/netconf"
@@ -88,22 +90,33 @@ type RPCReply struct {
 }
 
 type Netconf struct {
+	logger    logr.Logger
 	session   *netconf.Session
 	timeout   time.Duration
 	sshConfig *ssh.ClientConfig
 	urls      []string
 }
 
-// NewNetconfWithKnownHosts creates a NETCONF client that verifies CRA host keys
-// against the supplied known_hosts file.
-func NewNetconfWithKnownHosts(urls []string, user, pwd, knownHostsPath string, timeout time.Duration) (*Netconf, error) {
+// NewNetconfWithKnownHosts creates a NETCONF client that authenticates with auth
+// and verifies CRA host keys against the supplied known_hosts file.
+func NewNetconfWithKnownHosts(
+	urls []string,
+	user string,
+	auth ssh.AuthMethod,
+	knownHostsPath string,
+	timeout time.Duration,
+	logger logr.Logger,
+) (*Netconf, error) {
+	if auth == nil {
+		return nil, errors.New("no CRA SSH auth method provided")
+	}
 	normalizedURLs := normalizeCRAURLs(urls)
 	hostKeyCallback, err := validateKnownHostsEntries(knownHostsPath, normalizedURLs)
 	if err != nil {
 		return nil, err
 	}
 
-	return buildNetconf(normalizedURLs, user, pwd, timeout, hostKeyCallback), nil
+	return buildNetconf(normalizedURLs, user, auth, timeout, hostKeyCallback, logger), nil
 }
 
 // SSH algorithms the NETCONF client accepts (CORE 3.04 / CORE 3.50). The Go
@@ -135,8 +148,16 @@ var (
 // minRSAHostKeyBits is the smallest RSA host key the client accepts.
 const minRSAHostKeyBits = 3072
 
-func buildNetconf(urls []string, user, pwd string, timeout time.Duration, hostKeyCallback ssh.HostKeyCallback) *Netconf {
+func buildNetconf(
+	urls []string,
+	user string,
+	auth ssh.AuthMethod,
+	timeout time.Duration,
+	hostKeyCallback ssh.HostKeyCallback,
+	logger logr.Logger,
+) *Netconf {
 	return &Netconf{
+		logger:  logger,
 		urls:    normalizeCRAURLs(urls),
 		timeout: timeout,
 		sshConfig: &ssh.ClientConfig{
@@ -144,10 +165,8 @@ func buildNetconf(urls []string, user, pwd string, timeout time.Duration, hostKe
 				KeyExchanges: sshKeyExchanges,
 				MACs:         sshMACs,
 			},
-			User: user,
-			Auth: []ssh.AuthMethod{
-				ssh.Password(pwd),
-			},
+			User:              user,
+			Auth:              []ssh.AuthMethod{auth},
 			HostKeyCallback:   rejectWeakRSAHostKey(hostKeyCallback),
 			HostKeyAlgorithms: sshHostKeyAlgorithms,
 		},
@@ -165,6 +184,51 @@ func rejectWeakRSAHostKey(next ssh.HostKeyCallback) ssh.HostKeyCallback {
 		}
 		return next(hostname, remote, key)
 	}
+}
+
+// AuthFromFiles returns public-key authentication with the private key in
+// keyFile or, when keyFile is empty, password authentication with the content
+// of passwordFile without trailing newlines. The file must not be accessible beyond mode 0600.
+func AuthFromFiles(keyFile, passwordFile string) (ssh.AuthMethod, error) {
+	switch {
+	case keyFile != "":
+		data, err := readCredentialFile(keyFile)
+		if err != nil {
+			return nil, err
+		}
+		signer, err := ssh.ParsePrivateKey(data)
+		if err != nil {
+			return nil, fmt.Errorf("parse private key file %q: %w", keyFile, err)
+		}
+		return ssh.PublicKeys(signer), nil
+	case passwordFile != "":
+		data, err := readCredentialFile(passwordFile)
+		if err != nil {
+			return nil, err
+		}
+		password := strings.TrimRight(string(data), "\r\n")
+		if password == "" {
+			return nil, fmt.Errorf("password file %q is empty", passwordFile)
+		}
+		return ssh.Password(password), nil
+	default:
+		return nil, errors.New("no private key file or password file provided")
+	}
+}
+
+func readCredentialFile(path string) ([]byte, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, fmt.Errorf("credential file: %w", err)
+	}
+	if perm := info.Mode().Perm(); perm&^0o600 != 0 {
+		return nil, fmt.Errorf("credential file %q has mode %04o, must not be wider than 0600", path, perm)
+	}
+	data, err := os.ReadFile(path) //nolint:gosec // path is operator configuration
+	if err != nil {
+		return nil, fmt.Errorf("credential file: %w", err)
+	}
+	return data, nil
 }
 
 func normalizeCRAURLs(urls []string) []string {
@@ -280,7 +344,7 @@ func (nc *Netconf) Open(ctx context.Context) error {
 	for _, url := range nc.urls {
 		transport, err := ncssh.Dial(ctx, "tcp", url, nc.sshConfig)
 		if err != nil {
-			fmt.Println(err)
+			nc.logger.Error(err, "failed to connect to CRA", "url", url)
 			dialErrs = append(dialErrs, fmt.Errorf("%s: %w", url, err))
 			continue
 		}

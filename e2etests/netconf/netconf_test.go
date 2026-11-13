@@ -20,6 +20,9 @@ package netconf
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/pem"
 	"errors"
 	"net"
 	"os"
@@ -29,6 +32,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-logr/logr"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
 
@@ -49,6 +53,7 @@ type endpoint struct {
 }
 
 type server struct {
+	id          string
 	defaultAlgs endpoint // 830: OpenSSH defaults, ed25519 host key
 	weakKex     endpoint // 831: only diffie-hellman-group14-sha1
 	rsa2048     endpoint // 832: 2048-bit RSA host key
@@ -71,12 +76,13 @@ func docker(t *testing.T, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
-func startServer(t *testing.T) *server {
+func startServer(t *testing.T, authorizedKey ssh.PublicKey) *server {
 	t.Helper()
 
 	docker(t, "build", "-q", "-t", image, filepath.Join("..", "..", "e2e", "images", "netconf-ssh"))
 	id := docker(t, "run", "-d", "--rm",
 		"-e", "NETCONF_PASSWORD="+password,
+		"-e", "NETCONF_AUTHORIZED_KEY="+strings.TrimSpace(string(ssh.MarshalAuthorizedKey(authorizedKey))),
 		"-p", "127.0.0.1::830", "-p", "127.0.0.1::831", "-p", "127.0.0.1::832",
 		image)
 	t.Cleanup(func() {
@@ -111,6 +117,7 @@ func startServer(t *testing.T) *server {
 	}
 
 	return &server{
+		id:          id,
 		defaultAlgs: ep("830", "/etc/ssh/host_ed25519.pub"),
 		weakKex:     ep("831", "/etc/ssh/host_ed25519.pub"),
 		rsa2048:     ep("832", "/etc/ssh/host_rsa2048.pub"),
@@ -126,9 +133,40 @@ func knownHostsFile(t *testing.T, addr string, key ssh.PublicKey) string {
 	return path
 }
 
-func open(t *testing.T, addr string, knownHostKey ssh.PublicKey) error {
+// writeFile writes data with mode 0600, the widest mode the agent accepts.
+func writeFile(t *testing.T, name string, data []byte) string {
 	t.Helper()
-	nc, err := cra.NewNetconfWithKnownHosts([]string{addr}, user, password, knownHostsFile(t, addr, knownHostKey), timeout)
+	path := filepath.Join(t.TempDir(), name)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func newClientKeyFile(t *testing.T) (string, ssh.PublicKey) {
+	t.Helper()
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block, err := ssh.MarshalPrivateKey(priv, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sshPub, err := ssh.NewPublicKey(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return writeFile(t, "id_ed25519", pem.EncodeToMemory(block)), sshPub
+}
+
+func open(t *testing.T, addr string, knownHostKey ssh.PublicKey, keyFile, passwordFile string) error {
+	t.Helper()
+	auth, err := cra.AuthFromFiles(keyFile, passwordFile)
+	if err != nil {
+		t.Fatalf("AuthFromFiles: %v", err)
+	}
+	nc, err := cra.NewNetconfWithKnownHosts([]string{addr}, user, auth, knownHostsFile(t, addr, knownHostKey), timeout, logr.Discard())
 	if err != nil {
 		t.Fatalf("NewNetconfWithKnownHosts: %v", err)
 	}
@@ -136,10 +174,30 @@ func open(t *testing.T, addr string, knownHostKey ssh.PublicKey) error {
 }
 
 func TestNetconfClientAgainstOpenSSH(t *testing.T) {
-	srv := startServer(t)
+	keyFile, publicKey := newClientKeyFile(t)
+	unknownKeyFile, _ := newClientKeyFile(t)
+	passwordFile := writeFile(t, "password", []byte(password+"\n"))
+	srv := startServer(t, publicKey)
 
-	t.Run("verified host key and password connects", func(t *testing.T) {
-		if err := open(t, srv.defaultAlgs.addr, srv.defaultAlgs.hostKey); err != nil {
+	t.Run("enrolled key file connects", func(t *testing.T) {
+		if err := open(t, srv.defaultAlgs.addr, srv.defaultAlgs.hostKey, keyFile, ""); err != nil {
+			t.Fatalf("Open: %v", err)
+		}
+		logs := docker(t, "logs", srv.id)
+		if !strings.Contains(logs, "Accepted publickey for "+user) {
+			t.Fatalf("sshd did not log a public-key login:\n%s", logs)
+		}
+	})
+
+	t.Run("unknown key file is refused", func(t *testing.T) {
+		err := open(t, srv.defaultAlgs.addr, srv.defaultAlgs.hostKey, unknownKeyFile, "")
+		if err == nil || !strings.Contains(err.Error(), "unable to authenticate") {
+			t.Fatalf("Open error = %v, want authentication failure", err)
+		}
+	})
+
+	t.Run("password file connects", func(t *testing.T) {
+		if err := open(t, srv.defaultAlgs.addr, srv.defaultAlgs.hostKey, "", passwordFile); err != nil {
 			t.Fatalf("Open: %v", err)
 		}
 	})
@@ -150,7 +208,7 @@ func TestNetconfClientAgainstOpenSSH(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		err = open(t, srv.defaultAlgs.addr, other)
+		err = open(t, srv.defaultAlgs.addr, other, keyFile, "")
 		var keyErr *knownhosts.KeyError
 		if !errors.As(err, &keyErr) {
 			t.Fatalf("Open error = %v, want knownhosts.KeyError", err)
@@ -158,14 +216,14 @@ func TestNetconfClientAgainstOpenSSH(t *testing.T) {
 	})
 
 	t.Run("weak key exchange is rejected", func(t *testing.T) {
-		err := open(t, srv.weakKex.addr, srv.weakKex.hostKey)
+		err := open(t, srv.weakKex.addr, srv.weakKex.hostKey, keyFile, "")
 		if err == nil || !strings.Contains(err.Error(), "no common algorithm for key exchange") {
 			t.Fatalf("Open error = %v, want key exchange failure", err)
 		}
 	})
 
 	t.Run("2048-bit RSA host key is rejected", func(t *testing.T) {
-		err := open(t, srv.rsa2048.addr, srv.rsa2048.hostKey)
+		err := open(t, srv.rsa2048.addr, srv.rsa2048.hostKey, keyFile, "")
 		if err == nil || !strings.Contains(err.Error(), "RSA key has 2048 bits") {
 			t.Fatalf("Open error = %v, want RSA key size rejection", err)
 		}

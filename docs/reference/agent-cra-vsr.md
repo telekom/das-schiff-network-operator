@@ -15,8 +15,47 @@ on its node over NETCONF on SSH. It reads these environment variables at start:
 | `CRA_URL` | yes | Comma-separated `host:port` list of the router's NETCONF endpoints, e.g. `169.254.33.1:830`. |
 | `CRA_TIMEOUT` | yes | Timeout per NETCONF operation as a Go duration, e.g. `30s`. |
 | `CRA_USER` | yes | NETCONF user name. |
-| `CRA_PASSWORD` | yes | NETCONF password. |
+| `CRA_PRIVATE_KEY_FILE` | one of the two | Path of an unencrypted OpenSSH or PEM private key. The client authenticates with this key only. |
+| `CRA_PASSWORD_FILE` | one of the two | Path of a file that holds the NETCONF password (trailing newlines are removed). Used only when `CRA_PRIVATE_KEY_FILE` is unset. |
 | `CRA_KNOWN_HOSTS` | yes | Path of an OpenSSH `known_hosts` file with the router's host key. |
+
+## Credentials
+
+The agent refuses to start when neither `CRA_PRIVATE_KEY_FILE` nor
+`CRA_PASSWORD_FILE` is set, when the file is missing, cannot be parsed, or has a
+mode wider than `0600` (any group or other permission, or the owner execute bit).
+Neither the key nor the password appears in a log line or error message.
+
+The default manifest (`config/agent-cra-vsr/agent.yaml`) mounts the host
+directory `/etc/cra/netconf` read-only at the same path and sets
+`CRA_PRIVATE_KEY_FILE=/etc/cra/netconf/id_ed25519`. The node creates that key
+pair at first boot and enrols the public key on the router.
+
+### Migrating from `CRA_PASSWORD`
+
+`CRA_PASSWORD` is no longer read. An agent that still has only `CRA_PASSWORD`
+set exits at start with an error that names `CRA_PASSWORD_FILE`. Choose one:
+
+- **Key authentication (default):** provide `/etc/cra/netconf/id_ed25519` on
+  the node and enrol its public key for the NETCONF user on the router.
+- **Password authentication (opt-out for routers without key support):** write
+  the password to a file with mode `0600` (or `0400`), e.g.
+  `/etc/cra/netconf/password`, and replace `CRA_PRIVATE_KEY_FILE` by
+  `CRA_PASSWORD_FILE` in the DaemonSet:
+
+  ```yaml
+  - op: replace
+    path: /spec/template/spec/containers/0/env/3
+    value:
+      name: CRA_PASSWORD_FILE
+      value: /etc/cra/netconf/password
+  ```
+
+  When mounting the password from a Kubernetes Secret instead, set
+  `defaultMode: 0400` on the volume; the Secret default `0644` is refused.
+
+Remove `CRA_PASSWORD` from the manifest. While a file variable is set, a left-over
+`CRA_PASSWORD` is ignored and logged.
 
 ## Host key verification
 
