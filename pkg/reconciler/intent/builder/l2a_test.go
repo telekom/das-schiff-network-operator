@@ -712,8 +712,9 @@ func TestL2ABuilder_DisableAnycast(t *testing.T) {
 			{
 				ObjectMeta: metav1.ObjectMeta{Name: "l2a-1"},
 				Spec: nc.Layer2AttachmentSpec{
-					NetworkRef:     "net-1",
-					DisableAnycast: ptr(true),
+					NetworkRef:          "net-1",
+					DisableAnycast:      ptr(true),
+					AcceptGratuitousARP: ptr(true),
 					Destinations: &metav1.LabelSelector{
 						MatchLabels: map[string]string{"x": "y"},
 					},
@@ -730,6 +731,9 @@ func TestL2ABuilder_DisableAnycast(t *testing.T) {
 	l2 := result["node-1"].Layer2s["100"]
 	if l2.IRB != nil {
 		t.Error("expected nil IRB when anycast is disabled")
+	}
+	if !l2.AcceptGratuitousARP {
+		t.Error("expected AcceptGratuitousARP carried from the L2A")
 	}
 }
 

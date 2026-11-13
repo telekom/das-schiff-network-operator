@@ -178,6 +178,7 @@ and bridging into a VRF.
 | `advertiseNeighbors` | bool | Advertise host routes for local neighbors. |
 | `createMacVLANInterface` | bool | Create a MACVLAN attach interface. |
 | `neighSuppression` | bool | Enable ARP / ND suppression. |
+| `acceptGratuitousARP` | bool | Accept gratuitous ARP on the bridge. Unset: agent default, see below. |
 | `vrf` | string | VRF to attach the Layer 2 network to (default VRF if unset). |
 | `nodeSelector` | label selector | Nodes to create the Layer 2 network on. |
 
@@ -199,6 +200,26 @@ spec:
     matchLabels:
       node-role.kubernetes.io/worker: ""
 ```
+
+!!! warning "CRA-VSR rejects gratuitous ARP by default"
+    On CRA-VSR nodes the bridge of a Layer 2 network ignores gratuitous ARP, so a
+    workload cannot announce another address of the network. CRA-FRR nodes keep
+    accepting it. Whether a bridge accepts gratuitous ARP is decided in this order:
+
+    1. `acceptGratuitousARP: true` on the network: accept.
+    2. `NWOP_L2_ACCEPT_GARP` on the agent DaemonSet: `always` accepts and `never`
+       rejects on every bridge of the node. Other values are ignored with a warning.
+    3. The agent default: CRA-VSR rejects, CRA-FRR accepts.
+
+    Setups that move a virtual IP by gratuitous ARP, for example keepalived, need
+    `acceptGratuitousARP: true` on CRA-VSR. The CRA-VSR default changes when the
+    new agent DaemonSet rolls out, not through a `NetworkConfigRevision` canary.
+
+    Limit on CRA-FRR: rejecting covers only gratuitous ARP, where the sender and
+    target address are the same. Neighbour sync still learns from an unsolicited
+    ARP reply with a different target address and creates an entry for it,
+    because nodes with anycast gateways receive replies to other nodes' requests.
+    That is looser than the kernel with `arp_accept=0`.
 
 ## Legacy traffic mirroring (MirrorTarget + MirrorSelector)
 

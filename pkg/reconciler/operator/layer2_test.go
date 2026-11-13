@@ -114,6 +114,24 @@ var _ = Describe("Layer2 building", func() {
 			Expect(l2.VNI).To(Equal(uint32(1000)))
 			Expect(l2.VLAN).To(Equal(uint16(100)))
 			Expect(l2.MTU).To(Equal(uint16(1500)))
+			Expect(l2.AcceptGratuitousARP).To(BeFalse())
+		})
+
+		It("should carry acceptGratuitousARP", func() {
+			revision := &v1alpha1.NetworkConfigRevision{
+				Spec: v1alpha1.NetworkConfigRevisionSpec{
+					Layer2: []v1alpha1.Layer2Revision{{
+						Name: "l2-100",
+						Layer2NetworkConfigurationSpec: v1alpha1.Layer2NetworkConfigurationSpec{
+							ID: 100, VNI: 1000, MTU: 1500, AcceptGratuitousARP: true,
+						},
+					}},
+				},
+			}
+
+			c := &v1alpha1.NodeNetworkConfig{}
+			Expect(buildNodeLayer2(makeNode("node1", true), revision, c)).To(Succeed())
+			Expect(c.Spec.Layer2s["100"].AcceptGratuitousARP).To(BeTrue())
 		})
 
 		It("should create IRB when anycast gateways are set", func() {

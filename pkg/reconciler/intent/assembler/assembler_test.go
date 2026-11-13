@@ -143,7 +143,10 @@ func TestAssemble_KeepsMirrorMergedWithBase(t *testing.T) {
 	// A base L2A entry (VLAN>0) plus a mirror-only entry on the same key must
 	// merge and be kept, regardless of contribution order.
 	base := builder.NewNodeContribution()
-	base.Layer2s["700"] = networkv1alpha1.Layer2{VNI: 10700, VLAN: 700, MTU: 1500}
+	base.Layer2s["700"] = networkv1alpha1.Layer2{
+		VNI: 10700, VLAN: 700, MTU: 1500, RouteTarget: "65000:700",
+		DisableSegmentation: true, AcceptGratuitousARP: true,
+	}
 	mirror := builder.NewNodeContribution()
 	mirror.Layer2s["700"] = networkv1alpha1.Layer2{
 		MirrorACLs: []networkv1alpha1.MirrorACL{{Direction: networkv1alpha1.MirrorDirectionIngress}},
@@ -160,6 +163,10 @@ func TestAssemble_KeepsMirrorMergedWithBase(t *testing.T) {
 		}
 		if l2.VLAN != 700 || l2.VNI != 10700 || l2.MTU != 1500 {
 			t.Errorf("expected base scalars preserved, got vlan=%d vni=%d mtu=%d", l2.VLAN, l2.VNI, l2.MTU)
+		}
+		if l2.RouteTarget != "65000:700" || !l2.DisableSegmentation || !l2.AcceptGratuitousARP {
+			t.Errorf("expected base flags preserved, got rt=%q seg=%v garp=%v",
+				l2.RouteTarget, l2.DisableSegmentation, l2.AcceptGratuitousARP)
 		}
 		if len(l2.MirrorACLs) != 1 {
 			t.Errorf("expected 1 MirrorACL merged, got %d", len(l2.MirrorACLs))

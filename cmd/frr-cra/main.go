@@ -145,6 +145,8 @@ func reconcileNeighborSync(cfg *nl.NetlinkConfiguration) {
 		bridgeIdx := bridge.Attrs().Index
 
 		neighborSyncer.EnsureARPRefresh(bridgeIdx)
+		// nil keeps the legacy default (accept), see nl.Layer2Information.
+		neighborSyncer.SetAcceptGratuitousARP(bridgeIdx, l2.AcceptGratuitousARP == nil || *l2.AcceptGratuitousARP)
 
 		vlanName := fmt.Sprintf("vlan.%d", l2.VlanID)
 		vlanIntf, err := netlink.LinkByName(vlanName)

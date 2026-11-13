@@ -22,6 +22,7 @@ import (
 	"strconv"
 
 	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
+	"github.com/telekom/das-schiff-network-operator/pkg/helpers/garp"
 	"github.com/telekom/das-schiff-network-operator/pkg/helpers/types"
 )
 
@@ -41,6 +42,7 @@ type InfoL2 struct {
 	mac                 string
 	ips                 []string
 	acls                []v1alpha1.MirrorACL
+	acceptGARP          bool
 }
 
 func NewLayer2(
@@ -64,6 +66,7 @@ func (l *Layer2) setupInformations() {
 			disableSegmentation: l2.DisableSegmentation,
 			vni:                 int(l2.VNI),
 			acls:                l2.MirrorACLs,
+			acceptGARP:          l2.AcceptGratuitousARP,
 		}
 
 		if l2.IRB != nil {
@@ -106,8 +109,13 @@ func (l *Layer2) setupBridge(info *InfoL2, intfs *Interfaces) *Bridge {
 	}
 	br.NetworkStack.IPv6.AcceptDuplicateAD = types.ToPtr("never")
 
+	// CRA-VSR rejects gratuitous ARP unless the network or NWOP_L2_ACCEPT_GARP asks for it.
+	acceptGARP := "never"
+	if accept := garp.Resolve(info.acceptGARP, l.mgr.logger); accept != nil && *accept {
+		acceptGARP = "always"
+	}
 	br.NetworkStack.IPv4 = &NetworkStackV4{
-		AcceptARP: types.ToPtr("always"),
+		AcceptARP: types.ToPtr(acceptGARP),
 	}
 	br.NetworkStack.Neighbor = &NeighborNetworkStack{
 		BaseReachableTimeV4: &baseTimer,
