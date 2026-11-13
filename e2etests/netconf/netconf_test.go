@@ -38,7 +38,7 @@ import (
 const (
 	image    = "das-schiff-netconf-ssh:e2e"
 	user     = "netconf"
-	password = "netconf-e2e-password"
+	password = "netconf-e2e-password" //nolint:gosec // throw-away password of the test container
 	timeout  = 10 * time.Second
 )
 
@@ -97,7 +97,7 @@ func startServer(t *testing.T) *server {
 				if key, _, _, _, err = ssh.ParseAuthorizedKey(out); err != nil {
 					t.Fatalf("parse %s: %v", hostKeyFile, err)
 				}
-				if conn, err := net.DialTimeout("tcp", addr, time.Second); err == nil {
+				if conn, err := (&net.Dialer{Timeout: time.Second}).DialContext(context.Background(), "tcp", addr); err == nil {
 					_ = conn.Close()
 					break
 				}

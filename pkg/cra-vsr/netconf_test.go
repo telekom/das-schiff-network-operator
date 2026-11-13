@@ -226,7 +226,7 @@ func startTestSSHServer(t *testing.T, hostKey ssh.Signer, configure func(*ssh.Se
 		configure(cfg)
 	}
 
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	ln, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
@@ -387,7 +387,7 @@ func TestNetconfOpen_RejectsBeforeAuthentication(t *testing.T) {
 }
 
 func TestBuildNetconf_RestrictsAlgorithms(t *testing.T) {
-	nc := buildNetconf([]string{"169.254.33.1:830"}, "user", "password", time.Second, ssh.InsecureIgnoreHostKey())
+	nc := buildNetconf([]string{"169.254.33.1:830"}, "user", "password", time.Second, ssh.FixedHostKey(newTestPublicKey(t)))
 
 	want := map[string][]string{
 		"KeyExchanges": {"curve25519-sha256", "ecdh-sha2-nistp521", "ecdh-sha2-nistp384", "ecdh-sha2-nistp256", "diffie-hellman-group16-sha512"},
