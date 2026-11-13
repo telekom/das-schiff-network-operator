@@ -39,7 +39,10 @@ func (h logrusHook) Fire(e *logrus.Entry) error {
 	}
 	switch {
 	case e.Level <= logrus.ErrorLevel:
-		err, _ := e.Data[logrus.ErrorKey].(error)
+		var err error
+		if v, ok := e.Data[logrus.ErrorKey].(error); ok {
+			err = v
+		}
 		h.log.Error(err, e.Message, kv...)
 	case e.Level <= logrus.InfoLevel:
 		h.log.Info(e.Message, kv...)

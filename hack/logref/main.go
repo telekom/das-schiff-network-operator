@@ -44,6 +44,8 @@ const (
 	beginMark = "<!-- BEGIN GENERATED: go run ./hack/logref -->"
 	endMark   = "<!-- END GENERATED -->"
 	docMode   = 0o600
+
+	errorMethod = "Error"
 )
 
 var (
@@ -222,34 +224,29 @@ func addCall(p *pkgInfo, call *ast.CallExpr) error {
 	if !isLogrusMethod {
 		return nil // not a log method, for example WithValues or V
 	}
-	var level string
-	var msgArg ast.Expr
-	var kv []ast.Expr
+	isLogrus := strings.HasPrefix(recv, "logrus") || (method != "Info" && method != errorMethod)
 	minArgs := 1
-	if method == "Error" && !strings.HasPrefix(recv, "logrus") {
+	if !isLogrus && method == errorMethod {
 		minArgs = 2 // logr: err, msg
 	}
 	if len(call.Args) < minArgs {
 		return fmt.Errorf("log call %s.%s has too few arguments", recv, method)
 	}
+	var level string
+	var msgArg ast.Expr
+	var kv []ast.Expr
 	switch {
-	case strings.HasPrefix(recv, "logrus") || (method != "Info" && method != "Error"):
+	case isLogrus:
 		level, msgArg = logrusLevel, call.Args[0]
 		p.logrus = true
-	case method == "Error":
+	case method == errorMethod:
 		level, msgArg, kv = "error", call.Args[1], call.Args[2:]
 	default:
-		level, msgArg, kv = "info", call.Args[0], call.Args[1:]
-		if m := vLevelRe.FindAllStringSubmatch(recv, -1); m != nil {
-			if v := m[len(m)-1][1]; v != "0" {
-				level = "debug"
-				if v != "1" {
-					level = "V(" + v + ")"
-				}
-			}
-		} else if strings.Contains(recv, ".V(") {
-			return fmt.Errorf("log call %s.%s has a non-literal V level", recv, method)
+		var err error
+		if level, err = logrInfoLevel(recv); err != nil {
+			return fmt.Errorf("log call %s.%s: %w", recv, method, err)
 		}
+		msgArg, kv = call.Args[0], call.Args[1:]
 	}
 	msg := message(msgArg)
 	if msg == "" {
@@ -268,6 +265,25 @@ func addCall(p *pkgInfo, call *ast.CallExpr) error {
 	}
 	receiverFields(sel.X, e.fields)
 	return nil
+}
+
+// logrInfoLevel returns the catalogue level of a logr Info call on recv.
+func logrInfoLevel(recv string) (string, error) {
+	m := vLevelRe.FindAllStringSubmatch(recv, -1)
+	switch {
+	case m == nil && strings.Contains(recv, ".V("):
+		return "", errors.New("non-literal V level")
+	case m == nil:
+		return "info", nil
+	}
+	switch v := m[len(m)-1][1]; v {
+	case "0":
+		return "info", nil
+	case "1":
+		return "debug", nil
+	default:
+		return "V(" + v + ")", nil
+	}
 }
 
 // receiverFields adds the literal keys of WithValues/WithField(s) calls in a receiver chain.
