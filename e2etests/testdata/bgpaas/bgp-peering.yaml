@@ -1,17 +1,4 @@
-# BGPPeering CR for BGPaaS test (intent API).
-# Configures FRR to accept dynamic BGP peers from the VLAN 501 subnet.
-# Requires a matching L2A for the peering VLAN and a Network for the allow-list.
-apiVersion: network-connector.sylvaproject.org/v1alpha1
-kind: Layer2Attachment
-metadata:
-  name: l2a-bgpaas
-  namespace: default
-spec:
-  networkRef: "net-vlan501"
-  destinations:
-    matchLabels:
-      type: gateway
----
+# BGPPeering fixture reuses the base VLAN 501 attachment.
 # Network whose CIDRs the workload is allowed to advertise via BGP.
 # These become the import filter on the BGP peer (only prefixes within these
 # CIDRs are accepted, matched le 32/128) and the EVPN export entries (so the
@@ -36,7 +23,7 @@ metadata:
 spec:
   mode: listenRange
   ref:
-    attachmentRef: "l2a-bgpaas"
+    attachmentRef: "l2a-base-vlan501"
     networkRefs:
       - "net-bgpaas-clients"
   workloadAS: 65511

@@ -117,3 +117,4 @@ nav:
   - Design:
       - Intent-Based Config: design/intent-based-config.md
       - Traffic Mirroring: design/traffic-mirroring.md
+  - Release Notes: release-notes.md
