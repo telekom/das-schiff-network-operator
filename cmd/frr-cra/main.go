@@ -27,6 +27,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/vishvananda/netlink"
+	"go.uber.org/zap/zapcore"
 	"golang.org/x/sys/unix"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -572,7 +573,7 @@ func applyConfig(w http.ResponseWriter, r *http.Request) {
 	// Mirroring is an additive, non-disruptive observability feature, so a mirror
 	// programming error must not fail the whole node configuration.
 	if err := nlManager.ReconcileMirror(&craConfiguration.NetlinkConfiguration); err != nil {
-		logger.Error(sanitizeErr(err), "failed to reconcile mirror configuration, continuing")
+		logger.Info("failed to reconcile mirror configuration, continuing", "error", sanitizeErr(err).Error())
 	}
 
 	w.WriteHeader(http.StatusOK)
@@ -813,7 +814,9 @@ func createListener(ip net.IP, port int, bindInterface string) (net.Listener, er
 // parseFlagsAndSetupLogging parses the command line, including the --zap-*
 // log flags, and sets up the logger.
 func parseFlagsAndSetupLogging() {
-	opts := zap.Options{Development: true}
+	// Development profile as in the other binaries, but without a stack trace
+	// on every error line: frr-cra retries in a loop. --zap-stacktrace-level overrides.
+	opts := zap.Options{Development: true, StacktraceLevel: zapcore.PanicLevel}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
@@ -844,7 +847,7 @@ func main() {
 
 	// Initialize BPF and neighbor synchronization
 	if err := bpf.InitBPF(); err != nil {
-		logger.Error(err, "failed to initialize BPF, neighbor sync disabled")
+		logger.Info("failed to initialize BPF, neighbor sync disabled", "error", err.Error())
 	} else {
 		neighborSyncer = neighborsync.NewNeighborSync()
 		neighborSyncer.StartNeighborSync()

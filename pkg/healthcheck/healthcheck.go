@@ -212,7 +212,7 @@ func (hc *HealthChecker) CheckInterfaces() error {
 
 	for _, i := range interfaces {
 		if err := hc.checkInterface(i); err != nil {
-			hc.Logger.Error(err, "problem with network interface "+i)
+			hc.Logger.Error(err, "problem with network interface", "interface", i)
 			issuesFound = true
 		}
 	}

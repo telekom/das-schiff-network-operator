@@ -9,11 +9,15 @@
 // D-Bus command trace file) and it is either a logr call (Info, Error, with an
 // optional V(n)) or a logrus call (Debug, Info, Warn, Error, ... with an
 // optional f suffix). The level is the one the call has after
-// logging.RedirectLogrus; the fields are the literal keys of key/value pairs
-// and of WithValues/WithField calls on the receiver.
+// logging.RedirectLibraryLoggers; the fields are the literal keys of key/value
+// pairs and of WithValues/WithField calls on the receiver.
 //
-// The scan also fails when non-test code imports the standard library "log"
-// package, because those lines would bypass the --zap-* flags.
+// The scan fails when
+//   - a log call has no literal message (or fmt.Sprintf format), or cannot be
+//     classified,
+//   - non-test code imports the standard library "log" package, whose lines
+//     would bypass the --zap-* flags,
+//   - a cmd/<binary> package does not call logging.RedirectLibraryLoggers.
 package main
 
 import (
@@ -36,11 +40,10 @@ import (
 )
 
 const (
-	docPath    = "docs/reference/logging.md"
-	beginMark  = "<!-- BEGIN GENERATED: go run ./hack/logref -->"
-	endMark    = "<!-- END GENERATED -->"
-	dynamicMsg = "(dynamic)"
-	docMode    = 0o600
+	docPath   = "docs/reference/logging.md"
+	beginMark = "<!-- BEGIN GENERATED: go run ./hack/logref -->"
+	endMark   = "<!-- END GENERATED -->"
+	docMode   = 0o600
 )
 
 var (
@@ -48,9 +51,9 @@ var (
 	// skipDirs hold no log calls of their own: pkg/logging forwards logrus lines.
 	skipDirs = map[string]bool{"pkg/logging": true}
 	vLevelRe = regexp.MustCompile(`\.V\((\d+)\)`)
-	// logrusLevels maps logrus methods to the level they have after logging.RedirectLogrus.
+	// logrusLevels maps logrus methods to the level they have after logging.RedirectLibraryLoggers.
 	logrusLevels = map[string]string{
-		"Trace": "debug", "Debug": "debug", "Info": "info", "Print": "info", "Warn": "info", "Warning": "info",
+		"Trace": "V(3)", "Debug": "V(2)", "Info": "info", "Print": "info", "Warn": "info", "Warning": "info",
 		"Error": "error", "Fatal": "error", "Panic": "error",
 	}
 	levelOrder = []string{"error", "info", "debug"}
@@ -62,9 +65,10 @@ type entry struct {
 }
 
 type pkgInfo struct {
-	imports map[string]bool
-	entries map[string]*entry // key: level + "\x00" + message
-	logrus  bool
+	imports   map[string]bool
+	entries   map[string]*entry // key: level + "\x00" + message
+	logrus    bool
+	redirects bool // calls logging.RedirectLibraryLoggers
 }
 
 func main() {
@@ -130,7 +134,15 @@ func scan(root string) (map[string]*pkgInfo, error) {
 		}
 	}
 	if len(s.stdlibLog) > 0 {
-		return nil, fmt.Errorf("these files import the standard library \"log\" package, whose output ignores --zap-log-level and --zap-encoder; use a logr logger (ctrl.Log.WithName(...)) instead: %s", strings.Join(s.stdlibLog, ", "))
+		s.errs = append(s.errs, fmt.Errorf("these files import the standard library \"log\" package, whose output ignores --zap-log-level and --zap-encoder; use a logr logger (ctrl.Log.WithName(...)) instead: %s", strings.Join(s.stdlibLog, ", ")))
+	}
+	for _, dir := range sortedKeys(s.pkgs) {
+		if name, ok := strings.CutPrefix(dir, "cmd/"); ok && !strings.Contains(name, "/") && !s.pkgs[dir].redirects {
+			s.errs = append(s.errs, fmt.Errorf("%s does not call logging.RedirectLibraryLoggers(ctrl.Log) after ctrl.SetLogger, so logrus and klog lines bypass the --zap-* flags", dir))
+		}
+	}
+	if err := errors.Join(s.errs...); err != nil {
+		return nil, err
 	}
 	return s.pkgs, nil
 }
@@ -140,6 +152,7 @@ type scanner struct {
 	fset      *token.FileSet
 	pkgs      map[string]*pkgInfo
 	stdlibLog []string
+	errs      []error
 }
 
 func (s *scanner) visit(path string, d fs.DirEntry, err error) error {
@@ -177,41 +190,53 @@ func (s *scanner) visit(path string, d fs.DirEntry, err error) error {
 		}
 	}
 	ast.Inspect(f, func(n ast.Node) bool {
-		if call, ok := n.(*ast.CallExpr); ok {
-			addCall(p, call)
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		if types.ExprString(call.Fun) == "logging.RedirectLibraryLoggers" {
+			p.redirects = true
+		}
+		if err := addCall(p, call); err != nil {
+			s.errs = append(s.errs, fmt.Errorf("%s: %w", s.fset.Position(call.Pos()), err))
 		}
 		return true
 	})
 	return nil
 }
 
-func addCall(p *pkgInfo, call *ast.CallExpr) {
+// addCall records call if it is a log call. It returns an error for a log
+// call it cannot classify or whose message is not a literal.
+func addCall(p *pkgInfo, call *ast.CallExpr) error {
 	sel, ok := call.Fun.(*ast.SelectorExpr)
-	if !ok || len(call.Args) == 0 {
-		return
+	if !ok {
+		return nil
 	}
 	recv := types.ExprString(sel.X)
 	lower := strings.ToLower(recv)
 	if !strings.Contains(lower, "log") || strings.Contains(lower, "executionlog") {
-		return
+		return nil
 	}
 	method := sel.Sel.Name
-	isLogrus := strings.HasPrefix(recv, "logrus") || (method != "Info" && method != "Error")
+	logrusLevel, isLogrusMethod := logrusLevels[strings.TrimSuffix(strings.TrimSuffix(method, "ln"), "f")]
+	if !isLogrusMethod {
+		return nil // not a log method, for example WithValues or V
+	}
 	var level string
 	var msgArg ast.Expr
 	var kv []ast.Expr
+	minArgs := 1
+	if method == "Error" && !strings.HasPrefix(recv, "logrus") {
+		minArgs = 2 // logr: err, msg
+	}
+	if len(call.Args) < minArgs {
+		return fmt.Errorf("log call %s.%s has too few arguments", recv, method)
+	}
 	switch {
-	case isLogrus:
-		var ok bool
-		if level, ok = logrusLevels[strings.TrimSuffix(strings.TrimSuffix(method, "ln"), "f")]; !ok {
-			return
-		}
-		msgArg = call.Args[0]
+	case strings.HasPrefix(recv, "logrus") || (method != "Info" && method != "Error"):
+		level, msgArg = logrusLevel, call.Args[0]
 		p.logrus = true
 	case method == "Error":
-		if len(call.Args) < 2 { //nolint:mnd // err, msg
-			return
-		}
 		level, msgArg, kv = "error", call.Args[1], call.Args[2:]
 	default:
 		level, msgArg, kv = "info", call.Args[0], call.Args[1:]
@@ -222,9 +247,14 @@ func addCall(p *pkgInfo, call *ast.CallExpr) {
 					level = "V(" + v + ")"
 				}
 			}
+		} else if strings.Contains(recv, ".V(") {
+			return fmt.Errorf("log call %s.%s has a non-literal V level", recv, method)
 		}
 	}
 	msg := message(msgArg)
+	if msg == "" {
+		return fmt.Errorf("log call %s.%s has a non-literal message %s; use a literal message and key/value fields", recv, method, types.ExprString(msgArg))
+	}
 	key := level + "\x00" + msg
 	e := p.entries[key]
 	if e == nil {
@@ -237,6 +267,7 @@ func addCall(p *pkgInfo, call *ast.CallExpr) {
 		}
 	}
 	receiverFields(sel.X, e.fields)
+	return nil
 }
 
 // receiverFields adds the literal keys of WithValues/WithField(s) calls in a receiver chain.
@@ -283,19 +314,14 @@ func message(x ast.Expr) string {
 	if s := literal(x); s != "" {
 		return s
 	}
-	switch v := x.(type) {
-	case *ast.CallExpr:
+	if v, ok := x.(*ast.CallExpr); ok {
 		if types.ExprString(v.Fun) == "fmt.Sprintf" && len(v.Args) > 0 {
 			if s := literal(v.Args[0]); s != "" {
 				return s
 			}
 		}
-	case *ast.BinaryExpr:
-		if s := literal(v.X); s != "" && v.Op == token.ADD {
-			return s + "…"
-		}
 	}
-	return dynamicMsg
+	return ""
 }
 
 // binaries maps each cmd/<name> to the module packages it links.
@@ -358,7 +384,7 @@ func render(pkgs map[string]*pkgInfo) string {
 	var b strings.Builder
 	b.WriteString("\n### Messages per binary\n\n")
 	b.WriteString("Number of distinct messages each binary can log, per level. `logrus` marks binaries that link code logging through logrus.\n\n")
-	b.WriteString("| Binary | error | info | debug | higher V-levels | logrus |\n|---|---|---|---|---|---|\n")
+	b.WriteString("| Binary | error | info | debug | V(2) and higher | logrus |\n|---|---|---|---|---|---|\n")
 	for _, name := range sortedKeys(bins) {
 		counts := map[string]int{}
 		usesLogrus := "no"
@@ -381,7 +407,7 @@ func render(pkgs map[string]*pkgInfo) string {
 		fmt.Fprintf(&b, "| `%s` | %d | %d | %d | %d | %s |\n", name, counts["error"], counts["info"], counts["debug"], counts["other"], usesLogrus)
 	}
 	b.WriteString("\n### Messages per package\n\n")
-	b.WriteString("Messages are the literal message (logr) or format string (logrus) of the call. `(dynamic)` marks a message built at run time.\n")
+	b.WriteString("Messages are the literal message (logr) or format string (logrus or `fmt.Sprintf`) of the call.\n")
 	for _, dir := range sortedKeys(pkgs) {
 		p := pkgs[dir]
 		if len(p.entries) == 0 {

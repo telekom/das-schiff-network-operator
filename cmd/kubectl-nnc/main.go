@@ -31,6 +31,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
+	"github.com/telekom/das-schiff-network-operator/pkg/logging"
 )
 
 var (
@@ -67,6 +68,7 @@ func main() {
 		zapFlags.VisitAll(func(f *flag.Flag) { enabled = enabled || rootCmd.PersistentFlags().Changed(f.Name) })
 		if enabled {
 			ctrl.SetLogger(zap.New(zap.UseFlagOptions(&zapOpts)))
+			logging.RedirectLibraryLoggers(ctrl.Log)
 		}
 	}
 

@@ -113,7 +113,8 @@ func (config *Config) setProperty(hint, path string, value interface{}) error {
 	}
 
 	configObject := config.conn.Object(InterfacePath, dbus.ObjectPath(config.path))
-	config.log.Debugf("settings delta for hint %s: %s ", hint, delta)
+	// Log only the path: the value can hold secrets such as WireGuard private keys.
+	config.log.Debugf("setting netplan path %s for hint %s", path, hint)
 	config.executionLog.Infof("busctl --system call io.netplan.Netplan %s io.netplan.Netplan.Config Set ss \"%s\" \"%s\"", config.path, delta, hint)
 	setCall := configObject.Call(ConfigSetCall, 0, delta, hint)
 

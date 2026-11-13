@@ -152,6 +152,6 @@ func (dc *Client) setSingle(hint, path string, value interface{}) error {
 	if err != nil {
 		return err
 	}
-	logrus.Info(res)
+	logrus.WithField("output", res).Info("netplan output")
 	return nil
 }

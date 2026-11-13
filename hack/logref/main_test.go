@@ -23,6 +23,7 @@ func TestScan(t *testing.T) {
 import "example.com/m/pkg/x"
 
 func main() {
+	logging.RedirectLibraryLoggers(ctrl.Log)
 	setupLog.Error(err, "start failed", "addr", a)
 	x.F()
 }
@@ -38,7 +39,7 @@ func F() {
 	n.log.Errorf("failed: %v", err)
 	executionLog.Infof("busctl call")
 	logger.Info(fmt.Sprintf("vrf %s", v))
-	logger.Info(msg)
+	logger.WithValues("a", 1).V(1)
 	http.Error(w, "not a log", 500)
 	err.Error()
 }
@@ -61,11 +62,10 @@ func F() {
 		"pkg/x info reconciled":      "name,node",
 		"pkg/x debug cache hit":      "",
 		"pkg/x V(2) trace":           "",
-		"pkg/x debug delta %s":       "path",
+		"pkg/x V(2) delta %s":        "path",
 		"pkg/x info retry":           "",
 		"pkg/x error failed: %v":     "",
 		"pkg/x info vrf %s":          "",
-		"pkg/x info (dynamic)":       "",
 		"pkg/unused info unused":     "",
 	}
 	if len(got) != len(want) {
@@ -79,7 +79,7 @@ func F() {
 
 	md := render(pkgs)
 	for _, s := range []string{
-		"| `app` | 2 | 4 | 2 | 1 | yes |",
+		"| `app` | 2 | 3 | 1 | 2 | yes |",
 		"#### `pkg/x`\n\nLinked into: `app`",
 		"#### `pkg/unused`\n\nLinked into: none",
 		"| info | `reconciled` | `name`, `node` |",
@@ -90,12 +90,22 @@ func F() {
 	}
 }
 
-func TestScanRejectsStdlibLog(t *testing.T) {
-	root := t.TempDir()
-	writeFile(t, root, "go.mod", "module example.com/m\n")
-	writeFile(t, root, "pkg/x/x.go", "package x\nimport \"log\"\nfunc f() { log.Print(\"x\") }\n")
-	if _, err := scan(root); err == nil || !strings.Contains(err.Error(), "pkg/x/x.go") {
-		t.Fatalf("scan accepted the stdlib log import: %v", err)
+func TestScanRejects(t *testing.T) {
+	for name, tc := range map[string]struct{ file, src, want string }{
+		"stdlib log":                 {"pkg/x/x.go", "package x\nimport \"log\"\nfunc f() { log.Print(\"x\") }\n", "pkg/x/x.go"},
+		"dynamic message":            {"pkg/x/x.go", "package x\nfunc f() { logger.Info(msg) }\n", "non-literal message msg"},
+		"concatenated message":       {"pkg/x/x.go", "package x\nfunc f() { logrus.Info(\"a\" + b) }\n", "non-literal message"},
+		"logr error without message": {"pkg/x/x.go", "package x\nfunc f() { logger.Error(err) }\n", "too few arguments"},
+		"no redirect":                {"cmd/app/main.go", "package main\nfunc main() { ctrl.SetLogger(l) }\n", "cmd/app does not call logging.RedirectLibraryLoggers"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			writeFile(t, root, "go.mod", "module example.com/m\n")
+			writeFile(t, root, tc.file, tc.src)
+			if _, err := scan(root); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("scan error %v, want it to contain %q", err, tc.want)
+			}
+		})
 	}
 }
 

@@ -16,9 +16,14 @@ The [message catalogue](#message-catalogue) at the end of this page is
 generated from the log calls in the Go code by `go run ./hack/logref`. The
 unit test in `hack/logref` (part of `make test`) fails when the catalogue does
 not match the code, so a pull request that adds, removes or changes a log
-message, level or field key must regenerate it. The same test fails when code
-imports the standard library `log` package, whose output would ignore the
-flags.
+message, level or field key must regenerate it. The same test also fails
+when:
+
+- a log call has no literal message (use a constant message and key/value
+  fields for the variable parts),
+- code imports the standard library `log` package, whose output would ignore
+  the flags,
+- a binary in `cmd/` does not call `logging.RedirectLibraryLoggers`.
 
 ## Flags
 
@@ -27,7 +32,7 @@ flags.
 | `--zap-log-level` | `debug`, `info`, `error`, `panic`, or an integer `N > 0` | `debug` | Lowest level written. `debug` is the same as `1` (logr `V(1)`); `N` writes `V(0)` to `V(N)`. `warn` is not accepted. |
 | `--zap-encoder` | `console`, `json` | `console` | `console`: tab-separated text for people. `json`: one JSON object per line for log collectors. |
 | `--zap-devel` | `true`, `false` | `true` | Development profile: `console`, `debug`, stack traces from `warn`. `false` selects the production profile: `json`, `info`, stack traces from `error`, sampling. Explicit `--zap-encoder`, `--zap-log-level` and `--zap-stacktrace-level` win over the profile. |
-| `--zap-stacktrace-level` | `info`, `error`, `panic` | `warn` (development) | Level from which a stack trace is attached to the line. |
+| `--zap-stacktrace-level` | `info`, `error`, `panic` | `warn` (development); `panic` in `frr-cra` | Level from which a stack trace is attached to the line. `frr-cra` defaults to `panic` because it retries failed operations in a loop and would otherwise print a stack trace with every error line. |
 | `--zap-time-encoding` | `epoch`, `millis`, `nano`, `iso8601`, `rfc3339`, `rfc3339nano` | `rfc3339` | Format of the `ts` field. |
 
 All binaries start in the development profile, so by default they write every
@@ -87,8 +92,8 @@ the whole process and changing it restarts the pods.
 |-------|----------------|-------------|
 | `error` | A reconcile, a request to the CRA, a netlink, FRR, netplan or D-Bus operation, or a Kubernetes API call failed; the binary retries or reports the failure upwards. Startup failures are logged at `error` before the binary exits with status 1. | always on |
 | `info` | Lifecycle and state changes: startup and configuration, controller and manager start, leader election, applied node configurations, created and deleted VRFs, Layer2s and policy rules, FRR reloads, health check transitions, webhook validations, conditions handled without failing (for example an unsupported address type, or a timeout waiting for L3VNIs). logrus `warn` lines are logged at `info`. | production |
-| `debug` (`V(1)`) | Per-event detail with high volume: every kernel neighbour update and BPF neighbour event (`frr-cra`), BPF program attachment, intent finalizer changes, sync progress, netplan D-Bus apply steps and settings deltas, logrus `debug` and `trace` lines, and controller-runtime's own `V(1)` lines. | troubleshooting |
-| `V(2)` and higher | Not used by this code. controller-runtime and client-go write some lines there; enable them with `--zap-log-level=2` or higher. | deep library debugging |
+| `debug` (`V(1)`) | Per-event detail with high volume: every kernel neighbour update and BPF neighbour event (`frr-cra`), BPF program attachment, intent finalizer changes, sync progress, and controller-runtime's own `V(1)` lines. | troubleshooting |
+| `V(2)`, `V(3)` | logrus `debug` lines (`V(2)`: netplan D-Bus apply steps, the netplan paths being set, network link lookups) and logrus `trace` lines (`V(3)`), plus some controller-runtime and client-go lines. Enable with `--zap-log-level=2` or `3`. They stay hidden at the default level, as they were with logrus' default `info` level. The netplan settings values are not logged because they can contain secrets such as WireGuard private keys. | deep debugging |
 
 Per binary, the [message counts](#messages-per-binary) show how many distinct
 messages each level can produce, and the
@@ -102,7 +107,7 @@ These lines come from libraries, so the catalogue does not list them:
 |--------|----------|-------|-------------|
 | controller-runtime (manager, controllers, webhooks, cache, metrics server) | all except `frr-cra`, `frr-exporter` and `kubectl-nnc` | `info`, `error`; `V(1)` at `debug` | for example `controller-runtime.metrics`, plus the `controller`, `controllerGroup`, `controllerKind`, `name`, `namespace`, `reconcileID` fields on reconciler lines |
 | client-go (klog), for example leader election and reflector errors | all that talk to the API server | `info`, `error`; klog `V(n)` lines are not written | `klog` |
-| logrus (netplan client in `pkg/network`) | see the `logrus` column of the [message counts](#messages-per-binary) | `debug`/`trace` at `debug`, `info`/`warn` at `info`, `error`/`fatal`/`panic` at `error` | `logrus` |
+| logrus (netplan client in `pkg/network`) | see the `logrus` column of the [message counts](#messages-per-binary) | `info`/`warn` at `info`, `error`/`fatal`/`panic` at `error`, `debug` at `V(2)`, `trace` at `V(3)` | `logrus` |
 
 ### Other output
 
@@ -127,23 +132,23 @@ The tables below are generated; do not edit them by hand. Run
 
 Number of distinct messages each binary can log, per level. `logrus` marks binaries that link code logging through logrus.
 
-| Binary | error | info | debug | higher V-levels | logrus |
+| Binary | error | info | debug | V(2) and higher | logrus |
 |---|---|---|---|---|---|
-| `agent-cra-frr` | 40 | 41 | 2 | 0 | yes |
-| `agent-cra-vsr` | 40 | 41 | 2 | 0 | yes |
-| `agent-hbn-l2` | 7 | 11 | 2 | 0 | yes |
-| `agent-netplan` | 12 | 28 | 6 | 0 | yes |
-| `frr-cra` | 66 | 37 | 8 | 0 | yes |
-| `frr-exporter` | 27 | 26 | 1 | 0 | yes |
-| `kubectl-nnc` | 0 | 6 | 1 | 0 | yes |
+| `agent-cra-frr` | 40 | 41 | 1 | 1 | yes |
+| `agent-cra-vsr` | 40 | 41 | 1 | 1 | yes |
+| `agent-hbn-l2` | 7 | 11 | 1 | 1 | yes |
+| `agent-netplan` | 12 | 28 | 1 | 5 | yes |
+| `frr-cra` | 64 | 39 | 7 | 1 | yes |
+| `frr-exporter` | 27 | 26 | 0 | 1 | yes |
+| `kubectl-nnc` | 0 | 6 | 0 | 1 | yes |
 | `network-sync` | 12 | 16 | 2 | 0 | no |
-| `operator` | 44 | 75 | 10 | 0 | yes |
-| `platform-coil` | 9 | 30 | 1 | 0 | yes |
-| `platform-metallb` | 9 | 30 | 1 | 0 | yes |
+| `operator` | 44 | 75 | 9 | 1 | yes |
+| `platform-coil` | 9 | 30 | 0 | 1 | yes |
+| `platform-metallb` | 9 | 30 | 0 | 1 | yes |
 
 ### Messages per package
 
-Messages are the literal message (logr) or format string (logrus) of the call. `(dynamic)` marks a message built at run time.
+Messages are the literal message (logr) or format string (logrus or `fmt.Sprintf`) of the call.
 
 #### `api/v1alpha1`
 
@@ -226,13 +231,11 @@ Linked into: `frr-cra`
 | Level | Message | Fields |
 |---|---|---|
 | error | `failed to create listener` |  |
-| error | `failed to initialize BPF, neighbor sync disabled` |  |
 | error | `failed to load base config` |  |
 | error | `failed to parse URL` |  |
 | error | `failed to parse request` |  |
 | error | `failed to read CA certificate` |  |
 | error | `failed to read command request body` |  |
-| error | `failed to reconcile mirror configuration, continuing` |  |
 | error | `failed to reconcile netlink` |  |
 | error | `failed to reconcile policy routes` |  |
 | error | `failed to reload FRR, trying to restart` |  |
@@ -253,6 +256,8 @@ Linked into: `frr-cra`
 | info | `bringing up VRF interfaces` | `vrf` |
 | info | `command request body is empty` |  |
 | info | `creating VRF` | `vrf` |
+| info | `failed to initialize BPF, neighbor sync disabled` | `error` |
+| info | `failed to reconcile mirror configuration, continuing` | `error` |
 | info | `policy-routes: added rule` | `rule` |
 | info | `reloaded FRR config` |  |
 | info | `timed out waiting for L3VNIs in FRR` | `needed` |
@@ -435,7 +440,7 @@ Linked into: `agent-cra-frr`, `agent-cra-vsr`, `agent-hbn-l2`, `agent-netplan`, 
 |---|---|---|
 | error | `error while getting node's info` |  |
 | error | `error while updating node` |  |
-| error | `problem with network interface …` |  |
+| error | `problem with network interface` | `interface` |
 | info | `glob pattern matched no interfaces` | `pattern` |
 | info | `node object was modified by another process, will retry taint removal on next reconciliation` |  |
 | info | `unable to parse TCP dialer timeout provided in HealtCheck config as duration` | `timeout`, `value` |
@@ -519,7 +524,7 @@ Linked into: `agent-cra-frr`, `agent-cra-vsr`, `agent-hbn-l2`, `agent-netplan`, 
 |---|---|---|
 | info | `deleting link %s` |  |
 | info | `removing bond %s` |  |
-| debug | `searching network link %s` |  |
+| V(2) | `searching network link %s` |  |
 
 #### `pkg/network/netplan`
 
@@ -544,10 +549,10 @@ Linked into: `agent-netplan`
 | info | `error deleting %s link %s. err: %s` |  |
 | info | `netplan apply was successful` |  |
 | info | `removing links for virtual interfaces removed from configuration before netplan apply` |  |
-| debug | `applying configuration` |  |
-| debug | `error applying configuration. err: %s` |  |
-| debug | `settings delta for hint %s: %s ` |  |
-| debug | `trying configuration for %d seconds` |  |
+| V(2) | `applying configuration` |  |
+| V(2) | `error applying configuration. err: %s` |  |
+| V(2) | `setting netplan path %s for hint %s` |  |
+| V(2) | `trying configuration for %d seconds` |  |
 
 #### `pkg/network/netplan/client/direct`
 
@@ -556,7 +561,7 @@ Linked into: `agent-netplan`
 | Level | Message | Fields |
 |---|---|---|
 | error | `failed to write input into stdin: %s` |  |
-| info | `(dynamic)` |  |
+| info | `netplan output` | `output` |
 
 #### `pkg/network/netplan/client/dummy`
 
