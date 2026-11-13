@@ -27,7 +27,7 @@ type Client struct {
 	initialHints []string
 	conn         *dbus.Conn
 	netManager   net.Manager
-	logger       *logrus.Logger
+	executionLog *logrus.Logger
 }
 
 func New(hint string, initialHints []string, opts Opts) (*Client, error) {
@@ -56,7 +56,7 @@ func New(hint string, initialHints []string, opts Opts) (*Client, error) {
 		initialHints: initialHints,
 		conn:         dbusConn,
 		netManager:   opts.NetManager,
-		logger:       executionLog,
+		executionLog: executionLog,
 	}
 
 	if opts.ExecutionLogPath != "" {
@@ -68,8 +68,8 @@ func New(hint string, initialHints []string, opts Opts) (*Client, error) {
 			MaxAge:     7,    //nolint:mnd // days
 			Compress:   true, // disabled by default
 		}
-		client.logger.SetOutput(lumberjackLogger)
-		client.logger.SetLevel(logrus.InfoLevel)
+		client.executionLog.SetOutput(lumberjackLogger)
+		client.executionLog.SetLevel(logrus.InfoLevel)
 	}
 	return &client, nil
 }
@@ -79,7 +79,7 @@ func (client *Client) Close() {
 	client.conn = nil
 }
 func (client *Client) config() (*Config, netplan.Error) {
-	dbusConfig, err := newConfig(client.hint, client.initialHints, client.conn, client.netManager, client.logger)
+	dbusConfig, err := newConfig(client.hint, client.initialHints, client.conn, client.netManager, client.executionLog)
 	return &dbusConfig, netplan.ParseError(err)
 }
 func (client *Client) Initialize() (config.Config, netplan.Error) {
@@ -117,7 +117,7 @@ func (fvt featuresVariantType) getFeatures() ([]string, error) {
 func (client *Client) Info() ([]string, netplan.Error) {
 	var result dbus.Variant
 	object := client.conn.Object(InterfacePath, ObjectPath)
-	client.logger.Infof("busctl --system call io.netplan.Netplan /io/netplan/Netplan io.netplan.Netplan Info")
+	client.executionLog.Infof("busctl --system call io.netplan.Netplan /io/netplan/Netplan io.netplan.Netplan Info")
 	call := object.Call(InfoCall, 0)
 	if call.Err != nil {
 		return nil, netplan.ParseError(call.Err)

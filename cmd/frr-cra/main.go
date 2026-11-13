@@ -8,10 +8,10 @@ import (
 	"crypto/x509/pkix"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
-	"log"
 	"math/big"
 	"net"
 	"net/http"
@@ -28,11 +28,14 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	"github.com/telekom/das-schiff-network-operator/pkg/bpf"
 	"github.com/telekom/das-schiff-network-operator/pkg/config"
 	"github.com/telekom/das-schiff-network-operator/pkg/cra-frr"
 	"github.com/telekom/das-schiff-network-operator/pkg/frr"
+	"github.com/telekom/das-schiff-network-operator/pkg/logging"
 	"github.com/telekom/das-schiff-network-operator/pkg/monitoring"
 	"github.com/telekom/das-schiff-network-operator/pkg/neighborsync"
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
@@ -56,11 +59,16 @@ var (
 	neighborSyncer *neighborsync.NeighborSync
 	baseConfig     *config.BaseConfig
 	applyMu        sync.Mutex // serializes applyConfig to prevent concurrent FRR/netlink races
+	logger         = ctrl.Log.WithName("frr-cra")
 )
 
 // sanitizeLog removes newlines and carriage returns from log messages
 // to prevent log injection attacks (CodeQL: Log entries created from user input).
 var logSanitizer = strings.NewReplacer("\n", "", "\r", "")
+
+func sanitizeErr(err error) error {
+	return errors.New(logSanitizer.Replace(err.Error()))
+}
 
 func deleteLayer2(cfg *nl.NetlinkConfiguration) error {
 	existing, err := nlManager.ListL2()
@@ -139,7 +147,7 @@ func reconcileNeighborSync(cfg *nl.NetlinkConfiguration) {
 		bridgeName := fmt.Sprintf("l2.%d", l2.VlanID)
 		bridge, err := netlink.LinkByName(bridgeName)
 		if err != nil {
-			log.Print(logSanitizer.Replace(fmt.Sprintf("neighborsync: bridge l2.%d not found: %v", l2.VlanID, err)))
+			logger.Error(sanitizeErr(err), "neighborsync: bridge not found", "bridge", bridgeName)
 			continue
 		}
 		bridgeIdx := bridge.Attrs().Index
@@ -149,12 +157,12 @@ func reconcileNeighborSync(cfg *nl.NetlinkConfiguration) {
 		vlanName := fmt.Sprintf("vlan.%d", l2.VlanID)
 		vlanIntf, err := netlink.LinkByName(vlanName)
 		if err != nil {
-			log.Print(logSanitizer.Replace(fmt.Sprintf("neighborsync: vlan interface %s not found: %v", vlanName, err)))
+			logger.Error(sanitizeErr(err), "neighborsync: vlan interface not found", "interface", vlanName)
 			continue
 		}
 
 		if err := neighborSyncer.EnsureNeighborSuppression(bridgeIdx, vlanIntf.Attrs().Index); err != nil {
-			log.Print(logSanitizer.Replace(fmt.Sprintf("neighborsync: failed to ensure neighbor suppression for bridge l2.%d: %v", l2.VlanID, err)))
+			logger.Error(sanitizeErr(err), "neighborsync: failed to ensure neighbor suppression", "bridge", bridgeName)
 		}
 	}
 }
@@ -193,7 +201,7 @@ func deleteStaleRules(existing, desired []netlink.Rule) error {
 		}
 		if !containsRule(desired, &existing[i]) {
 			if err := netlink.RuleDel(&existing[i]); err != nil {
-				log.Printf("policy-routes: failed to delete stale rule %v: %v", existing[i], err)
+				logger.Error(err, "policy-routes: failed to delete stale rule", "rule", existing[i].String())
 			}
 		}
 	}
@@ -209,7 +217,7 @@ func addMissingRules(existing, desired []netlink.Rule, family int) error {
 			if err := netlink.RuleAdd(&desired[i]); err != nil {
 				return fmt.Errorf("error adding rule %v: %w", desired[i], err)
 			}
-			log.Printf("policy-routes: added rule %v", desired[i])
+			logger.Info("policy-routes: added rule", "rule", desired[i].String())
 		}
 	}
 	return nil
@@ -233,7 +241,7 @@ func buildDesiredRules(routes []cra.PolicyRoute) []netlink.Rule {
 
 		tableID, err := vrfTableID(pr.Vrf)
 		if err != nil {
-			log.Print(logSanitizer.Replace(fmt.Sprintf("policy-routes: cannot resolve VRF %q table: %v", pr.Vrf, err)))
+			logger.Error(sanitizeErr(err), "policy-routes: cannot resolve VRF table", "vrf", logSanitizer.Replace(pr.Vrf))
 			continue
 		}
 
@@ -412,7 +420,7 @@ func createVRFs(cfg *nl.NetlinkConfiguration) ([]nl.VRFInformation, error) {
 			}
 		}
 		if !alreadyExists {
-			log.Print(logSanitizer.Replace(fmt.Sprintf("Creating VRF %s", cfg.VRFs[i].Name)))
+			logger.Info("creating VRF", "vrf", logSanitizer.Replace(cfg.VRFs[i].Name))
 			if err := nlManager.CreateL3(cfg.VRFs[i]); err != nil {
 				return created, fmt.Errorf("error creating L3 (VRF: %s): %w", cfg.VRFs[i].Name, err)
 			}
@@ -429,7 +437,7 @@ func createVRFs(cfg *nl.NetlinkConfiguration) ([]nl.VRFInformation, error) {
 // advertise the correct EVPN Router-MAC.
 func upNewVRFs(vrfs []nl.VRFInformation) error {
 	for i := range vrfs {
-		log.Print(logSanitizer.Replace(fmt.Sprintf("Bringing up VRF interfaces %s", vrfs[i].Name)))
+		logger.Info("bringing up VRF interfaces", "vrf", logSanitizer.Replace(vrfs[i].Name))
 		if err := nlManager.UpL3(vrfs[i]); err != nil {
 			return fmt.Errorf("error setting up L3 (VRF: %s): %w", vrfs[i].Name, err)
 		}
@@ -471,15 +479,15 @@ func reconcileLayer3(cfg *nl.NetlinkConfiguration) ([]nl.VRFInformation, error) 
 func reloadFRR() error {
 	err := frrManager.ReloadFRR()
 	if err != nil {
-		log.Println("Failed to reload FRR, trying to restart", err)
+		logger.Error(err, "failed to reload FRR, trying to restart")
 
 		err = frrManager.RestartFRR()
 		if err != nil {
-			log.Println("Failed to restart FRR", err)
+			logger.Error(err, "failed to restart FRR")
 			return fmt.Errorf("error reloading / restarting FRR systemd unit: %w", err)
 		}
 	}
-	log.Println("Reloaded FRR config")
+	logger.Info("reloaded FRR config")
 	return nil
 }
 
@@ -514,13 +522,13 @@ func waitForL3VNIs(vrfs []nl.VRFInformation) {
 				}
 			}
 			if found >= len(needed) {
-				log.Printf("All %d L3VNIs registered in FRR", found)
+				logger.Info("all L3VNIs registered in FRR", "count", found)
 				return
 			}
 		}
 		time.Sleep(vniPollInterval)
 	}
-	log.Printf("Warning: timed out waiting for L3VNIs in FRR (needed %d)", len(needed))
+	logger.Info("timed out waiting for L3VNIs in FRR", "needed", len(needed))
 }
 
 func applyConfig(w http.ResponseWriter, r *http.Request) {
@@ -536,26 +544,26 @@ func applyConfig(w http.ResponseWriter, r *http.Request) {
 	// Parse Body into NetlinkConfiguration
 	var craConfiguration cra.Configuration
 	if err := parseApplyRequest(r, &craConfiguration); err != nil {
-		log.Print(logSanitizer.Replace(fmt.Sprintf("Failed to parse request: %v", err)))
+		logger.Error(sanitizeErr(err), "failed to parse request")
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	if err := writeFRRConfig(craConfiguration.FRRConfiguration); err != nil {
-		log.Print(logSanitizer.Replace(fmt.Sprintf("Failed to write FRR config: %v", err)))
+		logger.Error(sanitizeErr(err), "failed to write FRR config")
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	if err := reconcileNetlink(&craConfiguration.NetlinkConfiguration); err != nil {
-		log.Print(logSanitizer.Replace(fmt.Sprintf("Failed to reconcile netlink: %v", err)))
+		logger.Error(sanitizeErr(err), "failed to reconcile netlink")
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	// Reconcile SBR policy routes as ip rules
 	if err := reconcilePolicyRoutes(craConfiguration.PolicyRoutes); err != nil {
-		log.Print(logSanitizer.Replace(fmt.Sprintf("Failed to reconcile policy routes: %v", err)))
+		logger.Error(sanitizeErr(err), "failed to reconcile policy routes")
 		http.Error(w, fmt.Sprintf("Failed to reconcile policy routes: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -564,7 +572,7 @@ func applyConfig(w http.ResponseWriter, r *http.Request) {
 	// Mirroring is an additive, non-disruptive observability feature, so a mirror
 	// programming error must not fail the whole node configuration.
 	if err := nlManager.ReconcileMirror(&craConfiguration.NetlinkConfiguration); err != nil {
-		log.Println("Warning: failed to reconcile mirror configuration (continuing):", err)
+		logger.Error(sanitizeErr(err), "failed to reconcile mirror configuration, continuing")
 	}
 
 	w.WriteHeader(http.StatusOK)
@@ -654,14 +662,14 @@ func executeFrr(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if r.Body == nil {
-		log.Println("Request body is empty")
+		logger.Info("command request body is empty")
 		http.Error(w, "Request body is empty", http.StatusBadRequest)
 		return
 	}
 
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
-		log.Println("Failed to read request body", err)
+		logger.Error(err, "failed to read command request body")
 		http.Error(w, "Failed to read request body", http.StatusInternalServerError)
 		return
 	}
@@ -671,7 +679,7 @@ func executeFrr(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 
 	if _, err := w.Write(data); err != nil {
-		log.Println("Failed to write response", err)
+		logger.Error(err, "failed to write command response")
 		return
 	}
 }
@@ -806,17 +814,23 @@ func main() {
 	ip := flag.String("ip", "fd00:7:caa5::", "IP to listen on and generate certificate for")
 	bindInterface := flag.String("bind-interface", "cluster", "Bind interface to use for netlink")
 	port := flag.Int("port", 8443, "Port to listen on") //nolint:mnd
+	opts := zap.Options{Development: true}
+	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
+	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+	logging.RedirectLibraryLoggers(ctrl.Log)
 
 	parsedIP := net.ParseIP(*ip)
 	if parsedIP == nil {
-		log.Fatal("Invalid IP")
+		logger.Error(fmt.Errorf("invalid IP %q", *ip), "invalid --ip")
+		os.Exit(1)
 	}
 
 	var err error
 	baseConfig, err = config.LoadBaseConfig(baseConfigPath)
 	if err != nil {
-		log.Fatal("Failed to load base config", err)
+		logger.Error(err, "failed to load base config")
+		os.Exit(1)
 	}
 
 	frrManager = frr.NewFRRManager()
@@ -824,16 +838,17 @@ func main() {
 
 	// Initialize BPF and neighbor synchronization
 	if err := bpf.InitBPF(); err != nil {
-		log.Printf("WARNING: Failed to initialize BPF, neighbor sync disabled: %v", err)
+		logger.Error(err, "failed to initialize BPF, neighbor sync disabled")
 	} else {
 		neighborSyncer = neighborsync.NewNeighborSync()
 		neighborSyncer.StartNeighborSync()
-		log.Println("BPF and neighbor sync initialized")
+		logger.Info("BPF and neighbor sync initialized")
 	}
 
 	registry, err := setupPrometheusRegistry()
 	if err != nil {
-		log.Fatal("Failed to setup Prometheus registry", err)
+		logger.Error(err, "failed to setup Prometheus registry")
+		os.Exit(1)
 	}
 
 	http.HandleFunc("/frr/configuration", applyConfig)
@@ -849,7 +864,8 @@ func main() {
 
 	exporterURL, err := url.Parse("http://localhost:9100")
 	if err != nil {
-		log.Fatal("Failed to parse URL", err)
+		logger.Error(err, "failed to parse URL")
+		os.Exit(1)
 	}
 	// Build proxy for local node-exporter
 	proxy := httputil.NewSingleHostReverseProxy(exporterURL)
@@ -859,19 +875,22 @@ func main() {
 	if _, err := os.Stat(serverCert); os.IsNotExist(err) {
 		err = setupTLS(parsedIP)
 		if err != nil {
-			log.Fatal("Failed to setup TLS", err)
+			logger.Error(err, "failed to setup TLS")
+			os.Exit(1)
 		}
 	}
 	if _, err := os.Stat(serverKey); os.IsNotExist(err) {
 		err = setupTLS(parsedIP)
 		if err != nil {
-			log.Fatal("Failed to setup TLS", err)
+			logger.Error(err, "failed to setup TLS")
+			os.Exit(1)
 		}
 	}
 
 	caCert, err := os.ReadFile(serverCert)
 	if err != nil {
-		log.Fatal("Failed to read CA certificate", err)
+		logger.Error(err, "failed to read CA certificate")
+		os.Exit(1)
 	}
 	caCertPool := x509.NewCertPool()
 	caCertPool.AppendCertsFromPEM(caCert)
@@ -889,11 +908,13 @@ func main() {
 
 	listener, err := createListener(parsedIP, *port, *bindInterface)
 	if err != nil {
-		log.Fatal("Failed to create listener", err)
+		logger.Error(err, "failed to create listener")
+		os.Exit(1)
 	}
 
 	err = server.ServeTLS(listener, serverCert, serverKey)
 	if err != nil {
-		log.Fatal("Failed to start server", err)
+		logger.Error(err, "failed to start server")
+		os.Exit(1)
 	}
 }

@@ -197,7 +197,8 @@ failing node stalls the rollout for the whole revision.
 - **A node not progressing.** Check that node's `nnc.status.configStatus`. If it
   stays `provisioning`, the agent on that node is not applying the config —
   inspect the `agent-cra-frr` / `agent-cra-vsr` (or `agent-netplan` /
-  `agent-hbn-l2`) pod logs on that node.
+  `agent-hbn-l2`) pod logs on that node. See [Logging](../reference/logging.md)
+  for the log levels and what each level logs.
 
 - **Revision mismatch.** If `nnc.status.lastAppliedRevision` does not match
   `nnc.spec.revision`, the node has not yet applied the latest build. A

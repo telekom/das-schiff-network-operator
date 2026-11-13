@@ -17,6 +17,7 @@ limitations under the License.
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 
@@ -25,7 +26,9 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/clientcmd"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 )
@@ -52,6 +55,20 @@ func main() {
 	rootCmd.PersistentFlags().StringVar(&kubeconfig, "kubeconfig", "", "path to kubeconfig file")
 	rootCmd.PersistentFlags().StringVar(&kubeContext, "context", "", "kubeconfig context to use")
 	rootCmd.PersistentFlags().BoolVar(&noColor, "no-color", false, "disable color output")
+
+	// The --zap-* flags enable library logging on stderr. Without them no
+	// logger is set, so the output stays the rendered tree/table only.
+	zapOpts := zap.Options{Development: true}
+	zapFlags := flag.NewFlagSet("zap", flag.ContinueOnError)
+	zapOpts.BindFlags(zapFlags)
+	rootCmd.PersistentFlags().AddGoFlagSet(zapFlags)
+	rootCmd.PersistentPreRun = func(*cobra.Command, []string) {
+		enabled := false
+		zapFlags.VisitAll(func(f *flag.Flag) { enabled = enabled || rootCmd.PersistentFlags().Changed(f.Name) })
+		if enabled {
+			ctrl.SetLogger(zap.New(zap.UseFlagOptions(&zapOpts)))
+		}
+	}
 
 	rootCmd.AddCommand(newShowCmd())
 	rootCmd.AddCommand(newListCmd())

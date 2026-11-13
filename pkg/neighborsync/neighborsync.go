@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"log"
 	"net"
 	"net/netip"
 	"sync"
@@ -17,12 +16,16 @@ import (
 	"github.com/mdlayher/ndp"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
+	ctrl "sigs.k8s.io/controller-runtime"
 
 	"github.com/telekom/das-schiff-network-operator/pkg/bpf"
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
 )
 
 const hardwareAddrLen = 6
+
+var logger = ctrl.Log.WithName("neighborsync")
+
 const refreshEvery = time.Second * 10
 
 type timerKey struct {
@@ -82,14 +85,14 @@ func sendNeighborRequest(linkIndex int, destination net.HardwareAddr, address ne
 	case address.Is6():
 		sendNDPRequest(linkIndex, destination, address)
 	default:
-		log.Printf("sendNeighborRequest: unsupported IP address type: %s", address)
+		logger.Info("sendNeighborRequest: unsupported IP address type", "address", address)
 	}
 }
 
 func sendGratuitousNeighbor(linkIndex int, address netip.Addr, mac net.HardwareAddr) {
 	intf, err := net.InterfaceByIndex(linkIndex)
 	if err != nil {
-		log.Printf("failed to get interface by index %d: %v", linkIndex, err)
+		logger.Error(err, "failed to get interface by index", "linkIndex", linkIndex)
 		return
 	}
 
@@ -99,7 +102,7 @@ func sendGratuitousNeighbor(linkIndex int, address netip.Addr, mac net.HardwareA
 	case address.Is6():
 		sendUnsolicitedNA(intf, address, mac)
 	default:
-		log.Printf("sendGratuitousNeighbor: unsupported IP address type: %s", address)
+		logger.Info("sendGratuitousNeighbor: unsupported IP address type", "address", address)
 	}
 }
 
@@ -116,18 +119,18 @@ func sendARPRequest(linkIndex int, destination net.HardwareAddr, address netip.A
 
 	ip, err := getFirstIPv4FromInterface(iface)
 	if err != nil {
-		log.Printf("failed to get IPv4 address from interface %s: %v", iface.Name, err)
+		logger.Error(err, "failed to get IPv4 address from interface", "interface", iface.Name)
 		return
 	}
 
 	arpPacket, err := arp.NewPacket(arp.OperationRequest, iface.HardwareAddr, ip, destination, address)
 	if err != nil {
-		log.Printf("failed to create ARP packet on %s for %s: %v", iface.Name, address, err)
+		logger.Error(err, "failed to create ARP packet", "interface", iface.Name, "address", address)
 		return
 	}
 
 	if err := c.WriteTo(arpPacket, destination); err != nil {
-		log.Printf("sendARPRequest failed on %s for %s: %v", iface.Name, address, err)
+		logger.Error(err, "sendARPRequest failed", "interface", iface.Name, "address", address)
 	}
 }
 
@@ -139,7 +142,7 @@ func sendNDPRequest(linkIndex int, destination net.HardwareAddr, address netip.A
 
 	c, _, err := ndp.Listen(iface, ndp.LinkLocal)
 	if err != nil {
-		log.Printf("failed to listen for NDP on %s: %v", iface.Name, err)
+		logger.Error(err, "failed to listen for NDP", "interface", iface.Name)
 		return
 	}
 	defer c.Close()
@@ -159,7 +162,7 @@ func sendNDPRequest(linkIndex int, destination net.HardwareAddr, address netip.A
 	}
 
 	if err := c.WriteTo(m, nil, address); err != nil {
-		log.Printf("sendNDPRequest failed for %s: %v", address, err)
+		logger.Error(err, "sendNDPRequest failed", "address", address)
 	}
 }
 
@@ -167,19 +170,19 @@ func sendNDPRequest(linkIndex int, destination net.HardwareAddr, address netip.A
 func sendGratuitousARP(ifi *net.Interface, nip netip.Addr, mac net.HardwareAddr) {
 	c, err := arp.Dial(ifi)
 	if err != nil {
-		log.Printf("failed to dial ARP on %s: %v", ifi.Name, err)
+		logger.Error(err, "failed to dial ARP", "interface", ifi.Name)
 		return
 	}
 	defer c.Close()
 
 	pkt, err := arp.NewPacket(arp.OperationReply, mac, nip, mac, nip)
 	if err != nil {
-		log.Printf("failed to create gratuitous ARP packet on %s for %s: %v", ifi.Name, nip, err)
+		logger.Error(err, "failed to create gratuitous ARP packet", "interface", ifi.Name, "address", nip)
 		return
 	}
 	bcast := net.HardwareAddr{0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
 	if err := c.WriteTo(pkt, bcast); err != nil {
-		log.Printf("sendGratuitousARP failed on %s for %s: %v", ifi.Name, nip, err)
+		logger.Error(err, "sendGratuitousARP failed", "interface", ifi.Name, "address", nip)
 	}
 }
 
@@ -197,13 +200,13 @@ func sendUnsolicitedNA(ifi *net.Interface, nip netip.Addr, mac net.HardwareAddr)
 	}
 	conn, _, err := ndp.Listen(ifi, ndp.LinkLocal)
 	if err != nil {
-		log.Printf("failed to open NDP socket on %s: %v", ifi.Name, err)
+		logger.Error(err, "failed to open NDP socket", "interface", ifi.Name)
 		return
 	}
 	defer conn.Close()
 	dst, _ := netip.ParseAddr("ff02::1")
 	if err := conn.WriteTo(na, nil, dst); err != nil {
-		log.Printf("sendUnsolicitedNA failed on %s for %s: %v", ifi.Name, nip, err)
+		logger.Error(err, "sendUnsolicitedNA failed", "interface", ifi.Name, "address", nip)
 	}
 }
 
@@ -240,12 +243,12 @@ func (n *NeighborSync) processUpdate(update *netlink.NeighUpdate) {
 
 	switch update.Type {
 	case unix.RTM_NEWNEIGH:
-		log.Printf("neighbor update: link=%d ip=%s mac=%s state=%d flags=%d",
-			update.LinkIndex, update.IP, update.HardwareAddr, update.State, update.Flags)
+		logger.V(1).Info("neighbor update", "link", update.LinkIndex, "ip", update.IP,
+			"mac", update.HardwareAddr, "state", update.State, "flags", update.Flags)
 		n.handleNeighborAdd(addr, &update.Neigh)
 	case unix.RTM_DELNEIGH:
-		log.Printf("neighbor delete: link=%d ip=%s mac=%s state=%d flags=%d",
-			update.LinkIndex, update.IP, update.HardwareAddr, update.State, update.Flags)
+		logger.V(1).Info("neighbor delete", "link", update.LinkIndex, "ip", update.IP,
+			"mac", update.HardwareAddr, "state", update.State, "flags", update.Flags)
 		n.handleNeighborDelete(addr, &update.Neigh)
 	default:
 		return
@@ -283,14 +286,14 @@ func (n *NeighborSync) receiveUpdates() {
 		done := make(chan struct{})
 		err := n.neighSubscribeFn(updates, done, netlink.NeighSubscribeOptions{ListExisting: true})
 		if err != nil {
-			log.Printf("failed to subscribe to neighbor updates: %v", err)
+			logger.Error(err, "failed to subscribe to neighbor updates")
 			break
 		}
 		for update := range updates {
 			n.processUpdate(&update)
 		}
 		close(done)
-		log.Println("neighbor updates channel closed, restarting neighbor sync, clearing timers")
+		logger.Info("neighbor updates channel closed, restarting neighbor sync, clearing timers")
 		n.neighbors = sync.Map{} // Clear all timers
 		time.Sleep(time.Second)
 	}
@@ -299,7 +302,7 @@ func (n *NeighborSync) receiveUpdates() {
 func (n *NeighborSync) syncKernelNeighbors(intfIndex int) {
 	neighbors, err := n.nlOps.NeighList(intfIndex, netlink.FAMILY_ALL)
 	if err != nil {
-		log.Printf("failed to list neighbors: %v", err)
+		logger.Error(err, "failed to list neighbors", "linkIndex", intfIndex)
 		return
 	}
 
@@ -326,8 +329,8 @@ func (n *NeighborSync) runNeighborCheck() {
 			}
 			if time.Now().After(timerVal.NextRun) {
 				if _, err := net.InterfaceByIndex(timerKeyVal.LinkIndex); err != nil {
-					log.Printf("interface removed, deleting neighbor timer: linkIndex=%d address=%s",
-						timerKeyVal.LinkIndex, timerKeyVal.Address)
+					logger.V(1).Info("interface removed, deleting neighbor timer",
+						"linkIndex", timerKeyVal.LinkIndex, "address", timerKeyVal.Address)
 					interfaceRemoved = append(interfaceRemoved, timerKeyVal)
 					return true
 				}
@@ -344,14 +347,14 @@ func (n *NeighborSync) runNeighborCheck() {
 }
 
 func (n *NeighborSync) runBpfNeighborSync() {
-	log.Println("BPF ringbuf reader goroutine started")
+	logger.Info("BPF ringbuf reader goroutine started")
 	rd, err := n.newRingbufReaderFn()
 	if err != nil {
-		log.Printf("failed to open ringbuf reader: %v", err)
+		logger.Error(err, "failed to open ringbuf reader")
 		return
 	}
 	defer rd.Close()
-	log.Println("BPF ringbuf reader opened, waiting for events...")
+	logger.Info("BPF ringbuf reader opened, waiting for events")
 
 	for {
 		rec, err := rd.Read()
@@ -363,7 +366,7 @@ func (n *NeighborSync) runBpfNeighborSync() {
 			if errors.As(err, &errno) && (errno == unix.EINTR || errno == unix.EAGAIN) {
 				continue
 			}
-			log.Printf("failed to read ringbuf: %v", err)
+			logger.Error(err, "failed to read ringbuf")
 			return
 		}
 
@@ -392,15 +395,15 @@ func (n *NeighborSync) runBpfNeighborSync() {
 			family = unix.AF_INET6
 		}
 
-		log.Printf("BPF neighbor event: ifindex=%d family=%d ip=%s mac=%s skipped=%t",
-			ev.Ifindex, family, ip.String(), net.HardwareAddr(ev.Mac[:]).String(), skipping)
+		logger.V(1).Info("BPF neighbor event", "ifindex", ev.Ifindex, "family", family,
+			"ip", ip.String(), "mac", net.HardwareAddr(ev.Mac[:]).String(), "skipped", skipping)
 
 		if skipping {
 			continue
 		}
 
 		if err := n.replaceNeighborReachable(int(ev.Ifindex), family, ip, ev.Mac); err != nil {
-			log.Printf("neigh replace failed: %v", err)
+			logger.Error(err, "neigh replace failed")
 		}
 	}
 }
@@ -430,7 +433,7 @@ func (n *NeighborSync) replaceNeighborReachable(ifindex, family int, ip net.IP, 
 	macChanged := true
 	existingNeighs, err := n.nlOps.NeighList(bridgeIdx, family)
 	if err != nil {
-		log.Printf("failed to list neighbors on bridge %d: %v — assuming MAC changed", bridgeIdx, err)
+		logger.Error(err, "failed to list neighbors on bridge, assuming MAC changed", "bridge", bridgeIdx)
 	}
 	for i := range existingNeighs {
 		if existingNeighs[i].IP.Equal(ip) {
@@ -461,7 +464,7 @@ func (n *NeighborSync) replaceNeighborReachable(ifindex, family int, ip net.IP, 
 		if _, ok := n.sendGratuitousNeighbor.Load(bridgeIdx); ok {
 			addr, ok := netip.AddrFromSlice(ip)
 			if ok {
-				log.Printf("MAC changed for %s on bridge %d, sending gratuitous neighbor", ip.String(), bridgeIdx)
+				logger.Info("MAC changed, sending gratuitous neighbor", "ip", ip.String(), "bridge", bridgeIdx)
 				n.sendGratuitousNeighborFn(bridgeIdx, addr, hw)
 			}
 		}

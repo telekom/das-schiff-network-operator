@@ -48,7 +48,7 @@ func (dc *Client) netplanWithInput(arguments []string, input string) (string, er
 			defer stdin.Close()
 			_, err = io.WriteString(stdin, input)
 			if err != nil {
-				fmt.Printf("failed to write input into stdin: %s\n", err.Error())
+				logrus.Errorf("failed to write input into stdin: %s", err.Error())
 			}
 		}()
 	}
