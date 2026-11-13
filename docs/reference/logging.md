@@ -116,7 +116,8 @@ These lines come from libraries, so the catalogue does not list them:
   independent of the log flags.
 - The netplan D-Bus client (`pkg/network/netplan/client/dbus`) can write
   every D-Bus call as a `busctl` command line to a separate, rotated file
-  (`dbus.Opts.ExecutionLogPath`). No binary enables this trace today, and the
+  (`dbus.Opts.ExecutionLogPath`). Secret values in it (WireGuard keys,
+  passwords, PSKs) are written as `<redacted>`. No binary enables this trace today, and the
   log flags do not affect it.
 - `kubectl-nnc` writes its tree and table output to stdout and errors to
   stderr.
