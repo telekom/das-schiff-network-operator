@@ -9,7 +9,7 @@ import (
 )
 
 func TestTraceSetRedactsSecrets(t *testing.T) {
-	const secret = "c2VjcmV0LXByaXZhdGUta2V5LWJhc2U2NC1lbmNvZGVkPQ=="
+	const secret = "c2VjcmV0LXByaXZhdGUta2V5LWJhc2U2NC1lbmNvZGVkPQ==" //nolint:gosec // test value, not a credential
 	var out bytes.Buffer
 	trace := logrus.New()
 	trace.SetOutput(&out)
