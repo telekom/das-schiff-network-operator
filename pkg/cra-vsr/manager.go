@@ -493,7 +493,7 @@ func (m *Manager) GetKPIMetrics(ctx context.Context) ([]byte, error) {
 
 		resBody, err := m.SendHttpRequest(ctx, url)
 		if err != nil {
-			fmt.Println(err)
+			m.logger.Error(err, "failed to fetch KPI metrics", "url", url)
 			continue
 		}
 

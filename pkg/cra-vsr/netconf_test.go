@@ -506,6 +506,7 @@ func TestAuthFromFiles_RejectsInvalidFiles(t *testing.T) {
 		{name: "missing key file", keyFile: filepath.Join(t.TempDir(), "missing"), wantErrSub: "no such file"},
 		{name: "empty password file", passwordFile: emptyPasswordFile, wantErrSub: "is empty"},
 		{name: "no file", wantErrSub: "no private key file or password file provided"},
+		{name: "encrypted key file", keyFile: newEncryptedTestKeyFile(t), wantErrSub: "is encrypted"},
 		{name: "key file holds no key", keyFile: writeTestFile(t, "not-a-key", []byte("secret"), 0o600), wantErrSub: "parse private key file"},
 	}
 
@@ -520,4 +521,18 @@ func TestAuthFromFiles_RejectsInvalidFiles(t *testing.T) {
 			}
 		})
 	}
+}
+
+func newEncryptedTestKeyFile(t *testing.T) string {
+	t.Helper()
+
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate client key: %v", err)
+	}
+	block, err := ssh.MarshalPrivateKeyWithPassphrase(priv, "", []byte("passphrase"))
+	if err != nil {
+		t.Fatalf("marshal client key: %v", err)
+	}
+	return writeTestFile(t, "id_ed25519_encrypted", pem.EncodeToMemory(block), 0o600)
 }

@@ -112,7 +112,10 @@ spec:
           name: cra-known-hosts
         - hostPath:
             path: /etc/cra/netconf
-            type: Directory
+            # DirectoryOrCreate: a node without the key directory starts the
+            # agent, which then exits with a clear error instead of the Pod
+            # hanging in ContainerCreating.
+            type: DirectoryOrCreate
           name: cra-netconf
         - configMap:
             name: healthcheck-config

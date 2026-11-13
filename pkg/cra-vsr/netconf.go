@@ -198,6 +198,10 @@ func AuthFromFiles(keyFile, passwordFile string) (ssh.AuthMethod, error) {
 		}
 		signer, err := ssh.ParsePrivateKey(data)
 		if err != nil {
+			var passphraseErr *ssh.PassphraseMissingError
+			if errors.As(err, &passphraseErr) {
+				return nil, fmt.Errorf("private key file %q is encrypted; the agent needs an unencrypted key", keyFile)
+			}
 			return nil, fmt.Errorf("parse private key file %q: %w", keyFile, err)
 		}
 		return ssh.PublicKeys(signer), nil
@@ -216,15 +220,23 @@ func AuthFromFiles(keyFile, passwordFile string) (ssh.AuthMethod, error) {
 	}
 }
 
+// readCredentialFile checks the mode and reads the file through the same file
+// descriptor, so the file cannot be swapped between check and read.
 func readCredentialFile(path string) ([]byte, error) {
-	info, err := os.Stat(path)
+	f, err := os.Open(path) //nolint:gosec // path is operator configuration
+	if err != nil {
+		return nil, fmt.Errorf("credential file: %w", err)
+	}
+	defer f.Close()
+
+	info, err := f.Stat()
 	if err != nil {
 		return nil, fmt.Errorf("credential file: %w", err)
 	}
 	if perm := info.Mode().Perm(); perm&^0o600 != 0 {
 		return nil, fmt.Errorf("credential file %q has mode %04o, must not be wider than 0600", path, perm)
 	}
-	data, err := os.ReadFile(path) //nolint:gosec // path is operator configuration
+	data, err := io.ReadAll(f)
 	if err != nil {
 		return nil, fmt.Errorf("credential file: %w", err)
 	}

@@ -28,8 +28,17 @@ Neither the key nor the password appears in a log line or error message.
 
 The default manifest (`config/agent-cra-vsr/agent.yaml`) mounts the host
 directory `/etc/cra/netconf` read-only at the same path and sets
-`CRA_PRIVATE_KEY_FILE=/etc/cra/netconf/id_ed25519`. The node creates that key
-pair at first boot and enrols the public key on the router.
+`CRA_PRIVATE_KEY_FILE=/etc/cra/netconf/id_ed25519`. Node provisioning must
+create that key pair and enrol the public key for the NETCONF user on the
+router; the agent does neither. (For T-CaaS this is a separate node-image task,
+and 6WIND has yet to confirm public-key authentication on VSR 3.12.) The volume
+uses `type: DirectoryOrCreate`, so a node without the directory starts the agent,
+which then exits with an error naming the missing key file.
+
+!!! warning "Breaking change"
+    `CRA_PASSWORD` is no longer read and the default manifest expects
+    `/etc/cra/netconf/id_ed25519`. Roll out a release with this agent only after
+    the nodes carry an enrolled key (or after switching to `CRA_PASSWORD_FILE`).
 
 ### Migrating from `CRA_PASSWORD`
 
@@ -53,6 +62,8 @@ set exits at start with an error that names `CRA_PASSWORD_FILE`. Choose one:
 
   When mounting the password from a Kubernetes Secret instead, set
   `defaultMode: 0400` on the volume; the Secret default `0644` is refused.
+  Do not set a pod-level `fsGroup` for the agent: it adds group read to
+  projected files (`0440`), which the agent refuses as well.
 
 Remove `CRA_PASSWORD` from the manifest. While a file variable is set, a left-over
 `CRA_PASSWORD` is ignored and logged.
