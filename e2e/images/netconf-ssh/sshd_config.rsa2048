@@ -1,0 +1,4 @@
+Port 832
+PidFile /run/sshd-832.pid
+HostKey /etc/ssh/host_rsa2048
+Include /etc/ssh/sshd_config.common

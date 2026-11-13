@@ -165,6 +165,23 @@ jobs:
           retention-days: 1
           compression-level: 0
 
+  # ── CRA-VSR NETCONF client against OpenSSH (no lab needed) ─────────
+  netconf-e2e:
+    name: NETCONF client E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Run NETCONF client E2E
+        run: make e2e-netconf
+
   # ── E2E setup + test (uses pre-built images) ────────────────────────
   e2e:
     name: E2E Tests

@@ -1,0 +1,4 @@
+#!/bin/sh
+# Minimal NETCONF 1.0 server: send the hello, then read until the client leaves.
+printf '%s' '<?xml version="1.0" encoding="UTF-8"?><hello xmlns="urn:ietf:params:xml:ns:netconf:base:1.0"><capabilities><capability>urn:ietf:params:netconf:base:1.0</capability></capabilities><session-id>'"$$"'</session-id></hello>]]>]]>'
+cat >/dev/null

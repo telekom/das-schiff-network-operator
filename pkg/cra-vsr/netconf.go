@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"crypto/rsa"
 	"encoding/xml"
 	"errors"
 	"fmt"
@@ -105,17 +106,64 @@ func NewNetconfWithKnownHosts(urls []string, user, pwd, knownHostsPath string, t
 	return buildNetconf(normalizedURLs, user, pwd, timeout, hostKeyCallback), nil
 }
 
+// SSH algorithms the NETCONF client accepts (CORE 3.04 / CORE 3.50). The Go
+// defaults for ciphers already contain only AEAD and CTR modes and stay in place.
+var (
+	sshKeyExchanges = []string{
+		ssh.KeyExchangeCurve25519,
+		ssh.KeyExchangeECDHP521,
+		ssh.KeyExchangeECDHP384,
+		ssh.KeyExchangeECDHP256,
+		ssh.KeyExchangeDH16SHA512,
+	}
+	sshMACs = []string{
+		ssh.HMACSHA512ETM,
+		ssh.HMACSHA256ETM,
+		ssh.HMACSHA512,
+		ssh.HMACSHA256,
+	}
+	sshHostKeyAlgorithms = []string{
+		ssh.KeyAlgoED25519,
+		ssh.KeyAlgoECDSA521,
+		ssh.KeyAlgoECDSA384,
+		ssh.KeyAlgoECDSA256,
+		ssh.KeyAlgoRSASHA512,
+		ssh.KeyAlgoRSASHA256,
+	}
+)
+
+// minRSAHostKeyBits is the smallest RSA host key the client accepts.
+const minRSAHostKeyBits = 3072
+
 func buildNetconf(urls []string, user, pwd string, timeout time.Duration, hostKeyCallback ssh.HostKeyCallback) *Netconf {
 	return &Netconf{
 		urls:    normalizeCRAURLs(urls),
 		timeout: timeout,
 		sshConfig: &ssh.ClientConfig{
+			Config: ssh.Config{
+				KeyExchanges: sshKeyExchanges,
+				MACs:         sshMACs,
+			},
 			User: user,
 			Auth: []ssh.AuthMethod{
 				ssh.Password(pwd),
 			},
-			HostKeyCallback: hostKeyCallback,
+			HostKeyCallback:   rejectWeakRSAHostKey(hostKeyCallback),
+			HostKeyAlgorithms: sshHostKeyAlgorithms,
 		},
+	}
+}
+
+// rejectWeakRSAHostKey wraps next and refuses RSA host keys shorter than
+// minRSAHostKeyBits before any credential is sent.
+func rejectWeakRSAHostKey(next ssh.HostKeyCallback) ssh.HostKeyCallback {
+	return func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+		if cryptoKey, ok := key.(ssh.CryptoPublicKey); ok {
+			if rsaKey, ok := cryptoKey.CryptoPublicKey().(*rsa.PublicKey); ok && rsaKey.N.BitLen() < minRSAHostKeyBits {
+				return fmt.Errorf("host key of %s: RSA key has %d bits, need at least %d", hostname, rsaKey.N.BitLen(), minRSAHostKeyBits)
+			}
+		}
+		return next(hostname, remote, key)
 	}
 }
 
@@ -228,10 +276,12 @@ func (nc *Netconf) Open(ctx context.Context) error {
 		nc.session = nil
 	}
 
+	var dialErrs []error
 	for _, url := range nc.urls {
 		transport, err := ncssh.Dial(ctx, "tcp", url, nc.sshConfig)
 		if err != nil {
 			fmt.Println(err)
+			dialErrs = append(dialErrs, fmt.Errorf("%s: %w", url, err))
 			continue
 		}
 
@@ -243,7 +293,7 @@ func (nc *Netconf) Open(ctx context.Context) error {
 		return nil
 	}
 
-	return fmt.Errorf("all CRA URLs failed due to connection issues")
+	return fmt.Errorf("all CRA URLs failed due to connection issues: %w", errors.Join(dialErrs...))
 }
 
 func (nc *Netconf) Send(ctx context.Context, req, rep any) error {

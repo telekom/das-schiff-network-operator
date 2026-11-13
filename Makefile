@@ -256,6 +256,10 @@ e2e-test-sync: ## Run E2E sync controller tests.
 	docker exec clab-nwop-tester bash -c \
 	  'cd /repo && KUBECONFIG=/repo/e2etests/.kubeconfig E2E_INTENT_MODE=true go test -v -count=1 -timeout=30m ./e2etests -ginkgo.label-filter="sync"'
 
+.PHONY: e2e-netconf
+e2e-netconf: ## Run the CRA-VSR NETCONF client against OpenSSH in a container (needs docker).
+	E2E_NETCONF=1 go test -v -count=1 -timeout=10m ./e2etests/netconf
+
 ##@ Build Dependencies
 
 CONTROLLER_GEN = $(shell pwd)/bin/controller-gen
