@@ -1,0 +1,6 @@
+PermitRootLogin no
+PubkeyAuthentication yes
+PasswordAuthentication yes
+KbdInteractiveAuthentication no
+AllowUsers netconf
+Subsystem netconf /usr/local/bin/netconf-hello

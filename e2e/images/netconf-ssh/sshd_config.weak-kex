@@ -1,0 +1,5 @@
+Port 831
+PidFile /run/sshd-831.pid
+HostKey /etc/ssh/host_ed25519
+KexAlgorithms diffie-hellman-group14-sha1
+Include /etc/ssh/sshd_config.common

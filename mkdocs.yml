@@ -110,6 +110,7 @@ nav:
       - CRD Reference: reference/crd-reference.md
       - Metrics: reference/metrics.md
       - Node Readiness: reference/node-readiness.md
+      - CRA-VSR Agent: reference/agent-cra-vsr.md
   - Advanced:
       - Debugging: advanced/debugging.md
       - Network debugging runbooks: advanced/network-runbooks.md

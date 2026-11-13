@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -180,12 +181,48 @@ func createCraManager() (*cra.Manager, error) {
 		return nil, fmt.Errorf("no CRA known hosts file provided via CRA_KNOWN_HOSTS")
 	}
 
-	craManager, err := cra.NewManagerWithKnownHosts(urls, user, pwd, knownHostsPath, timeout, ctrl.Log.WithName("setup"))
+	sshOpts, err := craSSHOptionsFromEnv()
+	if err != nil {
+		return nil, err
+	}
+
+	craManager, err := cra.NewManagerWithKnownHosts(urls, user, pwd, knownHostsPath, timeout, sshOpts, ctrl.Log.WithName("setup"))
 	if err != nil {
 		return nil, fmt.Errorf("error creating CRA manager: %w", err)
 	}
 
 	return craManager, nil
+}
+
+// craSSHOptionsFromEnv reads the opt-outs from the PSA-compliant SSH settings.
+// Both exist only for routers that cannot meet them and log a warning.
+func craSSHOptionsFromEnv() (cra.SSHOptions, error) {
+	var opts cra.SSHOptions
+
+	if v := strings.TrimSpace(os.Getenv("CRA_SSH_MIN_RSA_HOST_KEY_BITS")); v != "" {
+		bits, err := strconv.Atoi(v)
+		if err != nil || bits <= 0 {
+			return opts, fmt.Errorf("CRA_SSH_MIN_RSA_HOST_KEY_BITS must be a positive integer, got %q", v)
+		}
+		if bits < cra.DefaultMinRSAHostKeyBits {
+			setupLog.Info("WARNING: CRA_SSH_MIN_RSA_HOST_KEY_BITS lowers the RSA host key minimum, this is not PSA-compliant",
+				"bits", bits, "default", cra.DefaultMinRSAHostKeyBits)
+		}
+		opts.MinRSAHostKeyBits = bits
+	}
+
+	if v := strings.TrimSpace(os.Getenv("CRA_SSH_LEGACY_ALGORITHMS")); v != "" {
+		legacy, err := strconv.ParseBool(v)
+		if err != nil {
+			return opts, fmt.Errorf("CRA_SSH_LEGACY_ALGORITHMS must be a boolean, got %q", v)
+		}
+		if legacy {
+			setupLog.Info("WARNING: CRA_SSH_LEGACY_ALGORITHMS uses the x/crypto default SSH algorithms, this is not PSA-compliant")
+		}
+		opts.LegacyAlgorithms = legacy
+	}
+
+	return opts, nil
 }
 
 func setupReconcilers(

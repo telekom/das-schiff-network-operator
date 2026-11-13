@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"crypto/rsa"
 	"encoding/xml"
 	"errors"
 	"fmt"
@@ -90,32 +91,168 @@ type Netconf struct {
 	session   *netconf.Session
 	timeout   time.Duration
 	sshConfig *ssh.ClientConfig
-	urls      []string
+	// hostKeyAlgorithms overrides sshConfig.HostKeyAlgorithms per URL so that
+	// the client asks for a host key type that known_hosts holds for it.
+	hostKeyAlgorithms map[string][]string
+	urls              []string
+}
+
+// SSHOptions relaxes the SSH settings of the NETCONF client. The zero value is
+// the PSA-compliant default.
+type SSHOptions struct {
+	// MinRSAHostKeyBits is the smallest RSA host key accepted; 0 means 3072.
+	MinRSAHostKeyBits int
+	// LegacyAlgorithms uses the golang.org/x/crypto/ssh default algorithms
+	// instead of the restricted lists. Not PSA-compliant.
+	LegacyAlgorithms bool
 }
 
 // NewNetconfWithKnownHosts creates a NETCONF client that verifies CRA host keys
 // against the supplied known_hosts file.
-func NewNetconfWithKnownHosts(urls []string, user, pwd, knownHostsPath string, timeout time.Duration) (*Netconf, error) {
+func NewNetconfWithKnownHosts(
+	urls []string,
+	user, pwd, knownHostsPath string,
+	timeout time.Duration,
+	opts SSHOptions,
+) (*Netconf, error) {
 	normalizedURLs := normalizeCRAURLs(urls)
 	hostKeyCallback, err := validateKnownHostsEntries(knownHostsPath, normalizedURLs)
 	if err != nil {
 		return nil, err
 	}
 
-	return buildNetconf(normalizedURLs, user, pwd, timeout, hostKeyCallback), nil
+	nc := buildNetconf(normalizedURLs, user, pwd, timeout, hostKeyCallback, opts)
+	validationKey, err := newKnownHostsValidationKey()
+	if err != nil {
+		return nil, err
+	}
+	nc.hostKeyAlgorithms = make(map[string][]string, len(normalizedURLs))
+	for _, url := range normalizedURLs {
+		if algs := hostKeyAlgorithmsFor(knownHostKeyTypes(hostKeyCallback, url, validationKey), opts.LegacyAlgorithms); len(algs) > 0 {
+			nc.hostKeyAlgorithms[url] = algs
+		}
+	}
+	return nc, nil
 }
 
-func buildNetconf(urls []string, user, pwd string, timeout time.Duration, hostKeyCallback ssh.HostKeyCallback) *Netconf {
-	return &Netconf{
-		urls:    normalizeCRAURLs(urls),
-		timeout: timeout,
-		sshConfig: &ssh.ClientConfig{
-			User: user,
-			Auth: []ssh.AuthMethod{
-				ssh.Password(pwd),
-			},
-			HostKeyCallback: hostKeyCallback,
+// SSH algorithms the NETCONF client accepts (CORE 3.04 / CORE 3.50). The Go
+// defaults for ciphers already contain only AEAD and CTR modes and stay in place.
+var (
+	sshKeyExchanges = []string{
+		ssh.KeyExchangeCurve25519,
+		ssh.KeyExchangeECDHP521,
+		ssh.KeyExchangeECDHP384,
+		ssh.KeyExchangeECDHP256,
+		ssh.KeyExchangeDH16SHA512,
+	}
+	sshMACs = []string{
+		ssh.HMACSHA512ETM,
+		ssh.HMACSHA256ETM,
+		ssh.HMACSHA512,
+		ssh.HMACSHA256,
+	}
+	sshHostKeyAlgorithms = []string{
+		ssh.KeyAlgoED25519,
+		ssh.KeyAlgoECDSA521,
+		ssh.KeyAlgoECDSA384,
+		ssh.KeyAlgoECDSA256,
+		ssh.KeyAlgoRSASHA512,
+		ssh.KeyAlgoRSASHA256,
+	}
+)
+
+// DefaultMinRSAHostKeyBits is the smallest RSA host key the client accepts
+// unless SSHOptions.MinRSAHostKeyBits says otherwise.
+const DefaultMinRSAHostKeyBits = 3072
+
+func buildNetconf(
+	urls []string,
+	user, pwd string,
+	timeout time.Duration,
+	hostKeyCallback ssh.HostKeyCallback,
+	opts SSHOptions,
+) *Netconf {
+	minRSABits := opts.MinRSAHostKeyBits
+	if minRSABits <= 0 {
+		minRSABits = DefaultMinRSAHostKeyBits
+	}
+	cfg := &ssh.ClientConfig{
+		User: user,
+		Auth: []ssh.AuthMethod{
+			ssh.Password(pwd),
 		},
+		HostKeyCallback: rejectWeakRSAHostKey(hostKeyCallback, minRSABits),
+	}
+	if !opts.LegacyAlgorithms {
+		cfg.KeyExchanges = sshKeyExchanges
+		cfg.MACs = sshMACs
+		cfg.HostKeyAlgorithms = sshHostKeyAlgorithms
+	}
+	return &Netconf{
+		urls:      normalizeCRAURLs(urls),
+		timeout:   timeout,
+		sshConfig: cfg,
+	}
+}
+
+// hostKeyAlgorithmsFor maps the key types known_hosts holds for a host to the
+// host key algorithms to request, so that the server presents a key that
+// known_hosts can verify. Without legacy, only allow-listed algorithms are
+// kept, in allow-list order. An empty result keeps the default list.
+func hostKeyAlgorithmsFor(keyTypes []string, legacy bool) []string {
+	var algs []string
+	if legacy {
+		for _, keyType := range keyTypes {
+			if keyType == ssh.KeyAlgoRSA {
+				algs = append(algs, ssh.KeyAlgoRSASHA512, ssh.KeyAlgoRSASHA256)
+			}
+			algs = append(algs, keyType)
+		}
+		return algs
+	}
+
+	wanted := map[string]bool{}
+	for _, keyType := range keyTypes {
+		if keyType == ssh.KeyAlgoRSA {
+			wanted[ssh.KeyAlgoRSASHA512] = true
+			wanted[ssh.KeyAlgoRSASHA256] = true
+		}
+		wanted[keyType] = true
+	}
+	for _, alg := range sshHostKeyAlgorithms {
+		if wanted[alg] {
+			algs = append(algs, alg)
+		}
+	}
+	return algs
+}
+
+// knownHostKeyTypes returns the key types known_hosts holds for address.
+func knownHostKeyTypes(hostKeyCallback ssh.HostKeyCallback, address string, validationKey ssh.PublicKey) []string {
+	const validationCallbackPort = 22
+	remote := &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: validationCallbackPort}
+	err := hostKeyCallback(knownHostsCallbackAddress(address), remote, validationKey)
+	var keyErr *knownhosts.KeyError
+	if !errors.As(err, &keyErr) {
+		return nil
+	}
+	types := make([]string, 0, len(keyErr.Want))
+	for _, known := range keyErr.Want {
+		types = append(types, known.Key.Type())
+	}
+	return types
+}
+
+// rejectWeakRSAHostKey wraps next and refuses RSA host keys shorter than
+// minBits before any credential is sent.
+func rejectWeakRSAHostKey(next ssh.HostKeyCallback, minBits int) ssh.HostKeyCallback {
+	return func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+		if cryptoKey, ok := key.(ssh.CryptoPublicKey); ok {
+			if rsaKey, ok := cryptoKey.CryptoPublicKey().(*rsa.PublicKey); ok && rsaKey.N.BitLen() < minBits {
+				return fmt.Errorf("host key of %s: RSA key has %d bits, need at least %d", hostname, rsaKey.N.BitLen(), minBits)
+			}
+		}
+		return next(hostname, remote, key)
 	}
 }
 
@@ -228,10 +365,15 @@ func (nc *Netconf) Open(ctx context.Context) error {
 		nc.session = nil
 	}
 
+	var dialErrs []error
 	for _, url := range nc.urls {
-		transport, err := ncssh.Dial(ctx, "tcp", url, nc.sshConfig)
+		cfg := *nc.sshConfig
+		if algs, ok := nc.hostKeyAlgorithms[url]; ok {
+			cfg.HostKeyAlgorithms = algs
+		}
+		transport, err := ncssh.Dial(ctx, "tcp", url, &cfg)
 		if err != nil {
-			fmt.Println(err)
+			dialErrs = append(dialErrs, fmt.Errorf("%s: %w", url, err))
 			continue
 		}
 
@@ -243,7 +385,7 @@ func (nc *Netconf) Open(ctx context.Context) error {
 		return nil
 	}
 
-	return fmt.Errorf("all CRA URLs failed due to connection issues")
+	return fmt.Errorf("all CRA URLs failed due to connection issues: %w", errors.Join(dialErrs...))
 }
 
 func (nc *Netconf) Send(ctx context.Context, req, rep any) error {
