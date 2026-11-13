@@ -17,6 +17,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"flag"
 	"fmt"
@@ -28,6 +29,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -38,6 +40,7 @@ const (
 	beginMark  = "<!-- BEGIN GENERATED: go run ./hack/logref -->"
 	endMark    = "<!-- END GENERATED -->"
 	dynamicMsg = "(dynamic)"
+	docMode    = 0o600
 )
 
 var (
@@ -50,7 +53,7 @@ var (
 		"Trace": "debug", "Debug": "debug", "Info": "info", "Print": "info", "Warn": "info", "Warning": "info",
 		"Error": "error", "Fatal": "error", "Panic": "error",
 	}
-	levelOrder = map[string]int{"error": 0, "info": 1, "debug": 2}
+	levelOrder = []string{"error", "info", "debug"}
 )
 
 type entry struct {
@@ -84,8 +87,8 @@ func run(root string, check bool) error {
 	if err != nil {
 		return fmt.Errorf("read %s: %w", docPath, err)
 	}
-	begin := strings.Index(string(doc), beginMark)
-	end := strings.Index(string(doc), endMark)
+	begin := bytes.Index(doc, []byte(beginMark))
+	end := bytes.Index(doc, []byte(endMark))
 	if begin < 0 || end < begin {
 		return fmt.Errorf("%s needs the markers %q and %q", docPath, beginMark, endMark)
 	}
@@ -96,7 +99,7 @@ func run(root string, check bool) error {
 	if check {
 		return fmt.Errorf("%s is out of date with the log calls in the code; run `go run ./hack/logref` and commit the result", docPath)
 	}
-	if err := os.WriteFile(path, []byte(updated), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(updated), docMode); err != nil {
 		return fmt.Errorf("write %s: %w", docPath, err)
 	}
 	return nil
@@ -120,63 +123,66 @@ func scan(root string) (map[string]*pkgInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	pkgs := map[string]*pkgInfo{}
-	fset := token.NewFileSet()
-	var stdlibLog []string
+	s := &scanner{root: root, mod: mod, fset: token.NewFileSet(), pkgs: map[string]*pkgInfo{}}
 	for _, top := range scanDirs {
-		err := filepath.WalkDir(filepath.Join(root, top), func(path string, d fs.DirEntry, err error) error {
-			if err != nil {
-				if errors.Is(err, fs.ErrNotExist) {
-					return nil
-				}
-				return err
-			}
-			rel, _ := filepath.Rel(root, path)
-			rel = filepath.ToSlash(rel)
-			if d.IsDir() {
-				if skipDirs[rel] || d.Name() == "testdata" {
-					return filepath.SkipDir
-				}
-				return nil
-			}
-			if !strings.HasSuffix(rel, ".go") || strings.HasSuffix(rel, "_test.go") || strings.HasPrefix(d.Name(), "zz_generated") {
-				return nil
-			}
-			f, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
-			if err != nil {
-				return fmt.Errorf("parse %s: %w", rel, err)
-			}
-			dir := filepath.ToSlash(filepath.Dir(rel))
-			p := pkgs[dir]
-			if p == nil {
-				p = &pkgInfo{imports: map[string]bool{}, entries: map[string]*entry{}}
-				pkgs[dir] = p
-			}
-			for _, imp := range f.Imports {
-				ip, _ := strconv.Unquote(imp.Path.Value)
-				if ip == "log" {
-					stdlibLog = append(stdlibLog, rel)
-				}
-				if dep, ok := strings.CutPrefix(ip, mod+"/"); ok {
-					p.imports[dep] = true
-				}
-			}
-			ast.Inspect(f, func(n ast.Node) bool {
-				if call, ok := n.(*ast.CallExpr); ok {
-					addCall(p, call)
-				}
-				return true
-			})
-			return nil
-		})
-		if err != nil {
-			return nil, err
+		if err := filepath.WalkDir(filepath.Join(root, top), s.visit); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return nil, fmt.Errorf("scan %s: %w", top, err)
 		}
 	}
-	if len(stdlibLog) > 0 {
-		return nil, fmt.Errorf("these files import the standard library \"log\" package, whose output ignores --zap-log-level and --zap-encoder; use a logr logger (ctrl.Log.WithName(...)) instead: %s", strings.Join(stdlibLog, ", "))
+	if len(s.stdlibLog) > 0 {
+		return nil, fmt.Errorf("these files import the standard library \"log\" package, whose output ignores --zap-log-level and --zap-encoder; use a logr logger (ctrl.Log.WithName(...)) instead: %s", strings.Join(s.stdlibLog, ", "))
 	}
-	return pkgs, nil
+	return s.pkgs, nil
+}
+
+type scanner struct {
+	root, mod string
+	fset      *token.FileSet
+	pkgs      map[string]*pkgInfo
+	stdlibLog []string
+}
+
+func (s *scanner) visit(path string, d fs.DirEntry, err error) error {
+	if err != nil {
+		return err
+	}
+	rel, _ := filepath.Rel(s.root, path)
+	rel = filepath.ToSlash(rel)
+	if d.IsDir() {
+		if skipDirs[rel] || d.Name() == "testdata" {
+			return filepath.SkipDir
+		}
+		return nil
+	}
+	if !strings.HasSuffix(rel, ".go") || strings.HasSuffix(rel, "_test.go") || strings.HasPrefix(d.Name(), "zz_generated") {
+		return nil
+	}
+	f, err := parser.ParseFile(s.fset, path, nil, parser.SkipObjectResolution)
+	if err != nil {
+		return fmt.Errorf("parse %s: %w", rel, err)
+	}
+	dir := filepath.ToSlash(filepath.Dir(rel))
+	p := s.pkgs[dir]
+	if p == nil {
+		p = &pkgInfo{imports: map[string]bool{}, entries: map[string]*entry{}}
+		s.pkgs[dir] = p
+	}
+	for _, imp := range f.Imports {
+		ip, _ := strconv.Unquote(imp.Path.Value)
+		if ip == "log" {
+			s.stdlibLog = append(s.stdlibLog, rel)
+		}
+		if dep, ok := strings.CutPrefix(ip, s.mod+"/"); ok {
+			p.imports[dep] = true
+		}
+	}
+	ast.Inspect(f, func(n ast.Node) bool {
+		if call, ok := n.(*ast.CallExpr); ok {
+			addCall(p, call)
+		}
+		return true
+	})
+	return nil
 }
 
 func addCall(p *pkgInfo, call *ast.CallExpr) {
@@ -336,17 +342,13 @@ func sortedEntries(p *pkgInfo) []*entry {
 	for _, k := range sortedKeys(p.entries) {
 		es = append(es, p.entries[k])
 	}
-	sort.SliceStable(es, func(i, j int) bool {
-		oi, ok := levelOrder[es[i].level]
-		if !ok {
-			oi = len(levelOrder)
+	rank := func(level string) int {
+		if i := slices.Index(levelOrder, level); i >= 0 {
+			return i
 		}
-		oj, ok := levelOrder[es[j].level]
-		if !ok {
-			oj = len(levelOrder)
-		}
-		return oi < oj
-	})
+		return len(levelOrder)
+	}
+	sort.SliceStable(es, func(i, j int) bool { return rank(es[i].level) < rank(es[j].level) })
 	return es
 }
 
@@ -369,7 +371,7 @@ func render(pkgs map[string]*pkgInfo) string {
 				usesLogrus = "yes"
 			}
 			for _, e := range p.entries {
-				if _, ok := levelOrder[e.level]; ok {
+				if slices.Contains(levelOrder, e.level) {
 					counts[e.level]++
 				} else {
 					counts["other"]++

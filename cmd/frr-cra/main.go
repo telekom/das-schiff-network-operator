@@ -455,9 +455,9 @@ func reconcileLayer3(cfg *nl.NetlinkConfiguration) ([]nl.VRFInformation, error) 
 	}
 
 	for i := range vrfsToDelete {
-		errors := nlManager.CleanupL3(vrfsToDelete[i])
-		if len(errors) > 0 {
-			return nil, fmt.Errorf("error cleaning up L3 (VRF: %s): %v", vrfsToDelete[i].Name, errors)
+		cleanupErrs := nlManager.CleanupL3(vrfsToDelete[i])
+		if len(cleanupErrs) > 0 {
+			return nil, fmt.Errorf("error cleaning up L3 (VRF: %s): %v", vrfsToDelete[i].Name, cleanupErrs)
 		}
 	}
 
@@ -810,15 +810,21 @@ func createListener(ip net.IP, port int, bindInterface string) (net.Listener, er
 	return listener, nil
 }
 
-func main() {
-	ip := flag.String("ip", "fd00:7:caa5::", "IP to listen on and generate certificate for")
-	bindInterface := flag.String("bind-interface", "cluster", "Bind interface to use for netlink")
-	port := flag.Int("port", 8443, "Port to listen on") //nolint:mnd
+// parseFlagsAndSetupLogging parses the command line, including the --zap-*
+// log flags, and sets up the logger.
+func parseFlagsAndSetupLogging() {
 	opts := zap.Options{Development: true}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 	logging.RedirectLibraryLoggers(ctrl.Log)
+}
+
+func main() {
+	ip := flag.String("ip", "fd00:7:caa5::", "IP to listen on and generate certificate for")
+	bindInterface := flag.String("bind-interface", "cluster", "Bind interface to use for netlink")
+	port := flag.Int("port", 8443, "Port to listen on") //nolint:mnd
+	parseFlagsAndSetupLogging()
 
 	parsedIP := net.ParseIP(*ip)
 	if parsedIP == nil {
