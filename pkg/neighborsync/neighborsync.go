@@ -550,6 +550,10 @@ func (n *NeighborSync) EnsureNeighborSuppression(bridgeID, vethID int) error {
 		return fmt.Errorf("failed to get link by index: %w", err)
 	}
 
+	if nlLink == nil {
+		return fmt.Errorf("link by index %d is nil", vethID)
+	}
+
 	// Attach the BPF program before updating in-memory state. If attach fails
 	// the maps remain unchanged, keeping a consistent view for callers. This
 	// mirrors the ordering in DisableNeighborSuppression which detaches before
@@ -591,6 +595,8 @@ func (n *NeighborSync) DisableNeighborSuppression(bridgeID, vethID int) error {
 			return fmt.Errorf("failed to get link by index: %w", err)
 		}
 		// Veth already gone — no BPF to detach; fall through to clear maps.
+	} else if nlLink == nil {
+		return fmt.Errorf("link by index %d is nil", vethID)
 	} else if err := n.bpfDetachFn(nlLink); err != nil {
 		var notFoundErr netlink.LinkNotFoundError
 		if !errors.As(err, &notFoundErr) {
