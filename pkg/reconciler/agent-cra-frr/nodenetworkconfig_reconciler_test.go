@@ -11,15 +11,17 @@ import (
 
 func TestConvertAcceptGratuitousARP(t *testing.T) {
 	a := &CRAFRRConfigApplier{baseConfig: &config.BaseConfig{}}
+	yes, no := true, false
 	for _, tt := range []struct {
 		name   string
 		accept bool
 		env    string
-		want   bool
+		want   *bool
 	}{
-		{name: "default rejects"},
-		{name: "network opts in", accept: true, want: true},
-		{name: "variable restores old default", env: "always", want: true},
+		{name: "unset keeps the CRA-FRR default"},
+		{name: "network opts in", accept: true, want: &yes},
+		{name: "variable rejects", env: "never", want: &no},
+		{name: "network opt-in beats variable", accept: true, env: "never", want: &yes},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv("NWOP_L2_ACCEPT_GARP", tt.env)

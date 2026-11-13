@@ -17,10 +17,19 @@ func TestConfigureBridgeArpAccept(t *testing.T) {
 	}
 	arpAccept := filepath.Join(procSysNetPath, "ipv4", "conf", "l2.501", "arp_accept")
 
-	for accept, want := range map[bool]string{false: "0", true: "1"} {
-		require.NoError(t, (&Manager{}).configureBridge("l2.501", accept))
+	accept, reject := true, false
+	for _, tt := range []struct {
+		name   string
+		accept *bool
+		want   string
+	}{
+		{name: "unset keeps legacy accept", want: "1"},
+		{name: "reject", accept: &reject, want: "0"},
+		{name: "accept", accept: &accept, want: "1"},
+	} {
+		require.NoError(t, (&Manager{}).configureBridge("l2.501", tt.accept))
 		got, err := os.ReadFile(arpAccept)
 		require.NoError(t, err)
-		require.Equal(t, want, string(got), "acceptGARP=%v", accept)
+		require.Equal(t, tt.want, string(got), tt.name)
 	}
 }

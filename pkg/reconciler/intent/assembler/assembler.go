@@ -73,6 +73,10 @@ func Assemble(contributions []*builder.NodeContribution) (*AssembleResult, error
 			if v.IRB != nil {
 				existing.IRB = v.IRB
 			}
+			if v.RouteTarget != "" {
+				existing.RouteTarget = v.RouteTarget
+			}
+			existing.DisableSegmentation = existing.DisableSegmentation || v.DisableSegmentation
 			existing.AcceptGratuitousARP = existing.AcceptGratuitousARP || v.AcceptGratuitousARP
 			existing.MirrorACLs = append(existing.MirrorACLs, v.MirrorACLs...)
 			spec.Layer2s[k] = existing

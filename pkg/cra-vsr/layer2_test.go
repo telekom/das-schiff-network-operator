@@ -49,6 +49,8 @@ func TestLayer2AcceptGratuitousARP(t *testing.T) {
 		{name: "default rejects", want: "never"},
 		{name: "network opts in", accept: true, want: "always"},
 		{name: "variable restores old default", env: "always", want: "always"},
+		{name: "variable rejects", env: "never", want: "never"},
+		{name: "network opt-in beats variable", accept: true, env: "never", want: "always"},
 		{name: "unknown variable value keeps default", env: "true", want: "never"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {

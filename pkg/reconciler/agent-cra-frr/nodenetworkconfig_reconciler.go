@@ -3,7 +3,6 @@ package agent_cra_frr //nolint:revive
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"github.com/go-logr/logr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -11,6 +10,7 @@ import (
 	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/pkg/config"
 	cra "github.com/telekom/das-schiff-network-operator/pkg/cra-frr"
+	"github.com/telekom/das-schiff-network-operator/pkg/helpers/garp"
 	"github.com/telekom/das-schiff-network-operator/pkg/nl"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/common"
 )
@@ -25,6 +25,7 @@ type CRAFRRConfigApplier struct {
 	craManager  *cra.Manager
 	baseConfig  *config.BaseConfig
 	frrTemplate cra.FRRTemplate
+	logger      logr.Logger
 }
 
 // ApplyConfig applies the network configuration using CRA-FRR manager.
@@ -52,8 +53,8 @@ func (a *CRAFRRConfigApplier) convertNodeConfigToNetlink(nodeCfg *v1alpha1.NodeN
 			VNI:                 int(layer2.VNI),
 			AnycastMAC:          new(string),
 			DisableSegmentation: layer2.DisableSegmentation,
-			// NWOP_L2_ACCEPT_GARP=always restores the old default for every bridge.
-			AcceptGratuitousARP: layer2.AcceptGratuitousARP || os.Getenv("NWOP_L2_ACCEPT_GARP") == "always",
+			// nil keeps the CRA-FRR default (accept), see nl.Layer2Information.
+			AcceptGratuitousARP: garp.Resolve(layer2.AcceptGratuitousARP, a.logger),
 		}
 
 		if layer2.IRB != nil {
@@ -208,6 +209,7 @@ func NewNodeNetworkConfigReconciler(
 		craManager:  craManager,
 		baseConfig:  baseConfig,
 		frrTemplate: cra.FRRTemplate{FRRTemplatePath: frrTemplatePath},
+		logger:      logger,
 	}
 
 	commonReconciler, err := common.NewNodeNetworkConfigReconciler(

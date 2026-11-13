@@ -12,9 +12,12 @@ import (
 	"github.com/telekom/das-schiff-network-operator/e2etests/framework"
 )
 
-// TC-12: Layer 2 bridges reject gratuitous ARP unless the network sets
-// acceptGratuitousARP. VLAN 501 (vlan1) sets it, VLAN 502 (vlan2) does not.
-var _ = Describe("Gratuitous ARP", Label("garp"), func() {
+// TC-12: gratuitous ARP for an address the router does not know yet does not
+// create a neighbor entry, unless the network sets acceptGratuitousARP.
+// It does not test whether an existing entry keeps its MAC address.
+// The e2e agent runs with NWOP_L2_ACCEPT_GARP=never; VLAN 503 (vlan3) opts in,
+// VLAN 502 (vlan2) does not.
+var _ = Describe("Gratuitous ARP neighbor creation", Label("garp"), func() {
 	var (
 		f   *framework.Framework
 		ctx context.Context
@@ -23,10 +26,11 @@ var _ = Describe("Gratuitous ARP", Label("garp"), func() {
 
 	// craExec runs a shell command in the CRA network namespace of a kind node.
 	craExec := func(node, cmd string) string {
-		out, _, _ := f.DockerExec(ctx, node, []string{"bash", "-c",
-			`P=$(systemctl show cra.service -p MainPID --value 2>/dev/null); ` +
-				`CRA_PID=$(cat /proc/$P/task/*/children 2>/dev/null | head -1 | tr -d " \n"); ` +
-				`[ -n "$CRA_PID" ] && nsenter -t $CRA_PID -m -n -- ` + cmd})
+		out, stderr, err := f.DockerExec(ctx, node, []string{"bash", "-c",
+			`set -e; P=$(systemctl show cra.service -p MainPID --value); ` +
+				`CRA_PID=$(cat /proc/$P/task/*/children | head -1 | tr -d " \n"); ` +
+				`test -n "$CRA_PID"; nsenter -t $CRA_PID -m -n -- ` + cmd})
+		Expect(err).NotTo(HaveOccurred(), "CRA exec %q failed: %s", cmd, stderr)
 		return strings.TrimSpace(out)
 	}
 
@@ -38,15 +42,17 @@ var _ = Describe("Gratuitous ARP", Label("garp"), func() {
 		By("Creating test namespace")
 		Expect(f.CreateNamespace(ctx, ns)).To(Succeed())
 
-		By("Applying VLAN 501/502 NADs")
-		nad, err := readTestdata("l2-connectivity/nad.yaml")
-		Expect(err).NotTo(HaveOccurred())
-		Expect(f.ApplyManifestInNamespace(ctx, nad, ns)).To(Succeed())
+		By("Applying VLAN 502/503 NADs")
+		for _, path := range []string{"l2-connectivity/nad.yaml", "l2-connectivity/nad-c2m.yaml"} {
+			nad, err := readTestdata(path)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(f.ApplyManifestInNamespace(ctx, nad, ns)).To(Succeed())
+		}
 	})
 
 	AfterEach(func() {
-		_ = f.DeletePod(ctx, ns, "garp-501")
 		_ = f.DeletePod(ctx, ns, "garp-502")
+		_ = f.DeletePod(ctx, ns, "garp-503")
 	})
 
 	// announce starts a pod on VLAN vlan with podIP, makes it claim claimIP and
@@ -64,27 +70,35 @@ var _ = Describe("Gratuitous ARP", Label("garp"), func() {
 
 		_, _, err = f.ExecInPod(ctx, ns, pod, "", []string{"ip", "addr", "add", claimIP + "/32", "dev", "net1"})
 		Expect(err).NotTo(HaveOccurred())
-		// No replies are expected, so the exit code is not checked. The opt-in
-		// case below proves that the announcement goes out.
-		_, _, _ = f.ExecInPod(ctx, ns, pod, "", []string{"arping", "-U", "-c", "3", "-I", "net1", claimIP})
+		// busybox arping exits 0 in unsolicited mode even without replies.
+		_, stderr, err := f.ExecInPod(ctx, ns, pod, "", []string{"arping", "-U", "-c", "3", "-I", "net1", claimIP})
+		Expect(err).NotTo(HaveOccurred(), "arping failed: %s", stderr)
 		return strings.TrimSpace(mac)
 	}
 
-	It("rejects gratuitous ARP by default and accepts it when the network opts in", func() {
+	It("creates a neighbor entry from gratuitous ARP only on networks that opt in", func() {
 		node := f.Config.WorkerNode1
 
 		By("Checking arp_accept on the CRA bridges")
 		Expect(craExec(node, "cat /proc/sys/net/ipv4/conf/l2.502/arp_accept")).To(Equal("0"))
-		Expect(craExec(node, "cat /proc/sys/net/ipv4/conf/l2.501/arp_accept")).To(Equal("1"))
+		Expect(craExec(node, "cat /proc/sys/net/ipv4/conf/l2.503/arp_accept")).To(Equal("1"))
 
-		By("Opt-in network (VLAN 501): gratuitous ARP creates a neighbor entry")
-		mac := announce(501, "10.250.0.200", "10.250.0.201")
+		By("Opt-in network (VLAN 503): gratuitous ARP creates a neighbor entry")
+		mac := announce(503, "10.250.30.200", "10.250.30.201")
 		Eventually(func() string {
-			return craExec(node, "ip neigh show 10.250.0.201 dev l2.501")
+			return craExec(node, "ip neigh show 10.250.30.201 dev l2.503")
 		}).WithTimeout(15 * time.Second).WithPolling(time.Second).Should(ContainSubstring(mac))
 
-		By("Default network (VLAN 502): gratuitous ARP is ignored")
-		announce(502, "10.250.1.200", "10.250.1.201")
+		By("Default network (VLAN 502): gratuitous ARP does not create a neighbor entry")
+		mac = announce(502, "10.250.1.200", "10.250.1.201")
+
+		By("Checking that the pod reaches the CRA bridge: ARP for the gateway creates an entry")
+		_, _, err := f.ExecInPod(ctx, ns, "garp-502", "", []string{"ping", "-c", "1", "-W", "2", "10.250.1.1"})
+		Expect(err).NotTo(HaveOccurred())
+		Eventually(func() string {
+			return craExec(node, "ip neigh show 10.250.1.200 dev l2.502")
+		}).WithTimeout(15 * time.Second).WithPolling(time.Second).Should(ContainSubstring(mac))
+
 		Consistently(func() string {
 			return craExec(node, "ip neigh show 10.250.1.201 dev l2.502")
 		}).WithTimeout(10 * time.Second).WithPolling(time.Second).ShouldNot(ContainSubstring("lladdr"))

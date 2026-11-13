@@ -22,6 +22,7 @@ import (
 	"strconv"
 
 	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
+	"github.com/telekom/das-schiff-network-operator/pkg/helpers/garp"
 	"github.com/telekom/das-schiff-network-operator/pkg/helpers/types"
 )
 
@@ -108,9 +109,9 @@ func (l *Layer2) setupBridge(info *InfoL2, intfs *Interfaces) *Bridge {
 	}
 	br.NetworkStack.IPv6.AcceptDuplicateAD = types.ToPtr("never")
 
-	// NWOP_L2_ACCEPT_GARP=always restores the old default for every bridge.
+	// CRA-VSR rejects gratuitous ARP unless the network or NWOP_L2_ACCEPT_GARP asks for it.
 	acceptGARP := "never"
-	if info.acceptGARP || os.Getenv("NWOP_L2_ACCEPT_GARP") == "always" {
+	if accept := garp.Resolve(info.acceptGARP, l.mgr.logger); accept != nil && *accept {
 		acceptGARP = "always"
 	}
 	br.NetworkStack.IPv4 = &NetworkStackV4{

@@ -105,9 +105,11 @@ type Layer2AttachmentSpec struct {
 	// +optional
 	DisableSegmentation *bool `json:"disableSegmentation,omitempty"`
 
-	// AcceptGratuitousARP makes the bridge accept gratuitous ARP. Off by default,
-	// so a workload cannot announce another address of the network. Enable it
-	// for setups that move a virtual IP by gratuitous ARP, for example keepalived.
+	// AcceptGratuitousARP makes the bridge accept gratuitous ARP on the nodes this
+	// attachment selects, for setups that move a virtual IP by gratuitous ARP,
+	// for example keepalived. When unset, the agent default applies: CRA-VSR
+	// rejects gratuitous ARP, CRA-FRR accepts it, and NWOP_L2_ACCEPT_GARP on the
+	// agent overrides both.
 	// +optional
 	AcceptGratuitousARP *bool `json:"acceptGratuitousARP,omitempty"`
 
