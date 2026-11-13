@@ -45,6 +45,7 @@ import (
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	controllervsr "github.com/telekom/das-schiff-network-operator/controllers/agent-cra-vsr"
 	"github.com/telekom/das-schiff-network-operator/pkg/cra-vsr"
+	"github.com/telekom/das-schiff-network-operator/pkg/logging"
 	"github.com/telekom/das-schiff-network-operator/pkg/monitoring"
 	reconcilervsr "github.com/telekom/das-schiff-network-operator/pkg/reconciler/agent-cra-vsr"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/common"
@@ -247,6 +248,7 @@ func main() {
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+	logging.RedirectLibraryLoggers(ctrl.Log)
 
 	craManager, err := createCraManager()
 	if err != nil {

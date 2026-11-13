@@ -3,6 +3,7 @@ package dbus
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/godbus/dbus/v5"
@@ -100,21 +101,75 @@ func (config *Config) Discard() netplan.Error {
 	return nil
 }
 
-func (config *Config) setProperty(hint, path string, value interface{}) error {
-	delta := path + "="
+// settingsDelta returns the "path=value" argument of the netplan Config.Set call.
+func settingsDelta(path string, value interface{}) string {
 	if value == nil {
-		delta += "NULL"
-	} else {
-		if jsonValue, err := json.Marshal(value); err == nil {
-			delta += string(jsonValue)
-		} else {
-			delta += fmt.Sprint(value)
+		return path + "=NULL"
+	}
+	if jsonValue, err := json.Marshal(value); err == nil {
+		return path + "=" + string(jsonValue)
+	}
+	return path + "=" + fmt.Sprint(value)
+}
+
+// redactedDelta is settingsDelta with the values of secret fields (WireGuard
+// keys, passwords, PSKs) masked, for the busctl trace file.
+func redactedDelta(path string, value interface{}) string {
+	for _, segment := range strings.Split(path, ".") {
+		if isSecretKey(segment) {
+			return path + "=" + redactedValue
 		}
 	}
+	var generic interface{}
+	if jsonValue, err := json.Marshal(value); err != nil || json.Unmarshal(jsonValue, &generic) != nil {
+		return path + "=" + redactedValue // not JSON: cannot tell what is secret
+	}
+	return settingsDelta(path, redactSecrets(generic))
+}
+
+const redactedValue = `"<redacted>"`
+
+func isSecretKey(k string) bool {
+	k = strings.ToLower(k)
+	for _, s := range []string{"key", "private", "password", "psk", "secret", "shared"} {
+		if strings.Contains(k, s) {
+			return true
+		}
+	}
+	return false
+}
+
+// redactSecrets replaces the values of secret keys in a decoded JSON value, recursively.
+func redactSecrets(v interface{}) interface{} {
+	switch t := v.(type) {
+	case map[string]interface{}:
+		for k, inner := range t {
+			if isSecretKey(k) {
+				t[k] = "<redacted>"
+			} else {
+				t[k] = redactSecrets(inner)
+			}
+		}
+	case []interface{}:
+		for i := range t {
+			t[i] = redactSecrets(t[i])
+		}
+	}
+	return v
+}
+
+// traceSet writes the Config.Set call to the busctl trace file, with secrets masked.
+func (config *Config) traceSet(hint, path string, value interface{}) {
+	config.executionLog.Infof("busctl --system call io.netplan.Netplan %s io.netplan.Netplan.Config Set ss \"%s\" \"%s\"", config.path, redactedDelta(path, value), hint)
+}
+
+func (config *Config) setProperty(hint, path string, value interface{}) error {
+	delta := settingsDelta(path, value)
 
 	configObject := config.conn.Object(InterfacePath, dbus.ObjectPath(config.path))
-	config.log.Debugf("settings delta for hint %s: %s ", hint, delta)
-	config.executionLog.Infof("busctl --system call io.netplan.Netplan %s io.netplan.Netplan.Config Set ss \"%s\" \"%s\"", config.path, delta, hint)
+	// Log only the path: the value can hold secrets such as WireGuard private keys.
+	config.log.Debugf("setting netplan path %s for hint %s", path, hint)
+	config.traceSet(hint, path, value)
 	setCall := configObject.Call(ConfigSetCall, 0, delta, hint)
 
 	if setCall.Err != nil {

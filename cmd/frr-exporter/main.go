@@ -3,7 +3,6 @@ package main
 import (
 	"flag"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"time"
@@ -16,6 +15,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	"github.com/telekom/das-schiff-network-operator/pkg/frr"
+	"github.com/telekom/das-schiff-network-operator/pkg/logging"
 	"github.com/telekom/das-schiff-network-operator/pkg/monitoring"
 	"github.com/telekom/das-schiff-network-operator/pkg/version"
 )
@@ -38,18 +38,21 @@ func main() {
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+	logging.RedirectLibraryLoggers(ctrl.Log)
 
 	// Setup a new registry.
 	reg, err := setupPrometheusRegistry()
 	if err != nil {
-		log.Fatal(fmt.Errorf("prometheus registry setup error: %w", err))
+		setupLog.Error(err, "prometheus registry setup error")
+		os.Exit(1)
 	}
 
 	setupLog.Info("configured Prometheus registry")
 
 	endpoint, err := setupMonitoringEndpoint()
 	if err != nil {
-		log.Fatal(fmt.Errorf("error configuring monitoring endpoint: %w", err))
+		setupLog.Error(err, "error configuring monitoring endpoint")
+		os.Exit(1)
 	}
 
 	setupLog.Info("configured monitoring endpoint")
@@ -70,7 +73,8 @@ func main() {
 	// Run server
 	err = server.ListenAndServe()
 	if err != nil {
-		log.Fatal(fmt.Errorf("failed to start server: %w", err))
+		setupLog.Error(err, "failed to start server")
+		os.Exit(1)
 	}
 }
 

@@ -49,6 +49,7 @@ import (
 	intentctrl "github.com/telekom/das-schiff-network-operator/controllers/intent"
 	operator2 "github.com/telekom/das-schiff-network-operator/controllers/operator"
 	"github.com/telekom/das-schiff-network-operator/controllers/platform"
+	"github.com/telekom/das-schiff-network-operator/pkg/logging"
 	intentreconciler "github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/operator"
 	"github.com/telekom/das-schiff-network-operator/pkg/utils"
@@ -131,6 +132,7 @@ func main() {
 
 	cfg := parseFlags()
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&cfg.zapOpts)))
+	logging.RedirectLibraryLoggers(ctrl.Log)
 
 	host, portStr, err := net.SplitHostPort(cfg.webhookAddr)
 	if err != nil {
