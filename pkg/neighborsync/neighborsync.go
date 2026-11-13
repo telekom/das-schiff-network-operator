@@ -41,6 +41,9 @@ type NeighborSync struct {
 	neighRefreshInterfaces sync.Map
 	sendGratuitousNeighbor sync.Map
 	receiveNeighbors       sync.Map
+	// rejectGARPBridges holds the bridges whose network does not accept
+	// gratuitous ARP (arp_accept=0).
+	rejectGARPBridges sync.Map
 
 	nlOps nl.ToolkitInterface
 
@@ -427,18 +430,26 @@ func (n *NeighborSync) replaceNeighborReachable(ifindex, family int, ip net.IP, 
 	// Check existing neighbor entry to detect MAC changes.
 	// Only send gratuitous ARP/NA when the MAC actually changed to avoid
 	// infinite flooding loops through VXLAN (G-NA → remote BPF → G-NA → ...).
-	macChanged := true
+	macChanged, exists := true, false
 	existingNeighs, err := n.nlOps.NeighList(bridgeIdx, family)
 	if err != nil {
 		log.Printf("failed to list neighbors on bridge %d: %v — assuming MAC changed", bridgeIdx, err)
 	}
 	for i := range existingNeighs {
 		if existingNeighs[i].IP.Equal(ip) {
+			exists = true
 			if bytes.Equal(existingNeighs[i].HardwareAddr, hw) {
 				macChanged = false
 			}
 			break
 		}
+	}
+
+	// Like the kernel with arp_accept=0: gratuitous ARP must not create an
+	// entry. Replies to our own refresh requests only concern existing entries.
+	if _, reject := n.rejectGARPBridges.Load(bridgeIdx); reject && family == unix.AF_INET && !exists {
+		log.Printf("ignoring unknown neighbor %s on bridge %d: gratuitous ARP is not accepted", ip.String(), bridgeIdx)
+		return nil
 	}
 
 	neigh := &netlink.Neigh{
@@ -566,6 +577,16 @@ func (n *NeighborSync) EnsureNeighborSuppression(bridgeID, vethID int) error {
 	}
 
 	return nil
+}
+
+// SetAcceptGratuitousARP sets whether IPv4 neighbors learned by BPF may create
+// new entries on the bridge. Without a call, they may.
+func (n *NeighborSync) SetAcceptGratuitousARP(bridgeID int, accept bool) {
+	if accept {
+		n.rejectGARPBridges.Delete(bridgeID)
+	} else {
+		n.rejectGARPBridges.Store(bridgeID, struct{}{})
+	}
 }
 
 // DisableARPRefresh unmarks the given interface ID for ARP refresh.

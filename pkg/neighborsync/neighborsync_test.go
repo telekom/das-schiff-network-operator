@@ -12,6 +12,7 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/vishvananda/netlink"
 	"go.uber.org/mock/gomock"
+	"golang.org/x/sys/unix"
 
 	mock_nl "github.com/telekom/das-schiff-network-operator/pkg/nl/mock"
 )
@@ -260,5 +261,41 @@ var _ = Describe("DisableNeighborSuppression", func() {
 
 		_, tracked := ns.receiveNeighbors.Load(10)
 		Expect(tracked).To(BeTrue())
+	})
+})
+
+var _ = Describe("replaceNeighborReachable with gratuitous ARP rejected", func() {
+	var ns *NeighborSync
+	vlan := &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Index: 10, MasterIndex: 20}}
+	ip := net.ParseIP("10.250.1.201").To4()
+	mac := [6]byte{0xd6, 0xe1, 0xa7, 0x9d, 0x69, 0x8f}
+
+	BeforeEach(func() {
+		ns = &NeighborSync{
+			nlOps:                    mockNlOps,
+			sendNeighborRequestFn:    noopSendNeighborRequest,
+			sendGratuitousNeighborFn: noopSendGratuitous,
+		}
+		ns.SetAcceptGratuitousARP(20, false)
+		mockNlOps.EXPECT().LinkByIndex(10).Return(vlan, nil)
+	})
+
+	It("does not create an IPv4 entry", func() {
+		mockNlOps.EXPECT().NeighList(20, unix.AF_INET).Return(nil, nil)
+		mockNlOps.EXPECT().NeighSet(gomock.Any()).Times(0)
+		Expect(ns.replaceNeighborReachable(10, unix.AF_INET, ip, mac)).To(Succeed())
+	})
+
+	It("updates an existing IPv4 entry", func() {
+		mockNlOps.EXPECT().NeighList(20, unix.AF_INET).Return([]netlink.Neigh{{IP: ip}}, nil)
+		mockNlOps.EXPECT().NeighSet(gomock.Any()).Return(nil)
+		Expect(ns.replaceNeighborReachable(10, unix.AF_INET, ip, mac)).To(Succeed())
+	})
+
+	It("creates the entry again once the network accepts", func() {
+		ns.SetAcceptGratuitousARP(20, true)
+		mockNlOps.EXPECT().NeighList(20, unix.AF_INET).Return(nil, nil)
+		mockNlOps.EXPECT().NeighSet(gomock.Any()).Return(nil)
+		Expect(ns.replaceNeighborReachable(10, unix.AF_INET, ip, mac)).To(Succeed())
 	})
 })
