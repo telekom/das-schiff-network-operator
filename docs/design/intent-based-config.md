@@ -46,7 +46,7 @@ node — see [Debugging](../advanced/debugging.md).
 - **Loose coupling via selectors**: usage resources select `Destination`s by
   label instead of referencing them by name.
 - **Provisioner-agnostic foundation**: `VRF` and `Network` can be created by any
-  provisioner (BM4X, Netbox, or by hand); provider-specific fields never leak
+  external provisioner (or by hand); provider-specific fields never leak
   into this API group.
 - **Safe lifecycle**: finalizers enforce a deletion order so referenced
   resources cannot be removed while in use
