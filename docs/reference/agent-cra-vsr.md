@@ -18,6 +18,8 @@ on its node over NETCONF on SSH. It reads these environment variables at start:
 | `CRA_PRIVATE_KEY_FILE` | one of the two | Path of an unencrypted OpenSSH or PEM private key. The client authenticates with this key only. |
 | `CRA_PASSWORD_FILE` | one of the two | Path of a file that holds the NETCONF password (trailing newlines are removed). Used only when `CRA_PRIVATE_KEY_FILE` is unset. |
 | `CRA_KNOWN_HOSTS` | yes | Path of an OpenSSH `known_hosts` file with the router's host key. |
+| `CRA_SSH_MIN_RSA_HOST_KEY_BITS` | no | Smallest accepted RSA host key, default `3072`. **Opt-out, not PSA-compliant below 3072.** |
+| `CRA_SSH_LEGACY_ALGORITHMS` | no | `true` uses the `golang.org/x/crypto/ssh` default algorithms instead of the lists below. **Opt-out, not PSA-compliant.** |
 
 ## Credentials
 
@@ -95,6 +97,23 @@ The NETCONF client negotiates only these algorithms, in order of preference:
 | MAC | `hmac-sha2-512-etm@openssh.com`, `hmac-sha2-256-etm@openssh.com`, `hmac-sha2-512`, `hmac-sha2-256` |
 | Host key | `ssh-ed25519`, `ecdsa-sha2-nistp521`, `ecdsa-sha2-nistp384`, `ecdsa-sha2-nistp256`, `rsa-sha2-512`, `rsa-sha2-256` |
 
+For each `CRA_URL` the client requests only the host key algorithms that match
+the key types `known_hosts` holds for that endpoint (an `ssh-rsa` entry maps to
+`rsa-sha2-512` and `rsa-sha2-256`). A router that also has an Ed25519 key
+therefore still presents the pinned RSA key.
+
 Ciphers are the `golang.org/x/crypto/ssh` defaults (AES-GCM, ChaCha20-Poly1305,
 AES-CTR). A router that offers none of the algorithms of one category fails the
 handshake; the agent logs the negotiation error and does not send credentials.
+
+## Opt-outs (not PSA-compliant)
+
+Use these only for a router that cannot meet the settings above, and only until
+the router is fixed. The agent logs a warning at start when one is active.
+
+- `CRA_SSH_MIN_RSA_HOST_KEY_BITS=2048` accepts shorter RSA host keys.
+- `CRA_SSH_LEGACY_ALGORITHMS=true` negotiates the `golang.org/x/crypto/ssh`
+  default key exchanges, MACs and host key algorithms, which include
+  `diffie-hellman-group14-sha1`.
+
+Host key verification against `CRA_KNOWN_HOSTS` has no opt-out.

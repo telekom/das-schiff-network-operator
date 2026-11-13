@@ -57,3 +57,27 @@ func TestCraAuthFromEnvUsesPasswordFile(t *testing.T) {
 		t.Fatalf("craAuthFromEnv() error = %v", err)
 	}
 }
+
+func TestCraSSHOptionsFromEnv(t *testing.T) {
+	t.Setenv("CRA_SSH_MIN_RSA_HOST_KEY_BITS", "2048")
+	t.Setenv("CRA_SSH_LEGACY_ALGORITHMS", "true")
+	opts, err := craSSHOptionsFromEnv()
+	if err != nil {
+		t.Fatalf("craSSHOptionsFromEnv() error = %v", err)
+	}
+	if opts.MinRSAHostKeyBits != 2048 || !opts.LegacyAlgorithms {
+		t.Fatalf("craSSHOptionsFromEnv() = %+v, want 2048 bits and legacy algorithms", opts)
+	}
+
+	for env, value := range map[string]string{
+		"CRA_SSH_MIN_RSA_HOST_KEY_BITS": "-1",
+		"CRA_SSH_LEGACY_ALGORITHMS":     "maybe",
+	} {
+		t.Run(env, func(t *testing.T) {
+			t.Setenv(env, value)
+			if _, err := craSSHOptionsFromEnv(); err == nil || !strings.Contains(err.Error(), env) {
+				t.Fatalf("craSSHOptionsFromEnv() error = %v, want error naming %s", err, env)
+			}
+		})
+	}
+}

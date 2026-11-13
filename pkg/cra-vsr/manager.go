@@ -104,9 +104,10 @@ func NewManagerWithKnownHosts(
 	auth ssh.AuthMethod,
 	knownHostsPath string,
 	timeout time.Duration,
+	sshOpts SSHOptions,
 	logger logr.Logger,
 ) (*Manager, error) {
-	netconfClient, err := NewNetconfWithKnownHosts(urls, user, auth, knownHostsPath, timeout, logger)
+	netconfClient, err := NewNetconfWithKnownHosts(urls, user, auth, knownHostsPath, timeout, sshOpts)
 	if err != nil {
 		return nil, err
 	}

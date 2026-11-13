@@ -24,6 +24,7 @@ import (
 	"crypto/rand"
 	"encoding/pem"
 	"errors"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -32,7 +33,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-logr/logr"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
 
@@ -103,8 +103,7 @@ func startServer(t *testing.T, authorizedKey ssh.PublicKey) *server {
 				if key, _, _, _, err = ssh.ParseAuthorizedKey(out); err != nil {
 					t.Fatalf("parse %s: %v", hostKeyFile, err)
 				}
-				if conn, err := (&net.Dialer{Timeout: time.Second}).DialContext(context.Background(), "tcp", addr); err == nil {
-					_ = conn.Close()
+				if sshBannerReadable(addr) {
 					break
 				}
 			}
@@ -166,7 +165,7 @@ func open(t *testing.T, addr string, knownHostKey ssh.PublicKey, keyFile, passwo
 	if err != nil {
 		t.Fatalf("AuthFromFiles: %v", err)
 	}
-	nc, err := cra.NewNetconfWithKnownHosts([]string{addr}, user, auth, knownHostsFile(t, addr, knownHostKey), timeout, logr.Discard())
+	nc, err := cra.NewNetconfWithKnownHosts([]string{addr}, user, auth, knownHostsFile(t, addr, knownHostKey), timeout, cra.SSHOptions{})
 	if err != nil {
 		t.Fatalf("NewNetconfWithKnownHosts: %v", err)
 	}
@@ -228,4 +227,18 @@ func TestNetconfClientAgainstOpenSSH(t *testing.T) {
 			t.Fatalf("Open error = %v, want RSA key size rejection", err)
 		}
 	})
+}
+
+// sshBannerReadable reports whether sshd answers on addr. A plain TCP connect
+// is not enough: the Docker port proxy accepts before sshd listens.
+func sshBannerReadable(addr string) bool {
+	conn, err := (&net.Dialer{Timeout: time.Second}).DialContext(context.Background(), "tcp", addr)
+	if err != nil {
+		return false
+	}
+	defer conn.Close()
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	banner := make([]byte, len("SSH-2.0-"))
+	_, err = io.ReadFull(conn, banner)
+	return err == nil && string(banner) == "SSH-2.0-"
 }
