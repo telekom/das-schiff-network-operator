@@ -38,7 +38,7 @@ type AssembleResult struct {
 // Assemble merges multiple NodeContributions into a single NodeNetworkConfigSpec.
 // Contributions are merged deterministically: Layer2s and VRFs are merged by key,
 // ClusterVRF BGPPeers and routes are appended. Origins are merged for traceability.
-func Assemble(contributions []*builder.NodeContribution) (*AssembleResult, error) { //nolint:gocognit,cyclop // assembly logic is inherently complex
+func Assemble(contributions []*builder.NodeContribution) (*AssembleResult, error) { //nolint:gocognit,cyclop,gocyclo // assembly logic is inherently complex
 	spec := &networkv1alpha1.NodeNetworkConfigSpec{
 		Layer2s:    make(map[string]networkv1alpha1.Layer2),
 		FabricVRFs: make(map[string]networkv1alpha1.FabricVRF),
