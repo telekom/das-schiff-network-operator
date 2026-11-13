@@ -71,7 +71,11 @@ updates:
   open-pull-requests-limit: 10
 
 - package-ecosystem: "docker"
-  directory: "/"
+  directories:
+    - "/"
+    - "/e2e/images/kind-node"
+    - "/e2e/images/nat64"
+    - "/e2e/images/tester"
   schedule:
     interval: "daily"
   commit-message:
