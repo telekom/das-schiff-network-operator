@@ -27,7 +27,7 @@ spec:
           effect: NoSchedule
           operator: Exists
       hostNetwork: true
-      hostPID: true
+      hostPID: false
       containers:
         - args:
             - "--health-addr=[$(HOST_IP)]:7083"

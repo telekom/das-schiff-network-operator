@@ -27,7 +27,7 @@ spec:
           effect: NoSchedule
           operator: Exists
       hostNetwork: true
-      hostPID: true
+      hostPID: false
       containers:
         - args:
             - "--nodenetworkconfig-path=/tmp/current-config.yaml"
