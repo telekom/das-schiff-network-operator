@@ -15,8 +15,10 @@ exactly these pods.
 
 The tables reflect `kubectl kustomize` output of `config/default`,
 `config/hbn-standalone`, `config/agent-cra-vsr`, `config/network-sync`,
-`config/platform-coil` and `config/platform-metallb` on `main`. All images set
-`USER 65532:65532`; a `runAsUser: 0` in the pod spec overrides that.
+`config/platform-coil` and `config/platform-metallb` on `main`. All images
+except `das-schiff-cra-frr` set `USER 65532:65532`, and a `runAsUser: 0` in the
+pod spec overrides that. The `cra-frr` image sets no `USER` and runs as root
+even without `runAsUser: 0`.
 
 ## Summary
 
@@ -49,7 +51,7 @@ or manifest in this repository and is not covered here.
 | Workload | Reason |
 |---|---|
 | `operator` | It configures the node network, so it must not depend on the pod network it manages. Webhook, metrics and health endpoints are served on the host IP. |
-| `agent-cra-frr` | Reads and changes links and routes via netlink in the host namespace, runs the netlink-based health checks, and reaches the CRA API on its link-local address (`169.254.1.0` / `fd00:7:caa5::`) over HTTPS. |
+| `agent-cra-frr` | Reaches the CRA API on its link-local address (`169.254.1.0` / `fd00:7:caa5::`) over HTTPS, and runs the netlink metrics and health checks against the host namespace. The configuration itself is sent to the CRA API, not applied locally. |
 | `agent-cra-vsr` | Runs the health checks and netlink metrics in the host namespace, and reaches the vSR over NETCONF (SSH over the network). |
 | `agent-hbn-l2` | Creates and configures interfaces via netlink and writes `/proc/sys/net/...`. Both act on the caller's network namespace, which must be the host one. |
 | `agent-netplan` | Reads `/sys/class/net` and runs the health checks in the host namespace. The netplan change itself goes through D-Bus. |
@@ -74,8 +76,8 @@ change once tested.
 
 | Workload | Reason |
 |---|---|
-| `agent-cra-frr`, `agent-hbn-l2` | Netlink changes need `CAP_NET_ADMIN`. Container runtimes mount `/proc/sys` read-only for unprivileged containers, so writing `/proc/sys/net` needs a privileged container. |
-| `agent-cra-vsr` | Netlink metrics and health checks. Configuration goes over NETCONF and does not need host privileges. |
+| `agent-hbn-l2` | Netlink changes need `CAP_NET_ADMIN`. Container runtimes mount `/proc/sys` read-only for unprivileged containers, so writing `/proc/sys/net` needs a privileged container. |
+| `agent-cra-frr`, `agent-cra-vsr` | No privileged operation identified: configuration goes to the CRA (HTTPS API or NETCONF), and the local netlink metrics and health checks only read network state and open TCP connections. Removing `privileged` still needs testing. |
 | `agent-netplan` | Calls the host's netplan D-Bus service (`io.netplan.Netplan`), whose system-bus policy is written for root, so the agent runs as UID 0. |
 | `cra-frr` | Runs systemd, FRR and the CRA configuration API inside the container, which needs cgroup access and full network administration of the CRA namespace. |
 | `operator`, `network-sync`, `platform-*` | Not required. |
@@ -97,16 +99,21 @@ change once tested.
   `allowPrivilegeEscalation: false`, `readOnlyRootFilesystem: true` and
   `capabilities.drop: [ALL]`, as `network-sync` already does. The same applies
   to `platform-coil` and `platform-metallb`.
-- **`agent-cra-vsr`**: it does not change host networking, so `privileged` may
-  be replaceable by a small capability set (for example `NET_ADMIN`); not yet
-  tested.
+- **`agent-cra-frr`, `agent-cra-vsr`**: they do not change host networking,
+  so `privileged` and possibly UID 0 may be removable. Test the metrics, health
+  checks and, for `agent-cra-frr`, read access to the client certificate in
+  `/etc/cra/certs/`; not yet tested.
 - **`agent-netplan`**: it needs root for D-Bus, but probably not `privileged`;
   not yet tested.
-- **`agent-cra-frr`, `agent-hbn-l2`**: `privileged` could be replaced by
+- **`agent-hbn-l2`**: `privileged` could be replaced by
   `NET_ADMIN` plus an unmasked, writable `/proc/sys/net` only if the runtime
   supports that; keep `privileged` until tested.
 - Make `hostPath` mounts read-only where the workload only reads them
   (`/etc/cra/base-config.yaml`).
 
-Keep these pods in a dedicated namespace (by default `kube-system`) and scope
-any admission-policy exception to their service account and labels.
+Pod Security Admission is enforced per namespace and cannot exempt single
+pods. With the default `kube-system` namespace, the `privileged` level then
+applies to every system workload there. To narrow that, deploy into a
+dedicated namespace labelled `pod-security.kubernetes.io/enforce: privileged`,
+or use a policy engine such as Kyverno or Gatekeeper, whose exceptions can
+select these workloads by namespace, service account and labels.
