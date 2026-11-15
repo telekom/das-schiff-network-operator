@@ -258,6 +258,32 @@ func (nc *Netconf) Commit(ctx context.Context) error {
 	return nil
 }
 
+// commitOnce commits on the current session and never re-opens it: a commit
+// retried in a new session could commit a candidate that lacks the edits of
+// the old one. lost reports that the session closed; the commit outcome is
+// then unknown and the session is dropped so that the next request opens a
+// new one.
+func (nc *Netconf) commitOnce(ctx context.Context) (lost bool, err error) {
+	if nc.session == nil {
+		return true, nil
+	}
+
+	subctx, cancel := context.WithTimeout(ctx, nc.timeout)
+	defer cancel()
+
+	var rep rpc.OkReply
+	err = nc.session.Exec(subctx, &rpc.Commit{}, &rep)
+	if errors.Is(err, io.EOF) || errors.Is(err, netconf.ErrClosed) {
+		nc.session.Close(ctx)
+		nc.session = nil
+		return true, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("failed to commit netconf: %w", err)
+	}
+	return false, nil
+}
+
 func (nc *Netconf) RPC(ctx context.Context, req, out any) error {
 	var rep RPCReply
 	if err := nc.Send(ctx, req, &rep); err != nil {

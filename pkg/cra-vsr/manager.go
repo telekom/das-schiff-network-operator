@@ -241,12 +241,12 @@ func (m *Manager) ApplyConfiguration(
 }
 
 // apply resets the candidate to the startup config, merges the vrouter and
-// commits. Send re-opens a dropped session and retries the RPC there, but the
-// edits of the old session may not be in the candidate of the new one. apply
-// therefore skips the commit and reports reopened=true when the session
-// changed after the reset; a session change during the commit is reported as
-// well, as the commit outcome is then unknown. The sequence is idempotent, so
-// the caller simply runs it again.
+// commits. Send re-opens a dropped session and retries the request there, but
+// the edits of the old session may not be in the candidate of the new one.
+// apply therefore commits only on the session that made both edits and
+// reports reopened=true, without committing, when the session changed after
+// the reset or closed during the commit. The sequence is idempotent, so the
+// caller simply runs it again.
 func (m *Manager) apply(ctx context.Context, vrouter *VRouter) (reopened bool, err error) {
 	if err := m.nc.Edit(ctx, Candidate, Replace, m.startupXML); err != nil {
 		return false, err
@@ -260,10 +260,7 @@ func (m *Manager) apply(ctx context.Context, vrouter *VRouter) (reopened bool, e
 		return true, nil
 	}
 
-	if err := m.nc.Commit(ctx); err != nil {
-		return false, err
-	}
-	return m.nc.opens != opens, nil
+	return m.nc.commitOnce(ctx)
 }
 
 func (m *Manager) makeVRouter(nodeCfg *v1alpha1.NodeNetworkConfigSpec) (*VRouter, error) {

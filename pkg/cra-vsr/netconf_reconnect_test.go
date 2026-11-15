@@ -252,12 +252,12 @@ func TestApplyConfiguration_SessionDrop(t *testing.T) {
 			commits:  [][]string{full},
 		},
 		{
-			// The commit is retried in a new session with an empty candidate;
-			// the whole sequence must run again afterwards.
+			// The commit is never retried in a new session; the whole
+			// sequence runs again there.
 			name:     "drop between merge and commit",
 			drop:     func(rpcs int, _ string) bool { return rpcs == 3 },
 			sessions: 2,
-			commits:  [][]string{nil, full},
+			commits:  [][]string{full},
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -269,7 +269,9 @@ func TestApplyConfiguration_SessionDrop(t *testing.T) {
 			sessions, commits := srv.stats()
 			require.Equal(t, tt.sessions, sessions)
 			require.Equal(t, tt.commits, commits)
-			require.Equal(t, full, commits[len(commits)-1], "last commit holds the full sequence")
+			for _, commit := range commits {
+				require.Equal(t, full, commit, "every commit holds the full sequence")
+			}
 		})
 	}
 }
