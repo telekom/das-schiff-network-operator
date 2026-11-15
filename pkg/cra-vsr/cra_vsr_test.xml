@@ -236,6 +236,9 @@
           <mac-address>02:54:0a:32:00:0a</mac-address>
         </ethernet>
         <network-stack>
+          <ipv4>
+            <send-redirects>false</send-redirects>
+          </ipv4>
           <ipv6>
             <address-generation-mode>no-link-local</address-generation-mode>
           </ipv6>
@@ -253,6 +256,9 @@
           <mac-address>02:54:0a:32:00:0a</mac-address>
         </ethernet>
         <network-stack>
+          <ipv4>
+            <send-redirects>false</send-redirects>
+          </ipv4>
           <ipv6>
             <address-generation-mode>no-link-local</address-generation-mode>
           </ipv6>
@@ -270,6 +276,9 @@
           <mac-address>02:54:0a:32:00:0a</mac-address>
         </ethernet>
         <network-stack>
+          <ipv4>
+            <send-redirects>false</send-redirects>
+          </ipv4>
           <ipv6>
             <address-generation-mode>no-link-local</address-generation-mode>
           </ipv6>
@@ -287,6 +296,9 @@
           <mac-address>02:54:0a:32:00:0a</mac-address>
         </ethernet>
         <network-stack>
+          <ipv4>
+            <send-redirects>false</send-redirects>
+          </ipv4>
           <ipv6>
             <address-generation-mode>no-link-local</address-generation-mode>
           </ipv6>
@@ -301,6 +313,9 @@
         <tso-enabled>false</tso-enabled>
         <gso-enabled>false</gso-enabled>
         <network-stack>
+          <ipv4>
+            <send-redirects>false</send-redirects>
+          </ipv4>
           <ipv6>
             <address-generation-mode>no-link-local</address-generation-mode>
           </ipv6>
@@ -314,6 +329,9 @@
         <tso-enabled>true</tso-enabled>
         <gso-enabled>true</gso-enabled>
         <network-stack>
+          <ipv4>
+            <send-redirects>false</send-redirects>
+          </ipv4>
           <ipv6>
             <address-generation-mode>no-link-local</address-generation-mode>
           </ipv6>
@@ -667,6 +685,9 @@
             <hairpin>true</hairpin>
           </link-interface>
           <network-stack>
+            <ipv4>
+              <send-redirects>false</send-redirects>
+            </ipv4>
             <ipv6>
               <address-generation-mode>no-link-local</address-generation-mode>
             </ipv6>
@@ -700,6 +721,7 @@
           <network-stack>
             <ipv4>
               <arp-accept-gratuitous>always</arp-accept-gratuitous>
+              <send-redirects>false</send-redirects>
             </ipv4>
             <ipv6>
               <accept-duplicate-address-detection>never</accept-duplicate-address-detection>
@@ -738,6 +760,7 @@
           <network-stack>
             <ipv4>
               <arp-accept-gratuitous>always</arp-accept-gratuitous>
+              <send-redirects>false</send-redirects>
             </ipv4>
             <ipv6>
               <accept-duplicate-address-detection>never</accept-duplicate-address-detection>
@@ -882,6 +905,9 @@
             <hairpin>true</hairpin>
           </link-interface>
           <network-stack>
+            <ipv4>
+              <send-redirects>false</send-redirects>
+            </ipv4>
             <ipv6>
               <address-generation-mode>no-link-local</address-generation-mode>
             </ipv6>

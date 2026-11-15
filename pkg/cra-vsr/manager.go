@@ -272,6 +272,8 @@ func (m *Manager) makeVRouter(nodeCfg *v1alpha1.NodeNetworkConfigSpec) (*VRouter
 		return nil, err
 	}
 
+	disableSendRedirects(&ns)
+
 	m.setupKPI(vrouter, &ns)
 
 	vrouter.Namespaces = append(vrouter.Namespaces, ns)

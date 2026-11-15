@@ -325,7 +325,8 @@ type NetworkStack struct {
 }
 
 type NetworkStackV4 struct {
-	AcceptARP *string `xml:"arp-accept-gratuitous,omitempty"`
+	AcceptARP     *string `xml:"arp-accept-gratuitous,omitempty"`
+	SendRedirects *bool   `xml:"send-redirects,omitempty"`
 }
 
 type AddressGenMode string
