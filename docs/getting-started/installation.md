@@ -40,6 +40,7 @@ and a `main` image carries `...@refs/heads/main`.
 Verify a release image against the tag-anchored identity (cosign v2 or later):
 
 ```bash
+failed=0
 IDENTITY='^https://github\.com/telekom/das-schiff-network-operator/\.github/workflows/build-images\.yaml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$'
 
 for image in \
@@ -55,8 +56,10 @@ for image in \
   cosign verify \
     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
     --certificate-identity-regexp "$IDENTITY" \
-    "ghcr.io/telekom/${image}:<version>" > /dev/null && echo "OK ${image}"
+    "ghcr.io/telekom/${image}:<version>" > /dev/null \
+    && echo "OK ${image}" || { echo "FAILED ${image}"; failed=1; }
 done
+[ "$failed" -eq 0 ]  # non-zero status if any image failed
 ```
 
 `<version>` is the release without the leading `v` (for example `0.5.8`).
@@ -98,6 +101,10 @@ spec:
       ctlog:
         url: https://rekor.sigstore.dev
 ```
+
+The policy-controller only enforces policies in namespaces labelled
+`policy.sigstore.dev/include=true`, so label the namespace the operator runs
+in (by default `kube-system`).
 
 ## Install CRDs
 
