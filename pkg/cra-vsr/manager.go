@@ -212,32 +212,58 @@ func (m *Manager) isReservedVRF(name string) bool {
 	return name == m.baseConfig.ManagementVRF.Name || name == m.baseConfig.ClusterVRF.Name
 }
 
+// maxApplyAttempts bounds how often ApplyConfiguration restarts its edit
+// sequence after the NETCONF session was re-opened in the middle of it.
+const maxApplyAttempts = 3
+
 func (m *Manager) ApplyConfiguration(
 	ctx context.Context,
 	nodeCfg *v1alpha1.NodeNetworkConfigSpec,
 ) error {
-	err := m.nc.Edit(ctx, Candidate, Replace, m.startupXML)
-	if err != nil {
-		return err
-	}
-
 	vrouter, err := m.makeVRouter(nodeCfg)
 	if err != nil {
 		return err
 	}
 
-	err = m.nc.Edit(ctx, Candidate, Merge, &VRouterConfig{VRouter: *vrouter})
-	if err != nil {
-		return err
+	for range maxApplyAttempts {
+		reopened, err := m.apply(ctx, vrouter)
+		if err != nil {
+			return err
+		}
+		if !reopened {
+			m.running = vrouter
+			return nil
+		}
+		m.logger.Info("NETCONF session was re-opened during apply, restarting the edit sequence")
 	}
 
-	err = m.nc.Commit(ctx)
-	if err != nil {
-		return err
+	return fmt.Errorf("NETCONF session was re-opened during each of %d apply attempts", maxApplyAttempts)
+}
+
+// apply resets the candidate to the startup config, merges the vrouter and
+// commits. Send re-opens a dropped session and retries the RPC there, but the
+// edits of the old session may not be in the candidate of the new one. apply
+// therefore skips the commit and reports reopened=true when the session
+// changed after the reset; a session change during the commit is reported as
+// well, as the commit outcome is then unknown. The sequence is idempotent, so
+// the caller simply runs it again.
+func (m *Manager) apply(ctx context.Context, vrouter *VRouter) (reopened bool, err error) {
+	if err := m.nc.Edit(ctx, Candidate, Replace, m.startupXML); err != nil {
+		return false, err
+	}
+	opens := m.nc.opens
+
+	if err := m.nc.Edit(ctx, Candidate, Merge, &VRouterConfig{VRouter: *vrouter}); err != nil {
+		return false, err
+	}
+	if m.nc.opens != opens {
+		return true, nil
 	}
 
-	m.running = vrouter
-	return nil
+	if err := m.nc.Commit(ctx); err != nil {
+		return false, err
+	}
+	return m.nc.opens != opens, nil
 }
 
 func (m *Manager) makeVRouter(nodeCfg *v1alpha1.NodeNetworkConfigSpec) (*VRouter, error) {

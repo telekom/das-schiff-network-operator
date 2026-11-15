@@ -83,6 +83,10 @@ type RPCReply struct {
 }
 
 type Netconf struct {
+	// opens counts the sessions opened so far. Callers compare it before and
+	// after a sequence of RPCs to detect that Send re-opened the session.
+	opens uint64
+
 	session   *netconf.Session
 	timeout   time.Duration
 	sshConfig *ssh.ClientConfig
@@ -127,6 +131,7 @@ func (nc *Netconf) Open(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("failed to open netconf session on %s: %w", url, err)
 		}
+		nc.opens++
 
 		return nil
 	}

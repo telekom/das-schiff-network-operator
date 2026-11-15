@@ -165,6 +165,18 @@ command and VRF filtering syntax also varies by FRR release; confirm it with
 the installed `vtysh` help and keep the query read-only. Escalate access
 failures instead of broadening host privileges.
 
+The `agent-cra-vsr` keeps one NETCONF session open to the router and sends no
+keepalive, so a router `netconf-server idle-timeout` closes it between
+reconciliations. That is expected: the agent re-opens the session on the next
+request and retries that request once. An apply resets the candidate to the
+startup configuration, merges the desired configuration and commits, in three
+requests. If the session is re-opened during these requests, the agent does not
+commit what the new session holds and runs the whole sequence again, up to three
+times; the log line `NETCONF session was re-opened during apply` records each
+restart. An incomplete candidate is therefore never committed. Only an error
+`re-opened during each of 3 apply attempts` or a failed retry points at an
+unstable NETCONF link.
+
 ## Netplan and host interface convergence
 
 `NodeNetplanConfig` is desired host interface state; `NodeNetworkStatus` is the
