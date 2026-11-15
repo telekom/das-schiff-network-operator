@@ -93,7 +93,8 @@ spec:
     - glob: "ghcr.io/telekom/das-schiff-nwop-agent-*"
     - glob: "ghcr.io/telekom/das-schiff-platform-*"
   authorities:
-    - keyless:
+    - signatureFormat: bundle
+      keyless:
         url: https://fulcio.sigstore.dev
         identities:
           - issuer: https://token.actions.githubusercontent.com
@@ -102,9 +103,20 @@ spec:
         url: https://rekor.sigstore.dev
 ```
 
-The policy-controller only enforces policies in namespaces labelled
-`policy.sigstore.dev/include=true`, so label the namespace the operator runs
-in (by default `kube-system`).
+Notes for this example:
+
+- Current releases are signed with cosign v3, which stores Sigstore bundles as
+  OCI referrers. The authority therefore sets `signatureFormat: bundle`, which
+  needs policy-controller v0.13.0 or later; the default `legacy` format does
+  not find these signatures.
+- The policy-controller only enforces policies in namespaces labelled
+  `policy.sigstore.dev/include=true`, and by default it denies images in such a
+  namespace that no policy matches. Labelling the shared `kube-system`
+  namespace therefore also affects unrelated system pods (CoreDNS, kube-proxy,
+  ...). Either deploy the operator into a dedicated namespace and label that
+  one, or cover the other images with policies (or set `no-match-policy` in
+  `config-policy-controller` to `warn` or `allow`) before labelling
+  `kube-system`.
 
 ## Install CRDs
 
