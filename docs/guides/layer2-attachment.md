@@ -51,6 +51,15 @@ itself is decided only by `interfaceRef`.
     agents) and host L2 plumbing (`NodeNetplanConfig` → netplan/hbn-l2 agent)
     are split in *both* modes.
 
+!!! note "CRA-VSR does not send ICMP redirects"
+    The CRA-VSR agent sets `network-stack ipv4 send-redirects false` on every
+    bridge, VXLAN and VLAN interface it creates, so the router does not steer
+    hosts on the segment to another next hop. Linux sends a redirect when either
+    the interface or the system-wide value allows it, so switch the system-wide
+    value (`/ system network-stack ipv4 send-redirects false`) off in the router's
+    initial configuration as well. Transitional opt-out: `NWOP_SEND_REDIRECTS=true`
+    on the agent DaemonSet omits the leaf and keeps the router default.
+
 ## Prerequisites
 
 Before creating a `Layer2Attachment` you need:

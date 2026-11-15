@@ -19,6 +19,7 @@ package cra
 import (
 	"fmt"
 	"net"
+	"os"
 	"strings"
 
 	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
@@ -119,6 +120,46 @@ func (m *Manager) createBridge(
 	intfs.Bridges = append(intfs.Bridges, br)
 
 	return &intfs.Bridges[len(intfs.Bridges)-1]
+}
+
+// disableSendRedirects sets send-redirects to false on every bridge, VXLAN and
+// VLAN that the agent creates in the namespace and its VRFs, so that the router
+// does not steer hosts to another next hop with ICMP redirects.
+// NWOP_SEND_REDIRECTS=true omits the leaf and keeps the router default; it is a
+// transitional opt-out.
+func disableSendRedirects(ns *Namespace) {
+	if os.Getenv("NWOP_SEND_REDIRECTS") == "true" {
+		return
+	}
+
+	all := []*Interfaces{ns.Interfaces}
+	for i := range ns.VRFs {
+		all = append(all, ns.VRFs[i].Interfaces)
+	}
+	for _, intfs := range all {
+		if intfs == nil {
+			continue
+		}
+		for i := range intfs.Bridges {
+			ipv4Stack(&intfs.Bridges[i].NetworkStack).SendRedirects = types.ToPtr(false)
+		}
+		for i := range intfs.VXLANs {
+			ipv4Stack(&intfs.VXLANs[i].NetworkStack).SendRedirects = types.ToPtr(false)
+		}
+		for i := range intfs.VLANs {
+			ipv4Stack(&intfs.VLANs[i].NetworkStack).SendRedirects = types.ToPtr(false)
+		}
+	}
+}
+
+func ipv4Stack(stack **NetworkStack) *NetworkStackV4 {
+	if *stack == nil {
+		*stack = &NetworkStack{}
+	}
+	if (*stack).IPv4 == nil {
+		(*stack).IPv4 = &NetworkStackV4{}
+	}
+	return (*stack).IPv4
 }
 
 func (m *Manager) createVXLAN(
