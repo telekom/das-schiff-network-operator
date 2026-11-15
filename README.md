@@ -13,6 +13,10 @@ under [`docs/`](docs/index.md) and is published as a versioned site with
 MkDocs Material. Build it locally with `make docs-serve`; regenerate the
 auto-generated CRD reference with `make docs-api`.
 
+The host privileges each workload needs (host network, host PID, privileged,
+host paths) and why are listed in
+[docs/advanced/host-privileges.md](docs/advanced/host-privileges.md).
+
 The project provides five components:
 - One central `operator`, taking in desired state and deriving config revisions out of it. Further it controls the gradual rollout of the revisions.
   This is achieved by generating the `NodeNetworkConfig` and `NodeNetplanConfig` resources for each node, waiting for them to be provisioned successfully and then choosing the next node.

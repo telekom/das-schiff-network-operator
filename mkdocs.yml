@@ -113,6 +113,7 @@ nav:
   - Advanced:
       - Debugging: advanced/debugging.md
       - Network debugging runbooks: advanced/network-runbooks.md
+      - Host privileges: advanced/host-privileges.md
       - Legacy API: advanced/legacy-api.md
   - Design:
       - Intent-Based Config: design/intent-based-config.md
