@@ -381,7 +381,7 @@ func (r *NodeNetworkConfigReconciler) doReconciliation(
 	ctx context.Context,
 	nodeCfg *v1alpha1.NodeNetworkConfig,
 ) error {
-	r.logger.Info("config to reconcile", "NodeNetworkConfig", *nodeCfg)
+	r.logger.Info("config to reconcile", "name", nodeCfg.Name, "revision", nodeCfg.Spec.Revision, "configHash", nodeCfg.Spec.ConfigHash)
 
 	if err := r.configApplier.ApplyConfig(ctx, nodeCfg); err != nil {
 		return fmt.Errorf("error applying configuration: %w", err)

@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/go-logr/logr"
+	"github.com/go-logr/logr/funcr"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	"go.uber.org/mock/gomock"
@@ -486,6 +488,27 @@ var _ = Describe("NodeNetworkConfigReconciler", func() {
 			err := r.doReconciliation(context.Background(), cfg)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("apply config failed"))
+		})
+
+		It("should not log BGP peer passwords", func() {
+			secret := "test-bgp-secret"
+			cfg := createTestNodeNetworkConfig("1")
+			cfg.Spec.ConfigHash = "abc123"
+			cfg.Spec.ClusterVRF = &v1alpha1.VRF{
+				BGPPeers: []v1alpha1.BGPPeer{{RemoteASN: 65000, Password: &secret}},
+			}
+
+			r := newMockReconciler(mockCtrl, fakeClient, configPath, ReconcilerOptions{})
+			var logs strings.Builder
+			r.logger = funcr.New(func(prefix, args string) {
+				logs.WriteString(prefix + " " + args + "\n")
+			}, funcr.Options{})
+			r.mockApplier.EXPECT().ApplyConfig(gomock.Any(), cfg).Return(nil)
+
+			Expect(r.doReconciliation(context.Background(), cfg)).To(Succeed())
+			Expect(logs.String()).To(ContainSubstring("config to reconcile"))
+			Expect(logs.String()).To(ContainSubstring("abc123"))
+			Expect(logs.String()).ToNot(ContainSubstring(secret))
 		})
 	})
 
