@@ -13,7 +13,10 @@ artifact (`sbom-<image>`).
 
 The attestation is signed by the reusable workflow
 `.github/workflows/build-images.yaml` at the release tag, the same certificate
-identity as the image signature. Verify it with cosign v2 or later:
+identity as the image signature. The workflow signs with cosign v3, which
+stores the attestation as a Sigstore bundle (OCI referrer); cosign v2 looks
+for the legacy format by default and does not find it. Verify it with cosign
+v3 or later:
 
 ```bash
 cosign verify-attestation \
