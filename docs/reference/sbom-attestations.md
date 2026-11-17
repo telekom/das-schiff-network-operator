@@ -22,11 +22,12 @@ v3 or later:
 cosign verify-attestation \
   --type spdxjson \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity-regexp '^https://github\.com/telekom/das-schiff-network-operator/\.github/workflows/build-images\.yaml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$' \
+  --certificate-identity-regexp '^https://github\.com/telekom/das-schiff-network-operator/\.github/workflows/build-images\.yaml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$' \
   ghcr.io/telekom/das-schiff-network-operator:<version>
 ```
 
-`<version>` is the release without the leading `v`. Replace the image name to
+`<version>` is the release without the leading `v`. The identity pattern also
+matches pre-release tags such as `v0.5.1-alpha.1`. Replace the image name to
 check any other image of the release.
 
 Limitations:
