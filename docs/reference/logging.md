@@ -606,7 +606,7 @@ Linked into: `agent-cra-frr`, `agent-cra-vsr`
 |---|---|---|
 | error | `failed to remove taints from node, will retry on next reconciliation` |  |
 | error | `failed to update network operator readiness condition` |  |
-| info | `config to reconcile` | `NodeNetworkConfig` |
+| info | `config to reconcile` | `configHash`, `name`, `revision` |
 | info | `invalidating NodeNetworkConfig` | `error`, `name`, `reason` |
 | info | `restored last known valid NodeNetworkConfig` |  |
 | info | `restoring previous NodeNetworkConfig` |  |
