@@ -565,6 +565,12 @@ func (c *VSRCollector) Update(ch chan<- prometheus.Metric) error {
 
 		metrics, err := c.CraManager.GetMetrics(ctx)
 		if err != nil {
+			// Release the scrapes waiting on wg; without this every later
+			// scrape would wait forever on the stale channel list.
+			c.mu.Lock()
+			c.clearChannels()
+			c.wg.Done()
+			c.mu.Unlock()
 			return fmt.Errorf("update of vsr collector failed: %w", err)
 		}
 

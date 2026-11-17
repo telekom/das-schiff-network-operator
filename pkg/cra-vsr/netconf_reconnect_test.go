@@ -200,6 +200,7 @@ func (s *ncTestServer) stats() (sessions int, commits [][]string) {
 func newNCTestManager(t *testing.T, addr string) *Manager {
 	t.Helper()
 	m := *manager
+	m.session = make(chan struct{}, 1)
 	m.logger = logr.Discard()
 	m.startupXML = []byte(`<vrouter xmlns="urn:6wind:vrouter"/>`)
 	m.running = m.startup
