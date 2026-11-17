@@ -65,6 +65,13 @@ type GetSchemaOutput struct {
 }
 
 type Manager struct {
+	// session serializes the use of nc (and of running, which changes with
+	// it) between the reconciler and the metrics collector: an apply holds it
+	// for the whole edit, edit, commit sequence. It is a one-slot channel
+	// rather than a sync.Mutex so that a waiter gives up when its context
+	// expires instead of blocking a scrape behind a slow apply.
+	session chan struct{}
+
 	logger       logr.Logger
 	baseConfig   *config.BaseConfig
 	timeout      time.Duration
@@ -102,6 +109,7 @@ func NewManager(
 	logger logr.Logger,
 ) (*Manager, error) {
 	m := &Manager{
+		session: make(chan struct{}, 1),
 		logger:  logger,
 		timeout: timeout,
 		nc:      NewNetconf(urls, user, password, timeout),
@@ -156,7 +164,27 @@ func NewManager(
 	return m, nil
 }
 
+// lock acquires the NETCONF session, or fails once ctx is done.
+func (m *Manager) lock(ctx context.Context) error {
+	select {
+	case m.session <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("waiting for the NETCONF session: %w", ctx.Err())
+	}
+}
+
+func (m *Manager) unlock() {
+	<-m.session
+}
+
 func (m *Manager) detectSegmentationOffloadSupport(ctx context.Context) {
+	if err := m.lock(ctx); err != nil {
+		m.featureFlags.SupportsSegmentationOffload = false
+		return
+	}
+	defer m.unlock()
+
 	req := GetSchemaInput{
 		Identifier: "vrouter-vlan",
 	}
@@ -220,6 +248,12 @@ func (m *Manager) ApplyConfiguration(
 	ctx context.Context,
 	nodeCfg *v1alpha1.NodeNetworkConfigSpec,
 ) error {
+	if err := m.lock(ctx); err != nil {
+		return err
+	}
+	defer m.unlock()
+
+	// makeVRouter reads m.running, so it runs under the lock as well.
 	vrouter, err := m.makeVRouter(nodeCfg)
 	if err != nil {
 		return err
@@ -385,6 +419,11 @@ func (*Manager) xpath(prefix string, paths []string) string {
 }
 
 func (m *Manager) GetMetrics(ctx context.Context) (*Metrics, error) {
+	if err := m.lock(ctx); err != nil {
+		return nil, fmt.Errorf("get metrics: %w", err)
+	}
+	defer m.unlock()
+
 	metrics := Metrics{
 		State:            VRouter{},
 		V4RouteSummaries: map[string]ShowRouteSummaryOutput{},
