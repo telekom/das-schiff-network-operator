@@ -23,7 +23,9 @@ when:
   fields for the variable parts),
 - code imports the standard library `log` package, whose output would ignore
   the flags,
-- a binary in `cmd/` does not call `logging.RedirectLibraryLoggers`.
+- a binary in `cmd/` does not call `logging.RedirectLibraryLoggers`,
+- a field key is not classified as [personal data](#personal-data) or as
+  free of it.
 
 ## Flags
 
@@ -122,12 +124,93 @@ These lines come from libraries, so the catalogue does not list them:
 - `kubectl-nnc` writes its tree and table output to stdout and errors to
   stderr.
 
+## Personal data
+
+The operator logs no person's data on purpose, but the clusters it runs in
+belong to tenants: tenants name their VRFs, Layer2s and intent objects
+(Network, Destination, Inbound, Outbound, BGPPeering, ...), node names are
+host names of the tenant's machines, and `frr-cra` logs the kernel
+neighbours of the Layer2 networks, which can be devices of the tenant's
+customers. Classes and data subjects follow the T-CaaS platform logging
+contract: classes `tenant-pii` (names a tenant user chose, account data),
+`customer-data` (IP and MAC addresses, prefixes, host names), `content`
+(command lines and command output); data subjects `operator`,
+`tenant-user`, `end-customer`. A field that can hold several data subjects
+names the one with the highest need for protection (`end-customer`, then
+`tenant-user`, then `operator`).
+
+The [table of fields with personal data](#fields-with-personal-data) in the
+catalogue is generated with the class, data subject and levels of each
+field. `go run ./hack/logref` fails when a log call uses a field key that is
+classified neither as personal data nor as free of it.
+
+Which level adds personal data:
+
+- `error` and `info` already log tenant object names (`vrf`, `l2a`, `name`,
+  ...), node names, allocated addresses and prefixes, policy rules, the FRR
+  commands of monitoring requests and the netplan command output.
+- `debug` (`V(1)`, the default of the development profile) adds every
+  kernel neighbour update and BPF neighbour event of `frr-cra` with the
+  neighbour's `ip` and `mac` (`end-customer`), and the intent finalizer
+  changes with `network` and `destination` names.
+- `V(2)` and `V(3)` add the logrus lines of the netplan client: the netplan
+  paths being set and link lookups, with interface and VRF names.
+
+Free text: messages built with `fmt.Sprintf` (logrus) and `error` values
+can repeat a VRF name, a node name or an address; treat them at the class
+of the value they repeat. controller-runtime adds `name` and `namespace` of
+the reconciled object to its reconciler lines (see
+[Lines from libraries](#lines-from-libraries)).
+
+Never logged: BGP session passwords (they are in the NodeNetworkConfig,
+which is logged by name, revision and config hash only), WireGuard private
+and pre-shared keys and other netplan secret values (the values of netplan
+settings are not logged, and the `busctl` trace writes them as
+`<redacted>`), kubeconfigs of remote clusters (only the Secret name), and
+TLS keys.
+
 ## Message catalogue
 
 The tables below are generated; do not edit them by hand. Run
 `go run ./hack/logref` after changing log calls.
 
 <!-- BEGIN GENERATED: go run ./hack/logref -->
+
+### Fields with personal data
+
+Every field key of the catalogue is classified in `hack/logref/main.go`; the fields below can hold personal data. Levels are those of the messages that log the field.
+
+| Field | Class | Data subject | Levels | Meaning |
+|---|---|---|---|---|
+| `address` | `customer-data` | `end-customer` | error, info, debug | IP address of a neighbour request or gratuitous neighbour on a Layer2 network |
+| `addresses` | `customer-data` | `tenant-user` | info | IP addresses allocated to a node, Inbound or Outbound |
+| `bgppeering` | `tenant-pii` | `tenant-user` | info | name of a BGPPeering |
+| `cidr` | `customer-data` | `tenant-user` | info | prefix of a Calico IP pool |
+| `cluster` | `tenant-pii` | `tenant-user` | info | namespace and name of a remote cluster |
+| `collector` | `tenant-pii` | `tenant-user` | error, info, debug | name of a Collector |
+| `command` | `content` | `tenant-user` | info | FRR show command of a monitoring request, with VRF names and prefixes |
+| `destination` | `tenant-pii` | `tenant-user` | debug | name of a Destination |
+| `endpoints` | `customer-data` | `tenant-user` | info | IP addresses of the monitoring endpoints on the nodes |
+| `failedNode` | `customer-data` | `tenant-user` | info | node name (host name) of a failed rollout |
+| `inbound` | `tenant-pii` | `tenant-user` | error, info | name of an Inbound |
+| `ip` | `customer-data` | `end-customer` | info, debug | IP address of a kernel neighbour on a Layer2 network |
+| `l2a` | `tenant-pii` | `tenant-user` | error, info | name of a Layer2Attachment |
+| `mac` | `customer-data` | `end-customer` | debug | MAC address of a kernel neighbour on a Layer2 network |
+| `name` | `tenant-pii` | `tenant-user` | error, info, debug | name of the object of the line: VRF route configuration, Layer2, IP pool, revision, MetalLB or Coil resource, NodeNetworkConfig (the node name) |
+| `namespace` | `tenant-pii` | `tenant-user` | info | namespace of an Outbound |
+| `network` | `tenant-pii` | `tenant-user` | debug | name of a Network |
+| `networkRef` | `tenant-pii` | `tenant-user` | info | name of the Network a Layer2Attachment or PodNetwork refers to |
+| `nnc` | `customer-data` | `tenant-user` | error, info | NodeNetworkConfig name, which is the node name |
+| `node` | `customer-data` | `tenant-user` | error, info | node name (host name) |
+| `nodeattachment` | `tenant-pii` | `tenant-user` | info | name of a node attachment |
+| `outbound` | `tenant-pii` | `tenant-user` | error, info | name of an Outbound |
+| `output` | `content` | `tenant-user` | info | output of a netplan command |
+| `ownerName` | `tenant-pii` | `tenant-user` | info | name of the owner of a NodeNetworkConfig |
+| `podnetwork` | `tenant-pii` | `tenant-user` | info | name of a PodNetwork |
+| `rule` | `customer-data` | `tenant-user` | error, info | policy routing rule with its prefixes |
+| `subnet` | `customer-data` | `tenant-user` | error | prefix allocated to a Collector |
+| `trafficmirror` | `tenant-pii` | `tenant-user` | info | name of a TrafficMirror |
+| `vrf` | `tenant-pii` | `tenant-user` | error, info, debug | name of a VRF |
 
 ### Messages per binary
 

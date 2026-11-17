@@ -132,6 +132,31 @@ func TestRunCheckDetectsDrift(t *testing.T) {
 	}
 }
 
+// TestPersonalDataClassificationIsUsed fails when personalData or
+// nonPersonalFields name a field that no log call of the module has.
+func TestPersonalDataClassificationIsUsed(t *testing.T) {
+	pkgs, err := scan(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	levels := fieldLevels(pkgs)
+	for _, f := range append(sortedKeys(personalData), nonPersonalFields...) {
+		if levels[f] == nil {
+			t.Errorf("field %q is classified in hack/logref/main.go but no log call has it; remove it", f)
+		}
+	}
+}
+
+func TestRunRejectsUnclassifiedField(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module example.com/m\n")
+	writeFile(t, root, "pkg/x/x.go", "package x\nfunc f() { logger.Info(\"hello\", \"tenantSecretName\", v) }\n")
+	writeFile(t, root, docPath, "# Ref\n"+beginMark+"\n"+endMark+"\n")
+	if err := run(root, false); err == nil || !strings.Contains(err.Error(), `field "tenantSecretName" must be classified`) {
+		t.Fatalf("run with an unclassified field: %v", err)
+	}
+}
+
 func writeFile(t *testing.T, root, rel, content string) {
 	t.Helper()
 	path := filepath.Join(root, rel)

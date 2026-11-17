@@ -15,6 +15,7 @@
 // The scan fails when
 //   - a log call has no literal message (or fmt.Sprintf format), or cannot be
 //     classified,
+//   - a field key is in neither personalData nor nonPersonalFields,
 //   - non-test code imports the standard library "log" package, whose lines
 //     would bypass the --zap-* flags,
 //   - a cmd/<binary> package does not call logging.RedirectLibraryLoggers.
@@ -61,6 +62,60 @@ var (
 	levelOrder = []string{"error", "info", "debug"}
 )
 
+// personalField classifies a field key that can hold personal data, with the
+// classes and data subjects of the T-CaaS platform logging contract. A key
+// that can hold several data subjects names the one with the highest need for
+// protection: end-customer, then tenant-user, then operator.
+type personalField struct {
+	class, subject, meaning string
+}
+
+// personalData are the field keys that can hold personal data. The clusters
+// the operator runs in belong to tenants: the names of their intent objects,
+// VRFs and Layer2s are chosen by the tenant, and node names and addresses
+// identify the tenant's machines.
+var personalData = map[string]personalField{
+	"vrf":            {"tenant-pii", "tenant-user", "name of a VRF"},
+	"l2a":            {"tenant-pii", "tenant-user", "name of a Layer2Attachment"},
+	"name":           {"tenant-pii", "tenant-user", "name of the object of the line: VRF route configuration, Layer2, IP pool, revision, MetalLB or Coil resource, NodeNetworkConfig (the node name)"},
+	"network":        {"tenant-pii", "tenant-user", "name of a Network"},
+	"networkRef":     {"tenant-pii", "tenant-user", "name of the Network a Layer2Attachment or PodNetwork refers to"},
+	"destination":    {"tenant-pii", "tenant-user", "name of a Destination"},
+	"inbound":        {"tenant-pii", "tenant-user", "name of an Inbound"},
+	"outbound":       {"tenant-pii", "tenant-user", "name of an Outbound"},
+	"collector":      {"tenant-pii", "tenant-user", "name of a Collector"},
+	"bgppeering":     {"tenant-pii", "tenant-user", "name of a BGPPeering"},
+	"podnetwork":     {"tenant-pii", "tenant-user", "name of a PodNetwork"},
+	"nodeattachment": {"tenant-pii", "tenant-user", "name of a node attachment"},
+	"trafficmirror":  {"tenant-pii", "tenant-user", "name of a TrafficMirror"},
+	"ownerName":      {"tenant-pii", "tenant-user", "name of the owner of a NodeNetworkConfig"},
+	"namespace":      {"tenant-pii", "tenant-user", "namespace of an Outbound"},
+	"cluster":        {"tenant-pii", "tenant-user", "namespace and name of a remote cluster"},
+	"node":           {"customer-data", "tenant-user", "node name (host name)"},
+	"failedNode":     {"customer-data", "tenant-user", "node name (host name) of a failed rollout"},
+	"nnc":            {"customer-data", "tenant-user", "NodeNetworkConfig name, which is the node name"},
+	"addresses":      {"customer-data", "tenant-user", "IP addresses allocated to a node, Inbound or Outbound"},
+	"cidr":           {"customer-data", "tenant-user", "prefix of a Calico IP pool"},
+	"subnet":         {"customer-data", "tenant-user", "prefix allocated to a Collector"},
+	"rule":           {"customer-data", "tenant-user", "policy routing rule with its prefixes"},
+	"endpoints":      {"customer-data", "tenant-user", "IP addresses of the monitoring endpoints on the nodes"},
+	"ip":             {"customer-data", "end-customer", "IP address of a kernel neighbour on a Layer2 network"},
+	"mac":            {"customer-data", "end-customer", "MAC address of a kernel neighbour on a Layer2 network"},
+	"address":        {"customer-data", "end-customer", "IP address of a neighbour request or gratuitous neighbour on a Layer2 network"},
+	"command":        {"content", "tenant-user", "FRR show command of a monitoring request, with VRF names and prefixes"},
+	"output":         {"content", "tenant-user", "output of a netplan command"},
+}
+
+// nonPersonalFields are the field keys that hold no personal data: states,
+// counts, durations, kinds, interface and link names, ASNs, listen
+// addresses, CRA URLs, Secret names and errors.
+var nonPersonalFields = strings.Fields(`
+	Addr ReadHeaderTimeout ReadTimeout asn attempt bridge builder caughtUp configHash conflictingASN
+	conflicts controller count duration_seconds error failedMessage family flags gvk ifindex index
+	interface kind link linkID linkIndex mode needed ownerKind pattern progID reason revision secret
+	skipped state status timeout type url value vlanID
+`)
+
 type entry struct {
 	level, message string
 	fields         map[string]bool
@@ -88,6 +143,9 @@ func run(root string, check bool) error {
 	if err != nil {
 		return err
 	}
+	if err := checkClassified(pkgs); err != nil {
+		return err
+	}
 	path := filepath.Join(root, docPath)
 	doc, err := os.ReadFile(path)
 	if err != nil {
@@ -109,6 +167,34 @@ func run(root string, check bool) error {
 		return fmt.Errorf("write %s: %w", docPath, err)
 	}
 	return nil
+}
+
+// fieldLevels returns, per field key, the levels of the messages that log it.
+func fieldLevels(pkgs map[string]*pkgInfo) map[string][]string {
+	levels := map[string][]string{}
+	for _, p := range pkgs {
+		for _, e := range p.entries {
+			for f := range e.fields {
+				if !slices.Contains(levels[f], e.level) {
+					levels[f] = append(levels[f], e.level)
+				}
+			}
+		}
+	}
+	return levels
+}
+
+// checkClassified fails when a field key is in neither personalData nor
+// nonPersonalFields, or in both.
+func checkClassified(pkgs map[string]*pkgInfo) error {
+	var errs []error
+	for _, f := range sortedKeys(fieldLevels(pkgs)) {
+		_, personal := personalData[f]
+		if personal == slices.Contains(nonPersonalFields, f) {
+			errs = append(errs, fmt.Errorf("field %q must be classified once: in personalData (with class and data subject) or in nonPersonalFields of hack/logref/main.go", f))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func modulePath(root string) (string, error) {
@@ -379,25 +465,53 @@ func code(s string) string {
 	return "`" + strings.ReplaceAll(strings.ReplaceAll(s, "`", "'"), "|", `\|`) + "`"
 }
 
+// levelRank orders error, info, debug, then V(2) and higher.
+func levelRank(level string) int {
+	if i := slices.Index(levelOrder, level); i >= 0 {
+		return i
+	}
+	return len(levelOrder)
+}
+
 func sortedEntries(p *pkgInfo) []*entry {
 	es := make([]*entry, 0, len(p.entries))
 	for _, k := range sortedKeys(p.entries) {
 		es = append(es, p.entries[k])
 	}
-	rank := func(level string) int {
-		if i := slices.Index(levelOrder, level); i >= 0 {
-			return i
-		}
-		return len(levelOrder)
-	}
-	sort.SliceStable(es, func(i, j int) bool { return rank(es[i].level) < rank(es[j].level) })
+	sort.SliceStable(es, func(i, j int) bool { return levelRank(es[i].level) < levelRank(es[j].level) })
 	return es
+}
+
+// personalDataTable renders the table of the logged fields that can hold
+// personal data.
+func personalDataTable(levels map[string][]string) string {
+	var b strings.Builder
+	b.WriteString("\n### Fields with personal data\n\n")
+	b.WriteString("Every field key of the catalogue is classified in `hack/logref/main.go`; the fields below can hold personal data. " +
+		"Levels are those of the messages that log the field.\n\n")
+	b.WriteString("| Field | Class | Data subject | Levels | Meaning |\n|---|---|---|---|---|\n")
+	for _, f := range sortedKeys(personalData) {
+		l := levels[f]
+		if len(l) == 0 {
+			continue
+		}
+		sort.Slice(l, func(i, j int) bool {
+			if ri, rj := levelRank(l[i]), levelRank(l[j]); ri != rj {
+				return ri < rj
+			}
+			return l[i] < l[j]
+		})
+		pf := personalData[f]
+		fmt.Fprintf(&b, "| %s | `%s` | `%s` | %s | %s |\n", code(f), pf.class, pf.subject, strings.Join(l, ", "), pf.meaning)
+	}
+	return b.String()
 }
 
 func render(pkgs map[string]*pkgInfo) string {
 	bins := binaries(pkgs)
 	usedBy := map[string][]string{}
 	var b strings.Builder
+	b.WriteString(personalDataTable(fieldLevels(pkgs)))
 	b.WriteString("\n### Messages per binary\n\n")
 	b.WriteString("Number of distinct messages each binary can log, per level. `logrus` marks binaries that link code logging through logrus.\n\n")
 	b.WriteString("| Binary | error | info | debug | V(2) and higher | logrus |\n|---|---|---|---|---|---|\n")
