@@ -90,3 +90,16 @@ updates:
       update-types:
         - "minor"
         - "patch"
+
+- package-ecosystem: "pip"
+  directory: "/docs"
+  schedule:
+    interval: "weekly"
+  commit-message:
+    prefix: ":seedling:"
+  labels:
+    - "ok-to-test"
+  groups:
+    docs-toolchain:
+      patterns:
+        - "*"
