@@ -22,6 +22,22 @@ We take all security reports seriously and will respond within 48 hours to ackno
 
 ---
 
+## Supported Versions
+
+Two release lines receive security fixes:
+
+| Release line | Branch | Data plane | Supported |
+|--------------|--------|------------|-----------|
+| `v0.5.x` | `main` | CRA-VSR / HBN (routing in a containerized router) | :white_check_mark: latest patch release |
+| `v0.2.x` | `stable/0.2` | Legacy: FRR running directly on the host | :white_check_mark: latest patch release |
+| Anything older | — | — | :x: |
+
+Fixes are released as a new patch release on each supported line that is affected. Only the latest patch release of a line is supported, so upgrade to it before reporting an issue. The `v0.2.x` line is in maintenance: it gets security and critical fixes only, no new features. A release line stops being supported once it is announced as end of life in the release notes.
+
+Confirmed vulnerabilities are published as [GitHub Security Advisories](https://github.com/telekom/das-schiff-network-operator/security/advisories) for this repository, listing the affected and fixed versions per release line.
+
+---
+
 ## Security Practices
 
 ### Our Commitment
