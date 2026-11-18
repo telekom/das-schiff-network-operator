@@ -158,8 +158,12 @@ func redactSecrets(v interface{}) interface{} {
 	return v
 }
 
-// traceSet writes the Config.Set call to the busctl trace file, with secrets masked.
+// traceSet writes the Config.Set call to the busctl trace file, with secrets
+// masked. Without a trace file it returns before building the masked value.
 func (config *Config) traceSet(hint, path string, value interface{}) {
+	if !config.executionLog.IsLevelEnabled(logrus.InfoLevel) {
+		return
+	}
 	config.executionLog.Infof("busctl --system call io.netplan.Netplan %s io.netplan.Netplan.Config Set ss \"%s\" \"%s\"", config.path, redactedDelta(path, value), hint)
 }
 
