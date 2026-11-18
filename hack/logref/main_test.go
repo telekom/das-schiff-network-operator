@@ -44,6 +44,34 @@ func F() {
 	err.Error()
 }
 `)
+	// Fields bound where a logger is initialized: a struct field set in
+	// another file, a local variable, and a parameter.
+	writeFile(t, root, "pkg/y/new.go", `package y
+
+func New(p string) *Config {
+	return &Config{log: logrus.WithField("path", p)}
+}
+`)
+	writeFile(t, root, "pkg/y/y.go", `package y
+
+func (c *Config) Reset() {
+	c.log.Infof("cleaning")
+}
+
+func Reconcile() {
+	log := r.Log.WithValues("cluster", c)
+	log.Info("deleted")
+	sync(ctx, log.WithValues("kind", k))
+}
+
+func sync(ctx context.Context, log logr.Logger) {
+	log.V(1).Info("syncing")
+}
+
+func Other() {
+	log.Info("unbound")
+}
+`)
 	writeFile(t, root, "pkg/x/x_test.go", "package x\nfunc g() { logger.Info(\"test only\") }\n")
 	writeFile(t, root, "pkg/unused/u.go", "package unused\nfunc g() { logger.Info(\"unused\") }\n")
 
@@ -67,6 +95,10 @@ func F() {
 		"pkg/x error failed: %v":     "",
 		"pkg/x info vrf %s":          "",
 		"pkg/unused info unused":     "",
+		"pkg/y info cleaning":        "path",
+		"pkg/y info deleted":         "cluster",
+		"pkg/y debug syncing":        "cluster,kind",
+		"pkg/y info unbound":         "",
 	}
 	if len(got) != len(want) {
 		t.Errorf("got %d entries, want %d: %v", len(got), len(want), got)

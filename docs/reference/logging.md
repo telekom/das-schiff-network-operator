@@ -152,7 +152,8 @@ Which level adds personal data:
 - `debug` (`V(1)`, the default of the development profile) adds every
   kernel neighbour update and BPF neighbour event of `frr-cra` with the
   neighbour's `ip` and `mac` (`end-customer`), and the intent finalizer
-  changes with `network` and `destination` names.
+  changes with `network` and `destination` names, and the objects
+  `network-sync` syncs to a workload cluster with their `namespace`.
 - `V(2)` and `V(3)` add the logrus lines of the netplan client: the netplan
   paths being set and link lookups, with interface and VRF names.
 
@@ -196,8 +197,8 @@ Every field key of the catalogue is classified in `hack/logref/main.go`; the fie
 | `ip` | `customer-data` | `end-customer` | info, debug | IP address of a kernel neighbour on a Layer2 network |
 | `l2a` | `tenant-pii` | `tenant-user` | error, info | name of a Layer2Attachment |
 | `mac` | `customer-data` | `end-customer` | debug | MAC address of a kernel neighbour on a Layer2 network |
-| `name` | `tenant-pii` | `tenant-user` | error, info, debug | name of the object of the line: VRF route configuration, Layer2, IP pool, revision, MetalLB or Coil resource, NodeNetworkConfig (the node name) |
-| `namespace` | `tenant-pii` | `tenant-user` | info | namespace of an Outbound |
+| `name` | `tenant-pii` | `tenant-user` | error, info, debug | name of the object of the line: VRF route configuration, Layer2, IP pool, revision, MetalLB or Coil resource, NodeNetworkConfig (the node name); on netplan client lines the client component (dummy, netplan, net-class-manager) |
+| `namespace` | `tenant-pii` | `tenant-user` | error, info, debug | namespace of an Outbound, or the tenant namespace synced to a workload cluster |
 | `network` | `tenant-pii` | `tenant-user` | debug | name of a Network |
 | `networkRef` | `tenant-pii` | `tenant-user` | info | name of the Network a Layer2Attachment or PodNetwork refers to |
 | `nnc` | `customer-data` | `tenant-user` | error, info | NodeNetworkConfig name, which is the node name |
@@ -471,18 +472,18 @@ Linked into: `network-sync`
 
 | Level | Message | Fields |
 |---|---|---|
-| error | `IPAM allocation failed` |  |
+| error | `IPAM allocation failed` | `namespace` |
 | info | `BGPPeering authSecretRef target Secret missing; skipping` | `name`, `namespace` |
-| info | `Cluster deleted, removing remote client` |  |
-| info | `Deleting remote object` | `kind`, `name` |
+| info | `Cluster deleted, removing remote client` | `cluster` |
+| info | `Deleting remote object` | `kind`, `name`, `namespace` |
 | info | `Remote client ready` | `cluster` |
-| info | `Remote cluster gone; releasing finalizer without remote delete` | `kind`, `name` |
+| info | `Remote cluster gone; releasing finalizer without remote delete` | `kind`, `name`, `namespace` |
 | info | `Sweeping orphan synced Secret on workload cluster` | `name`, `namespace` |
-| info | `kubeconfig Secret has empty 'value' key` | `secret` |
-| info | `kubeconfig Secret missing 'value' key` | `secret` |
-| info | `kubeconfig Secret not found yet, waiting` | `secret` |
-| debug | `Mirrored workload status back to management` | `caughtUp`, `kind`, `name` |
-| debug | `Syncing to remote` | `kind`, `name` |
+| info | `kubeconfig Secret has empty 'value' key` | `cluster`, `secret` |
+| info | `kubeconfig Secret missing 'value' key` | `cluster`, `secret` |
+| info | `kubeconfig Secret not found yet, waiting` | `cluster`, `secret` |
+| debug | `Mirrored workload status back to management` | `caughtUp`, `kind`, `name`, `namespace` |
+| debug | `Syncing to remote` | `kind`, `name`, `namespace` |
 
 #### `pkg/bpf`
 
@@ -607,7 +608,7 @@ Linked into: `agent-cra-frr`, `agent-cra-vsr`, `agent-hbn-l2`, `agent-netplan`, 
 | Level | Message | Fields |
 |---|---|---|
 | info | `deleting link %s` |  |
-| info | `removing bond %s` |  |
+| info | `removing bond %s` | `name`, `root-dir` |
 | V(2) | `searching network link %s` |  |
 
 #### `pkg/network/netplan`
@@ -616,7 +617,7 @@ Linked into: `agent-cra-frr`, `agent-cra-vsr`, `agent-hbn-l2`, `agent-netplan`, 
 
 | Level | Message | Fields |
 |---|---|---|
-| info | `virtual interface %s was removed` |  |
+| info | `virtual interface %s was removed` | `name` |
 
 #### `pkg/network/netplan/client/dbus`
 
@@ -627,16 +628,16 @@ Linked into: `agent-netplan`
 | error | `error authenticating with dbus. err: %s` |  |
 | error | `error dialing connection with dbus using %s. err: %s` |  |
 | error | `error sending Hello message to dbus. err: %s` |  |
-| info | `applying new netplan configuration` |  |
-| info | `cleaning existing configuration` |  |
+| info | `applying new netplan configuration` | `path` |
+| info | `cleaning existing configuration` | `path` |
 | info | `dialing with dbus using address %s` |  |
-| info | `error deleting %s link %s. err: %s` |  |
-| info | `netplan apply was successful` |  |
-| info | `removing links for virtual interfaces removed from configuration before netplan apply` |  |
-| V(2) | `applying configuration` |  |
-| V(2) | `error applying configuration. err: %s` |  |
-| V(2) | `setting netplan path %s for hint %s` |  |
-| V(2) | `trying configuration for %d seconds` |  |
+| info | `error deleting %s link %s. err: %s` | `path` |
+| info | `netplan apply was successful` | `path` |
+| info | `removing links for virtual interfaces removed from configuration before netplan apply` | `path` |
+| V(2) | `applying configuration` | `path` |
+| V(2) | `error applying configuration. err: %s` | `path` |
+| V(2) | `setting netplan path %s for hint %s` | `path` |
+| V(2) | `trying configuration for %d seconds` | `path` |
 
 #### `pkg/network/netplan/client/direct`
 
@@ -653,15 +654,15 @@ Linked into: `agent-netplan`
 
 | Level | Message | Fields |
 |---|---|---|
-| info | `cleaning existing configuration` |  |
+| info | `cleaning existing configuration` | `name`, `path` |
 | info | `clearing temp dir used by dummy netplan client: %s` |  |
 | info | `creating dummy netplan client using directory %s` |  |
-| info | `error parsing netplan file %s; moving on. err: %s` |  |
+| info | `error parsing netplan file %s; moving on. err: %s` | `name`, `path` |
 | info | `failed to remove %s: %s` |  |
-| info | `netplan configuration has changed. applying new state` |  |
-| info | `removing existing netplan file %s` |  |
-| info | `removing links for virtual interfaces removed from configuration before netplan apply` |  |
-| info | `would remove link %s if not dummy` |  |
+| info | `netplan configuration has changed. applying new state` | `name`, `path` |
+| info | `removing existing netplan file %s` | `name`, `path` |
+| info | `removing links for virtual interfaces removed from configuration before netplan apply` | `name`, `path` |
+| info | `would remove link %s if not dummy` | `name`, `path` |
 
 #### `pkg/reconciler/agent-hbn-l2`
 

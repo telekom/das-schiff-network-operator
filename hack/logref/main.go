@@ -10,7 +10,13 @@
 // optional V(n)) or a logrus call (Debug, Info, Warn, Error, ... with an
 // optional f suffix). The level is the one the call has after
 // logging.RedirectLibraryLoggers; the fields are the literal keys of key/value
-// pairs and of WithValues/WithField calls on the receiver.
+// pairs and of WithValues/WithField calls on the receiver, and of those calls
+// where the receiver's logger is bound: a local variable assigned earlier in
+// the same function (log := r.Log.WithValues(...)), a struct field set
+// anywhere in the package (Config{log: logrus.WithField(...)}, c.log = ...),
+// or a parameter, from the arguments of the calls of that function in the
+// package. Bindings are matched by name within a package and followed one
+// step, which covers how this module binds its loggers.
 //
 // The scan fails when
 //   - a log call has no literal message (or fmt.Sprintf format), or cannot be
@@ -31,6 +37,7 @@ import (
 	"go/token"
 	"go/types"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -77,7 +84,7 @@ type personalField struct {
 var personalData = map[string]personalField{
 	"vrf":            {"tenant-pii", "tenant-user", "name of a VRF"},
 	"l2a":            {"tenant-pii", "tenant-user", "name of a Layer2Attachment"},
-	"name":           {"tenant-pii", "tenant-user", "name of the object of the line: VRF route configuration, Layer2, IP pool, revision, MetalLB or Coil resource, NodeNetworkConfig (the node name)"},
+	"name":           {"tenant-pii", "tenant-user", "name of the object of the line: VRF route configuration, Layer2, IP pool, revision, MetalLB or Coil resource, NodeNetworkConfig (the node name); on netplan client lines the client component (dummy, netplan, net-class-manager)"},
 	"network":        {"tenant-pii", "tenant-user", "name of a Network"},
 	"networkRef":     {"tenant-pii", "tenant-user", "name of the Network a Layer2Attachment or PodNetwork refers to"},
 	"destination":    {"tenant-pii", "tenant-user", "name of a Destination"},
@@ -89,7 +96,7 @@ var personalData = map[string]personalField{
 	"nodeattachment": {"tenant-pii", "tenant-user", "name of a node attachment"},
 	"trafficmirror":  {"tenant-pii", "tenant-user", "name of a TrafficMirror"},
 	"ownerName":      {"tenant-pii", "tenant-user", "name of the owner of a NodeNetworkConfig"},
-	"namespace":      {"tenant-pii", "tenant-user", "namespace of an Outbound"},
+	"namespace":      {"tenant-pii", "tenant-user", "namespace of an Outbound, or the tenant namespace synced to a workload cluster"},
 	"cluster":        {"tenant-pii", "tenant-user", "namespace and name of a remote cluster"},
 	"node":           {"customer-data", "tenant-user", "node name (host name)"},
 	"failedNode":     {"customer-data", "tenant-user", "node name (host name) of a failed rollout"},
@@ -108,22 +115,26 @@ var personalData = map[string]personalField{
 
 // nonPersonalFields are the field keys that hold no personal data: states,
 // counts, durations, kinds, interface and link names, ASNs, listen
-// addresses, CRA URLs, Secret names and errors.
+// addresses, CRA URLs, Secret names, file and D-Bus object paths and errors.
 var nonPersonalFields = strings.Fields(`
 	Addr ReadHeaderTimeout ReadTimeout asn attempt bridge builder caughtUp configHash conflictingASN
 	conflicts controller count duration_seconds error failedMessage family flags gvk ifindex index
-	interface kind link linkID linkIndex mode needed ownerKind pattern progID reason revision secret
-	skipped state status timeout type url value vlanID
+	interface kind link linkID linkIndex mode needed ownerKind path pattern progID reason revision
+	root-dir secret skipped state status timeout type url value vlanID
 `)
 
 type entry struct {
 	level, message string
 	fields         map[string]bool
+	sources        map[string]bool // keys of bound the logger is read from, resolved by scan
 }
 
 type pkgInfo struct {
-	imports   map[string]bool
-	entries   map[string]*entry // key: level + "\x00" + message
+	imports map[string]bool
+	entries map[string]*entry // key: level + "\x00" + message
+	// bound maps a struct field (".name") or a function parameter
+	// ("function#index") to the field keys of the loggers assigned to it.
+	bound     map[string]map[string]bool
 	logrus    bool
 	redirects bool // calls logging.RedirectLibraryLoggers
 }
@@ -232,6 +243,13 @@ func scan(root string) (map[string]*pkgInfo, error) {
 	if err := errors.Join(s.errs...); err != nil {
 		return nil, err
 	}
+	for _, p := range s.pkgs {
+		for _, e := range p.entries {
+			for src := range e.sources {
+				maps.Copy(e.fields, p.bound[src])
+			}
+		}
+	}
 	return s.pkgs, nil
 }
 
@@ -265,7 +283,7 @@ func (s *scanner) visit(path string, d fs.DirEntry, err error) error {
 	dir := filepath.ToSlash(filepath.Dir(rel))
 	p := s.pkgs[dir]
 	if p == nil {
-		p = &pkgInfo{imports: map[string]bool{}, entries: map[string]*entry{}}
+		p = &pkgInfo{imports: map[string]bool{}, entries: map[string]*entry{}, bound: map[string]map[string]bool{}}
 		s.pkgs[dir] = p
 	}
 	for _, imp := range f.Imports {
@@ -277,25 +295,127 @@ func (s *scanner) visit(path string, d fs.DirEntry, err error) error {
 			p.imports[dep] = true
 		}
 	}
-	ast.Inspect(f, func(n ast.Node) bool {
-		call, ok := n.(*ast.CallExpr)
-		if !ok {
+	for _, decl := range f.Decls {
+		sc := scope{locals: map[string]map[string]bool{}, params: map[string]string{}}
+		if fn, ok := decl.(*ast.FuncDecl); ok {
+			i := 0
+			for _, field := range fn.Type.Params.List {
+				for _, name := range field.Names {
+					sc.params[name.Name] = fn.Name.Name + "#" + strconv.Itoa(i)
+					i++
+				}
+				if len(field.Names) == 0 {
+					i++
+				}
+			}
+		}
+		ast.Inspect(decl, func(n ast.Node) bool {
+			switch v := n.(type) {
+			case *ast.AssignStmt:
+				if len(v.Lhs) == len(v.Rhs) {
+					for i := range v.Lhs {
+						bind(p, sc, v.Lhs[i], v.Rhs[i])
+					}
+				}
+			case *ast.ValueSpec:
+				if len(v.Names) == len(v.Values) {
+					for i := range v.Names {
+						bind(p, sc, v.Names[i], v.Values[i])
+					}
+				}
+			case *ast.KeyValueExpr:
+				if k, ok := v.Key.(*ast.Ident); ok {
+					bind(p, sc, &ast.SelectorExpr{Sel: k}, v.Value)
+				}
+			case *ast.CallExpr:
+				if types.ExprString(v.Fun) == "logging.RedirectLibraryLoggers" {
+					p.redirects = true
+				}
+				bindArgs(p, sc, v)
+				if err := addCall(p, v, sc); err != nil {
+					s.errs = append(s.errs, fmt.Errorf("%s: %w", s.fset.Position(v.Pos()), err))
+				}
+			}
 			return true
-		}
-		if types.ExprString(call.Fun) == "logging.RedirectLibraryLoggers" {
-			p.redirects = true
-		}
-		if err := addCall(p, call); err != nil {
-			s.errs = append(s.errs, fmt.Errorf("%s: %w", s.fset.Position(call.Pos()), err))
-		}
-		return true
-	})
+		})
+	}
 	return nil
+}
+
+// scope holds the logger bindings of one top-level declaration.
+type scope struct {
+	locals map[string]map[string]bool // local variable -> field keys of its logger
+	params map[string]string          // parameter name -> key in pkgInfo.bound
+}
+
+// bind records the literal field keys of the WithValues/WithField calls in
+// value for the local variable or struct field lhs it is assigned to.
+func bind(p *pkgInfo, sc scope, lhs, value ast.Expr) {
+	switch v := lhs.(type) {
+	case *ast.Ident:
+		addFields(sc.locals, v.Name, value, sc)
+	case *ast.SelectorExpr:
+		addFields(p.bound, "."+v.Sel.Name, value, sc)
+	}
+}
+
+// bindArgs records the field keys of the loggers passed to call for the
+// parameters of the called function.
+func bindArgs(p *pkgInfo, sc scope, call *ast.CallExpr) {
+	var fn string
+	switch f := call.Fun.(type) {
+	case *ast.Ident:
+		fn = f.Name
+	case *ast.SelectorExpr:
+		fn = f.Sel.Name
+	default:
+		return
+	}
+	for i, arg := range call.Args {
+		addFields(p.bound, fn+"#"+strconv.Itoa(i), arg, sc)
+	}
+}
+
+// addFields adds the field keys of the logger expression x to m[key].
+func addFields(m map[string]map[string]bool, key string, x ast.Expr, sc scope) {
+	fields := map[string]bool{}
+	receiverFields(x, fields)
+	if name, isField := loggerSource(x); !isField {
+		maps.Copy(fields, sc.locals[name])
+	}
+	if len(fields) == 0 {
+		return
+	}
+	if m[key] == nil {
+		m[key] = map[string]bool{}
+	}
+	maps.Copy(m[key], fields)
+}
+
+// loggerSource returns the variable or struct field a receiver chain starts
+// from: log for log.V(1), r.Log for r.Log.WithValues(...).
+func loggerSource(x ast.Expr) (name string, isField bool) {
+	for {
+		switch v := x.(type) {
+		case *ast.CallExpr:
+			sel, ok := v.Fun.(*ast.SelectorExpr)
+			if !ok {
+				return "", false
+			}
+			x = sel.X
+		case *ast.SelectorExpr:
+			return v.Sel.Name, true
+		case *ast.Ident:
+			return v.Name, false
+		default:
+			return "", false
+		}
+	}
 }
 
 // addCall records call if it is a log call. It returns an error for a log
 // call it cannot classify or whose message is not a literal.
-func addCall(p *pkgInfo, call *ast.CallExpr) error {
+func addCall(p *pkgInfo, call *ast.CallExpr, sc scope) error {
 	sel, ok := call.Fun.(*ast.SelectorExpr)
 	if !ok {
 		return nil
@@ -341,7 +461,7 @@ func addCall(p *pkgInfo, call *ast.CallExpr) error {
 	key := level + "\x00" + msg
 	e := p.entries[key]
 	if e == nil {
-		e = &entry{level: level, message: msg, fields: map[string]bool{}}
+		e = &entry{level: level, message: msg, fields: map[string]bool{}, sources: map[string]bool{}}
 		p.entries[key] = e
 	}
 	for i := 0; i < len(kv); i += 2 {
@@ -350,6 +470,14 @@ func addCall(p *pkgInfo, call *ast.CallExpr) error {
 		}
 	}
 	receiverFields(sel.X, e.fields)
+	switch name, isField := loggerSource(sel.X); {
+	case isField:
+		e.sources["."+name] = true
+	case sc.params[name] != "":
+		e.sources[sc.params[name]] = true
+	default:
+		maps.Copy(e.fields, sc.locals[name])
+	}
 	return nil
 }
 
