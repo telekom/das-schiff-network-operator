@@ -16,3 +16,4 @@ resources:
 - intent_rbac.yaml
 patches:
 - path: manager_webhook_patch.yaml
+- path: agent_cra_frr_garp_patch.yaml

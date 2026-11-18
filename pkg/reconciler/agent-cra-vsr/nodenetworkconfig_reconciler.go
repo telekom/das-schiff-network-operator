@@ -25,6 +25,7 @@ import (
 
 	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	cra "github.com/telekom/das-schiff-network-operator/pkg/cra-vsr"
+	"github.com/telekom/das-schiff-network-operator/pkg/helpers/garp"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/common"
 )
 
@@ -65,6 +66,7 @@ func NewNodeNetworkConfigReconciler(
 		common.ReconcilerOptions{
 			RestoreOnReconcileFailure: false, // VSR cannot commit invalid configs
 			LocalASN:                  craManager.LocalASN(),
+			AppliedStateID:            garp.AppliedStateID(),
 		},
 	)
 	if err != nil {

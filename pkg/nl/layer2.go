@@ -65,6 +65,9 @@ type Layer2Information struct {
 	AnycastGateways     []string `json:"anycastGateways"`
 	NeighSuppression    *bool    `json:"neighSuppression"`
 	DisableSegmentation bool     `json:"disableSegmentation"`
+	// AcceptGratuitousARP nil keeps the legacy default (accept), so a CRA
+	// updated before its agent behaves as before.
+	AcceptGratuitousARP *bool `json:"acceptGratuitousARP,omitempty"`
 	bridge              *netlink.Bridge
 	vxlan               *netlink.Vxlan
 	vlanInterface       *netlink.Vlan
@@ -184,7 +187,7 @@ func (n *Manager) setupBridge(info *Layer2Information, masterIdx int) (*netlink.
 		return nil, err
 	}
 	info.bridge = bridge
-	if err := n.configureBridge(bridge.Name); err != nil {
+	if err := n.configureBridge(bridge.Name, info.AcceptGratuitousARP); err != nil {
 		return nil, err
 	}
 
@@ -346,7 +349,7 @@ func (n *Manager) ReconcileL2(current, desired *Layer2Information) error {
 		}
 	}
 
-	if err := n.configureBridge(bridgeName); err != nil {
+	if err := n.configureBridge(bridgeName, desired.AcceptGratuitousARP); err != nil {
 		return err
 	}
 
@@ -484,15 +487,19 @@ func (n *Manager) isL2VNIreattachRequired(current, desired *Layer2Information) (
 	return shouldReattachL2VNI, nil
 }
 
-func (*Manager) configureBridge(intfName string) error {
+func (*Manager) configureBridge(intfName string, acceptGARP *bool) error {
 	safe, err := sanitizeIntfName(intfName)
 	if err != nil {
 		return err
 	}
 
-	// Ensure bridge can receive gratitious ARP
-	if err := os.WriteFile(fmt.Sprintf("%s/ipv4/conf/%s/arp_accept", procSysNetPath, safe), []byte("1"), neighFilePermissions); err != nil {
-		return fmt.Errorf("error setting arp_accept = 1 for interface: %w", err)
+	// Ensure bridge can receive gratuitous ARP, unless told otherwise
+	arpAccept := "1"
+	if acceptGARP != nil && !*acceptGARP {
+		arpAccept = "0"
+	}
+	if err := os.WriteFile(fmt.Sprintf("%s/ipv4/conf/%s/arp_accept", procSysNetPath, safe), []byte(arpAccept), neighFilePermissions); err != nil {
+		return fmt.Errorf("error setting arp_accept = %s for interface: %w", arpAccept, err)
 	}
 
 	// Ensure we can receive unsolicited and solicited but untracked NA

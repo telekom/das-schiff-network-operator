@@ -699,7 +699,7 @@
           </ipv6>
           <network-stack>
             <ipv4>
-              <arp-accept-gratuitous>always</arp-accept-gratuitous>
+              <arp-accept-gratuitous>never</arp-accept-gratuitous>
             </ipv4>
             <ipv6>
               <accept-duplicate-address-detection>never</accept-duplicate-address-detection>
@@ -737,7 +737,7 @@
           </ipv6>
           <network-stack>
             <ipv4>
-              <arp-accept-gratuitous>always</arp-accept-gratuitous>
+              <arp-accept-gratuitous>never</arp-accept-gratuitous>
             </ipv4>
             <ipv6>
               <accept-duplicate-address-detection>never</accept-duplicate-address-detection>

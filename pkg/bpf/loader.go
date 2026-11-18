@@ -25,6 +25,8 @@ type NeighborEvent struct {
 	Family  AddressFamily // 4 or 6
 	Mac     [6]byte
 	IP      [16]byte
+	// Gratuitous is set for gratuitous ARP.
+	Gratuitous bool
 }
 
 // AddressFamily represents IPv4 or IPv6.
@@ -35,8 +37,8 @@ const (
 	AddressFamilyIPv6 AddressFamily = 6
 )
 
-// NeighborEventSize is the byte size of a serialized NeighborEvent (4+1+6+16).
-const NeighborEventSize = 27
+// NeighborEventSize is the byte size of a serialized NeighborEvent (4+1+6+16+1).
+const NeighborEventSize = 28
 
 // InitBPF loads the BPF programs and maps into the kernel.
 func InitBPF() error {

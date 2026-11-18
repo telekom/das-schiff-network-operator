@@ -61,6 +61,8 @@ type Layer2 struct {
 	MirrorACLs []MirrorACL `json:"mirrorAcls,omitempty"`
 	// DisableSegmentation indicates whether to disable segmentation for the Layer 2 network.
 	DisableSegmentation bool `json:"disableSegmentation,omitempty"`
+	// AcceptGratuitousARP indicates whether the bridge accepts gratuitous ARP.
+	AcceptGratuitousARP bool `json:"acceptGratuitousARP,omitempty"`
 }
 
 // IRB represents the Integrated Routing and Bridging configuration.

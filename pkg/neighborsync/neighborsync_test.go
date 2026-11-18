@@ -12,6 +12,7 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/vishvananda/netlink"
 	"go.uber.org/mock/gomock"
+	"golang.org/x/sys/unix"
 
 	mock_nl "github.com/telekom/das-schiff-network-operator/pkg/nl/mock"
 )
@@ -260,5 +261,66 @@ var _ = Describe("DisableNeighborSuppression", func() {
 
 		_, tracked := ns.receiveNeighbors.Load(10)
 		Expect(tracked).To(BeTrue())
+	})
+})
+
+var _ = Describe("replaceNeighborReachable with gratuitous ARP rejected", func() {
+	var ns *NeighborSync
+	// Own controller: the shared mock keeps AnyTimes expectations from other specs.
+	var ctrl *gomock.Controller
+	var nlOps *mock_nl.MockToolkitInterface
+	vlan := &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Index: 10, MasterIndex: 20}}
+	ip := net.ParseIP("10.250.1.201").To4()
+	mac := [6]byte{0xd6, 0xe1, 0xa7, 0x9d, 0x69, 0x8f}
+
+	BeforeEach(func() {
+		ctrl = gomock.NewController(GinkgoT())
+		nlOps = mock_nl.NewMockToolkitInterface(ctrl)
+		ns = &NeighborSync{
+			nlOps:                    nlOps,
+			sendNeighborRequestFn:    noopSendNeighborRequest,
+			sendGratuitousNeighborFn: noopSendGratuitous,
+		}
+		ns.SetAcceptGratuitousARP(20, false)
+		nlOps.EXPECT().LinkByIndex(10).Return(vlan, nil)
+	})
+
+	AfterEach(func() { ctrl.Finish() })
+
+	It("does not create an entry from gratuitous ARP", func() {
+		nlOps.EXPECT().NeighList(20, unix.AF_INET).Return(nil, nil)
+		nlOps.EXPECT().NeighSet(gomock.Any()).Times(0)
+		Expect(ns.replaceNeighborReachable(10, unix.AF_INET, ip, mac, true)).To(Succeed())
+	})
+
+	It("updates an existing entry from gratuitous ARP as STALE", func() {
+		nlOps.EXPECT().NeighList(20, unix.AF_INET).Return([]netlink.Neigh{{IP: ip}}, nil)
+		nlOps.EXPECT().NeighSet(gomock.Any()).DoAndReturn(func(n *netlink.Neigh) error {
+			Expect(n.State).To(Equal(netlink.NUD_STALE))
+			return nil
+		})
+		Expect(ns.replaceNeighborReachable(10, unix.AF_INET, ip, mac, true)).To(Succeed())
+	})
+
+	It("drops gratuitous ARP when the neighbor list fails", func() {
+		nlOps.EXPECT().NeighList(20, unix.AF_INET).Return(nil, errors.New("netlink io error"))
+		nlOps.EXPECT().NeighSet(gomock.Any()).Times(0)
+		Expect(ns.replaceNeighborReachable(10, unix.AF_INET, ip, mac, true)).To(Succeed())
+	})
+
+	It("creates a REACHABLE entry from an ARP reply", func() {
+		nlOps.EXPECT().NeighList(20, unix.AF_INET).Return(nil, nil)
+		nlOps.EXPECT().NeighSet(gomock.Any()).DoAndReturn(func(n *netlink.Neigh) error {
+			Expect(n.State).To(Equal(netlink.NUD_REACHABLE))
+			return nil
+		})
+		Expect(ns.replaceNeighborReachable(10, unix.AF_INET, ip, mac, false)).To(Succeed())
+	})
+
+	It("creates an entry from gratuitous ARP once the network accepts", func() {
+		ns.SetAcceptGratuitousARP(20, true)
+		nlOps.EXPECT().NeighList(20, unix.AF_INET).Return(nil, nil)
+		nlOps.EXPECT().NeighSet(gomock.Any()).Return(nil)
+		Expect(ns.replaceNeighborReachable(10, unix.AF_INET, ip, mac, true)).To(Succeed())
 	})
 })

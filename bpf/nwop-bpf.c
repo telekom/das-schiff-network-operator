@@ -35,6 +35,7 @@ struct neighbor_event
     __u8 family; // 4 for IPv4, 6 for IPv6
     __u8 mac[6];
     __u8 ip[16]; // IPv4 in first 4 bytes, rest zero
+    __u8 gratuitous; // 1 for gratuitous ARP (fills the padding byte)
 };
 
 // Minimal vlan header definition (avoid kernel headers not available to BPF C)
@@ -86,7 +87,7 @@ static __always_inline int parse_eth_tc(struct __sk_buff *skb, void **data, void
     return 0;
 }
 
-static __always_inline void emit_event(__u32 ifindex, __u8 family, const __u8 mac[6], const __u8 ip[16])
+static __always_inline void emit_event(__u32 ifindex, __u8 family, const __u8 mac[6], const __u8 ip[16], __u8 gratuitous)
 {
     struct neighbor_event *ev = bpf_ringbuf_reserve(&neighbor_ringbuf, sizeof(*ev), 0);
     if (!ev)
@@ -95,6 +96,7 @@ static __always_inline void emit_event(__u32 ifindex, __u8 family, const __u8 ma
     ev->family = family;
     __builtin_memcpy(ev->mac, mac, 6);
     __builtin_memcpy(ev->ip, ip, 16);
+    ev->gratuitous = gratuitous;
     bpf_ringbuf_submit(ev, 0);
 }
 
@@ -158,14 +160,14 @@ int handle_neighbor_reply_tc(struct __sk_buff *skb)
             
             // IPv4 goes in first 4 bytes of ip buffer (use spa since spa == tpa)
             __builtin_memcpy(ip, arp->spa, 4);
-            emit_event(skb->ifindex, 4 /* IPv4 */, mac, ip);
+            emit_event(skb->ifindex, 4 /* IPv4 */, mac, ip, 1);
         } else if (oper == 2) {
             // Handle non-gratuitous ARP Reply
             // In a regular ARP reply, the sender is replying with their own MAC/IP mapping
             // Learn from the ARP Sender Hardware Address and Protocol Address
             __builtin_memcpy(mac, arp->sha, 6);
             __builtin_memcpy(ip, arp->spa, 4);
-            emit_event(skb->ifindex, 4 /* IPv4 */, mac, ip);
+            emit_event(skb->ifindex, 4 /* IPv4 */, mac, ip, 0);
         }
         // Note: We don't process non-gratuitous ARP requests as they don't provide
         // definitive MAC-to-IP mappings (the sender might not own the target IP)
@@ -223,7 +225,7 @@ int handle_neighbor_reply_tc(struct __sk_buff *skb)
                 {
                     __u8 mac6[6] = {};
                     __builtin_memcpy(mac6, (void *)pos + 2, 6);
-                    emit_event(skb->ifindex, 6 /* IPv6 */, mac6, ip);
+                    emit_event(skb->ifindex, 6 /* IPv6 */, mac6, ip, 0);
                     emitted = 1;
                 }
                 break; // stop after TLLA processing

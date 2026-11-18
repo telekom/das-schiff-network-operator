@@ -126,34 +126,44 @@ func createLayer2(cfg *nl.NetlinkConfiguration) error {
 	return nil
 }
 
-func reconcileNeighborSync(cfg *nl.NetlinkConfiguration) {
-	if neighborSyncer == nil {
-		return
-	}
+// bridgeNeighborSyncer is the part of neighborsync.NeighborSync that
+// reconcileNeighborSync drives.
+type bridgeNeighborSyncer interface {
+	EnsureARPRefresh(interfaceID int)
+	SetAcceptGratuitousARP(bridgeID int, accept bool)
+	EnsureNeighborSuppression(bridgeID, vethID int) error
+}
+
+func reconcileNeighborSync(cfg *nl.NetlinkConfiguration, syncer bridgeNeighborSyncer, linkByName func(string) (netlink.Link, error)) {
 	for i := range cfg.Layer2s {
 		l2 := &cfg.Layer2s[i]
-		if len(l2.AnycastGateways) == 0 {
-			continue
-		}
 
 		bridgeName := fmt.Sprintf("l2.%d", l2.VlanID)
-		bridge, err := netlink.LinkByName(bridgeName)
+		bridge, err := linkByName(bridgeName)
 		if err != nil {
 			log.Print(logSanitizer.Replace(fmt.Sprintf("neighborsync: bridge l2.%d not found: %v", l2.VlanID, err)))
 			continue
 		}
 		bridgeIdx := bridge.Attrs().Index
 
-		neighborSyncer.EnsureARPRefresh(bridgeIdx)
+		// Every bridge, also one that just lost its anycast gateways: its BPF
+		// attachment from before stays, and must follow the new policy.
+		// nil keeps the legacy default (accept), see nl.Layer2Information.
+		syncer.SetAcceptGratuitousARP(bridgeIdx, l2.AcceptGratuitousARP == nil || *l2.AcceptGratuitousARP)
+		if len(l2.AnycastGateways) == 0 {
+			continue
+		}
+
+		syncer.EnsureARPRefresh(bridgeIdx)
 
 		vlanName := fmt.Sprintf("vlan.%d", l2.VlanID)
-		vlanIntf, err := netlink.LinkByName(vlanName)
+		vlanIntf, err := linkByName(vlanName)
 		if err != nil {
 			log.Print(logSanitizer.Replace(fmt.Sprintf("neighborsync: vlan interface %s not found: %v", vlanName, err)))
 			continue
 		}
 
-		if err := neighborSyncer.EnsureNeighborSuppression(bridgeIdx, vlanIntf.Attrs().Index); err != nil {
+		if err := syncer.EnsureNeighborSuppression(bridgeIdx, vlanIntf.Attrs().Index); err != nil {
 			log.Print(logSanitizer.Replace(fmt.Sprintf("neighborsync: failed to ensure neighbor suppression for bridge l2.%d: %v", l2.VlanID, err)))
 		}
 	}
@@ -643,7 +653,9 @@ func reconcileNetlink(cfg *nl.NetlinkConfiguration) error {
 		return fmt.Errorf("failed to reconcile Layer2 (create): %w", err)
 	}
 
-	reconcileNeighborSync(cfg)
+	if neighborSyncer != nil {
+		reconcileNeighborSync(cfg, neighborSyncer, netlink.LinkByName)
+	}
 	return nil
 }
 

@@ -1,0 +1,14 @@
+# Reject gratuitous ARP on all bridges unless the network opts in (TC-12).
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: agent-cra-frr
+  namespace: system
+spec:
+  template:
+    spec:
+      containers:
+        - name: agent-cra-frr
+          env:
+            - name: NWOP_L2_ACCEPT_GARP
+              value: never
