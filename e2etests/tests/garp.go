@@ -16,7 +16,8 @@ import (
 // create a neighbor entry, unless the network sets acceptGratuitousARP.
 // It does not test whether an existing entry keeps its MAC address.
 // The e2e agent runs with NWOP_L2_ACCEPT_GARP=never; VLAN 503 (vlan3) opts in,
-// VLAN 502 (vlan2) does not.
+// VLAN 502 (vlan2) does not. Only the legacy fixture has the opt-in, so the
+// spec is skipped in intent mode.
 var _ = Describe("Gratuitous ARP neighbor creation", Label("garp"), func() {
 	var (
 		f   *framework.Framework
@@ -37,6 +38,9 @@ var _ = Describe("Gratuitous ARP neighbor creation", Label("garp"), func() {
 	BeforeEach(func() {
 		f = framework.Global
 		Expect(f).NotTo(BeNil())
+		if f.IsIntentMode() {
+			Skip("legacy fixture only: the intent base config has no acceptGratuitousARP opt-in")
+		}
 		ctx = context.Background()
 
 		By("Creating test namespace")
