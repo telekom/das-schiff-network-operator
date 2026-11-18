@@ -30,6 +30,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"golang.org/x/crypto/ssh"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -171,14 +172,14 @@ func createCraManager() (*cra.Manager, error) {
 		return nil, fmt.Errorf("no CRA user provided")
 	}
 
-	pwd := os.Getenv("CRA_PASSWORD")
-	if pwd == "" {
-		return nil, fmt.Errorf("no CRA password provided")
-	}
-
 	knownHostsPath := strings.TrimSpace(os.Getenv("CRA_KNOWN_HOSTS"))
 	if knownHostsPath == "" {
 		return nil, fmt.Errorf("no CRA known hosts file provided via CRA_KNOWN_HOSTS")
+	}
+
+	auth, err := craAuthFromEnv()
+	if err != nil {
+		return nil, err
 	}
 
 	sshOpts, err := craSSHOptionsFromEnv()
@@ -186,12 +187,41 @@ func createCraManager() (*cra.Manager, error) {
 		return nil, err
 	}
 
-	craManager, err := cra.NewManagerWithKnownHosts(urls, user, pwd, knownHostsPath, timeout, sshOpts, ctrl.Log.WithName("setup"))
+	craManager, err := cra.NewManagerWithKnownHosts(urls, user, auth, knownHostsPath, timeout, sshOpts, ctrl.Log.WithName("setup"))
 	if err != nil {
 		return nil, fmt.Errorf("error creating CRA manager: %w", err)
 	}
 
 	return craManager, nil
+}
+
+// craAuthFromEnv builds the NETCONF credential from CRA_PRIVATE_KEY_FILE or,
+// for routers without public-key authentication, CRA_PASSWORD_FILE.
+// CRA_PASSWORD is no longer read.
+func craAuthFromEnv() (ssh.AuthMethod, error) {
+	keyFile := strings.TrimSpace(os.Getenv("CRA_PRIVATE_KEY_FILE"))
+	passwordFile := strings.TrimSpace(os.Getenv("CRA_PASSWORD_FILE"))
+	_, legacyPassword := os.LookupEnv("CRA_PASSWORD")
+
+	if keyFile == "" && passwordFile == "" {
+		if legacyPassword {
+			return nil, fmt.Errorf("CRA_PASSWORD is no longer supported: set CRA_PRIVATE_KEY_FILE, " +
+				"or write the password to a file with mode 0600 and set CRA_PASSWORD_FILE")
+		}
+		return nil, fmt.Errorf("no CRA credential provided: set CRA_PRIVATE_KEY_FILE or CRA_PASSWORD_FILE")
+	}
+	if legacyPassword {
+		setupLog.Info("ignoring CRA_PASSWORD, remove it from the manifest")
+	}
+	if keyFile != "" && passwordFile != "" {
+		setupLog.Info("CRA_PRIVATE_KEY_FILE is set, ignoring CRA_PASSWORD_FILE")
+	}
+
+	auth, err := cra.AuthFromFiles(keyFile, passwordFile)
+	if err != nil {
+		return nil, fmt.Errorf("error loading CRA credential: %w", err)
+	}
+	return auth, nil
 }
 
 // craSSHOptionsFromEnv reads the opt-outs from the PSA-compliant SSH settings.

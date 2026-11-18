@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"golang.org/x/crypto/ssh"
 
 	"github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	"github.com/telekom/das-schiff-network-operator/pkg/config"
@@ -95,17 +96,18 @@ type Metrics struct {
 	BridgeFDB        ShowBridgeFDBOutput
 }
 
-// NewManagerWithKnownHosts creates a CRA manager that verifies CRA host keys
-// against the supplied known_hosts file.
+// NewManagerWithKnownHosts creates a CRA manager that authenticates with auth
+// and verifies CRA host keys against the supplied known_hosts file.
 func NewManagerWithKnownHosts(
 	urls []string,
-	user, password string,
+	user string,
+	auth ssh.AuthMethod,
 	knownHostsPath string,
 	timeout time.Duration,
 	sshOpts SSHOptions,
 	logger logr.Logger,
 ) (*Manager, error) {
-	netconfClient, err := NewNetconfWithKnownHosts(urls, user, password, knownHostsPath, timeout, sshOpts)
+	netconfClient, err := NewNetconfWithKnownHosts(urls, user, auth, knownHostsPath, timeout, sshOpts)
 	if err != nil {
 		return nil, err
 	}
@@ -492,7 +494,7 @@ func (m *Manager) GetKPIMetrics(ctx context.Context) ([]byte, error) {
 
 		resBody, err := m.SendHttpRequest(ctx, url)
 		if err != nil {
-			fmt.Println(err)
+			m.logger.Error(err, "failed to fetch KPI metrics", "url", url)
 			continue
 		}
 

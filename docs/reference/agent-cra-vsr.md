@@ -15,10 +15,60 @@ on its node over NETCONF on SSH. It reads these environment variables at start:
 | `CRA_URL` | yes | Comma-separated `host:port` list of the router's NETCONF endpoints, e.g. `169.254.33.1:830`. |
 | `CRA_TIMEOUT` | yes | Timeout per NETCONF operation as a Go duration, e.g. `30s`. |
 | `CRA_USER` | yes | NETCONF user name. |
-| `CRA_PASSWORD` | yes | NETCONF password. |
+| `CRA_PRIVATE_KEY_FILE` | one of the two | Path of an unencrypted OpenSSH or PEM private key. The client authenticates with this key only. |
+| `CRA_PASSWORD_FILE` | one of the two | Path of a file that holds the NETCONF password (trailing newlines are removed). Used only when `CRA_PRIVATE_KEY_FILE` is unset. |
 | `CRA_KNOWN_HOSTS` | yes | Path of an OpenSSH `known_hosts` file with the router's host key. |
 | `CRA_SSH_MIN_RSA_HOST_KEY_BITS` | no | Smallest accepted RSA host key, default `3072`. **Opt-out, not PSA-compliant below 3072.** |
 | `CRA_SSH_LEGACY_ALGORITHMS` | no | `true` uses the `golang.org/x/crypto/ssh` default algorithms instead of the lists below. **Opt-out, not PSA-compliant.** |
+
+## Credentials
+
+The agent refuses to start when neither `CRA_PRIVATE_KEY_FILE` nor
+`CRA_PASSWORD_FILE` is set, when the file is missing, cannot be parsed, or has a
+mode wider than `0600` (any group or other permission, or the owner execute bit).
+Neither the key nor the password appears in a log line or error message.
+
+The default manifest (`config/agent-cra-vsr/agent.yaml`) mounts the host
+directory `/etc/cra/netconf` read-only at the same path and sets
+`CRA_PRIVATE_KEY_FILE=/etc/cra/netconf/id_ed25519`. Node provisioning must
+create that key pair and enrol the public key for the NETCONF user on the
+router; the agent does neither. (For T-CaaS this is a separate node-image task,
+and 6WIND has yet to confirm public-key authentication on VSR 3.12.) The volume
+uses `type: DirectoryOrCreate`, so a node without the directory starts the agent,
+which then exits with an error naming the missing key file.
+
+!!! warning "Breaking change"
+    `CRA_PASSWORD` is no longer read and the default manifest expects
+    `/etc/cra/netconf/id_ed25519`. Roll out a release with this agent only after
+    the nodes carry an enrolled key (or after switching to `CRA_PASSWORD_FILE`).
+
+### Migrating from `CRA_PASSWORD`
+
+`CRA_PASSWORD` is no longer read. An agent that still has only `CRA_PASSWORD`
+set exits at start with an error that names `CRA_PASSWORD_FILE`. Choose one:
+
+- **Key authentication (default):** provide `/etc/cra/netconf/id_ed25519` on
+  the node and enrol its public key for the NETCONF user on the router.
+- **Password authentication (opt-out for routers without key support):** write
+  the password to a file with mode `0600` (or `0400`), e.g.
+  `/etc/cra/netconf/password`, and replace `CRA_PRIVATE_KEY_FILE` by
+  `CRA_PASSWORD_FILE` in the DaemonSet:
+
+  ```yaml
+  - op: replace
+    path: /spec/template/spec/containers/0/env/3
+    value:
+      name: CRA_PASSWORD_FILE
+      value: /etc/cra/netconf/password
+  ```
+
+  When mounting the password from a Kubernetes Secret instead, set
+  `defaultMode: 0400` on the volume; the Secret default `0644` is refused.
+  Do not set a pod-level `fsGroup` for the agent: it adds group read to
+  projected files (`0440`), which the agent refuses as well.
+
+Remove `CRA_PASSWORD` from the manifest. While a file variable is set, a left-over
+`CRA_PASSWORD` is ignored and logged.
 
 ## Host key verification
 
