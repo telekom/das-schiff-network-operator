@@ -1,0 +1,707 @@
+// Command logref generates the message catalogue in docs/reference/logging.md
+// from the log calls in the Go code of this module.
+//
+//	go run ./hack/logref          # rewrite the generated section
+//	go run ./hack/logref -check   # fail if the section is out of date
+//
+// It parses the source without type information. A call is a log call when
+// its receiver expression contains "log" (but not "executionLog", the netplan
+// D-Bus command trace file) and it is either a logr call (Info, Error, with an
+// optional V(n)) or a logrus call (Debug, Info, Warn, Error, ... with an
+// optional f suffix). The level is the one the call has after
+// logging.RedirectLibraryLoggers; the fields are the literal keys of key/value
+// pairs and of WithValues/WithField calls on the receiver, and of those calls
+// where the receiver's logger is bound: a local variable assigned earlier in
+// the same function (log := r.Log.WithValues(...)), a struct field set
+// anywhere in the package (Config{log: logrus.WithField(...)}, c.log = ...),
+// or a parameter, from the arguments of the calls of that function in the
+// package. Bindings are matched by name within a package and followed one
+// step, which covers how this module binds its loggers.
+//
+// The scan fails when
+//   - a log call has no literal message (or fmt.Sprintf format), or cannot be
+//     classified,
+//   - a field key is in neither personalData nor nonPersonalFields,
+//   - non-test code imports the standard library "log" package, whose lines
+//     would bypass the --zap-* flags,
+//   - a cmd/<binary> package does not call logging.RedirectLibraryLoggers.
+package main
+
+import (
+	"bytes"
+	"errors"
+	"flag"
+	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"go/types"
+	"io/fs"
+	"maps"
+	"os"
+	"path/filepath"
+	"regexp"
+	"slices"
+	"sort"
+	"strconv"
+	"strings"
+)
+
+const (
+	docPath   = "docs/reference/logging.md"
+	beginMark = "<!-- BEGIN GENERATED: go run ./hack/logref -->"
+	endMark   = "<!-- END GENERATED -->"
+	docMode   = 0o600
+
+	errorMethod = "Error"
+)
+
+var (
+	scanDirs = []string{"api", "cmd", "controllers", "pkg"}
+	// skipDirs hold no log calls of their own: pkg/logging forwards logrus lines.
+	skipDirs = map[string]bool{"pkg/logging": true}
+	vLevelRe = regexp.MustCompile(`\.V\((\d+)\)`)
+	// logrusLevels maps logrus methods to the level they have after logging.RedirectLibraryLoggers.
+	logrusLevels = map[string]string{
+		"Trace": "V(3)", "Debug": "V(2)", "Info": "info", "Print": "info", "Warn": "info", "Warning": "info",
+		"Error": "error", "Fatal": "error", "Panic": "error",
+	}
+	levelOrder = []string{"error", "info", "debug"}
+)
+
+// personalField classifies a field key that can hold personal data, with the
+// classes and data subjects of the T-CaaS platform logging contract. A key
+// that can hold several data subjects names the one with the highest need for
+// protection: end-customer, then tenant-user, then operator.
+type personalField struct {
+	class, subject, meaning string
+}
+
+// personalData are the field keys that can hold personal data. The clusters
+// the operator runs in belong to tenants: the names of their intent objects,
+// VRFs and Layer2s are chosen by the tenant, and node names and addresses
+// identify the tenant's machines.
+var personalData = map[string]personalField{
+	"vrf":            {"tenant-pii", "tenant-user", "name of a VRF"},
+	"l2a":            {"tenant-pii", "tenant-user", "name of a Layer2Attachment"},
+	"name":           {"tenant-pii", "tenant-user", "name of the object of the line: VRF route configuration, Layer2, IP pool, revision, MetalLB or Coil resource, NodeNetworkConfig (the node name); on netplan client lines the client component (dummy, netplan, net-class-manager)"},
+	"network":        {"tenant-pii", "tenant-user", "name of a Network"},
+	"networkRef":     {"tenant-pii", "tenant-user", "name of the Network a Layer2Attachment or PodNetwork refers to"},
+	"destination":    {"tenant-pii", "tenant-user", "name of a Destination"},
+	"inbound":        {"tenant-pii", "tenant-user", "name of an Inbound"},
+	"outbound":       {"tenant-pii", "tenant-user", "name of an Outbound"},
+	"collector":      {"tenant-pii", "tenant-user", "name of a Collector"},
+	"bgppeering":     {"tenant-pii", "tenant-user", "name of a BGPPeering"},
+	"podnetwork":     {"tenant-pii", "tenant-user", "name of a PodNetwork"},
+	"nodeattachment": {"tenant-pii", "tenant-user", "name of a node attachment"},
+	"trafficmirror":  {"tenant-pii", "tenant-user", "name of a TrafficMirror"},
+	"ownerName":      {"tenant-pii", "tenant-user", "name of the owner of a NodeNetworkConfig"},
+	"namespace":      {"tenant-pii", "tenant-user", "namespace of an Outbound, or the tenant namespace synced to a workload cluster"},
+	"cluster":        {"tenant-pii", "tenant-user", "namespace and name of a remote cluster"},
+	"node":           {"customer-data", "tenant-user", "node name (host name)"},
+	"failedNode":     {"customer-data", "tenant-user", "node name (host name) of a failed rollout"},
+	"nnc":            {"customer-data", "tenant-user", "NodeNetworkConfig name, which is the node name"},
+	"addresses":      {"customer-data", "tenant-user", "IP addresses allocated to a node, Inbound or Outbound"},
+	"cidr":           {"customer-data", "tenant-user", "prefix of a Calico IP pool"},
+	"subnet":         {"customer-data", "tenant-user", "prefix allocated to a Collector"},
+	"rule":           {"customer-data", "tenant-user", "policy routing rule with its prefixes"},
+	"endpoints":      {"customer-data", "tenant-user", "IP addresses of the monitoring endpoints on the nodes"},
+	"ip":             {"customer-data", "end-customer", "IP address of a kernel neighbour on a Layer2 network"},
+	"mac":            {"customer-data", "end-customer", "MAC address of a kernel neighbour on a Layer2 network"},
+	"address":        {"customer-data", "end-customer", "IP address of a neighbour request or gratuitous neighbour on a Layer2 network"},
+	"command":        {"content", "tenant-user", "FRR show command of a monitoring request, with VRF names and prefixes"},
+	"output":         {"content", "tenant-user", "output of a netplan command"},
+}
+
+// nonPersonalFields are the field keys that hold no personal data: states,
+// counts, durations, kinds, interface and link names, ASNs, listen
+// addresses, CRA URLs, Secret names, file and D-Bus object paths and errors.
+var nonPersonalFields = strings.Fields(`
+	Addr ReadHeaderTimeout ReadTimeout asn attempt bridge builder caughtUp configHash conflictingASN
+	conflicts controller count duration_seconds error failedMessage family flags gvk ifindex index
+	interface kind link linkID linkIndex mode needed ownerKind path pattern progID reason revision
+	root-dir secret skipped state status timeout type url value vlanID
+`)
+
+type entry struct {
+	level, message string
+	fields         map[string]bool
+	sources        map[string]bool // keys of bound the logger is read from, resolved by scan
+}
+
+type pkgInfo struct {
+	imports map[string]bool
+	entries map[string]*entry // key: level + "\x00" + message
+	// bound maps a struct field (".name") or a function parameter
+	// ("function#index") to the field keys of the loggers assigned to it.
+	bound     map[string]map[string]bool
+	logrus    bool
+	redirects bool // calls logging.RedirectLibraryLoggers
+}
+
+func main() {
+	check := flag.Bool("check", false, "fail if "+docPath+" is out of date instead of rewriting it")
+	root := flag.String("root", ".", "repository root")
+	flag.Parse()
+	if err := run(*root, *check); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
+
+func run(root string, check bool) error {
+	pkgs, err := scan(root)
+	if err != nil {
+		return err
+	}
+	if err := checkClassified(pkgs); err != nil {
+		return err
+	}
+	path := filepath.Join(root, docPath)
+	doc, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", docPath, err)
+	}
+	begin := bytes.Index(doc, []byte(beginMark))
+	end := bytes.Index(doc, []byte(endMark))
+	if begin < 0 || end < begin {
+		return fmt.Errorf("%s needs the markers %q and %q", docPath, beginMark, endMark)
+	}
+	updated := string(doc[:begin+len(beginMark)]) + "\n" + render(pkgs) + string(doc[end:])
+	if updated == string(doc) {
+		return nil
+	}
+	if check {
+		return fmt.Errorf("%s is out of date with the log calls in the code; run `go run ./hack/logref` and commit the result", docPath)
+	}
+	if err := os.WriteFile(path, []byte(updated), docMode); err != nil {
+		return fmt.Errorf("write %s: %w", docPath, err)
+	}
+	return nil
+}
+
+// fieldLevels returns, per field key, the levels of the messages that log it.
+func fieldLevels(pkgs map[string]*pkgInfo) map[string][]string {
+	levels := map[string][]string{}
+	for _, p := range pkgs {
+		for _, e := range p.entries {
+			for f := range e.fields {
+				if !slices.Contains(levels[f], e.level) {
+					levels[f] = append(levels[f], e.level)
+				}
+			}
+		}
+	}
+	return levels
+}
+
+// checkClassified fails when a field key is in neither personalData nor
+// nonPersonalFields, or in both.
+func checkClassified(pkgs map[string]*pkgInfo) error {
+	var errs []error
+	for _, f := range sortedKeys(fieldLevels(pkgs)) {
+		_, personal := personalData[f]
+		if personal == slices.Contains(nonPersonalFields, f) {
+			errs = append(errs, fmt.Errorf("field %q must be classified once: in personalData (with class and data subject) or in nonPersonalFields of hack/logref/main.go", f))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func modulePath(root string) (string, error) {
+	gomod, err := os.ReadFile(filepath.Join(root, "go.mod"))
+	if err != nil {
+		return "", fmt.Errorf("read go.mod: %w", err)
+	}
+	for _, line := range strings.Split(string(gomod), "\n") {
+		if m, ok := strings.CutPrefix(line, "module "); ok {
+			return strings.TrimSpace(m), nil
+		}
+	}
+	return "", errors.New("go.mod has no module line")
+}
+
+func scan(root string) (map[string]*pkgInfo, error) {
+	mod, err := modulePath(root)
+	if err != nil {
+		return nil, err
+	}
+	s := &scanner{root: root, mod: mod, fset: token.NewFileSet(), pkgs: map[string]*pkgInfo{}}
+	for _, top := range scanDirs {
+		if err := filepath.WalkDir(filepath.Join(root, top), s.visit); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return nil, fmt.Errorf("scan %s: %w", top, err)
+		}
+	}
+	if len(s.stdlibLog) > 0 {
+		s.errs = append(s.errs, fmt.Errorf("these files import the standard library \"log\" package, whose output ignores --zap-log-level and --zap-encoder; use a logr logger (ctrl.Log.WithName(...)) instead: %s", strings.Join(s.stdlibLog, ", ")))
+	}
+	for _, dir := range sortedKeys(s.pkgs) {
+		if name, ok := strings.CutPrefix(dir, "cmd/"); ok && !strings.Contains(name, "/") && !s.pkgs[dir].redirects {
+			s.errs = append(s.errs, fmt.Errorf("%s does not call logging.RedirectLibraryLoggers(ctrl.Log) after ctrl.SetLogger, so logrus and klog lines bypass the --zap-* flags", dir))
+		}
+	}
+	if err := errors.Join(s.errs...); err != nil {
+		return nil, err
+	}
+	for _, p := range s.pkgs {
+		for _, e := range p.entries {
+			for src := range e.sources {
+				maps.Copy(e.fields, p.bound[src])
+			}
+		}
+	}
+	return s.pkgs, nil
+}
+
+type scanner struct {
+	root, mod string
+	fset      *token.FileSet
+	pkgs      map[string]*pkgInfo
+	stdlibLog []string
+	errs      []error
+}
+
+func (s *scanner) visit(path string, d fs.DirEntry, err error) error {
+	if err != nil {
+		return err
+	}
+	rel, _ := filepath.Rel(s.root, path)
+	rel = filepath.ToSlash(rel)
+	if d.IsDir() {
+		if skipDirs[rel] || d.Name() == "testdata" {
+			return filepath.SkipDir
+		}
+		return nil
+	}
+	if !strings.HasSuffix(rel, ".go") || strings.HasSuffix(rel, "_test.go") || strings.HasPrefix(d.Name(), "zz_generated") {
+		return nil
+	}
+	f, err := parser.ParseFile(s.fset, path, nil, parser.SkipObjectResolution)
+	if err != nil {
+		return fmt.Errorf("parse %s: %w", rel, err)
+	}
+	dir := filepath.ToSlash(filepath.Dir(rel))
+	p := s.pkgs[dir]
+	if p == nil {
+		p = &pkgInfo{imports: map[string]bool{}, entries: map[string]*entry{}, bound: map[string]map[string]bool{}}
+		s.pkgs[dir] = p
+	}
+	for _, imp := range f.Imports {
+		ip, _ := strconv.Unquote(imp.Path.Value)
+		if ip == "log" {
+			s.stdlibLog = append(s.stdlibLog, rel)
+		}
+		if dep, ok := strings.CutPrefix(ip, s.mod+"/"); ok {
+			p.imports[dep] = true
+		}
+	}
+	for _, decl := range f.Decls {
+		s.inspectDecl(p, decl)
+	}
+	return nil
+}
+
+// inspectDecl records the logger bindings and log calls of one top-level declaration.
+func (s *scanner) inspectDecl(p *pkgInfo, decl ast.Decl) {
+	sc := scope{locals: map[string]map[string]bool{}, params: map[string]string{}}
+	if fn, ok := decl.(*ast.FuncDecl); ok {
+		sc.params = paramKeys(fn)
+	}
+	ast.Inspect(decl, func(n ast.Node) bool {
+		switch v := n.(type) {
+		case *ast.AssignStmt:
+			if len(v.Lhs) == len(v.Rhs) {
+				for i := range v.Lhs {
+					bind(p, sc, v.Lhs[i], v.Rhs[i])
+				}
+			}
+		case *ast.ValueSpec:
+			if len(v.Names) == len(v.Values) {
+				for i := range v.Names {
+					bind(p, sc, v.Names[i], v.Values[i])
+				}
+			}
+		case *ast.KeyValueExpr:
+			if k, ok := v.Key.(*ast.Ident); ok {
+				bind(p, sc, &ast.SelectorExpr{Sel: k}, v.Value)
+			}
+		case *ast.CallExpr:
+			if types.ExprString(v.Fun) == "logging.RedirectLibraryLoggers" {
+				p.redirects = true
+			}
+			bindArgs(p, sc, v)
+			if err := addCall(p, v, sc); err != nil {
+				s.errs = append(s.errs, fmt.Errorf("%s: %w", s.fset.Position(v.Pos()), err))
+			}
+		}
+		return true
+	})
+}
+
+// paramKeys maps the parameter names of fn to their keys in pkgInfo.bound.
+func paramKeys(fn *ast.FuncDecl) map[string]string {
+	keys := map[string]string{}
+	i := 0
+	for _, field := range fn.Type.Params.List {
+		for _, name := range field.Names {
+			keys[name.Name] = fn.Name.Name + "#" + strconv.Itoa(i)
+			i++
+		}
+		if len(field.Names) == 0 {
+			i++
+		}
+	}
+	return keys
+}
+
+// scope holds the logger bindings of one top-level declaration.
+type scope struct {
+	locals map[string]map[string]bool // local variable -> field keys of its logger
+	params map[string]string          // parameter name -> key in pkgInfo.bound
+}
+
+// bind records the literal field keys of the WithValues/WithField calls in
+// value for the local variable or struct field lhs it is assigned to.
+func bind(p *pkgInfo, sc scope, lhs, value ast.Expr) {
+	switch v := lhs.(type) {
+	case *ast.Ident:
+		addFields(sc.locals, v.Name, value, sc)
+	case *ast.SelectorExpr:
+		addFields(p.bound, "."+v.Sel.Name, value, sc)
+	}
+}
+
+// bindArgs records the field keys of the loggers passed to call for the
+// parameters of the called function.
+func bindArgs(p *pkgInfo, sc scope, call *ast.CallExpr) {
+	var fn string
+	switch f := call.Fun.(type) {
+	case *ast.Ident:
+		fn = f.Name
+	case *ast.SelectorExpr:
+		fn = f.Sel.Name
+	default:
+		return
+	}
+	for i, arg := range call.Args {
+		addFields(p.bound, fn+"#"+strconv.Itoa(i), arg, sc)
+	}
+}
+
+// addFields adds the field keys of the logger expression x to m[key].
+func addFields(m map[string]map[string]bool, key string, x ast.Expr, sc scope) {
+	fields := map[string]bool{}
+	receiverFields(x, fields)
+	if name, isField := loggerSource(x); !isField {
+		maps.Copy(fields, sc.locals[name])
+	}
+	if len(fields) == 0 {
+		return
+	}
+	if m[key] == nil {
+		m[key] = map[string]bool{}
+	}
+	maps.Copy(m[key], fields)
+}
+
+// loggerSource returns the variable or struct field a receiver chain starts
+// from: log for log.V(1), r.Log for r.Log.WithValues(...).
+func loggerSource(x ast.Expr) (name string, isField bool) {
+	for {
+		switch v := x.(type) {
+		case *ast.CallExpr:
+			sel, ok := v.Fun.(*ast.SelectorExpr)
+			if !ok {
+				return "", false
+			}
+			x = sel.X
+		case *ast.SelectorExpr:
+			return v.Sel.Name, true
+		case *ast.Ident:
+			return v.Name, false
+		default:
+			return "", false
+		}
+	}
+}
+
+// addCall records call if it is a log call. It returns an error for a log
+// call it cannot classify or whose message is not a literal.
+func addCall(p *pkgInfo, call *ast.CallExpr, sc scope) error {
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return nil
+	}
+	recv := types.ExprString(sel.X)
+	lower := strings.ToLower(recv)
+	if !strings.Contains(lower, "log") || strings.Contains(lower, "executionlog") {
+		return nil
+	}
+	method := sel.Sel.Name
+	logrusLevel, isLogrusMethod := logrusLevels[strings.TrimSuffix(strings.TrimSuffix(method, "ln"), "f")]
+	if !isLogrusMethod {
+		return nil // not a log method, for example WithValues or V
+	}
+	isLogrus := strings.HasPrefix(recv, "logrus") || (method != "Info" && method != errorMethod)
+	minArgs := 1
+	if !isLogrus && method == errorMethod {
+		minArgs = 2 // logr: err, msg
+	}
+	if len(call.Args) < minArgs {
+		return fmt.Errorf("log call %s.%s has too few arguments", recv, method)
+	}
+	var level string
+	var msgArg ast.Expr
+	var kv []ast.Expr
+	switch {
+	case isLogrus:
+		level, msgArg = logrusLevel, call.Args[0]
+		p.logrus = true
+	case method == errorMethod:
+		level, msgArg, kv = "error", call.Args[1], call.Args[2:]
+	default:
+		var err error
+		if level, err = logrInfoLevel(recv); err != nil {
+			return fmt.Errorf("log call %s.%s: %w", recv, method, err)
+		}
+		msgArg, kv = call.Args[0], call.Args[1:]
+	}
+	msg := message(msgArg)
+	if msg == "" {
+		return fmt.Errorf("log call %s.%s has a non-literal message %s; use a literal message and key/value fields", recv, method, types.ExprString(msgArg))
+	}
+	key := level + "\x00" + msg
+	e := p.entries[key]
+	if e == nil {
+		e = &entry{level: level, message: msg, fields: map[string]bool{}, sources: map[string]bool{}}
+		p.entries[key] = e
+	}
+	for i := 0; i < len(kv); i += 2 {
+		if k := literal(kv[i]); k != "" {
+			e.fields[k] = true
+		}
+	}
+	receiverFields(sel.X, e.fields)
+	addBoundFields(e, sel.X, sc)
+	return nil
+}
+
+// addBoundFields adds the fields bound to the local variable recv starts
+// from, or records the struct field or parameter to resolve after the scan.
+func addBoundFields(e *entry, recv ast.Expr, sc scope) {
+	switch name, isField := loggerSource(recv); {
+	case isField:
+		e.sources["."+name] = true
+	case sc.params[name] != "":
+		e.sources[sc.params[name]] = true
+	default:
+		maps.Copy(e.fields, sc.locals[name])
+	}
+}
+
+// logrInfoLevel returns the catalogue level of a logr Info call on recv.
+func logrInfoLevel(recv string) (string, error) {
+	m := vLevelRe.FindAllStringSubmatch(recv, -1)
+	switch {
+	case m == nil && strings.Contains(recv, ".V("):
+		return "", errors.New("non-literal V level")
+	case m == nil:
+		return "info", nil
+	}
+	switch v := m[len(m)-1][1]; v {
+	case "0":
+		return "info", nil
+	case "1":
+		return "debug", nil
+	default:
+		return "V(" + v + ")", nil
+	}
+}
+
+// receiverFields adds the literal keys of WithValues/WithField(s) calls in a receiver chain.
+func receiverFields(x ast.Expr, fields map[string]bool) {
+	for {
+		switch v := x.(type) {
+		case *ast.CallExpr:
+			sel, ok := v.Fun.(*ast.SelectorExpr)
+			if !ok {
+				return
+			}
+			switch sel.Sel.Name {
+			case "WithValues":
+				for i := 0; i < len(v.Args); i += 2 {
+					if k := literal(v.Args[i]); k != "" {
+						fields[k] = true
+					}
+				}
+			case "WithField":
+				if k := literal(v.Args[0]); k != "" {
+					fields[k] = true
+				}
+			}
+			x = sel.X
+		case *ast.SelectorExpr:
+			x = v.X
+		default:
+			return
+		}
+	}
+}
+
+func literal(x ast.Expr) string {
+	if lit, ok := x.(*ast.BasicLit); ok && lit.Kind == token.STRING {
+		s, err := strconv.Unquote(lit.Value)
+		if err == nil {
+			return s
+		}
+	}
+	return ""
+}
+
+func message(x ast.Expr) string {
+	if s := literal(x); s != "" {
+		return s
+	}
+	if v, ok := x.(*ast.CallExpr); ok {
+		if types.ExprString(v.Fun) == "fmt.Sprintf" && len(v.Args) > 0 {
+			if s := literal(v.Args[0]); s != "" {
+				return s
+			}
+		}
+	}
+	return ""
+}
+
+// binaries maps each cmd/<name> to the module packages it links.
+func binaries(pkgs map[string]*pkgInfo) map[string]map[string]bool {
+	out := map[string]map[string]bool{}
+	for dir := range pkgs {
+		name, ok := strings.CutPrefix(dir, "cmd/")
+		if !ok || strings.Contains(name, "/") {
+			continue
+		}
+		seen := map[string]bool{}
+		queue := []string{dir}
+		for len(queue) > 0 {
+			d := queue[0]
+			queue = queue[1:]
+			if seen[d] || pkgs[d] == nil {
+				continue
+			}
+			seen[d] = true
+			for imp := range pkgs[d].imports {
+				queue = append(queue, imp)
+			}
+		}
+		out[name] = seen
+	}
+	return out
+}
+
+func sortedKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func code(s string) string {
+	return "`" + strings.ReplaceAll(strings.ReplaceAll(s, "`", "'"), "|", `\|`) + "`"
+}
+
+// levelRank orders error, info, debug, then V(2) and higher.
+func levelRank(level string) int {
+	if i := slices.Index(levelOrder, level); i >= 0 {
+		return i
+	}
+	return len(levelOrder)
+}
+
+func sortedEntries(p *pkgInfo) []*entry {
+	es := make([]*entry, 0, len(p.entries))
+	for _, k := range sortedKeys(p.entries) {
+		es = append(es, p.entries[k])
+	}
+	sort.SliceStable(es, func(i, j int) bool { return levelRank(es[i].level) < levelRank(es[j].level) })
+	return es
+}
+
+// personalDataTable renders the table of the logged fields that can hold
+// personal data.
+func personalDataTable(levels map[string][]string) string {
+	var b strings.Builder
+	b.WriteString("\n### Fields with personal data\n\n")
+	b.WriteString("Every field key of the catalogue is classified in `hack/logref/main.go`; the fields below can hold personal data. " +
+		"Levels are those of the messages that log the field.\n\n")
+	b.WriteString("| Field | Class | Data subject | Levels | Meaning |\n|---|---|---|---|---|\n")
+	for _, f := range sortedKeys(personalData) {
+		l := levels[f]
+		if len(l) == 0 {
+			continue
+		}
+		sort.Slice(l, func(i, j int) bool {
+			if ri, rj := levelRank(l[i]), levelRank(l[j]); ri != rj {
+				return ri < rj
+			}
+			return l[i] < l[j]
+		})
+		pf := personalData[f]
+		fmt.Fprintf(&b, "| %s | `%s` | `%s` | %s | %s |\n", code(f), pf.class, pf.subject, strings.Join(l, ", "), pf.meaning)
+	}
+	return b.String()
+}
+
+func render(pkgs map[string]*pkgInfo) string {
+	bins := binaries(pkgs)
+	usedBy := map[string][]string{}
+	var b strings.Builder
+	b.WriteString(personalDataTable(fieldLevels(pkgs)))
+	b.WriteString("\n### Messages per binary\n\n")
+	b.WriteString("Number of distinct messages each binary can log, per level. `logrus` marks binaries that link code logging through logrus.\n\n")
+	b.WriteString("| Binary | error | info | debug | V(2) and higher | logrus |\n|---|---|---|---|---|---|\n")
+	for _, name := range sortedKeys(bins) {
+		counts := map[string]int{}
+		usesLogrus := "no"
+		for _, dir := range sortedKeys(bins[name]) {
+			p := pkgs[dir]
+			if len(p.entries) > 0 {
+				usedBy[dir] = append(usedBy[dir], name)
+			}
+			if p.logrus {
+				usesLogrus = "yes"
+			}
+			for _, e := range p.entries {
+				if slices.Contains(levelOrder, e.level) {
+					counts[e.level]++
+				} else {
+					counts["other"]++
+				}
+			}
+		}
+		fmt.Fprintf(&b, "| `%s` | %d | %d | %d | %d | %s |\n", name, counts["error"], counts["info"], counts["debug"], counts["other"], usesLogrus)
+	}
+	b.WriteString("\n### Messages per package\n\n")
+	b.WriteString("Messages are the literal message (logr) or format string (logrus or `fmt.Sprintf`) of the call.\n")
+	for _, dir := range sortedKeys(pkgs) {
+		p := pkgs[dir]
+		if len(p.entries) == 0 {
+			continue
+		}
+		users := "none (not linked by a binary in `cmd/`)"
+		if len(usedBy[dir]) > 0 {
+			users = "`" + strings.Join(usedBy[dir], "`, `") + "`"
+		}
+		fmt.Fprintf(&b, "\n#### `%s`\n\nLinked into: %s\n\n| Level | Message | Fields |\n|---|---|---|\n", dir, users)
+		for _, e := range sortedEntries(p) {
+			fields := make([]string, 0, len(e.fields))
+			for _, f := range sortedKeys(e.fields) {
+				fields = append(fields, code(f))
+			}
+			fmt.Fprintf(&b, "| %s | %s | %s |\n", e.level, code(e.message), strings.Join(fields, ", "))
+		}
+	}
+	b.WriteString("\n")
+	return b.String()
+}

@@ -33,6 +33,7 @@ import (
 
 	networkconnector "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 	"github.com/telekom/das-schiff-network-operator/controllers/platform"
+	"github.com/telekom/das-schiff-network-operator/pkg/logging"
 )
 
 var scheme = runtime.NewScheme()
@@ -58,6 +59,7 @@ func main() {
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+	logging.RedirectLibraryLoggers(ctrl.Log)
 	setupLog := ctrl.Log.WithName("setup")
 
 	mgrOpts := ctrl.Options{

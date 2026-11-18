@@ -37,6 +37,7 @@ import (
 
 	networkv1alpha1 "github.com/telekom/das-schiff-network-operator/api/v1alpha1"
 	controllernetplan "github.com/telekom/das-schiff-network-operator/controllers/agent-netplan"
+	"github.com/telekom/das-schiff-network-operator/pkg/logging"
 	reconcilernetplan "github.com/telekom/das-schiff-network-operator/pkg/reconciler/agent-netplan"
 	"github.com/telekom/das-schiff-network-operator/pkg/version"
 )
@@ -66,6 +67,7 @@ func main() {
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+	logging.RedirectLibraryLoggers(ctrl.Log)
 
 	options := ctrl.Options{
 		Scheme: scheme,

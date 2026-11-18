@@ -119,7 +119,7 @@ func (nc *Netconf) Open(ctx context.Context) error {
 	for _, url := range nc.urls {
 		transport, err := ncssh.Dial(ctx, "tcp", url, nc.sshConfig)
 		if err != nil {
-			fmt.Println(err)
+			netconfLog.Error(err, "netconf SSH dial failed, trying next URL", "url", url)
 			continue
 		}
 

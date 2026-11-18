@@ -2,13 +2,13 @@ package bpf
 
 import (
 	"fmt"
-	"log"
 	"runtime"
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/rlimit"
 	"github.com/vishvananda/netlink"
+	ctrl "sigs.k8s.io/controller-runtime"
 )
 
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target amd64 nwopbpf ../../bpf/nwop-bpf.c
@@ -17,6 +17,7 @@ import (
 var (
 	nwopbpf    nwopbpfObjects
 	tcxLinkFds = map[int]link.Link{}
+	logger     = ctrl.Log.WithName("bpf")
 )
 
 // NeighborEvent mirrors the C struct neighbor_event in nwop-bpf.c.
@@ -51,9 +52,9 @@ func InitBPF() error {
 
 func cleanupXDP(intf netlink.Link) {
 	if intf.Attrs().Xdp != nil && intf.Attrs().Xdp.Attached {
-		log.Printf("Detaching XDP program from interface %s (index %d) to avoid conflicts with TCX program\n", intf.Attrs().Name, intf.Attrs().Index)
+		logger.Info("detaching XDP program to avoid conflicts with TCX program", "interface", intf.Attrs().Name, "index", intf.Attrs().Index)
 		if err := netlink.LinkSetXdpFd(intf, -1); err != nil {
-			log.Printf("Error detaching XDP program from interface %s (index %d): %v\n", intf.Attrs().Name, intf.Attrs().Index, err)
+			logger.Error(err, "failed to detach XDP program", "interface", intf.Attrs().Name, "index", intf.Attrs().Index)
 		}
 	}
 }
@@ -62,11 +63,11 @@ func cleanupXDP(intf netlink.Link) {
 func AttachNeighborHandlerToInterface(intf netlink.Link) error {
 	cleanupXDP(intf)
 	if _, ok := tcxLinkFds[intf.Attrs().Index]; ok {
-		log.Printf("BPF: TCX already attached to %s (index %d), skipping", intf.Attrs().Name, intf.Attrs().Index)
+		logger.V(1).Info("TCX already attached, skipping", "interface", intf.Attrs().Name, "index", intf.Attrs().Index)
 		return nil
 	}
 
-	log.Printf("BPF: attaching TCX ingress to %s (index %d)...", intf.Attrs().Name, intf.Attrs().Index)
+	logger.V(1).Info("attaching TCX ingress", "interface", intf.Attrs().Name, "index", intf.Attrs().Index)
 	tcxLink, err := link.AttachTCX(link.TCXOptions{
 		Interface: intf.Attrs().Index,
 		Program:   nwopbpf.HandleNeighborReplyTc,
@@ -78,14 +79,14 @@ func AttachNeighborHandlerToInterface(intf netlink.Link) error {
 	// Verify the link is valid by querying its info.
 	info, infoErr := tcxLink.Info()
 	if infoErr != nil {
-		log.Printf("BPF: WARNING: TCX link Info() failed for %s (index %d): %v", intf.Attrs().Name, intf.Attrs().Index, infoErr)
+		logger.Error(infoErr, "TCX link Info() failed", "interface", intf.Attrs().Name, "index", intf.Attrs().Index)
 	} else {
-		log.Printf("BPF: TCX link verified for %s (index %d): linkID=%d progID=%d type=%d",
-			intf.Attrs().Name, intf.Attrs().Index, info.ID, info.Program, info.Type)
+		logger.V(1).Info("TCX link verified", "interface", intf.Attrs().Name, "index", intf.Attrs().Index,
+			"linkID", info.ID, "progID", info.Program, "type", info.Type)
 	}
 	tcxLinkFds[intf.Attrs().Index] = tcxLink
 	runtime.KeepAlive(tcxLink)
-	log.Printf("BPF: TCX ingress attached successfully to %s (index %d)", intf.Attrs().Name, intf.Attrs().Index)
+	logger.Info("TCX ingress attached", "interface", intf.Attrs().Name, "index", intf.Attrs().Index)
 	return nil
 }
 

@@ -32,6 +32,7 @@ import (
 
 	networkconnector "github.com/telekom/das-schiff-network-operator/api/v1alpha1/network-connector"
 	syncctrl "github.com/telekom/das-schiff-network-operator/controllers/sync"
+	"github.com/telekom/das-schiff-network-operator/pkg/logging"
 	"github.com/telekom/das-schiff-network-operator/pkg/reconciler/intent/ipam"
 )
 
@@ -65,6 +66,7 @@ func main() {
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+	logging.RedirectLibraryLoggers(ctrl.Log)
 	setupLog := ctrl.Log.WithName("setup")
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
