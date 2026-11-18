@@ -296,50 +296,62 @@ func (s *scanner) visit(path string, d fs.DirEntry, err error) error {
 		}
 	}
 	for _, decl := range f.Decls {
-		sc := scope{locals: map[string]map[string]bool{}, params: map[string]string{}}
-		if fn, ok := decl.(*ast.FuncDecl); ok {
-			i := 0
-			for _, field := range fn.Type.Params.List {
-				for _, name := range field.Names {
-					sc.params[name.Name] = fn.Name.Name + "#" + strconv.Itoa(i)
-					i++
-				}
-				if len(field.Names) == 0 {
-					i++
-				}
-			}
-		}
-		ast.Inspect(decl, func(n ast.Node) bool {
-			switch v := n.(type) {
-			case *ast.AssignStmt:
-				if len(v.Lhs) == len(v.Rhs) {
-					for i := range v.Lhs {
-						bind(p, sc, v.Lhs[i], v.Rhs[i])
-					}
-				}
-			case *ast.ValueSpec:
-				if len(v.Names) == len(v.Values) {
-					for i := range v.Names {
-						bind(p, sc, v.Names[i], v.Values[i])
-					}
-				}
-			case *ast.KeyValueExpr:
-				if k, ok := v.Key.(*ast.Ident); ok {
-					bind(p, sc, &ast.SelectorExpr{Sel: k}, v.Value)
-				}
-			case *ast.CallExpr:
-				if types.ExprString(v.Fun) == "logging.RedirectLibraryLoggers" {
-					p.redirects = true
-				}
-				bindArgs(p, sc, v)
-				if err := addCall(p, v, sc); err != nil {
-					s.errs = append(s.errs, fmt.Errorf("%s: %w", s.fset.Position(v.Pos()), err))
-				}
-			}
-			return true
-		})
+		s.inspectDecl(p, decl)
 	}
 	return nil
+}
+
+// inspectDecl records the logger bindings and log calls of one top-level declaration.
+func (s *scanner) inspectDecl(p *pkgInfo, decl ast.Decl) {
+	sc := scope{locals: map[string]map[string]bool{}, params: map[string]string{}}
+	if fn, ok := decl.(*ast.FuncDecl); ok {
+		sc.params = paramKeys(fn)
+	}
+	ast.Inspect(decl, func(n ast.Node) bool {
+		switch v := n.(type) {
+		case *ast.AssignStmt:
+			if len(v.Lhs) == len(v.Rhs) {
+				for i := range v.Lhs {
+					bind(p, sc, v.Lhs[i], v.Rhs[i])
+				}
+			}
+		case *ast.ValueSpec:
+			if len(v.Names) == len(v.Values) {
+				for i := range v.Names {
+					bind(p, sc, v.Names[i], v.Values[i])
+				}
+			}
+		case *ast.KeyValueExpr:
+			if k, ok := v.Key.(*ast.Ident); ok {
+				bind(p, sc, &ast.SelectorExpr{Sel: k}, v.Value)
+			}
+		case *ast.CallExpr:
+			if types.ExprString(v.Fun) == "logging.RedirectLibraryLoggers" {
+				p.redirects = true
+			}
+			bindArgs(p, sc, v)
+			if err := addCall(p, v, sc); err != nil {
+				s.errs = append(s.errs, fmt.Errorf("%s: %w", s.fset.Position(v.Pos()), err))
+			}
+		}
+		return true
+	})
+}
+
+// paramKeys maps the parameter names of fn to their keys in pkgInfo.bound.
+func paramKeys(fn *ast.FuncDecl) map[string]string {
+	keys := map[string]string{}
+	i := 0
+	for _, field := range fn.Type.Params.List {
+		for _, name := range field.Names {
+			keys[name.Name] = fn.Name.Name + "#" + strconv.Itoa(i)
+			i++
+		}
+		if len(field.Names) == 0 {
+			i++
+		}
+	}
+	return keys
 }
 
 // scope holds the logger bindings of one top-level declaration.
@@ -470,7 +482,14 @@ func addCall(p *pkgInfo, call *ast.CallExpr, sc scope) error {
 		}
 	}
 	receiverFields(sel.X, e.fields)
-	switch name, isField := loggerSource(sel.X); {
+	addBoundFields(e, sel.X, sc)
+	return nil
+}
+
+// addBoundFields adds the fields bound to the local variable recv starts
+// from, or records the struct field or parameter to resolve after the scan.
+func addBoundFields(e *entry, recv ast.Expr, sc scope) {
+	switch name, isField := loggerSource(recv); {
 	case isField:
 		e.sources["."+name] = true
 	case sc.params[name] != "":
@@ -478,7 +497,6 @@ func addCall(p *pkgInfo, call *ast.CallExpr, sc scope) error {
 	default:
 		maps.Copy(e.fields, sc.locals[name])
 	}
-	return nil
 }
 
 // logrInfoLevel returns the catalogue level of a logr Info call on recv.

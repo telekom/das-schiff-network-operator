@@ -2,7 +2,6 @@ package dbus
 
 import (
 	"bytes"
-	"encoding/json"
 	"strings"
 	"testing"
 
@@ -14,7 +13,7 @@ type marshalCounter struct{ calls *int }
 
 func (m marshalCounter) MarshalJSON() ([]byte, error) {
 	*m.calls++
-	return json.Marshal("v")
+	return []byte(`"v"`), nil
 }
 
 func TestTraceSetSkipsWorkWhenTraceDisabled(t *testing.T) {
