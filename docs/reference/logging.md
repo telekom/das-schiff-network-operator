@@ -9,8 +9,9 @@ Every binary of the network-operator logs through one
 [controller-runtime](https://pkg.go.dev/sigs.k8s.io/controller-runtime/pkg/log/zap)
 zap logger. Its level and format are set with the same `--zap-*` flags in
 every binary. The lines of the libraries the binaries use (logrus in the
-netplan client, klog in client-go) are routed into the same logger, so the
-flags control all log output.
+netplan client, klog in client-go, the standard library `log` package used by
+`net/http`) are routed into the same logger, so the flags control all log
+output.
 
 The [message catalogue](#message-catalogue) at the end of this page is
 generated from the log calls in the Go code by `go run ./hack/logref`. The
@@ -21,8 +22,8 @@ when:
 
 - a log call has no literal message (use a constant message and key/value
   fields for the variable parts),
-- code imports the standard library `log` package, whose output would ignore
-  the flags,
+- code imports the standard library `log` package (only `pkg/logging` may,
+  to route it into the logger),
 - a binary in `cmd/` does not call `logging.RedirectLibraryLoggers`,
 - a field key is not classified as [personal data](#personal-data) or as
   free of it.
@@ -43,8 +44,8 @@ production, `--zap-log-level=info --zap-encoder=json` (or `--zap-devel=false`)
 drops the debug lines and makes the output machine-readable.
 
 In the `json` format each line has the keys `level`, `ts`, `logger` (the
-logger name, for example `setup`, `frr-cra`, `neighborsync`, `logrus` or
-`klog`), `caller` (development profile only), `msg`, `error` (error lines) and
+logger name, for example `setup`, `frr-cra`, `neighborsync`, `logrus`,
+`klog` or `stdlib`), `caller` (development profile only), `msg`, `error` (error lines) and
 the structured fields listed in the catalogue. The `console` format writes the
 same content as tab-separated text; its layout is not stable. The production
 profile samples: per message and level, the first 100 lines per second are
@@ -109,7 +110,8 @@ These lines come from libraries, so the catalogue does not list them:
 |--------|----------|-------|-------------|
 | controller-runtime (manager, controllers, webhooks, cache, metrics server) | all except `frr-cra`, `frr-exporter` and `kubectl-nnc` | `info`, `error`; `V(1)` at `debug` | for example `controller-runtime.metrics`, plus the `controller`, `controllerGroup`, `controllerKind`, `name`, `namespace`, `reconcileID` fields on reconciler lines |
 | client-go (klog), for example leader election and reflector errors | all that talk to the API server | `info`, `error`; klog `V(n)` lines are not written | `klog` |
-| logrus (netplan client in `pkg/network`) | see the `logrus` column of the [message counts](#messages-per-binary) | `info`/`warn` at `info`, `error`/`fatal`/`panic` at `error`, `debug` at `V(2)`, `trace` at `V(3)` | `logrus` |
+| logrus (netplan client in `pkg/network`) | see the `logrus` column of the [message counts](#messages-per-binary) | `info`/`warn` at `info`, `error`/`fatal`/`panic` at `error`, `debug` at `V(2)`, `trace` at `V(3)`; the `error` field of a `warn` line is kept | `logrus` |
+| Go standard library `log`, for example `net/http` server errors (TLS handshake failures) and reverse proxy errors in `frr-cra` | all | `error` | `stdlib` |
 
 ### Other output
 
