@@ -328,6 +328,10 @@ spec:
     Setups that move a virtual IP by gratuitous ARP, for example keepalived, need
     `acceptGratuitousARP: true` on CRA-VSR. The CRA-VSR default changes when the
     new agent DaemonSet rolls out, not through a `NetworkConfigRevision` canary.
+    When the agent starts with another gratuitous ARP policy (first start of
+    this release, or a changed `NWOP_L2_ACCEPT_GARP`), it applies its unchanged
+    `NodeNetworkConfig` once more, so existing bridges take the new setting
+    without a network change.
 
     Limit on CRA-FRR: rejecting covers only gratuitous ARP, where the sender and
     target address are the same. Neighbour sync still learns from an unsolicited

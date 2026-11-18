@@ -11,7 +11,22 @@ import (
 // Env overrides the agent default for every bridge: "always" or "never".
 const Env = "NWOP_L2_ACCEPT_GARP"
 
+// policyVersion names the gratuitous ARP rendering of the agents. Change it
+// when the rendering of an unchanged NodeNetworkConfig changes.
+const policyVersion = "garp/v1"
+
 var warnOnce sync.Once
+
+// AppliedStateID identifies the policy version and the effective Env
+// override, for common.ReconcilerOptions.AppliedStateID: when either changes,
+// the agent applies an unchanged NodeNetworkConfig again after its restart.
+func AppliedStateID() string {
+	v := os.Getenv(Env)
+	if v != "always" && v != "never" {
+		v = "" // unknown values are ignored like an unset Env
+	}
+	return policyVersion + " " + Env + "=" + v
+}
 
 // Resolve returns the setting for one bridge. A network that opts in always
 // accepts; otherwise Env decides. nil means Env is unset (or unknown, which is

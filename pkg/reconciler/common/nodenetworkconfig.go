@@ -46,6 +46,9 @@ const (
 	NodeNetworkConfigFilePerm = 0o600
 	// TaintRemovalRequeueTime is the delay before retrying taint removal after a conflict.
 	TaintRemovalRequeueTime = 30 * time.Second
+	// AppliedStateAnnotation holds, on the saved NodeNetworkConfig, the
+	// ReconcilerOptions.AppliedStateID it was applied with.
+	AppliedStateAnnotation = "network.t-caas.telekom.com/applied-state-id"
 )
 
 // ConfigApplier is an interface for applying network configuration.
@@ -68,6 +71,12 @@ type ReconcilerOptions struct {
 	// node's NodeNetworkConfig.status.asNumber so the operator can report the
 	// server ASN on BGPPeering status. Zero means unset (nothing is surfaced).
 	LocalASN int
+
+	// AppliedStateID identifies what, besides the spec, decides how the agent
+	// renders a NodeNetworkConfig: policy versions and environment overrides.
+	// A saved configuration applied under another ID is applied again, so a
+	// changed policy or override reaches the existing configuration.
+	AppliedStateID string
 }
 
 // NodeNetworkConfigReconciler handles the common reconciliation logic for NodeNetworkConfig.
@@ -80,6 +89,7 @@ type NodeNetworkConfigReconciler struct {
 	NodeNetworkConfigPath     string
 	restoreOnReconcileFailure bool
 	localASN                  int64
+	appliedStateID            string
 }
 
 // NewNodeNetworkConfigReconciler creates a new NodeNetworkConfigReconciler.
@@ -97,6 +107,7 @@ func NewNodeNetworkConfigReconciler(
 		NodeNetworkConfigPath:     nodeNetworkConfigPath,
 		restoreOnReconcileFailure: opts.RestoreOnReconcileFailure,
 		localASN:                  int64(opts.LocalASN),
+		appliedStateID:            opts.AppliedStateID,
 	}
 
 	nc, err := healthcheck.LoadConfig(healthcheck.NetHealthcheckFile)
@@ -143,7 +154,8 @@ func (r *NodeNetworkConfigReconciler) Reconcile(ctx context.Context) (ctrl.Resul
 	asnNeedsWrite := cfg.Status.ASNumber != r.localASN
 	cfg.Status.ASNumber = r.localASN
 
-	if r.NodeNetworkConfig != nil && sameAppliedConfig(r.NodeNetworkConfig.Spec, cfg.Spec) {
+	if r.NodeNetworkConfig != nil && r.NodeNetworkConfig.Annotations[AppliedStateAnnotation] == r.appliedStateID &&
+		sameAppliedConfig(r.NodeNetworkConfig.Spec, cfg.Spec) {
 		// replace in-memory working NodeNetworkConfig and store it on the disk
 		if err := r.storeConfig(cfg, r.NodeNetworkConfigPath); err != nil {
 			return ctrl.Result{}, fmt.Errorf("error saving NodeNetworkConfig status: %w", err)
@@ -217,6 +229,10 @@ func (r *NodeNetworkConfigReconciler) storeConfig(
 	cfg *v1alpha1.NodeNetworkConfig,
 	path string,
 ) error {
+	if r.appliedStateID != "" {
+		cfg = cfg.DeepCopy()
+		metav1.SetMetaDataAnnotation(&cfg.ObjectMeta, AppliedStateAnnotation, r.appliedStateID)
+	}
 	r.NodeNetworkConfig = cfg
 
 	// save working NodeNetworkConfig

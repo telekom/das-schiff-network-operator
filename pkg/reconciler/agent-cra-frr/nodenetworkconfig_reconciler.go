@@ -220,6 +220,7 @@ func NewNodeNetworkConfigReconciler(
 		common.ReconcilerOptions{
 			RestoreOnReconcileFailure: true, // FRR can partially apply invalid configs
 			LocalASN:                  baseConfig.LocalASN,
+			AppliedStateID:            garp.AppliedStateID(),
 		},
 	)
 	if err != nil {

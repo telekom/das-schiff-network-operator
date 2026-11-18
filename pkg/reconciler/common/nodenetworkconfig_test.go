@@ -102,6 +102,7 @@ func newMockReconciler(
 		NodeNetworkConfigPath:     configPath,
 		restoreOnReconcileFailure: opts.RestoreOnReconcileFailure,
 		localASN:                  int64(opts.LocalASN),
+		appliedStateID:            opts.AppliedStateID,
 	}
 
 	return &mockReconciler{
@@ -427,6 +428,60 @@ var _ = Describe("NodeNetworkConfigReconciler", func() {
 			fetched := &v1alpha1.NodeNetworkConfig{}
 			Expect(fakeClient.Get(context.Background(), client.ObjectKeyFromObject(cfg), fetched)).To(Succeed())
 			Expect(fetched.Status.ASNumber).To(BeZero())
+		})
+	})
+
+	Context("Reconcile with an AppliedStateID", func() {
+		It("applies an unchanged saved config again once when it was applied under another ID", func() {
+			cfg := createTestNodeNetworkConfig("1")
+			cfg.Status.ConfigStatus = operator.StatusProvisioned
+			fakeClient = fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithRuntimeObjects(cfg).
+				WithStatusSubresource(cfg).
+				Build()
+
+			// Saved before the agent had this ID, for example before an upgrade
+			// or with another NWOP_L2_ACCEPT_GARP.
+			Expect(saveNodeNetworkConfigToFile(createTestNodeNetworkConfig("1"), configPath)).To(Succeed())
+			saved, err := ReadNodeNetworkConfig(configPath)
+			Expect(err).ToNot(HaveOccurred())
+
+			r := newMockReconciler(mockCtrl, fakeClient, configPath, ReconcilerOptions{AppliedStateID: "policy/v2"})
+			r.NodeNetworkConfig = saved
+			r.mockApplier.EXPECT().ApplyConfig(gomock.Any(), gomock.Any()).Return(nil).Times(1)
+			r.setupHealthyHealthCheck()
+
+			_, err = r.Reconcile(context.Background())
+			Expect(err).ToNot(HaveOccurred())
+
+			stored, err := ReadNodeNetworkConfig(configPath)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(stored.Annotations).To(HaveKeyWithValue(AppliedStateAnnotation, "policy/v2"))
+
+			// A restart with the same ID skips the unchanged config again.
+			restarted := newMockReconciler(mockCtrl, fakeClient, configPath, ReconcilerOptions{AppliedStateID: "policy/v2"})
+			restarted.NodeNetworkConfig = stored
+			restarted.mockHealthChecker.EXPECT().TaintsRemoved().Return(true)
+			_, err = restarted.Reconcile(context.Background())
+			Expect(err).ToNot(HaveOccurred())
+		})
+
+		It("keeps skipping a config saved without an ID when the agent has none", func() {
+			cfg := createTestNodeNetworkConfig("1")
+			cfg.Status.ConfigStatus = operator.StatusProvisioned
+			fakeClient = fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithRuntimeObjects(cfg).
+				WithStatusSubresource(cfg).
+				Build()
+
+			r := newMockReconciler(mockCtrl, fakeClient, configPath, ReconcilerOptions{})
+			r.NodeNetworkConfig = createTestNodeNetworkConfig("1")
+			r.mockHealthChecker.EXPECT().TaintsRemoved().Return(true)
+
+			_, err := r.Reconcile(context.Background())
+			Expect(err).ToNot(HaveOccurred())
 		})
 	})
 

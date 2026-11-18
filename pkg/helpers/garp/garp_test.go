@@ -7,6 +7,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestAppliedStateID(t *testing.T) {
+	ids := map[string]string{}
+	for _, env := range []string{"", "always", "never", "true"} {
+		t.Setenv(Env, env)
+		ids[env] = AppliedStateID()
+	}
+	require.Equal(t, "garp/v1 NWOP_L2_ACCEPT_GARP=", ids[""])
+	require.Equal(t, ids[""], ids["true"], "an ignored value must not force a new apply")
+	require.NotEqual(t, ids[""], ids["always"])
+	require.NotEqual(t, ids[""], ids["never"])
+	require.NotEqual(t, ids["always"], ids["never"])
+}
+
 func TestResolve(t *testing.T) {
 	yes, no := true, false
 	for _, tt := range []struct {
