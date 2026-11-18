@@ -509,6 +509,11 @@ func TestAuthFromFiles_RejectsInvalidFiles(t *testing.T) {
 		{name: "no file", wantErrSub: "no private key file or password file provided"},
 		{name: "encrypted key file", keyFile: newEncryptedTestKeyFile(t), wantErrSub: "is encrypted"},
 		{name: "key file holds no key", keyFile: writeTestFile(t, "not-a-key", []byte("secret"), 0o600), wantErrSub: "parse private key file"},
+		{
+			name:       "key file holds a PEM block of unknown type",
+			keyFile:    writeTestFile(t, "unknown-pem", pem.EncodeToMemory(&pem.Block{Type: "secret MARKER", Bytes: []byte("x")}), 0o600),
+			wantErrSub: "parse private key file",
+		},
 	}
 
 	for _, tt := range tests {

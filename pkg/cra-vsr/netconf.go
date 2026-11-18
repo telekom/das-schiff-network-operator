@@ -277,7 +277,9 @@ func AuthFromFiles(keyFile, passwordFile string) (ssh.AuthMethod, error) {
 			if errors.As(err, &passphraseErr) {
 				return nil, fmt.Errorf("private key file %q is encrypted; the agent needs an unencrypted key", keyFile)
 			}
-			return nil, fmt.Errorf("parse private key file %q: %w", keyFile, err)
+			// The parser error can quote file content (e.g. an unknown PEM
+			// block type), so it must not reach errors or logs.
+			return nil, fmt.Errorf("parse private key file %q: no supported private key found", keyFile)
 		}
 		return ssh.PublicKeys(signer), nil
 	case passwordFile != "":
