@@ -49,13 +49,14 @@ func (a *CRAFRRConfigApplier) convertNodeConfigToNetlink(nodeCfg *v1alpha1.NodeN
 			VlanID:              int(layer2.VLAN),
 			MTU:                 int(layer2.MTU),
 			VNI:                 int(layer2.VNI),
-			AnycastMAC:          new(string),
 			DisableSegmentation: layer2.DisableSegmentation,
 		}
 
+		// A Layer2 without IRB (pure L2, no anycast gateway) has no MAC to set: leave AnycastMAC nil, an empty
+		// string fails net.ParseMAC in the CRA ("invalid MAC address") and the whole NodeNetworkConfig is rejected.
 		if layer2.IRB != nil {
 			nlLayer2.AnycastGateways = layer2.IRB.IPAddresses
-			*nlLayer2.AnycastMAC = layer2.IRB.MACAddress
+			nlLayer2.AnycastMAC = &layer2.IRB.MACAddress
 			nlLayer2.VRF = layer2.IRB.VRF
 		}
 
