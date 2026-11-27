@@ -37,7 +37,10 @@ triggered the build, so a release image carries
 `https://github.com/telekom/das-schiff-network-operator/.github/workflows/build-images.yaml@refs/tags/vX.Y.Z`
 and a `main` image carries `...@refs/heads/main`.
 
-Verify a release image against the tag-anchored identity (cosign v2 or later):
+Verify a release image against the tag-anchored identity with cosign v3 or
+later. Release images are signed with cosign v3, which stores the signature as
+a Sigstore bundle (OCI referrer) instead of a `.sig` tag; cosign v2 looks for
+the legacy format by default and reports `no signatures found`.
 
 ```bash
 failed=0
