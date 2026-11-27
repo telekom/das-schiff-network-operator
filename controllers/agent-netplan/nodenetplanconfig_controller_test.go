@@ -56,6 +56,7 @@ func TestNamePredicate_UpdateFunc(t *testing.T) {
 }
 
 func TestNamePredicate_DeleteAndGenericReturnFalse(t *testing.T) {
+	t.Setenv(healthcheck.NodenameEnv, "worker-node-01")
 	testutil.RunDeleteAndGenericAlwaysFalse(t, shared.BuildNamePredicates())
 }
 
