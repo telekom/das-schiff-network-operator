@@ -54,7 +54,7 @@ or manifest in this repository and is not covered here.
 | `agent-cra-frr` | Reaches the CRA API on its link-local address (`169.254.1.0` / `fd00:7:caa5::`) over HTTPS, and runs the netlink metrics and health checks against the host namespace. The configuration itself is sent to the CRA API, not applied locally. |
 | `agent-cra-vsr` | Runs the health checks and netlink metrics in the host namespace, and reaches the vSR over NETCONF (SSH over the network). |
 | `agent-hbn-l2` | Creates and configures interfaces via netlink and writes `/proc/sys/net/...`. Both act on the caller's network namespace, which must be the host one. |
-| `agent-netplan` | Reads `/sys/class/net` and runs the health checks in the host namespace. The netplan change itself goes through D-Bus. |
+| `agent-netplan` | Reads `/sys/class/net`, deletes bonds removed from the configuration by writing `/sys/class/net/bonding_masters`, and runs the health checks in the host namespace. Sysfs shows the network devices of the caller's namespace, so this must be the host one. The netplan change itself goes through D-Bus. |
 | others | Not required. |
 
 ### Host PID namespace
@@ -78,7 +78,7 @@ change once tested.
 |---|---|
 | `agent-hbn-l2` | Netlink changes need `CAP_NET_ADMIN`. Container runtimes mount `/proc/sys` read-only for unprivileged containers, so writing `/proc/sys/net` needs a privileged container. |
 | `agent-cra-frr`, `agent-cra-vsr` | No privileged operation identified: configuration goes to the CRA (HTTPS API or NETCONF), and the local netlink metrics and health checks only read network state and open TCP connections. Removing `privileged` still needs testing. |
-| `agent-netplan` | Calls the host's netplan D-Bus service (`io.netplan.Netplan`), whose system-bus policy is written for root, so the agent runs as UID 0. |
+| `agent-netplan` | Calls the host's netplan D-Bus service (`io.netplan.Netplan`), whose system-bus policy is written for root, so the agent runs as UID 0. Before `netplan apply` it deletes removed bonds locally by writing `/sys/class/net/bonding_masters`, which needs `CAP_NET_ADMIN` and a writable `/sys`; container runtimes mount `/sys` read-only for unprivileged containers. |
 | `cra-frr` | Runs systemd, FRR and the CRA configuration API inside the container, which needs cgroup access and full network administration of the CRA namespace. |
 | `operator`, `network-sync`, `platform-*` | Not required. |
 
@@ -103,8 +103,9 @@ change once tested.
   so `privileged` and possibly UID 0 may be removable. Test the metrics, health
   checks and, for `agent-cra-frr`, read access to the client certificate in
   `/etc/cra/certs/`; not yet tested.
-- **`agent-netplan`**: it needs root for D-Bus, but probably not `privileged`;
-  not yet tested.
+- **`agent-netplan`**: it needs root for D-Bus. Without `privileged` it
+  additionally needs `NET_ADMIN` and a writable `/sys/class/net` for the local
+  bond cleanup; test bond removal before dropping `privileged`. Not yet tested.
 - **`agent-hbn-l2`**: `privileged` could be replaced by
   `NET_ADMIN` plus an unmasked, writable `/proc/sys/net` only if the runtime
   supports that; keep `privileged` until tested.
